@@ -1111,7 +1111,7 @@ export function Sales() {
   const { vehicles, clients, addClient, createNotification, addDocument } = useApp();
   const { listUsers } = useAuth();
   const { workCenters, activeWorkCenters, hasWorkCenters, getWorkCenterName } = useWorkCenters();
-  const [teamMemberNames, setTeamMemberNames] = useState<string[]>([]);
+  const [teamMemberOptions, setTeamMemberOptions] = useState<{ id: string; name: string }[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showGenerateDocsModal, setShowGenerateDocsModal] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
@@ -1207,10 +1207,14 @@ export function Sales() {
 
   useEffect(() => {
     listUsers().then(users => {
-      const names = users
+      const options = users
         .filter(u => u.fullName)
-        .map(u => u.fullName);
-      if (names.length > 0) setTeamMemberNames(names);
+        .map(u => ({
+          id: u.user_id || u.id || '',
+          name: u.fullName,
+        }))
+        .filter(option => option.id && option.name);
+      if (options.length > 0) setTeamMemberOptions(options);
     }).catch(() => {});
   }, [listUsers]);
 
@@ -1352,6 +1356,7 @@ export function Sales() {
     depositPaid: string;
     expectedDelivery: string;
     responsible: string;
+    responsibleId?: string;
     paymentMethod: string;
     operationType: string;
     notes: string;
@@ -1392,6 +1397,7 @@ export function Sales() {
       operationType: formData.operationType,
       expectedDelivery: formData.expectedDelivery,
       responsible: formData.responsible || client?.responsible || 'Equipo comercial',
+      responsibleId: formData.responsibleId || undefined,
       notes: formData.notes,
       workCenterId: formData.workCenterId || undefined,
       workCenterName: formData.workCenterName || undefined,
@@ -1932,7 +1938,7 @@ export function Sales() {
         }}
         vehicles={vehicles || []}
         clients={clients || []}
-        teamMembers={teamMemberNames}
+        teamMemberOptions={teamMemberOptions}
         existingSales={allSales}
       />
       {selectedSale && (

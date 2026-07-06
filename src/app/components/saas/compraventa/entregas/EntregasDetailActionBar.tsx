@@ -7,11 +7,19 @@ const ACTIONS = [
   { id: 'deliver', label: 'Marcar como entregado', icon: CheckCircle2, primary: true },
 ] as const;
 
+export type EntregaActionId = (typeof ACTIONS)[number]['id'];
+
 type EntregasDetailActionBarProps = {
   showActions?: boolean;
+  disabled?: boolean;
+  onAction?: (actionId: EntregaActionId) => void;
 };
 
-export function EntregasDetailActionBar({ showActions = false }: EntregasDetailActionBarProps) {
+export function EntregasDetailActionBar({
+  showActions = false,
+  disabled = false,
+  onAction,
+}: EntregasDetailActionBarProps) {
   if (!showActions) return null;
 
   return (
@@ -23,7 +31,9 @@ export function EntregasDetailActionBar({ showActions = false }: EntregasDetailA
             <button
               key={action.id}
               type="button"
-              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all ${
+              disabled={disabled}
+              onClick={() => onAction?.(action.id)}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                 action.primary
                   ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/25 hover:bg-emerald-700'
                   : 'border border-gray-200/90 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'

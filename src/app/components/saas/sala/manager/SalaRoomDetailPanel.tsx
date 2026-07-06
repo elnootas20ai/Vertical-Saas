@@ -9,6 +9,7 @@ import type { SalaTpvDisplay } from '../../../../lib/salaStoreTpv';
 import { roomSetupStatus } from './useSalaManager';
 import { SalaTpvStatusBlock } from './SalaTpvStatusBlock';
 import { SalaTableConfigRow } from './SalaTableConfigRow';
+import { SALA_TABLE_LIST_GRID } from './salaTableListLayout';
 import type { TableSizePreset } from '../../../../lib/salaTableSize';
 
 /** Filas visibles por página — caben en pantalla sin scroll interno. */
@@ -173,60 +174,57 @@ export function SalaRoomDetailPanel({
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200/80 dark:border-gray-800">
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <table className="w-full table-fixed border-collapse text-left">
-                <thead className="bg-gray-50/90 dark:bg-gray-900/60">
-                  <tr className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-                    <th className="w-[28%] px-3 py-2">Mesa</th>
-                    <th className="w-[18%] px-3 py-2">Tamaño</th>
-                    <th className="w-[22%] px-3 py-2">Aforo</th>
-                    <th className="w-[14%] px-3 py-2 text-center">Activa</th>
-                    <th className="w-[18%] px-3 py-2 text-right" />
-                  </tr>
-                </thead>
-                <tbody className="bg-white dark:bg-gray-950">
-                  {pagedTables.map((table) => (
-                    <SalaTableConfigRow
-                      key={table._id}
-                      table={table}
-                      onEdit={() => onEditTable(table)}
-                      onSizeChange={(preset) => onTableSizeChange(table._id, preset)}
-                      onCapacityChange={(cap) => onTableCapacityChange(table._id, cap)}
-                      onActiveChange={(active) => onTableActiveChange(table._id, active)}
-                      onDelete={() => onDeleteTable(table._id)}
-                    />
-                  ))}
-                  {pagedTables.length < TABLES_PER_PAGE
-                    ? Array.from({ length: TABLES_PER_PAGE - pagedTables.length }).map((_, i) => (
-                        <tr key={`pad-${i}`} className="h-[45px] border-b border-transparent last:border-b-0" aria-hidden>
-                          <td colSpan={5} />
-                        </tr>
-                      ))
-                    : null}
-                </tbody>
-              </table>
+            <div
+              className={`${SALA_TABLE_LIST_GRID} shrink-0 border-b border-gray-200/80 bg-gray-50/90 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-800 dark:bg-gray-900/60`}
+            >
+              <span>Mesa</span>
+              <span>Tamaño</span>
+              <span className="text-center">Aforo</span>
+              <span className="text-center">Activa</span>
+              <span className="sr-only">Acciones</span>
             </div>
 
-            <div className="flex shrink-0 items-center justify-between gap-2 border-t border-gray-200/80 bg-gray-50/80 px-3 py-2 dark:border-gray-800 dark:bg-gray-900/40">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-white dark:bg-gray-950">
+              {pagedTables.map((table) => (
+                <SalaTableConfigRow
+                  key={table._id}
+                  table={table}
+                  onEdit={() => onEditTable(table)}
+                  onSizeChange={(preset) => onTableSizeChange(table._id, preset)}
+                  onCapacityChange={(cap) => onTableCapacityChange(table._id, cap)}
+                  onActiveChange={(active) => onTableActiveChange(table._id, active)}
+                  onDelete={() => onDeleteTable(table._id)}
+                />
+              ))}
+            </div>
+
+            <div className="flex shrink-0 items-center justify-between gap-3 border-t border-gray-200/80 bg-gray-50/80 px-3 py-2.5 dark:border-gray-800 dark:bg-gray-900/40">
               <button
                 type="button"
                 disabled={safePage === 0}
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
-                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 disabled:opacity-40 dark:text-gray-400"
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-900"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
                 Anterior
               </button>
-              <span className="text-xs text-gray-500">
-                {tables.length <= TABLES_PER_PAGE
-                  ? `${tables.length} mesa${tables.length !== 1 ? 's' : ''}`
-                  : `${safePage * TABLES_PER_PAGE + 1}–${Math.min((safePage + 1) * TABLES_PER_PAGE, tables.length)} de ${tables.length}`}
-              </span>
+              <div className="text-center">
+                <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {tables.length <= TABLES_PER_PAGE
+                    ? `${tables.length} mesa${tables.length !== 1 ? 's' : ''}`
+                    : `${safePage * TABLES_PER_PAGE + 1}–${Math.min((safePage + 1) * TABLES_PER_PAGE, tables.length)} de ${tables.length}`}
+                </p>
+                {totalPages > 1 ? (
+                  <p className="mt-0.5 text-[10px] text-gray-400">
+                    Página {safePage + 1} de {totalPages}
+                  </p>
+                ) : null}
+              </div>
               <button
                 type="button"
                 disabled={safePage >= totalPages - 1}
                 onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-gray-600 disabled:opacity-40 dark:text-gray-400"
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-900"
               >
                 Siguiente
                 <ChevronRight className="h-3.5 w-3.5" />

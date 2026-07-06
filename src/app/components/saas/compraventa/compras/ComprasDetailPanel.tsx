@@ -10,7 +10,7 @@ import {
   User,
 } from 'lucide-react';
 import { VehicleShellBlock } from '../../vehicles/VehicleShellBlock';
-import { ComprasDetailActionBar } from './ComprasDetailActionBar';
+import { ComprasDetailActionBar, type CompraActionId } from './ComprasDetailActionBar';
 import {
   formatCompraDate,
   formatCompraPrice,
@@ -21,6 +21,7 @@ import {
 
 type ComprasDetailPanelProps = {
   purchase: CompraListItem | null;
+  onAction?: (actionId: CompraActionId) => void;
 };
 
 const DOCUMENT_SLOTS = [
@@ -147,7 +148,7 @@ function PurchaseDetailContent({ purchase }: { purchase: CompraListItem }) {
   );
 }
 
-export function ComprasDetailPanel({ purchase }: ComprasDetailPanelProps) {
+export function ComprasDetailPanel({ purchase, onAction }: ComprasDetailPanelProps) {
   if (!purchase) {
     return (
       <section className="flex h-full min-h-0 flex-col items-center justify-center bg-gray-50/50 px-8 text-center dark:bg-gray-950/50">
@@ -203,7 +204,7 @@ export function ComprasDetailPanel({ purchase }: ComprasDetailPanelProps) {
         </div>
       </header>
 
-      <ComprasDetailActionBar showActions />
+      <ComprasDetailActionBar showActions onAction={onAction} />
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50/50 px-6 py-5 dark:bg-gray-950/50">
         <PurchaseDetailContent purchase={purchase} />

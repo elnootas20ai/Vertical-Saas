@@ -2777,6 +2777,9 @@ export function buildSaleDocument(userId, data = {}, existing = null) {
       ? (data.deliveredAt || existing?.deliveredAt || now)
       : (existing?.deliveredAt || ''),
     responsible: String(data.responsible || 'Sin asignar'),
+    responsibleId: data.responsibleId !== undefined
+      ? String(data.responsibleId || '')
+      : (existing?.responsibleId || ''),
     notes: String(data.notes || ''),
     stageHistory: Array.isArray(data.stageHistory) ? data.stageHistory : (existing?.stageHistory || []),
     paymentHistory: Array.isArray(data.paymentHistory) ? data.paymentHistory : (existing?.paymentHistory || []),
@@ -2833,6 +2836,7 @@ export function sanitizeSale(sale) {
     expectedDelivery: sale.expectedDelivery || '',
     deliveredAt: sale.deliveredAt || '',
     responsible: sale.responsible || 'Sin asignar',
+    responsibleId: sale.responsibleId || '',
     notes: sale.notes || '',
     stageHistory: Array.isArray(sale.stageHistory) ? sale.stageHistory : [],
     paymentHistory: Array.isArray(sale.paymentHistory) ? sale.paymentHistory : [],

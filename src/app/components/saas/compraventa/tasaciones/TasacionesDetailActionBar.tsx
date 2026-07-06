@@ -49,11 +49,18 @@ export function TasacionesDetailActionBar({
   );
 }
 
-export function TasacionesNewButton({ disabled = false }: { disabled?: boolean }) {
+export function TasacionesNewButton({
+  disabled = false,
+  onClick,
+}: {
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
   return (
     <button
       type="button"
       disabled={disabled}
+      onClick={onClick}
       className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gray-900 px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
     >
       <Plus className="h-4 w-4" />

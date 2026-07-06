@@ -1,4 +1,4 @@
-import React, { ReactNode, useState, useEffect, useCallback, useRef, useReducer, useMemo } from 'react';
+import React, { ReactNode, useState, useEffect, useCallback, useRef, useReducer } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -11,6 +11,8 @@ import { GlobalSearchModal } from './GlobalSearchModal';
 import { BusinessCarousel } from './BusinessCarousel';
 import { useDashboardViewOptional } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
+import { PageLayoutProvider, usePageLayoutConfig, useRegisterPageLayout } from '../../context/PageLayoutContext';
+import { isChromelessSaasRoute } from '../../lib/saasChromelessRoute';
 
 import { OnboardingTour } from './OnboardingTour';
 import { OnboardingTourCompleteToast } from './OnboardingTourCompleteToast';
@@ -33,6 +35,32 @@ interface LayoutProps {
   noPadding?: boolean;
   titleClassName?: string;
   subtitleClassName?: string;
+}
+
+/** Shell persistente: sidebar + topbar montados una sola vez por sesión SaaS. */
+export function SaasAppShell({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  if (isChromelessSaasRoute(location.pathname)) {
+    return <>{children}</>;
+  }
+  return (
+    <PageLayoutProvider>
+      <SaasAppShellInner>{children}</SaasAppShellInner>
+    </PageLayoutProvider>
+  );
+}
+
+/** Registra título/padding de la página activa; el chrome vive en SaasAppShell. */
+export function Layout({
+  children,
+  title,
+  subtitle,
+  noPadding,
+  titleClassName,
+  subtitleClassName,
+}: LayoutProps) {
+  useRegisterPageLayout({ title, subtitle, noPadding, titleClassName, subtitleClassName });
+  return <>{children}</>;
 }
 
 /** Navegación desde Centro Operativo (delivery): barra compacta para volver sin perder contexto */
@@ -111,49 +139,18 @@ function UnverifiedEmailBanner({ user }: { user: AuthContextType['user'] }) {
   );
 }
 
-export function Layout({ children, title, subtitle, noPadding, titleClassName, subtitleClassName }: LayoutProps) {
+function SaasAppShellInner({ children }: { children: ReactNode }) {
   const auth = useAuthOptional();
-  if (!auth) return null;
-  if (auth.isInitializing && !auth.user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full" />
-      </div>
-    );
-  }
-  if (!auth.user) return null;
-  return (
-    <LayoutInner
-      auth={auth}
-      title={title}
-      subtitle={subtitle}
-      noPadding={noPadding}
-      titleClassName={titleClassName}
-      subtitleClassName={subtitleClassName}
-    >
-      {children}
-    </LayoutInner>
-  );
-}
-
-function LayoutInner({
-  auth,
-  children,
-  title,
-  subtitle,
-  noPadding,
-  titleClassName,
-  subtitleClassName,
-}: LayoutProps & { auth: AuthContextType }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user } = auth;
+  const { title, subtitle, noPadding, titleClassName, subtitleClassName } = usePageLayoutConfig();
+  const user = auth?.user;
   const { businesses, currentBusiness, switchBusiness } = useBusiness();
   const dashboardView = useDashboardViewOptional();
   const portfolioPlan = usePortfolioPlanAccess();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const stored = localStorage.getItem('sidebarCollapsed');
-    return stored === 'true';
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('sidebarCollapsed') === 'true';
   });
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
@@ -174,12 +171,15 @@ function LayoutInner({
     dashboardView?.setPortfolioView(true);
   }, [portfolioPlan.canUsePortfolioView, navigate, dashboardView]);
 
-  // Two-key sequence tracking (G+D, N+V, etc.)
   const lastKeyRef = useRef<string | null>(null);
   const lastKeyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('sidebarCollapsed', String(sidebarCollapsed));
+    if (sidebarCollapsed) {
+      localStorage.setItem('sidebarCollapsed', 'true');
+    } else {
+      localStorage.removeItem('sidebarCollapsed');
+    }
   }, [sidebarCollapsed]);
 
   useEffect(() => {
@@ -198,7 +198,6 @@ function LayoutInner({
     }
   }, []);
 
-  // ── Global keyboard shortcuts ──────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -207,7 +206,6 @@ function LayoutInner({
         target.tagName === 'TEXTAREA' ||
         target.isContentEditable;
 
-      // Cmd/Ctrl+K → búsqueda global
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         setGlobalSearchOpen(v => !v);
@@ -218,7 +216,6 @@ function LayoutInner({
 
       const key = e.key.toUpperCase();
 
-      // Two-key sequences
       if (lastKeyRef.current) {
         const seq = `${lastKeyRef.current}+${key}`;
         lastKeyRef.current = null;
@@ -239,7 +236,6 @@ function LayoutInner({
           return;
         }
 
-        // N+X dispatches a custom event pages can listen to
         const NEW_MAP: Record<string, string> = {
           'N+V': 'vertial:new-vehicle',
           'N+L': 'vertial:new-lead',
@@ -254,7 +250,6 @@ function LayoutInner({
         return;
       }
 
-      // First key of a sequence
       if (['G', 'N'].includes(key)) {
         lastKeyRef.current = key;
         if (lastKeyTimerRef.current) clearTimeout(lastKeyTimerRef.current);
@@ -270,6 +265,15 @@ function LayoutInner({
     };
   }, [navigate]);
 
+  if (!auth || (auth.isInitializing && !user)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full" />
+      </div>
+    );
+  }
+  if (!user) return null;
+
   const desktopMargin = sidebarCollapsed ? 'md:ml-20' : 'md:ml-60';
 
   return (
@@ -280,8 +284,7 @@ function LayoutInner({
         onMobileClose={() => setMobileSidebarOpen(false)}
       />
 
-      {/* Main content */}
-      <div className={`transition-all duration-300 ${desktopMargin}`}>
+      <div className={`md:transition-[margin-left] md:duration-300 ${desktopMargin}`}>
         <SubscriptionBanner />
         <BusinessesSyncBanner />
         <UnverifiedEmailBanner user={user} />
@@ -311,7 +314,6 @@ function LayoutInner({
             />
           </div>
         )}
-        {/* Extra bottom padding on mobile so content clears the BottomNav */}
         <main className={`overflow-x-auto ${noPadding ? 'pb-16 md:pb-0' : 'py-4 pb-16 md:pb-0 px-3 md:px-4'}`}>
           <ErrorBoundary>
             <DeliveryOpsReturnStrip />
@@ -324,7 +326,6 @@ function LayoutInner({
 
       <BottomNav />
 
-      {/* Global overlays */}
       <GlobalSearchModal isOpen={globalSearchOpen} onClose={() => setGlobalSearchOpen(false)} />
       {!isWorkerAccount(user) ? <OnboardingTourCompleteToast /> : null}
       {!isWorkerAccount(user) ? <OnboardingTour /> : null}

@@ -13,11 +13,14 @@ import {
   ENTREGA_STATUS_TOKEN,
   entregaChecklistProgress,
   formatEntregaDate,
+  type EntregaChecklistKey,
   type EntregaListItem,
 } from './entregasListData';
 
 type EntregasDetailPanelProps = {
   entrega: EntregaListItem | null;
+  checklistDisabled?: boolean;
+  onToggleChecklist?: (key: EntregaChecklistKey, checked: boolean) => void;
 };
 
 function DetailSection({
@@ -47,26 +50,23 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 function ChecklistItem({
   label,
   checked,
+  disabled,
+  onChange,
 }: {
   label: string;
   checked: boolean;
+  disabled?: boolean;
+  onChange?: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-default items-center gap-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-4 py-3 transition-colors dark:border-gray-700 dark:bg-gray-900/30">
-      <span
-        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border-2 transition-colors ${
-          checked
-            ? 'border-emerald-500 bg-emerald-500 text-white'
-            : 'border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-950'
-        }`}
-        aria-hidden
-      >
-        {checked ? (
-          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-          </svg>
-        ) : null}
-      </span>
+    <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-gray-200/80 bg-gray-50/40 px-4 py-3 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900/30 dark:hover:bg-gray-900/50">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange?.(e.target.checked)}
+        className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+      />
       <span className={`text-sm ${checked ? 'font-medium text-gray-900 dark:text-gray-100' : 'text-gray-600 dark:text-gray-400'}`}>
         {label}
       </span>
@@ -74,7 +74,15 @@ function ChecklistItem({
   );
 }
 
-function EntregaDetailContent({ entrega }: { entrega: EntregaListItem }) {
+function EntregaDetailContent({
+  entrega,
+  checklistDisabled,
+  onToggleChecklist,
+}: {
+  entrega: EntregaListItem;
+  checklistDisabled?: boolean;
+  onToggleChecklist?: (key: EntregaChecklistKey, checked: boolean) => void;
+}) {
   const { done, total } = entregaChecklistProgress(entrega);
   const progressPct = total > 0 ? Math.round((done / total) * 100) : 0;
 
@@ -113,6 +121,8 @@ function EntregaDetailContent({ entrega }: { entrega: EntregaListItem }) {
               key={id}
               label={label}
               checked={entrega.checklist?.[id] === true}
+              disabled={checklistDisabled}
+              onChange={(checked) => onToggleChecklist?.(id, checked)}
             />
           ))}
         </div>
@@ -139,7 +149,11 @@ function EntregaDetailContent({ entrega }: { entrega: EntregaListItem }) {
   );
 }
 
-export function EntregasDetailPanel({ entrega }: EntregasDetailPanelProps) {
+export function EntregasDetailPanel({
+  entrega,
+  checklistDisabled,
+  onToggleChecklist,
+}: EntregasDetailPanelProps) {
   if (!entrega) {
     return (
       <section className="flex h-full min-h-0 flex-col items-center justify-center bg-gray-50/50 px-8 text-center dark:bg-gray-950/50">
@@ -201,7 +215,11 @@ export function EntregasDetailPanel({ entrega }: EntregasDetailPanelProps) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50/50 px-6 py-5 dark:bg-gray-950/50">
-        <EntregaDetailContent entrega={entrega} />
+        <EntregaDetailContent
+          entrega={entrega}
+          checklistDisabled={checklistDisabled}
+          onToggleChecklist={onToggleChecklist}
+        />
       </div>
     </section>
   );

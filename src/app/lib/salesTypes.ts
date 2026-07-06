@@ -150,6 +150,7 @@ export interface SaleRecord {
   expectedDelivery?: string;
   deliveredAt?: string;
   responsible: string;
+  responsibleId?: string;
   notes: string;
   stageHistory: SaleHistoryEntry[];
   paymentHistory: SalePaymentEntry[];
@@ -190,6 +191,7 @@ export interface CreateSalePayload {
   operationType?: string;
   expectedDelivery?: string;
   responsible: string;
+  responsibleId?: string;
   notes: string;
   workCenterId?: string;
   workCenterName?: string;
@@ -236,6 +238,7 @@ export function createSaleRecord(payload: CreateSalePayload): SaleRecord {
     expectedDelivery: payload.expectedDelivery || '',
     deliveredAt: payload.stage === 'delivered' ? now : '',
     responsible: payload.responsible,
+    responsibleId: payload.responsibleId || undefined,
     notes: payload.notes,
     stageHistory: [
       {
@@ -336,6 +339,7 @@ export function normalizeSaleRecord(value: unknown): SaleRecord | null {
     expectedDelivery: doc.expectedDelivery ? String(doc.expectedDelivery) : '',
     deliveredAt: doc.deliveredAt ? String(doc.deliveredAt) : '',
     responsible: String(doc.responsible || 'Sin asignar'),
+    responsibleId: doc.responsibleId ? String(doc.responsibleId) : undefined,
     notes: String(doc.notes || ''),
     stageHistory: Array.isArray(doc.stageHistory) ? doc.stageHistory : [],
     paymentHistory: Array.isArray(doc.paymentHistory) ? doc.paymentHistory : [],

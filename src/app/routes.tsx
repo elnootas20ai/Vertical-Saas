@@ -528,6 +528,7 @@ export const router = createBrowserRouter([
           { path: 'locations', Component: Locations },
           { path: 'locations/:id', Component: LocationZone },
           { path: 'clients', element: <RequireWorkerPermission permission="clients"><ClientsPage /></RequireWorkerPermission> },
+          { path: 'clientes', element: <Navigate to="/saas/crm/clientes?tab=clients" replace /> },
           { path: 'clients/:id', element: <RequireWorkerPermission permission="clients"><ClientDetail /></RequireWorkerPermission> },
           { path: 'crm/clientes', element: <RequireWorkerPermission permission="clients"><ClientsPage /></RequireWorkerPermission> },
           { path: 'crm/clientes/:id', element: <RequireWorkerPermission permission="clients"><ClientDetail /></RequireWorkerPermission> },
@@ -829,7 +830,9 @@ export const router = createBrowserRouter([
           { path: 'butcher-tpv', Component: ButcherTpvPage },
 
           // Compraventa (car dealership)
+          { path: 'compraventa-hub', element: <Navigate to="/saas/vertical/compraventa" replace /> },
           { path: 'vertical/compraventa', element: <RequireBusinessOwner><CompraventaHub /></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/informes', element: <Navigate to="/saas/reports" replace /> },
           { path: 'dealership-workers', element: <RequireBusinessOwner><DealershipWorkers /></RequireBusinessOwner> },
           { path: 'vertical/compraventa/trabajadores', element: <Navigate to="/saas/dealership-workers" replace /> },
           { path: 'vertical/compraventa/entrada-vehiculo', element: <RequireWorkerPermission permission="vehicles"><VehicleEntryPage /></RequireWorkerPermission> },
@@ -838,7 +841,7 @@ export const router = createBrowserRouter([
           { path: 'vertical/compraventa/ventas', element: <RequireWorkerPermission permission="sales"><CompraventaVentasPage /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/tasaciones', element: <RequireBusinessOwner><CompraventaTasacionesPage /></RequireBusinessOwner> },
           { path: 'vertical/compraventa/gastos', element: <Navigate to="/saas/vertical/compraventa/gastos-preparacion" replace /> },
-          { path: 'vertical/compraventa/entregas', element: <RequireBusinessOwner><CompraventaEntregasPage /></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/entregas', element: <RequireWorkerPermission permission="sales"><CompraventaEntregasPage /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/gastos-preparacion', element: <RequireBusinessOwner><PreparationExpenses /></RequireBusinessOwner> },
 
           { path: 'changelog', Component: ChangelogPage },

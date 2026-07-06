@@ -8,7 +8,7 @@ import {
   User,
 } from 'lucide-react';
 import { VehicleShellBlock } from '../../vehicles/VehicleShellBlock';
-import { VentasDetailActionBar } from './VentasDetailActionBar';
+import { VentasDetailActionBar, type VentaActionId } from './VentasDetailActionBar';
 import {
   formatVentaDate,
   formatVentaPrice,
@@ -19,6 +19,8 @@ import {
 
 type VentasDetailPanelProps = {
   sale: VentaListItem | null;
+  actionsDisabled?: boolean;
+  onAction?: (actionId: VentaActionId) => void;
 };
 
 function DetailSection({
@@ -138,7 +140,7 @@ function SaleDetailContent({ sale }: { sale: VentaListItem }) {
   );
 }
 
-export function VentasDetailPanel({ sale }: VentasDetailPanelProps) {
+export function VentasDetailPanel({ sale, actionsDisabled, onAction }: VentasDetailPanelProps) {
   if (!sale) {
     return (
       <section className="flex h-full min-h-0 flex-col items-center justify-center bg-gray-50/50 px-8 text-center dark:bg-gray-950/50">
@@ -194,7 +196,7 @@ export function VentasDetailPanel({ sale }: VentasDetailPanelProps) {
         </div>
       </header>
 
-      <VentasDetailActionBar showActions />
+      <VentasDetailActionBar showActions disabled={actionsDisabled} onAction={onAction} />
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50/50 px-6 py-5 dark:bg-gray-950/50">
         <SaleDetailContent sale={sale} />

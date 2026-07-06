@@ -51,7 +51,7 @@ function applyCompraventaStepLocks(
         ...step,
         locked: true,
         lockedReason: 'Registra al menos un cliente antes del stock.',
-        unlockRoute: '/saas/clientes',
+        unlockRoute: '/saas/crm/clientes?tab=clients',
       };
     }
     if (step.id === 'compraventa_operate' && !flags.hasPricedVehicle) {
@@ -86,7 +86,7 @@ const COMPRAVENTA_ACTIVATION_STEP_DEFS = (
     number: 2,
     label: 'Clientes',
     description: 'Registra compradores y contactos para operaciones y documentos',
-    route: '/saas/clientes',
+    route: '/saas/crm/clientes?tab=clients',
     icon: 'users',
     subSteps: [
       { id: 'first_client', label: 'Primer cliente registrado', completed: flags.hasClient },
@@ -123,7 +123,7 @@ const COMPRAVENTA_ACTIVATION_STEP_DEFS = (
     number: 5,
     label: 'Listo para vender',
     description: 'Con expositor, clientes, stock y datos fiscales ya puedes operar',
-    route: '/saas/compraventa-hub',
+    route: '/saas/vertical/compraventa',
     icon: 'rocket',
     subSteps: [
       {

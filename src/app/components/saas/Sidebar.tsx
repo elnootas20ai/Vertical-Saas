@@ -261,12 +261,25 @@ const menuItemDefs = [
   { id: 'doc-user-expenses', navKey: 'docUserExpenses', icon: <Receipt className="w-5 h-5" />,     path: '/saas/documents?tab=user-expenses' },
   { id: 'doc-other',         navKey: 'docOther',        icon: <FolderOpen className="w-5 h-5" />,  path: '/saas/documents?tab=other' },
 
+  // ── Documentación compraventa (tabs vehículo) ────────────────────────────────
+  { id: 'doc-vehiculo',      navKey: 'docVehiculo',     icon: <Car className="w-5 h-5" />,           path: '/saas/documents?tab=vehiculo' },
+  { id: 'doc-contratos-cv',  navKey: 'docContratosCv',  icon: <ScrollText className="w-5 h-5" />,  path: '/saas/documents?tab=contratos' },
+  { id: 'doc-facturas-cv',   navKey: 'docFacturasCv',   icon: <Receipt className="w-5 h-5" />,     path: '/saas/documents?tab=facturas' },
+  { id: 'doc-itv-cv',        navKey: 'docItvCv',        icon: <ShieldCheck className="w-5 h-5" />, path: '/saas/documents?tab=itv' },
+  { id: 'doc-reparacion-cv', navKey: 'docReparacionCv', icon: <Wrench className="w-5 h-5" />,      path: '/saas/documents?tab=reparacion' },
+  { id: 'doc-cliente-cv',    navKey: 'docClienteCv',    icon: <UserCheck className="w-5 h-5" />,   path: '/saas/documents?tab=cliente' },
+  { id: 'doc-anexos-cv',     navKey: 'docAnexosCv',     icon: <FolderOpen className="w-5 h-5" />,  path: '/saas/documents?tab=anexos' },
+
   // ── Vertical: Comercial (concesionario) ──────────────────────────────────────
+  { id: 'compraventa-hub',        navKey: 'compraventaHub',        icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/vertical/compraventa' },
   { id: 'compraventa-vehiculos',  navKey: 'compraventaVehiculos',  icon: <Car className="w-5 h-5" />,              path: '/saas/vehicles' },
   { id: 'compraventa-compras',    navKey: 'compraventaCompras',    icon: <ShoppingCart className="w-5 h-5" />,       path: '/saas/vertical/compraventa/compras' },
   { id: 'compraventa-ventas',     navKey: 'compraventaVentas',     icon: <TrendingUp className="w-5 h-5" />,         path: '/saas/vertical/compraventa/ventas' },
   { id: 'compraventa-tasaciones', navKey: 'compraventaTasaciones', icon: <Scale className="w-5 h-5" />,              path: '/saas/vertical/compraventa/tasaciones' },
   { id: 'compraventa-entregas',   navKey: 'compraventaEntregas',   icon: <Truck className="w-5 h-5" />,              path: '/saas/vertical/compraventa/entregas' },
+  { id: 'compraventa-crm',        navKey: 'compraventa-crm',       icon: <Kanban className="w-5 h-5" />,             path: '/saas/vertical/compraventa/crm' },
+  { id: 'dealership-workers',     navKey: 'dealershipWorkers',     icon: <BarChart3 className="w-5 h-5" />,          path: '/saas/dealership-workers' },
+  { id: 'gastos-preparacion',     navKey: 'gastosPreparacion',     icon: <Receipt className="w-5 h-5" />,            path: '/saas/vertical/compraventa/gastos-preparacion' },
   { id: 'vehicles',     navKey: 'vehicles',     icon: <Car className="w-5 h-5" />,           path: '/saas/vehicles' },
   { id: 'reservations', navKey: 'reservations', icon: <BookmarkCheck className="w-5 h-5" />, path: '/saas/reservations' },
   { id: 'sales',        navKey: 'sales',        icon: <TrendingUp className="w-5 h-5" />,    path: '/saas/sales' },
@@ -506,8 +519,12 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
 /** Items de menú por grupo, sustituyen los defaults del grupo para un vertical concreto. */
 const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string, readonly string[]>>> = {
   carDealership: {
-    clientesCrm: ['clients', 'quotes', 'promotions'],
-    catalogProviders: ['suppliers'],
+    clientesCrm: ['clients', 'compraventa-crm', 'quotes', 'promotions', 'pipeline'],
+    equipo: ['team', 'dealership-workers', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll'],
+    catalogProviders: ['compraventa-vehiculos', 'suppliers'],
+    finanzas: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics', 'gastos-preparacion'],
+    documentacion: ['doc-vehiculo', 'doc-contratos-cv', 'doc-facturas-cv', 'doc-itv-cv', 'doc-reparacion-cv', 'doc-cliente-cv', 'doc-anexos-cv'],
+    commercial: ['compraventa-hub', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'],
   },
   restaurant: {
     clientesCrm: ['clients'],
@@ -759,12 +776,6 @@ function SidebarInner({
 
   useEffect(() => {
     if (!usesOpsStoreSidebar) return;
-    if (opsStoreRows.length === 0) return;
-    setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
-  }, [usesOpsStoreSidebar, opsStoreRows.length]);
-
-  useEffect(() => {
-    if (!usesOpsStoreSidebar) return;
     if (opsStoreLoading) return;
     if (opsStoreRows.length > 0) return;
     if (activeStore.retailWorkCenters.length > 0 || activeStore.allPointsOfSale.length > 0) return;
@@ -781,6 +792,20 @@ function SidebarInner({
     activeStore.allPointsOfSale.length,
     activeStore.refresh,
   ]);
+
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
+    home: false,
+    'worker-main': true,
+    salesPoints: true,
+    ...Object.fromEntries(sidebarGroupDefs.map((g) => [g.id, false])),
+    ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
+  }));
+
+  useEffect(() => {
+    if (!usesOpsStoreSidebar) return;
+    if (opsStoreRows.length === 0) return;
+    setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
+  }, [usesOpsStoreSidebar, opsStoreRows.length]);
 
   /** Centro de trabajo marcado en sidebar = misma lógica que Topbar (PDV `_id` o `wc:`). */
   const selectedSidebarWorkCenterId = useMemo(() => {
@@ -813,14 +838,6 @@ function SidebarInner({
     activeStore.pointsOfSale,
     salesPoints,
   ]);
-
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => ({
-    home: false,
-    'worker-main': true,
-    salesPoints: true,
-    ...Object.fromEntries(sidebarGroupDefs.map((g) => [g.id, false])),
-    ...Object.fromEntries(workerSidebarGroupDefs.map((g) => [g.id, false])),
-  }));
 
   const getActiveCompanySelector = useCallback(() => {
     if (typeof window === 'undefined') return null;
@@ -878,7 +895,6 @@ function SidebarInner({
 
   const navScrollDesktopRef = useRef<HTMLElement>(null);
   const navScrollMobileRef = useRef<HTMLElement>(null);
-  const pendingNavScrollRestore = useRef<number | null>(null);
 
   const deliveryNav = useDeliveryActivationNav();
 
@@ -953,15 +969,6 @@ function SidebarInner({
   };
 
   const handleNavigate = (path: string) => {
-    const navEl =
-      typeof window !== 'undefined' && window.innerWidth < 768
-        ? navScrollMobileRef.current
-        : navScrollDesktopRef.current;
-    const scrollTop = navEl?.scrollTop ?? 0;
-    pendingNavScrollRestore.current = scrollTop;
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(scrollTop));
-    }
     navigate(saasPathWithBusinessScope(path, currentBusiness?.business_id), {
       preventScrollReset: true,
     });
@@ -1097,21 +1104,6 @@ function SidebarInner({
     handleNavigate(resolveSidebarItemPath(item, isRestaurantVertical));
   };
 
-  useLayoutEffect(() => {
-    const pendingY = pendingNavScrollRestore.current;
-    const savedY =
-      typeof window !== 'undefined'
-        ? Number(window.sessionStorage.getItem(SIDEBAR_SCROLL_KEY))
-        : Number.NaN;
-    const y = pendingY ?? (Number.isFinite(savedY) ? savedY : null);
-    if (y === null) return;
-    const desktop = navScrollDesktopRef.current;
-    const mobile = navScrollMobileRef.current;
-    if (desktop) desktop.scrollTop = y;
-    if (mobile) mobile.scrollTop = y;
-    pendingNavScrollRestore.current = null;
-  }, [location.pathname, location.search]);
-
   const visibleMenuItemsBase = menuItems;
 
   const permissionMap = user?.permissions || {};
@@ -1148,6 +1140,7 @@ function SidebarInner({
     'spareparts-compatibility',
     'carwash-services', 'carwash-memberships',
     'scrapyard-deregistrations', 'scrapyard-environment',
+    'compraventa-hub', 'dealership-workers', 'gastos-preparacion', 'compraventa-crm',
   ]);
 
   const visibleMenuItems = visibleMenuItemsBase.filter((item) => {
@@ -1195,7 +1188,8 @@ function SidebarInner({
       || (item.id === 'compraventa-ventas' ? permissionMap.sales : undefined)
       || (item.id === 'compraventa-compras' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-tasaciones' ? permissionMap.vehicles : undefined)
-      || (item.id === 'compraventa-entregas' ? permissionMap.vehicles : undefined);
+      || (item.id === 'compraventa-entregas' ? permissionMap.sales : undefined)
+      || (item.id === 'compraventa-crm' ? permissionMap.clients : undefined);
     if (!permission) {
       // Sin permiso definido: el owner lo ve, el worker no (defensa por defecto).
       return !isWorker;
@@ -1227,6 +1221,17 @@ function SidebarInner({
     (item.id === 'compraventa-compras' && location.pathname.startsWith('/saas/vertical/compraventa/compras')) ||
     (item.id === 'compraventa-tasaciones' && location.pathname.startsWith('/saas/vertical/compraventa/tasaciones')) ||
     (item.id === 'compraventa-entregas' && location.pathname.startsWith('/saas/vertical/compraventa/entregas')) ||
+    (item.id === 'compraventa-crm' && location.pathname.startsWith('/saas/vertical/compraventa/crm')) ||
+    (item.id === 'compraventa-hub' && location.pathname.startsWith('/saas/vertical/compraventa') && !location.pathname.includes('/compras') && !location.pathname.includes('/ventas') && !location.pathname.includes('/tasaciones') && !location.pathname.includes('/entregas') && !location.pathname.includes('/crm') && !location.pathname.includes('/gastos')) ||
+    (item.id === 'dealership-workers' && location.pathname.startsWith('/saas/dealership-workers')) ||
+    (item.id === 'gastos-preparacion' && location.pathname.startsWith('/saas/vertical/compraventa/gastos-preparacion')) ||
+    (item.id === 'doc-vehiculo' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=vehiculo')) ||
+    (item.id === 'doc-contratos-cv' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=contratos')) ||
+    (item.id === 'doc-facturas-cv' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=facturas')) ||
+    (item.id === 'doc-itv-cv' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=itv')) ||
+    (item.id === 'doc-reparacion-cv' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=reparacion')) ||
+    (item.id === 'doc-cliente-cv' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=cliente')) ||
+    (item.id === 'doc-anexos-cv' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=anexos')) ||
     (item.id === 'clients' && (location.pathname.startsWith('/saas/clients') || location.pathname.startsWith('/saas/crm/clientes'))) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
     (item.id === 'parts' && location.pathname.startsWith('/saas/parts')) ||
@@ -1391,6 +1396,29 @@ function SidebarInner({
     const [home, ...rest] = mapped;
     return home ? [home, salesPointsGroup, ...rest] : [salesPointsGroup];
   })();
+
+  // Al cambiar de ruta, abrir el grupo que contiene la página activa (sin impedir cerrarlo después).
+  const prevNavLocationRef = useRef(`${location.pathname}${location.search}`);
+  useEffect(() => {
+    if (workerMode) return;
+    const current = `${location.pathname}${location.search}`;
+    if (current === prevNavLocationRef.current) return;
+    prevNavLocationRef.current = current;
+
+    setExpandedGroups((prev) => {
+      const updates: Record<string, boolean> = {};
+      for (const group of groupedVisibleItems) {
+        if (group.id === 'home' || group.id === 'salesPoints') continue;
+        if (group.items.some((item) => isItemActive(item))) {
+          updates[group.id] = true;
+        }
+      }
+      if (Object.keys(updates).length === 0) return prev;
+      const needsUpdate = Object.entries(updates).some(([id, val]) => prev[id] !== val);
+      if (!needsUpdate) return prev;
+      return { ...prev, ...updates };
+    });
+  }, [location.pathname, location.search, workerMode, groupedVisibleItems]);
 
   const bottomItemIds = allowedBottom;
   const bottomVisibleItems = visibleMenuItems.filter((item) => bottomItemIds.has(item.id));
@@ -1596,7 +1624,8 @@ function SidebarInner({
             const groupHasActiveItem = group.items.some((item) => isItemActive(item));
             const isExpanded = Boolean(expandedGroups[group.id]);
             const showGroupedAsFlat = !isMobile && collapsed;
-            const shouldShowChildren = showGroupedAsFlat || isExpanded || !!searchNorm;
+            const shouldShowChildren =
+              showGroupedAsFlat || isExpanded || !!searchNorm;
 
             const sortedItems = searchNorm
               ? [...group.items.filter(itemMatchesSearch), ...group.items.filter((i) => !itemMatchesSearch(i))]
@@ -1604,16 +1633,16 @@ function SidebarInner({
 
             return (
               <NavSectionShell key={group.id} narrow={narrow}>
-                <div className={`transition-opacity duration-200 ${dimmed ? 'opacity-30' : ''}`}>
+                <div className={dimmed ? 'opacity-30' : undefined}>
                   {!showGroupedAsFlat && (
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
                         setExpandedGroups((prev) => ({
                           ...prev,
                           [group.id]: !prev[group.id],
-                        }))
-                      }
+                        }));
+                      }}
                       className={`w-full flex items-center gap-2 px-4 py-2 text-xs uppercase tracking-wide transition-colors rounded-t-xl ${
                         groupHasActiveItem
                           ? 'text-amber-700 dark:text-amber-300'
@@ -1625,13 +1654,13 @@ function SidebarInner({
                         {group.label}
                       </span>
                       <ChevronDown
-                        className={`w-4 h-4 shrink-0 transition-transform ${(isExpanded || !!searchNorm) ? 'rotate-180' : 'rotate-0'}`}
+                        className={`w-4 h-4 shrink-0 ${shouldShowChildren ? 'rotate-180' : 'rotate-0'}`}
                       />
                     </button>
                   )}
 
-                  {shouldShowChildren &&
-                    sortedItems.map((item) => {
+                  <div className={shouldShowChildren ? undefined : 'hidden'} aria-hidden={!shouldShowChildren}>
+                    {sortedItems.map((item) => {
                       const isActive = isItemActive(item);
                       const isCalendar = item.id === 'calendar';
                       /** Marca visual en sidebar: zona Ops ya trabajada / hub principal */
@@ -1646,7 +1675,7 @@ function SidebarInner({
                           key={item.id}
                           type="button"
                           onClick={() => handleMenuItemClick(item)}
-                          className={`relative w-full flex items-center transition-all last:rounded-b-xl ${
+                          className={`relative w-full flex items-center transition-colors last:rounded-b-xl ${
                             isSalesPointSubItem ? 'gap-2 py-1.5' : 'gap-3 py-2.5'
                           } ${
                             !isMobile && collapsed
@@ -1778,6 +1807,7 @@ function SidebarInner({
                         </button>
                       );
                     })}
+                  </div>
                 </div>
               </NavSectionShell>
             );

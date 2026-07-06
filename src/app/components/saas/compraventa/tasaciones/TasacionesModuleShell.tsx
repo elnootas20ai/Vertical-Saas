@@ -7,6 +7,7 @@ import { mapTradeInToTasacion } from '../../../../lib/compraventaMappers';
 import { TasacionesListPanel } from './TasacionesListPanel';
 import { TasacionesDetailPanel } from './TasacionesDetailPanel';
 import { TasacionesNewButton } from './TasacionesDetailActionBar';
+import { TasacionesNewWizard } from './TasacionesNewWizard';
 import type { TasacionListItem } from './tasacionesListData';
 
 export function TasacionesModuleShell() {
@@ -19,6 +20,7 @@ export function TasacionesModuleShell() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const selectedTasacion = useMemo(
     () => tasaciones.find((t) => t.id === selectedId) ?? null,
@@ -108,7 +110,7 @@ export function TasacionesModuleShell() {
             Oportunidades de compra antes de entrar al inventario
           </p>
         </div>
-        <TasacionesNewButton disabled={loading || actionLoading} />
+        <TasacionesNewButton disabled={loading || actionLoading} onClick={() => setWizardOpen(true)} />
       </div>
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
@@ -124,6 +126,15 @@ export function TasacionesModuleShell() {
           actionsDisabled={actionLoading}
         />
       </div>
+
+      <TasacionesNewWizard
+        open={wizardOpen}
+        onClose={() => setWizardOpen(false)}
+        onCreated={async (tasacionId) => {
+          await loadTasaciones();
+          setSelectedId(tasacionId);
+        }}
+      />
     </div>
   );
 }

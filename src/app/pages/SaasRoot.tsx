@@ -8,6 +8,7 @@ import { AppProvider, useApp } from '../context/AppContext';
 
 import { ActiveStoreScopeProvider } from '../context/ActiveStoreScopeContext';
 import { BusinessScopeUrlSync } from '../components/saas/BusinessScopeUrlSync';
+import { SaasAppShell } from '../components/saas/Layout';
 
 import { useBusinessOptional } from '../context/BusinessContext';
 
@@ -461,13 +462,9 @@ function SaasContent() {
 
 
   return (
-
-    <>
-
+    <SaasAppShell>
       <Outlet />
-
-    </>
-
+    </SaasAppShell>
   );
 
 }

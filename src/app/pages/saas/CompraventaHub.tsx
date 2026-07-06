@@ -20,7 +20,7 @@ import {
   RefreshCw, ChevronRight, AlertTriangle, AlertCircle, Info,
   Clock, Truck, Users, FileText, Search, Filter, X,
   BarChart3, ArrowUpRight, ArrowDownRight, Minus, Eye,
-  ShieldAlert, Package, Phone, MapPin, Tag,
+  ShieldAlert, Package, Phone, MapPin, Tag, Scale, ShoppingCart,
 } from 'lucide-react';
 import {
   BarChart, Bar, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid,
@@ -406,9 +406,9 @@ export function CompraventaHub() {
 
         {/* ─── KPI Cards ───────────────────────────────────────────────── */}
         {isVisible('kpis') && (
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-4 gap-3">
             {loading && !data ? (
-              [...Array(6)].map((_, i) => <KpiSkeleton key={i} />)
+              [...Array(8)].map((_, i) => <KpiSkeleton key={i} />)
             ) : data ? (
               <>
                 <KpiCard
@@ -425,7 +425,7 @@ export function CompraventaHub() {
                   value={data.stock.reservados}
                   subtitle={data.crm.reservasSinContrato > 0 ? `${data.crm.reservasSinContrato} sin contrato` : 'Todas con contrato'}
                   color="amber"
-                  onClick={() => navigate('/saas/sales?stage=reserved')}
+                  onClick={() => navigate('/saas/vertical/compraventa/ventas')}
                 />
                 <KpiCard
                   icon={<Wrench className="w-5 h-5" />}
@@ -458,6 +458,22 @@ export function CompraventaHub() {
                   subtitle={fmt(data.finanzas.cobrosPendientes)}
                   color="red"
                   onClick={() => navigate('/saas/finance')}
+                />
+                <KpiCard
+                  icon={<Scale className="w-5 h-5" />}
+                  label="Tasaciones"
+                  value={data.comercial?.tasacionesPendientes ?? 0}
+                  subtitle="Pendientes de revisión"
+                  color="indigo"
+                  onClick={() => navigate('/saas/vertical/compraventa/tasaciones')}
+                />
+                <KpiCard
+                  icon={<ShoppingCart className="w-5 h-5" />}
+                  label="Compras abiertas"
+                  value={data.comercial?.comprasAbiertas ?? 0}
+                  subtitle="Adquisiciones en curso"
+                  color="cyan"
+                  onClick={() => navigate('/saas/vertical/compraventa/compras')}
                 />
               </>
             ) : null}
@@ -516,9 +532,9 @@ export function CompraventaHub() {
                 <button
                   onClick={() => {
                     if (activeTable === 'stock') navigate('/saas/vehicles?status=listo');
-                    else if (activeTable === 'reservas') navigate('/saas/sales?stage=reserved');
+                    else if (activeTable === 'reservas') navigate('/saas/vertical/compraventa/ventas');
                     else if (activeTable === 'preparacion') navigate('/saas/vehicles?status=preparacion');
-                    else navigate('/saas/sales');
+                    else navigate('/saas/vertical/compraventa/ventas');
                   }}
                   className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                 >
@@ -553,7 +569,7 @@ export function CompraventaHub() {
                     {(data?.entregasPendientes || []).map((e) => (
                       <button
                         key={e.id}
-                        onClick={() => navigate(`/saas/sales/${e.id}`)}
+                        onClick={() => navigate(`/saas/vertical/compraventa/entregas`)}
                         className="flex items-center gap-3 w-full p-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
                       >
                         <div className="flex-1 min-w-0">
@@ -609,7 +625,7 @@ export function CompraventaHub() {
                   </div>
                 )}
                 <button
-                  onClick={() => navigate('/saas/pipeline')}
+                  onClick={() => navigate('/saas/vertical/compraventa/crm')}
                   className="mt-3 text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                 >
                   Ver pipeline <ChevronRight className="w-3.5 h-3.5" />

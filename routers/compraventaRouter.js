@@ -35,6 +35,16 @@ async function fetchAllDocs(req, dbName) {
   );
 }
 
+function saleMatchesUser(sale, userId, fullName) {
+  const responsibleId = String(sale.responsibleId || '').trim();
+  if (responsibleId && responsibleId === userId) return true;
+  const responsible = String(sale.responsible || '').trim();
+  if (!responsible) return true;
+  if (responsible === userId) return true;
+  if (fullName && responsible.toLowerCase() === String(fullName).trim().toLowerCase()) return true;
+  return false;
+}
+
 function isManagerRole(role) {
   return ['Admin', 'Gerente'].includes(role);
 }
@@ -48,6 +58,7 @@ compraventaRouter.get('/:userId', async (req, res) => {
 
     const { branchId, responsibleId, vehicleStatus, salesChannel } = req.query;
     const authRole = req.authUser?.role || '';
+    const authFullName = req.authUser?.fullName || '';
     const isManager = isManagerRole(authRole);
 
     const cacheKey = cacheService.buildKey(
@@ -99,7 +110,7 @@ compraventaRouter.get('/:userId', async (req, res) => {
 
     // ── Ventas ──
     let sales = saleDocs.filter((s) => s.user_id === userId && s.type === 'sale');
-    if (!isManager) sales = sales.filter((s) => !s.responsible || s.responsible === userId);
+    if (!isManager) sales = sales.filter((s) => saleMatchesUser(s, userId, authFullName));
     if (branchId) sales = sales.filter((s) => s.branch_id === branchId);
 
     // ── Documentos del usuario ──

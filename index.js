@@ -999,6 +999,8 @@ const internalRouters = [
   ['/api/scrapyard',       requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, scrapyardRouter],
   ['/api/compraventa',     requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, compraventaRouter],
   ['/api/compraventa/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, compraventaAlertRouter],
+  ['/api/worker-performance', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, workerPerformanceRouter],
+  ['/api/preparation-expenses', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, preparationExpenseRouter],
   ['/api/opportunities',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, opportunitiesRouter],
 ];
 

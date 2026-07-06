@@ -7,11 +7,19 @@ const ACTIONS = [
   { id: 'cancel', label: 'Cancelar compra', icon: XCircle, danger: true },
 ] as const;
 
+export type CompraActionId = (typeof ACTIONS)[number]['id'];
+
 type ComprasDetailActionBarProps = {
   showActions?: boolean;
+  disabled?: boolean;
+  onAction?: (actionId: CompraActionId) => void;
 };
 
-export function ComprasDetailActionBar({ showActions = false }: ComprasDetailActionBarProps) {
+export function ComprasDetailActionBar({
+  showActions = false,
+  disabled = false,
+  onAction,
+}: ComprasDetailActionBarProps) {
   if (!showActions) return null;
 
   return (
@@ -23,7 +31,9 @@ export function ComprasDetailActionBar({ showActions = false }: ComprasDetailAct
             <button
               key={action.id}
               type="button"
-              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all ${
+              disabled={disabled}
+              onClick={() => onAction?.(action.id)}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                 action.danger
                   ? 'border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
                   : 'border border-gray-200/90 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'

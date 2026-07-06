@@ -75,10 +75,12 @@ function buildMemberMap(business) {
   return map;
 }
 
-function matchResponsible(responsible, member) {
-  if (!responsible || !member) return false;
-  const r = String(responsible).trim().toLowerCase();
+function matchResponsible(responsible, member, responsibleId) {
+  if (!member) return false;
   const uid = String(member.user_id || '').toLowerCase();
+  if (responsibleId && String(responsibleId).trim().toLowerCase() === uid) return true;
+  if (!responsible) return false;
+  const r = String(responsible).trim().toLowerCase();
   const name = String(member.fullName || '').toLowerCase();
   return r === uid || r === name;
 }
@@ -151,8 +153,8 @@ export async function getWorkerPerformance(req, res) {
       : memberList;
 
     for (const member of targetMembers) {
-      const mySales = allSales.filter((s) => matchResponsible(s.responsible, member));
-      const myLeads = allLeads.filter((l) => matchResponsible(l.responsible, member));
+      const mySales = allSales.filter((s) => matchResponsible(s.responsible, member, s.responsibleId));
+      const myLeads = allLeads.filter((l) => matchResponsible(l.responsible, member, l.responsibleId));
       const myClockins = allClockins.filter((c) => c.member_id === member.user_id);
       const myCommissions = allCommissions.filter(
         (c) => c.agentId === member.user_id || matchResponsible(c.agentName, member),

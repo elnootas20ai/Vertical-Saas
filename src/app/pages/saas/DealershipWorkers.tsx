@@ -28,6 +28,9 @@ import {
   X, ExternalLink, Truck, UserPlus,
   Activity, Kanban, CircleAlert, Receipt,
 } from 'lucide-react';
+
+const COMPRAVENTA_VENTAS_PATH = '/saas/vertical/compraventa/ventas';
+const COMPRAVENTA_ENTREGAS_PATH = '/saas/vertical/compraventa/entregas';
 import { format, subDays, subMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -280,8 +283,11 @@ function WorkerDetailModal({
           <button onClick={() => navigate('/saas/crm/clientes?tab=leads')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors">
             <UserPlus className="w-3.5 h-3.5" /> CRM
           </button>
-          <button onClick={() => navigate('/saas/sales')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors">
+          <button onClick={() => navigate(COMPRAVENTA_VENTAS_PATH)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors">
             <Receipt className="w-3.5 h-3.5" /> Ventas
+          </button>
+          <button onClick={() => navigate(COMPRAVENTA_ENTREGAS_PATH)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-xs font-semibold hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors">
+            <Truck className="w-3.5 h-3.5" /> Entregas
           </button>
           <button onClick={() => navigate('/saas/commissions')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-xs font-semibold hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors">
             <Award className="w-3.5 h-3.5" /> Comisiones
@@ -459,7 +465,8 @@ function WorkerResumen({
 
   const connections = [
     { label: 'Mi CRM', icon: <UserPlus className="w-4 h-4" />, route: '/saas/crm/clientes?tab=leads', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
-    { label: 'Mis ventas', icon: <Receipt className="w-4 h-4" />, route: '/saas/sales', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+    { label: 'Mis ventas', icon: <Receipt className="w-4 h-4" />, route: COMPRAVENTA_VENTAS_PATH, color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+    { label: 'Mis entregas', icon: <Truck className="w-4 h-4" />, route: COMPRAVENTA_ENTREGAS_PATH, color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
     { label: 'Comisiones', icon: <Award className="w-4 h-4" />, route: '/saas/commissions', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
     { label: 'Vehículos', icon: <Car className="w-4 h-4" />, route: '/saas/vehicles', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
     { label: 'Dashboard', icon: <BarChart3 className="w-4 h-4" />, route: '/saas/dashboard', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
@@ -525,7 +532,7 @@ function WorkerResumen({
             <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
               <Car className="w-4 h-4 text-emerald-500" /> Mis operaciones
             </h3>
-            <button onClick={() => navigate('/saas/sales')} className="text-[11px] text-indigo-500 font-semibold hover:underline flex items-center gap-1">
+            <button onClick={() => navigate(COMPRAVENTA_VENTAS_PATH)} className="text-[11px] text-indigo-500 font-semibold hover:underline flex items-center gap-1">
               Ver todas <ChevronRight className="w-3 h-3" />
             </button>
           </div>
@@ -559,7 +566,7 @@ function WorkerResumen({
               </button>
             )}
             {worker.entregasPendientes > 0 && (
-              <button onClick={() => navigate('/saas/sales')} className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-900 rounded-lg border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 font-medium hover:bg-amber-50 transition-colors">
+              <button onClick={() => navigate(COMPRAVENTA_ENTREGAS_PATH)} className="flex items-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-900 rounded-lg border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 font-medium hover:bg-amber-50 transition-colors">
                 <Truck className="w-3.5 h-3.5" /> {worker.entregasPendientes} entregas por realizar
               </button>
             )}

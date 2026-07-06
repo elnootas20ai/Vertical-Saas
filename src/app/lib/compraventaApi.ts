@@ -38,6 +38,11 @@ export interface CrmKpis {
   reservasSinContrato: number;
 }
 
+export interface ComercialKpis {
+  tasacionesPendientes: number;
+  comprasAbiertas: number;
+}
+
 export interface VehiculoStock {
   id: string;
   matricula: string;
@@ -128,6 +133,7 @@ export interface CompraventaData {
   finanzas: FinanzasKpis;
   entregas: EntregasKpis;
   crm: CrmKpis;
+  comercial?: ComercialKpis;
   vehiculosStock: VehiculoStock[];
   reservasActivas: ReservaActiva[];
   ventasRecientes: VentaReciente[];

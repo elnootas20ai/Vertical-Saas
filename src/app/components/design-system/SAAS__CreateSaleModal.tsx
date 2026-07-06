@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   X, TrendingUp, AlertCircle, Check, Search, Plus,
   ChevronDown, User, Mail, Phone, UserPlus, ArrowLeft,
@@ -78,6 +78,11 @@ interface Client {
   phone: string;
 }
 
+export interface SaleTeamMemberOption {
+  id: string;
+  name: string;
+}
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -92,6 +97,7 @@ interface Props {
     depositPaid: string;
     expectedDelivery: string;
     responsible: string;
+    responsibleId?: string;
     paymentMethod: string;
     operationType: string;
     notes: string;
@@ -103,6 +109,8 @@ interface Props {
   onAddVehicle?: () => void;
   vehicles: Vehicle[];
   clients: Client[];
+  /** Miembros del equipo con id estable (preferido) */
+  teamMemberOptions?: SaleTeamMemberOption[];
   teamMembers?: string[];
   /** Ventas ya registradas — evita asignar un vehículo con operación activa */
   existingSales?: SaleRecord[];
@@ -359,14 +367,15 @@ function ClientPicker({ clients, value, onChange, onNewClient, required }: Clien
 
 // ─── Main modal ───────────────────────────────────────────────────────────────
 
-const buildInitialForm = (firstResponsable: string) => ({
+const buildInitialForm = (first: SaleTeamMemberOption) => ({
   vehicleId: '',
   clientId: '',
   stage: 'interested' as SaleStage,
   totalPrice: '',
   depositPaid: '',
   expectedDelivery: '',
-  responsible: firstResponsable,
+  responsible: first.name,
+  responsibleId: first.id,
   paymentMethod: '',
   operationType: 'Venta directa',
   notes: '',
@@ -380,14 +389,21 @@ export function SAAS__CreateSaleModal({
   onAddVehicle,
   vehicles,
   clients: initialClients,
+  teamMemberOptions,
   teamMembers,
   existingSales = [],
 }: Props) {
-  const responsableList = teamMembers && teamMembers.length > 0
-    ? teamMembers
-    : RESPONSABLES;
+  const responsableOptions = useMemo<SaleTeamMemberOption[]>(() => {
+    if (teamMemberOptions && teamMemberOptions.length > 0) return teamMemberOptions;
+    if (teamMembers && teamMembers.length > 0) {
+      return teamMembers.map((name) => ({ id: '', name }));
+    }
+    return RESPONSABLES.map((name) => ({ id: '', name }));
+  }, [teamMemberOptions, teamMembers]);
 
-  const [formData, setFormData] = useState(() => buildInitialForm(responsableList[0]));
+  const defaultResponsable = responsableOptions[0] || { id: '', name: 'Equipo comercial' };
+
+  const [formData, setFormData] = useState(() => buildInitialForm(defaultResponsable));
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [clientError, setClientError] = useState('');
@@ -403,17 +419,17 @@ export function SAAS__CreateSaleModal({
 
   useEffect(() => {
     if (isOpen) {
-      setFormData(buildInitialForm(responsableList[0]));
+      setFormData(buildInitialForm(defaultResponsable));
       setWorkCenterId('');
       setClientError('');
       setSubmitError('');
       setIsCreatingClient(false);
       setIsSubmitting(false);
     }
-  }, [isOpen]);
+  }, [isOpen, defaultResponsable.id, defaultResponsable.name]);
 
   const resetAndClose = () => {
-    setFormData(buildInitialForm(responsableList[0]));
+    setFormData(buildInitialForm(defaultResponsable));
     setWorkCenterId('');
     setClientError('');
     setSubmitError('');
@@ -654,8 +670,29 @@ export function SAAS__CreateSaleModal({
               </div>
               <div>
                 <label className={lc}>Responsable</label>
-                <select value={formData.responsible} onChange={e => handleChange('responsible', e.target.value)} className={ic}>
-                  {responsableList.map(r => <option key={r} value={r}>{r}</option>)}
+                <select
+                  value={formData.responsibleId || formData.responsible}
+                  onChange={(e) => {
+                    const selected = responsableOptions.find(
+                      (option) => (option.id || option.name) === e.target.value,
+                    );
+                    if (selected) {
+                      setFormData((prev) => ({
+                        ...prev,
+                        responsible: selected.name,
+                        responsibleId: selected.id,
+                      }));
+                    } else {
+                      handleChange('responsible', e.target.value);
+                    }
+                  }}
+                  className={ic}
+                >
+                  {responsableOptions.map((option) => (
+                    <option key={option.id || option.name} value={option.id || option.name}>
+                      {option.name}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

@@ -420,7 +420,8 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
       { label: 'Centro operativo', icon: <LayoutDashboard className="w-5 h-5" />, route: '/saas/vertical/compraventa', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
       { label: 'Vehículos', icon: <Car className="w-5 h-5" />, route: '/saas/vehicles', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
       { label: 'Reservas', icon: <BookmarkCheck className="w-5 h-5" />, route: '/saas/reservations', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
-      { label: 'Ventas', icon: <ShoppingCart className="w-5 h-5" />, route: '/saas/sales', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+      { label: 'Ventas', icon: <ShoppingCart className="w-5 h-5" />, route: '/saas/vertical/compraventa/ventas', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+      { label: 'Compras', icon: <ShoppingCart className="w-5 h-5" />, route: '/saas/vertical/compraventa/compras', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
       { label: 'Gastos prep.', icon: <Receipt className="w-5 h-5" />, route: '/saas/vertical/compraventa/gastos-preparacion', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
       { label: 'Taller', icon: <Wrench className="w-5 h-5" />, route: '/saas/workshop', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
@@ -683,6 +684,7 @@ function UnifiedDashboard() {
   } | null>(null);
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
+  const isCompraventaVertical = vertical === 'carDealership';
   const isRestaurantVertical = vertical === 'restaurant' || isRestaurantBusinessType(currentBusiness?.businessType);
 
   useEffect(() => {
@@ -1182,7 +1184,7 @@ function UnifiedDashboard() {
                   iconBg="bg-emerald-100 dark:bg-emerald-900/40"
                   iconColor="text-emerald-600"
                   trend={salesTodayCount > 0 ? { value: `+${salesTodayCount}`, up: true } : undefined}
-                  onClick={() => navigate('/saas/sales')}
+                  onClick={() => navigate(isCompraventaVertical ? '/saas/vertical/compraventa/ventas' : '/saas/sales')}
                   loading={serverLoading}
                 />
                 <KPICard
@@ -1849,7 +1851,7 @@ function OperativeBlock({
         icon: <Truck className="w-4 h-4" />,
         bg: n > 0 ? 'bg-amber-50 dark:bg-amber-950/30' : 'bg-gray-50 dark:bg-gray-800',
         text: n > 0 ? 'text-amber-700' : 'text-gray-500',
-        route: '/saas/sales',
+        route: '/saas/vertical/compraventa/entregas',
       });
     }
     return row;

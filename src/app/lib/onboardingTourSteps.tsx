@@ -303,7 +303,7 @@ const COMPRAVENTA_TOUR_STEPS: OnboardingTourStep[] = [
     title: 'Registra clientes',
     description: 'Añade compradores y contactos para operaciones, reservas y documentación.',
     hint: 'Clientes → «Nuevo cliente».',
-    route: '/saas/clientes',
+    route: '/saas/crm/clientes?tab=clients',
     checklist: ['Al menos un cliente registrado'],
   },
   {
@@ -333,7 +333,7 @@ const COMPRAVENTA_TOUR_STEPS: OnboardingTourStep[] = [
     title: 'Listo para vender',
     description: 'Con expositor, clientes, stock y datos fiscales ya puedes registrar operaciones.',
     hint: 'El hub de compraventa concentra ventas, reservas y documentos.',
-    route: '/saas/compraventa-hub',
+    route: '/saas/vertical/compraventa',
     checklist: ['Expositor, clientes y stock listos', 'Datos de empresa completos'],
   },
 ];

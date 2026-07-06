@@ -8,11 +8,19 @@ const ACTIONS = [
   { id: 'cancel', label: 'Cancelar', icon: XCircle, danger: true },
 ] as const;
 
+export type VentaActionId = (typeof ACTIONS)[number]['id'];
+
 type VentasDetailActionBarProps = {
   showActions?: boolean;
+  disabled?: boolean;
+  onAction?: (actionId: VentaActionId) => void;
 };
 
-export function VentasDetailActionBar({ showActions = false }: VentasDetailActionBarProps) {
+export function VentasDetailActionBar({
+  showActions = false,
+  disabled = false,
+  onAction,
+}: VentasDetailActionBarProps) {
   if (!showActions) return null;
 
   return (
@@ -24,7 +32,9 @@ export function VentasDetailActionBar({ showActions = false }: VentasDetailActio
             <button
               key={action.id}
               type="button"
-              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all ${
+              disabled={disabled}
+              onClick={() => onAction?.(action.id)}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                 action.primary
                   ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/25 hover:bg-amber-600'
                   : action.danger
@@ -42,11 +52,18 @@ export function VentasDetailActionBar({ showActions = false }: VentasDetailActio
   );
 }
 
-export function VentasNewSaleButton() {
+type VentasNewSaleButtonProps = {
+  disabled?: boolean;
+  onClick?: () => void;
+};
+
+export function VentasNewSaleButton({ disabled = false, onClick }: VentasNewSaleButtonProps) {
   return (
     <button
       type="button"
-      className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gray-900 px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-gray-100 dark:text-gray-900"
+      disabled={disabled}
+      onClick={onClick}
+      className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gray-900 px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
     >
       <Plus className="h-4 w-4" />
       Nueva venta
