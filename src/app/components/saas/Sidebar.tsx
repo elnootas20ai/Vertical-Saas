@@ -524,7 +524,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
     catalogProviders: ['compraventa-vehiculos', 'suppliers'],
     finanzas: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics', 'gastos-preparacion'],
     documentacion: ['doc-vehiculo', 'doc-contratos-cv', 'doc-facturas-cv', 'doc-itv-cv', 'doc-reparacion-cv', 'doc-cliente-cv', 'doc-anexos-cv'],
-    commercial: ['compraventa-hub', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'],
+    commercial: ['compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'],
   },
   restaurant: {
     clientesCrm: ['clients'],
