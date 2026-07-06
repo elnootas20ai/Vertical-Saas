@@ -1,94 +1,74 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
-  ArrowLeft, Users, DollarSign, TrendingUp, Clock, CheckCircle2, Copy, Check,
-  Plus, X, User, Mail, Phone, Building2, FileText, Loader2, AlertCircle,
-  Handshake, BadgeDollarSign, ExternalLink, MessageSquare, Tag,
-  CreditCard, MailOpen, UserPlus, CircleDollarSign, QrCode, Share2, UserCheck,
+  ArrowLeft, Users, Handshake, Check, Plus, X, User, Mail, Phone, Building2,
+  Loader2, AlertCircle, Tag, LayoutDashboard, BadgeDollarSign,
+  UserCheck, Share2, UserCircle2, LifeBuoy, FolderOpen,
 } from 'lucide-react';
 import {
   listAffiliateVerticals,
   portalDashboard,
   portalLogin,
+  portalLoginWithAccount,
   portalRegisterClient,
   portalReferredAccounts,
+  portalAcceptContract,
   type ReferredAccount,
 } from '../../lib/affiliatesApi';
-
-type Tab = 'clients' | 'commissions' | 'referred';
-
-interface PortalAffiliate {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  whatsapp: string;
-  company: string;
-  affiliateCode: string;
-  referralCode: string;
-  commissionRate: number;
-  status: string;
-  createdAt: string;
-}
-
-interface PortalClient {
-  _id: string;
-  contactName: string;
-  contactEmail: string;
-  contactPhone: string;
-  contactType: string;
-  company: string;
-  verticals?: string[];
-  signedSaas: boolean;
-  emailSent?: boolean;
-  emailOpened?: boolean;
-  cardAdded?: boolean;
-  isPaying?: boolean;
-  monthlyAmount?: number;
-  commissionPercent?: number;
-  createdAt: string;
-}
-
-interface PortalCommission {
-  _id: string;
-  description: string;
-  amount: number;
-  status: 'pending' | 'paid' | 'cancelled';
-  dueDate?: string;
-  paidAt?: string;
-  createdAt: string;
-}
-
-interface PortalStats {
-  totalClients: number;
-  signedClients: number;
-  totalEarned: number;
-  pendingAmount: number;
-}
-
-function fmt(iso: string) {
-  return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-function fmtCurrency(v: number) {
-  return `${v.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
-}
-
-const COMM_STATUS: Record<string, { label: string; bg: string; text: string; dot: string }> = {
-  pending:   { label: 'Pendiente', bg: 'bg-amber-50',   text: 'text-amber-700',   dot: 'bg-amber-400' },
-  paid:      { label: 'Pagada',    bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
-  cancelled: { label: 'Cancelada', bg: 'bg-red-50',     text: 'text-red-700',     dot: 'bg-red-500' },
-};
+import { AFFILIATE_AGREEMENT_VERSION } from '../../content/legal/affiliateAgreement';
+import { AffiliateContractGate } from '../../components/affiliate/AffiliateContractGate';
+import { AffiliateResourcesSection } from '../../components/affiliate/AffiliateResourcesSection';
+import {
+  AffiliateBackofficeLayout,
+  type AffiliateBackofficeSection,
+  type AffiliateNavItem,
+} from '../../components/affiliate/AffiliateBackofficeLayout';
+import {
+  AffiliateDashboardSection,
+  AffiliateClientsSection,
+  AffiliateReferredSection,
+  AffiliateCommissionsSection,
+  AffiliateReferralSection,
+  AffiliateAccountSection,
+  AffiliateHelpSection,
+  type PortalAffiliate,
+  type PortalClient,
+  type PortalCommission,
+  type PortalStats,
+} from '../../components/affiliate/AffiliatePortalSections';
 
 // ── Login Screen ───────────────────────────────────────────────────────────────
 
 function LoginScreen({ onLogin }: { onLogin: (code: string) => void }) {
   const navigate = useNavigate();
+  const [mode, setMode] = useState<'account' | 'code'>('account');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleAccountSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await portalLoginWithAccount(email.trim(), password);
+      if (data.ok && data.affiliate?.affiliateCode) {
+        onLogin(data.affiliate.affiliateCode);
+      } else {
+        setError(data.error || 'No se pudo iniciar sesión');
+      }
+    } catch {
+      setError('Error de conexión');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCodeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim()) return;
     setLoading(true);
@@ -115,38 +95,116 @@ function LoginScreen({ onLogin }: { onLogin: (code: string) => void }) {
             <Handshake className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-black text-white mb-2">Panel de Afiliado</h1>
-          <p className="text-blue-200/70">Introduce tu código de afiliado para acceder</p>
+          <p className="text-blue-200/70 min-h-[2.75rem] flex items-center justify-center px-2 text-sm leading-relaxed">
+            {mode === 'account'
+              ? 'Entra con tu email y contraseña de Vertial'
+              : 'Acceso alternativo con código de afiliado'}
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-6 space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-blue-200/80 mb-2">Código de afiliado</label>
-            <input
-              type="text" value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="Ej: AFF-A7K2N3"
-              className="w-full px-4 py-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-blue-300/40 font-mono text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          {error && (
-            <div className="flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
-            </div>
-          )}
-
-          <button type="submit" disabled={loading || !code.trim()}
-            className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-violet-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-violet-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Acceder al panel'}
+        <div className="flex rounded-xl bg-white/10 p-1 mb-4">
+          <button
+            type="button"
+            onClick={() => { setMode('account'); setError(''); }}
+            className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors duration-200 ${mode === 'account' ? 'bg-white text-slate-900 shadow-sm' : 'text-blue-100 hover:text-white'}`}
+          >
+            Email y contraseña
           </button>
+          <button
+            type="button"
+            onClick={() => { setMode('code'); setError(''); }}
+            className={`flex-1 py-2.5 text-sm font-semibold rounded-lg transition-colors duration-200 ${mode === 'code' ? 'bg-white text-slate-900 shadow-sm' : 'text-blue-100 hover:text-white'}`}
+          >
+            Código
+          </button>
+        </div>
 
-          <div className="text-center">
-            <button type="button" onClick={() => navigate('/affiliados')}
-              className="text-sm text-blue-300/60 hover:text-blue-200 transition-colors">
-              ¿No tienes código? Solicita ser afiliado
-            </button>
-          </div>
-        </form>
+        <div className="bg-white/5 backdrop-blur border border-white/10 rounded-2xl p-6 min-h-[23.5rem] flex flex-col">
+          {mode === 'account' ? (
+            <form onSubmit={handleAccountSubmit} className="flex flex-col flex-1 space-y-5">
+              <div className="min-h-[11.5rem] space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-blue-200/80 mb-2">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="tu@email.com"
+                    autoComplete="email"
+                    className="w-full px-4 py-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-blue-200/80 mb-2">Contraseña</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    className="w-full px-4 py-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-blue-300/40 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="min-h-[3rem] flex items-start">
+                {error ? (
+                  <div className="w-full flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+                  </div>
+                ) : null}
+              </div>
+
+              <button type="submit" disabled={loading || !email.trim() || !password}
+                className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-violet-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-violet-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Entrar al panel'}
+              </button>
+              <div className="text-center min-h-[1.25rem]">
+                <button type="button" onClick={() => navigate('/affiliados')}
+                  className="text-sm text-blue-300/60 hover:text-blue-200 transition-colors">
+                  ¿No tienes acceso? Solicita ser afiliado
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleCodeSubmit} className="flex flex-col flex-1 space-y-5">
+              <div className="min-h-[11.5rem] flex flex-col justify-center">
+                <div>
+                  <label className="block text-sm font-medium text-blue-200/80 mb-2">Código de afiliado</label>
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.toUpperCase())}
+                    placeholder="Ej: AFF-A7K2N3"
+                    className="w-full px-4 py-3.5 bg-white/10 border border-white/20 rounded-xl text-white placeholder-blue-300/40 font-mono text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="mt-2 text-xs text-blue-200/45 text-center leading-relaxed">
+                    Lo recibes por email cuando te aceptamos como afiliado
+                  </p>
+                </div>
+              </div>
+
+              <div className="min-h-[3rem] flex items-start">
+                {error ? (
+                  <div className="w-full flex items-center gap-2 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" /> {error}
+                  </div>
+                ) : null}
+              </div>
+
+              <button type="submit" disabled={loading || !code.trim()}
+                className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-violet-600 text-white font-bold rounded-xl hover:from-blue-700 hover:to-violet-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Acceder con código'}
+              </button>
+              <div className="text-center min-h-[1.25rem]">
+                <button type="button" onClick={() => navigate('/affiliados')}
+                  className="text-sm text-blue-300/60 hover:text-blue-200 transition-colors">
+                  ¿No tienes código? Solicita ser afiliado
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
 
         <button onClick={() => navigate('/')}
           className="flex items-center gap-2 text-sm text-blue-300/40 hover:text-blue-200 transition-colors mx-auto mt-6">
@@ -177,7 +235,7 @@ function AddClientModal({ onSave, onClose, loading, verticalOptions }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
           <h3 className="font-bold text-slate-900 text-lg flex items-center gap-2">
             <Plus className="w-5 h-5 text-blue-600" /> Registrar nuevo cliente
@@ -264,14 +322,13 @@ export function AffiliatePortal() {
   const [stats, setStats] = useState<PortalStats>({ totalClients: 0, signedClients: 0, totalEarned: 0, pendingAmount: 0 });
   const [loading, setLoading] = useState(!!urlCode);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<Tab>('clients');
+  const [section, setSection] = useState<AffiliateBackofficeSection>('dashboard');
   const [showAddClient, setShowAddClient] = useState(false);
   const [addingClient, setAddingClient] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [copiedReferral, setCopiedReferral] = useState(false);
   const [verticalOptions, setVerticalOptions] = useState<string[]>([]);
   const [referredAccounts, setReferredAccounts] = useState<ReferredAccount[]>([]);
-  const [showQr, setShowQr] = useState(false);
+  const [acceptingContract, setAcceptingContract] = useState(false);
+  const [contractError, setContractError] = useState('');
 
   useEffect(() => {
     listAffiliateVerticals()
@@ -319,6 +376,7 @@ export function AffiliatePortal() {
       if (result.ok) {
         setShowAddClient(false);
         loadData(affiliateCode);
+        setSection('clients');
       }
     } catch {
       // silently fail
@@ -327,25 +385,35 @@ export function AffiliatePortal() {
     }
   };
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(affiliate?.affiliateCode || '');
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleAcceptContract = async () => {
+    if (!affiliateCode) return;
+    setAcceptingContract(true);
+    setContractError('');
+    try {
+      const result = await portalAcceptContract(affiliateCode, AFFILIATE_AGREEMENT_VERSION);
+      if (result.ok && result.affiliate) {
+        setAffiliate(result.affiliate as PortalAffiliate);
+        await loadData(affiliateCode);
+      } else {
+        setContractError(result.error || 'No se pudo registrar la firma');
+      }
+    } catch {
+      setContractError('Error de conexión');
+    } finally {
+      setAcceptingContract(false);
+    }
   };
 
-  const copyReferralCode = () => {
-    navigator.clipboard.writeText(affiliate?.referralCode || '');
-    setCopiedReferral(true);
-    setTimeout(() => setCopiedReferral(false), 2000);
-  };
-
-  const referralUrl = affiliate?.referralCode
-    ? `${window.location.origin}/auth/register?ref=${encodeURIComponent(affiliate.referralCode)}`
-    : '';
-
-  const qrImageUrl = referralUrl
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(referralUrl)}`
-    : '';
+  const navItems = useMemo((): AffiliateNavItem[] => [
+    { id: 'dashboard', label: 'Inicio', description: 'Resumen y acciones rápidas', icon: LayoutDashboard },
+    { id: 'clients', label: 'Mis clientes', description: 'Leads y seguimiento comercial', icon: Users, badge: clients.length },
+    { id: 'referred', label: 'Altas referidas', description: 'Registros con tu código', icon: UserCheck, badge: referredAccounts.length },
+    { id: 'commissions', label: 'Comisiones', description: 'Cobros pendientes y pagados', icon: BadgeDollarSign, badge: commissions.length },
+    { id: 'referral', label: 'Referir', description: 'Código, enlace y QR', icon: Share2 },
+    { id: 'resources', label: 'Materiales', description: 'Plan de acción y venta', icon: FolderOpen },
+    { id: 'account', label: 'Mi cuenta', description: 'Datos de tu perfil', icon: UserCircle2 },
+    { id: 'help', label: 'Ayuda', description: 'Soporte y recursos', icon: LifeBuoy },
+  ], [clients.length, referredAccounts.length, commissions.length]);
 
   if (!urlCode && !affiliate) {
     return <LoginScreen onLogin={handleLogin} />;
@@ -353,8 +421,8 @@ export function AffiliatePortal() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
       </div>
     );
   }
@@ -374,342 +442,67 @@ export function AffiliatePortal() {
     );
   }
 
+  if (affiliate.needsContractAcceptance) {
+    return (
+      <AffiliateContractGate
+        affiliateName={affiliate.name}
+        loading={acceptingContract}
+        error={contractError}
+        onAccept={handleAcceptContract}
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-violet-600 rounded-xl flex items-center justify-center">
-                <Handshake className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <p className="font-bold text-sm leading-tight">Panel de Afiliado</p>
-                <p className="text-xs text-blue-300/60">Vertial</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={copyCode}
-                className="flex items-center gap-2 px-3 py-1.5 bg-white/10 border border-white/20 rounded-lg text-xs font-mono hover:bg-white/20 transition-colors">
-                {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                {affiliate.affiliateCode}
-              </button>
-              <button onClick={() => navigate('/')}
-                className="text-sm text-blue-300/60 hover:text-white transition-colors">
-                Salir
-              </button>
-            </div>
-          </div>
-
-          {/* Affiliate info + stats */}
-          <div className="pb-6 pt-2">
-            <h1 className="text-xl font-bold mb-1">Hola, {affiliate.name.split(' ')[0]}</h1>
-            <p className="text-sm text-blue-200/60 mb-6">Comisión: {affiliate.commissionRate}% por cliente activo</p>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: 'Clientes registrados', value: stats.totalClients, icon: Users, color: 'text-blue-400' },
-                { label: 'Clientes firmados', value: stats.signedClients, icon: CheckCircle2, color: 'text-emerald-400' },
-                { label: 'Pendiente de cobro', value: fmtCurrency(stats.pendingAmount), icon: Clock, color: 'text-amber-400' },
-                { label: 'Total cobrado', value: fmtCurrency(stats.totalEarned), icon: TrendingUp, color: 'text-emerald-400' },
-              ].map(({ label, value, icon: Icon, color }) => (
-                <div key={label} className="bg-white/5 backdrop-blur border border-white/10 rounded-xl p-3.5">
-                  <Icon className={`w-5 h-5 ${color} mb-2`} />
-                  <p className="text-lg font-bold text-white">{value}</p>
-                  <p className="text-xs text-blue-200/50">{label}</p>
-                </div>
-              ))}
-            </div>
-
-            {affiliate.referralCode && (
-              <div className="mt-4 bg-white/5 backdrop-blur border border-white/10 rounded-xl p-4">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-                      <Share2 className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-white">Tu código de referido</p>
-                      <p className="text-xs text-blue-200/60">Compártelo con tus clientes para que se registren</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={copyReferralCode}
-                      className="flex items-center gap-2 px-4 py-2 bg-amber-500/20 border border-amber-400/30 rounded-xl text-sm font-mono font-bold text-amber-300 hover:bg-amber-500/30 transition-colors">
-                      {copiedReferral ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                      {affiliate.referralCode}
-                    </button>
-                    <button onClick={() => setShowQr(!showQr)}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-white/10 border border-white/20 rounded-xl text-sm text-white hover:bg-white/20 transition-colors">
-                      <QrCode className="w-4 h-4" />
-                      QR
-                    </button>
-                  </div>
-                </div>
-                {showQr && qrImageUrl && (
-                  <div className="mt-4 flex flex-col items-center gap-3 p-4 bg-white rounded-xl">
-                    <img src={qrImageUrl} alt="QR código de referido" className="w-48 h-48" />
-                    <p className="text-xs text-slate-500 text-center break-all max-w-xs">{referralUrl}</p>
-                    <button onClick={() => {
-                      navigator.clipboard.writeText(referralUrl);
-                    }} className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1">
-                      <Copy className="w-3 h-3" /> Copiar enlace de registro
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Content */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-4">
-        {/* Tabs + action */}
-        <div className="flex items-center justify-between">
-          <div className="flex bg-white rounded-xl border border-slate-200 overflow-hidden overflow-x-auto">
-            {([
-              { id: 'clients' as Tab, label: 'Mis clientes', icon: Users, count: clients.length },
-              { id: 'referred' as Tab, label: 'Altas referidas', icon: UserCheck, count: referredAccounts.length },
-              { id: 'commissions' as Tab, label: 'Mis comisiones', icon: BadgeDollarSign, count: commissions.length },
-            ]).map((t) => (
-              <button key={t.id} onClick={() => setTab(t.id)}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold transition-colors ${
-                  tab === t.id ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:text-slate-700'
-                }`}>
-                <t.icon className="w-4 h-4" />
-                {t.label}
-                <span className={`text-xs px-1.5 py-0.5 rounded-full ${tab === t.id ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
-                  {t.count}
-                </span>
-              </button>
-            ))}
-          </div>
-          {tab === 'clients' && (
-            <button onClick={() => setShowAddClient(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
-              <Plus className="w-4 h-4" /> Nuevo cliente
-            </button>
-          )}
-        </div>
-
-        {/* Clients tab */}
-        {tab === 'clients' && (
-          <div className="space-y-3">
-            {clients.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
-                <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <p className="font-medium text-slate-500 mb-1">No tienes clientes registrados</p>
-                <p className="text-sm text-slate-400 mb-4">Empieza registrando clientes desde aquí para hacer seguimiento.</p>
-                <button onClick={() => setShowAddClient(true)}
-                  className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors inline-flex items-center gap-2">
-                  <Plus className="w-4 h-4" /> Registrar primer cliente
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {clients.map((c) => {
-                  const stages = [
-                    { label: 'Registrado', active: true, icon: UserPlus, color: 'bg-blue-500' },
-                    { label: 'Email enviado', active: !!c.emailSent, icon: Mail, color: 'bg-violet-500' },
-                    { label: 'Email abierto', active: !!c.emailOpened, icon: MailOpen, color: 'bg-indigo-500' },
-                    { label: 'Tarjeta añadida', active: !!c.cardAdded, icon: CreditCard, color: 'bg-amber-500' },
-                    { label: 'Pagando', active: !!c.isPaying, icon: CircleDollarSign, color: 'bg-emerald-500' },
-                  ];
-                  const progress = stages.filter((s) => s.active).length;
-                  const estComm = (c.monthlyAmount ?? 0) > 0
-                    ? ((c.monthlyAmount ?? 0) * (c.commissionPercent ?? affiliate.commissionRate)) / 100
-                    : 0;
-                  return (
-                    <div key={c._id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                      <div className="px-4 sm:px-5 py-4">
-                        {/* Contact info row */}
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                            {c.contactName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <p className="font-semibold text-slate-800 text-sm">{c.contactName}</p>
-                              {c.isPaying && (
-                                <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                                  <CircleDollarSign className="w-2.5 h-2.5" /> Pagando
-                                </span>
-                              )}
-                              {c.signedSaas && !c.isPaying && (
-                                <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
-                                  <CheckCircle2 className="w-2.5 h-2.5" /> SaaS
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
-                              {c.contactEmail && <span>{c.contactEmail}</span>}
-                              {c.company && <span className="flex items-center gap-1"><Building2 className="w-3 h-3" />{c.company}</span>}
-                            </div>
-                          </div>
-                          {estComm > 0 && (
-                            <div className="text-right flex-shrink-0">
-                              <p className="text-sm font-bold text-emerald-700">{fmtCurrency(estComm)}</p>
-                              <p className="text-[10px] text-slate-400">/mes</p>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Pipeline steps */}
-                        <div className="flex items-center gap-1">
-                          {stages.map((stage, i) => {
-                            const Icon = stage.icon;
-                            return (
-                              <React.Fragment key={stage.label}>
-                                {i > 0 && (
-                                  <div className={`h-0.5 flex-1 rounded-full ${stage.active ? 'bg-emerald-300' : 'bg-slate-200'}`} />
-                                )}
-                                <div
-                                  title={stage.label}
-                                  className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
-                                    stage.active ? `${stage.color} text-white` : 'bg-slate-100 text-slate-400'
-                                  }`}
-                                >
-                                  <Icon className="w-3 h-3" />
-                                </div>
-                              </React.Fragment>
-                            );
-                          })}
-                          <span className="text-[10px] font-semibold text-slate-400 ml-2">{progress}/5</span>
-                          <span className="text-[10px] text-slate-400 ml-auto">{fmt(c.createdAt)}</span>
-                        </div>
-
-                        {/* Categories */}
-                        {c.verticals && c.verticals.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-2">
-                            {c.verticals.map((v) => (
-                              <span key={v} className="text-[10px] font-medium bg-violet-50 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded-full">{v}</span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+    <>
+      <AffiliateBackofficeLayout
+        affiliateName={affiliate.name}
+        affiliateCode={affiliate.affiliateCode}
+        commissionRate={affiliate.commissionRate}
+        activeSection={section}
+        onSectionChange={setSection}
+        navItems={navItems}
+      >
+        {section === 'dashboard' && (
+          <AffiliateDashboardSection
+            affiliate={affiliate}
+            stats={stats}
+            clients={clients}
+            commissions={commissions}
+            onGoClients={() => setSection('clients')}
+            onGoReferral={() => setSection('referral')}
+          />
         )}
-
-        {/* Referred accounts tab */}
-        {tab === 'referred' && (
-          <div className="space-y-3">
-            {referredAccounts.length === 0 ? (
-              <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
-                <UserCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <p className="font-medium text-slate-500 mb-1">No hay altas referidas aún</p>
-                <p className="text-sm text-slate-400 mb-4">
-                  Comparte tu código de referido <span className="font-mono font-bold text-amber-600">{affiliate.referralCode}</span> para que tus clientes se registren.
-                </p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
-                  <UserCheck className="w-4 h-4 text-emerald-600" />
-                  <span className="text-sm font-semibold text-slate-700">{referredAccounts.length} alta{referredAccounts.length !== 1 ? 's' : ''} con tu código</span>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {referredAccounts.map((acc) => (
-                    <div key={acc.id} className="flex items-center gap-3 px-5 py-3.5">
-                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                        {acc.fullName.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-slate-800 text-sm truncate">{acc.fullName}</p>
-                        <div className="flex items-center gap-3 text-xs text-slate-500">
-                          {acc.email && <span>{acc.email}</span>}
-                          {acc.companyName && <span className="flex items-center gap-1"><Building2 className="w-3 h-3" />{acc.companyName}</span>}
-                        </div>
-                      </div>
-                      <span className="text-xs text-slate-400 flex-shrink-0">{fmt(acc.createdAt)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+        {section === 'clients' && (
+          <AffiliateClientsSection
+            clients={clients}
+            commissionRate={affiliate.commissionRate}
+            onAddClient={() => setShowAddClient(true)}
+          />
         )}
-
-        {/* Commissions tab */}
-        {tab === 'commissions' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { label: 'Total generado', value: fmtCurrency(stats.totalEarned + stats.pendingAmount), bg: 'bg-blue-50', text: 'text-blue-700' },
-                { label: 'Pendiente de cobro', value: fmtCurrency(stats.pendingAmount), bg: 'bg-amber-50', text: 'text-amber-700' },
-                { label: 'Ya cobrado', value: fmtCurrency(stats.totalEarned), bg: 'bg-emerald-50', text: 'text-emerald-700' },
-              ].map((s) => (
-                <div key={s.label} className={`rounded-2xl ${s.bg} border border-slate-200/50 p-4 text-center`}>
-                  <p className={`text-xl font-bold ${s.text}`}>{s.value}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{s.label}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              {commissions.length === 0 ? (
-                <div className="p-12 text-center">
-                  <BadgeDollarSign className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                  <p className="font-medium text-slate-500 mb-1">Sin comisiones aún</p>
-                  <p className="text-sm text-slate-400">Cuando tus clientes firmen el SaaS, verás tus comisiones aquí.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-slate-50 text-xs text-slate-500 uppercase tracking-wide border-b border-slate-200">
-                        <th className="px-4 py-3 text-left">Descripción</th>
-                        <th className="px-4 py-3 text-right">Importe</th>
-                        <th className="px-4 py-3 text-center">Estado</th>
-                        <th className="px-4 py-3 text-left">Fecha pago</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {commissions.map((c) => {
-                        const cfg = COMM_STATUS[c.status] || COMM_STATUS.pending;
-                        return (
-                          <tr key={c._id} className="hover:bg-slate-50">
-                            <td className="px-4 py-3 text-slate-700">{c.description}</td>
-                            <td className="px-4 py-3 text-right font-bold text-blue-700">{fmtCurrency(c.amount)}</td>
-                            <td className="px-4 py-3 text-center">
-                              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.text}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
-                                {cfg.label}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
-                              {c.paidAt ? fmt(c.paidAt) : c.dueDate ? `Vence: ${fmt(c.dueDate)}` : '—'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </div>
+        {section === 'referred' && (
+          <AffiliateReferredSection
+            referredAccounts={referredAccounts}
+            referralCode={affiliate.referralCode}
+          />
         )}
+        {section === 'commissions' && (
+          <AffiliateCommissionsSection commissions={commissions} stats={stats} />
+        )}
+        {section === 'referral' && (
+          <AffiliateReferralSection affiliate={affiliate} />
+        )}
+        {section === 'resources' && (
+          <AffiliateResourcesSection />
+        )}
+        {section === 'account' && (
+          <AffiliateAccountSection affiliate={affiliate} />
+        )}
+        {section === 'help' && (
+          <AffiliateHelpSection />
+        )}
+      </AffiliateBackofficeLayout>
 
-        {/* Info box */}
-        <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 flex items-start gap-4">
-          <MessageSquare className="w-6 h-6 text-blue-500 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-blue-900 text-sm mb-1">¿Necesitas ayuda?</p>
-            <p className="text-sm text-blue-700/70">
-              Contacta con nuestro equipo de afiliados por WhatsApp o email. Estamos aquí para ayudarte a cerrar más ventas.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Modal */}
       {showAddClient && (
         <AddClientModal
           onSave={handleAddClient}
@@ -718,6 +511,6 @@ export function AffiliatePortal() {
           verticalOptions={verticalOptions}
         />
       )}
-    </div>
+    </>
   );
 }

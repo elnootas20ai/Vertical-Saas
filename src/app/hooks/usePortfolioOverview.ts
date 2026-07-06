@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AuthUser } from '../lib/authApi';
 import type { Business } from '../lib/businessApi';
 import type { Brand } from '../lib/brandApi';
@@ -374,25 +374,53 @@ export function usePortfolioOverview(
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const businessesRef = useRef(businesses);
+  businessesRef.current = businesses;
+  const reloadInflightRef = useRef<Promise<void> | null>(null);
+  const reloadSeqRef = useRef(0);
+  const suppressLiveRefreshRef = useRef(false);
+  const hasLoadedOnceRef = useRef(false);
 
   const businessIdsKey = useMemo(
-    () => businesses.map((b) => b.business_id).filter(Boolean).join('|'),
+    () =>
+      [...businesses.map((b) => b.business_id).filter(Boolean)]
+        .sort()
+        .join('|'),
     [businesses],
   );
 
   const reload = useCallback(async (reloadOpts?: PortfolioReloadOptions) => {
     const silent = reloadOpts?.silent === true;
-    if (!user?.user_id || businesses.length === 0) {
+    const businessesSnapshot = businessesRef.current;
+    const force = reloadOpts?.force === true;
+
+    if (reloadInflightRef.current && !force) {
+      if (silent) return reloadInflightRef.current;
+      await reloadInflightRef.current;
+    }
+    if (force) {
+      reloadSeqRef.current += 1;
+      reloadInflightRef.current = null;
+    }
+
+    const run = async () => {
+    const seq = ++reloadSeqRef.current;
+    suppressLiveRefreshRef.current = true;
+
+    if (!user?.user_id || businessesSnapshot.length === 0) {
+      if (seq !== reloadSeqRef.current) return;
       setRows([]);
       setFinance(EMPTY_FINANCE);
       setLoading(false);
       setIsRefreshing(false);
       setError(null);
+      suppressLiveRefreshRef.current = false;
       return;
     }
 
-    if (silent) setIsRefreshing(true);
-    else setLoading(true);
+    const showFullScreenLoad = !silent && !hasLoadedOnceRef.current;
+    if (silent || hasLoadedOnceRef.current) setIsRefreshing(true);
+    else if (showFullScreenLoad) setLoading(true);
     setError(null);
 
     const todayKey = localCalendarDayKey();
@@ -403,7 +431,7 @@ export function usePortfolioOverview(
 
     try {
       const structures = await Promise.all(
-        businesses.map(async (business) => {
+        businessesSnapshot.map(async (business) => {
           const dataUserId = resolveBusinessDataUserId(user, business);
           const isDelivery = isDeliveryBusinessType(business.businessType);
           const isRestaurant = isRestaurantBusinessType(business.businessType);
@@ -412,12 +440,12 @@ export function usePortfolioOverview(
             listBrandsRequest(business.business_id).catch(() => [] as Brand[]),
             dataUserId && isOps
               ? (isRestaurant
-                ? loadRestaurantStores(user, business, businesses, { accountBusinessCount: businesses.length }).catch(() => ({
+                ? loadRestaurantStores(user, business, businessesSnapshot, { accountBusinessCount: businessesSnapshot.length }).catch(() => ({
                     dataUserId: '',
                     workCenters: [] as WorkCenter[],
                     pointsOfSale: [] as PointOfSale[],
                   }))
-                : loadDeliveryStores(user, business, { accountBusinessCount: businesses.length }).catch(() => ({
+                : loadDeliveryStores(user, business, { accountBusinessCount: businessesSnapshot.length }).catch(() => ({
                     dataUserId: '',
                     workCenters: [] as WorkCenter[],
                     pointsOfSale: [] as PointOfSale[],
@@ -475,14 +503,14 @@ export function usePortfolioOverview(
       const financeTotals = consolidatePortfolioFinance(
         financeMovements,
         monthKey,
-        businesses.map((b) => b.business_id),
+        businessesSnapshot.map((b) => b.business_id),
       );
       financeTotals.cashBalance = getTotalBalance(bankAccounts);
       const scopedForEbitda =
-        businesses.length > 1
+        businessesSnapshot.length > 1
           ? financeMovements.filter((m) => {
               const bid = String(m.businessId || '').replace(/^business:/, '').trim();
-              return bid && businesses.some((b) => b.business_id === bid);
+              return bid && businessesSnapshot.some((b) => b.business_id === bid);
             })
           : financeMovements;
       try {
@@ -592,7 +620,7 @@ export function usePortfolioOverview(
             financeMovements,
             monthKey,
             s.business.business_id,
-            businesses.length,
+            businessesSnapshot.length,
           );
           const clients = s.dataUserId
             ? await loadClientMetricsForBusiness(s.dataUserId, s.business.business_id, monthKey).catch(
@@ -621,23 +649,39 @@ export function usePortfolioOverview(
         }),
       );
 
+      if (seq !== reloadSeqRef.current) return;
       setFinance(financeTotals);
       setRows(loaded.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es')));
       setLastUpdatedAt(new Date());
       setError(financeLoadWarning);
+      hasLoadedOnceRef.current = true;
     } catch (e) {
+      if (seq !== reloadSeqRef.current) return;
       setError(e instanceof Error ? e.message : 'No se pudo cargar el panorama');
       if (loaded.length > 0) {
         setRows(loaded.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es')));
+        hasLoadedOnceRef.current = true;
       } else {
         setRows([]);
         setFinance(EMPTY_FINANCE);
       }
     } finally {
+      if (seq !== reloadSeqRef.current) return;
       setLoading(false);
       setIsRefreshing(false);
+      suppressLiveRefreshRef.current = false;
     }
-  }, [user?.user_id, businessIdsKey, businesses]);
+    };
+
+    let promise!: Promise<void>;
+    promise = run().finally(() => {
+      if (reloadInflightRef.current === promise) {
+        reloadInflightRef.current = null;
+      }
+    });
+    reloadInflightRef.current = promise;
+    await promise;
+  }, [user?.user_id, businessIdsKey]);
 
   const { liveSseOk, scheduleSilentRefresh } = usePortfolioDashboardLive({
     enabled: options?.live ?? false,
@@ -645,9 +689,19 @@ export function usePortfolioOverview(
     onRefresh: reload,
   });
 
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+
+  // Carga inicial y cuando cambia la lista de empresas (no en cada re-render del callback).
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (!user?.user_id || !businessIdsKey) {
+      setLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
+    hasLoadedOnceRef.current = false;
+    void reloadRef.current();
+  }, [user?.user_id, businessIdsKey]);
 
   // Incluir de inmediato empresas nuevas en el portfolio (métricas en 0 hasta que termine reload).
   useEffect(() => {
@@ -670,7 +724,10 @@ export function usePortfolioOverview(
 
   useEffect(() => {
     if (!options?.live) return;
-    const onChange = () => scheduleSilentRefresh();
+    const onChange = () => {
+      if (suppressLiveRefreshRef.current) return;
+      scheduleSilentRefresh();
+    };
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChange);
     window.addEventListener(DELIVERY_BRANDS_CHANGED, onChange);
     window.addEventListener(VERTIAL_BUSINESSES_CHANGED, onChange);
@@ -680,11 +737,6 @@ export function usePortfolioOverview(
       window.removeEventListener(VERTIAL_BUSINESSES_CHANGED, onChange);
     };
   }, [options?.live, scheduleSilentRefresh]);
-
-  useEffect(() => {
-    if (businesses.length <= rows.length) return;
-    void reload({ silent: true });
-  }, [businesses.length, rows.length, reload]);
 
   const totals: PortfolioTotals = {
     businesses: Math.max(rows.length, businesses.length),

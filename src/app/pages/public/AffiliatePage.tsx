@@ -4,10 +4,11 @@ import {
   ArrowLeft, ArrowRight, Check, Users, Handshake, TrendingUp, Shield,
   User, Mail, Phone, Building2, Globe, MessageSquare, ChevronRight,
   CheckCircle, AlertCircle, Loader2, Star, Zap, BarChart3, DollarSign,
-  Gift, Rocket, HeadphonesIcon, Copy, BadgePercent,
+  Gift, Rocket, HeadphonesIcon, Copy, BadgePercent, LogIn,
 } from 'lucide-react';
 import { getApiBase } from '../../lib/apiBase';
-import { listAffiliateVerticals } from '../../lib/affiliatesApi';
+import { listAffiliateVerticals, DEFAULT_AFFILIATE_COMMISSION_RATE } from '../../lib/affiliatesApi';
+import { AUTH_PATHS } from '../../lib/authEntryPaths';
 
 const STEPS = [
   { icon: Rocket, title: 'Solicita tu acceso', desc: 'Rellena el formulario con tus datos. En menos de 48h tendrás tu código de afiliado.' },
@@ -32,7 +33,7 @@ const TESTIMONIALS = [
 ];
 
 const FAQ = [
-  { q: '¿Cuánto puedo ganar?', a: 'No hay límite. Cuantos más clientes activos refieras, más comisiones mensuales recibes. El porcentaje base es del 10% y puede aumentar según tu volumen.' },
+  { q: '¿Cuánto puedo ganar?', a: `No hay límite. Cuantos más clientes activos refieras, más comisiones mensuales recibes. El porcentaje base es del ${DEFAULT_AFFILIATE_COMMISSION_RATE}% y puede aumentar según tu volumen.` },
   { q: '¿Necesito conocimientos técnicos?', a: 'No. Te damos todos los materiales y formación. Solo necesitas tener red de contactos en sectores como automoción, fitness, hostelería, etc.' },
   { q: '¿Cuándo cobro mis comisiones?', a: 'Las comisiones se liquidan mensualmente. Podrás ver el estado de cada una en tu panel de afiliado.' },
   { q: '¿Puedo ser afiliado desde cualquier país?', a: 'Sí, el programa está abierto a nivel internacional. Solo necesitas poder facturar legalmente.' },
@@ -40,6 +41,15 @@ const FAQ = [
 ];
 
 const API_BASE = getApiBase();
+
+const SCROLL_HEADER_OFFSET = 72;
+
+function scrollToPageSection(sectionId: string) {
+  const el = document.getElementById(sectionId);
+  if (!el) return;
+  const top = el.getBoundingClientRect().top + window.scrollY - SCROLL_HEADER_OFFSET;
+  window.scrollTo({ top, behavior: 'smooth' });
+}
 
 type FormState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -158,7 +168,7 @@ export function AffiliatePage() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white scroll-smooth">
       {/* ── Header ── */}
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-slate-100">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -167,10 +177,23 @@ export function AffiliatePage() {
             <ArrowLeft className="w-4 h-4" /> Volver
           </button>
           <span className="text-xl font-black text-slate-900 tracking-tight">Vertial</span>
-          <a href="#formulario"
-            className="hidden sm:flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors">
-            Unirme ahora <ArrowRight className="w-3.5 h-3.5" />
-          </a>
+          <div className="hidden sm:flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.companyLogin)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              Ya soy cliente
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollToPageSection('formulario')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              Unirme ahora <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -197,10 +220,13 @@ export function AffiliatePage() {
               className="px-8 py-4 bg-white text-slate-900 font-bold rounded-xl hover:bg-blue-50 transition-all shadow-xl shadow-black/20 text-lg flex items-center gap-2">
               Solicitar acceso <ArrowRight className="w-5 h-5" />
             </a>
-            <a href="#como-funciona"
-              className="px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-all text-lg">
+            <button
+              type="button"
+              onClick={() => scrollToPageSection('como-funciona')}
+              className="px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-all text-lg"
+            >
               ¿Cómo funciona?
-            </a>
+            </button>
           </div>
           <div className="flex items-center justify-center gap-8 mt-12 text-blue-200/60 text-sm">
             <span className="flex items-center gap-1.5"><Check className="w-4 h-4 text-emerald-400" /> Sin inversión</span>
@@ -333,10 +359,31 @@ export function AffiliatePage() {
       {/* ── Formulario ── */}
       <section id="formulario" className="py-20 px-6">
         <div className="max-w-2xl mx-auto">
-          <div className="text-center mb-12">
+          <div className="text-center mb-8">
             <span className="text-blue-600 font-bold text-sm uppercase tracking-widest">Únete ahora</span>
             <h2 className="text-3xl sm:text-4xl font-black text-slate-900 mt-3">Solicita tu código de afiliado</h2>
             <p className="text-slate-500 mt-3">Rellena el formulario y te contactaremos en menos de 48 horas con tu acceso.</p>
+          </div>
+
+          <div className="mb-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.companyLogin)}
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border-2 border-slate-200 bg-white text-slate-800 text-sm font-semibold hover:border-blue-300 hover:bg-blue-50/50 transition-colors"
+            >
+              <LogIn className="w-4 h-4 text-blue-600" />
+              Ya soy cliente
+              <span className="text-slate-400 font-normal hidden sm:inline">— acceder al panel</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.affiliatePortal)}
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl border border-violet-200 bg-violet-50 text-violet-800 text-sm font-semibold hover:bg-violet-100 transition-colors"
+            >
+              <Handshake className="w-4 h-4" />
+              Ya soy afiliado
+              <span className="text-violet-500/80 font-normal hidden sm:inline">— tengo código</span>
+            </button>
           </div>
 
           <form onSubmit={handleSubmit} noValidate className="space-y-6">

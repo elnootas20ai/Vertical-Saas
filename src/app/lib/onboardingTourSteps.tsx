@@ -332,8 +332,8 @@ const COMPRAVENTA_TOUR_STEPS: OnboardingTourStep[] = [
     iconBg: 'bg-gradient-to-br from-orange-500 to-amber-600',
     title: 'Listo para vender',
     description: 'Con expositor, clientes, stock y datos fiscales ya puedes registrar operaciones.',
-    hint: 'El hub de compraventa concentra ventas, reservas y documentos.',
-    route: '/saas/vertical/compraventa',
+    hint: 'Comercial → Ventas para registrar tu primera operación.',
+    route: '/saas/vertical/compraventa/ventas',
     checklist: ['Expositor, clientes y stock listos', 'Datos de empresa completos'],
   },
 ];

@@ -3,14 +3,19 @@ import {
   getVerticals,
   submitAffiliateRequest,
   validateReferralCode,
+  handleAffiliateEmailAction,
   portalLogin,
+  portalLoginWithAccount,
+  portalAcceptContract,
   portalDashboard,
   portalRegisterClient,
   portalReferredAccounts,
   listAffiliatesAdmin,
+  affiliateRequestsSummaryAdmin,
   createAffiliateAdmin,
   updateAffiliateAdmin,
   updateAffiliateStatusAdmin,
+  linkAffiliateAccountAdmin,
   deleteAffiliateAdmin,
   clearAffiliateRequestsAdmin,
   listContactsAdmin,
@@ -33,20 +38,25 @@ export const affiliateRouter = Router();
 // ── Public ─────────────────────────────────────────────────────────────────────
 affiliateRouter.get('/verticals', getVerticals);
 affiliateRouter.post('/request', apiLimiter, submitAffiliateRequest);
+affiliateRouter.get('/email-action', apiLimiter, handleAffiliateEmailAction);
 affiliateRouter.get('/referral/:code/validate', validateReferralCode);
 
 // ── Portal (affiliate accesses with their code) ───────────────────────────────
 affiliateRouter.post('/portal/login', apiLimiter, portalLogin);
+affiliateRouter.post('/portal/login-account', apiLimiter, portalLoginWithAccount);
+affiliateRouter.post('/portal/:code/accept-contract', apiLimiter, portalAcceptContract);
 affiliateRouter.get('/portal/:code/dashboard', portalDashboard);
 affiliateRouter.post('/portal/:code/clients', apiLimiter, portalRegisterClient);
 affiliateRouter.get('/portal/:code/referred', portalReferredAccounts);
 
 // ── Admin (requires auth) ──────────────────────────────────────────────────────
+affiliateRouter.get('/admin/:userId/affiliates/summary', requireAuthAndEmailVerified, affiliateRequestsSummaryAdmin);
 affiliateRouter.get('/admin/:userId/affiliates', requireAuthAndEmailVerified, listAffiliatesAdmin);
 affiliateRouter.post('/admin/:userId/affiliates/clear-requests', requireAuthAndEmailVerified, clearAffiliateRequestsAdmin);
 affiliateRouter.post('/admin/:userId/affiliates', requireAuthAndEmailVerified, createAffiliateAdmin);
 affiliateRouter.put('/admin/:userId/affiliates/:affiliateId', requireAuthAndEmailVerified, updateAffiliateAdmin);
 affiliateRouter.put('/admin/:userId/affiliates/:affiliateId/status', requireAuthAndEmailVerified, updateAffiliateStatusAdmin);
+affiliateRouter.post('/admin/:userId/affiliates/:affiliateId/link-account', requireAuthAndEmailVerified, linkAffiliateAccountAdmin);
 affiliateRouter.delete('/admin/:userId/affiliates/:affiliateId', requireAuthAndEmailVerified, deleteAffiliateAdmin);
 
 affiliateRouter.get('/admin/:userId/contacts', requireAuthAndEmailVerified, listContactsAdmin);

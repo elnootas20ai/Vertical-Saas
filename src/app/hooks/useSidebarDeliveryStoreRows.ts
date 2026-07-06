@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
@@ -20,6 +20,18 @@ import { listWorkCentersForDelivery } from '../lib/workCentersApi';
 import { readSidebarRetailCache, writeSidebarRetailCache } from '../lib/sidebarRetailCache';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 
+function readCachedSidebarRows(
+  businessId: string,
+  accountBusinessCount?: number,
+): DeliverySidebarStoreRow[] {
+  const withCount = readSidebarRetailCache(
+    businessId,
+    accountBusinessCount !== undefined ? { accountBusinessCount } : undefined,
+  );
+  if (withCount?.rows.length) return withCount.rows;
+  return readSidebarRetailCache(businessId)?.rows ?? [];
+}
+
 /**
  * Filas de tiendas para el sidebar: usa ActiveStoreScope y, si hace falta,
  * caché local + fetch directo de PDV (nunca dejar el menú vacío por una carga fallida).
@@ -31,6 +43,8 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
   const [fallbackRows, setFallbackRows] = useState<DeliverySidebarStoreRow[]>([]);
   const [fallbackLoading, setFallbackLoading] = useState(false);
   const inflightRef = useRef(false);
+  const stableRowsRef = useRef<DeliverySidebarStoreRow[]>([]);
+  const stableBusinessIdRef = useRef<string | null>(null);
 
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
@@ -44,39 +58,49 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
     [enabled, activeStore.retailWorkCenters, activeStore.allPointsOfSale],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enabled || !businessId) {
+      stableRowsRef.current = [];
+      stableBusinessIdRef.current = null;
       setFallbackRows([]);
       return;
     }
+    if (stableBusinessIdRef.current !== businessId) {
+      stableBusinessIdRef.current = businessId;
+      stableRowsRef.current = readCachedSidebarRows(businessId, accountBusinessCount);
+      setFallbackRows(stableRowsRef.current);
+    } else {
+      const cached = readCachedSidebarRows(businessId, accountBusinessCount);
+      if (cached.length > 0) {
+        stableRowsRef.current = cached;
+        setFallbackRows(cached);
+      }
+    }
+  }, [enabled, businessId, accountBusinessCount]);
 
-    if (rowsFromScope.length > 0) {
-      setFallbackRows([]);
+  useEffect(() => {
+    if (!enabled || !businessId) return;
+
+    const liveRows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
+    if (liveRows.length > 0) {
+      stableRowsRef.current = liveRows;
       writeSidebarRetailCache(
         businessId,
         {
-          rows: rowsFromScope,
+          rows: liveRows,
           retailWorkCenters: activeStore.retailWorkCenters,
           allPointsOfSale: activeStore.allPointsOfSale,
           savedAt: Date.now(),
         },
         accountBusinessCount !== undefined ? { accountBusinessCount } : undefined,
       );
-      return;
-    }
-
-    const cached = readSidebarRetailCache(
-      businessId,
-      accountBusinessCount !== undefined ? { accountBusinessCount } : undefined,
-    );
-    if (cached?.rows.length) {
-      setFallbackRows(cached.rows);
     }
   }, [
     enabled,
     businessId,
     accountBusinessCount,
     rowsFromScope,
+    fallbackRows,
     activeStore.retailWorkCenters,
     activeStore.allPointsOfSale,
   ]);
@@ -84,7 +108,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
   useEffect(() => {
     if (!enabled || !dataUserId || !businessId) return;
     if (rowsFromScope.length > 0) return;
-    if (!businessesFetchSettled && activeStore.loading) return;
+    if (stableRowsRef.current.length > 0) return;
     if (inflightRef.current) return;
 
     let cancelled = false;
@@ -108,6 +132,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
         const scopedPdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail);
         const rows = buildDeliverySidebarStoreRows(retail, scopedPdvs);
         if (rows.length > 0) {
+          stableRowsRef.current = rows;
           setFallbackRows(rows);
           writeSidebarRetailCache(
             businessId,
@@ -119,7 +144,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
             },
             { accountBusinessCount: accountN },
           );
-          if (activeStore.allPointsOfSale.length === 0) {
+          if (activeStore.allPointsOfSale.length === 0 && activeStore.retailWorkCenters.length === 0) {
             void activeStore.refresh();
           }
         }
@@ -134,7 +159,6 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
     return () => {
       cancelled = true;
       inflightRef.current = false;
-      setFallbackLoading(false);
     };
   }, [
     enabled,
@@ -143,16 +167,21 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
     businessesFetchSettled,
     businesses.length,
     rowsFromScope.length,
-    activeStore.loading,
     activeStore.allPointsOfSale.length,
+    activeStore.retailWorkCenters.length,
     activeStore.refresh,
     currentBusiness,
   ]);
 
-  const rows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
+  const liveRows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
+  if (liveRows.length > 0) {
+    stableRowsRef.current = liveRows;
+  }
+  const rows = liveRows.length > 0 ? liveRows : stableRowsRef.current;
+
   const waitingForBusinessList = !businessesFetchSettled;
   const waitingForStores =
-    Boolean(businessId) && (activeStore.loading || fallbackLoading);
+    Boolean(businessId) && rows.length === 0 && (activeStore.loading || fallbackLoading);
   const loading = enabled && rows.length === 0 && (waitingForBusinessList || waitingForStores);
 
   return { rows, loading };

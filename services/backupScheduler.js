@@ -22,6 +22,8 @@ import { pipeline } from 'node:stream/promises';
 import { Readable }  from 'node:stream';
 import logger from './logger.js';
 import { getCouchConfig, buildCouchAuthHeader } from './couchdb.js';
+import { sendAdminAlert } from './adminAlerts.js';
+import { escapeAdminHtml } from './adminAlertEmail.js';
 
 const BACKUP_DIR       = process.env.BACKUP_DIR             || path.resolve(process.cwd(), 'backups');
 const INTERVAL_HOURS   = Math.max(1, Number(process.env.BACKUP_INTERVAL_HOURS  ?? 24));
@@ -235,8 +237,57 @@ export async function runBackup() {
       filePath,
     }, 'Error crítico en backup automático — revisar inmediatamente');
 
+    sendAdminAlert({
+      key: 'backup_failed',
+      subject: '🚨 Vertial: fallo backup CouchDB',
+      html: `<p><b>No se pudo completar el backup automático.</b></p>
+<ul>
+  <li><b>Error</b>: ${escapeAdminHtml(err.message)}</li>
+  <li><b>Directorio</b>: ${escapeAdminHtml(BACKUP_DIR)}</li>
+</ul>
+<p>Revisa espacio en disco, credenciales CouchDB y logs del contenedor <code>app</code>.</p>`,
+      cooldownMs: Number(process.env.ALERT_BACKUP_FAIL_COOLDOWN_MS || 60 * 60_000),
+    }).catch(() => null);
+
     throw err;
   }
+}
+
+function checkBackupStaleness() {
+  if (!BACKUP_ENABLED) return;
+
+  const maxAgeHours = Number(process.env.ALERT_BACKUP_MAX_AGE_HOURS || INTERVAL_HOURS + 2);
+  const maxAgeMs = Math.max(1, maxAgeHours) * 3_600_000;
+
+  if (!backupState.lastRunAt) {
+    const uptimeMs = Number(process.uptime?.() || 0) * 1000;
+    if (uptimeMs < STARTUP_DELAY_MS + maxAgeMs) return;
+    sendAdminAlert({
+      key: 'backup_stale',
+      subject: '⚠️ Vertial: sin backup CouchDB registrado',
+      html: `<p>El scheduler está activo pero <b>no hay ningún backup completado</b> desde el arranque.</p>
+<ul><li><b>Directorio</b>: ${escapeAdminHtml(BACKUP_DIR)}</li></ul>`,
+      cooldownMs: Number(process.env.ALERT_BACKUP_STALE_COOLDOWN_MS || 6 * 60 * 60_000),
+    }).catch(() => null);
+    return;
+  }
+
+  const ageMs = Date.now() - new Date(backupState.lastRunAt).getTime();
+  if (backupState.lastStatus === 'success' && ageMs <= maxAgeMs) return;
+
+  const lastLabel = backupState.lastStatus || 'desconocido';
+  sendAdminAlert({
+    key: 'backup_stale',
+    subject: '⚠️ Vertial: backup CouchDB desactualizado',
+    html: `<p>El último backup no es reciente o no fue exitoso.</p>
+<ul>
+  <li><b>Último estado</b>: ${escapeAdminHtml(lastLabel)}</li>
+  <li><b>Última ejecución</b>: ${escapeAdminHtml(backupState.lastRunAt)}</li>
+  <li><b>Umbral</b>: ${maxAgeHours} h</li>
+  ${backupState.lastError ? `<li><b>Error</b>: ${escapeAdminHtml(backupState.lastError)}</li>` : ''}
+</ul>`,
+    cooldownMs: Number(process.env.ALERT_BACKUP_STALE_COOLDOWN_MS || 6 * 60 * 60_000),
+  }).catch(() => null);
 }
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
@@ -279,4 +330,7 @@ export function startBackupScheduler() {
     ),
     intervalMs,
   );
+
+  const staleCheckMs = Number(process.env.ALERT_BACKUP_STALE_CHECK_MS || 60 * 60_000);
+  setInterval(() => checkBackupStaleness(), staleCheckMs);
 }

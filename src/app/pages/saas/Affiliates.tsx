@@ -24,6 +24,7 @@ import {
   listAffiliates,
   listContacts,
   listFollowUps,
+  linkAffiliateAccount,
   saveAffiliate,
   saveContact,
   updateAffiliateStatus,
@@ -36,7 +37,9 @@ import {
   type CommissionStatus,
   type ContactType,
   type FollowUpType,
+  DEFAULT_AFFILIATE_COMMISSION_RATE,
 } from '../../lib/affiliatesApi';
+import { VertialAccountBadge } from '../../components/saas/affiliates/VertialAccountBadge';
 
 function fmt(iso: string) {
   return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -169,7 +172,7 @@ interface AffiliateFormData {
 
 const emptyAffForm = (): AffiliateFormData => ({
   name: '', email: '', phone: '', whatsapp: '', company: '',
-  commissionRate: '10', status: 'pending', notes: '',
+  commissionRate: String(DEFAULT_AFFILIATE_COMMISSION_RATE), status: 'pending', notes: '',
 });
 
 function AffiliateModal({ affiliate, onSave, onClose }: {
@@ -302,7 +305,7 @@ function ContactModal({ affiliates, contact, onSave, onClose, verticalOptions }:
   };
 
   const selectedAffiliate = affiliates.find((a) => getId(a) === form.affiliateId);
-  const affRate = selectedAffiliate?.commissionRate ?? 10;
+  const affRate = selectedAffiliate?.commissionRate ?? DEFAULT_AFFILIATE_COMMISSION_RATE;
   const rate = form.commissionPercent ? Number(form.commissionPercent) : affRate;
   const monthly = Number(form.monthlyAmount) || 0;
   const estimatedComm = (monthly * rate) / 100;
@@ -660,6 +663,8 @@ export function Affiliates() {
   const [statusFilter, setStatusFilter] = useState<AffiliateStatus | 'all'>('all');
   const [expandedAffiliate, setExpandedAffiliate] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [linkingAffiliateId, setLinkingAffiliateId] = useState<string | null>(null);
+  const [linkFeedback, setLinkFeedback] = useState<{ id: string; message: string; ok: boolean } | null>(null);
 
   const [showAffModal, setShowAffModal] = useState(false);
   const [editingAff, setEditingAff] = useState<Affiliate | null>(null);
@@ -710,11 +715,12 @@ export function Affiliates() {
     const totalMRR = contacts.filter((c) => c.isPaying).reduce((s, c) => s + (c.monthlyAmount ?? 0), 0);
     const totalEstComm = contacts.filter((c) => c.isPaying).reduce((s, c) => {
       const aff = affiliates.find((a) => getId(a) === c.affiliateId);
-      return s + getEstimatedCommission(c, aff?.commissionRate ?? 10);
+      return s + getEstimatedCommission(c, aff?.commissionRate ?? DEFAULT_AFFILIATE_COMMISSION_RATE);
     }, 0);
     return {
       total: affiliates.length,
       accepted: affiliates.filter((a) => a.status === 'accepted').length,
+      linkedClients: affiliates.filter((a) => a.accountLinked).length,
       pending: affiliates.filter((a) => a.status === 'pending').length,
       totalContacts: contacts.length,
       signedContacts: contacts.filter((c) => c.signedSaas).length,
@@ -782,6 +788,30 @@ export function Affiliates() {
 
   const handleStatusChange = async (id: string, status: AffiliateStatus) => {
     try { await updateAffiliateStatus(userId, id, status); load(); } catch (err) { console.error(err); }
+  };
+
+  const handleLinkAccount = async (affiliateId: string) => {
+    setLinkingAffiliateId(affiliateId);
+    setLinkFeedback(null);
+    try {
+      const { affiliate, alreadyLinked } = await linkAffiliateAccount(userId, affiliateId);
+      setLinkFeedback({
+        id: affiliateId,
+        ok: true,
+        message: alreadyLinked
+          ? 'Este afiliado ya estaba enlazado con su cuenta Vertial.'
+          : `Cuenta enlazada${affiliate.vertialAccountName ? `: ${affiliate.vertialAccountName}` : ''}.`,
+      });
+      load();
+    } catch (err) {
+      setLinkFeedback({
+        id: affiliateId,
+        ok: false,
+        message: err instanceof Error ? err.message : 'No se pudo enlazar la cuenta',
+      });
+    } finally {
+      setLinkingAffiliateId(null);
+    }
   };
 
   const handleSaveContact = async (data: ContactFormData) => {
@@ -898,7 +928,7 @@ export function Affiliates() {
         {/* KPI Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: 'Afiliados activos', value: kpis.accepted, sub: `${kpis.pending} pendientes`, icon: <Users className="w-5 h-5 text-blue-500" />, bg: 'bg-blue-50' },
+            { label: 'Afiliados activos', value: kpis.accepted, sub: `${kpis.linkedClients} con cuenta Vertial`, icon: <Users className="w-5 h-5 text-blue-500" />, bg: 'bg-blue-50' },
             { label: 'Contactos referidos', value: kpis.totalContacts, sub: `${kpis.signedContacts} firmados SaaS`, icon: <UserCheck className="w-5 h-5 text-violet-500" />, bg: 'bg-violet-50' },
             { label: 'Comisión pendiente', value: fmtCurrency(kpis.pendingCommission), sub: 'Por pagar', icon: <CircleDollarSign className="w-5 h-5 text-amber-500" />, bg: 'bg-amber-50' },
             { label: 'Comisión pagada', value: fmtCurrency(kpis.paidCommission), sub: 'Total histórico', icon: <TrendingUp className="w-5 h-5 text-emerald-500" />, bg: 'bg-emerald-50' },
@@ -987,10 +1017,11 @@ export function Affiliates() {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-semibold text-slate-900 text-sm">{aff.name}</p>
                         <StatusBadge status={aff.status} />
+                        <VertialAccountBadge affiliate={aff} />
                         {aff.affiliateCode && (
                           <button onClick={() => copyAffiliateCode(aff.affiliateCode)}
                             className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-xs font-mono text-slate-600 transition-colors"
-                            title="Copiar código de acceso">
+                            title="Copiar ID interno de afiliado">
                             {copiedCode === aff.affiliateCode ? <CheckIcon className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
                             {aff.affiliateCode}
                           </button>
@@ -1048,6 +1079,17 @@ export function Affiliates() {
                           <CheckCircle2 className="w-4 h-4" />
                         </button>
                       )}
+                      {aff.status === 'accepted' && aff.canLinkAccount && (
+                        <button
+                          onClick={() => handleLinkAccount(affId)}
+                          disabled={linkingAffiliateId === affId}
+                          title="Enlazar con la cuenta Vertial de este email"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors disabled:opacity-60"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          {linkingAffiliateId === affId ? 'Enlazando…' : 'Enlazar cuenta'}
+                        </button>
+                      )}
                       {aff.affiliateCode && aff.status === 'accepted' && (
                         <a href={`/panel-afiliado/${aff.affiliateCode}`} target="_blank" rel="noopener noreferrer" title="Ver panel del afiliado"
                           className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
@@ -1071,6 +1113,68 @@ export function Affiliates() {
 
                   {expandedAffiliate === affId && (
                     <div className="border-t border-slate-100 dark:border-gray-700 px-5 py-4 bg-slate-50/50 dark:bg-gray-800/50 space-y-4">
+                      {aff.status === 'accepted' && (
+                        <div className="rounded-xl border border-slate-200 bg-white dark:bg-gray-800 p-4 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-slate-500 dark:text-gray-400 uppercase tracking-wide">
+                              Conexión con Vertial
+                            </p>
+                            {aff.canLinkAccount && (
+                              <button
+                                onClick={() => handleLinkAccount(affId)}
+                                disabled={linkingAffiliateId === affId}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-60"
+                              >
+                                <Link2 className="w-3.5 h-3.5" />
+                                {linkingAffiliateId === affId ? 'Enlazando…' : 'Forzar enlace con cuenta'}
+                              </button>
+                            )}
+                          </div>
+                          <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <p className="text-xs text-slate-400 mb-0.5">Estado</p>
+                              <p className="font-medium text-slate-800">
+                                {aff.accountLinked
+                                  ? 'Partner + cliente enlazados'
+                                  : aff.vertialAccountExists
+                                    ? 'Cliente detectado, pendiente de enlace'
+                                    : 'Esperando registro en Vertial'}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-slate-400 mb-0.5">Acceso al panel</p>
+                              <p className="font-medium text-slate-800">
+                                {aff.accountLinked ? 'Email y contraseña Vertial' : 'Código alternativo hasta registrarse'}
+                              </p>
+                            </div>
+                            {aff.vertialAccountName && (
+                              <div>
+                                <p className="text-xs text-slate-400 mb-0.5">Nombre en Vertial</p>
+                                <p className="font-medium text-slate-800">{aff.vertialAccountName}</p>
+                              </div>
+                            )}
+                            {aff.vertialAccountCompany && (
+                              <div>
+                                <p className="text-xs text-slate-400 mb-0.5">Empresa en Vertial</p>
+                                <p className="font-medium text-slate-800">{aff.vertialAccountCompany}</p>
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-xs text-slate-400 mb-0.5">Contrato afiliado</p>
+                              <p className={`font-medium ${aff.contractAcceptedAt ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                {aff.contractAcceptedAt
+                                  ? `Firmado ${fmt(aff.contractAcceptedAt)}${aff.contractVersion ? ` · v${aff.contractVersion}` : ''}`
+                                  : 'Pendiente de firma en el panel'}
+                              </p>
+                            </div>
+                          </div>
+                          {linkFeedback?.id === affId && (
+                            <p className={`text-xs font-medium ${linkFeedback.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {linkFeedback.message}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       {aff.notes && (
                         <div className="flex gap-2 text-sm text-slate-600 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-xl border border-slate-100 dark:border-gray-700 p-3">
                           <FileText className="w-4 h-4 text-slate-400 dark:text-gray-500 flex-shrink-0 mt-0.5" />{aff.notes}
@@ -1202,7 +1306,7 @@ export function Affiliates() {
               <div className="space-y-3">
                 {filteredContacts.map((c) => {
                   const aff = affiliates.find((a) => getId(a) === c.affiliateId);
-                  const estComm = getEstimatedCommission(c, aff?.commissionRate ?? 10);
+                  const estComm = getEstimatedCommission(c, aff?.commissionRate ?? DEFAULT_AFFILIATE_COMMISSION_RATE);
                   const progress = getPipelineProgress(c);
                   const isExpanded = expandedAffiliate === `cnt-${getId(c)}`;
                   return (
@@ -1346,7 +1450,7 @@ export function Affiliates() {
                             </div>
                             <div className="bg-white rounded-xl border border-slate-200 p-3">
                               <p className="text-[10px] text-slate-400 uppercase tracking-wide">% Comisión</p>
-                              <p className="text-sm font-bold text-slate-800 mt-0.5">{c.commissionPercent ?? aff?.commissionRate ?? 10}%</p>
+                              <p className="text-sm font-bold text-slate-800 mt-0.5">{c.commissionPercent ?? aff?.commissionRate ?? DEFAULT_AFFILIATE_COMMISSION_RATE}%</p>
                             </div>
                             <div className="bg-white rounded-xl border border-slate-200 p-3">
                               <p className="text-[10px] text-slate-400 uppercase tracking-wide">Comisión/mes</p>

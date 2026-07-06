@@ -13,7 +13,7 @@ export const ONBOARDING_TOUR_VERSION = '5';
 /** Disparado al crear empresa en sesión para abrir el tour sin recargar. */
 export const ONBOARDING_TOUR_ARM_EVENT = 'vertial:onboarding-tour-arm';
 
-/** Tour marcado como completado (mostrar check de confirmación una vez). */
+/** Alta guiada al 100 % — mostrar toast de confirmación una vez por empresa. */
 export const ONBOARDING_TOUR_COMPLETED_EVENT = 'vertial:onboarding-tour-completed';
 
 /** Checklist lateral: paso «Ir» / reinicio de tour cambió el paso activo. */
@@ -402,6 +402,15 @@ export function markOnboardingTourCompleted(userId: string, businessId: string):
     localStorage.removeItem('vertial_onboarding_completed');
     sessionStorage.removeItem(onboardingTourStepKey(userId, businessId));
     sessionStorage.removeItem(onboardingTourActiveKey(userId, businessId));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Alta guiada terminada (checklist 100 %) — dispara el toast de confirmación. */
+export function notifyGuidedActivationComplete(userId: string, businessId: string): void {
+  if (!userId || !businessId || typeof window === 'undefined') return;
+  try {
     window.dispatchEvent(
       new CustomEvent(ONBOARDING_TOUR_COMPLETED_EVENT, {
         detail: { userId: trimId(userId), businessId: trimId(businessId) },

@@ -149,7 +149,8 @@ import {
   isDeliveryBusinessType,
   resolveBusinessScopeId,
 } from '../../lib/deliverySetup';
-import { isCompraventaBusinessType, loadCompraventaStores } from '../../lib/compraventaSetup';
+import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
+import { isCompraventaBusinessType, loadCompraventaStores, listCompraventaSidebarWorkCenters } from '../../lib/compraventaSetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
 import {
@@ -519,12 +520,12 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
 /** Items de menú por grupo, sustituyen los defaults del grupo para un vertical concreto. */
 const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string, readonly string[]>>> = {
   carDealership: {
-    clientesCrm: ['clients', 'compraventa-crm', 'quotes', 'promotions', 'pipeline'],
+    clientesCrm: ['clients', 'quotes', 'promotions'],
     equipo: ['team', 'dealership-workers', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll'],
-    catalogProviders: ['compraventa-vehiculos', 'suppliers'],
+    catalogProviders: ['suppliers'],
     finanzas: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics', 'gastos-preparacion'],
     documentacion: ['doc-vehiculo', 'doc-contratos-cv', 'doc-facturas-cv', 'doc-itv-cv', 'doc-reparacion-cv', 'doc-cliente-cv', 'doc-anexos-cv'],
-    commercial: ['compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'],
+    commercial: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'],
   },
   restaurant: {
     clientesCrm: ['clients'],
@@ -697,37 +698,43 @@ function SidebarInner({
   };
 
   const [salesPoints, setSalesPoints] = useState<SalesPoint[]>([]);
+  const currentBusinessRef = useRef(currentBusiness);
+  currentBusinessRef.current = currentBusiness;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const businessScopeId = resolveBusinessScopeId(currentBusiness);
 
   const loadCompraventaSidebarStores = useCallback(async () => {
-    const bid = resolveBusinessScopeId(currentBusiness);
-    if (!bid || !user) return;
+    const biz = currentBusinessRef.current;
+    const authUser = userRef.current;
+    const bid = resolveBusinessScopeId(biz);
+    if (!bid || !authUser) {
+      setSalesPoints([]);
+      return;
+    }
     try {
-      const state = await loadCompraventaStores(user, currentBusiness, {
-        includeInactivePdvs: false,
+      const state = await loadCompraventaStores(authUser, biz, {
+        includeInactivePdvs: true,
         ensureTabletCodes: false,
       });
-      setSalesPoints(
-        state.workCenters.filter(
-          (wc) =>
-            wc.active !== false &&
-            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-        ),
-      );
+      if (resolveBusinessScopeId(currentBusinessRef.current) !== bid) return;
+      setSalesPoints(listCompraventaSidebarWorkCenters(state.workCenters));
     } catch {
+      if (resolveBusinessScopeId(currentBusinessRef.current) !== bid) return;
       setSalesPoints([]);
     }
-  }, [user, currentBusiness?.business_id]);
+  }, [businessScopeId, user?.user_id]);
 
   const loadSalesPoints = useCallback(async () => {
     if (isCompraventa) {
       await loadCompraventaSidebarStores();
       return;
     }
-    const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
+    const dataUserId = resolveBusinessDataUserId(userRef.current, currentBusinessRef.current);
     if (!dataUserId) return;
     try {
       const sps = await listSalesPoints(dataUserId);
-      const businessId = resolveBusinessScopeId(currentBusiness);
+      const businessId = resolveBusinessScopeId(currentBusinessRef.current);
       const scoped = filterWorkCentersForBusinessScope(sps, businessId, {
         accountBusinessCount,
       });
@@ -735,35 +742,62 @@ function SidebarInner({
         scoped.filter(
           (sp) =>
             sp.active !== false &&
-            ( !isDeliveryBusinessType(vertical) ||
+            (!isDeliveryBusinessType(vertical) ||
               sp.centerType === 'punto_de_venta' ||
               sp.centerType === 'almacen'),
         ),
       );
     } catch {
-      // silent
+      setSalesPoints([]);
     }
-  }, [user?.user_id, currentBusiness?.business_id, vertical, accountBusinessCount, isCompraventa, loadCompraventaSidebarStores]);
+  }, [accountBusinessCount, isCompraventa, loadCompraventaSidebarStores, vertical]);
 
   const activeStore = useActiveStoreScope();
   const sidebarDelivery = useSidebarDeliveryStoreRows(isStrictDeliveryVertical);
   const sidebarRestaurant = useRestaurantStoreRows(isRestaurantVertical);
   const opsStoreRows = isRestaurantVertical ? sidebarRestaurant.rows : sidebarDelivery.rows;
   const opsStoreLoading = isRestaurantVertical ? sidebarRestaurant.loading : sidebarDelivery.loading;
+  const lastOpsStoreRowsRef = useRef(opsStoreRows);
+  useEffect(() => {
+    lastOpsStoreRowsRef.current = [];
+  }, [businessScopeId]);
+  if (opsStoreRows.length > 0) {
+    lastOpsStoreRowsRef.current = opsStoreRows;
+  }
+  const displayOpsStoreRows =
+    opsStoreRows.length > 0 ? opsStoreRows : lastOpsStoreRowsRef.current;
+  const showOpsStoreLoading =
+    usesOpsStoreSidebar && opsStoreLoading && displayOpsStoreRows.length === 0;
 
   useEffect(() => {
     if (usesOpsStoreSidebar) return;
+    if (!businessesFetchSettled) return;
+    if (isCompraventa && !businessScopeId) {
+      setSalesPoints([]);
+      return;
+    }
     void loadSalesPoints();
-  }, [loadSalesPoints, usesOpsStoreSidebar]);
+  }, [loadSalesPoints, usesOpsStoreSidebar, isCompraventa, businessScopeId, businessesFetchSettled]);
+
+  const loadCompraventaSidebarStoresRef = useRef(loadCompraventaSidebarStores);
+  loadCompraventaSidebarStoresRef.current = loadCompraventaSidebarStores;
 
   useEffect(() => {
     if (!isCompraventa) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const onStoresChanged = () => {
-      void loadCompraventaSidebarStores();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void loadCompraventaSidebarStoresRef.current();
+      }, 250);
     };
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
-    return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
-  }, [isCompraventa, loadCompraventaSidebarStores]);
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
+    };
+  }, [isCompraventa]);
 
   useEffect(() => {
     if (!usesOpsStoreSidebar) return;
@@ -803,9 +837,9 @@ function SidebarInner({
 
   useEffect(() => {
     if (!usesOpsStoreSidebar) return;
-    if (opsStoreRows.length === 0) return;
+    if (displayOpsStoreRows.length === 0) return;
     setExpandedGroups((prev) => ({ ...prev, salesPoints: true }));
-  }, [usesOpsStoreSidebar, opsStoreRows.length]);
+  }, [usesOpsStoreSidebar, displayOpsStoreRows.length]);
 
   /** Centro de trabajo marcado en sidebar = misma lógica que Topbar (PDV `_id` o `wc:`). */
   const selectedSidebarWorkCenterId = useMemo(() => {
@@ -1079,7 +1113,7 @@ function SidebarInner({
     if (item.id.startsWith('sp-')) {
       const rawId = item.id.slice('sp-'.length);
       if (rawId) {
-        const rows = usesOpsStoreSidebar ? opsStoreRows : [];
+        const rows = usesOpsStoreSidebar ? displayOpsStoreRows : [];
         const row = rows.find((r) => r.rowId === rawId);
         const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
         const pdvId = row?.pdvId || pdv?._id;
@@ -1235,11 +1269,11 @@ function SidebarInner({
     (item.id === 'clients' && (location.pathname.startsWith('/saas/clients') || location.pathname.startsWith('/saas/crm/clientes'))) ||
     (item.id === 'workshop' && location.pathname.startsWith('/saas/workshop')) ||
     (item.id === 'parts' && location.pathname.startsWith('/saas/parts')) ||
-    (item.id === 'tpv' && location.pathname === '/saas/tpv') ||
+    (item.id === 'tpv' && (location.pathname === '/saas/tpv' || location.pathname === '/saas/tpv/locales')) ||
     (item.id === 'tpv-rapido'
       && (location.pathname.startsWith('/saas/vertical/delivery/tpv')
         || location.pathname.startsWith('/saas/caja/tpv'))) ||
-    (item.id === 'tpv-locales' && location.pathname === '/saas/tpv/locales') ||
+    (item.id === 'tpv-locales' && (location.pathname === '/saas/tpv/locales' || location.pathname === '/saas/tpv')) ||
     (item.id === 'delivery-ops'
       && location.pathname.startsWith('/saas/delivery-ops')
       && !['clients', 'promotions'].includes(new URLSearchParams(location.search).get('panel') || '')) ||
@@ -1321,7 +1355,7 @@ function SidebarInner({
 
   const salesPointRows: SidebarItem[] =
     usesOpsStoreSidebar
-      ? opsStoreRows.map((row) => {
+      ? displayOpsStoreRows.map((row) => {
           const subParts: string[] = [];
           if (row.code) subParts.push(row.code);
           if (row.needsPdv) subParts.push('Sin PDV');
@@ -1343,11 +1377,11 @@ function SidebarInner({
       }));
 
   const workCentersSidebarCount =
-    usesOpsStoreSidebar ? opsStoreRows.length : salesPoints.length;
+    usesOpsStoreSidebar ? displayOpsStoreRows.length : salesPoints.length;
 
   /** Sin PDV: CTA «Primer centro» (abre alta). Con al menos uno: lista + «Nuevo centro». */
   const workCentersSidebarItems: SidebarItem[] =
-    usesOpsStoreSidebar && opsStoreLoading && opsStoreRows.length === 0
+    showOpsStoreLoading
       ? [
           {
             id: 'salesPoints-loading',

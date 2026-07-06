@@ -161,7 +161,6 @@ function AlertCenterDrawer({
   const { departments, departmentSourceFilter, vertical } = useAlertDepartments();
   const { summary, reload: reloadSummary } = useAlertCenterSummary(businessId, {
     pollMs: isOpen ? 30_000 : 60_000,
-    dataUserId,
   });
 
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
@@ -170,37 +169,59 @@ function AlertCenterDrawer({
   const [bulkBusy, setBulkBusy] = useState(false);
   const [activeDept, setActiveDept] = useState('all');
   const busyAlertIds = useRef(new Set<string>());
+  const loadInflightRef = useRef<Promise<void> | null>(null);
+  const loadSeqRef = useRef(0);
   useModalClose(isOpen, onClose);
 
   const loadAlerts = useCallback(async (deptId = activeDept, options?: { silent?: boolean }) => {
     if (!businessId) return;
+
+    if (loadInflightRef.current) {
+      return loadInflightRef.current;
+    }
+
     const silent = options?.silent === true;
+    const seq = ++loadSeqRef.current;
     if (!silent) setLoading(true);
-    try {
-      const sourceFilter = departmentSourceFilter(deptId);
-      const includeDocs = shouldIncludeDocumentAlerts(sourceFilter);
-      const [res, docAlerts] = await Promise.all([
-        fetchAlerts(businessId, {
+
+    const run = async () => {
+      try {
+        const sourceFilter = departmentSourceFilter(deptId);
+        const includeDocs = shouldIncludeDocumentAlerts(sourceFilter);
+        const res = await fetchAlerts(businessId, {
           status: 'new,seen',
           order: 'desc',
           page: 1,
           limit: 20,
           ...(sourceFilter ? { source: sourceFilter } : {}),
-        }),
-        includeDocs && dataUserId
-          ? fetchDocumentAlertsAsRecords(dataUserId, businessId)
-          : Promise.resolve([]),
-      ]);
-      setAlerts(mergeAlertLists(res.alerts || [], docAlerts, 20));
-    } catch { /* silent */ } finally {
-      if (!silent) setLoading(false);
-    }
-  }, [businessId, activeDept, dataUserId, departmentSourceFilter]);
+        });
+        if (seq !== loadSeqRef.current) return;
 
-  const refreshData = useCallback(async () => {
-    if (!businessId) return;
-    await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: false })]);
-  }, [businessId, reloadSummary, loadAlerts, activeDept]);
+        const serverAlerts = res.alerts || [];
+        setAlerts(serverAlerts);
+
+        if (includeDocs && dataUserId) {
+          const docAlerts = await fetchDocumentAlertsAsRecords(dataUserId, businessId);
+          if (seq !== loadSeqRef.current) return;
+          setAlerts(mergeAlertLists(serverAlerts, docAlerts, 20));
+        }
+      } catch {
+        if (seq === loadSeqRef.current) {
+          toast.error('No se pudieron cargar las alertas');
+        }
+      } finally {
+        if (seq === loadSeqRef.current && !silent) setLoading(false);
+      }
+    };
+
+    const promise = run().finally(() => {
+      if (loadInflightRef.current === promise) {
+        loadInflightRef.current = null;
+      }
+    });
+    loadInflightRef.current = promise;
+    return promise;
+  }, [businessId, activeDept, dataUserId, departmentSourceFilter]);
 
   const syncAndReload = useCallback(async () => {
     if (!businessId || syncing) return;
@@ -218,12 +239,15 @@ function AlertCenterDrawer({
 
   useEffect(() => {
     if (!isOpen || !businessId) return;
-    void refreshData();
-  }, [isOpen, businessId]); // eslint-disable-line react-hooks/exhaustive-deps
+    void loadAlerts(activeDept, { silent: alerts.length > 0 });
+  }, [isOpen, businessId, activeDept, loadAlerts]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (isOpen && businessId) void loadAlerts(activeDept, { silent: true });
-  }, [activeDept, isOpen, businessId, loadAlerts]);
+    if (!isOpen) {
+      loadSeqRef.current += 1;
+      setLoading(false);
+    }
+  }, [isOpen]);
 
   const handleNavigate = useCallback(
     (route: string) => {
@@ -373,6 +397,11 @@ function AlertCenterDrawer({
   const highCount = summary?.byPriority?.high ?? 0;
   const unresolved = summary?.unresolved ?? 0;
   const newCount = summary?.byStatus?.new ?? 0;
+  const visiblePending = alerts.filter((a) => a.status !== 'resolved').length;
+  const listNote =
+    unresolved > visiblePending && visiblePending > 0
+      ? `Mostrando ${visiblePending} de ${unresolved} pendientes`
+      : null;
 
   return (
     <>
@@ -425,14 +454,20 @@ function AlertCenterDrawer({
         />
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-zinc-50 dark:bg-zinc-950">
+          {listNote && (
+            <p className="px-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+              {listNote}
+            </p>
+          )}
           {bulkBusy ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-zinc-500">
               <RefreshCw className="h-5 w-5 animate-spin" />
               Resolviendo alertas…
             </div>
           ) : loading && alerts.length === 0 ? (
-            <div className="flex items-center justify-center py-16">
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-zinc-500">
               <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
+              Cargando alertas…
             </div>
           ) : alerts.length === 0 ? (
             <AlertProEmpty label={`Sin alertas en ${departments.find((d) => d.id === activeDept)?.label || 'esta área'}`} />

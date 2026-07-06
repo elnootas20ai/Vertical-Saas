@@ -45,6 +45,7 @@ import {
   isActivationChecklistForceVisible,
   isOnboardingTourActive,
   markOnboardingTourCompleted,
+  notifyGuidedActivationComplete,
   setActivationChecklistDismissed,
   setActivationChecklistForceVisible,
   setActivationInProgressStep,
@@ -438,6 +439,11 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   }, [displaySteps]);
 
   const guidedActivationIncomplete = usesGuidedActivation && totalSteps > 0 && completionPct < 100;
+  const prevCompletionPctRef = useRef(0);
+
+  useEffect(() => {
+    prevCompletionPctRef.current = 0;
+  }, [accountUserId, businessId]);
 
   useEffect(() => {
     if (!accountUserId || !businessId || completionPct < 100) return;
@@ -453,11 +459,18 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
   }, [guidedActivationIncomplete, accountUserId, businessId]);
 
   useEffect(() => {
-    if (completionPct !== 100 || !accountUserId || !businessId || !usesGuidedActivation) return;
+    if (completionPct !== 100 || !accountUserId || !businessId || !usesGuidedActivation) {
+      prevCompletionPctRef.current = completionPct;
+      return;
+    }
     if (isOnboardingTourActive(accountUserId, businessId)) return;
     markOnboardingTourCompleted(accountUserId, businessId);
     setOnboardingTourActive(accountUserId, businessId, false);
-    if (isActivationChecklistForceVisible(accountUserId, businessId)) return;
+    const prev = prevCompletionPctRef.current;
+    prevCompletionPctRef.current = completionPct;
+    if (prev < 100) {
+      notifyGuidedActivationComplete(accountUserId, businessId);
+    }
   }, [completionPct, accountUserId, businessId, usesGuidedActivation]);
 
   const dismiss = useCallback(() => {

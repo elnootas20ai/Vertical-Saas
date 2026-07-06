@@ -123,7 +123,7 @@ const COMPRAVENTA_ACTIVATION_STEP_DEFS = (
     number: 5,
     label: 'Listo para vender',
     description: 'Con expositor, clientes, stock y datos fiscales ya puedes operar',
-    route: '/saas/vertical/compraventa',
+    route: '/saas/vertical/compraventa/ventas',
     icon: 'rocket',
     subSteps: [
       {

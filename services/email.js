@@ -16,6 +16,15 @@ function getFromAddress() {
   return process.env.EMAIL_FROM || process.env.SMTP_FROM || 'noreply@vertialapp.com';
 }
 
+/** Remitente con nombre visible (p. ej. "Vertial" &lt;vertial.noreply@gmail.com&gt;). */
+export function getFormattedFromAddress() {
+  const addr = getFromAddress();
+  const name = String(process.env.EMAIL_FROM_NAME || 'Vertial').trim();
+  if (!name) return addr;
+  const safeName = name.replace(/"/g, "'");
+  return `"${safeName}" <${addr}>`;
+}
+
 /** Reply-To por defecto (p. ej. buzón “notas”); si sendEmail recibe replyTo explícito, gana ese. */
 function resolveReplyTo(explicitReplyTo) {
   const ex = explicitReplyTo ? String(explicitReplyTo).trim() : '';
@@ -39,7 +48,7 @@ function hasUsableResendKey() {
 }
 
 async function sendViaResend(to, subject, html, replyTo) {
-  const payload = { from: getFromAddress(), to, subject, html };
+  const payload = { from: getFormattedFromAddress(), to, subject, html };
   if (replyTo) payload.reply_to = replyTo;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Number(process.env.EMAIL_SEND_TIMEOUT_MS || 15000));
@@ -83,7 +92,7 @@ async function sendViaSMTP(to, subject, html, replyTo) {
   });
 
   const mail = {
-    from: getFromAddress(),
+    from: getFormattedFromAddress(),
     to,
     subject,
     html,

@@ -7,7 +7,6 @@ import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import {
   isDeliveryAccountFromSources,
   bootstrapRetailStoreAfterCreate,
-  loadTpvPointsOfSaleForBusiness,
   loadDeliveryStores,
   notifyDeliveryWorkCentersChanged,
   selectDeliveryPointOfSale,
@@ -15,6 +14,7 @@ import {
   readWorkCenterBusinessId,
   resolveBusinessScopeId,
   knownBusinessIdsFromList,
+  type DeliveryStoresState,
 } from '../../../lib/deliverySetup';
 import {
   bootstrapCompraventaStoreAfterCreate,
@@ -26,7 +26,6 @@ import {
   clearAllRetailScopeCaches,
   loadRetailStoresForBusiness,
   persistRetailScopeAfterStoreSave,
-  shouldLoadRetailStoresForBusiness,
 } from '../../../verticals/retailScopeRegistry';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 import { loadRestaurantStores } from '../../../verticals/restaurant/loadRestaurantStores';
@@ -36,6 +35,7 @@ import {
   type PdvWizardVariant,
 } from '../../../lib/retailLocationCopy';
 import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
+import { readSidebarRetailCache } from '../../../lib/sidebarRetailCache';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { useHasProAccess } from '../../../hooks/useHasProAccess';
 import { usePointOfSaleAccess } from '../../../hooks/usePointOfSaleAccess';
@@ -1600,7 +1600,6 @@ export function SalesPointsTab() {
   const [regeneratingTerminal, setRegeneratingTerminal] = useState<string | null>(null);
   const saveInProgressRef = useRef(false);
   const loadSeqRef = useRef(0);
-  const loadInflightRef = useRef<Promise<void> | null>(null);
   const hasDisplayedStoresRef = useRef(false);
   hasDisplayedStoresRef.current = workCenters.length > 0;
   const currentBusinessRef = useRef(currentBusiness);
@@ -1609,6 +1608,10 @@ export function SalesPointsTab() {
   userRef.current = user;
   const accountBusinessCountRef = useRef(accountBusinessCount);
   accountBusinessCountRef.current = accountBusinessCount;
+  const businessesRef = useRef(businesses);
+  businessesRef.current = businesses;
+  const pdvWizardVariantRef = useRef(pdvWizardVariant);
+  pdvWizardVariantRef.current = pdvWizardVariant;
   const isDeliveryAccountRef = useRef(isDeliveryAccount);
   isDeliveryAccountRef.current = isDeliveryAccount;
   const isOpsBusinessRef = useRef(isOpsBusiness);
@@ -1629,7 +1632,7 @@ export function SalesPointsTab() {
     [workCenters],
   );
 
-  const applyDeliveryStoresState = useCallback((state: Awaited<ReturnType<typeof loadTpvPointsOfSaleForBusiness>>) => {
+  const applyDeliveryStoresState = useCallback((state: DeliveryStoresState) => {
     setWorkCenters(state.workCenters);
     const pdvList = state.pointsOfSale;
     setDeliveryPdvCodes(pdvList.map((p) => String(p.code || '').trim()).filter(Boolean));
@@ -1653,9 +1656,7 @@ export function SalesPointsTab() {
   }, []);
 
   const loadData = useCallback(async (options?: { skipPdvMerge?: boolean }) => {
-    if (loadInflightRef.current) {
-      return loadInflightRef.current;
-    }
+    const seq = ++loadSeqRef.current;
 
     const run = async () => {
       if (!businessesFetchSettled) return;
@@ -1666,49 +1667,37 @@ export function SalesPointsTab() {
       const bid = businessScopeId || resolveBusinessScopeId(bizNow);
 
       if (!uid || !userNow) {
-        setLoading(false);
+        if (seq === loadSeqRef.current) setLoading(false);
         return;
       }
       if ((isDeliveryAccountRef.current || isCompraventaRef.current || isOpsBusinessRef.current) && !bid) {
         setWorkCenters([]);
-        setLoading(false);
+        if (seq === loadSeqRef.current) setLoading(false);
         return;
       }
 
-      const retailCtx = {
-        business: bizNow,
-        businesses,
-        accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
+      const businessesNow = businessesRef.current;
+      const showSpinner = !hasDisplayedStoresRef.current;
+      if (showSpinner) setLoading(true);
+
+      const retailLoadOpts = {
+        accountBusinessCount: accountBusinessCountRef.current ?? businessesNow.length,
+        knownBusinessIds: knownBusinessIdsFromList(businessesNow),
+        includeInactivePdvs: true,
+        tpvBootstrap: false,
+        skipPdvMerge: true,
+        ensureTabletCodes: false,
       };
-      const shouldLoadRetail = shouldLoadRetailStoresForBusiness(retailCtx, bid, {
-        hasDisplayedStores: hasDisplayedStoresRef.current,
-      });
 
-      const seq = ++loadSeqRef.current;
-      setLoading(true);
-
-      const skipPdvMerge = options?.skipPdvMerge === true;
       try {
         const isCompraventaOnly =
           isCompraventaRef.current && !isDeliveryAccountRef.current && !isOpsBusinessRef.current;
         const state = isCompraventaOnly
           ? await loadCompraventaStores(userNow, bizNow, {
               includeInactivePdvs: true,
-              ensureTabletCodes: true,
+              ensureTabletCodes: false,
             })
-          : shouldLoadRetail && bizNow
-            ? await loadRetailStoresForBusiness(userNow, bizNow, businesses, {
-                accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
-                knownBusinessIds: knownBusinessIdsFromList(businesses),
-                includeInactivePdvs: true,
-                tpvBootstrap: !skipPdvMerge,
-              })
-            : await loadTpvPointsOfSaleForBusiness(userNow, bizNow, {
-                skipPdvMerge,
-                includeInactivePdvs: true,
-                accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
-                knownBusinessIds: knownBusinessIdsFromList(businesses),
-              });
+          : await loadRetailStoresForBusiness(userNow, bizNow!, businessesNow, retailLoadOpts);
         if (seq !== loadSeqRef.current) return;
         if ((businessScopeId || resolveBusinessScopeId(currentBusinessRef.current)) !== bid) return;
         applyDeliveryStoresState(state);
@@ -1722,18 +1711,20 @@ export function SalesPointsTab() {
         }
         try {
           const fallback = isRestaurantBusinessType(bizNow?.businessType)
-            ? await loadRestaurantStores(userNow, bizNow!, businesses, {
+            ? await loadRestaurantStores(userNow, bizNow!, businessesNow, {
                 includeInactivePdvs: true,
+                tpvBootstrap: false,
               })
             : await loadDeliveryStores(userNow, bizNow, {
                 skipPdvMerge: true,
                 includeInactivePdvs: true,
-                accountBusinessCount: accountBusinessCountRef.current ?? businesses.length,
-                knownBusinessIds: knownBusinessIdsFromList(businesses),
+                ensureTabletCodes: false,
+                accountBusinessCount: accountBusinessCountRef.current ?? businessesNow.length,
+                knownBusinessIds: knownBusinessIdsFromList(businessesNow),
               });
           if (seq !== loadSeqRef.current) return;
           applyDeliveryStoresState(fallback);
-          toast.warning(getRetailLocationCopy(pdvWizardVariant).syncWarning);
+          toast.warning(getRetailLocationCopy(pdvWizardVariantRef.current).syncWarning);
         } catch (fallbackErr) {
           const msg =
             fallbackErr instanceof Error
@@ -1748,14 +1739,20 @@ export function SalesPointsTab() {
       }
     };
 
-    const promise = run().finally(() => {
-      if (loadInflightRef.current === promise) {
-        loadInflightRef.current = null;
-      }
+    await run();
+  }, [businessScopeId, businessesFetchSettled, applyDeliveryStoresState]);
+
+  useEffect(() => {
+    if (!businessScopeId || !usesRetailPdvFlow) return;
+    const cached = readSidebarRetailCache(businessScopeId);
+    if (!cached?.retailWorkCenters?.length) return;
+    applyDeliveryStoresState({
+      dataUserId: dataUserId || '',
+      workCenters: cached.retailWorkCenters,
+      pointsOfSale: cached.allPointsOfSale || [],
     });
-    loadInflightRef.current = promise;
-    return promise;
-  }, [businessScopeId, businessesFetchSettled, businesses, applyDeliveryStoresState, pdvWizardVariant]);
+    setLoading(false);
+  }, [businessScopeId, usesRetailPdvFlow, dataUserId, applyDeliveryStoresState]);
 
   useEffect(() => {
     if (!businessesFetchSettled) return;
@@ -1764,23 +1761,28 @@ export function SalesPointsTab() {
       setLoading(false);
       return;
     }
-    void loadData().then(() => {
-      if ((isDeliveryAccount || isOpsBusiness) && !isCompraventa) void activeStore.refresh();
-    });
-  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, isCompraventa, isOpsBusiness, loadData, activeStore.refresh]);
+    void loadData();
+  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, isCompraventa, isOpsBusiness, loadData]);
+
+  const loadDataRef = useRef(loadData);
+  loadDataRef.current = loadData;
 
   useEffect(() => {
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const onChanged = () => {
       if (saveInProgressRef.current) return;
-      void loadData();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void loadDataRef.current();
+      }, 250);
     };
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
-    window.addEventListener('work-centers:changed', onChanged);
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onChanged);
-      window.removeEventListener('work-centers:changed', onChanged);
     };
-  }, [loadData]);
+  }, []);
 
 
   const handleRegenerateTerminalCode = async (wc: WorkCenter) => {

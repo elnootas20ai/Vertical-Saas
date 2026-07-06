@@ -8,6 +8,8 @@ const PORTFOLIO_DEBOUNCE_MS = 900;
 export type PortfolioReloadOptions = {
   /** Sin spinner de carga completa (actualización en segundo plano). */
   silent?: boolean;
+  /** Cancela recarga en curso y vuelve a pedir datos (botón Actualizar). */
+  force?: boolean;
 };
 
 export function usePortfolioDashboardLive(options: {

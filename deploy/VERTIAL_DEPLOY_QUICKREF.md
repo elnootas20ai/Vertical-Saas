@@ -65,6 +65,20 @@ Variables habituales:
 - Opcional: `OPENAI_*`, email (`RESEND_*` / `SMTP_*`), `MONEI_*`, etc.
 - Estabilidad (5+ usuarios concurrentes): `NODE_MAX_OLD_SPACE_MB=1024`, `BURST_LIMIT_MAX=150`, `PLAN_TRIAL_MAX_PER_MIN=400`, `SSE_MAX_CONNECTIONS_PER_USER=3`
 
+### Alertas operativas (correo a ti)
+
+Remitente transaccional: `EMAIL_FROM` + `SMTP_*` (p. ej. `vertial.noreply@gmail.com`). Nombre visible: `EMAIL_FROM_NAME=Vertial`.
+
+Destino de alertas admin (registros, bugs, RAM, Couch, backup):
+
+- `ALERTS_ADMIN_EMAIL=elnootas2.0@gmail.com` (principal)
+- `BUG_REPORT_EMAIL`, `AFFILIATE_EMAIL` — mismo buzón o separados
+- `EMAIL_REPLY_TO` — buzón que **lees** (respuestas de clientes), no el noreply
+- `ALERTS_ADMIN_ENABLED=true` — `false` apaga todo
+- Umbrales opcionales: `ALERT_RSS_MB`, `ALERT_HEAP_MB`, `ALERT_DISK_FREE_GB`, `ALERT_5XX_THRESHOLD`, `ALERT_BACKUP_MAX_AGE_HOURS`
+
+Desde tu PC, aplicar en el VPS sin editar a mano: `node scripts/remote-config-alerts.mjs` (requiere `deploy/local-values.env`).
+
 ## Qué va en el **build** del frontend (solo variables `VITE_*`)
 
 Se incrustan en `dist/` en el momento de `npm run build`:

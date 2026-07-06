@@ -114,6 +114,7 @@ import InventoryPage from './pages/saas/InventoryPage';
 import { DealershipWorkers } from './pages/saas/DealershipWorkers';
 import { DeliveryOpsCenter } from './pages/saas/DeliveryOpsCenter';
 import { TpvRapidoPage } from './pages/saas/TpvRapidoPage';
+import { TpvQuickBridgePage } from './pages/saas/TpvQuickBridgePage';
 import { TpvRouteShell } from './components/saas/TpvRouteShell';
 import { CajaPage } from './pages/saas/CajaPage';
 import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
@@ -567,8 +568,8 @@ export const router = createBrowserRouter([
           { path: 'sala/setup', Component: SalaPage },
           { path: 'sala', Component: SalaPage },
           { path: 'lista-espera', Component: RestaurantWaitlistPage },
-          { path: 'tpv/locales', element: <RedirectLegacyDeliveryTpv /> },
-          { path: 'tpv', element: <RedirectLegacyDeliveryTpv /> },
+          { path: 'tpv/locales', element: <RequireBusinessOwner><TpvQuickBridgePage /></RequireBusinessOwner> },
+          { path: 'tpv', element: <RequireBusinessOwner><TpvQuickBridgePage /></RequireBusinessOwner> },
           { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },
           { path: 'tpv/punto/:salesPointId', Component: SalesPointTpvPage },
           { path: 'clock-kiosk', Component: ClockKiosk },

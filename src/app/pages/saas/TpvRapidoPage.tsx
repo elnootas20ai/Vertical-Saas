@@ -412,6 +412,7 @@ function TpvRapidoCeoBoard() {
   const awaitingPdvResolution =
     !forceStorePicker
     && !effectivePdvId
+    && activePdvs.length === 0
     && (storesLoading || !businessesFetchSettled || !businessId || !dataUserId);
 
   const noStoresConfigured =
@@ -430,7 +431,7 @@ function TpvRapidoCeoBoard() {
       setPdvWaitTimedOut(false);
       return;
     }
-    const timer = window.setTimeout(() => setPdvWaitTimedOut(true), 12000);
+    const timer = window.setTimeout(() => setPdvWaitTimedOut(true), 5000);
     return () => window.clearTimeout(timer);
   }, [awaitingPdvResolution]);
 
@@ -438,11 +439,14 @@ function TpvRapidoCeoBoard() {
     lastSyncedStorePdvRef.current = null;
   }, [businessId]);
 
-  /** TPV ops: no cambiar de empresa si ya estás en delivery o restaurante. */
+  /** TPV ops: auto-switch una sola vez al negocio delivery de la cuenta. */
+  const autoSwitchDoneRef = useRef(false);
   useEffect(() => {
-    if (!businessesFetchSettled) return;
+    if (!businessesFetchSettled || autoSwitchDoneRef.current) return;
     const targetId = shouldAutoSwitchToDeliveryBusiness(currentBusiness, businesses);
-    if (targetId) switchBusiness(targetId);
+    if (!targetId) return;
+    autoSwitchDoneRef.current = true;
+    switchBusiness(targetId);
   }, [businessesFetchSettled, businesses, currentBusiness, switchBusiness]);
 
   useEffect(() => {
@@ -549,32 +553,43 @@ function TpvRapidoCeoBoard() {
     );
   }
 
-  if (awaitingPdvResolution) {
+  if (awaitingPdvResolution && !pdvWaitTimedOut) {
     return (
       <div className="flex h-[100svh] min-h-[100svh] items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="text-center px-6">
-          {pdvWaitTimedOut ? (
-            <>
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                Tarda más de lo habitual en conectar
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Comprueba que el servidor está en marcha y vuelve a intentarlo.
-              </p>
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white"
-              >
-                Reintentar
-              </button>
-            </>
-          ) : (
-            <>
-              <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-gray-400" />
-              <p className="text-sm text-gray-500 dark:text-gray-400">Abriendo TPV…</p>
-            </>
-          )}
+          <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-gray-400" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">Abriendo TPV…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (awaitingPdvResolution && pdvWaitTimedOut) {
+    return (
+      <div className="flex h-[100svh] min-h-[100svh] items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="text-center px-6">
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
+            Tarda más de lo habitual en conectar
+          </p>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Puedes elegir la tienda manualmente o volver al puente de acceso rápido.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setForceStorePicker(true)}
+              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"
+            >
+              Elegir tienda
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/tpv')}
+              className="rounded-xl border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200"
+            >
+              Puente TPV
+            </button>
+          </div>
         </div>
       </div>
     );

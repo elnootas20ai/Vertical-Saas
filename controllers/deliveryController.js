@@ -2860,7 +2860,10 @@ export async function listPointsOfSale(req, res) {
     } else {
       pdvs = await listScopedPointsOfSaleForUser(req, userId);
     }
-    pdvs = await Promise.all(pdvs.map((p) => ensureTerminalCodeOnPdv(req, p).catch(() => p)));
+    // Códigos tablet: solo bajo demanda (TPV/regenerar), no en cada listado.
+    if (req.query.ensureTerminalCodes === 'true' || req.query.ensureTerminalCodes === '1') {
+      pdvs = await Promise.all(pdvs.map((p) => ensureTerminalCodeOnPdv(req, p).catch(() => p)));
+    }
     // Trabajadores con PDV asignado en empleo: solo ven ese centro (id PDV o workCenter enlazado).
     if (req.callerIsWorker) {
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();

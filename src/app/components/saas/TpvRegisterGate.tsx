@@ -78,7 +78,8 @@ import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
-import { TpvPrinterSetupModal } from './TpvPrinterSetupPanel';
+import { TpvPrinterSetupModal, type TpvPrinterScope } from './TpvPrinterSetupPanel';
+import { setActivePrinterScope } from '../../lib/vertialPrint';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
   clockIn,
@@ -334,7 +335,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   tabletStoreLabel?: string;
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
-  onRequestPrinter?: () => void;
+  onRequestPrinter?: (ctx: { pdvId: string; terminalId?: string }) => void;
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -723,7 +724,10 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
           {onRequestPrinter && (
             <button
               type="button"
-              onClick={onRequestPrinter}
+              onClick={() => onRequestPrinter({
+                pdvId: selectedPdvId || restrictedToPdvId || '',
+                terminalId: selectedTerminalId || undefined,
+              })}
               className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
               aria-label="Impresora"
               title="Impresora de tickets"
@@ -2279,6 +2283,7 @@ export function TpvRegisterGate({
   const [showClockIn, setShowClockIn] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
   const [showPrinter, setShowPrinter] = useState(false);
+  const [openingPrinterCtx, setOpeningPrinterCtx] = useState<{ pdvId: string; terminalId?: string } | null>(null);
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
   const [postCloseAggregatorRows, setPostCloseAggregatorRows] = useState<AggregatorCashRow[]>([]);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
@@ -2524,6 +2529,50 @@ export function TpvRegisterGate({
     pointsOfSale,
     tabletBinding?.workCenterId,
   ]);
+
+  const printerModalScope = useMemo((): TpvPrinterScope | undefined => {
+    if (!dataUserId) return undefined;
+    const pdvId = String(
+      activeSession?.pointOfSaleId || openingPrinterCtx?.pdvId || tabletRestrictedPdvId || managerPdvPickId || '',
+    ).trim();
+    const terminalId = activeSession?.terminalId || openingPrinterCtx?.terminalId;
+    const pdv = pointsOfSale.find((p) => p._id === pdvId);
+    if (!pdvId || !pdv) return undefined;
+    const terminal = terminalId ? pdv.terminals.find((t) => t.id === terminalId) : undefined;
+    return {
+      userId: dataUserId,
+      pdvId,
+      pdv,
+      terminalId,
+      storeLabel: pointOfSaleDisplayLabel(pdv),
+      terminalLabel: terminal ? (terminal.code || terminal.name) : undefined,
+      onPdvUpdated: (updated) => {
+        setPointsOfSale((prev) => prev.map((p) => (p._id === updated._id ? updated : p)));
+      },
+    };
+  }, [
+    dataUserId,
+    activeSession?.pointOfSaleId,
+    activeSession?.terminalId,
+    openingPrinterCtx,
+    tabletRestrictedPdvId,
+    managerPdvPickId,
+    pointsOfSale,
+  ]);
+
+  useEffect(() => {
+    const pdv = printerModalScope?.pdv;
+    if (!pdv) {
+      setActivePrinterScope({});
+      return;
+    }
+    setActivePrinterScope({
+      pdvId: pdv._id,
+      terminalId: printerModalScope?.terminalId,
+      pdv,
+    });
+    return () => setActivePrinterScope({});
+  }, [printerModalScope?.pdv?._id, printerModalScope?.pdv?._rev, printerModalScope?.terminalId]);
 
   const handleOpeningPdvChange = useCallback((pdvId: string) => {
     const id = String(pdvId || '').trim();
@@ -3319,7 +3368,7 @@ export function TpvRegisterGate({
       {clockInModalEl}
       {showPrinter && (
         <TpvGatePortal>
-          <TpvPrinterSetupModal open onClose={() => setShowPrinter(false)} />
+          <TpvPrinterSetupModal open onClose={() => setShowPrinter(false)} scope={printerModalScope} />
         </TpvGatePortal>
       )}
     </>
@@ -3531,7 +3580,10 @@ export function TpvRegisterGate({
         tabletStoreLabel={tabletBinding?.pdvName}
         restrictedToPdvId={openingRestrictedPdvId}
         onOpeningPdvChange={handleOpeningPdvChange}
-        onRequestPrinter={() => setShowPrinter(true)}
+        onRequestPrinter={(ctx) => {
+          setOpeningPrinterCtx(ctx);
+          setShowPrinter(true);
+        }}
         onClearStorePick={
           !isWorkerUser && !isTabletSession
             ? () => {

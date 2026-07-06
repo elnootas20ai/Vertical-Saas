@@ -1,5 +1,7 @@
 import logger from './logger.js';
 import { sendEmail } from './email.js';
+import { getAdminInbox } from './adminInbox.js';
+import { adminAlertSeverityForKey, wrapAdminAlertHtml } from './adminAlertEmail.js';
 
 /** Infraestructura: no enviar por correo en dev local (evita falsos positivos al reiniciar/backup). */
 const OPS_ALERT_KEYS = new Set([
@@ -7,20 +9,24 @@ const OPS_ALERT_KEYS = new Set([
   'ram_high',
   'disk_low',
   'couchdb_down',
+  'couchdb_recovered',
   'email_send_fail',
+  'backup_failed',
+  'backup_stale',
 ]);
 
 /**
  * Alertas admin por correo:
  * - Negocio (registro, plan, etc.): siempre activas si hay ALERTS_ADMIN_EMAIL
- * - Infraestructura (RAM, Couch, pico 5xx): solo producción salvo ALERTS_OPS_IN_DEV=true
+ * - Infraestructura (RAM, Couch, pico 5xx, backup): solo producción salvo ALERTS_OPS_IN_DEV=true
  * - Apagar todo: ALERTS_ADMIN_ENABLED=false
  */
 export function isAdminAlertsEnabled(key = '') {
   const flag = String(process.env.ALERTS_ADMIN_ENABLED ?? '').trim().toLowerCase();
   if (flag === 'false' || flag === '0') return false;
 
-  const isOps = OPS_ALERT_KEYS.has(key);
+  const baseKey = String(key || '').split(':')[0];
+  const isOps = OPS_ALERT_KEYS.has(baseKey);
   const isProd = process.env.NODE_ENV === 'production';
 
   if (isOps) {
@@ -29,19 +35,7 @@ export function isAdminAlertsEnabled(key = '') {
     return opsInDev === 'true' || opsInDev === '1';
   }
 
-  // Registro, plan seleccionado, etc.
   return true;
-}
-
-function getAdminEmail() {
-  return (
-    process.env.ALERTS_ADMIN_EMAIL ||
-    process.env.DEFAULT_CONTACT_EMAIL ||
-    process.env.AFFILIATE_EMAIL ||
-    ''
-  )
-    .toString()
-    .trim();
 }
 
 const lastSentAtByKey = new Map();
@@ -54,14 +48,21 @@ export function shouldSendAdminAlert(key, cooldownMs) {
   return true;
 }
 
-export async function sendAdminAlert({ key, subject, html, cooldownMs = 30 * 60_000 }) {
+export async function sendAdminAlert({
+  key,
+  subject,
+  html,
+  cooldownMs = 30 * 60_000,
+  severity,
+  skipWrap = false,
+}) {
   if (!isAdminAlertsEnabled(key)) {
     return { ok: true, skipped: true, reason: 'disabled_env' };
   }
 
-  const to = getAdminEmail();
+  const to = getAdminInbox();
   if (!to) {
-    logger.warn({ tag: 'ADMIN_ALERT', key }, 'ADMIN alert omitida: falta ALERTS_ADMIN_EMAIL/DEFAULT_CONTACT_EMAIL');
+    logger.warn({ tag: 'ADMIN_ALERT', key }, 'ADMIN alert omitida: falta ALERTS_ADMIN_EMAIL');
     return { ok: false, skipped: true, reason: 'no_admin_email' };
   }
   if (!shouldSendAdminAlert(key, cooldownMs)) {
@@ -74,8 +75,11 @@ export async function sendAdminAlert({ key, subject, html, cooldownMs = 30 * 60_
       ? subject
       : `${envTag}${subject}`;
 
+  const resolvedSeverity = severity || adminAlertSeverityForKey(key);
+  const outboundHtml = skipWrap ? html : wrapAdminAlertHtml(taggedSubject, html, resolvedSeverity);
+
   try {
-    await sendEmail({ to, subject: taggedSubject, html, _skipAdminAlert: true });
+    await sendEmail({ to, subject: taggedSubject, html: outboundHtml, _skipAdminAlert: true });
     logger.info({ tag: 'ADMIN_ALERT', key, to, env: process.env.NODE_ENV || 'development' }, 'ADMIN alert enviada');
     return { ok: true };
   } catch (err) {
@@ -83,4 +87,3 @@ export async function sendAdminAlert({ key, subject, html, cooldownMs = 30 * 60_
     return { ok: false, error: err };
   }
 }
-

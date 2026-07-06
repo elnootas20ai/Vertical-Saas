@@ -8,6 +8,9 @@ export type CommissionStatus = 'pending' | 'paid' | 'cancelled';
 export type ContactType = 'lead' | 'client' | 'prospect';
 export type FollowUpType = 'call' | 'email' | 'meeting' | 'note' | 'whatsapp';
 
+/** Comisión base estándar del programa de afiliados (%). */
+export const DEFAULT_AFFILIATE_COMMISSION_RATE = 20;
+
 export interface Affiliate {
   _id: string;
   id?: string;
@@ -24,6 +27,21 @@ export interface Affiliate {
   status: AffiliateStatus;
   commissionRate: number;
   notes?: string;
+  message?: string;
+  adminNotifiedAt?: string;
+  applicantNotifiedAt?: string;
+  statusEmailSentAt?: string;
+  linkedAccountUserId?: string;
+  portalAccessMode?: 'account' | 'code';
+  accountLinked?: boolean;
+  vertialAccountExists?: boolean;
+  vertialAccountUserId?: string | null;
+  vertialAccountName?: string | null;
+  vertialAccountCompany?: string | null;
+  canLinkAccount?: boolean;
+  contractAcceptedAt?: string | null;
+  contractVersion?: string | null;
+  needsContractAcceptance?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -126,6 +144,23 @@ function getId(doc: { _id?: string; id?: string }): string {
 
 // ── Admin: Affiliates ──────────────────────────────────────────────────────────
 
+export interface AffiliateRequestCounts {
+  total: number;
+  pending: number;
+  accepted: number;
+  rejected: number;
+}
+
+export async function fetchAffiliateRequestCounts(userId: string): Promise<AffiliateRequestCounts> {
+  const data = await apiRequest<AffiliateRequestCounts>(`${BASE}/admin/${userId}/affiliates/summary`);
+  return {
+    total: data.total ?? 0,
+    pending: data.pending ?? 0,
+    accepted: data.accepted ?? 0,
+    rejected: data.rejected ?? 0,
+  };
+}
+
 export async function listAffiliates(userId: string): Promise<Affiliate[]> {
   const data = await apiRequest<{ affiliates: Affiliate[] }>(`${BASE}/admin/${userId}/affiliates`);
   return data.affiliates;
@@ -147,12 +182,34 @@ export async function saveAffiliate(userId: string, affiliateId: string, body: R
   return data.affiliate;
 }
 
-export async function updateAffiliateStatus(userId: string, affiliateId: string, status: AffiliateStatus): Promise<Affiliate> {
-  const data = await apiRequest<{ affiliate: Affiliate }>(`${BASE}/admin/${userId}/affiliates/${affiliateId}/status`, {
-    method: 'PUT',
-    body: JSON.stringify({ status }),
-  });
-  return data.affiliate;
+export async function linkAffiliateAccount(
+  userId: string,
+  affiliateId: string,
+): Promise<{ affiliate: Affiliate; alreadyLinked: boolean }> {
+  const data = await apiRequest<{ affiliate: Affiliate; alreadyLinked?: boolean }>(
+    `${BASE}/admin/${userId}/affiliates/${affiliateId}/link-account`,
+    { method: 'POST' },
+  );
+  return { affiliate: data.affiliate, alreadyLinked: Boolean(data.alreadyLinked) };
+}
+
+export async function updateAffiliateStatus(
+  userId: string,
+  affiliateId: string,
+  status: AffiliateStatus,
+): Promise<{ affiliate: Affiliate; statusEmailSent?: boolean; statusEmailError?: string | null }> {
+  const data = await apiRequest<{ affiliate: Affiliate; statusEmailSent?: boolean; statusEmailError?: string | null }>(
+    `${BASE}/admin/${userId}/affiliates/${affiliateId}/status`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    },
+  );
+  return {
+    affiliate: data.affiliate,
+    statusEmailSent: data.statusEmailSent,
+    statusEmailError: data.statusEmailError ?? null,
+  };
 }
 
 export async function deleteAffiliate(userId: string, affiliateId: string): Promise<void> {
@@ -254,6 +311,15 @@ export async function portalLogin(code: string) {
   return res.json();
 }
 
+export async function portalLoginWithAccount(email: string, password: string) {
+  const res = await fetch(`${BASE}/portal/login-account`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  return res.json();
+}
+
 export async function portalDashboard(code: string) {
   const res = await fetch(`${BASE}/portal/${code}/dashboard`);
   return res.json();
@@ -272,6 +338,18 @@ export async function portalReferredAccounts(code: string): Promise<ReferredAcco
   const res = await fetch(`${BASE}/portal/${code}/referred`);
   const data = await res.json();
   return data.ok ? (data.referredAccounts || []) : [];
+}
+
+export async function portalAcceptContract(
+  code: string,
+  version: string,
+): Promise<{ ok: boolean; affiliate?: Record<string, unknown>; error?: string }> {
+  const res = await fetch(`${BASE}/portal/${code}/accept-contract`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accepted: true, version }),
+  });
+  return res.json();
 }
 
 // ── Public: validate referral code ────────────────────────────────────────────

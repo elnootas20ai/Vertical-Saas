@@ -50,6 +50,11 @@ export type LoadCompraventaStoresOptions = {
   ensureTabletCodes?: boolean;
 };
 
+/** Centros visibles en sidebar compraventa (misma lista que Ajustes → Tienda). */
+export function listCompraventaSidebarWorkCenters(workCenters: WorkCenter[]): WorkCenter[] {
+  return workCenters.filter((wc) => wc.active !== false && !wc.deletedAt);
+}
+
 /** Tiendas/PDV de compraventa: alcance estricto por empresa activa (independiente de delivery). */
 export async function loadCompraventaStores(
   authUser: AuthLike,
@@ -76,7 +81,7 @@ export async function loadCompraventaStores(
     workCenters,
   );
 
-  if (options?.ensureTabletCodes !== false && pointsOfSale.length > 0) {
+  if (options?.ensureTabletCodes === true && pointsOfSale.length > 0) {
     pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
   }
 

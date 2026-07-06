@@ -1,16 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuthOptional } from '../context/AuthContext';
+import { useBusinessOptional } from '../context/BusinessContext';
 import { fetchAlertSummary, normalizeAlertSummary, type AlertSummary } from '../lib/alertCenterApi';
 import {
   fetchDocumentAlertsAsRecords,
   mergeDocumentAlertsIntoSummary,
 } from '../lib/documentAlertsApi';
+import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 
 export function useAlertCenterSummary(
   businessId: string | undefined,
-  options?: { pollMs?: number; dataUserId?: string },
+  options?: { pollMs?: number; dataUserId?: string; includeDocumentAlerts?: boolean },
 ) {
+  const auth = useAuthOptional();
+  const currentBusiness = useBusinessOptional()?.currentBusiness;
+  const resolvedDataUserId =
+    options?.dataUserId ?? resolveBusinessDataUserId(auth?.user ?? null, currentBusiness);
+  const includeDocumentAlerts = options?.includeDocumentAlerts !== false;
+
   const [summary, setSummary] = useState<AlertSummary | null>(null);
   const [loading, setLoading] = useState(Boolean(businessId));
+  const loadInflightRef = useRef<Promise<void> | null>(null);
+  const loadSeqRef = useRef(0);
 
   const reload = useCallback(async () => {
     if (!businessId) {
@@ -18,21 +29,46 @@ export function useAlertCenterSummary(
       setLoading(false);
       return;
     }
-    try {
-      const [res, docAlerts] = await Promise.all([
-        fetchAlertSummary(businessId),
-        options?.dataUserId
-          ? fetchDocumentAlertsAsRecords(options.dataUserId, businessId)
-          : Promise.resolve([]),
-      ]);
-      const base = normalizeAlertSummary(res.summary);
-      setSummary(docAlerts.length > 0 ? mergeDocumentAlertsIntoSummary(base, docAlerts) : base);
-    } catch {
-      /* silent */
-    } finally {
-      setLoading(false);
+
+    if (loadInflightRef.current) {
+      return loadInflightRef.current;
     }
-  }, [businessId, options?.dataUserId]);
+
+    const seq = ++loadSeqRef.current;
+
+    const run = async () => {
+      try {
+        const summaryRes = await fetchAlertSummary(businessId);
+        if (seq !== loadSeqRef.current) return;
+
+        const base = normalizeAlertSummary(summaryRes.summary);
+
+        if (!includeDocumentAlerts || !resolvedDataUserId) {
+          setSummary(base);
+          return;
+        }
+
+        const docAlerts = await fetchDocumentAlertsAsRecords(resolvedDataUserId, businessId);
+        if (seq !== loadSeqRef.current) return;
+
+        setSummary(
+          docAlerts.length > 0 ? mergeDocumentAlertsIntoSummary(base, docAlerts) : base,
+        );
+      } catch {
+        /* silent */
+      } finally {
+        if (seq === loadSeqRef.current) setLoading(false);
+      }
+    };
+
+    const promise = run().finally(() => {
+      if (loadInflightRef.current === promise) {
+        loadInflightRef.current = null;
+      }
+    });
+    loadInflightRef.current = promise;
+    return promise;
+  }, [businessId, includeDocumentAlerts, resolvedDataUserId]);
 
   useEffect(() => {
     setLoading(Boolean(businessId));

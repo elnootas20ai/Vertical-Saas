@@ -49,7 +49,7 @@ import {
   DollarSign, Wallet, AlertCircle, UserCheck, BarChart3, Briefcase,
   ShieldAlert, PieChart, Zap, Building2, FileBarChart, Boxes,
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
-  LayoutGrid, LayoutDashboard,
+  LayoutGrid, LayoutDashboard, Scale,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
@@ -417,13 +417,11 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
 
   const verticalLinks: Record<string, QuickAccessItem[]> = {
     carDealership: [
-      { label: 'Centro operativo', icon: <LayoutDashboard className="w-5 h-5" />, route: '/saas/vertical/compraventa', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
       { label: 'Vehículos', icon: <Car className="w-5 h-5" />, route: '/saas/vehicles', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
-      { label: 'Reservas', icon: <BookmarkCheck className="w-5 h-5" />, route: '/saas/reservations', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
-      { label: 'Ventas', icon: <ShoppingCart className="w-5 h-5" />, route: '/saas/vertical/compraventa/ventas', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
       { label: 'Compras', icon: <ShoppingCart className="w-5 h-5" />, route: '/saas/vertical/compraventa/compras', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
-      { label: 'Gastos prep.', icon: <Receipt className="w-5 h-5" />, route: '/saas/vertical/compraventa/gastos-preparacion', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
-      { label: 'Taller', icon: <Wrench className="w-5 h-5" />, route: '/saas/workshop', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
+      { label: 'Ventas', icon: <TrendingUp className="w-5 h-5" />, route: '/saas/vertical/compraventa/ventas', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+      { label: 'Tasaciones', icon: <Scale className="w-5 h-5" />, route: '/saas/vertical/compraventa/tasaciones', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
+      { label: 'Entregas', icon: <Truck className="w-5 h-5" />, route: '/saas/vertical/compraventa/entregas', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
     ],
     workshop: [
       { label: 'Taller', icon: <Wrench className="w-5 h-5" />, route: '/saas/workshop', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },

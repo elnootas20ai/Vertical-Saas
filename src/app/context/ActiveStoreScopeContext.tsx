@@ -233,6 +233,10 @@ function ActiveStoreScopeProviderImpl({
   const hasDisplayedStoresRef = useRef(false);
   const emptyRetryDoneRef = useRef(false);
   const pathnameRef = useRef(location.pathname);
+  const retailWorkCentersRef = useRef(retailWorkCenters);
+  retailWorkCentersRef.current = retailWorkCenters;
+  const allPointsOfSaleRef = useRef(allPointsOfSale);
+  allPointsOfSaleRef.current = allPointsOfSale;
 
   const applyStores = useCallback((retail: WorkCenter[], allPdvs: PointOfSale[]) => {
     const bid = businessIdRef.current;
@@ -291,16 +295,13 @@ function ActiveStoreScopeProviderImpl({
     [applyStores],
   );
 
-  const storeScopeKeyRef = useRef('');
+  const storeBusinessIdRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
-    const scopeKey = `${businessId}|${accountBusinessCount ?? ''}`;
-    const scopeChanged = storeScopeKeyRef.current !== scopeKey;
-    storeScopeKeyRef.current = scopeKey;
-
     setInitialLoading(false);
 
     if (!businessId) {
+      storeBusinessIdRef.current = null;
       emptyRetryDoneRef.current = false;
       hasDisplayedStoresRef.current = false;
       setPointsOfSale([]);
@@ -309,17 +310,13 @@ function ActiveStoreScopeProviderImpl({
       return;
     }
 
-    // Solo resetear tiendas al cambiar de empresa — no en cada re-render del contexto.
-    if (!scopeChanged && hasDisplayedStoresRef.current) {
+    const businessChanged = storeBusinessIdRef.current !== businessId;
+    storeBusinessIdRef.current = businessId;
+
+    // Cambio de nº de empresas en cuenta: no vaciar sidebar (evita parpadeo).
+    if (!businessChanged && hasDisplayedStoresRef.current) {
       return;
     }
-
-    emptyRetryDoneRef.current = false;
-    hasDisplayedStoresRef.current = false;
-    setPointsOfSale([]);
-    setAllPointsOfSale([]);
-    setRetailWorkCenters([]);
-    loadInflightRef.current = null;
 
     const cacheCtx = buildRetailScopeCtx(
       currentBusinessRef.current,
@@ -328,9 +325,19 @@ function ActiveStoreScopeProviderImpl({
     );
     const cached = readRetailScopeCacheForBusiness(businessId, cacheCtx);
     if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
+      emptyRetryDoneRef.current = false;
       hasDisplayedStoresRef.current = true;
       applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
       return;
+    }
+
+    if (businessChanged) {
+      emptyRetryDoneRef.current = false;
+      hasDisplayedStoresRef.current = false;
+      setPointsOfSale([]);
+      setAllPointsOfSale([]);
+      setRetailWorkCenters([]);
+      loadInflightRef.current = null;
     }
 
     const tabletBinding = resolveTabletBoundStoreScope(location.pathname, businessId);
@@ -378,7 +385,10 @@ function ActiveStoreScopeProviderImpl({
         return;
       }
 
-      const showInitialSpinner = !hasDisplayedStoresRef.current;
+      const showInitialSpinner =
+        !hasDisplayedStoresRef.current
+        && retailWorkCentersRef.current.length === 0
+        && allPointsOfSaleRef.current.length === 0;
       if (showInitialSpinner) setInitialLoading(true);
 
       const loadOpts = {
@@ -391,7 +401,13 @@ function ActiveStoreScopeProviderImpl({
           authUser,
           biz as Business,
           businessesRef.current,
-          { ...loadOpts, includeInactivePdvs: true, tpvBootstrap: false },
+          {
+            ...loadOpts,
+            includeInactivePdvs: true,
+            tpvBootstrap: false,
+            skipPdvMerge: true,
+            ensureTabletCodes: false,
+          },
         );
 
         if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
@@ -629,7 +645,10 @@ function ActiveStoreScopeProviderImpl({
       activePreferenceRaw,
       setActiveSalesPoint,
       setActiveWorkCenterPreference,
-      loading: initialLoading,
+      loading:
+        initialLoading
+        && retailWorkCenters.length === 0
+        && allPointsOfSale.length === 0,
       refresh,
       displayLabelForActive,
     }),

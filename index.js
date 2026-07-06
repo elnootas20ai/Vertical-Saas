@@ -3283,6 +3283,14 @@ setInterval(async () => {
         html: `<p><b>CouchDB no responde</b></p><pre>${escapeHtml(JSON.stringify(result?.checks?.couchdb || result, null, 2))}</pre>`,
         cooldownMs: 15 * 60_000,
       });
+    } else if (couchOk && !lastCouchOk) {
+      await sendAdminAlert({
+        key: 'couchdb_recovered',
+        subject: '✅ Vertial: CouchDB recuperado',
+        html: `<p>CouchDB vuelve a responder correctamente tras una incidencia.</p>`,
+        cooldownMs: 15 * 60_000,
+        severity: 'success',
+      });
     }
     lastCouchOk = couchOk;
   } catch (err) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Printer,
@@ -12,15 +12,20 @@ import {
   CheckCircle2,
   AlertTriangle,
   X,
+  Store,
 } from 'lucide-react';
+import type { PointOfSale } from '../../lib/deliveryApi';
 import {
   DEFAULT_PRINTER_CONFIG,
   fetchBridgePrinters,
-  loadPrinterConfig,
+  loadLegacyPrinterConfig,
   printTestTicket,
+  resolveEffectivePrinterConfig,
   savePrinterConfig,
   type VertialPrinterConfig,
 } from '../../lib/vertialPrint';
+import { savePrinterConfigToPdv, type PrinterConfigTarget } from '../../lib/vertialPrint/printerPdvSync';
+import { isVertialPrinterConfigConfigured, normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
 import {
   connectionToSetupKind,
   evaluatePrinterStatus,
@@ -58,26 +63,75 @@ const SETUP_OPTIONS: Array<{ id: PrinterSetupKind; label: string; hint: string; 
   },
 ];
 
+export interface TpvPrinterScope {
+  userId: string;
+  pdvId: string;
+  pdv?: PointOfSale | null;
+  terminalId?: string;
+  storeLabel?: string;
+  terminalLabel?: string;
+  onPdvUpdated?: (pdv: PointOfSale) => void;
+}
+
 function statusToneClass(tone: PrinterStatusSnapshot['tone']): string {
   if (tone === 'ok') return 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-800';
   if (tone === 'warn') return 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800';
   return 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700';
 }
 
+function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
+  if (scope?.pdv) {
+    return resolveEffectivePrinterConfig({
+      pdv: scope.pdv,
+      terminalId: scope.terminalId,
+      localFallback: loadLegacyPrinterConfig(),
+    });
+  }
+  return loadLegacyPrinterConfig();
+}
+
 export function TpvPrinterSetupPanel({
   variant = 'page',
   onClose,
+  scope,
 }: {
   variant?: 'page' | 'modal';
   onClose?: () => void;
+  scope?: TpvPrinterScope;
 }) {
-  const [config, setConfig] = useState<VertialPrinterConfig>(() => loadPrinterConfig());
-  const [kind, setKind] = useState<PrinterSetupKind>(() => connectionToSetupKind(loadPrinterConfig().connectionType));
+  const [pdv, setPdv] = useState<PointOfSale | null | undefined>(scope?.pdv);
+  const [config, setConfig] = useState<VertialPrinterConfig>(() => initialConfig(scope));
+  const [kind, setKind] = useState<PrinterSetupKind>(() => connectionToSetupKind(initialConfig(scope).connectionType));
+  const [saveTarget, setSaveTarget] = useState<PrinterConfigTarget>(
+    scope?.terminalId ? 'terminal' : 'store',
+  );
   const [printers, setPrinters] = useState<Array<{ name: string }>>([]);
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const [status, setStatus] = useState<PrinterStatusSnapshot | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
+  const saveTimerRef = useRef<number | null>(null);
+  const pendingConfigRef = useRef<VertialPrinterConfig | null>(null);
+
+  const canPersistToStore = Boolean(scope?.userId && scope?.pdvId && pdv?._id);
+  const terminalLabel = scope?.terminalLabel?.trim() || 'este TPV';
+  const storeLabel = scope?.storeLabel?.trim() || 'toda la tienda';
+  const hasTerminalScope = Boolean(scope?.terminalId);
+
+  const terminalHasOverride = useMemo(() => {
+    if (!scope?.terminalId || !pdv) return false;
+    const term = pdv.terminals.find((t) => t.id === scope.terminalId);
+    return Boolean(term?.printerConfig && isVertialPrinterConfigConfigured(normalizeVertialPrinterConfig(term.printerConfig)));
+  }, [pdv, scope?.terminalId]);
+
+  useEffect(() => {
+    setPdv(scope?.pdv);
+    const next = initialConfig(scope);
+    setConfig(next);
+    setKind(connectionToSetupKind(next.connectionType));
+    setSaveTarget(scope?.terminalId && terminalHasOverride ? 'terminal' : 'store');
+  }, [scope?.pdv?._id, scope?.pdv?._rev, scope?.pdvId, scope?.terminalId, terminalHasOverride]);
 
   const refreshStatus = useCallback(async (nextConfig = config) => {
     setStatusLoading(true);
@@ -101,10 +155,45 @@ export function TpvPrinterSetupPanel({
     }
   }, [status, showSetup]);
 
+  const persistToStore = useCallback(async (next: VertialPrinterConfig, target: PrinterConfigTarget) => {
+    if (!scope?.userId || !pdv?._id) return;
+    setSaving(true);
+    try {
+      const saved = await savePrinterConfigToPdv(
+        scope.userId,
+        pdv,
+        next,
+        target,
+        target === 'terminal' ? scope.terminalId : undefined,
+      );
+      setPdv(saved);
+      scope.onPdvUpdated?.(saved);
+    } catch {
+      toast.error('No se pudo guardar la impresora en la tienda');
+    } finally {
+      setSaving(false);
+    }
+  }, [pdv, scope]);
+
+  const schedulePersist = useCallback((next: VertialPrinterConfig, target: PrinterConfigTarget) => {
+    pendingConfigRef.current = next;
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      const cfg = pendingConfigRef.current;
+      pendingConfigRef.current = null;
+      if (cfg && canPersistToStore) void persistToStore(cfg, target);
+    }, 600);
+  }, [canPersistToStore, persistToStore]);
+
+  useEffect(() => () => {
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+  }, []);
+
   const patch = (partial: Partial<VertialPrinterConfig>) => {
     setConfig((prev) => {
-      const next = { ...prev, ...partial };
+      const next = normalizeVertialPrinterConfig({ ...prev, ...partial });
       savePrinterConfig(next);
+      if (canPersistToStore) schedulePersist(next, saveTarget);
       void refreshStatus(next);
       return next;
     });
@@ -116,8 +205,15 @@ export function TpvPrinterSetupPanel({
     setShowSetup(true);
   };
 
+  const handleTargetChange = (target: PrinterConfigTarget) => {
+    setSaveTarget(target);
+    if (!canPersistToStore) return;
+    schedulePersist(config, target);
+  };
+
   const handleTest = async () => {
     savePrinterConfig(config);
+    if (canPersistToStore) await persistToStore(config, saveTarget);
     setTesting(true);
     try {
       await printTestTicket();
@@ -138,7 +234,9 @@ export function TpvPrinterSetupPanel({
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Impresora de tickets</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Se configura una vez por tienda. Funciona en iPad y PC.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {canPersistToStore ? `Se guarda en ${storeLabel}. Todos los TPV la heredan.` : 'Se configura una vez por tienda. Funciona en iPad y PC.'}
+            </p>
           </div>
           {onClose && (
             <button
@@ -163,11 +261,26 @@ export function TpvPrinterSetupPanel({
               <div>
                 <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Impresión de tickets</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  También disponible en el TPV (icono de impresora con la caja abierta)
+                  {canPersistToStore
+                    ? `Configuración de ${storeLabel}. Se aplica a todos los dispositivos de esta tienda.`
+                    : 'También disponible en el TPV (icono de impresora con la caja abierta)'}
                 </p>
               </div>
             </div>
           </header>
+        )}
+
+        {canPersistToStore && (
+          <div className={`${settingsListCardClass()} flex items-start gap-3`}>
+            <Store className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{storeLabel}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                La IP y el tipo de conexión quedan guardados en la tienda, no solo en este dispositivo.
+                {saving ? ' Guardando…' : ' Cambios guardados automáticamente.'}
+              </p>
+            </div>
+          </div>
         )}
 
         <section className={`${settingsListCardClass()} space-y-4`}>
@@ -191,7 +304,7 @@ export function TpvPrinterSetupPanel({
           <button
             type="button"
             onClick={() => void handleTest()}
-            disabled={testing}
+            disabled={testing || saving}
             className={`${settingsPrimaryBtnClass} w-full`}
           >
             {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
@@ -212,8 +325,32 @@ export function TpvPrinterSetupPanel({
           {showSetup && (
             <div className="space-y-4 mt-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                Elige cómo está conectada en tu local. No depende de si usas iPad o PC: todos los dispositivos de la tienda usarán la misma impresora.
+                Elige cómo está conectada en tu local. Todos los iPad y PC de la misma tienda usarán esta misma impresora.
               </p>
+
+              {canPersistToStore && hasTerminalScope && (
+                <div className={`${settingsListCardClass()} space-y-3`}>
+                  <p className={settingsLabelClass}>¿Dónde guardar esta configuración?</p>
+                  <div className="grid gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleTargetChange('store')}
+                      className={settingsChoiceCardClass(saveTarget === 'store') + ' text-left px-4 py-3'}
+                    >
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Toda la tienda</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Todos los TPV de {storeLabel} imprimen aquí.</p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTargetChange('terminal')}
+                      className={settingsChoiceCardClass(saveTarget === 'terminal') + ' text-left px-4 py-3'}
+                    >
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Solo {terminalLabel}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Útil si esta caja tiene otra impresora distinta.</p>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="grid gap-2">
                 {SETUP_OPTIONS.map(({ id, label, hint, icon: Icon }) => (
@@ -370,7 +507,15 @@ export function TpvPrinterSetupPanel({
   );
 }
 
-export function TpvPrinterSetupModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function TpvPrinterSetupModal({
+  open,
+  onClose,
+  scope,
+}: {
+  open: boolean;
+  onClose: () => void;
+  scope?: TpvPrinterScope;
+}) {
   if (!open) return null;
 
   return (
@@ -380,7 +525,7 @@ export function TpvPrinterSetupModal({ open, onClose }: { open: boolean; onClose
         role="dialog"
         aria-labelledby="tpv-printer-setup-title"
       >
-        <TpvPrinterSetupPanel variant="modal" onClose={onClose} />
+        <TpvPrinterSetupPanel variant="modal" onClose={onClose} scope={scope} />
       </div>
     </div>
   );

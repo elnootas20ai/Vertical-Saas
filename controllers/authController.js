@@ -294,6 +294,13 @@ export async function register(req, res) {
 
     let savedAccount = await saveAccount(req, account);
 
+    try {
+      const { syncAffiliateLinkForAccount } = await import('./affiliateController.js');
+      await syncAffiliateLinkForAccount(req, savedAccount);
+    } catch (linkErr) {
+      logger.warn({ tag: 'AUTH_REGISTER', linkErr }, 'No se pudo enlazar cuenta con afiliado');
+    }
+
     let verificationEmailSent = Boolean(googleUser);
     if (!googleUser) {
       try {

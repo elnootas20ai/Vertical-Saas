@@ -1,8 +1,8 @@
 import {
-  loadPrinterConfig,
   resolveBridgeUrl,
   type VertialPrinterConfig,
 } from './printerConfig';
+import { resolveEffectivePrinterConfig } from './printerActiveScope';
 
 export interface BridgeHealth {
   ok: boolean;
@@ -42,7 +42,7 @@ export function buildBridgeConnection(config: VertialPrinterConfig): BridgePrint
 }
 
 function bridgeUrl(config?: VertialPrinterConfig): string {
-  return resolveBridgeUrl(config ?? loadPrinterConfig());
+  return resolveBridgeUrl(config ?? resolveEffectivePrinterConfig());
 }
 
 export async function fetchBridgeHealth(timeoutMs = 1200, config?: VertialPrinterConfig): Promise<BridgeHealth> {

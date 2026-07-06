@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowRight,
@@ -199,6 +199,10 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
     navigate('/saas/payroll');
   };
 
+  const handlePortfolioRefresh = useCallback(async () => {
+    await reload({ force: true });
+  }, [reload]);
+
   return (
     <Layout
       title="Visión general"
@@ -221,15 +225,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
               <Building2 className="w-4 h-4 text-indigo-500" />
               Resumen del portfolio
             </h3>
-            <button
-              type="button"
-              onClick={() => void reload()}
-              disabled={loading && !isRefreshing}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading || isRefreshing ? 'animate-spin' : ''}`} />
-              Actualizar
-            </button>
+            <PortfolioRefreshButton onRefresh={handlePortfolioRefresh} />
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             <StatCard label="Empresas" value={String(filteredTotals.businesses)} icon={<Building2 className="w-4 h-4" />} tone="blue" sub={`${filteredTotals.brands} marcas · ${filteredTotals.stores} tiendas`} />
@@ -261,15 +257,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
               {businessFilter === 'all' ? 'Finanzas consolidadas del mes' : 'Finanzas de la selección'}
             </h3>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void reload()}
-                disabled={loading && !isRefreshing}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 dark:border-gray-700 px-2.5 py-1.5 text-[11px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${loading || isRefreshing ? 'animate-spin' : ''}`} />
-                Actualizar
-              </button>
+              <PortfolioRefreshButton onRefresh={handlePortfolioRefresh} />
               <button
                 type="button"
                 onClick={() => navigate('/saas/ebitda')}
@@ -466,6 +454,63 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
 }
 
 // ── Subcomponents ───────────────────────────────────────────────────────────
+
+type RefreshPhase = 'idle' | 'loading' | 'done';
+
+/** Botón Actualizar con feedback visual: carga → confirmación → idle. */
+function PortfolioRefreshButton({ onRefresh }: { onRefresh: () => Promise<void> }) {
+  const [phase, setPhase] = useState<RefreshPhase>('idle');
+  const doneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadingRef = useRef(false);
+
+  useEffect(() => () => {
+    if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+  }, []);
+
+  const handleClick = useCallback(async () => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    setPhase('loading');
+    try {
+      await onRefresh();
+      setPhase('done');
+      doneTimerRef.current = setTimeout(() => {
+        setPhase('idle');
+        doneTimerRef.current = null;
+      }, 2000);
+    } catch {
+      setPhase('idle');
+    } finally {
+      loadingRef.current = false;
+    }
+  }, [onRefresh]);
+
+  const isLoading = phase === 'loading';
+  const isDone = phase === 'done';
+
+  return (
+    <button
+      type="button"
+      onClick={() => void handleClick()}
+      aria-busy={isLoading}
+      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-all duration-200 ${
+        isLoading
+          ? 'border-indigo-300 dark:border-indigo-600 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 shadow-sm'
+          : isDone
+            ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+            : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 active:scale-[0.98]'
+      }`}
+    >
+      {isDone ? (
+        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+      ) : (
+        <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isLoading ? 'animate-spin' : ''}`} />
+      )}
+      {isLoading ? 'Actualizando…' : isDone ? 'Actualizado' : 'Actualizar'}
+    </button>
+  );
+}
 
 function StatCard({
   label,

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from 'vitest';
-import { scopeCompraventaWorkCenters } from '../src/app/lib/compraventaSetup.ts';
+import { scopeCompraventaWorkCenters, listCompraventaSidebarWorkCenters } from '../src/app/lib/compraventaSetup.ts';
 
 const VENEAUTOS = 'biz-veneautos';
 const BADALONA_BIZ = 'biz-badalona-legacy';
@@ -53,5 +53,18 @@ describe('scopeCompraventaWorkCenters', () => {
 
   it('devuelve vacío sin businessId', () => {
     expect(scopeCompraventaWorkCenters([wc('wc-1', 'x', VENEAUTOS)], '')).toEqual([]);
+  });
+});
+
+describe('listCompraventaSidebarWorkCenters', () => {
+  it('incluye oficina y punto de venta activos (como Ajustes → Tienda)', () => {
+    const all = [
+      wc('wc-1', 'Expositor', VENEAUTOS, 'punto_de_venta'),
+      wc('wc-2', 'Oficina', VENEAUTOS, 'oficina'),
+      wc('wc-3', 'Baja', VENEAUTOS, 'punto_de_venta'),
+    ];
+    all[2].active = false;
+    const listed = listCompraventaSidebarWorkCenters(all);
+    expect(listed.map((s) => s.name)).toEqual(['Expositor', 'Oficina']);
   });
 });

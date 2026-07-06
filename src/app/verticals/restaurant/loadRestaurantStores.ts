@@ -50,7 +50,8 @@ export async function loadRestaurantStores(
 
   const retail = filterRestaurantRetailWorkCenters(allWorkCenters, business, businesses);
 
-  let pointsOfSale = options?.skipPdvMerge
+  const skipPdvMerge = options?.skipPdvMerge ?? true;
+  let pointsOfSale = skipPdvMerge
     ? dedupePointsOfSale(rawPdvs, dedupeOpts)
     : await mergePointsOfSaleWithRetailWorkCenters(
         dataUserId,

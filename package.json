@@ -38,6 +38,7 @@
     "deploy:all": "node scripts/deploy-all.mjs",
     "deploy:diagnose": "node scripts/remote-diagnose.mjs",
     "deploy:deep-diagnose": "node scripts/remote-deep-diagnose.mjs",
+    "deploy:config-alerts": "node scripts/remote-config-alerts.mjs",
     "deploy:fix-dist": "node scripts/remote-fix-dist-perms.mjs",
     "test:verticals": "vitest run tests/verticalModuleBoundaries.test.js",
     "smoke:saas": "node scripts/smoke-saas.mjs",

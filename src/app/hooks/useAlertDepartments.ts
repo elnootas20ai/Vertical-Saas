@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useBusinessOptional } from '../context/BusinessContext';
 import {
   getAlertDepartmentsForVertical,
@@ -21,10 +21,20 @@ export function useAlertDepartments(): {
     [vertical],
   );
 
+  const departmentSourceFilter = useCallback(
+    (deptId: string) => deptSourceFilter(deptId, vertical),
+    [vertical],
+  );
+
+  const isDepartmentVisible = useCallback(
+    (deptId: string) => isDepartmentVisibleForVertical(deptId, vertical),
+    [vertical],
+  );
+
   return {
     vertical,
     departments,
-    departmentSourceFilter: (deptId: string) => deptSourceFilter(deptId, vertical),
-    isDepartmentVisible: (deptId: string) => isDepartmentVisibleForVertical(deptId, vertical),
+    departmentSourceFilter,
+    isDepartmentVisible,
   };
 }

@@ -386,6 +386,8 @@ export type LoadDeliveryStoresOptions = {
   knownBusinessIds?: string[];
   /** Centro asignado al trabajador (invitación): asegurar PDV aunque falte en el listado filtrado. */
   priorityWorkCenterId?: string;
+  /** TPV: genera códigos tablet si faltan. Ajustes/listados: false para no bloquear la UI. */
+  ensureTabletCodes?: boolean;
 };
 
 /**
@@ -507,7 +509,8 @@ export async function loadDeliveryStores(
   });
   workCenters = dedupeRetailWorkCentersForBusiness(workCenters);
 
-  let pointsOfSale = options?.skipPdvMerge
+  const skipPdvMerge = options?.skipPdvMerge ?? true;
+  let pointsOfSale = skipPdvMerge
     ? dedupePointsOfSale(rawPdvs, dedupeOpts)
     : await mergePointsOfSaleWithRetailWorkCenters(dataUserId, dedupePointsOfSale(rawPdvs, dedupeOpts), {
         business: business ?? null,
@@ -519,7 +522,9 @@ export async function loadDeliveryStores(
     dedupeOpts,
   );
   pointsOfSale = filteredByWc;
-  pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
+  if (options?.ensureTabletCodes === true && pointsOfSale.length > 0) {
+    pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
+  }
 
   return { dataUserId, workCenters, pointsOfSale };
 }
@@ -532,7 +537,11 @@ export async function loadTpvPointsOfSaleForBusiness(
   business?: Business | null,
   options?: LoadDeliveryStoresOptions,
 ): Promise<DeliveryStoresState> {
-  const state = await loadDeliveryStores(authUser, business, options);
+  const state = await loadDeliveryStores(authUser, business, {
+    ...options,
+    skipPdvMerge: false,
+    ensureTabletCodes: options?.ensureTabletCodes !== false,
+  });
   if (!state.dataUserId) return state;
 
   const retail = state.workCenters.filter(

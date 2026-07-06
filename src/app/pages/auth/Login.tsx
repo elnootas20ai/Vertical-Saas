@@ -276,7 +276,7 @@ export function Login() {
   useEffect(() => {
     if (googleReady && googleBtnRef.current) {
       const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
-      renderButton(googleBtnRef.current, { theme, size: 'large', text: 'signin_with' });
+      renderButton(googleBtnRef.current, { theme, size: 'medium', text: 'signin_with' });
     }
   }, [googleReady, renderButton, resolvedTheme]);
 
@@ -292,21 +292,21 @@ export function Login() {
   }, [googleReady, googleClientConfigured]);
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
+    <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-800 flex items-start justify-center px-4 pt-4 pb-5 sm:pt-6">
       <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
           {/* Header */}
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center mb-6">
-              <VertialLogo size="lg" />
+          <div className="text-center mb-5">
+            <div className="flex items-center justify-center mb-3">
+              <VertialLogo size="md" />
             </div>
-            <span className="inline-block mb-3 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+            <span className="inline-block mb-2 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
               Acceso empresa
             </span>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
               Iniciar sesión — Empresa
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">
+            <p className="text-sm text-gray-600 dark:text-gray-400 leading-snug">
               Para propietarios, gerentes y administración del negocio.
             </p>
           </div>
@@ -333,7 +333,7 @@ export function Login() {
           )}
 
           {loginMode === 'emailCode' ? (
-            <form onSubmit={handleVerifyCode} className="space-y-6">
+            <form onSubmit={handleVerifyCode} className="space-y-4">
               <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
                 Código de <strong>6 dígitos</strong> que llega a tu correo. No es el código de la tablet.
               </p>
@@ -368,7 +368,7 @@ export function Login() {
                   type="submit"
                   variant="primary"
                   fullWidth
-                  size="lg"
+                  size="md"
                   disabled={isSubmitting}
                 >
                   {isSubmitting ? 'Verificando…' : 'Entrar con código'}
@@ -406,7 +406,7 @@ export function Login() {
               </div>
             </form>
           ) : loginMode === 'tpvStore' ? (
-            <form onSubmit={handleTpvStoreLogin} className="space-y-6">
+            <form onSubmit={handleTpvStoreLogin} className="space-y-4">
               <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
                 Código de <strong>tablet / tienda</strong> (Ajustes → Tienda → Código tablet). Letras y números.
               </p>
@@ -430,7 +430,7 @@ export function Login() {
                   type="submit"
                   variant="primary"
                   fullWidth
-                  size="lg"
+                  size="md"
                   disabled={isSubmitting}
                 >
                   {isSubmitting ? 'Activando…' : 'Entrar con código de tienda'}
@@ -456,7 +456,7 @@ export function Login() {
               </div>
             </form>
           ) : (
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <ACCESO__Input
               label={t('auth.email')}
               type="email"
@@ -514,14 +514,14 @@ export function Login() {
               type="submit"
               variant="primary"
               fullWidth
-              size="lg"
+              size="md"
               className="mb-0"
               disabled={isSubmitting}
             >
               {t('auth.submit')}
             </ACCESO__Button>
 
-            <div className="relative my-6">
+            <div className="relative my-3">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-200 dark:border-gray-700" />
               </div>
@@ -532,7 +532,7 @@ export function Login() {
 
             <div className="flex justify-center w-full">
               {!googleClientConfigured ? null : !googleReady && !googleTimedOut ? (
-                <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
+                <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-2 px-3 text-sm text-gray-500 dark:text-gray-400">
                   <svg className="w-5 h-5 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -540,11 +540,11 @@ export function Login() {
                   <span>{t('auth.googleLogin')}…</span>
                 </div>
               ) : !googleReady && googleTimedOut ? (
-                <div className="min-h-[44px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-3 px-4 text-sm text-amber-800 text-center">
+                <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-2 px-3 text-xs text-amber-800 text-center">
                   Google (script) no cargó a tiempo. Revisa bloqueadores, CSP o red; puedes usar email y contraseña.
                 </div>
               ) : (
-                <div ref={googleBtnRef} className="min-h-[44px] w-full max-w-sm flex justify-center" />
+                <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
               )}
             </div>
             {!googleClientConfigured && (
@@ -563,40 +563,42 @@ export function Login() {
                 setErrors({});
               }}
               disabled={isSubmitting}
-              className="w-full text-sm text-center text-gray-600 dark:text-gray-400 hover:underline"
+              className="w-full text-xs text-center text-gray-600 dark:text-gray-400 hover:underline"
             >
               Código de tienda / tablet TPV
             </button>
           </form>
           )}
 
-          <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-            {t('auth.noAccount')}{' '}
+          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-2 text-center text-sm text-gray-600 dark:text-gray-400">
+            <p>
+              {t('auth.noAccount')}{' '}
+              <button
+                type="button"
+                onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
+                className="font-medium text-[#0f1419] hover:underline dark:text-gray-100"
+              >
+                Crear cuenta de empresa
+              </button>
+            </p>
+            <p>
+              ¿Eres trabajador?{' '}
+              <button
+                type="button"
+                onClick={() => navigate(AUTH_PATHS.workerLogin)}
+                className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+              >
+                Accede por aquí
+              </button>
+            </p>
             <button
               type="button"
-              onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
-              className="font-medium text-[#0f1419] hover:underline dark:text-gray-100"
+              onClick={() => navigate(AUTH_PATHS.entry)}
+              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 pt-1"
             >
-              Crear cuenta de empresa
+              ← Elegir tipo de acceso
             </button>
-          </p>
-
-          <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700 pt-4">
-            ¿Eres trabajador?{' '}
-            <button
-              type="button"
-              onClick={() => navigate(AUTH_PATHS.workerLogin)}
-              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
-            >
-              Accede por aquí
-            </button>
-          </p>
-        </div>
-
-        <div className="mt-6 text-center">
-          <ACCESO__Button variant="ghost" onClick={() => navigate(AUTH_PATHS.entry)}>
-            ← Elegir tipo de acceso
-          </ACCESO__Button>
+          </div>
         </div>
       </div>
     </div>

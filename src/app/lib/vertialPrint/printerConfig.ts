@@ -14,7 +14,8 @@ export interface VertialPrinterConfig {
 export const VERTIAL_PRINT_BRIDGE_PORT = 39201;
 export const VERTIAL_PRINT_BRIDGE_URL = `http://127.0.0.1:${VERTIAL_PRINT_BRIDGE_PORT}`;
 
-const STORAGE_KEY = 'vertial_printer_config_v1';
+const LEGACY_STORAGE_KEY = 'vertial_printer_config_v1';
+const PDV_CACHE_PREFIX = 'vertial_printer_config_pdv_';
 
 export const DEFAULT_PRINTER_CONFIG: VertialPrinterConfig = {
   connectionType: 'browser',
@@ -34,9 +35,13 @@ export function resolveBridgeUrl(config?: Pick<VertialPrinterConfig, 'bridgeHost
   return `http://${normalized}:${VERTIAL_PRINT_BRIDGE_PORT}`;
 }
 
-export function loadPrinterConfig(): VertialPrinterConfig {
+export function pdvPrinterCacheKey(pdvId: string): string {
+  return `${PDV_CACHE_PREFIX}${pdvId}`;
+}
+
+export function loadLegacyPrinterConfig(): VertialPrinterConfig {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_PRINTER_CONFIG };
     const parsed = JSON.parse(raw) as Partial<VertialPrinterConfig>;
     return {
@@ -50,6 +55,26 @@ export function loadPrinterConfig(): VertialPrinterConfig {
   }
 }
 
-export function savePrinterConfig(config: VertialPrinterConfig): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+export function saveLegacyPrinterConfig(config: VertialPrinterConfig): void {
+  localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(config));
+}
+
+export function loadPdvPrinterCache(pdvId: string): VertialPrinterConfig | null {
+  try {
+    const raw = localStorage.getItem(pdvPrinterCacheKey(pdvId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<VertialPrinterConfig>;
+    return {
+      ...DEFAULT_PRINTER_CONFIG,
+      ...parsed,
+      networkPort: Number(parsed.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
+      paperWidthMm: parsed.paperWidthMm === 58 ? 58 : 80,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function cachePdvPrinterConfig(pdvId: string, config: VertialPrinterConfig): void {
+  localStorage.setItem(pdvPrinterCacheKey(pdvId), JSON.stringify(config));
 }

@@ -2,7 +2,7 @@ import { toast } from 'sonner';
 import type { DeliveryTicketPrintOptions } from '../deliveryTicketTypes';
 import { buildTicketDocument } from './ticketDocument';
 import { encodeTicketEscpos } from './escposEncode';
-import { loadPrinterConfig } from './printerConfig';
+import { resolveEffectivePrinterConfig } from './printerActiveScope';
 import { fetchBridgeHealth, sendEscposToBridge } from './printBridgeClient';
 import { printDeliveryTicketBrowser, printTestTicketBrowser } from './printBrowser';
 
@@ -13,7 +13,7 @@ export type PrintDeliveryTicketResult = {
 export async function printDeliveryTicket(
   options: DeliveryTicketPrintOptions,
 ): Promise<PrintDeliveryTicketResult> {
-  const config = loadPrinterConfig();
+  const config = resolveEffectivePrinterConfig();
   const doc = buildTicketDocument(options);
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
@@ -35,7 +35,7 @@ export async function printDeliveryTicket(
 }
 
 export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
-  const config = loadPrinterConfig();
+  const config = resolveEffectivePrinterConfig();
   const { encodeTestTicketEscpos } = await import('./escposEncode');
   const escpos = encodeTestTicketEscpos(config.paperWidthMm);
 

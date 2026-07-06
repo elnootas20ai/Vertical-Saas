@@ -6147,18 +6147,46 @@ export async function listCajaDataByUser(req, userId) {
 
 // ─── POINTS OF SALE ───────────────────────────────────────────────────────────
 
+function sanitizePrinterConfig(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const connectionType = ['network', 'system', 'browser'].includes(raw.connectionType)
+    ? raw.connectionType
+    : 'browser';
+  return {
+    connectionType,
+    networkHost: String(raw.networkHost || ''),
+    networkPort: Number(raw.networkPort || 9100) || 9100,
+    systemPrinterName: String(raw.systemPrinterName || ''),
+    bridgeHost: String(raw.bridgeHost || ''),
+    paperWidthMm: raw.paperWidthMm === 58 ? 58 : 80,
+    preferBridge: raw.preferBridge !== false,
+  };
+}
+
+function mapPointOfSaleTerminal(t) {
+  const out = {
+    id: String(t.id || `term-${uuidv4().slice(0, 8)}`),
+    code: String(t.code || ''),
+    name: String(t.name || ''),
+    datafonName: String(t.datafonName || ''),
+    printerName: String(t.printerName || ''),
+    active: t.active !== false,
+  };
+  if (Object.prototype.hasOwnProperty.call(t || {}, 'printerConfig')) {
+    const cfg = sanitizePrinterConfig(t.printerConfig);
+    if (cfg) out.printerConfig = cfg;
+  } else if (t?.printerConfig) {
+    const cfg = sanitizePrinterConfig(t.printerConfig);
+    if (cfg) out.printerConfig = cfg;
+  }
+  return out;
+}
+
 export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `pdv-${uuidv4()}`;
   const terminals = Array.isArray(data.terminals)
-    ? data.terminals.map((t) => ({
-        id: String(t.id || `term-${uuidv4().slice(0, 8)}`),
-        code: String(t.code || ''),
-        name: String(t.name || ''),
-        datafonName: String(t.datafonName || ''),
-        printerName: String(t.printerName || ''),
-        active: t.active !== false,
-      }))
+    ? data.terminals.map(mapPointOfSaleTerminal)
     : existing?.terminals || [];
 
   const terminalCode = String(
@@ -6177,6 +6205,11 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     terminalCode,
     address: String(data.address || existing?.address || ''),
     terminals,
+    ...(Object.prototype.hasOwnProperty.call(data, 'printerConfig')
+      ? { printerConfig: sanitizePrinterConfig(data.printerConfig) }
+      : existing?.printerConfig
+        ? { printerConfig: sanitizePrinterConfig(existing.printerConfig) }
+        : {}),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -6203,9 +6236,11 @@ export function sanitizePointOfSale(doc) {
           name: t.name || '',
           datafonName: t.datafonName || '',
           printerName: t.printerName || '',
+          ...(t.printerConfig ? { printerConfig: sanitizePrinterConfig(t.printerConfig) } : {}),
           active: t.active !== false,
         }))
       : [],
+    ...(doc.printerConfig ? { printerConfig: sanitizePrinterConfig(doc.printerConfig) } : {}),
     active: doc.active !== false,
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),

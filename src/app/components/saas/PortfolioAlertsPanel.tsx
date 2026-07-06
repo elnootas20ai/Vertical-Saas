@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AlertTriangle, ArrowRight, Bell, RefreshCw } from 'lucide-react';
 import {
@@ -25,8 +25,17 @@ export function PortfolioAlertsPanel({ rows }: PortfolioAlertsPanelProps) {
   const [items, setItems] = useState<PortfolioAlertRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const rowIdsKey = useMemo(
+    () => rows.map((r) => r.businessId).filter(Boolean).sort().join('|'),
+    [rows],
+  );
+
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+
   const load = useCallback(async () => {
-    if (!rows.length) {
+    const snapshot = rowsRef.current;
+    if (!snapshot.length) {
       setItems([]);
       setLoading(false);
       return;
@@ -34,7 +43,7 @@ export function PortfolioAlertsPanel({ rows }: PortfolioAlertsPanelProps) {
     setLoading(true);
     try {
       const results = await Promise.all(
-        rows.map(async (r) => {
+        snapshot.map(async (r) => {
           try {
             const res = await fetchAlertSummary(r.businessId);
             return {
@@ -55,7 +64,7 @@ export function PortfolioAlertsPanel({ rows }: PortfolioAlertsPanelProps) {
     } finally {
       setLoading(false);
     }
-  }, [rows]);
+  }, [rowIdsKey]);
 
   useEffect(() => {
     void load();

@@ -3,6 +3,7 @@ import { getApiBase } from './apiBase';
 import { toast } from 'sonner';
 import { listWorkCentersForDelivery, type WorkCenter } from './workCentersApi';
 import type { StoreIngredient, TpvBrandIngredientSelection, TpvBrandSupplements, TpvCategoryTemplates } from './catalogCustomization';
+import type { VertialPrinterConfig } from './vertialPrint/printerConfig';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -957,6 +958,8 @@ export interface TerminalConfig {
   name: string;
   datafonName: string;
   printerName: string;
+  /** Config técnica de impresión para este terminal (opcional; hereda la de la tienda). */
+  printerConfig?: VertialPrinterConfig;
   scaleDeviceId: string;
   scaleName: string;
   active: boolean;
@@ -982,6 +985,8 @@ export interface PointOfSale {
   /** Código de activación TPV tablet (6 caracteres). */
   terminalCode?: string;
   address: string;
+  /** Config de impresión por defecto de la tienda (todos los TPV la heredan). */
+  printerConfig?: VertialPrinterConfig;
   terminals: TerminalConfig[];
   active: boolean;
   createdAt: string;

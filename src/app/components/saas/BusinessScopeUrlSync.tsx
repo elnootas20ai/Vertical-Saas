@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { normalizeBusinessScopeId } from '../../lib/deliverySetup';
@@ -11,12 +11,25 @@ import {
 /**
  * Mantiene `?empresa=` en la URL alineado con la empresa activa.
  * Así el botón Atrás del navegador restaura pantalla + empresa juntos.
+ *
+ * Regla: el contexto manda al cambiar empresa en UI; la URL solo manda en
+ * carga inicial con ?empresa= o navegación atrás/adelante (popstate).
  */
 export function BusinessScopeUrlSync() {
   const location = useLocation();
   const navigate = useNavigate();
   const businessCtx = useBusinessOptional();
   const pendingUrlApplyRef = useRef<string | null>(null);
+  const initialUrlAppliedRef = useRef(false);
+  const isPopNavigationRef = useRef(false);
+
+  useEffect(() => {
+    const onPopState = () => {
+      isPopNavigationRef.current = true;
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   useLayoutEffect(() => {
     if (!businessCtx) return;
@@ -27,16 +40,30 @@ export function BusinessScopeUrlSync() {
 
     const urlBusinessId = readBusinessIdFromSearch(location.search);
     const contextBusinessId = normalizeBusinessScopeId(currentBusiness?.business_id);
+    const isPopNavigation = isPopNavigationRef.current;
+    isPopNavigationRef.current = false;
 
-    if (urlBusinessId && urlBusinessId !== contextBusinessId) {
+    const applyUrlToContext = (targetId: string) => {
       const exists = businesses.some(
-        (b) => normalizeBusinessScopeId(b.business_id) === urlBusinessId,
+        (b) => normalizeBusinessScopeId(b.business_id) === targetId,
       );
-      if (exists) {
-        pendingUrlApplyRef.current = urlBusinessId;
-        switchBusiness(urlBusinessId);
-        return;
+      if (!exists) return false;
+      pendingUrlApplyRef.current = targetId;
+      switchBusiness(targetId);
+      return true;
+    };
+
+    // Primera hidratación: deep-link / refresh con ?empresa=
+    if (!initialUrlAppliedRef.current) {
+      initialUrlAppliedRef.current = true;
+      if (urlBusinessId && urlBusinessId !== contextBusinessId) {
+        if (applyUrlToContext(urlBusinessId)) return;
       }
+    }
+
+    // Atrás/adelante del navegador: la URL restaura la empresa activa.
+    if (isPopNavigation && urlBusinessId && urlBusinessId !== contextBusinessId) {
+      if (applyUrlToContext(urlBusinessId)) return;
     }
 
     if (pendingUrlApplyRef.current) {
@@ -49,6 +76,7 @@ export function BusinessScopeUrlSync() {
 
     if (!contextBusinessId) return;
 
+    // Cambio manual en UI: empujar contexto → URL (no revertir al ?empresa= viejo).
     const nextSearch = withBusinessScopeSearch(location.search, contextBusinessId);
     if (location.search !== nextSearch) {
       navigate(

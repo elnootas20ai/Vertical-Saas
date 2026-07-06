@@ -9,6 +9,7 @@ import type { Business } from '../lib/businessApi';
 import type { PointOfSale } from '../lib/deliveryApi';
 import { buildDeliverySidebarStoreRows } from '../lib/deliveryApi';
 import type { AuthUser } from '../lib/authApi';
+import { isCompraventaBusinessType } from '../lib/compraventaSetup';
 import {
   isRestaurantBusinessType,
   isStrictDeliveryBusinessType,
@@ -69,6 +70,10 @@ export type LoadRetailStoresOptions = {
   includeInactivePdvs?: boolean;
   /** TPV: auto-crea PDV faltantes. Settings/listados: solo fetch. */
   tpvBootstrap?: boolean;
+  /** TPV: genera códigos tablet. Ajustes/listados: false. */
+  ensureTabletCodes?: boolean;
+  /** Listados: true (rápido). TPV bootstrap: false para enlazar PDV faltantes. */
+  skipPdvMerge?: boolean;
 };
 
 /** Clasifica cómo aislar tiendas según el tipo de negocio activo. */
@@ -224,6 +229,7 @@ export function shouldLoadRetailStoresForBusiness(
 ): boolean {
   if (!ctx.business) return false;
   if (hints?.tabletBoundStore) return false;
+  if (isCompraventaBusinessType(ctx.business.businessType)) return false;
   const kind = resolveRetailScopeKind(ctx.business.businessType);
   if (kind === 'restaurant') {
     if (hints?.hasDisplayedStores) return false;
@@ -260,21 +266,25 @@ export async function loadRetailStoresForBusiness(
     accountBusinessCount: options?.accountBusinessCount,
   };
   const kind = resolveRetailScopeKind(business.businessType);
+  const tpvBootstrap = options?.tpvBootstrap === true;
   const loadOpts = {
     accountBusinessCount: options?.accountBusinessCount,
     knownBusinessIds: options?.knownBusinessIds,
     includeInactivePdvs: options?.includeInactivePdvs,
+    skipPdvMerge: options?.skipPdvMerge ?? !tpvBootstrap,
+    ensureTabletCodes: options?.ensureTabletCodes ?? tpvBootstrap,
   };
 
   if (kind === 'restaurant') {
     return loadRestaurantStores(authUser, business, businesses, {
       accountBusinessCount: options?.accountBusinessCount,
       includeInactivePdvs: options?.includeInactivePdvs,
-      tpvBootstrap: options?.tpvBootstrap,
+      tpvBootstrap,
+      skipPdvMerge: loadOpts.skipPdvMerge,
     });
   }
 
-  const state = options?.tpvBootstrap
+  const state = tpvBootstrap
     ? await loadTpvPointsOfSaleForBusiness(authUser, business, loadOpts)
     : await loadDeliveryStores(authUser, business, loadOpts);
 

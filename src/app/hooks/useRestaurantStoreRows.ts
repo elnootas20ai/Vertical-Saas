@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
@@ -27,6 +27,8 @@ export function useRestaurantStoreRows(enabled: boolean) {
   const [fallbackRows, setFallbackRows] = useState<DeliverySidebarStoreRow[]>([]);
   const [fallbackLoading, setFallbackLoading] = useState(false);
   const inflightRef = useRef(false);
+  const stableRowsRef = useRef<DeliverySidebarStoreRow[]>([]);
+  const stableBusinessIdRef = useRef<string | null>(null);
 
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
@@ -55,22 +57,37 @@ export function useRestaurantStoreRows(enabled: boolean) {
     [enabled, scopedRetail, scopedPdvs],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enabled || !businessId || !currentBusiness) {
+      stableRowsRef.current = [];
+      stableBusinessIdRef.current = null;
       setFallbackRows([]);
       return;
     }
-    if (!businessesFetchSettled) {
-      setFallbackRows([]);
-      return;
+    if (stableBusinessIdRef.current !== businessId) {
+      stableBusinessIdRef.current = businessId;
+      const cached = readRestaurantRetailCache(businessId, currentBusiness, businesses);
+      stableRowsRef.current = cached?.rows ?? [];
+      setFallbackRows(stableRowsRef.current);
+    } else {
+      const cached = readRestaurantRetailCache(businessId, currentBusiness, businesses);
+      if (cached?.rows.length) {
+        stableRowsRef.current = cached.rows;
+        setFallbackRows(cached.rows);
+      }
     }
+  }, [enabled, businessId, currentBusiness, businesses]);
 
-    if (rowsFromScope.length > 0) {
-      setFallbackRows([]);
+  useEffect(() => {
+    if (!enabled || !businessId || !currentBusiness || !businessesFetchSettled) return;
+
+    const liveRows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
+    if (liveRows.length > 0) {
+      stableRowsRef.current = liveRows;
       writeRestaurantRetailCache(
         businessId,
         {
-          rows: rowsFromScope,
+          rows: liveRows,
           retailWorkCenters: scopedRetail,
           allPointsOfSale: scopedPdvs,
           savedAt: Date.now(),
@@ -78,16 +95,13 @@ export function useRestaurantStoreRows(enabled: boolean) {
         currentBusiness,
         businesses,
       );
-      return;
     }
-
-    const cached = readRestaurantRetailCache(businessId, currentBusiness, businesses);
-    setFallbackRows(cached?.rows ?? []);
   }, [
     enabled,
     businessId,
     businessesFetchSettled,
     rowsFromScope,
+    fallbackRows,
     scopedRetail,
     scopedPdvs,
     currentBusiness,
@@ -98,6 +112,7 @@ export function useRestaurantStoreRows(enabled: boolean) {
     if (!enabled || !dataUserId || !businessId || !currentBusiness) return;
     if (!businessesFetchSettled) return;
     if (rowsFromScope.length > 0) return;
+    if (stableRowsRef.current.length > 0) return;
     if (inflightRef.current) return;
 
     let cancelled = false;
@@ -117,8 +132,9 @@ export function useRestaurantStoreRows(enabled: boolean) {
         });
         const pdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail);
         const rows = buildDeliverySidebarStoreRows(retail, pdvs);
-        setFallbackRows(rows);
         if (rows.length > 0) {
+          stableRowsRef.current = rows;
+          setFallbackRows(rows);
           writeRestaurantRetailCache(
             businessId,
             {
@@ -130,7 +146,7 @@ export function useRestaurantStoreRows(enabled: boolean) {
             currentBusiness,
             businesses,
           );
-          if (activeStore.allPointsOfSale.length === 0) {
+          if (activeStore.allPointsOfSale.length === 0 && activeStore.retailWorkCenters.length === 0) {
             void activeStore.refresh();
           }
         }
@@ -143,7 +159,6 @@ export function useRestaurantStoreRows(enabled: boolean) {
     return () => {
       cancelled = true;
       inflightRef.current = false;
-      setFallbackLoading(false);
     };
   }, [
     enabled,
@@ -153,15 +168,21 @@ export function useRestaurantStoreRows(enabled: boolean) {
     businesses,
     rowsFromScope.length,
     activeStore.allPointsOfSale.length,
+    activeStore.retailWorkCenters.length,
     activeStore.refresh,
     currentBusiness,
   ]);
 
-  const rows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
+  const liveRows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;
+  if (liveRows.length > 0) {
+    stableRowsRef.current = liveRows;
+  }
+  const rows = liveRows.length > 0 ? liveRows : stableRowsRef.current;
+
   const loading =
-    enabled &&
-    rows.length === 0 &&
-    (!businessesFetchSettled || activeStore.loading || fallbackLoading);
+    enabled
+    && rows.length === 0
+    && (!businessesFetchSettled || activeStore.loading || fallbackLoading);
 
   return { rows, loading };
 }

@@ -1,4 +1,6 @@
 import { sendEmail } from '../services/email.js';
+import { sendAdminAlert } from '../services/adminAlerts.js';
+import { getAffiliateAdminInbox } from '../services/adminInbox.js';
 import logger from '../services/logger.js';
 import {
   ensureDatabase,
@@ -7,9 +9,13 @@ import {
   putDocument,
   deleteDocument,
   findAccountByUserId,
+  findAccountByEmail,
+  saveAccount,
+  verifyPassword,
 } from '../services/couchdb.js';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
+import { VERTIAL_SUPER_ADMIN_EMAIL } from '../utils/superAdmin.js';
 
 // ── Public constants ───────────────────────────────────────────────────────────
 
@@ -25,6 +31,9 @@ const VERTICALS = [
   'Consultoría',
   'Otro',
 ];
+
+/** Comisión base estándar del programa de afiliados (%). */
+export const DEFAULT_AFFILIATE_COMMISSION_RATE = 20;
 
 // ── Database name ──────────────────────────────────────────────────────────────
 
@@ -68,18 +77,301 @@ async function findAffiliateByCode(req, code) {
   return all.find((d) => d.type === 'affiliate' && d.affiliateCode === code && !d.deletedAt) || null;
 }
 
-function getAffiliateContactEmail() {
-  return (
-    process.env.AFFILIATE_EMAIL ||
-    process.env.DEFAULT_CONTACT_EMAIL ||
-    process.env.EMAIL_FROM ||
-    process.env.SMTP_USER ||
-    'hola@vertialapp.com'
+async function findAcceptedAffiliateByEmail(req, email) {
+  const norm = String(email || '').trim().toLowerCase();
+  if (!norm) return null;
+  await ensureAffiliatesDb(req);
+  const all = await getAllDocuments(req, AFFILIATES_DB);
+  return all.find(
+    (d) => d.type === 'affiliate'
+      && !d.deletedAt
+      && d.status === 'accepted'
+      && String(d.email || '').trim().toLowerCase() === norm,
+  ) || null;
+}
+
+async function findAffiliateByLinkedAccount(req, accountUserId) {
+  const uid = String(accountUserId || '').trim();
+  if (!uid) return null;
+  await ensureAffiliatesDb(req);
+  const all = await getAllDocuments(req, AFFILIATES_DB);
+  return all.find(
+    (d) => d.type === 'affiliate' && !d.deletedAt && String(d.linkedAccountUserId || '').trim() === uid,
+  ) || null;
+}
+
+/** Enlaza afiliado ↔ cuenta Vertial (mismo email). Idempotente. */
+async function linkAffiliateToVertialAccount(req, affiliate, account) {
+  if (!affiliate?._id || !account?.user_id) return affiliate;
+  const now = new Date().toISOString();
+  const linkedAffiliate = {
+    ...affiliate,
+    linkedAccountUserId: account.user_id,
+    portalAccessMode: 'account',
+    updatedAt: now,
+  };
+  await putDocument(req, AFFILIATES_DB, affiliate._id, linkedAffiliate);
+
+  const needsAccountUpdate =
+    account.affiliateId !== affiliate._id
+    || account.affiliateCode !== affiliate.affiliateCode;
+  if (needsAccountUpdate) {
+    await saveAccount(req, {
+      ...account,
+      affiliateId: affiliate._id,
+      affiliateCode: affiliate.affiliateCode || account.affiliateCode || '',
+      updatedAt: now,
+    });
+  }
+  return linkedAffiliate;
+}
+
+async function syncAffiliateAccountLink(req, affiliate) {
+  const email = String(affiliate?.email || '').trim();
+  if (!email) return affiliate;
+  try {
+    const account = await findAccountByEmail(req, email);
+    if (!account) return affiliate;
+    return await linkAffiliateToVertialAccount(req, affiliate, account);
+  } catch (err) {
+    logger.warn({ tag: 'AFFILIATE', err, affiliateId: affiliate._id }, 'No se pudo enlazar afiliado con cuenta Vertial');
+    return affiliate;
+  }
+}
+
+/** Tras registro Vertial: si el email ya es afiliado aceptado, enlazar automáticamente. */
+export async function syncAffiliateLinkForAccount(req, account) {
+  if (!account?.email) return null;
+  const affiliate = await findAcceptedAffiliateByEmail(req, account.email);
+  if (!affiliate) return null;
+  return linkAffiliateToVertialAccount(req, affiliate, account);
+}
+
+function isAffiliateAccountLinked(affiliate) {
+  return Boolean(
+    String(affiliate?.linkedAccountUserId || '').trim()
+    || affiliate?.portalAccessMode === 'account',
   );
+}
+
+/** Metadatos de cuenta Vertial para el backoffice admin (sin datos sensibles). */
+async function enrichAffiliateWithAccountMeta(req, affiliate) {
+  if (!affiliate) return affiliate;
+
+  const accountLinked = isAffiliateAccountLinked(affiliate);
+  let vertialAccountExists = false;
+  let vertialAccountUserId = null;
+  let vertialAccountName = null;
+  let vertialAccountCompany = null;
+
+  try {
+    const account = await findAccountByEmail(req, affiliate.email);
+    if (account?.user_id) {
+      vertialAccountExists = true;
+      vertialAccountUserId = account.user_id;
+      vertialAccountName = String(account.fullName || account.name || '').trim() || null;
+      vertialAccountCompany = String(account.companyName || account.company || '').trim() || null;
+    }
+  } catch (err) {
+    logger.warn({ tag: 'AFFILIATE_ADMIN', err, affiliateId: affiliate._id }, 'No se pudo consultar cuenta Vertial del afiliado');
+  }
+
+  return {
+    ...affiliate,
+    accountLinked,
+    vertialAccountExists,
+    vertialAccountUserId: accountLinked
+      ? String(affiliate.linkedAccountUserId || vertialAccountUserId || '').trim() || null
+      : vertialAccountUserId,
+    vertialAccountName,
+    vertialAccountCompany,
+    canLinkAccount: affiliate.status === 'accepted' && vertialAccountExists && !accountLinked,
+  };
+}
+
+function getAffiliateContactEmail() {
+  return getAffiliateAdminInbox() || 'hola@vertialapp.com';
 }
 
 function getPublicSiteUrl() {
   return process.env.APP_URL || 'https://vertialapp.com';
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+function affiliatePortalUrl() {
+  return `${getPublicSiteUrl()}/panel-afiliado`;
+}
+
+function affiliateRequestFormUrl() {
+  return `${getPublicSiteUrl()}/affiliados`;
+}
+
+const AFFILIATE_EMAIL_ACTION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const AFFILIATE_EMAIL_ACTIONS = new Set(['accept', 'reject', 'pending']);
+
+function getAffiliateActionSecret() {
+  return (
+    process.env.AFFILIATE_ACTION_SECRET
+    || process.env.JWT_SECRET
+    || 'vertial-dev-secret-change-in-production'
+  );
+}
+
+function signAffiliateEmailActionToken(affiliateId, action) {
+  const ts = Date.now();
+  const payload = `${String(affiliateId).trim()}:${action}:${ts}`;
+  const sig = crypto
+    .createHmac('sha256', getAffiliateActionSecret())
+    .update(payload)
+    .digest('base64url');
+  return `${Buffer.from(payload, 'utf8').toString('base64url')}.${sig}`;
+}
+
+function verifyAffiliateEmailActionToken(token) {
+  const rawToken = String(token || '').trim();
+  const dot = rawToken.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const encodedPayload = rawToken.slice(0, dot);
+  const sig = rawToken.slice(dot + 1);
+  let payload = '';
+  try {
+    payload = Buffer.from(encodedPayload, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  const expectedSig = crypto
+    .createHmac('sha256', getAffiliateActionSecret())
+    .update(payload)
+    .digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    return null;
+  }
+  const [affiliateId, action, tsRaw] = payload.split(':');
+  if (!affiliateId || !AFFILIATE_EMAIL_ACTIONS.has(action)) return null;
+  const ts = Number(tsRaw);
+  if (!Number.isFinite(ts) || Date.now() - ts > AFFILIATE_EMAIL_ACTION_TTL_MS) return null;
+  return { affiliateId, action };
+}
+
+function buildAffiliateEmailActionUrl(affiliateId, action) {
+  const token = signAffiliateEmailActionToken(affiliateId, action);
+  return `${getPublicSiteUrl().replace(/\/+$/, '')}/api/affiliate/email-action?token=${encodeURIComponent(token)}`;
+}
+
+function adminAffiliateRequestsUrl() {
+  return `${getPublicSiteUrl().replace(/\/+$/, '')}/saas/admin?tab=affiliate_requests`;
+}
+
+async function resolvePlatformAffiliateOwnerUserId(req) {
+  const explicit = String(process.env.AFFILIATE_OWNER_USER_ID || '').trim();
+  if (explicit) return explicit;
+  try {
+    const account = await findAccountByEmail(req, VERTIAL_SUPER_ADMIN_EMAIL);
+    return String(account?.user_id || account?._id || '').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function applyAffiliateStatusChange(
+  req,
+  affiliateId,
+  status,
+  { ownerUserId = null, sendStatusEmail = true } = {},
+) {
+  await ensureAffiliatesDb(req);
+  const existing = await getDocument(req, AFFILIATES_DB, affiliateId);
+  if (!existing || existing.type !== 'affiliate' || existing.deletedAt) {
+    const err = new Error('Afiliado no encontrado');
+    err.code = 'AFFILIATE_NOT_FOUND';
+    throw err;
+  }
+
+  const previousStatus = existing.status;
+  if (previousStatus === status) {
+    return {
+      doc: existing,
+      previousStatus,
+      statusEmailSent: false,
+      statusEmailError: null,
+      unchanged: true,
+    };
+  }
+
+  let doc = {
+    ...existing,
+    status,
+    user_id:
+      existing.user_id === 'public_request' && ownerUserId
+        ? ownerUserId
+        : existing.user_id,
+    updatedAt: new Date().toISOString(),
+  };
+  if (status === 'accepted' && !doc.referralCode) {
+    doc.referralCode = generateReferralCode();
+  }
+  await putDocument(req, AFFILIATES_DB, affiliateId, doc);
+
+  if (status === 'accepted') {
+    doc = await syncAffiliateAccountLink(req, doc);
+  }
+
+  let statusEmailSent = false;
+  let statusEmailError = null;
+  if (
+    sendStatusEmail
+    && (status === 'accepted' || status === 'rejected')
+  ) {
+    try {
+      if (status === 'accepted') {
+        await sendEmail({
+          to: doc.email,
+          subject: '¡Tu solicitud de afiliado ha sido aceptada! · Vertial',
+          html: buildAffiliateAcceptedEmail(doc),
+        });
+      } else {
+        await sendEmail({
+          to: doc.email,
+          subject: 'Actualización sobre tu solicitud de afiliación · Vertial',
+          html: buildAffiliateRejectedEmail(doc),
+        });
+      }
+      statusEmailSent = true;
+      const stamped = {
+        ...doc,
+        statusEmailSentAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await putDocument(req, AFFILIATES_DB, affiliateId, stamped);
+      return {
+        doc: stamped,
+        previousStatus,
+        statusEmailSent,
+        statusEmailError: null,
+        unchanged: false,
+      };
+    } catch (emailErr) {
+      statusEmailError = emailErr?.message || 'No se pudo enviar el correo';
+      logger.warn({ tag: 'AFFILIATE', affiliateId, status, emailErr }, 'Fallo email de cambio de estado');
+    }
+  }
+
+  return {
+    doc,
+    previousStatus,
+    statusEmailSent,
+    statusEmailError,
+    unchanged: false,
+  };
 }
 
 export async function findAffiliateByReferralCode(req, code) {
@@ -127,10 +419,8 @@ export async function submitAffiliateRequest(req, res) {
     const affiliateCode = generateAffiliateCode();
     const referralCode = generateReferralCode();
 
-    const doc = {
-      _id: id,
-      type: 'affiliate',
-      user_id: 'public_request',
+    const trimmedMessage = message?.trim() || '';
+    const payload = {
       name: name.trim(),
       email: email.trim(),
       phone: phone?.trim() || '',
@@ -138,12 +428,19 @@ export async function submitAffiliateRequest(req, res) {
       company: company?.trim() || '',
       website: website?.trim() || '',
       verticals: verticals || [],
-      message: message?.trim() || '',
+      message: trimmedMessage,
+    };
+
+    const doc = {
+      _id: id,
+      type: 'affiliate',
+      user_id: 'public_request',
+      ...payload,
       affiliateCode,
       referralCode,
-      commissionRate: 10,
+      commissionRate: DEFAULT_AFFILIATE_COMMISSION_RATE,
       status: 'pending',
-      notes: '',
+      notes: trimmedMessage,
       createdAt: now,
       updatedAt: now,
     };
@@ -152,20 +449,28 @@ export async function submitAffiliateRequest(req, res) {
 
     logger.info({ tag: 'AFFILIATE', email, verticals, affiliateCode }, 'Solicitud de afiliado recibida');
 
-    try {
-      const affiliateEmail = getAffiliateContactEmail();
-      const html = buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, website, verticals, message });
-      await sendEmail({
-        to: affiliateEmail,
-        subject: `Nueva solicitud de afiliado: ${name.trim()}`,
-        html,
-        replyTo: email.trim(),
+    const emailMeta = await sendAffiliateRequestEmails({
+      ...payload,
+      affiliateCode,
+      affiliateId: id,
+    });
+    if (emailMeta.adminNotifiedAt || emailMeta.applicantNotifiedAt) {
+      await putDocument(req, AFFILIATES_DB, id, {
+        ...doc,
+        adminNotifiedAt: emailMeta.adminNotifiedAt,
+        applicantNotifiedAt: emailMeta.applicantNotifiedAt,
+        updatedAt: new Date().toISOString(),
       });
-    } catch (emailErr) {
-      logger.warn({ tag: 'AFFILIATE', emailErr }, 'No se pudo enviar email de notificación (la solicitud se guardó correctamente)');
     }
 
-    return res.json({ ok: true, message: 'Solicitud enviada correctamente.' });
+    return res.json({
+      ok: true,
+      message: 'Solicitud enviada correctamente.',
+      emails: {
+        admin: Boolean(emailMeta.adminNotifiedAt),
+        applicant: Boolean(emailMeta.applicantNotifiedAt),
+      },
+    });
   } catch (err) {
     logger.error({ tag: 'AFFILIATE', err }, 'Error al guardar solicitud de afiliado');
     return res.status(500).json({ ok: false, error: 'No se pudo enviar la solicitud. Inténtalo más tarde.' });
@@ -195,9 +500,69 @@ export async function portalLogin(req, res) {
       await putDocument(req, AFFILIATES_DB, affiliate._id, affiliate);
     }
 
-    return res.json({ ok: true, affiliate: sanitizeAffiliate(affiliate) });
+    const linked = await syncAffiliateAccountLink(req, affiliate);
+
+    return res.json({
+      ok: true,
+      affiliate: sanitizeAffiliate(linked),
+      accessMode: linked.portalAccessMode || 'code',
+    });
   } catch (err) {
     logger.error({ tag: 'AFFILIATE_PORTAL', err }, 'Error en login de portal');
+    return res.status(500).json({ ok: false, error: 'Error interno' });
+  }
+}
+
+/** Acceso al panel con email + contraseña de la cuenta Vertial (recomendado). */
+export async function portalLoginWithAccount(req, res) {
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return badRequest(res, 'Email y contraseña son obligatorios');
+  }
+
+  try {
+    const account = await findAccountByEmail(req, email);
+    if (!account || !verifyPassword(password, account.passwordHash)) {
+      return res.status(401).json({ ok: false, error: 'Email o contraseña incorrectos' });
+    }
+
+    let affiliate = null;
+    if (account.affiliateId) {
+      try {
+        affiliate = await getDocument(req, AFFILIATES_DB, account.affiliateId);
+      } catch {
+        affiliate = null;
+      }
+    }
+    if (!affiliate || affiliate.deletedAt || affiliate.type !== 'affiliate') {
+      affiliate = await findAffiliateByLinkedAccount(req, account.user_id);
+    }
+    if (!affiliate) {
+      affiliate = await findAcceptedAffiliateByEmail(req, email);
+    }
+
+    if (!affiliate || affiliate.status !== 'accepted') {
+      return res.status(403).json({
+        ok: false,
+        error: 'Esta cuenta no tiene acceso al programa de afiliados. Solicita acceso en la página de afiliados.',
+      });
+    }
+
+    affiliate = await linkAffiliateToVertialAccount(req, affiliate, account);
+
+    if (!affiliate.referralCode) {
+      affiliate.referralCode = generateReferralCode();
+      affiliate.updatedAt = new Date().toISOString();
+      await putDocument(req, AFFILIATES_DB, affiliate._id, affiliate);
+    }
+
+    return res.json({
+      ok: true,
+      affiliate: sanitizeAffiliate(affiliate),
+      accessMode: 'account',
+    });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_PORTAL', err }, 'Error en login de portal con cuenta');
     return res.status(500).json({ ok: false, error: 'Error interno' });
   }
 }
@@ -295,7 +660,15 @@ export async function portalRegisterClient(req, res) {
   }
 }
 
+/** Versión del contrato — mantener alineada con AFFILIATE_AGREEMENT_VERSION (frontend). */
+export const AFFILIATE_AGREEMENT_VERSION_EXPORT = '2026-07-06-v1';
+
 function sanitizeAffiliate(aff) {
+  const contractVersion = String(aff.contractVersion || '').trim();
+  const contractAcceptedAt = aff.contractAcceptedAt || null;
+  const needsContractAcceptance = !contractAcceptedAt
+    || contractVersion !== AFFILIATE_AGREEMENT_VERSION_EXPORT;
+
   return {
     id: aff._id,
     name: aff.name,
@@ -308,10 +681,69 @@ function sanitizeAffiliate(aff) {
     commissionRate: aff.commissionRate,
     status: aff.status,
     createdAt: aff.createdAt,
+    contractAcceptedAt,
+    contractVersion: contractVersion || null,
+    needsContractAcceptance,
   };
 }
 
+export async function portalAcceptContract(req, res) {
+  const { code } = req.params;
+  const { version, accepted } = req.body || {};
+
+  if (!code) return badRequest(res, 'Código requerido');
+  if (!accepted) return badRequest(res, 'Debes aceptar el contrato para continuar');
+  if (String(version || '').trim() !== AFFILIATE_AGREEMENT_VERSION_EXPORT) {
+    return badRequest(res, 'Versión del contrato no válida. Recarga la página e inténtalo de nuevo.');
+  }
+
+  try {
+    const affiliate = await findAffiliateByCode(req, code.toUpperCase());
+    if (!affiliate || affiliate.status !== 'accepted') {
+      return res.status(404).json({ ok: false, error: 'Afiliado no encontrado o no activo' });
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...affiliate,
+      contractAcceptedAt: now,
+      contractVersion: AFFILIATE_AGREEMENT_VERSION_EXPORT,
+      contractAcceptedIp: req.ip || req.headers['x-forwarded-for'] || '',
+      contractAcceptedUserAgent: String(req.headers['user-agent'] || '').slice(0, 500),
+      updatedAt: now,
+    };
+
+    await putDocument(req, AFFILIATES_DB, affiliate._id, updated);
+
+    logger.info(
+      {
+        tag: 'AFFILIATE_PORTAL',
+        affiliateId: affiliate._id,
+        version: AFFILIATE_AGREEMENT_VERSION_EXPORT,
+        ip: updated.contractAcceptedIp,
+      },
+      'Contrato de afiliado aceptado',
+    );
+
+    return res.json({
+      ok: true,
+      affiliate: sanitizeAffiliate(updated),
+    });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_PORTAL', err }, 'Error al registrar aceptación de contrato');
+    return res.status(500).json({ ok: false, error: 'No se pudo registrar la aceptación' });
+  }
+}
+
 // ── Admin: Affiliates CRUD ─────────────────────────────────────────────────────
+
+function adminAffiliateRecords(all, userId) {
+  return all.filter(
+    (d) => d.type === 'affiliate'
+      && !d.deletedAt
+      && (d.user_id === userId || d.user_id === 'public_request'),
+  );
+}
 
 export async function listAffiliatesAdmin(req, res) {
   try {
@@ -321,15 +753,45 @@ export async function listAffiliatesAdmin(req, res) {
     await ensureAffiliatesDb(req);
     const all = await getAllDocuments(req, AFFILIATES_DB);
 
-    const affiliates = all
-      .filter((d) => d.type === 'affiliate' && !d.deletedAt)
-      .filter((d) => d.user_id === userId || d.user_id === 'public_request')
+    const affiliates = adminAffiliateRecords(all, userId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-    return res.json({ ok: true, affiliates });
+    const enriched = await Promise.all(
+      affiliates.map((row) => enrichAffiliateWithAccountMeta(req, row)),
+    );
+
+    return res.json({ ok: true, affiliates: enriched });
   } catch (err) {
     logger.error({ tag: 'AFFILIATE_ADMIN', err }, 'Error al listar afiliados');
     return res.status(500).json({ ok: false, error: err.message || 'Error al cargar afiliados' });
+  }
+}
+
+export async function affiliateRequestsSummaryAdmin(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    await ensureAffiliatesDb(req);
+    const all = await getAllDocuments(req, AFFILIATES_DB);
+    const affiliates = adminAffiliateRecords(all, userId);
+
+    const summary = {
+      total: affiliates.length,
+      pending: 0,
+      accepted: 0,
+      rejected: 0,
+    };
+    for (const row of affiliates) {
+      if (row.status === 'accepted') summary.accepted += 1;
+      else if (row.status === 'rejected') summary.rejected += 1;
+      else summary.pending += 1;
+    }
+
+    return res.json({ ok: true, ...summary });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_ADMIN', err }, 'Error al resumir solicitudes de afiliados');
+    return res.status(500).json({ ok: false, error: err.message || 'Error al cargar resumen' });
   }
 }
 
@@ -359,7 +821,7 @@ export async function createAffiliateAdmin(req, res) {
       company: company?.trim() || '',
       affiliateCode,
       referralCode,
-      commissionRate: Number(commissionRate) || 10,
+      commissionRate: Number(commissionRate) || DEFAULT_AFFILIATE_COMMISSION_RATE,
       status: status || 'pending',
       notes: notes?.trim() || '',
       createdAt: now,
@@ -409,6 +871,125 @@ export async function updateAffiliateAdmin(req, res) {
   }
 }
 
+export async function handleAffiliateEmailAction(req, res) {
+  const verified = verifyAffiliateEmailActionToken(req.query.token);
+  if (!verified) {
+    return res.status(400).send(buildAffiliateEmailActionResultHtml({
+      ok: false,
+      title: 'Enlace no válido o caducado',
+      message: 'Este enlace ha expirado o no es válido. Abre el panel admin para gestionar la solicitud manualmente.',
+      adminUrl: adminAffiliateRequestsUrl(),
+    }));
+  }
+
+  try {
+    await ensureAffiliatesDb(req);
+    const affiliate = await getDocument(req, AFFILIATES_DB, verified.affiliateId);
+    if (!affiliate || affiliate.type !== 'affiliate' || affiliate.deletedAt) {
+      return res.status(404).send(buildAffiliateEmailActionResultHtml({
+        ok: false,
+        title: 'Solicitud no encontrada',
+        message: 'No encontramos esta solicitud de afiliado. Puede que ya se haya eliminado.',
+        adminUrl: adminAffiliateRequestsUrl(),
+      }));
+    }
+
+    if (verified.action === 'pending') {
+      return res.send(buildAffiliateEmailActionResultHtml({
+        ok: true,
+        title: 'Solicitud pendiente de revisión',
+        message: `La solicitud de ${affiliate.name} se mantiene en estado pendiente. Puedes revisarla más tarde en el panel admin.`,
+        affiliate,
+        adminUrl: adminAffiliateRequestsUrl(),
+        statusLabel: 'Pendiente',
+      }));
+    }
+
+    const nextStatus = verified.action === 'accept' ? 'accepted' : 'rejected';
+    const ownerUserId = await resolvePlatformAffiliateOwnerUserId(req);
+    const result = await applyAffiliateStatusChange(req, verified.affiliateId, nextStatus, {
+      ownerUserId,
+      sendStatusEmail: true,
+    });
+
+    if (nextStatus === 'accepted') {
+      return res.send(buildAffiliateEmailActionResultHtml({
+        ok: true,
+        title: result.unchanged ? 'Solicitud ya aceptada' : 'Solicitud aceptada',
+        message: result.unchanged
+          ? `${affiliate.name} ya estaba aceptado como afiliado.`
+          : `Has aceptado a ${result.doc.name}. Se ha enviado un email con su código ${result.doc.affiliateCode || ''}.`,
+        affiliate: result.doc,
+        adminUrl: adminAffiliateRequestsUrl(),
+        statusLabel: 'Aceptado',
+        emailNote: result.statusEmailSent
+          ? 'Correo enviado al solicitante.'
+          : (result.statusEmailError || 'No se pudo enviar el correo al solicitante.'),
+      }));
+    }
+
+    return res.send(buildAffiliateEmailActionResultHtml({
+      ok: true,
+      title: result.unchanged ? 'Solicitud ya rechazada' : 'Solicitud rechazada',
+      message: result.unchanged
+        ? `${affiliate.name} ya estaba marcado como rechazado.`
+        : `Has rechazado la solicitud de ${result.doc.name}.`,
+      affiliate: result.doc,
+      adminUrl: adminAffiliateRequestsUrl(),
+      statusLabel: 'Rechazado',
+      emailNote: result.statusEmailSent
+        ? 'Se notificó al solicitante por email.'
+        : (result.statusEmailError || null),
+    }));
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE', err }, 'Error en acción de email de afiliado');
+    return res.status(500).send(buildAffiliateEmailActionResultHtml({
+      ok: false,
+      title: 'No se pudo completar la acción',
+      message: err.message || 'Error interno. Inténtalo desde el panel admin.',
+      adminUrl: adminAffiliateRequestsUrl(),
+    }));
+  }
+}
+
+export async function linkAffiliateAccountAdmin(req, res) {
+  try {
+    const { userId, affiliateId } = req.params;
+    if (!userId || !affiliateId) return badRequest(res, 'Faltan parámetros');
+
+    await ensureAffiliatesDb(req);
+    const existing = await getDocument(req, AFFILIATES_DB, affiliateId);
+    if (!existing || existing.type !== 'affiliate' || existing.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Afiliado no encontrado' });
+    }
+    if (existing.status !== 'accepted') {
+      return badRequest(res, 'Solo se puede enlazar un afiliado aceptado');
+    }
+    if (isAffiliateAccountLinked(existing)) {
+      const affiliate = await enrichAffiliateWithAccountMeta(req, existing);
+      return res.json({ ok: true, affiliate, alreadyLinked: true });
+    }
+
+    const account = await findAccountByEmail(req, existing.email);
+    if (!account?.user_id) {
+      return badRequest(res, 'No hay cuenta Vertial con ese email. El afiliado debe registrarse primero.');
+    }
+
+    const linked = await linkAffiliateToVertialAccount(req, existing, account);
+    const affiliate = await enrichAffiliateWithAccountMeta(req, linked);
+
+    logger.info(
+      { tag: 'AFFILIATE_ADMIN', userId, affiliateId, linkedAccountUserId: linked.linkedAccountUserId },
+      'Afiliado enlazado manualmente con cuenta Vertial',
+    );
+
+    return res.json({ ok: true, affiliate, alreadyLinked: false });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_ADMIN', err }, 'Error al enlazar afiliado con cuenta Vertial');
+    return res.status(500).json({ ok: false, error: err.message || 'Error al enlazar cuenta' });
+  }
+}
+
 export async function updateAffiliateStatusAdmin(req, res) {
   try {
     const { userId, affiliateId } = req.params;
@@ -418,21 +999,23 @@ export async function updateAffiliateStatusAdmin(req, res) {
     if (!userId || !affiliateId) return badRequest(res, 'Faltan parámetros');
     if (!status || !validStatuses.includes(status)) return badRequest(res, 'Estado no válido');
 
-    await ensureAffiliatesDb(req);
-    const existing = await getDocument(req, AFFILIATES_DB, affiliateId);
-    if (!existing || existing.type !== 'affiliate' || existing.deletedAt) {
+    const result = await applyAffiliateStatusChange(req, affiliateId, status, {
+      ownerUserId: userId,
+      sendStatusEmail: true,
+    });
+
+    const affiliate = await enrichAffiliateWithAccountMeta(req, result.doc);
+
+    return res.json({
+      ok: true,
+      affiliate,
+      statusEmailSent: result.statusEmailSent,
+      statusEmailError: result.statusEmailError,
+    });
+  } catch (err) {
+    if (err.code === 'AFFILIATE_NOT_FOUND') {
       return res.status(404).json({ ok: false, error: 'Afiliado no encontrado' });
     }
-
-    const doc = {
-      ...existing,
-      status,
-      user_id: existing.user_id === 'public_request' ? userId : existing.user_id,
-      updatedAt: new Date().toISOString(),
-    };
-    await putDocument(req, AFFILIATES_DB, affiliateId, doc);
-    return res.json({ ok: true, affiliate: doc });
-  } catch (err) {
     logger.error({ tag: 'AFFILIATE_ADMIN', err }, 'Error al actualizar estado de afiliado');
     return res.status(500).json({ ok: false, error: err.message || 'Error al actualizar estado' });
   }
@@ -909,11 +1492,56 @@ export async function portalReferredAccounts(req, res) {
 
 // ── Email builder ──────────────────────────────────────────────────────────────
 
-function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, website, verticals, message }) {
-  const verticalsHtml = verticals
+async function sendAffiliateRequestEmails(payload) {
+  const now = new Date().toISOString();
+  const meta = { adminNotifiedAt: null, applicantNotifiedAt: null };
+  const adminEmail = getAffiliateContactEmail();
+  const adminHtml = buildAffiliateRequestEmail(payload);
+
+  try {
+    await sendEmail({
+      to: adminEmail,
+      subject: `Nueva solicitud de afiliado: ${payload.name}`,
+      html: adminHtml,
+      replyTo: payload.email,
+    });
+    meta.adminNotifiedAt = now;
+    logger.info({ tag: 'AFFILIATE', to: adminEmail }, 'Email de solicitud enviado al admin');
+  } catch (emailErr) {
+    logger.warn({ tag: 'AFFILIATE', emailErr, to: adminEmail }, 'Fallo email admin de solicitud de afiliado');
+    try {
+      await sendAdminAlert({
+        key: `affiliate_request_${payload.email}`,
+        subject: `Nueva solicitud de afiliado: ${payload.name}`,
+        html: adminHtml,
+        cooldownMs: 60_000,
+      });
+      meta.adminNotifiedAt = now;
+    } catch (alertErr) {
+      logger.warn({ tag: 'AFFILIATE', alertErr }, 'Fallo alerta admin de solicitud de afiliado');
+    }
+  }
+
+  try {
+    await sendEmail({
+      to: payload.email,
+      subject: 'Hemos recibido tu solicitud de afiliación · Vertial',
+      html: buildAffiliateApplicantConfirmationEmail(payload),
+    });
+    meta.applicantNotifiedAt = now;
+    logger.info({ tag: 'AFFILIATE', to: payload.email }, 'Email de confirmación enviado al solicitante');
+  } catch (emailErr) {
+    logger.warn({ tag: 'AFFILIATE', emailErr, to: payload.email }, 'Fallo email de confirmación al solicitante');
+  }
+
+  return meta;
+}
+
+function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, website, verticals, message, affiliateCode, affiliateId }) {
+  const verticalsHtml = (verticals || [])
     .map(
       (v) =>
-        `<span style="display:inline-block;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:3px 10px;border-radius:20px;font-size:13px;margin:2px 4px 2px 0;">${v}</span>`,
+        `<span style="display:inline-block;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;padding:3px 10px;border-radius:20px;font-size:13px;margin:2px 4px 2px 0;">${escapeHtml(v)}</span>`,
     )
     .join('');
 
@@ -924,17 +1552,68 @@ function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, web
     ['WhatsApp', whatsapp || phone || '—'],
     ['Empresa', company || '—'],
     ['Web', website || '—'],
+    ...(affiliateCode ? [['Código reservado', affiliateCode]] : []),
   ];
 
   const rowsHtml = rows
     .map(
       ([label, value]) => `
       <tr>
-        <td style="padding:10px 16px;font-weight:600;color:#374151;background:#f9fafb;width:140px;border-bottom:1px solid #e5e7eb;">${label}</td>
-        <td style="padding:10px 16px;color:#111827;border-bottom:1px solid #e5e7eb;">${value}</td>
+        <td style="padding:10px 16px;font-weight:600;color:#374151;background:#f9fafb;width:140px;border-bottom:1px solid #e5e7eb;">${escapeHtml(label)}</td>
+        <td style="padding:10px 16px;color:#111827;border-bottom:1px solid #e5e7eb;">${escapeHtml(value)}</td>
       </tr>`,
     )
     .join('');
+
+  const messageBlock = message
+    ? `<tr><td style="padding:20px 32px 0;">
+          <p style="margin:0 0 8px;font-weight:600;color:#374151;font-size:14px;">Mensaje adicional</p>
+          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:14px;color:#374151;font-size:14px;line-height:1.6;">${escapeHtml(message).replace(/\n/g, '<br>')}</div>
+        </td></tr>`
+    : '';
+
+  const actionButtonsBlock = affiliateId
+    ? `<tr><td style="padding:28px 32px 0;">
+          <p style="margin:0 0 14px;font-weight:600;color:#374151;font-size:14px;">Gestionar solicitud</p>
+          <table cellpadding="0" cellspacing="0" width="100%"><tr><td>
+            <table cellpadding="0" cellspacing="0" width="100%">
+              <tr>
+                <td style="padding-bottom:10px;">
+                  <a href="${escapeHtml(buildAffiliateEmailActionUrl(affiliateId, 'accept'))}"
+                     style="display:block;background:#16a34a;color:#fff;padding:14px 18px;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;text-align:center;">
+                    ✅ Aceptar solicitud
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom:10px;">
+                  <a href="${escapeHtml(buildAffiliateEmailActionUrl(affiliateId, 'pending'))}"
+                     style="display:block;background:#f59e0b;color:#fff;padding:14px 18px;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;text-align:center;">
+                    ⏳ Mantener pendiente
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-bottom:10px;">
+                  <a href="${escapeHtml(buildAffiliateEmailActionUrl(affiliateId, 'reject'))}"
+                     style="display:block;background:#ef4444;color:#fff;padding:14px 18px;text-decoration:none;border-radius:10px;font-weight:700;font-size:15px;text-align:center;">
+                    ❌ Rechazar solicitud
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <a href="${escapeHtml(adminAffiliateRequestsUrl())}"
+                     style="display:block;background:#111827;color:#fff;padding:12px 18px;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;text-align:center;">
+                    Abrir panel admin
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </td></tr></table>
+          <p style="margin:14px 0 0;color:#9ca3af;font-size:11px;line-height:1.5;">Los enlaces de acción caducan a los 7 días. Al aceptar, el solicitante recibe su código por email automáticamente.</p>
+        </td></tr>`
+    : '';
 
   return `
 <!DOCTYPE html>
@@ -950,7 +1629,7 @@ function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, web
         </td></tr>
         <tr><td style="padding:32px 32px 0;">
           <h2 style="margin:0 0 8px;color:#111;font-size:20px;">Nueva solicitud de afiliado</h2>
-          <p style="color:#6b7280;margin:0 0 24px;font-size:14px;">Has recibido una nueva solicitud para unirse al programa de afiliados de Vertial.</p>
+          <p style="color:#6b7280;margin:0 0 24px;font-size:14px;">Has recibido una nueva solicitud para unirse al programa de afiliados de Vertial. Puedes gestionarla desde el panel admin.</p>
         </td></tr>
         <tr><td style="padding:0 32px;">
           <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
@@ -959,18 +1638,206 @@ function buildAffiliateRequestEmail({ name, email, phone, whatsapp, company, web
         </td></tr>
         <tr><td style="padding:24px 32px 0;">
           <p style="margin:0 0 10px;font-weight:600;color:#374151;font-size:14px;">Verticales solicitadas</p>
-          <div>${verticalsHtml}</div>
+          <div>${verticalsHtml || '<span style="color:#6b7280;font-size:14px;">—</span>'}</div>
         </td></tr>
-        ${
-          message
-            ? `<tr><td style="padding:20px 32px 0;">
-          <p style="margin:0 0 8px;font-weight:600;color:#374151;font-size:14px;">Mensaje adicional</p>
-          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:14px;color:#374151;font-size:14px;line-height:1.6;">${message.replace(/\n/g, '<br>')}</div>
-        </td></tr>`
-            : ''
-        }
+        ${messageBlock}
+        ${actionButtonsBlock}
         <tr><td style="padding:32px;">
-          <p style="color:#9ca3af;font-size:12px;margin:0;">Este correo fue generado automáticamente desde el formulario de afiliados de <a href="${getPublicSiteUrl()}" style="color:#2563eb;">${getPublicSiteUrl().replace(/^https?:\/\//, '')}</a></p>
+          <p style="color:#9ca3af;font-size:12px;margin:0;">Generado automáticamente desde <a href="${escapeHtml(affiliateRequestFormUrl())}" style="color:#2563eb;">${escapeHtml(affiliateRequestFormUrl().replace(/^https?:\/\//, ''))}</a></p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+function buildAffiliateApplicantConfirmationEmail({ name, verticals }) {
+  const verticalsText = (verticals || []).map((v) => escapeHtml(v)).join(', ');
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
+        <tr><td style="background:#000;padding:24px 32px;">
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Hola ${escapeHtml(name)},</h2>
+          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
+            Hemos recibido tu solicitud para unirte al <strong>programa de afiliados de Vertial</strong>.
+            Nuestro equipo la revisará y te contactaremos en un plazo máximo de <strong>48 horas</strong>.
+          </p>
+          ${verticalsText ? `<p style="color:#555;margin:0 0 16px;line-height:1.6;">Sectores indicados: <strong>${verticalsText}</strong>.</p>` : ''}
+          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+            Cuando seas aceptado recibirás un correo con tu código de afiliado para acceder a tu panel.
+          </p>
+          <p style="color:#888;font-size:13px;margin:0;line-height:1.5;">
+            Si tienes alguna duda, responde a este correo y te ayudaremos.
+          </p>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Programa de afiliados</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+function buildAffiliateAcceptedEmail(affiliate) {
+  const portalUrl = affiliatePortalUrl();
+  const hasLinkedAccount = Boolean(affiliate.linkedAccountUserId || affiliate.portalAccessMode === 'account');
+  const accessBlock = hasLinkedAccount
+    ? `<p style="color:#555;margin:0 0 16px;line-height:1.6;">
+         Accede a tu panel con el <strong>mismo email y contraseña</strong> que usas en Vertial:
+       </p>
+       <table cellpadding="0" cellspacing="0" style="margin:0 auto 24px;"><tr><td style="background:#111;border-radius:8px;">
+         <a href="${escapeHtml(portalUrl)}"
+            style="display:inline-block;background:#111;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:600;font-size:15px;">
+           Entrar al panel de afiliado
+         </a>
+       </td></tr></table>
+       <p style="color:#6b7280;margin:0 0 16px;font-size:13px;line-height:1.5;">
+         Tu código de referido para nuevos clientes sigue siendo
+         <strong style="font-family:monospace;">${escapeHtml(affiliate.referralCode || '—')}</strong>
+         (no lo uses para entrar al panel).
+       </p>`
+    : `<p style="color:#555;margin:0 0 16px;line-height:1.6;">
+         Tu solicitud ha sido <strong>aceptada</strong>. Para activar tu acceso:
+       </p>
+       <ol style="color:#555;margin:0 0 16px;padding-left:20px;line-height:1.7;font-size:14px;">
+         <li>Regístrate en Vertial con este email: <strong>${escapeHtml(affiliate.email)}</strong></li>
+         <li>Entra al panel de afiliado con ese email y contraseña</li>
+       </ol>
+       <table cellpadding="0" cellspacing="0" style="margin:0 auto 16px;"><tr><td style="background:#2563eb;border-radius:8px;">
+         <a href="${escapeHtml(`${getPublicSiteUrl()}/auth/register`)}"
+            style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">
+           Crear cuenta Vertial
+         </a>
+       </td></tr></table>
+       <p style="color:#555;margin:0 0 8px;line-height:1.6;font-size:14px;">
+         Código de panel (alternativo): <strong style="font-family:monospace;letter-spacing:1px;">${escapeHtml(affiliate.affiliateCode || '')}</strong>
+       </p>
+       <p style="color:#555;margin:0 0 16px;line-height:1.6;font-size:14px;">
+         Código de referido para clientes: <strong style="font-family:monospace;">${escapeHtml(affiliate.referralCode || '—')}</strong>
+       </p>`;
+
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
+        <tr><td style="background:#16a34a;padding:24px 32px;">
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Afiliado aceptado</span>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">¡Bienvenido, ${escapeHtml(affiliate.name)}!</h2>
+          ${accessBlock}
+          <p style="color:#555;margin:0;line-height:1.6;font-size:14px;">
+            Comisión base: <strong>${Number(affiliate.commissionRate) || DEFAULT_AFFILIATE_COMMISSION_RATE}%</strong>
+          </p>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Programa de afiliados</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+function buildAffiliateRejectedEmail(affiliate) {
+  const formUrl = affiliateRequestFormUrl();
+  return `
+<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
+        <tr><td style="background:#111;padding:24px 32px;">
+          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Hola ${escapeHtml(affiliate.name)},</h2>
+          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
+            Gracias por tu interés en el programa de afiliados de Vertial. Tras revisar tu solicitud,
+            en este momento <strong>no podemos aprobarla</strong>.
+          </p>
+          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+            Si crees que ha sido un error o tu situación ha cambiado, puedes volver a solicitar acceso
+            o contactarnos respondiendo a este correo.
+          </p>
+          <table cellpadding="0" cellspacing="0"><tr><td style="background:#2563eb;border-radius:8px;">
+            <a href="${escapeHtml(formUrl)}"
+               style="display:inline-block;background:#2563eb;color:#fff;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;">
+              Volver a solicitar
+            </a>
+          </td></tr></table>
+        </td></tr>
+        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Programa de afiliados</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+function buildAffiliateEmailActionResultHtml({
+  ok,
+  title,
+  message,
+  affiliate,
+  adminUrl,
+  statusLabel,
+  emailNote,
+}) {
+  const accent = ok ? '#16a34a' : '#dc2626';
+  const affiliateBlock = affiliate
+    ? `<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin:20px 0;text-align:left;">
+        <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Solicitante</p>
+        <p style="margin:0;font-size:16px;font-weight:700;color:#111;">${escapeHtml(affiliate.name)}</p>
+        <p style="margin:6px 0 0;font-size:13px;color:#374151;">${escapeHtml(affiliate.email)}</p>
+        ${affiliate.affiliateCode ? `<p style="margin:8px 0 0;font-size:12px;color:#374151;">Código: <strong style="font-family:monospace;">${escapeHtml(affiliate.affiliateCode)}</strong></p>` : ''}
+        ${statusLabel ? `<p style="margin:8px 0 0;font-size:12px;color:#374151;">Estado: <strong>${escapeHtml(statusLabel)}</strong></p>` : ''}
+      </div>`
+    : '';
+  const noteBlock = emailNote
+    ? `<p style="margin:16px 0 0;font-size:13px;color:#6b7280;">${escapeHtml(emailNote)}</p>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${escapeHtml(title)}</title></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;">
+        <tr><td style="background:${accent};padding:24px 28px;">
+          <span style="color:#fff;font-size:20px;font-weight:bold;">Vertial · Afiliados</span>
+        </td></tr>
+        <tr><td style="padding:28px;text-align:center;">
+          <h1 style="margin:0 0 12px;color:#111;font-size:24px;">${escapeHtml(title)}</h1>
+          <p style="margin:0;color:#555;font-size:15px;line-height:1.6;">${escapeHtml(message)}</p>
+          ${affiliateBlock}
+          ${noteBlock}
+          ${adminUrl ? `<table cellpadding="0" cellspacing="0" style="margin:24px auto 0;"><tr><td style="background:#111827;border-radius:10px;">
+            <a href="${escapeHtml(adminUrl)}" style="display:inline-block;color:#fff;padding:12px 22px;text-decoration:none;font-weight:600;font-size:14px;">
+              Ir al panel admin
+            </a>
+          </td></tr></table>` : ''}
         </td></tr>
       </table>
     </td></tr>

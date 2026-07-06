@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -11,6 +12,7 @@ import {
   Unlock,
   Key,
   Link,
+  Link2,
   Save,
   AlertTriangle,
   CheckCircle,
@@ -98,12 +100,15 @@ import { MoneiPaymentsTab } from './MoneiPaymentsTab';
 import { getApiBase } from '../../lib/apiBase';
 import {
   listAffiliates,
+  linkAffiliateAccount,
   updateAffiliateStatus,
   deleteAffiliate,
   clearAffiliateRequests,
   type Affiliate,
   type AffiliateStatus,
 } from '../../lib/affiliatesApi';
+import { VertialAccountBadge } from '../../components/saas/affiliates/VertialAccountBadge';
+import { toast } from 'sonner';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -2959,6 +2964,7 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<AffiliateStatus | 'all'>('pending');
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [search, setSearch] = useState('');
 
@@ -2970,12 +2976,13 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
       setRequests(all);
     } catch (err) {
       console.error('Error loading affiliate requests:', err);
+      toast.error('No se pudieron cargar las solicitudes de afiliados');
     } finally {
       setLoading(false);
     }
   }, [userId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   const filtered = useMemo(() => {
     return requests.filter((r) => {
@@ -2991,22 +2998,55 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
     });
   }, [requests, filter, search]);
 
-  const counts = useMemo(() => ({
-    all: requests.length,
-    pending: requests.filter((r) => r.status === 'pending').length,
-    accepted: requests.filter((r) => r.status === 'accepted').length,
-    rejected: requests.filter((r) => r.status === 'rejected').length,
-  }), [requests]);
-
   const handleStatus = async (id: string, status: AffiliateStatus) => {
     setProcessingId(id);
     try {
-      await updateAffiliateStatus(userId, id, status);
+      const { affiliate, statusEmailSent, statusEmailError } = await updateAffiliateStatus(userId, id, status);
       await load();
+      if (status === 'accepted') {
+        const accessHint = affiliate.accountLinked
+          ? 'Entrará con su email y contraseña Vertial.'
+          : affiliate.vertialAccountExists
+            ? 'Hay cuenta Vertial: enlázala desde Afiliados si no se vinculó sola.'
+            : 'Debe registrarse en Vertial con ese email.';
+        toast.success(
+          statusEmailSent
+            ? `Afiliado aceptado. Email enviado. ${accessHint}`
+            : `Afiliado aceptado (email no enviado). ${accessHint}`,
+        );
+      } else if (status === 'rejected') {
+        toast.success(
+          statusEmailSent
+            ? 'Solicitud rechazada. Se notificó al solicitante por email.'
+            : 'Solicitud rechazada (email no enviado).',
+        );
+      }
+      if (statusEmailError) {
+        toast.error(`Correo no enviado: ${statusEmailError}`);
+      }
     } catch (err) {
       console.error('Error updating status:', err);
+      toast.error(err instanceof Error ? err.message : 'No se pudo actualizar el estado');
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const handleLinkAccount = async (id: string) => {
+    setLinkingId(id);
+    try {
+      const { affiliate, alreadyLinked } = await linkAffiliateAccount(userId, id);
+      await load();
+      toast.success(
+        alreadyLinked
+          ? 'Este afiliado ya estaba enlazado con su cuenta Vertial.'
+          : `Cuenta enlazada${affiliate.vertialAccountName ? `: ${affiliate.vertialAccountName}` : ''}.`,
+      );
+    } catch (err) {
+      console.error('Error linking affiliate account:', err);
+      toast.error(err instanceof Error ? err.message : 'No se pudo enlazar la cuenta');
+    } finally {
+      setLinkingId(null);
     }
   };
 
@@ -3044,20 +3084,14 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
 
   return (
     <div className="space-y-5">
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {[
-          { label: 'Total solicitudes', value: counts.all, icon: <HandshakeIcon className="w-5 h-5 text-blue-500" />, bg: 'bg-blue-50' },
-          { label: 'Pendientes', value: counts.pending, icon: <Clock className="w-5 h-5 text-amber-500" />, bg: 'bg-amber-50' },
-          { label: 'Aceptadas', value: counts.accepted, icon: <CheckCircle className="w-5 h-5 text-emerald-500" />, bg: 'bg-emerald-50' },
-          { label: 'Rechazadas', value: counts.rejected, icon: <XCircle className="w-5 h-5 text-red-500" />, bg: 'bg-red-50' },
-        ].map((kpi) => (
-          <div key={kpi.label} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
-            <div className={`inline-flex p-2 rounded-xl ${kpi.bg} mb-3`}>{kpi.icon}</div>
-            <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{kpi.value}</div>
-            <div className="text-xs text-gray-500 mt-0.5">{kpi.label}</div>
-          </div>
-        ))}
+      <div className="rounded-2xl border border-blue-100 bg-blue-50/80 dark:bg-blue-950/20 dark:border-blue-900 px-4 py-3 text-sm text-blue-900 dark:text-blue-100">
+        <p className="font-semibold">Correos automáticos activos</p>
+        <p className="text-blue-800/80 dark:text-blue-200/80 mt-1 text-xs leading-relaxed">
+          Al enviar el formulario público (/affiliados) se notifica al buzón configurado en{' '}
+          <code className="font-mono text-[11px]">AFFILIATE_EMAIL</code> con botones para{' '}
+          <strong>aceptar</strong>, <strong>mantener pendiente</strong> o <strong>rechazar</strong> desde el propio correo.
+          Al aceptar, el solicitante recibe su código automáticamente.
+        </p>
       </div>
 
       {/* Filters */}
@@ -3070,10 +3104,10 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
         </div>
         <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700 rounded-xl">
           {([
-            { id: 'pending' as const, label: 'Pendientes', count: counts.pending },
-            { id: 'all' as const, label: 'Todas', count: counts.all },
-            { id: 'accepted' as const, label: 'Aceptadas', count: counts.accepted },
-            { id: 'rejected' as const, label: 'Rechazadas', count: counts.rejected },
+            { id: 'pending' as const, label: 'Pendientes' },
+            { id: 'all' as const, label: 'Todas' },
+            { id: 'accepted' as const, label: 'Aceptadas' },
+            { id: 'rejected' as const, label: 'Rechazadas' },
           ]).map((f) => (
             <button key={f.id} onClick={() => setFilter(f.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
@@ -3082,16 +3116,13 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                   : 'text-gray-500 hover:text-gray-700'
               }`}>
               {f.label}
-              <span className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] ${
-                filter === f.id ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-500'
-              }`}>{f.count}</span>
             </button>
           ))}
         </div>
-        <button onClick={() => load()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Recargar">
+        <button onClick={() => void load()} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Recargar">
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
         </button>
-        {(counts.pending + counts.rejected) > 0 && (
+        {requests.some((r) => r.status === 'pending' || r.status === 'rejected') && (
           <button
             type="button"
             onClick={() => void handleClearHistory()}
@@ -3124,6 +3155,7 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
             const cfg = REQUEST_STATUS_CFG[req.status];
             const isProcessing = processingId === id;
             const isPublicRequest = req.user_id === 'public_request';
+            const requestMessage = String(req.message || req.notes || '').trim();
 
             return (
               <div key={id} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -3138,6 +3170,7 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                         <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.bg} ${cfg.text}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />{cfg.label}
                         </span>
+                        <VertialAccountBadge affiliate={req} />
                         {isPublicRequest && (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-600 border border-blue-100">
                             Solicitud pública
@@ -3151,7 +3184,9 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                        <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{req.email}</span>
+                        <a href={`mailto:${req.email}`} className="flex items-center gap-1 hover:text-blue-600 transition-colors">
+                          <Mail className="w-3 h-3" />{req.email}
+                        </a>
                         {req.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{req.phone}</span>}
                         {req.whatsapp && req.whatsapp !== req.phone && (
                           <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3 text-green-500" />{req.whatsapp}</span>
@@ -3181,11 +3216,26 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                         </div>
                       )}
 
-                      {/* Notes/message from the request */}
-                      {req.notes && (
+                      {/* Mensaje del formulario */}
+                      {requestMessage && (
                         <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 flex gap-2">
                           <FileText className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" />
-                          <span>{req.notes}</span>
+                          <span>{requestMessage}</span>
+                        </div>
+                      )}
+
+                      {(req.adminNotifiedAt || req.applicantNotifiedAt) && (
+                        <div className="mt-2 flex flex-wrap gap-2 text-[10px] text-gray-400">
+                          {req.adminNotifiedAt && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+                              Admin notificado por email
+                            </span>
+                          )}
+                          {req.applicantNotifiedAt && (
+                            <span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100">
+                              Confirmación enviada al solicitante
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -3220,6 +3270,16 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                         >
                           <CheckCircle2 className="w-3.5 h-3.5" />
                           Reactivar
+                        </button>
+                      )}
+                      {req.status === 'accepted' && req.canLinkAccount && (
+                        <button
+                          onClick={() => handleLinkAccount(id)}
+                          disabled={linkingId === id}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                        >
+                          <Link2 className="w-3.5 h-3.5" />
+                          {linkingId === id ? 'Enlazando…' : 'Enlazar cuenta'}
                         </button>
                       )}
                       {req.status === 'accepted' && (
@@ -3258,6 +3318,7 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
 
 export function AdminPanel() {
   const { user, listUsers } = useAuth();
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>('clients');
   const [selectedAccount, setSelectedAccount] = useState<AuthUser | null>(null);
   const [auditUsers, setAuditUsers] = useState<AuthUser[]>([]);
@@ -3266,6 +3327,14 @@ export function AdminPanel() {
   useModalClose(!!selectedAccount, () => setSelectedAccount(null));
 
   const usersMap = useMemo(() => new Map(auditUsers.map((u) => [u.user_id, u])), [auditUsers]);
+  const adminUserId = user?.id || user?.user_id || '';
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab === 'affiliate_requests' && TABS.some((t) => t.id === tab)) {
+      setActiveTab('affiliate_requests');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (activeTab === 'audit') {
@@ -3304,7 +3373,7 @@ export function AdminPanel() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-col items-center gap-1.5 min-w-[5.5rem] px-4 py-3 rounded-xl text-xs font-semibold transition-all ${
+                className={`relative flex flex-col items-center gap-1.5 min-w-[5.5rem] px-4 py-3 rounded-xl text-xs font-semibold transition-all ${
                   isActive
                     ? 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
@@ -3327,7 +3396,9 @@ export function AdminPanel() {
         )}
         {activeTab === 'payments' && <MoneiPaymentsTab />}
         {activeTab === 'plans' && <PlansTab userId={user?.id || user?.user_id || ''} />}
-        {activeTab === 'affiliate_requests' && <AffiliateRequestsTab userId={user?.id || user?.user_id || ''} />}
+        {activeTab === 'affiliate_requests' && (
+          <AffiliateRequestsTab userId={adminUserId} />
+        )}
         {activeTab === 'backup' && <BackupTab />}
         {activeTab === 'audit' && (
           <AuditTab

@@ -1,5 +1,6 @@
 import logger from '../services/logger.js';
 import { sendEmail } from '../services/email.js';
+import { getAdminInbox } from '../services/adminInbox.js';
 import { pushClientError, listClientErrors } from '../services/clientErrorLog.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 
@@ -16,16 +17,8 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;');
 }
 
-function getAdminInbox() {
-  return (
-    process.env.BUG_REPORT_EMAIL ||
-    process.env.ALERTS_ADMIN_EMAIL ||
-    process.env.DEFAULT_CONTACT_EMAIL ||
-    process.env.AFFILIATE_EMAIL ||
-    ''
-  )
-    .toString()
-    .trim();
+function getAdminInboxForBugReport() {
+  return getAdminInbox();
 }
 
 function normalizeScreenshot(raw) {
@@ -98,7 +91,7 @@ export async function submitBugReport(req, res) {
       return res.status(400).json({ ok: false, error: screenshot.error });
     }
 
-    const adminTo = getAdminInbox();
+    const adminTo = getAdminInboxForBugReport();
     if (!adminTo) {
       logger.error({ tag: 'BUG_REPORT', userId }, 'Falta BUG_REPORT_EMAIL o ALERTS_ADMIN_EMAIL');
       return res.status(503).json({

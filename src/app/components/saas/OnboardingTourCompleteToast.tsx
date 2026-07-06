@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, X } from 'lucide-react';
 import { useAuthOptional } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
+import { useActivationChecklist } from '../../context/ActivationChecklistContext';
 import { isWorkerAccount } from '../../lib/authApi';
+import { isGuidedActivationBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import {
   isOnboardingTourCompleted,
@@ -21,14 +23,25 @@ export function OnboardingTourCompleteToast() {
   const businessCtx = useBusinessOptional();
   const currentBusiness = businessCtx?.currentBusiness ?? null;
   const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
+  const { completionPct, totalSteps } = useActivationChecklist();
 
   const accountUserId = resolveAccountUserId(user);
   const businessId = resolveBusinessScopeId(currentBusiness);
+  const usesGuidedActivation = isGuidedActivationBusinessType(currentBusiness?.businessType);
+  const guidedActivationComplete =
+    usesGuidedActivation && totalSteps > 0 && completionPct >= 100;
 
   const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimers = useCallback(() => {
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
+    hideTimerRef.current = null;
+    ackTimerRef.current = null;
+  }, []);
 
   const dismiss = useCallback(() => {
     if (!accountUserId || !businessId) return;
@@ -42,17 +55,50 @@ export function OnboardingTourCompleteToast() {
   }, [accountUserId, businessId]);
 
   const maybeShow = useCallback(() => {
-    if (isWorkerAccount(user)) return;
-    if (!accountUserId || !businessId || !businessesFetchSettled) return;
-    if (!isOnboardingTourCompleted(accountUserId, businessId)) return;
-    if (isTourCompleteAcknowledged(accountUserId, businessId)) return;
+    if (isWorkerAccount(user)) {
+      setVisible(false);
+      return;
+    }
+    if (!accountUserId || !businessId || !businessesFetchSettled) {
+      setVisible(false);
+      return;
+    }
+    if (isTourCompleteAcknowledged(accountUserId, businessId)) {
+      setVisible(false);
+      return;
+    }
+
+    const shouldShow = usesGuidedActivation
+      ? guidedActivationComplete
+      : isOnboardingTourCompleted(accountUserId, businessId);
+
+    if (!shouldShow) {
+      setVisible(false);
+      clearTimers();
+      return;
+    }
 
     setExiting(false);
     setVisible(true);
 
     if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
     ackTimerRef.current = setTimeout(() => dismiss(), 4500);
-  }, [accountUserId, businessId, businessesFetchSettled, dismiss, user]);
+  }, [
+    accountUserId,
+    businessId,
+    businessesFetchSettled,
+    clearTimers,
+    dismiss,
+    guidedActivationComplete,
+    user,
+    usesGuidedActivation,
+  ]);
+
+  useEffect(() => {
+    setVisible(false);
+    setExiting(false);
+    clearTimers();
+  }, [businessId, clearTimers]);
 
   useEffect(() => {
     maybeShow();
@@ -72,12 +118,7 @@ export function OnboardingTourCompleteToast() {
     return () => window.removeEventListener(ONBOARDING_TOUR_COMPLETED_EVENT, onCompleted);
   }, [accountUserId, businessId, maybeShow, user]);
 
-  useEffect(() => {
-    return () => {
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
-    };
-  }, []);
+  useEffect(() => () => clearTimers(), [clearTimers]);
 
   if (!visible) return null;
 
@@ -95,10 +136,12 @@ export function OnboardingTourCompleteToast() {
         </div>
         <div className="min-w-0">
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-            Tour completado
+            {usesGuidedActivation ? 'Alta completada' : 'Tour completado'}
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Ya puedes usar el panel con normalidad
+            {usesGuidedActivation
+              ? 'Has terminado todos los pasos de configuración'
+              : 'Ya puedes usar el panel con normalidad'}
           </p>
         </div>
         <button
