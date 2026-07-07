@@ -1,4 +1,5 @@
 import type { Client, ClientStats, ClientLoyalty, Lead, LeadInteraction } from '../context/AppContext';
+import { ImportAbortError } from './importAbort';
 import { v4 as uuidv4 } from 'uuid';
 import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
@@ -255,18 +256,22 @@ export async function bulkCreateClientsInChunks(
   userId: string,
   clients: Client[],
   onProgress?: (done: number, total: number) => void,
-  options?: { businessId?: string },
+  options?: { businessId?: string; signal?: AbortSignal },
 ): Promise<{ created: Client[]; errors: unknown[] }> {
   const created: Client[] = [];
   const errors: unknown[] = [];
   const total = clients.length;
   const businessId = options?.businessId?.trim();
+  const signal = options?.signal;
 
   for (let i = 0; i < clients.length; i += CRM_BULK_CHUNK_SIZE) {
+    if (signal?.aborted) {
+      throw new ImportAbortError();
+    }
     const chunk = clients.slice(i, i + CRM_BULK_CHUNK_SIZE).map((c) => (
       businessId ? { ...c, businessId, business_id: businessId } : c
     ));
-    const result = await bulkCreateClientsV2Request(userId, chunk, { businessId });
+    const result = await bulkCreateClientsV2Request(userId, chunk, { businessId, signal });
     created.push(...result.created);
     errors.push(...result.errors);
     onProgress?.(Math.min(i + chunk.length, total), total);
@@ -787,7 +792,7 @@ export async function bulkCreateLeadsV2Request(userId: string, leads: Lead[]): P
 export async function bulkCreateClientsV2Request(
   userId: string,
   clients: Client[],
-  options?: { businessId?: string },
+  options?: { businessId?: string; signal?: AbortSignal },
 ): Promise<{ created: Client[]; errors: unknown[] }> {
   const result = await request<{ ok: boolean; clients: unknown[]; errors: unknown[] }>(
     `/api/clients/${encodeURIComponent(userId)}/bulk`,
@@ -797,6 +802,7 @@ export async function bulkCreateClientsV2Request(
         clients,
         ...(options?.businessId?.trim() ? { businessId: options.businessId.trim() } : {}),
       }),
+      signal: options?.signal,
     },
   );
   return {

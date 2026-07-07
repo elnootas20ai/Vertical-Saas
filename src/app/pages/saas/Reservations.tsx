@@ -151,36 +151,7 @@ export function Reservations() {
   const [cancelTarget, setCancelTarget] = useState<ReservationRecord | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [showAlerts, setShowAlerts] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'client', label: 'Cliente' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'time', label: 'Hora' },
-    { key: 'guests', label: 'Comensales' },
-    { key: 'table', label: 'Mesa' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'client', label: 'Cliente', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'time', label: 'Hora', example: '' },
-    { key: 'guests', label: 'Comensales', example: '' },
-    { key: 'table', label: 'Mesa', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} reserva(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} reserva(s) importado(s)`);
-  };
-
-  const { visible: visibleCols, toggle: toggleCol, isVisible: isColVisible } = useColumnPreferences('reservations-cols', RES_COLUMNS);
+    const { visible: visibleCols, toggle: toggleCol, isVisible: isColVisible } = useColumnPreferences('reservations-cols', RES_COLUMNS);
 
   useModalClose(!!cancelTarget, () => setCancelTarget(null));
 
@@ -396,8 +367,6 @@ export function Reservations() {
             <AddButtonDropdown
                 label="Nueva reserva"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de reserva"
               />
@@ -614,22 +583,6 @@ export function Reservations() {
           </React.Suspense>
         )}
       </div>
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="reservations"
-        moduleLabel="Reservas"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Reservas"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

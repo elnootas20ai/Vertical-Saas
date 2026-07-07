@@ -17,6 +17,7 @@ import {
   sanitizeSetupProgress,
   saveSetupProgress,
   getCatalogDbName,
+  getWorkshopDbName,
 } from '../services/couchdb.js';
 import { computeSetupSteps, getApplicableStepDefinitions } from '../models/setupSteps.js';
 
@@ -398,6 +399,19 @@ async function verifyStep(req, userId, stepKey, account, businessId) {
           const sales = await getAllDocuments(req, salesDb);
           const businessSales = sales.filter((d) => !d?.deletedAt && d?.business_id === targetBusinessId);
           return businessSales.length >= 1;
+        } catch {
+          return false;
+        }
+      }
+      case 'workshop_config': {
+        const workshopDb = getWorkshopDbName();
+        try {
+          await ensureDatabase(req, workshopDb);
+          const docs = await getAllDocuments(req, workshopDb);
+          const orders = docs.filter(
+            (d) => d?.type === 'work_order' && d?.user_id === userId && !d?.deletedAt,
+          );
+          return orders.length >= 1;
         } catch {
           return false;
         }

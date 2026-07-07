@@ -203,6 +203,8 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
     await reload({ force: true });
   }, [reload]);
 
+  const showGroupSections = businessFilter === 'all' && !search.trim();
+
   return (
     <Layout
       title="Visión general"
@@ -219,6 +221,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
         />
 
         {/* Resumen portfolio: empresas, clientes y variación mes a mes */}
+        {showGroupSections && (
         <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -236,16 +239,17 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
             <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="amber" sub={`Mes ant.: ${filteredTotals.ordersPrevMonth}`} />
           </div>
         </section>
+        )}
 
         {/* Clasificación del grupo — comparativa tipo ranking */}
-        {filteredRows.length > 0 && (
+        {showGroupSections && filteredRows.length > 0 && (
           <PortfolioCompanyLeague
             rows={filteredRows}
             onEnter={enterBusiness}
           />
         )}
 
-        {filteredRows.length > 0 && (
+        {showGroupSections && filteredRows.length > 0 && (
           <PortfolioAlertsPanel rows={filteredRows} />
         )}
 
@@ -308,7 +312,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
         </div>
 
         {/* Comparativa por empresa */}
-        {filteredRows.length > 0 && (
+        {showGroupSections && filteredRows.length > 0 && (
           <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5 overflow-x-auto">
             <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3">
               Comparativa por empresa

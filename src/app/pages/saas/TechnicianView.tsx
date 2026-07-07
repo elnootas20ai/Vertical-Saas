@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import {
   listWorkOrdersRequest,
   updateWorkOrderRequest,
@@ -145,6 +146,11 @@ interface WorkOrderDetailMobileProps {
 
 function WorkOrderDetailMobile({ wo, mechanicName, onBack, onUpdate }: WorkOrderDetailMobileProps) {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(wo.timeEntries || []);
   const [photos, setPhotos] = useState<string[]>(wo.photos || []);
   const [notes, setNotes] = useState(wo.notes || '');
@@ -173,7 +179,7 @@ function WorkOrderDetailMobile({ wo, mechanicName, onBack, onUpdate }: WorkOrder
         photos,
         notes,
         ...overrides,
-      });
+      }, workshopScope);
       onUpdate(updated);
       if (!overrides) toast.success('Cambios guardados');
     } catch {
@@ -199,7 +205,7 @@ function WorkOrderDetailMobile({ wo, mechanicName, onBack, onUpdate }: WorkOrder
         stageHistory: wo.status === 'pending'
           ? [...(wo.stageHistory || []), { status: 'in_progress' as WorkOrderStatus, date: new Date().toISOString(), user: mechanicName || 'Mecánico' }]
           : wo.stageHistory,
-      });
+      }, workshopScope);
       onUpdate(updated);
       toast.success('Temporizador iniciado');
     } catch {
@@ -217,7 +223,7 @@ function WorkOrderDetailMobile({ wo, mechanicName, onBack, onUpdate }: WorkOrder
     setTimeEntries(next);
     if (!user?.id) return;
     try {
-      const updated = await updateWorkOrderRequest(user.id, { ...wo, timeEntries: next, photos, notes });
+      const updated = await updateWorkOrderRequest(user.id, { ...wo, timeEntries: next, photos, notes }, workshopScope);
       onUpdate(updated);
       toast.success('Temporizador parado');
     } catch {
@@ -236,7 +242,7 @@ function WorkOrderDetailMobile({ wo, mechanicName, onBack, onUpdate }: WorkOrder
         notes,
         status: 'completed',
         stageHistory: [...(wo.stageHistory || []), { status: 'completed' as WorkOrderStatus, date: new Date().toISOString(), user: mechanicName || 'Mecánico' }],
-      });
+      }, workshopScope);
       onUpdate(updated);
       toast.success('OT marcada como completada');
       onBack();
@@ -514,6 +520,11 @@ export function TechnicianView() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<WorkOrder | null>(null);
@@ -526,7 +537,7 @@ export function TechnicianView() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const data = await listWorkOrdersRequest(user.id);
+      const data = await listWorkOrdersRequest(user.id, workshopScope);
       // Technician only sees pending/in_progress
       setWorkOrders(data.filter(w => w.status === 'pending' || w.status === 'in_progress'));
     } catch {
@@ -534,7 +545,7 @@ export function TechnicianView() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, workshopScope]);
 
   useEffect(() => { load(); }, [load]);
 

@@ -62,6 +62,7 @@ import { crmRouter } from './routers/crmRouter.js';
 import { runLeadEngineForUser } from './controllers/leadAssignmentController.js';
 import { fleetRouter } from './routers/fleetRouter.js';
 import { supplierInvoiceRouter } from './routers/supplierInvoiceRouter.js';
+import { promotionsRouter } from './routers/promotionsRouter.js';
 import { tradeInRouter } from './routers/tradeInRouter.js';
 import { preparationExpenseRouter } from './routers/preparationExpenseRouter.js';
 import { appointmentsRouter } from './routers/appointmentsRouter.js';
@@ -82,6 +83,7 @@ import { gdprRouter } from './routers/gdprRouter.js';
 import { settingsRouter } from './routers/settingsRouter.js';
 import { supportRouter } from './routers/supportRouter.js';
 import { subscriptionRouter } from './routers/subscriptionRouter.js';
+import { moneiConnectRouter } from './routers/moneiConnectRouter.js';
 import { chatRouter } from './routers/chatRouter.js';
 import { orgchartRouter } from './routers/orgchartRouter.js';
 import { clockinsRouter } from './routers/clockinsRouter.js';
@@ -109,6 +111,7 @@ import { signatureRouter } from './routers/signatureRouter.js';
 import { scrapyardRouter } from './routers/scrapyardRouter.js';
 import { opportunitiesRouter } from './routers/opportunitiesRouter.js';
 import { vehicleAcquisitionRouter } from './routers/vehicleAcquisitionRouter.js';
+import { fiscalConsultationRouter } from './routers/fiscalConsultationRouter.js';
 import { compraventaRouter } from './routers/compraventaRouter.js';
 import { butcherClientsRouter } from './routers/butcherClientsRouter.js';
 import { butcherOrdersRouter } from './routers/butcherOrdersRouter.js';
@@ -248,7 +251,34 @@ app.param('dbName', (req, _res, next, value) => {
   next();
 });
 
-app.use(express.json({ limit: '50mb' }));
+/** MONEI webhooks: body en bruto para validar MONEI-Signature (HMAC-SHA256). */
+const MONEI_WEBHOOK_PREFIXES = [
+  '/api/subscriptions/webhook',
+  '/api/v2/subscriptions/webhook',
+  '/api/monei-connect/webhook',
+];
+function isMoneiWebhookRequest(req) {
+  return req.method === 'POST' && MONEI_WEBHOOK_PREFIXES.some((p) => req.path.startsWith(p));
+}
+
+app.use((req, res, next) => {
+  if (!isMoneiWebhookRequest(req)) return next();
+  express.raw({ type: 'application/json', limit: '1mb' })(req, res, (err) => {
+    if (err) return next(err);
+    req.rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
+    try {
+      req.body = req.rawBody ? JSON.parse(req.rawBody) : {};
+    } catch {
+      req.body = {};
+    }
+    next();
+  });
+});
+
+app.use((req, res, next) => {
+  if (isMoneiWebhookRequest(req)) return next();
+  express.json({ limit: '50mb' })(req, res, next);
+});
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 // SEC-03: CORS restrictivo con whitelist de dominios configurada via ALLOWED_ORIGINS.
@@ -256,6 +286,11 @@ app.use(cookieParser());
 const CORE_ALLOWED_ORIGINS = [
   process.env.APP_URL,
   process.env.VITE_API_URL,
+  // Orígenes Capacitor (app nativa iOS/Android)
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'https://localhost',
 ].filter(Boolean);
 const ALLOWED_ORIGINS = Array.from(
   new Set([
@@ -983,6 +1018,7 @@ const internalRouters = [
   ['/api/catalog-config', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, catalogConfigRouter],
   ['/api/purchase-orders', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, purchaseOrderRouter],
   ['/api/supplier-invoices', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, supplierInvoiceRouter],
+  ['/api/promotions', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, promotionsRouter],
   ['/api/warehouses',       requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, warehouseRouter],
   ['/api/alerts',          requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, alertRouter],
   ['/api/butcher',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherRouter],
@@ -995,6 +1031,7 @@ const internalRouters = [
   ['/api/setup-progress',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, setupProgressRouter],
   ['/api/signatures',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, signatureRouter],
   ['/api/vehicle-acquisitions', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, vehicleAcquisitionRouter],
+  ['/api/fiscal-consultations', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, fiscalConsultationRouter],
   ['/api/scrapyard/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, scrapyardAlertRouter],
   ['/api/scrapyard',       requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, scrapyardRouter],
   ['/api/compraventa',     requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, compraventaRouter],
@@ -1022,6 +1059,7 @@ app.use('/api/v2/support', requireAuthAndEmailVerified, burstLimiter, supportRou
 // MONEI Subscriptions — rutas protegidas + webhooks públicos internos
 app.use('/api/subscriptions', subscriptionRouter);
 app.use('/api/v2/subscriptions', subscriptionRouter);
+app.use('/api/monei-connect', moneiConnectRouter);
 
 // Admin MONEI — panel de gestión de pagos (solo Admin)
 app.use('/api/admin/monei', adminMoneiRouter);
@@ -2487,7 +2525,6 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       quickFinance,
       ...(butcherKpis ? { butcherKpis } : {}),
       ...(constructionKpis ? { constructionKpis } : {}),
-      ...(cleaningClientsKpis ? { cleaningClientsKpis } : {}),
       salesClosure,
       updatedAt: now.toISOString(),
     };

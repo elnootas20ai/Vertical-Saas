@@ -1,5 +1,6 @@
 import { getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { notifyWorkshopDataChanged, type WorkshopScope } from './workshopEvents';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -14,6 +15,13 @@ function normalizeUserId(userId: string): string {
 function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   return headers;
+}
+
+function withBusinessQuery(path: string, businessId?: string): string {
+  const scope = String(businessId || '').trim();
+  if (!scope) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}businessId=${encodeURIComponent(scope)}`;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -68,6 +76,7 @@ export interface Part {
   id: string;
   partNumber: string;
   user_id: string;
+  business_id?: string;
   name: string;
   reference: string;
   category: PartCategory;
@@ -114,10 +123,10 @@ export function normalizePart(value: unknown): Part | null {
 
 // ─── API Functions ────────────────────────────────────────────────────────────
 
-export async function listPartsRequest(userId: string): Promise<Part[]> {
+export async function listPartsRequest(userId: string, scope?: WorkshopScope): Promise<Part[]> {
   const normalizedUserId = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; parts: unknown[] }>(
-    `/api/workshop/parts/${encodeURIComponent(normalizedUserId)}`,
+    withBusinessQuery(`/api/workshop/parts/${encodeURIComponent(normalizedUserId)}`, scope?.businessId),
   );
   return (payload.parts || [])
     .map(normalizePart)
@@ -127,25 +136,36 @@ export async function listPartsRequest(userId: string): Promise<Part[]> {
 export async function createPartRequest(
   userId: string,
   data: CreatePartPayload,
+  scope?: WorkshopScope,
 ): Promise<Part> {
   const normalizedUserId = normalizeUserId(userId);
+  const businessId = String(scope?.businessId || (data as { business_id?: string }).business_id || '').trim();
   const result = await request<{ ok: boolean; part: unknown }>(
     `/api/workshop/parts/${encodeURIComponent(normalizedUserId)}`,
-    { method: 'POST', body: JSON.stringify({ part: data }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        part: businessId ? { ...data, business_id: businessId } : data,
+      }),
+    },
   );
   const normalized = normalizePart(result.part);
   if (!normalized) throw new Error('Respuesta inválida del servidor');
+  notifyWorkshopDataChanged();
   return normalized;
 }
 
-export async function updatePartRequest(userId: string, part: Part): Promise<Part> {
+export async function updatePartRequest(userId: string, part: Part, scope?: WorkshopScope): Promise<Part> {
   const normalizedUserId = normalizeUserId(userId);
+  const businessId = String(scope?.businessId || part.business_id || '').trim();
+  const payload = businessId ? { ...part, business_id: businessId } : part;
   const result = await request<{ ok: boolean; part: unknown }>(
     `/api/workshop/parts/${encodeURIComponent(normalizedUserId)}/${encodeURIComponent(part._id)}`,
-    { method: 'PUT', body: JSON.stringify({ part }) },
+    { method: 'PUT', body: JSON.stringify({ part: payload }) },
   );
   const normalized = normalizePart(result.part);
   if (!normalized) throw new Error('Respuesta inválida del servidor');
+  notifyWorkshopDataChanged();
   return normalized;
 }
 
@@ -155,6 +175,7 @@ export async function deletePartRequest(userId: string, partId: string): Promise
     `/api/workshop/parts/${encodeURIComponent(normalizedUserId)}/${encodeURIComponent(partId)}`,
     { method: 'DELETE' },
   );
+  notifyWorkshopDataChanged();
 }
 
 export function isLowStock(part: Part): boolean {

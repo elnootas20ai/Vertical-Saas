@@ -52,36 +52,7 @@ export function ConstructionPlans() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<PlanDoc | null>(null);
   const [form, setForm] = useState(emptyForm);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'project', label: 'Proyecto' },
-    { key: 'type', label: 'Tipo' },
-    { key: 'version', label: 'Versión' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'project', label: 'Proyecto', example: '' },
-    { key: 'type', label: 'Tipo', example: '' },
-    { key: 'version', label: 'Versión', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} documento(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} documento(s) importado(s)`);
-  };
-
-  const filtered = useMemo(() => docs.filter(d => {
+    const filtered = useMemo(() => docs.filter(d => {
     const matchSearch = `${d.nombre} ${d.proyecto} ${d.responsable}`.toLowerCase().includes(search.toLowerCase());
     const matchTipo = filterTipo === 'todos' || d.tipo === filterTipo;
     const matchEstado = filterEstado === 'todos' || d.estado === filterEstado;
@@ -149,8 +120,6 @@ export function ConstructionPlans() {
           <AddButtonDropdown
                 label="Nuevo documento"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de documento"
               />
@@ -230,22 +199,6 @@ export function ConstructionPlans() {
           </form>
         </div>
       )}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="construction_plans"
-        moduleLabel="Planos"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Planos"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

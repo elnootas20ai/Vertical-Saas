@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router';
+import { Navigate, useNavigate } from 'react-router';
 import { useModalClose } from '../../hooks/useModalClose';
 import { toast } from 'sonner';
 import {
@@ -32,7 +32,6 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useTpv, type TpvWorker } from '../../context/TpvContext';
 import type { BusinessType } from '../../lib/businessApi';
 import { DealershipCatalogPage } from './DealershipCatalogPage';
-import { EventsWorkstationPage } from './EventsWorkstationPage';
 import { HairSalonWorkstationPage } from './HairSalonWorkstationPage';
 
 const VERTICAL_CATALOG_LABELS: Partial<Record<BusinessType, { title: string; icon: React.ReactNode; emptyLabel: string }>> = {
@@ -89,12 +88,7 @@ export function TpvModePage({ salesPoint }: TpvModePageProps = {}) {
   }
 
   if (vertical === 'events') {
-    return (
-      <EventsWorkstationPage
-        salesPoint={salesPoint}
-        onBack={() => navigate(-1)}
-      />
-    );
+    return <Navigate to="/saas/vertical/eventos" replace />;
   }
 
   if (vertical === 'hairSalon') {

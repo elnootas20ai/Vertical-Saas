@@ -99,6 +99,14 @@ import { useBusiness } from '../../context/BusinessContext';
 import { useTenantEntitlements } from '../../hooks/useTenantEntitlements';
 import { PortfolioPlanBanner } from '../../components/saas/PortfolioPlanBanner';
 import { VertialSubscriptionSummary } from '../../components/saas/VertialSubscriptionSummary';
+import { MoneiConnectPanel } from '../../components/saas/MoneiConnectPanel';
+import { DeleteAccountSection } from '../../components/saas/DeleteAccountSection';
+import {
+  IOS_PRIVACY_POLICY_URL,
+  IOS_TERMS_URL,
+  IOS_WEB_BILLING_URL,
+  shouldHideInAppSubscriptionPurchaseOnIos,
+} from '../../lib/appStoreCompliance';
 import type { Business } from '../../lib/businessApi';
 import { listBrandsRequest } from '../../lib/brandApi';
 import {
@@ -114,6 +122,7 @@ import {
   clearActivationFocusFromSearch,
 } from '../../lib/activationGuide';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { isSettingsTabVisibleForVertical } from '../../lib/verticalModuleVisibility';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
 import { ActivationFieldWrap, ActivationFocusBanner } from '../../components/saas/ActivationGuideUi';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
@@ -342,6 +351,7 @@ function formatInputDate(value?: Date | string | null) {
 function TabBilling() {
   const { subscription } = useApp();
   const { user, updateProfile, refreshCurrentUser } = useAuth();
+  const hideIosInAppBilling = shouldHideInAppSubscriptionPurchaseOnIos();
   const billingSelectionStorageKey = useMemo(
     () => (user?.user_id ? `billing_selection_${user.user_id}` : null),
     [user?.user_id],
@@ -542,39 +552,6 @@ function TabBilling() {
             setBillingFeedback('Suscripción activada correctamente.');
             setMoneiStatus(String(result.moneiSubscription?.status || 'ACTIVE'));
             void refreshCurrentUser();
-            // TODO(pagos): sustituir por factura emitida desde webhook / backend al cobro real.
-            if (user?.user_id) {
-              let mode: 'monthly' | 'annual' = 'monthly';
-              let pid = subscription.selectedPlanId || 'basic';
-              try {
-                const rawSel = billingSelectionStorageKey ? localStorage.getItem(billingSelectionStorageKey) : null;
-                if (rawSel) {
-                  const j = JSON.parse(rawSel) as { billingMode?: string; selectedPlanId?: string };
-                  if (j.billingMode === 'annual' || j.billingMode === 'monthly') mode = j.billingMode;
-                  if (j.selectedPlanId) pid = j.selectedPlanId;
-                }
-              } catch {
-                /* ignore */
-              }
-              const planRow = DEFAULT_PLANS.find((p) => p.id === pid) || DEFAULT_PLANS[0];
-              const charge =
-                mode === 'annual'
-                  ? Math.round(planRow.monthlyPrice * 12 * (1 - DEFAULT_ANNUAL_DISCOUNT))
-                  : planRow.monthlyPrice;
-              void createBillingInvoice({
-                userId: user.user_id,
-                number: buildInvoiceNumber(),
-                description: `Suscripción ${planRow.name} (${mode}) — pago confirmado (MONEI)`,
-                amount: charge,
-                date: formatInputDate(new Date()),
-                dueDate: formatInputDate(new Date()),
-                status: 'paid',
-                planId: planRow.id,
-                planName: planRow.name,
-              })
-                .then((inv) => setInvoices((prev) => [inv, ...prev]))
-                .catch(() => {});
-            }
           } else {
             try {
               sessionStorage.removeItem(seenKey);
@@ -646,6 +623,10 @@ function TabBilling() {
   }, [user?.user_id]);
 
   const handlePurchaseAddon = async (addonId: PlanAddonId) => {
+    if (hideIosInAppBilling) {
+      setBillingFeedback('Contrata ampliaciones desde vertialapp.com en tu navegador.');
+      return;
+    }
     if (!user?.user_id) {
       setBillingFeedback('No hay usuario autenticado.');
       return;
@@ -685,6 +666,10 @@ function TabBilling() {
   };
 
   const handlePaySubscription = async () => {
+    if (hideIosInAppBilling) {
+      setBillingFeedback('En la app iOS gestiona tu suscripción en vertialapp.com (Ajustes → Facturación).');
+      return;
+    }
     if (!user?.user_id) {
       setBillingFeedback('No hay usuario autenticado.');
       return;
@@ -692,28 +677,6 @@ function TabBilling() {
 
     setIsPaying(true);
     setBillingFeedback(null);
-
-    const plan = plans.find((p) => p.id === selectedPlanId) || plans[0];
-    const chargeAmount = billingMode === 'annual' ? getAnnualTotal(plan) : getEffectivePrice(plan);
-
-    const recordPaidSubscriptionInvoice = async (description: string) => {
-      try {
-        const invoice = await createBillingInvoice({
-          userId: user.user_id,
-          number: buildInvoiceNumber(),
-          description,
-          amount: chargeAmount,
-          date: formatInputDate(new Date()),
-          dueDate: formatInputDate(new Date()),
-          status: 'paid',
-          planId: plan.id,
-          planName: plan.name,
-        });
-        setInvoices((prev) => [invoice, ...prev]);
-      } catch {
-        /* no bloquear el flujo de cobro / pruebas */
-      }
-    };
 
     try {
       const result = await createMoneiSubscription(selectedPlanId, billingMode);
@@ -734,9 +697,6 @@ function TabBilling() {
         }
         setMoneiStatus(result.skippedMonei ? 'ACTIVE' : 'TRIALING');
         void refreshCurrentUser();
-        await recordPaidSubscriptionInvoice(
-          `Suscripción ${plan.name} (${billingMode === 'annual' ? 'anual' : 'mensual'})${result.skippedMonei ? ' — activación local (sin MONEI)' : ' — cobro automático (simulación hasta pasarela)'}`,
-        );
         return;
       }
     } catch (error) {
@@ -749,6 +709,10 @@ function TabBilling() {
   };
 
   const handleCancelSubscription = async () => {
+    if (hideIosInAppBilling) {
+      setBillingFeedback('Cancela tu suscripción desde vertialapp.com (Ajustes → Facturación).');
+      return;
+    }
     if (!confirm('¿Estás seguro de que deseas cancelar tu suscripción? Perderás el acceso al final del periodo actual.')) {
       return;
     }
@@ -830,6 +794,24 @@ function TabBilling() {
 
   return (
     <div className="space-y-6">
+      {hideIosInAppBilling && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-900 dark:bg-amber-950/30">
+          <p className="text-sm font-bold text-amber-950 dark:text-amber-100">Suscripción en la app iOS</p>
+          <p className="mt-1 text-sm text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
+            Por las normas de Apple, contratar o cambiar de plan no está disponible dentro de la app iOS.
+            Si ya tienes cuenta, inicia sesión con tu plan activo. Para contratar o pagar, usa la web:
+          </p>
+          <a
+            href={IOS_WEB_BILLING_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-amber-950 underline underline-offset-2 dark:text-amber-100"
+          >
+            Gestionar suscripción en vertialapp.com
+          </a>
+        </div>
+      )}
+
       {accountBlocked && (
         <div className="rounded-2xl border-2 border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/30">
           <p className="text-sm font-bold text-red-900 dark:text-red-100">
@@ -853,7 +835,9 @@ function TabBilling() {
         onChangePlan={() => setShowPlanPicker(true)}
       />
 
-      {(showPlanPicker || accountBlocked) && (
+      <MoneiConnectPanel />
+
+      {(showPlanPicker || accountBlocked) && !hideIosInAppBilling && (
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div>
@@ -3552,6 +3536,33 @@ function TabAccountSecurity() {
           </button>
         </div>
       </form>
+
+      <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
+        <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-2">Legal y privacidad</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+          Enlaces públicos requeridos por App Store Connect.
+        </p>
+        <div className="flex flex-wrap gap-3 text-sm">
+          <a
+            href={IOS_PRIVACY_POLICY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 hover:underline dark:text-blue-400"
+          >
+            Política de privacidad
+          </a>
+          <a
+            href={IOS_TERMS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-blue-600 hover:underline dark:text-blue-400"
+          >
+            Términos de uso
+          </a>
+        </div>
+      </div>
+
+      <DeleteAccountSection />
     </div>
   );
 }
@@ -3932,7 +3943,12 @@ export function Settings() {
   }, [tabSlug, location.search, location.hash, navigate]);
 
   useEffect(() => {
-    if (!isBlockingSubscriptionStatus(subscription.status)) return;
+    if (currentBusiness?.businessType !== 'events') return;
+    if (isSettingsTabVisibleForVertical(activeTab, currentBusiness.businessType)) return;
+    navigate('/saas/settings/empresa', { replace: true });
+  }, [activeTab, currentBusiness?.businessType, navigate]);
+
+  useEffect(() => {
     if (activeTab === 'billing') return;
     navigate('/saas/settings/facturacion', { replace: true });
   }, [subscription.status, activeTab, navigate]);
@@ -4158,13 +4174,17 @@ export function Settings() {
                 style={{ scrollbarWidth: 'none' }}
               >
                 {SECTIONS.map((section) => {
-                  const isActive = TAB_TO_SECTION[activeTab] === section.id;
+                  const visibleTabs = section.tabs.filter((tabId) =>
+                    isSettingsTabVisibleForVertical(tabId, currentBusiness?.businessType),
+                  );
+                  if (visibleTabs.length === 0) return null;
+                  const isActive = visibleTabs.includes(activeTab);
                   const SectionIcon = section.icon;
                   return (
                     <button
                       key={section.id}
                       type="button"
-                      onClick={() => navigate(`/saas/settings/${TAB_TO_SLUG[section.tabs[0]]}`)}
+                      onClick={() => navigate(`/saas/settings/${TAB_TO_SLUG[visibleTabs[0]]}`)}
                       className={`flex min-h-[40px] shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                         isActive
                           ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
@@ -4183,12 +4203,16 @@ export function Settings() {
               {(() => {
                 const currentSection = SECTIONS.find((s) => s.id === TAB_TO_SECTION[activeTab]);
                 if (!currentSection || currentSection.tabs.length <= 1) return null;
+                const visibleSectionTabs = currentSection.tabs.filter((tabId) =>
+                  isSettingsTabVisibleForVertical(tabId, currentBusiness?.businessType),
+                );
+                if (visibleSectionTabs.length <= 1) return null;
                 return (
                   <div
                     className="flex gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
                     style={{ scrollbarWidth: 'none' }}
                   >
-                    {currentSection.tabs.map((tabId) => {
+                    {visibleSectionTabs.map((tabId) => {
                       const tab = TAB_KEYS.find((tk) => tk.id === tabId);
                       if (!tab) return null;
                       const defaultLabel = tab.label ?? (tab.i18nKey ? t(tab.i18nKey) : tab.id);

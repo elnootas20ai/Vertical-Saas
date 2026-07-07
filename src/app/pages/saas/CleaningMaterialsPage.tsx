@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -308,13 +309,29 @@ function CatalogoTab({ materials, search, onSearchChange, userId, onReload }: {
     { key: 'supplier', label: 'Proveedor', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} material(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!user?.id) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(user?.id, {
+      create: (uid, data) => createCleaningMaterialRequest(uid, data),
+    }, entries, (entry) => ({
+      name: entryStr(entry, 'name', 'nombre'),
+      category: entryStr(entry, 'category', 'categoria') || 'general',
+      unit: entryStr(entry, 'unit', 'unidad') || 'ud',
+      stock: entryNum(entry, 'stock'),
+    }));
+    if (created > 0) {
+      toast.success(`${created} material(s) creado(s)`);
+      void loadData();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} material(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   return (
     <div className="space-y-4">

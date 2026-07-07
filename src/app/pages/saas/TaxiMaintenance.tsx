@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -90,13 +91,29 @@ export function TaxiMaintenance() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} mantenimiento(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const vehiculo = entryStr(e, 'vehiculo');
+    if (!vehiculo) return null;
+    return {
+      vehiculo,
+      km: entryStr(e, 'km'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} mantenimiento creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} mantenimiento(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

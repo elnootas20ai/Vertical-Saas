@@ -959,13 +959,18 @@ export function WorkerTpvDelivery({
   const boardReady = useTpvRegisterBoardReady();
   const registerOpen = boardReady || Boolean(register && isTpvRegisterSessionOpen(register.session));
 
+  const isTabletSession = registerScope.isTabletSession;
+  const tabletVertical = tabletBinding?.tpvVertical ?? null;
+
   const isRestaurant = useMemo(
     () => resolveRestaurantVerticalFromContext({
       currentBusiness,
       businesses,
       scopeBusinessId: registerScope.scopeBusinessId,
+      isTabletSession,
+      tabletVertical,
     }),
-    [currentBusiness, businesses, registerScope.scopeBusinessId],
+    [currentBusiness, businesses, registerScope.scopeBusinessId, isTabletSession, tabletVertical],
   );
 
   const tpvVerticalPending = useMemo(
@@ -974,8 +979,10 @@ export function WorkerTpvDelivery({
       businesses,
       scopeBusinessId: registerScope.scopeBusinessId,
       businessesFetchSettled,
+      isTabletSession,
+      tabletVertical,
     }),
-    [currentBusiness, businesses, registerScope.scopeBusinessId, businessesFetchSettled],
+    [currentBusiness, businesses, registerScope.scopeBusinessId, businessesFetchSettled, isTabletSession, tabletVertical],
   );
 
   useTpvSuppressBottomBar(isRestaurant ? true : view !== 'board');

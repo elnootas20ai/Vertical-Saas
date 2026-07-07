@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -82,13 +83,34 @@ export function GymMemberships() {
     { key: 'description', label: 'Descripción', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} plan(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const nombre = entryStr(e, 'nombre', 'name');
+    if (!nombre) return null;
+    return {
+      nombre,
+      precioMensual: entryNum(e, 'precioMensual'),
+      precioAnual: entryNum(e, 'precioAnual'),
+      beneficios: [],
+      sociosActivos: entryNum(e, 'sociosActivos'),
+      color: entryStr(e, 'color') || 'gray',
+      destacado: false,
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} plan creado creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} plan(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const filtered = useMemo(() => {
     if (!search) return plans;
@@ -168,8 +190,6 @@ export function GymMemberships() {
           <AddButtonDropdown
                 label="Nuevo Plan"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de plan"
               />

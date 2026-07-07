@@ -16,6 +16,7 @@ import {
   Calendar, Edit2, Trash2, Play, ArrowRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -341,13 +342,29 @@ export function ScrapyardVehicles() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} vehículo(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createScrapyardVehicle(uid, data),
+    }, entries, (entry) => ({
+      matricula: entryStr(entry, 'plate', 'matricula', 'license'),
+      marca: entryStr(entry, 'brand', 'marca'),
+      modelo: entryStr(entry, 'model', 'modelo'),
+      estado: 'recibido',
+    }));
+    if (created > 0) {
+      toast.success(`${created} vehículo(s) creado(s)`);
+      void loadVehicles();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} vehículo(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const perPage = 25;
 

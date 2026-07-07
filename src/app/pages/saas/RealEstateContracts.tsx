@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -88,13 +89,36 @@ export function RealEstateContracts() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} contrato(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const referencia = entryStr(e, 'referencia', 'reference', 'sku');
+    if (!referencia) return null;
+    return {
+      referencia,
+      propiedad: entryStr(e, 'propiedad') || '',
+      cliente: entryStr(e, 'cliente', 'client') || '',
+      tipo: entryStr(e, 'tipo', 'type') || 'alquiler',
+      fechaInicio: entryStr(e, 'fechaInicio') || '',
+      fechaFin: entryStr(e, 'fechaFin') || '',
+      importeMensual: entryNum(e, 'importeMensual'),
+      importeTotal: entryNum(e, 'importeTotal'),
+      estado: entryStr(e, 'estado', 'status') || 'borrador',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} contrato creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} contrato(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(modalOpen, () => setModalOpen(false));
 

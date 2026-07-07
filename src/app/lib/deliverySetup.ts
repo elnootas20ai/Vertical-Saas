@@ -611,6 +611,46 @@ export async function loadTpvPointsOfSaleForBusiness(
 }
 
 /**
+ * Repara tiendas retail sin PDV de caja enlazado (Ajustes → Tienda).
+ * Crea/enlaza el PDV y genera código tablet cuando falta.
+ */
+export async function repairMissingRetailDeliveryPdvs(
+  dataUserId: string,
+  workCenters: WorkCenter[],
+  pointsOfSale: PointOfSale[],
+  business?: Business | null,
+): Promise<PointOfSale[]> {
+  if (!dataUserId) return pointsOfSale;
+
+  let pdvs = dedupePointsOfSale([...pointsOfSale], { includeInactive: true });
+  const retail = workCenters.filter(
+    (wc) =>
+      !wc.deletedAt &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
+
+  for (const wc of retail) {
+    const alreadyLinked = pdvs.some((p) => String(p.workCenterId || '').trim() === wc._id);
+    if (alreadyLinked) continue;
+    try {
+      const ensured = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
+        business: business ?? null,
+        existingPdvs: pdvs,
+      });
+      if (!ensured) continue;
+      const idx = pdvs.findIndex((p) => p._id === ensured._id);
+      if (idx >= 0) pdvs[idx] = ensured;
+      else pdvs.push(ensured);
+      pdvs = dedupePointsOfSale(pdvs, { includeInactive: true });
+    } catch {
+      // Reparación en segundo plano: el guardado manual mostrará el error concreto.
+    }
+  }
+
+  return ensureTabletCodesForPointsOfSale(dataUserId, pdvs);
+}
+
+/**
  * Marca por defecto de la empresa + enlace a tiendas retail (alta delivery).
  * Idempotente: no duplica «General» ni re-vincula tiendas ya asignadas.
  */

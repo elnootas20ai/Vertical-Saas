@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
+import { notifyWorkshopDataChanged, type WorkshopScope } from './workshopEvents';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -16,6 +17,15 @@ function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   return headers;
 }
+
+function withBusinessQuery(path: string, businessId?: string): string {
+  const scope = String(businessId || '').trim();
+  if (!scope) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return `${path}${sep}businessId=${encodeURIComponent(scope)}`;
+}
+
+export type { WorkshopScope } from './workshopEvents';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -88,6 +98,7 @@ export interface WorkOrder {
   id: string;
   woNumber: string;
   user_id: string;
+  business_id?: string;
   vehicleId?: string;
   vehicleBrand: string;
   vehicleModel: string;
@@ -172,10 +183,10 @@ export function normalizeWorkOrder(value: unknown): WorkOrder | null {
 
 // ─── API Functions ────────────────────────────────────────────────────────────
 
-export async function listWorkOrdersRequest(userId: string): Promise<WorkOrder[]> {
+export async function listWorkOrdersRequest(userId: string, scope?: WorkshopScope): Promise<WorkOrder[]> {
   const normalizedUserId = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; workOrders: unknown[] }>(
-    `/api/workshop/orders/${encodeURIComponent(normalizedUserId)}`,
+    withBusinessQuery(`/api/workshop/orders/${encodeURIComponent(normalizedUserId)}`, scope?.businessId),
   );
   return (payload.workOrders || [])
     .map(normalizeWorkOrder)
@@ -185,28 +196,40 @@ export async function listWorkOrdersRequest(userId: string): Promise<WorkOrder[]
 export async function createWorkOrderRequest(
   userId: string,
   data: CreateWorkOrderPayload,
+  scope?: WorkshopScope,
 ): Promise<WorkOrder> {
   const normalizedUserId = normalizeUserId(userId);
+  const businessId = String(scope?.businessId || data.business_id || '').trim();
   const result = await request<{ ok: boolean; workOrder: unknown }>(
     `/api/workshop/orders/${encodeURIComponent(normalizedUserId)}`,
-    { method: 'POST', body: JSON.stringify({ workOrder: data }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        workOrder: businessId ? { ...data, business_id: businessId } : data,
+      }),
+    },
   );
   const normalized = normalizeWorkOrder(result.workOrder);
   if (!normalized) throw new Error('Respuesta inválida del servidor');
+  notifyWorkshopDataChanged();
   return normalized;
 }
 
 export async function updateWorkOrderRequest(
   userId: string,
   workOrder: WorkOrder,
+  scope?: WorkshopScope,
 ): Promise<WorkOrder> {
   const normalizedUserId = normalizeUserId(userId);
+  const businessId = String(scope?.businessId || workOrder.business_id || '').trim();
+  const payload = businessId ? { ...workOrder, business_id: businessId } : workOrder;
   const result = await request<{ ok: boolean; workOrder: unknown }>(
     `/api/workshop/orders/${encodeURIComponent(normalizedUserId)}/${encodeURIComponent(workOrder._id)}`,
-    { method: 'PUT', body: JSON.stringify({ workOrder }) },
+    { method: 'PUT', body: JSON.stringify({ workOrder: payload }) },
   );
   const normalized = normalizeWorkOrder(result.workOrder);
   if (!normalized) throw new Error('Respuesta inválida del servidor');
+  notifyWorkshopDataChanged();
   return normalized;
 }
 
@@ -216,6 +239,7 @@ export async function deleteWorkOrderRequest(userId: string, workOrderId: string
     `/api/workshop/orders/${encodeURIComponent(normalizedUserId)}/${encodeURIComponent(workOrderId)}`,
     { method: 'DELETE' },
   );
+  notifyWorkshopDataChanged();
 }
 
 // ─── Helper: create empty labor/material/time items ──────────────────────────

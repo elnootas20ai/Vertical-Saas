@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router';
+import { useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Monitor, Store } from 'lucide-react';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
@@ -7,6 +8,7 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
+import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
@@ -19,13 +21,16 @@ import {
 export function TpvTabletLogin() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { tpvTabletLogin } = useAuth();
   const businessCtx = useBusinessOptional();
   const binding = readTpvTabletBinding();
 
   const [terminalCode, setTerminalCode] = useState(() => {
+    const fromQuery = searchParams.get('code') || searchParams.get('terminalCode');
+    if (fromQuery) return normalizeTpvTabletCode(fromQuery);
     const fromState = (location.state as { terminalCode?: string } | null)?.terminalCode;
-    if (fromState) return String(fromState).trim().toUpperCase();
+    if (fromState) return normalizeTpvTabletCode(fromState);
     return binding?.terminalCode || '';
   });
   const [errors, setErrors] = useState<{ terminalCode?: string; general?: string }>({});

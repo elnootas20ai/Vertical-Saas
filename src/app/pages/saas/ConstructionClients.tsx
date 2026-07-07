@@ -27,6 +27,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1175,13 +1176,29 @@ function ImportCrmModal({ userId, onClose, onImported }: { userId: string; onClo
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} cliente(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createConstructionClient(uid, data as Partial<ConstructionClient>),
+    }, entries, (entry) => ({
+      nombre: entryStr(entry, 'name', 'nombre'),
+      email: entryStr(entry, 'email'),
+      telefono: entryStr(entry, 'phone', 'telefono'),
+      direccion: entryStr(entry, 'address', 'direccion'),
+    }));
+    if (created > 0) {
+      toast.success(`${created} cliente(s) creado(s)`);
+      void loadClients();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} cliente(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const searchCrm = async () => {
     if (!searchQ.trim() || searchQ.length < 2) return;

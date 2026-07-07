@@ -36,6 +36,9 @@ export type CatalogImportProgressUpdate = {
 
 export type CatalogImportProgressReporter = (update: CatalogImportProgressUpdate) => void;
 
+export type { ImportAbortError } from './importAbort';
+export { throwIfAborted, isImportAbortError } from './importAbort';
+
 function mapIssue(issue: DeliveryCatalogImportIssue): CatalogImportReportLine {
   return {
     row: issue.row,

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -230,13 +231,53 @@ export function ButcherTraceability() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} lote(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const now = new Date().toISOString();
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const codigoLote = entryStr(e, 'batch', 'codigoLote', 'lote', 'code');
+      if (!codigoLote) return null;
+      const productRaw = entryStr(e, 'product', 'tipoAnimal', 'producto').toLowerCase();
+      const tipoAnimal = (['vacuno', 'cerdo', 'pollo', 'cordero'] as TipoAnimal[]).includes(productRaw as TipoAnimal)
+        ? (productRaw as TipoAnimal)
+        : 'otro';
+      return {
+        codigoLote,
+        proveedorId: '',
+        proveedorNombre: entryStr(e, 'supplier', 'proveedor'),
+        tipoAnimal,
+        origen: entryStr(e, 'origin', 'origen'),
+        matadero: '',
+        nGuiaSanitaria: '',
+        fechaEntrada: entryStr(e, 'date', 'fechaEntrada') || HOY,
+        fechaCaducidad: '',
+        fechaSacrificio: '',
+        kgRecibidos: entryNum(e, 'kg', 'kgRecibidos'),
+        costePorKg: entryNum(e, 'cost', 'costePorKg'),
+        tiendaAlmacenId: '',
+        tiendaAlmacenNombre: '',
+        temperatura: 2,
+        estado: 'activo' as EstadoLote,
+        observaciones: entryStr(e, 'notes', 'notas', 'observaciones'),
+        creadoPor: displayName,
+        kgDisponibles: entryNum(e, 'kg', 'kgRecibidos'),
+        ventasAsociadas: [],
+        fechaCreacion: now,
+      };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} lote(s) creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún lote');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} lote(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const [isGerente] = useState(true);
 

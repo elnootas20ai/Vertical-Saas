@@ -29,7 +29,7 @@ export type { SubscriptionPlanTier };
 export const INCLUDED_BUSINESSES: Record<SubscriptionPlanTier, number> = {
   basic: 1,
   normal: 1,
-  pro: 3,
+  pro: 2,
 };
 
 export function clampExtraBusinessSlots(value: unknown): number {
@@ -52,7 +52,7 @@ export function getEffectiveBusinessLimit(
 export const INCLUDED_COMMERCIAL_BRANDS: Record<SubscriptionPlanTier, number> = {
   basic: 0,
   normal: 0,
-  pro: 1,
+  pro: 2,
 };
 
 export type TenantEntitlementCounts = {

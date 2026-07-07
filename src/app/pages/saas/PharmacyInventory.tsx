@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
@@ -79,13 +80,34 @@ export function PharmacyInventory() {
     { key: 'supplier', label: 'Proveedor', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} producto(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const nombre = entryStr(e, 'nombre', 'name');
+    if (!nombre) return null;
+    return {
+      nombre,
+      laboratorio: entryStr(e, 'laboratorio') || '',
+      categoria: entryStr(e, 'categoria', 'category') || 'otros',
+      stock: entryNum(e, 'stock'),
+      stockMinimo: entryNum(e, 'stockMinimo'),
+      precio: entryNum(e, 'precio', 'price'),
+      caducidad: entryStr(e, 'caducidad') || '',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} producto creado creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} producto(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const loadData = useCallback(async () => {
     if (!userId) {

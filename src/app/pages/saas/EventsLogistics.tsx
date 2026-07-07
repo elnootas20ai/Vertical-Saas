@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -13,6 +14,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateVerticalEntries, entryStr } from '../../lib/bulkVerticalImport';
 
 type TaskStatus = 'pendiente' | 'en_proceso' | 'completado' | 'bloqueado';
 type Priority = 'alta' | 'media' | 'baja';
@@ -66,6 +68,9 @@ const EMPTY_FORM: LogisticsForm = { evento: '', tarea: '', responsable: '', fech
 
 export function EventsLogistics() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const linkedEventName = searchParams.get('eventName') || '';
+  const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<LogisticsTask>('events', 'logistics'), []);
   const eventsCatalogApi = useMemo(() => createVerticalApi<EventRecord>('events', 'events'), []);
   const userId = user?.user_id || user?.id || '';
@@ -130,13 +135,34 @@ export function EventsLogistics() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} tarea(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const tarea = entryStr(e, 'name', 'tarea', 'nombre');
+      if (!tarea) return null;
+      return {
+        evento: entryStr(e, 'event', 'evento') || linkedEventName,
+        tarea,
+        responsable: entryStr(e, 'assignee', 'responsable'),
+        fechaLimite: entryStr(e, 'deadline', 'fechaLimite', 'date'),
+        estado: (entryStr(e, 'status', 'estado') || 'pendiente') as TaskStatus,
+        prioridad: 'media' as Priority,
+        categoria: 'montaje' as Category,
+      };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} tarea(s) creada(s)`);
+    } else {
+      toast.error('No se pudo crear ninguna tarea');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} tarea(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -144,8 +170,9 @@ export function EventsLogistics() {
     const ms = t.tarea.toLowerCase().includes(search.toLowerCase()) || t.evento.toLowerCase().includes(search.toLowerCase()) || t.responsable.toLowerCase().includes(search.toLowerCase());
     const mst = !filterStatus || t.estado === filterStatus;
     const mp = !filterPriority || t.prioridad === filterPriority;
-    return ms && mst && mp;
-  }), [tasks, search, filterStatus, filterPriority]);
+    const me = !linkedEventName || t.evento === linkedEventName;
+    return ms && mst && mp && me;
+  }), [tasks, search, filterStatus, filterPriority, linkedEventName]);
 
   const stats = useMemo(() => {
     const pendientes = tasks.filter(t => t.estado === 'pendiente').length;
@@ -157,7 +184,11 @@ export function EventsLogistics() {
 
   const progressPercent = stats.total ? Math.round((stats.completadas / stats.total) * 100) : 0;
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowModal(true); };
+  const openCreate = () => {
+    setEditing(null);
+    setForm(linkedEventName ? { ...EMPTY_FORM, evento: linkedEventName } : EMPTY_FORM);
+    setShowModal(true);
+  };
   const openEdit = (t: LogisticsTask) => {
     setEditing(t);
     setForm({
@@ -197,11 +228,12 @@ export function EventsLogistics() {
 
   const handleSave = async () => {
     if (!form.tarea || !form.evento || !userId) return;
+    const payload = linkedEventId && !editing ? { ...form, eventId: linkedEventId } : form;
     try {
       if (editing) {
-        await api.update(userId, editing._id, form);
+        await api.update(userId, editing._id, payload);
       } else {
-        await api.create(userId, form);
+        await api.create(userId, payload);
       }
       await loadData();
       setShowModal(false);
@@ -219,6 +251,16 @@ export function EventsLogistics() {
   return (
     <Layout title="Logística">
       <div className="space-y-6">
+        {linkedEventName && (
+          <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>Evento: <strong>{linkedEventName}</strong></span>
+            {linkedEventId && (
+              <Link to={`/saas/vertical/eventos/${linkedEventId}`} className="font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
+                Volver al proyecto
+              </Link>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {statsCards.map(s => (
             <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-4`}>

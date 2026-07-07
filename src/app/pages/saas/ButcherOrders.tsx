@@ -69,33 +69,7 @@ export function ButcherOrders() {
 
   const [clientSuggestions, setClientSuggestions] = useState<ButcherClient[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'client', label: 'Cliente' },
-    { key: 'product', label: 'Producto' },
-    { key: 'quantity', label: 'Cantidad' },
-    { key: 'date', label: 'Fecha entrega' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'client', label: 'Cliente', required: true, example: '' },
-    { key: 'product', label: 'Producto', required: true, example: '' },
-    { key: 'quantity', label: 'Cantidad', example: '' },
-    { key: 'date', label: 'Fecha entrega', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} pedido(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} pedido(s) importado(s)`);
-  };
-  const searchTimeout = useRef<any>(null);
+    const searchTimeout = useRef<any>(null);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -262,8 +236,6 @@ export function ButcherOrders() {
             <AddButtonDropdown
               label="Nuevo pedido"
               onQuickAdd={() => openCreate('simple')}
-              onAIAdd={() => setShowAIModal(true)}
-              onImport={() => setShowImportModal(true)}
               quickAddLabel="Alta rápida"
               quickAddDesc="Formulario de pedido"
             />
@@ -434,21 +406,6 @@ export function ButcherOrders() {
           </div>
         </div>
       )}
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="butcher_orders"
-        moduleLabel="Pedidos"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Pedidos"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

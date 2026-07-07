@@ -121,36 +121,7 @@ export function ServiceContractsPage() {
   const [form, setForm] = useState<ContractForm>(emptyForm());
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'contracts' | 'calendar' | 'services'>('contracts');
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'client', label: 'Cliente' },
-    { key: 'service', label: 'Servicio' },
-    { key: 'startDate', label: 'Fecha inicio' },
-    { key: 'endDate', label: 'Fecha fin' },
-    { key: 'amount', label: 'Importe' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'client', label: 'Cliente', example: '' },
-    { key: 'service', label: 'Servicio', example: '' },
-    { key: 'startDate', label: 'Fecha inicio', example: '' },
-    { key: 'endDate', label: 'Fecha fin', example: '' },
-    { key: 'amount', label: 'Importe', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} contrato(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} contrato(s) importado(s)`);
-  };
-
-  useModalClose(showModal, () => setShowModal(false));
+    useModalClose(showModal, () => setShowModal(false));
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
@@ -355,8 +326,6 @@ export function ServiceContractsPage() {
             <AddButtonDropdown
                 label="Nuevo contrato"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de contrato"
               />
@@ -716,22 +685,6 @@ function Textarea({ label, value, onChange, placeholder }: {
       <textarea
         value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={2}
         className="w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-      />
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="service_contracts"
-        moduleLabel="Contratos"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Contratos"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
       />
     </div>
   );

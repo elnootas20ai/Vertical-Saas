@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -81,13 +82,33 @@ export function HotelRooms() {
     { key: 'status', label: 'Estado', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} habitación(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const number = entryStr(e, 'number', 'numero', 'name', 'nombre');
+    if (!number) return null;
+    return {
+      number,
+      tipo: entryStr(e, 'tipo', 'type') || 'individual',
+      floor: entryNum(e, 'floor'),
+      pricePerNight: entryNum(e, 'pricePerNight'),
+      status: entryStr(e, 'status') || 'disponible',
+      amenities: [],
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} habitación creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} habitación(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(modalOpen, () => setModalOpen(false));
 
@@ -191,8 +212,6 @@ export function HotelRooms() {
             <AddButtonDropdown
                 label="Nueva habitación"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de habitación"
               />

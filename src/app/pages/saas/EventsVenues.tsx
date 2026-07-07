@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -11,6 +12,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateVerticalEntries, entryNum, entryStr } from '../../lib/bulkVerticalImport';
 
 type VenueType = 'salon' | 'jardin' | 'playa' | 'finca' | 'hotel' | 'restaurante' | 'auditorio';
 
@@ -41,6 +43,9 @@ const EMPTY_FORM: VenueForm = { nombre: '', tipo: 'salon', direccion: '', capaci
 
 export function EventsVenues() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const linkedEventName = searchParams.get('eventName') || '';
+  const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<Venue>('events', 'venues'), []);
   const userId = user?.user_id || user?.id || '';
 
@@ -91,13 +96,36 @@ export function EventsVenues() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} local(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const nombre = entryStr(e, 'name', 'nombre');
+      const direccion = entryStr(e, 'address', 'direccion');
+      if (!nombre || !direccion) return null;
+      return {
+        nombre,
+        direccion,
+        capacidad: entryNum(e, 'capacity', 'capacidad'),
+        precio: entryNum(e, 'price', 'precio'),
+        tipo: (entryStr(e, 'type', 'tipo') || 'salon') as VenueType,
+        servicios: entryStr(e, 'notes', 'servicios'),
+        disponibilidad: true,
+        valoracion: 5,
+      };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} local(es) creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún local');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} local(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -176,6 +204,16 @@ export function EventsVenues() {
   return (
     <Layout title="Espacios / Venues">
       <div className="space-y-6">
+        {linkedEventName && (
+          <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>Evento: <strong>{linkedEventName}</strong></span>
+            {linkedEventId && (
+              <Link to={`/saas/vertical/eventos/${linkedEventId}`} className="font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
+                Volver al proyecto
+              </Link>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {statsCards.map(s => (
             <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-4`}>

@@ -23,6 +23,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 const TIPOS_OBRA = ['casa', 'local', 'piso', 'nave', 'promoción', 'colegio', 'gimnasio', 'oficina', 'otro'];
 
@@ -88,13 +89,31 @@ export function ConstructionBudgets() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} presupuesto(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createConstructionBudget(uid, data as Partial<ConstructionBudget>),
+    }, entries, (entry) => ({
+      proyectoNombre: entryStr(entry, 'name', 'nombre', 'proyecto'),
+      clienteNombre: entryStr(entry, 'client', 'cliente'),
+      direccionObra: entryStr(entry, 'address', 'direccion'),
+      fecha: entryStr(entry, 'date', 'fecha') || new Date().toISOString().slice(0, 10),
+      estado: 'borrador',
+      partidas: [],
+    }));
+    if (created > 0) {
+      toast.success(`${created} presupuesto(s) creado(s)`);
+      void load();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} presupuesto(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
   const navigate = useNavigate();
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {

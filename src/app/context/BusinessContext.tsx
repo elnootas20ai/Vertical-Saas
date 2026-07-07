@@ -148,6 +148,22 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         }
       }
 
+      const storedId = getStoredBusinessId(userId);
+      const storedBiz = storedId
+        ? list.find(
+            (b) =>
+              normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(storedId)
+              || normalizeBusinessScopeId(b.id) === normalizeBusinessScopeId(storedId),
+          )
+        : null;
+      if (storedBiz) {
+        setCurrentBusiness((prev) =>
+          prev?.business_id === storedBiz.business_id ? prev : storedBiz,
+        );
+        storeBusinessId(userId, storedBiz.business_id);
+        return;
+      }
+
       const tabletBusinessId = String(readTpvTabletBinding()?.businessId || '').trim();
       if (tabletBusinessId) {
         const tabletBiz = list.find(
@@ -163,14 +179,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const storedId = getStoredBusinessId(userId);
-      const found = storedId
-        ? list.find(
-            (b) =>
-              normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(storedId),
-          )
-        : null;
-      const resolved = found || list[0];
+      const resolved = list[0];
 
       setCurrentBusiness((prev) =>
         prev?.business_id === resolved.business_id ? prev : resolved,
@@ -323,11 +332,18 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const linkedId = String(user?.linkedBusinessId || '').trim();
     if (!linkedId || user?.accountType !== 'user' || businesses.length === 0) return;
-    const found = businesses.find((b) => b.business_id === linkedId);
-    if (!found || currentBusiness?.business_id === linkedId) return;
-    setCurrentBusiness(found);
+    const found = businesses.find(
+      (b) => normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(linkedId),
+    );
+    if (!found) return;
+    setCurrentBusiness((prev) => {
+      if (normalizeBusinessScopeId(prev?.business_id) === normalizeBusinessScopeId(linkedId)) {
+        return prev;
+      }
+      return found;
+    });
     if (user?.user_id) storeBusinessId(user.user_id, linkedId);
-  }, [user?.linkedBusinessId, user?.accountType, user?.user_id, businesses, currentBusiness?.business_id]);
+  }, [user?.linkedBusinessId, user?.accountType, user?.user_id, businesses]);
 
   useEffect(() => {
     void reloadBusinesses();
@@ -365,7 +381,9 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     (businessId: string) => {
       const norm = normalizeBusinessScopeId(businessId);
       const found = businesses.find(
-        (b) => normalizeBusinessScopeId(b.business_id) === norm,
+        (b) =>
+          normalizeBusinessScopeId(b.business_id) === norm
+          || normalizeBusinessScopeId(b.id) === norm,
       );
       if (!found) return;
       const prevId = normalizeBusinessScopeId(currentBusiness?.business_id);

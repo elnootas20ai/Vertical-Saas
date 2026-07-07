@@ -9,11 +9,17 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
-type Plan = 'basico' | 'premium' | 'vip';
+type Plan = string;
 type MemberStatus = 'activo' | 'inactivo' | 'congelado';
+
+interface MembershipPlan extends VerticalEntity {
+  nombre: string;
+  precioMensual: number;
+}
 
 interface Member extends VerticalEntity {
   nombre: string;
@@ -26,11 +32,28 @@ interface Member extends VerticalEntity {
 
 type MemberForm = Omit<Member, keyof VerticalEntity>;
 
-const PLAN_CONFIG: Record<Plan, { label: string; bg: string; text: string }> = {
+const LEGACY_PLAN_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   basico:  { label: 'Básico',  bg: 'bg-gray-100 dark:bg-gray-700', text: 'text-gray-700 dark:text-gray-300' },
   premium: { label: 'Premium', bg: 'bg-blue-100 dark:bg-blue-900/40', text: 'text-blue-700 dark:text-blue-300' },
   vip:     { label: 'VIP',     bg: 'bg-amber-100 dark:bg-amber-900/40', text: 'text-amber-700 dark:text-amber-300' },
 };
+
+function planStyle(plan: string, memberships: MembershipPlan[]) {
+  const match = memberships.find((m) => m.nombre === plan);
+  if (match) {
+    return { label: match.nombre, bg: 'bg-violet-100 dark:bg-violet-900/40', text: 'text-violet-700 dark:text-violet-300' };
+  }
+  return LEGACY_PLAN_CONFIG[plan] || { label: plan || '—', bg: 'bg-gray-100 dark:bg-gray-700', text: 'text-gray-700 dark:text-gray-300' };
+}
+
+function planMonthlyPrice(plan: string, memberships: MembershipPlan[]): number {
+  const match = memberships.find((m) => m.nombre === plan);
+  if (match) return Number(match.precioMensual || 0);
+  if (plan === 'vip') return 79.99;
+  if (plan === 'premium') return 49.99;
+  if (plan === 'basico') return 29.99;
+  return 0;
+}
 
 const STATUS_CONFIG: Record<MemberStatus, { label: string; dot: string }> = {
   activo:    { label: 'Activo',    dot: 'bg-emerald-500' },
@@ -38,17 +61,19 @@ const STATUS_CONFIG: Record<MemberStatus, { label: string; dot: string }> = {
   congelado: { label: 'Congelado', dot: 'bg-blue-400' },
 };
 
-const EMPTY_FORM: MemberForm = { nombre: '', email: '', telefono: '', plan: 'basico', estado: 'activo', fechaAlta: new Date().toISOString().slice(0, 10) };
+const EMPTY_FORM: MemberForm = { nombre: '', email: '', telefono: '', plan: '', estado: 'activo', fechaAlta: new Date().toISOString().slice(0, 10) };
 
 export function GymMembers() {
   const { user } = useAuth();
   const api = useMemo(() => createVerticalApi<Member>('gym', 'members'), []);
+  const membershipsApi = useMemo(() => createVerticalApi<MembershipPlan>('gym', 'memberships'), []);
   const userId = user?.user_id || user?.id || '';
 
   const [members, setMembers] = useState<Member[]>([]);
+  const [memberships, setMemberships] = useState<MembershipPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterPlan, setFilterPlan] = useState<Plan | 'all'>('all');
+  const [filterPlan, setFilterPlan] = useState<string | 'all'>('all');
   const [filterStatus, setFilterStatus] = useState<MemberStatus | 'all'>('all');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Member | null>(null);
@@ -63,12 +88,16 @@ export function GymMembers() {
     }
     setLoading(true);
     try {
-      const list = await api.list(userId);
+      const [list, plans] = await Promise.all([
+        api.list(userId),
+        membershipsApi.list(userId).catch(() => [] as MembershipPlan[]),
+      ]);
       setMembers(list);
+      setMemberships(plans);
     } finally {
       setLoading(false);
     }
-  }, [userId, api]);
+  }, [userId, api, membershipsApi]);
 
   useEffect(() => {
     loadData();
@@ -92,13 +121,33 @@ export function GymMembers() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} socio(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const nombre = entryStr(e, 'nombre', 'name');
+    if (!nombre) return null;
+    return {
+      nombre,
+      email: entryStr(e, 'email') || '',
+      telefono: entryStr(e, 'telefono', 'phone', 'tel') || '',
+      plan: entryStr(e, 'plan', 'membership') || 'basico',
+      estado: entryStr(e, 'estado', 'status') || 'activo',
+      fechaAlta: entryStr(e, 'fechaAlta', 'startDate', 'date') || new Date().toISOString().slice(0, 10),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} socio creado creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} socio(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -116,12 +165,19 @@ export function GymMembers() {
     const thisMonth = members.filter(m => m.fechaAlta.startsWith(new Date().toISOString().slice(0, 7))).length;
     const ingresos = members.reduce((sum, m) => {
       if (m.estado !== 'activo') return sum;
-      return sum + (m.plan === 'vip' ? 79.99 : m.plan === 'premium' ? 49.99 : 29.99);
+      return sum + planMonthlyPrice(m.plan, memberships);
     }, 0);
     return { total: members.length, activos, thisMonth, ingresos };
-  }, [members]);
+  }, [members, memberships]);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowModal(true); };
+  const openCreate = () => {
+    setEditing(null);
+    setForm({
+      ...EMPTY_FORM,
+      plan: memberships[0]?.nombre || 'basico',
+    });
+    setShowModal(true);
+  };
   const openEdit = (m: Member) => { setEditing(m); setForm({ nombre: m.nombre, email: m.email, telefono: m.telefono, plan: m.plan, estado: m.estado, fechaAlta: m.fechaAlta }); setShowModal(true); };
 
   const handleSave = async () => {
@@ -187,9 +243,12 @@ export function GymMembers() {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5">
               <Filter className="w-4 h-4 text-gray-400" />
-              <select className="text-sm border-2 border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 outline-none" value={filterPlan} onChange={e => setFilterPlan(e.target.value as Plan | 'all')} disabled={loading}>
+              <select className="text-sm border-2 border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 outline-none" value={filterPlan} onChange={e => setFilterPlan(e.target.value)} disabled={loading}>
                 <option value="all">Todos los planes</option>
-                {Object.entries(PLAN_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                {memberships.map((p) => <option key={p._id} value={p.nombre}>{p.nombre}</option>)}
+                {Object.entries(LEGACY_PLAN_CONFIG)
+                  .filter(([k]) => !memberships.some((p) => p.nombre === k))
+                  .map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
               </select>
               <select className="text-sm border-2 border-gray-200 dark:border-gray-700 rounded-lg px-2 py-1.5 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-300 outline-none" value={filterStatus} onChange={e => setFilterStatus(e.target.value as MemberStatus | 'all')} disabled={loading}>
                 <option value="all">Todos los estados</option>
@@ -238,7 +297,7 @@ export function GymMembers() {
                   <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">{m.nombre}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400 flex items-center gap-1.5"><Mail className="w-3.5 h-3.5" />{m.email}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400"><span className="inline-flex items-center gap-1.5"><Phone className="w-3.5 h-3.5" />{m.telefono}</span></td>
-                  <td className="px-4 py-3"><span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${PLAN_CONFIG[m.plan].bg} ${PLAN_CONFIG[m.plan].text}`}>{PLAN_CONFIG[m.plan].label}</span></td>
+                  <td className="px-4 py-3"><span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${planStyle(m.plan, memberships).bg} ${planStyle(m.plan, memberships).text}`}>{planStyle(m.plan, memberships).label}</span></td>
                   <td className="px-4 py-3"><span className="inline-flex items-center gap-1.5 text-sm"><span className={`w-2 h-2 rounded-full ${STATUS_CONFIG[m.estado].dot}`} />{STATUS_CONFIG[m.estado].label}</span></td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{m.fechaAlta}</td>
                   <td className="px-4 py-3 text-right">
@@ -283,8 +342,10 @@ export function GymMembers() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Plan</label>
-                  <select className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 text-gray-900 dark:text-white outline-none focus:border-gray-900 dark:focus:border-gray-500" value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value as Plan }))}>
-                    {Object.entries(PLAN_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  <select className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 text-gray-900 dark:text-white outline-none focus:border-gray-900 dark:focus:border-gray-500" value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))}>
+                    {memberships.length > 0
+                      ? memberships.map((p) => <option key={p._id} value={p.nombre}>{p.nombre} — €{p.precioMensual}/mes</option>)
+                      : Object.entries(LEGACY_PLAN_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </div>
                 <div>

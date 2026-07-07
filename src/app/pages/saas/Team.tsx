@@ -97,6 +97,7 @@ import { getUserActivityRequest } from '../../lib/authApi';
 import {
   buildCustomRolePermissionMatrix,
   formatRolePermissions,
+  getInvitePermissionsForUser,
   loadCustomRoles,
   mergeRoleCatalog,
   upsertCustomRole,
@@ -112,6 +113,13 @@ const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
   { id: 'Mostrador / Atención', description: 'Atiende clientes, mostrador, sala o food truck.', permissions: [], users: 0 },
   { id: 'Cocina', description: 'Prepara pedidos y cocina.', permissions: [], users: 0 },
   { id: 'Reparto', description: 'Entrega pedidos a domicilio.', permissions: [], users: 0 },
+];
+
+const EVENTS_FUNCTION_ROLES: RoleDefinition[] = [
+  { id: 'Administrador', description: 'Gestiona equipo, permisos y operación del negocio.', permissions: [], users: 0 },
+  { id: 'Encargado', description: 'Coordina contrataciones, catering y logística.', permissions: [], users: 0 },
+  { id: 'Comercial', description: 'Presupuestos, clientes y cierre de contratos.', permissions: [], users: 0 },
+  { id: 'Operaciones', description: 'Planificación del día del evento e invitados.', permissions: [], users: 0 },
 ];
 
 // ─── Skin System ──────────────────────────────────────────────────────────────
@@ -854,6 +862,7 @@ const ROLE_TOKEN: Record<
 };
 
 const PERMISSION_MODULES = [
+  { key: 'workshop', label: 'Taller', icon: <Wrench className="w-3.5 h-3.5" /> },
   { key: 'vehicles', label: 'Vehículos', icon: <Car className="w-3.5 h-3.5" /> },
   { key: 'clients', label: 'Clientes', icon: <Users className="w-3.5 h-3.5" /> },
   { key: 'sales', label: 'Ventas', icon: <TrendingUp className="w-3.5 h-3.5" /> },
@@ -861,6 +870,9 @@ const PERMISSION_MODULES = [
   { key: 'finance', label: 'Finanzas', icon: <DollarSign className="w-3.5 h-3.5" /> },
   { key: 'ancove', label: 'ANCOVE', icon: <Building2 className="w-3.5 h-3.5" /> },
   { key: 'team', label: 'Equipo', icon: <UsersRound className="w-3.5 h-3.5" /> },
+  { key: 'delivery', label: 'Delivery / Pedidos', icon: <Package className="w-3.5 h-3.5" /> },
+  { key: 'cash_register', label: 'Caja / TPV', icon: <Banknote className="w-3.5 h-3.5" /> },
+  { key: 'reports', label: 'Informes', icon: <FileText className="w-3.5 h-3.5" /> },
 ] as const;
 
 function getRoleToken(role?: string, skinId?: string) {
@@ -917,42 +929,7 @@ function buildPersonalDataInfo(overrides?: Partial<PersonalData> | null): Person
 }
 
 function buildRolePermissions(role = 'Usuario', roleDefinitions: RoleDefinition[] = []): AccountPermissionMatrix {
-  const customRole = roleDefinitions.find((definition) => definition.id === role);
-  if (customRole && !ROLE_TOKEN[role]) {
-    return buildCustomRolePermissionMatrix(customRole.permissions);
-  }
-
-  const fullAccess = role === 'Admin' || role === 'Gerente';
-  const base = Object.fromEntries(
-    PERMISSION_MODULES.map((module) => [module.key, { view: fullAccess, edit: fullAccess }]),
-  ) as AccountPermissionMatrix;
-
-  if (fullAccess) {
-    return base;
-  }
-
-  if (role === 'Comercial') {
-    ['vehicles', 'clients', 'sales', 'documents'].forEach((key) => {
-      base[key] = { view: true, edit: true };
-    });
-  }
-
-  if (role === 'Administración') {
-    ['clients', 'documents', 'finance', 'ancove'].forEach((key) => {
-      base[key] = { view: true, edit: true };
-    });
-  }
-
-  if (role === 'Taller') {
-    base.vehicles = { view: true, edit: true };
-  }
-
-  if (role === 'Usuario') {
-    base.vehicles = { view: true, edit: false };
-    base.clients = { view: true, edit: false };
-  }
-
-  return base;
+  return getInvitePermissionsForUser(role, roleDefinitions);
 }
 
 function normalizePermissions(permissions?: AccountPermissionMatrix, role?: string) {
@@ -2930,7 +2907,10 @@ export function Team() {
       return (a.fullName || '').localeCompare(b.fullName || '');
     });
   }, [members, user?.user_id]);
-  const roles = useMemo(() => mergeRoleCatalog(DELIVERY_FUNCTION_ROLES, customRoles, members), [customRoles, members]);
+  const roles = useMemo(() => {
+    const base = currentBusiness?.businessType === 'events' ? EVENTS_FUNCTION_ROLES : DELIVERY_FUNCTION_ROLES;
+    return mergeRoleCatalog(base, customRoles, members);
+  }, [customRoles, members, currentBusiness?.businessType]);
 
   const selectedMember = orderedMembers.find((member) => member.user_id === selectedMemberId) || null;
   const totalActive = orderedMembers.filter((member) => member.status === 'active').length;
@@ -3045,10 +3025,7 @@ export function Team() {
 
   const handleInvite = async (payload: InviteUserPayload) => {
     const { name, email, role, landingPage, phone, position, contractType, grossMonthlySalary, workCenterId, businessId } = payload;
-    const selectedRole = roles.find((item) => item.id === role);
-    const permissions = selectedRole && !ROLE_TOKEN[role]
-      ? buildRolePermissions(role, roles)
-      : undefined;
+    const permissions = getInvitePermissionsForUser(role, roles);
     const result = await inviteUser({
       name, email, role, phone, permissions,
       businessId: businessId || currentBusiness?.business_id,
@@ -3061,8 +3038,8 @@ export function Team() {
     const isExistingUser = Boolean(result.isExistingUser);
     setPageMessage({
       text: isExistingUser
-        ? `${name || email} ya tiene cuenta en Vertial. Verá tu invitación la próxima vez que inicie sesión.`
-        : `Invitación creada para ${email}. Cuando se registre en Vertial verá tu invitación pendiente.`,
+        ? `${name || email} recibirá la invitación con el rol «${role}» la próxima vez que inicie sesión.`
+        : `Invitación creada para ${email} con rol «${role}».`,
       type: 'success',
     });
     await loadDirectory(null);

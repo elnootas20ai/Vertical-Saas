@@ -27,6 +27,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 const fmt = (n: number) => n.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
 
@@ -279,13 +280,27 @@ export function ConstructionPartidasGremios() {
     { key: 'description', label: 'Descripción', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} partida/gremio(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createConstructionGuild(uid, data as Partial<ConstructionGuild>),
+    }, entries, (entry) => ({
+      nombre: entryStr(entry, 'name', 'nombre'),
+      categoria: entryStr(entry, 'category', 'categoria') || 'general',
+    }));
+    if (created > 0) {
+      toast.success(`${created} partida(s) creado(s)`);
+      void load();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} partida/gremio(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
   const hasEdited = Object.keys(editedPrices).length > 0;
 
   const saveBulkPrices = async () => {

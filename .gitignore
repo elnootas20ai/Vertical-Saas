@@ -43,6 +43,20 @@ Thumbs.db
 .cache/
 .parcel-cache/
 
+# Capacitor / nativo (artefactos locales; las carpetas android/ e ios/ sí se versionan)
+android/.gradle/
+android/app/build/
+android/local.properties
+android/captures/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+ios/App/Pods/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+
 # Plugin data (agent persistence)
 .plugin-data/
 

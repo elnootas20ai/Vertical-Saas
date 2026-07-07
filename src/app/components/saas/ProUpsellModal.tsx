@@ -11,7 +11,7 @@ const PRO_FEATURES = [
   'Roles personalizados (Taller, etc.)',
   'Vehículos ilimitados',
   'ANCOVE integrado',
-  'IA de llamadas y análisis',
+  'Chat de equipo integrado',
   'Soporte prioritario 24h',
   'Multi-ubicación',
 ];

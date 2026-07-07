@@ -7,7 +7,8 @@ import {
   resumeSubscription,
   getPayment,
   verifyWebhookSignature,
-  resolveApiKey,
+  resolvePlatformApiKey,
+  resolveWebhookApiKey,
   getDefaultMode,
   createPayment,
 } from '../services/monei.js';
@@ -38,6 +39,7 @@ import {
   shouldApplyMoneiWebhookUpdate,
 } from '../services/moneiSubscriptionSync.js';
 import { isAdminPlanLocked } from '../shared/billing/adminPlanLock.js';
+import { recordSubscriptionPaymentInvoice } from '../services/subscriptionBillingInvoice.js';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:3005';
 
@@ -156,7 +158,7 @@ export async function createAndActivate(req, res) {
       });
     }
 
-    const userApiKey = await resolveApiKey(req, userId);
+    const userApiKey = resolvePlatformApiKey();
     const maskedKey = userApiKey && userApiKey.length > 12
       ? `${userApiKey.slice(0, 8)}...${userApiKey.slice(-4)}`
       : '(no key)';
@@ -306,7 +308,7 @@ export async function getStatus(req, res) {
       });
     }
 
-    const userApiKey = await resolveApiKey(req, userId);
+    const userApiKey = resolvePlatformApiKey();
     let moneiSubscription = null;
     try {
       moneiSubscription = await getSubscription(moneiSubId, userApiKey);
@@ -350,7 +352,7 @@ export async function cancelUserSubscription(req, res) {
       return res.status(400).json({ ok: false, error: 'No hay suscripción activa' });
     }
 
-    const userApiKey = await resolveApiKey(req, userId);
+    const userApiKey = resolvePlatformApiKey();
     await cancelSubscription(moneiSubId, userApiKey);
 
     const updatedAccount = await saveAccount(req, {
@@ -407,7 +409,7 @@ export async function confirmSubscription(req, res) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
 
-    const userApiKey = await resolveApiKey(req, userId);
+    const userApiKey = resolvePlatformApiKey();
     const moneiSub = await getSubscription(subscriptionId, userApiKey);
     let paymentInfo = null;
     if (paymentId) {
@@ -482,7 +484,8 @@ export async function webhookSubscriptionStatus(req, res) {
     );
 
     const signature = req.headers['monei-signature'];
-    if (!verifyWebhookSignature(req.rawBody || '', signature)) {
+    const webhookKey = resolveWebhookApiKey(req.body);
+    if (!verifyWebhookSignature(req.rawBody || '', signature, webhookKey)) {
       logger.error('[MONEI][WEBHOOK /status] Firma inválida — devolviendo 401');
       return res.status(401).json({ error: 'Firma inválida' });
     }
@@ -572,7 +575,8 @@ export async function webhookPaymentStatus(req, res) {
     );
 
     const signature = req.headers['monei-signature'];
-    if (!verifyWebhookSignature(req.rawBody || '', signature)) {
+    const webhookKey = resolveWebhookApiKey(req.body);
+    if (!verifyWebhookSignature(req.rawBody || '', signature, webhookKey)) {
       logger.error('[MONEI][WEBHOOK /payment] Firma inválida — devolviendo 401');
       return res.status(401).json({ error: 'Firma inválida' });
     }
@@ -625,6 +629,15 @@ export async function webhookPaymentStatus(req, res) {
           metadata: { paymentId, billingMode: metadata.billingMode || 'monthly' },
         });
         sendPaymentSuccessNotification({ ...account, subscription: patched.subscription }).catch(() => null);
+        void recordSubscriptionPaymentInvoice(req, {
+          userId,
+          paymentId,
+          amountCents: payment.amount,
+          planId: account.subscription?.selectedPlanId || '',
+          planName: account.subscription?.planName || '',
+          billingMode: metadata.billingMode || account.subscription?.billingMode || 'monthly',
+          description: `Ampliación ${addonId} — MONEI`,
+        });
         logger.info({ paymentId, userId, addonId }, '[MONEI] Ampliación aplicada tras pago');
       } else if (paymentStatus === 'FAILED') {
         sendPaymentFailedNotification(account).catch(() => null);
@@ -671,6 +684,14 @@ export async function webhookPaymentStatus(req, res) {
         updatedAt: now.toISOString(),
       });
       sendPaymentSuccessNotification(updatedAccount).catch(() => null);
+      void recordSubscriptionPaymentInvoice(req, {
+        userId,
+        paymentId,
+        amountCents: payment.amount,
+        planId: account.subscription?.selectedPlanId || metadata.planId || '',
+        planName: account.subscription?.planName || '',
+        billingMode: account.subscription?.billingMode || metadata.billingMode || 'monthly',
+      });
       logger.info({ paymentId, userId, reactivated }, '[MONEI] Pago recurrente exitoso');
     } else if (paymentStatus === 'FAILED') {
       const updatedAccount = await saveAccount(req, {
@@ -749,7 +770,7 @@ export async function purchaseAddon(req, res) {
       });
     }
 
-    const userApiKey = await resolveApiKey(req, userId);
+    const userApiKey = resolvePlatformApiKey();
     const baseUrl = APP_URL.replace(/\/$/, '');
     const completeUrl = `${baseUrl}/saas/settings/facturacion?addon_complete=true&addon_id=${encodeURIComponent(addonId)}`;
     const cancelUrl = `${baseUrl}/saas/settings/facturacion?addon_cancelled=true`;

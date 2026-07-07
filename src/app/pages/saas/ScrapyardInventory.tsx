@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -171,13 +172,47 @@ export function ScrapyardInventory() {
     { key: 'condition', label: 'Estado', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} pieza(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const nombre = entryStr(e, 'nombre', 'name');
+    if (!nombre) return null;
+    return {
+      referencia: entryStr(e, 'referencia', 'reference', 'sku') || '',
+      nombre,
+      categoria: entryStr(e, 'categoria', 'category'),
+      vehiculoOrigen: entryStr(e, 'vehiculoOrigen') || '',
+      vehiculoMatricula: entryStr(e, 'vehiculoMatricula') || '',
+      ubicacion: entryStr(e, 'ubicacion') || '',
+      zona: entryStr(e, 'zona'),
+      estanteria: entryStr(e, 'estanteria') || '',
+      precio: entryNum(e, 'precio', 'price'),
+      coste: entryNum(e, 'coste'),
+      estado: entryStr(e, 'estado', 'status') || 'disponible',
+      fechaAlta: entryStr(e, 'fechaAlta', 'startDate', 'date') || new Date().toISOString().slice(0, 10),
+      fechaReserva: entryStr(e, 'fechaReserva'),
+      fechaVenta: entryStr(e, 'fechaVenta'),
+      fotos: [],
+      notas: entryStr(e, 'notas', 'notes', 'description') || '',
+      compatibilidades: [],
+      garantiaMeses: entryNum(e, 'garantiaMeses'),
+      peso: entryStr(e, 'peso') || '',
+      clienteReserva: entryStr(e, 'clienteReserva'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} pieza creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} pieza(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const photoInputRef = useRef<HTMLInputElement>(null);
 

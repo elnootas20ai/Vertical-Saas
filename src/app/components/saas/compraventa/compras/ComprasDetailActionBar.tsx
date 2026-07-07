@@ -1,6 +1,7 @@
-import { FileUp, Pencil, Plus, Receipt, XCircle } from 'lucide-react';
+import { FileUp, Calculator, Pencil, Plus, Receipt, XCircle } from 'lucide-react';
 
 const ACTIONS = [
+  { id: 'fiscal', label: 'Calculadora fiscal', icon: Calculator },
   { id: 'edit', label: 'Editar', icon: Pencil },
   { id: 'expense', label: 'Añadir gasto', icon: Receipt },
   { id: 'document', label: 'Adjuntar documento', icon: FileUp },

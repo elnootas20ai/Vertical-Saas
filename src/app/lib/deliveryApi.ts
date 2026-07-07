@@ -546,11 +546,15 @@ export interface BulkCreateResult {
   errorDetails?: { index: number; name: string; error: string }[];
 }
 
-export async function bulkCreateCatalogItemsRequest(userId: string, items: Partial<CatalogItem>[]): Promise<BulkCreateResult> {
+export async function bulkCreateCatalogItemsRequest(
+  userId: string,
+  items: Partial<CatalogItem>[],
+  signal?: AbortSignal,
+): Promise<BulkCreateResult> {
   const id = normalizeUserId(userId);
   return request<BulkCreateResult>(
     `/api/delivery/catalog/${encodeURIComponent(id)}/bulk`,
-    { method: 'POST', body: JSON.stringify({ items }) },
+    { method: 'POST', body: JSON.stringify({ items }), signal },
   );
 }
 
@@ -1344,8 +1348,9 @@ export async function ensureDeliveryPdvForWorkCenter(
           address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
         }),
       );
-    } catch {
-      return await ensurePdvHasTabletCode(id, orphan);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'No se pudo enlazar el PDV de caja';
+      throw new Error(msg);
     }
   }
 
@@ -1380,9 +1385,9 @@ export async function ensureDeliveryPdvForWorkCenter(
         ],
       }),
     );
-  } catch {
-    // Un local sin PDV no debe vaciar tiendas / Ajustes (p. ej. cuota, dirección o API caída).
-    return null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'No se pudo crear el PDV de caja';
+    throw new Error(msg);
   }
 }
 

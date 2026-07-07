@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   listPartsRequest,
@@ -408,6 +409,11 @@ function generatePurchaseOrderText(lowParts: Part[]): string {
 
 export function Parts() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const [parts, setParts] = useState<Part[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -424,21 +430,21 @@ export function Parts() {
   const load = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const data = await listPartsRequest(user.id);
+      const data = await listPartsRequest(user.id, workshopScope);
       setParts(data);
     } catch {
       toast.error('Error al cargar el inventario');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, workshopScope]);
 
   useEffect(() => { load(); }, [load]);
 
   const handleCreate = async (data: CreatePartPayload) => {
     if (!user?.id) return;
     try {
-      const created = await createPartRequest(user.id, data);
+      const created = await createPartRequest(user.id, data, workshopScope);
       setParts(prev => [created, ...prev]);
       setShowCreate(false);
       toast.success(`Recambio ${created.partNumber} añadido`);
@@ -450,7 +456,7 @@ export function Parts() {
   const handleUpdate = async (data: CreatePartPayload) => {
     if (!user?.id || !editingPart) return;
     try {
-      const updated = await updatePartRequest(user.id, { ...editingPart, ...data });
+      const updated = await updatePartRequest(user.id, { ...editingPart, ...data }, workshopScope);
       setParts(prev => prev.map(p => p._id === updated._id ? updated : p));
       setEditingPart(null);
       toast.success('Recambio actualizado');
@@ -489,7 +495,7 @@ export function Parts() {
         ...part,
         stockQuantity: newStock,
         movements: [...(part.movements || []), movement],
-      });
+      }, workshopScope);
       setParts(prev => prev.map(p => p._id === updated._id ? updated : p));
     } catch {
       toast.error('Error al ajustar el stock');
@@ -499,7 +505,7 @@ export function Parts() {
   const handleMovementSave = async (updatedPart: Part, _movement: StockMovement) => {
     if (!user?.id) return;
     try {
-      const saved = await updatePartRequest(user.id, updatedPart);
+      const saved = await updatePartRequest(user.id, updatedPart, workshopScope);
       setParts(prev => prev.map(p => p._id === saved._id ? saved : p));
       setMovementPart(null);
       toast.success('Movimiento registrado');

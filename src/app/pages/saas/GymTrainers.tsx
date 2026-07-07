@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -76,13 +77,35 @@ export function GymTrainers() {
     { key: 'schedule', label: 'Horario', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} entrenador(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const nombre = entryStr(e, 'nombre', 'name');
+    if (!nombre) return null;
+    return {
+      nombre,
+      especialidad: entryStr(e, 'especialidad') || '',
+      telefono: entryStr(e, 'telefono', 'phone', 'tel') || '',
+      email: entryStr(e, 'email') || '',
+      clientesAsignados: entryNum(e, 'clientesAsignados'),
+      horario: entryStr(e, 'horario', 'schedule', 'time') || '',
+      certificaciones: [],
+      valoracion: entryNum(e, 'valoracion'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} entrenador creado creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} entrenador(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

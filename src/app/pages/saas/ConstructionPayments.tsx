@@ -17,6 +17,7 @@ import {
 } from '../../lib/constructionApi';
 import type { PaymentGlobalSummary } from '../../lib/constructionApi';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -523,13 +524,28 @@ function RegisterPaymentModal({ payment, userId, onClose, onSaved, showToast }: 
     { key: 'status', label: 'Estado', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} pago(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createPayment(uid, data as Partial<ConstructionPayment>),
+    }, entries, (entry) => ({
+      concepto: entryStr(entry, 'name', 'concepto', 'concept'),
+      importe: entryNum(entry, 'amount', 'importe'),
+      fecha: entryStr(entry, 'date', 'fecha') || new Date().toISOString().slice(0, 10),
+    }));
+    if (created > 0) {
+      toast.success(`${created} pago(s) creado(s)`);
+      void load();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} pago(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
 
   const fases = (payment.fases || []).filter(f => !f.completada);

@@ -1,4 +1,6 @@
 import { fetchBridgeHealth } from './printBridgeClient';
+import { isVertialNativeApp } from './isNativeApp';import { pingNativePrinter } from './nativePrintClient';
+import { checkEposConnection, shouldUseEposPrint } from './eposPrintClient';
 import type { VertialPrinterConfig, VertialPrinterConnectionType } from './printerConfig';
 
 export type PrinterSetupKind = 'wifi' | 'pc' | 'browser';
@@ -58,9 +60,64 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
     return {
       tone: 'warn',
       label: 'Falta el número de la impresora',
-      detail: 'Imprime un ticket de prueba desde la impresora y copia el número que sale abajo.',
+      detail: isVertialNativeApp()
+        ? 'Pon la IP de la impresora o pulsa «Buscar impresora».'
+        : 'Pon la IP de la impresora Epson (ej. 192.168.1.200). Sale en el ticket de configuración.',
       bridgeOk: false,
       configured: false,
+    };
+  }
+
+  if (kind === 'wifi' && isVertialNativeApp()) {
+    const printerOk = (await pingNativePrinter(config)).ok;
+    if (!printerOk) {
+      return {
+        tone: 'warn',
+        label: 'Impresora no responde',
+        detail: `Comprueba que la Epson está encendida y en la misma WiFi (${config.networkHost}).`,
+        bridgeOk: true,
+        configured: true,
+      };
+    }
+    return {
+      tone: 'ok',
+      label: 'Impresora WiFi lista',
+      detail: `Conectada a ${config.networkHost}`,
+      bridgeOk: true,
+      configured: true,
+    };
+  }
+
+  if (kind === 'wifi' && shouldUseEposPrint(config) && String(config.bridgeHost || '').trim()) {
+    const bridgeOk = (await fetchBridgeHealth(1400, config)).ok;
+    if (bridgeOk) {
+      return {
+        tone: 'ok',
+        label: 'Impresora vía PC del mostrador',
+        detail: `Vertial Print en ${config.bridgeHost} → Epson ${config.networkHost}`,
+        bridgeOk: true,
+        configured: true,
+      };
+    }
+  }
+
+  if (kind === 'wifi' && shouldUseEposPrint(config)) {
+    const eposOk = (await checkEposConnection(config)).ok;
+    if (!eposOk) {
+      return {
+        tone: 'warn',
+        label: 'Autoriza la impresora en el iPad',
+        detail: `En EpsonNet Config activa ePOS-Print y ePOS-Device (Enable → Send). Luego https://${config.networkHost}:8043 (certificado) y «Probar impresión».`,
+        bridgeOk: true,
+        configured: true,
+      };
+    }
+    return {
+      tone: 'ok',
+      label: 'Impresora WiFi lista',
+      detail: `Epson conectada · ${config.networkHost} (Safari/iPad)`,
+      bridgeOk: true,
+      configured: true,
     };
   }
 
@@ -81,8 +138,8 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
       tone: 'warn',
       label: onIpad ? 'Falta conectar el PC del mostrador' : 'Servicio de impresión no detectado',
       detail: onIpad
-        ? 'En iPad hace falta un PC encendido en la misma WiFi con Vertial Print activo.'
-        : 'Ejecuta Vertial Print en este PC o indica la IP del PC del mostrador.',
+        ? 'En iPad hace falta un PC encendido en la misma WiFi con Vertial Print (VertialPrint.exe).'
+        : 'Descarga e inicia Vertial Print en este PC, o indica la IP del PC del mostrador.',
       bridgeOk: false,
       configured: true,
     };

@@ -74,14 +74,39 @@ export function verifyRefreshToken(token) {
   return jwt.verify(token, JWT_REFRESH_SECRET);
 }
 
-// S-01: Lee el access token de cookie httpOnly primero, luego del header Authorization
-export function requireAuth(req, res, next) {
+function readAccessTokenFromRequest(req) {
   let token = req.cookies?.access_token;
-
   if (!token) {
     const header = req.headers.authorization || '';
     token = header.startsWith('Bearer ') ? header.slice(7) : '';
   }
+  return token;
+}
+
+function verifyAccessTokenPayload(token) {
+  const payload = jwt.verify(token, JWT_SECRET);
+  if ((payload?.epoch ?? 0) !== AUTH_EPOCH) {
+    return null;
+  }
+  return payload;
+}
+
+/** JWT opcional: no falla si no hay token (p. ej. activar TPV tablet con sesión ya abierta). */
+export function optionalAuth(req, res, next) {
+  const token = readAccessTokenFromRequest(req);
+  if (!token) return next();
+  try {
+    const payload = verifyAccessTokenPayload(token);
+    if (payload) req.authUser = payload;
+  } catch {
+    // Token caducado o inválido: seguir como anónimo (tablet sin sesión previa).
+  }
+  return next();
+}
+
+// S-01: Lee el access token de cookie httpOnly primero, luego del header Authorization
+export function requireAuth(req, res, next) {
+  const token = readAccessTokenFromRequest(req);
 
   if (!token) {
     // Diagnóstico: loguear qué cookies llegan realmente
@@ -90,8 +115,8 @@ export function requireAuth(req, res, next) {
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    if ((payload?.epoch ?? 0) !== AUTH_EPOCH) {
+    const payload = verifyAccessTokenPayload(token);
+    if (!payload) {
       clearAuthCookies(res);
       return res.status(401).json({ ok: false, error: 'Sesión inválida. Vuelve a iniciar sesión.' });
     }

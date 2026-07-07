@@ -35,6 +35,7 @@ import { CrmNav } from '../../components/saas/CrmNav';
 import { usePagination } from '../../hooks/usePagination';
 import { v4 as uuidv4 } from 'uuid';
 import { readStoredPromotions, writeStoredPromotions, type StoredPromotion, setClientAppliedPromo, type AppliedPromo } from '../../lib/promoCodes';
+import { listPromotionsRequest, syncPromotionsRequest } from '../../lib/promotionsApi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -347,11 +348,8 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   const { user } = useAuth();
   const { clients } = useApp();
 
-  const [promotions, setPromotions] = useState<Promotion[]>(() => {
-    const stored = readStoredPromotions();
-    if (stored.length > 0) return stored.map(fromStoredPromotion);
-    return buildMockPromotions();
-  });
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [promotionsLoaded, setPromotionsLoaded] = useState(false);
   const [activeView, setActiveView] = useState<PageView>('list');
   const [selectedPromo, setSelectedPromo] = useState<Promotion | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -366,8 +364,46 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   const [assignClientId, setAssignClientId] = useState<string>('');
 
   useEffect(() => {
-    writeStoredPromotions(promotions.map(toStoredPromotion));
-  }, [promotions]);
+    const userId = user?.user_id;
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const remote = await listPromotionsRequest(userId);
+        if (cancelled) return;
+        if (remote.length > 0) {
+          setPromotions(remote.map(fromStoredPromotion));
+          writeStoredPromotions(remote);
+        } else {
+          const stored = readStoredPromotions();
+          if (stored.length > 0) {
+            setPromotions(stored.map(fromStoredPromotion));
+            await syncPromotionsRequest(userId, stored).catch(() => {});
+          } else {
+            setPromotions(buildMockPromotions());
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          const stored = readStoredPromotions();
+          setPromotions(stored.length > 0 ? stored.map(fromStoredPromotion) : buildMockPromotions());
+        }
+      } finally {
+        if (!cancelled) setPromotionsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.user_id]);
+
+  useEffect(() => {
+    if (!promotionsLoaded || !user?.user_id) return;
+    const stored = promotions.map(toStoredPromotion);
+    writeStoredPromotions(stored);
+    const timer = window.setTimeout(() => {
+      void syncPromotionsRequest(user.user_id!, stored).catch(() => {});
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [promotions, promotionsLoaded, user?.user_id]);
 
   const selectedClientLabel = useMemo(() => {
     const id = String(assignClientId || '').trim();

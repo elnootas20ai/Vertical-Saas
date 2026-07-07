@@ -132,6 +132,18 @@ export const ACTIVATION_FIELD_GUIDES: Record<string, ActivationFieldGuide> = {
     bannerTitle: 'Abre el TPV',
     bannerDetail: 'Entra al TPV rápido para cobrar cuando todo lo anterior esté listo.',
   },
+  'events-service-add': {
+    fieldKey: 'events-service-add',
+    label: 'Nuevo servicio',
+    bannerTitle: 'Crea un servicio de evento',
+    bannerDetail: 'Servicios → «Nuevo servicio» → nombre, categoría y precio.',
+  },
+  'events-contract-new': {
+    fieldKey: 'events-contract-new',
+    label: 'Nueva contratación',
+    bannerTitle: 'Crea tu primera contratación',
+    bannerDetail: 'Eventos → «Nueva contratación» → asistente paso a paso.',
+  },
   'doc-template': {
     fieldKey: 'doc-template',
     label: 'Plantilla de documento',
@@ -314,6 +326,30 @@ export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> =
     fieldKey: 'sale-new',
     route: '/saas/sales',
     clickHint: 'Ventas → nueva operación',
+  },
+  events_catalog_service: {
+    fieldKey: 'events-service-add',
+    route: '/saas/events-services',
+    clickHint: 'Servicios → «Nuevo servicio»',
+  },
+  events_catalog_price: {
+    fieldKey: 'events-service-add',
+    route: '/saas/events-services',
+    clickHint: 'Servicios → servicio con precio > 0 €',
+  },
+  events_first_client: {
+    fieldKey: 'client-add',
+    route: '/saas/clients',
+    clickHint: 'Clientes → alta rápida o importar',
+  },
+  events_first_event: {
+    fieldKey: 'events-contract-new',
+    route: '/saas/vertical/eventos/nueva-contratacion',
+    clickHint: 'Eventos → «Nueva contratación»',
+  },
+  events_ops_ready: {
+    route: '/saas/vertical/eventos',
+    clickHint: 'Hub de eventos → pipeline y planificación',
   },
 };
 

@@ -9,7 +9,7 @@ import { useActiveStoreScope } from '../../../../context/ActiveStoreScopeContext
 import { coerceSelectedPdvId } from '../../../../lib/deliveryOpsPdvSelection';
 import { resolveBusinessDataUserId } from '../../../../lib/tenantUserId';
 import { consumeSalaSetupPending, peekSalaSetupPending } from '../../../../lib/salaQuickSetup';
-import { writeSalaTpvLaunch } from '../../../../lib/salaTpvLaunch';
+import { openTpvTabletLogin } from '../../../../lib/tpvTabletLoginUrl';
 import { useSalaManager } from './useSalaManager';
 import { SalaQuickSetupWizard } from './SalaQuickSetupWizard';
 import { SalaRoomListPanel } from './SalaRoomListPanel';
@@ -76,14 +76,12 @@ export function SalaManager({ setupMode = false }: { setupMode?: boolean }) {
   });
 
   const openTpv = (tpv = mgr.activeRoomTpv) => {
-    const pdvId = String(tpv?.pdvId || mgr.activeRoom?.pdvId || parentPdvId || '').trim();
-    if (!pdvId) {
-      toast.error('Selecciona un centro de trabajo en la barra superior');
+    const code = String(tpv?.terminalCode || '').trim().toUpperCase();
+    if (!code) {
+      toast.error('Sin código TPV disponible');
       return;
     }
-    const terminalId = String(tpv?.terminalId || '').trim();
-    writeSalaTpvLaunch(terminalId, pdvId);
-    navigate('/saas/caja/tpv');
+    openTpvTabletLogin(code, 'navigate', navigate);
   };
 
   const handleEditRoomName = () => {

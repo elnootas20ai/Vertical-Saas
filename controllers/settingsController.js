@@ -8,6 +8,9 @@ import {
   sanitizeAccount,
   saveAccount,
   saveSession,
+  ACCOUNTS_DB,
+  getDocument,
+  putDocument,
 } from '../services/couchdb.js';
 import { capDocsForImport, chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
 import {
@@ -936,11 +939,37 @@ export async function saveInvoiceEmail(req, res) {
   try {
     const { businessId } = req.params;
     const { email, enabled, customEmail } = req.body;
+    const enabledBool = Boolean(enabled);
     await saveSettingsDoc(req, 'invoice_email', businessId, {
       email: email || buildDefaultInvoiceEmail(businessId),
-      enabled: Boolean(enabled),
+      enabled: enabledBool,
       customEmail: customEmail || '',
     });
+
+    // Activar recepción IMAP en la cuenta titular cuando el negocio habilita el correo
+    try {
+      const business = await findBusinessById(req, businessId);
+      const ownerUserId = String(business?.owner_user_id || req.authUser?.user_id || '').trim();
+      if (ownerUserId) {
+        await ensureDatabase(req, ACCOUNTS_DB);
+        const account = await findAccountByUserId(req, ownerUserId);
+        if (account?._id) {
+          const accountDoc = await getDocument(req, ACCOUNTS_DB, account._id);
+          if (accountDoc) {
+            const existing = accountDoc.supplierInvoiceConfig || {};
+            accountDoc.supplierInvoiceConfig = {
+              ...existing,
+              enabled: enabledBool,
+            };
+            await putDocument(req, ACCOUNTS_DB, accountDoc._id, accountDoc);
+          }
+        }
+      }
+    } catch (syncErr) {
+      // No bloquear guardado de settings si falla sync de cuenta
+      console.warn('[saveInvoiceEmail] sync supplierInvoiceConfig:', syncErr?.message);
+    }
+
     return res.json({ ok: true });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });

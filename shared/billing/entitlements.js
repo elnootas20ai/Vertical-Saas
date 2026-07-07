@@ -11,13 +11,13 @@ export const POINT_OF_SALE_LIMITS = {
 export const INCLUDED_BUSINESSES = {
   basic: 1,
   normal: 1,
-  pro: 3,
+  pro: 2,
 };
 
 export const INCLUDED_COMMERCIAL_BRANDS = {
-  basic: 0,
-  normal: 0,
-  pro: 1,
+  basic: 1,
+  normal: 1,
+  pro: 2,
 };
 
 export const PLAN_TIER_LABELS = {

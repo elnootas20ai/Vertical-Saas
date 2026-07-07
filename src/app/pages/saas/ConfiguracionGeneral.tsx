@@ -92,6 +92,13 @@ import {
 } from '../../lib/deliveryStockExcelTemplate';
 import { notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import {
+  getSupplierInvoiceEmailConfig,
+  saveSupplierInvoiceEmailConfig,
+  testSupplierInvoiceImap,
+  pollSupplierInvoicesNow,
+  type SupplierInvoiceEmailConfig,
+} from '../../lib/supplierInvoiceApi';
 
 // ─── Module definitions ────────────────────────────────────────────────────────
 
@@ -343,12 +350,20 @@ export function ConfiguracionGeneral() {
   const [togglingModule, setTogglingModule] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [importPopup, setImportPopup] = useState<null | 'stock' | 'clients' | 'catalog'>(null);
+  const [imapConfig, setImapConfig] = useState<SupplierInvoiceEmailConfig | null>(null);
+  const [imapDraft, setImapDraft] = useState<Partial<SupplierInvoiceEmailConfig>>({});
+  const [imapLoading, setImapLoading] = useState(false);
+  const [imapSaving, setImapSaving] = useState(false);
+  const [imapTesting, setImapTesting] = useState(false);
+  const [imapPolling, setImapPolling] = useState(false);
+  const [pollSummary, setPollSummary] = useState<string | null>(null);
 
   const biz = currentBusiness;
   const bizId = biz?.business_id;
   const dataUserId = resolveBusinessDataUserId(user, biz);
   const isDeliveryBiz = biz?.businessType === 'delivery';
   const isRestaurantBiz = isRestaurantBusinessType(biz?.businessType);
+  const isEventsBiz = biz?.businessType === 'events';
   const isDeliveryOpsBiz = isDeliveryOpsBusinessType(biz?.businessType);
   const businessScopeId = resolveBusinessScopeId(biz);
   const catalogImportTemplateFilename = isRestaurantBiz
@@ -583,6 +598,21 @@ export function ConfiguracionGeneral() {
     getInitialImportStatus(bizId).then(setImportData).catch(() => {});
   }, [bizId]);
 
+  useEffect(() => {
+    if (!dataUserId) return;
+    setImapLoading(true);
+    getSupplierInvoiceEmailConfig(dataUserId)
+      .then((cfg) => {
+        setImapConfig(cfg);
+        setImapDraft(cfg);
+      })
+      .catch(() => {
+        setImapConfig(null);
+        setImapDraft({});
+      })
+      .finally(() => setImapLoading(false));
+  }, [dataUserId]);
+
   const handleToggleModule = useCallback(async (moduleId: string) => {
     if (!bizId || !modulesData) return;
     setTogglingModule(moduleId);
@@ -616,11 +646,75 @@ export function ConfiguracionGeneral() {
       const next = !invoiceEmailData.enabled;
       await saveInvoiceEmailConfig(bizId, { enabled: next });
       setInvoiceEmailData((prev) => prev ? { ...prev, enabled: next } : prev);
+      if (dataUserId) {
+        const cfg = await getSupplierInvoiceEmailConfig(dataUserId).catch(() => imapConfig);
+        const merged = { ...(cfg || imapDraft), enabled: next };
+        await saveSupplierInvoiceEmailConfig(dataUserId, merged);
+        setImapConfig(merged as SupplierInvoiceEmailConfig);
+        setImapDraft(merged);
+      }
       toast.success(next ? 'Recepción de facturas activada' : 'Recepción de facturas desactivada');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al actualizar');
     }
-  }, [bizId, invoiceEmailData]);
+  }, [bizId, invoiceEmailData, dataUserId, imapConfig, imapDraft]);
+
+  const handleSaveImapConfig = useCallback(async () => {
+    if (!dataUserId) return;
+    setImapSaving(true);
+    try {
+      const saved = await saveSupplierInvoiceEmailConfig(dataUserId, {
+        ...imapDraft,
+        enabled: imapDraft.enabled ?? invoiceEmailData?.enabled ?? false,
+      });
+      setImapConfig(saved);
+      setImapDraft(saved);
+      toast.success('Sesión de correo guardada');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al guardar correo');
+    } finally {
+      setImapSaving(false);
+    }
+  }, [dataUserId, imapDraft, invoiceEmailData?.enabled]);
+
+  const handleTestImap = useCallback(async () => {
+    setImapTesting(true);
+    setPollSummary(null);
+    try {
+      const result = await testSupplierInvoiceImap({
+        imapHost: imapDraft.imapHost,
+        imapPort: imapDraft.imapPort,
+        imapUser: imapDraft.imapUser,
+        imapPassword: imapDraft.imapPassword === '••••••••' ? undefined : imapDraft.imapPassword,
+        imapTls: imapDraft.imapTls,
+      });
+      if (result.ok) {
+        toast.success(`Conexión OK · ${result.totalMessages ?? 0} mensajes en bandeja`);
+      } else {
+        toast.error(result.error || 'No se pudo conectar al correo');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al probar conexión');
+    } finally {
+      setImapTesting(false);
+    }
+  }, [imapDraft]);
+
+  const handlePollInvoicesNow = useCallback(async () => {
+    if (!dataUserId) return;
+    setImapPolling(true);
+    setPollSummary(null);
+    try {
+      const summary = await pollSupplierInvoicesNow(dataUserId);
+      const msg = `${summary.processed} emails · ${summary.created} facturas nuevas · ${summary.alerts} avisos`;
+      setPollSummary(msg);
+      toast.success(msg);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al sincronizar correo');
+    } finally {
+      setImapPolling(false);
+    }
+  }, [dataUserId]);
 
   const dismissAlert = useCallback((id: string) => {
     setDismissedAlerts((prev) => new Set([...prev, id]));
@@ -679,6 +773,7 @@ export function ConfiguracionGeneral() {
       status: loadingCenters ? 'partial' as BlockStatus : getSedesStatus(activeCenters.length),
       route: '/saas/settings/tienda',
       stats: sedesStats,
+      hidden: isEventsBiz,
     },
     {
       id: 'usuarios',
@@ -727,7 +822,7 @@ export function ConfiguracionGeneral() {
       status: (activeModulesSet.has('tpv') ? 'complete' : 'empty') as BlockStatus,
       route: '#tpv-config',
       stats: activeModulesSet.has('tpv') ? 'Activo' : 'Inactivo',
-      hidden: !activeModulesSet.has('tpv') && !contractedModulesSet.has('tpv'),
+      hidden: isEventsBiz || (!activeModulesSet.has('tpv') && !contractedModulesSet.has('tpv')),
     },
     {
       id: 'correo-facturas',
@@ -998,8 +1093,117 @@ export function ConfiguracionGeneral() {
           <div className="flex items-center gap-3 mt-4">
             <Info className="w-4 h-4 text-gray-400 shrink-0" />
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Las facturas recibidas se procesarán automáticamente con OCR y aparecerán en tu bandeja de facturas de proveedor.
+              Las facturas recibidas se procesan con OCR y aparecen en{' '}
+              <button
+                type="button"
+                onClick={() => navigate('/saas/suppliers/facturas')}
+                className="font-semibold text-violet-600 dark:text-violet-400 hover:underline"
+              >
+                Proveedores → Facturas
+              </button>
+              . Revisa también la sesión IMAP abajo si usas un buzón propio.
             </p>
+          </div>
+
+          <div className="mt-6 pt-6 border-t border-gray-100 dark:border-gray-700 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Sesión de correo (IMAP)</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Conecta el buzón donde llegan las facturas para volcarlas al sistema automáticamente
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleTestImap()}
+                  disabled={imapTesting || imapLoading || !dataUserId}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                >
+                  {imapTesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                  Probar conexión
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePollInvoicesNow()}
+                  disabled={imapPolling || imapLoading || !dataUserId}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 disabled:opacity-50"
+                >
+                  {imapPolling ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : null}
+                  Sincronizar ahora
+                </button>
+              </div>
+            </div>
+
+            {imapLoading ? (
+              <p className="text-xs text-gray-400">Cargando configuración de correo…</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase text-gray-400">Servidor IMAP</span>
+                  <input
+                    type="text"
+                    value={imapDraft.imapHost || ''}
+                    onChange={(e) => setImapDraft((p) => ({ ...p, imapHost: e.target.value }))}
+                    placeholder="imap.tudominio.com"
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase text-gray-400">Puerto</span>
+                  <input
+                    type="number"
+                    value={imapDraft.imapPort ?? 993}
+                    onChange={(e) => setImapDraft((p) => ({ ...p, imapPort: Number(e.target.value) || 993 }))}
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase text-gray-400">Usuario</span>
+                  <input
+                    type="text"
+                    value={imapDraft.imapUser || ''}
+                    onChange={(e) => setImapDraft((p) => ({ ...p, imapUser: e.target.value }))}
+                    placeholder="facturas@tuempresa.com"
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase text-gray-400">Contraseña</span>
+                  <input
+                    type="password"
+                    value={imapDraft.imapPassword || ''}
+                    onChange={(e) => setImapDraft((p) => ({ ...p, imapPassword: e.target.value }))}
+                    placeholder="••••••••"
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-sm"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="inline-flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={imapDraft.imapTls !== false}
+                  onChange={(e) => setImapDraft((p) => ({ ...p, imapTls: e.target.checked }))}
+                  className="rounded border-gray-300"
+                />
+                Usar TLS/SSL
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleSaveImapConfig()}
+                disabled={imapSaving || !dataUserId}
+                className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-bold disabled:opacity-50"
+              >
+                {imapSaving ? 'Guardando…' : 'Guardar sesión de correo'}
+              </button>
+            </div>
+
+            {pollSummary ? (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">{pollSummary}</p>
+            ) : null}
           </div>
         </section>
 

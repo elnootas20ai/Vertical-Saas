@@ -243,7 +243,7 @@ export interface MaterialsSummary {
 
 // ─── Materials API ───────────────────────────────────────────────────────────
 
-const BASE = '/api/cleaning-materials';
+const BASE = '/api/cleaning/materials';
 
 export async function listCleaningMaterialsRequest(userId: string, materialType?: MaterialType): Promise<CleaningMaterial[]> {
   const id = normalizeUserId(userId);

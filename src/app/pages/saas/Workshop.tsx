@@ -7,6 +7,7 @@ import { Tabs } from '../../components/saas/Tabs';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import {
   listWorkOrdersRequest,
   createWorkOrderRequest,
@@ -289,6 +290,11 @@ function CreateWorkOrderModal({ isOpen, onClose, onCreate, mechanics }: CreateWo
 export function Workshop() {
   const navigate = useNavigate();
   const { user, listUsers } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [mechanics, setMechanics] = useState<string[]>([]);
@@ -322,14 +328,14 @@ export function Workshop() {
   const loadWorkOrders = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const data = await listWorkOrdersRequest(user.id);
+      const data = await listWorkOrdersRequest(user.id, workshopScope);
       setWorkOrders(data);
     } catch {
       toast.error('Error al cargar órdenes de trabajo');
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, workshopScope]);
 
   const loadMechanics = useCallback(async () => {
     const stripAccents = (value: string) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -359,7 +365,7 @@ export function Workshop() {
   const handleCreate = async (data: Partial<WorkOrder>) => {
     if (!user?.id) return;
     try {
-      const created = await createWorkOrderRequest(user.id, data as Parameters<typeof createWorkOrderRequest>[1]);
+      const created = await createWorkOrderRequest(user.id, data as Parameters<typeof createWorkOrderRequest>[1], workshopScope);
       setWorkOrders(prev => [created, ...prev]);
       setShowCreate(false);
       toast.success(`OT ${created.woNumber} creada`);
@@ -393,7 +399,7 @@ export function Workshop() {
           ...(wo.stageHistory || []),
           { status: 'invoiced', date: new Date().toISOString(), user: user.fullName || 'Sistema', notes: 'Factura generada desde lista' },
         ],
-      });
+      }, workshopScope);
       setWorkOrders(prev => prev.map(w => w._id === updated._id ? updated : w));
       toast.success(`Factura generada para ${wo.woNumber}`);
     } catch {
@@ -411,7 +417,7 @@ export function Workshop() {
           ...(wo.stageHistory || []),
           { status, date: new Date().toISOString(), user: user.fullName || 'Sistema' },
         ],
-      });
+      }, workshopScope);
       setWorkOrders(prev => prev.map(w => w._id === updated._id ? updated : w));
       toast.success(`Estado actualizado a: ${STATUS_CONFIG[status].label}`);
     } catch {
@@ -492,7 +498,7 @@ export function Workshop() {
           ...(wo.stageHistory || []),
           { status: targetStatus, date: new Date().toISOString(), user: user.fullName || 'Sistema' },
         ],
-      });
+      }, workshopScope);
       setWorkOrders(prev => prev.map(w => w._id === updated._id ? updated : w));
       toast.success(`OT movida a: ${STATUS_CONFIG[targetStatus].label}`);
     } catch {
@@ -1317,11 +1323,11 @@ export function Workshop() {
                 stageHistory: [
                   { status: 'pending', date: new Date().toISOString(), user: 'Sistema', notes: 'OT importada' },
                 ],
-              } as Parameters<typeof createWorkOrderRequest>[1]);
+              } as Parameters<typeof createWorkOrderRequest>[1], workshopScope);
               created++;
             } catch { /* skip */ }
           }
-          const orders = await listWorkOrdersRequest(user.id);
+          const orders = await listWorkOrdersRequest(user.id, workshopScope);
           setWorkOrders(orders);
           toast.success(`${created} orden(es) importada(s)`);
         }}

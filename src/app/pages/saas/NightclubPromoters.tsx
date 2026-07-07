@@ -4,6 +4,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
@@ -67,13 +68,36 @@ export function NightclubPromoters() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} promotor(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const nombre = entryStr(e, 'nombre', 'name');
+    if (!nombre) return null;
+    return {
+      nombre,
+      telefono: entryStr(e, 'telefono', 'phone', 'tel') || '',
+      email: entryStr(e, 'email') || '',
+      invitacionesUsadas: entryNum(e, 'invitacionesUsadas'),
+      clientesTraidos: entryNum(e, 'clientesTraidos'),
+      comisionPct: entryNum(e, 'comisionPct'),
+      ingresosGenerados: entryNum(e, 'ingresosGenerados'),
+      valoracion: entryNum(e, 'valoracion'),
+      activo: true,
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} promotor creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} promotor(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const loadData = useCallback(async () => {
     if (!userId) {

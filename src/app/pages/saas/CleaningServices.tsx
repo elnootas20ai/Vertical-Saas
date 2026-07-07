@@ -21,6 +21,7 @@ import {
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 const STATUS_CONFIG: Record<CleaningServiceStatus, { label: string; bg: string; text: string; icon: React.ReactNode }> = {
   pending:     { label: 'Pendiente',   bg: 'bg-amber-50',   text: 'text-amber-700',   icon: <AlertCircle className="w-3.5 h-3.5" /> },
@@ -137,11 +138,25 @@ export function CleaningServices() {
   ];
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} servicio(s) parseado(s) con IA`);
+    if (!user?.id) return;
+    const created = await bulkCreateVerticalEntries(user.id, {
+      create: (uid, data) => createCleaningServiceRequest(uid, data as Partial<CleaningService>),
+    }, entries, (entry) => ({
+      clientName: entryStr(entry, 'name', 'client', 'clientName', 'nombre'),
+      address: entryStr(entry, 'address', 'direccion'),
+      price: entryNum(entry, 'price', 'precio'),
+      notes: entryStr(entry, 'notes', 'notas'),
+      cleaningType: 'general',
+      status: 'pending' as CleaningServiceStatus,
+    }));
+    if (created > 0) {
+      toast.success(`${created} servicio(s) creado(s)`);
+      void loadServices();
+    }
   };
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} servicio(s) importado(s)`);
+    await handleAIEntries(entries);
   };
 
   useModalClose(showModal, () => setShowModal(false));

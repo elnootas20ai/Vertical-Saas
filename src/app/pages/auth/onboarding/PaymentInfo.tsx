@@ -11,7 +11,8 @@ import {
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 import {
   calculateOnboardingPricing,
-  recommendOnboardingPlan,
+  getPlansForBusinessType,
+  clampOnboardingPlanId,
 } from '../../../lib/onboardingPlanRecommendation';
 
 const inputClass = (hasError: boolean) =>
@@ -66,24 +67,30 @@ export function PaymentInfo() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const orderSummary = useMemo(() => {
-    const recommendation = recommendOnboardingPlan({
-      businessType: data.businessType,
-      userCount: data.businessMetrics.userCount,
-      locationCount: data.businessMetrics.locationCount,
-      businessCount: data.businessMetrics.businessCount,
-      commercialBrandCount: data.businessMetrics.commercialBrandCount,
-      modules: data.requestedModules,
-    });
     const billingMode = data.subscriptionSelection.billingMode;
+    const selectedPlanId = clampOnboardingPlanId(
+      data.subscriptionSelection.recommendedPlanId,
+      {
+        businessType: data.businessType,
+        userCount: data.businessMetrics.userCount,
+        locationCount: data.businessMetrics.locationCount,
+        businessCount: data.businessMetrics.businessCount,
+        commercialBrandCount: data.businessMetrics.commercialBrandCount,
+        modules: data.requestedModules,
+        deliveryNeeds: data.deliveryNeeds,
+      },
+    );
+    const plans = getPlansForBusinessType(data.businessType);
+    const plan = plans.find((p) => p.id === selectedPlanId) ?? plans[0];
     const pricing = calculateOnboardingPricing({
-      plan: recommendation.plan,
+      plan,
       billingMode,
       userCount: data.businessMetrics.userCount,
       locationCount: data.businessMetrics.locationCount,
       businessCount: data.businessMetrics.businessCount,
       commercialBrandCount: data.businessMetrics.commercialBrandCount,
     });
-    return { recommendation, billingMode, pricing };
+    return { plan, selectedPlanId, billingMode, pricing };
   }, [data]);
 
   const formatCardNumber = (value: string) => {
@@ -207,7 +214,7 @@ export function PaymentInfo() {
   };
 
   const summaryLines = [
-    `Plan ${orderSummary.recommendation.plan.name}: ${orderSummary.pricing.baseCost}€`,
+    `Plan ${orderSummary.plan.name}: ${orderSummary.pricing.baseCost}€`,
     orderSummary.pricing.extraPdv > 0
       ? `+${orderSummary.pricing.extraPdv} PDV: ${orderSummary.pricing.extraPdvCost}€`
       : null,
@@ -282,7 +289,7 @@ export function PaymentInfo() {
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Resumen de tu suscripción</p>
               <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-                Plan {orderSummary.recommendation.plan.name} ·{' '}
+                Plan {orderSummary.plan.name} ·{' '}
                 {orderSummary.billingMode === 'monthly' ? 'mensual' : 'anual (-20%)'}
               </p>
             </div>

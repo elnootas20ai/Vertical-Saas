@@ -21,6 +21,7 @@ import { syncVehicleWithSale } from '../../../../lib/vehicleSaleSync';
 import { VentasListPanel } from './VentasListPanel';
 import { VentasDetailPanel } from './VentasDetailPanel';
 import { VentasNewSaleButton } from './VentasDetailActionBar';
+import { CompraventaSplitModuleShell } from '../CompraventaSplitModuleShell';
 import type { VentaListItem } from './ventasListData';
 
 export function VentasModuleShell() {
@@ -229,46 +230,42 @@ export function VentasModuleShell() {
   );
 
   return (
-    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950 md:min-h-[calc(100dvh-6.5rem)]">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200/80 px-4 py-3 dark:border-gray-800 md:px-5">
-        <div className="min-w-0">
-          <h1 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-            Ventas
-          </h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Reservas, ventas y entregas de vehículos
-          </p>
-        </div>
+    <CompraventaSplitModuleShell
+      title="Ventas"
+      subtitle="Reservas, ventas y entregas de vehículos"
+      headerAction={(
         <VentasNewSaleButton disabled={loading || actionLoading} onClick={() => setModalOpen(true)} />
-      </div>
-
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+      )}
+      listPanel={(
         <VentasListPanel
           sales={sales}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
+      )}
+      detailPanel={(
         <VentasDetailPanel
           sale={selectedSale}
           actionsDisabled={actionLoading}
           onAction={handleAction}
         />
-      </div>
-
-      <SAAS__CreateSaleModal
-        isOpen={modalOpen}
-        onClose={() => setModalOpen(false)}
-        onCreate={handleCreateSale}
-        onCreateClient={handleCreateClient}
-        onAddVehicle={() => {
-          setModalOpen(false);
-          navigate('/saas/vehicles?quickAdd=1');
-        }}
-        vehicles={vehicles || []}
-        clients={clients || []}
-        teamMemberOptions={responsableOptions}
-        existingSales={visibleSalesRecords}
-      />
-    </div>
+      )}
+      overlay={(
+        <SAAS__CreateSaleModal
+          isOpen={modalOpen}
+          onClose={() => setModalOpen(false)}
+          onCreate={handleCreateSale}
+          onCreateClient={handleCreateClient}
+          onAddVehicle={() => {
+            setModalOpen(false);
+            navigate('/saas/vehicles?quickAdd=1');
+          }}
+          vehicles={vehicles || []}
+          clients={clients || []}
+          teamMemberOptions={responsableOptions}
+          existingSales={visibleSalesRecords}
+        />
+      )}
+    />
   );
 }

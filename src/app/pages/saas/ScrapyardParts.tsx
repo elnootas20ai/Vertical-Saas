@@ -25,6 +25,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 const CATEGORY_LABEL_MAP = Object.fromEntries(
   PART_CATEGORIES.map(c => [c.value, c.label]),
@@ -132,13 +133,29 @@ export function ScrapyardParts() {
     { key: 'location', label: 'Ubicación', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} pieza(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createScrapyardPart(uid, data),
+    }, entries, (entry) => ({
+      nombre: entryStr(entry, 'name', 'nombre'),
+      referencia: entryStr(entry, 'reference', 'referencia', 'sku'),
+      precio: entryNum(entry, 'price', 'precio'),
+      stock: entryNum(entry, 'stock'),
+    }));
+    if (created > 0) {
+      toast.success(`${created} pieza(s) creado(s)`);
+      void fetchParts();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} pieza(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
   useModalClose(showSellModal, () => setShowSellModal(false));

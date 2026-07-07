@@ -4,13 +4,11 @@ import { useBusiness } from '../context/BusinessContext';
 import {
   listCleaningServicesRequest,
   listCleaningIncidentsRequest,
-  listCleaningRoutesRequest,
 } from '../lib/cleaningApi';
 import type {
   CleaningService,
   CleaningServiceStatus,
   CleaningIncident,
-  CleaningRoute,
 } from '../lib/cleaningApi';
 import { listCleaningWorkersRequest } from '../lib/cleaningWorkersApi';
 import type { CleaningWorker } from '../lib/cleaningWorkersApi';
@@ -19,6 +17,18 @@ import type { CleaningMaterial as CatalogMaterial } from '../lib/cleaningMateria
 import { fetchClockins } from '../lib/clockinsApi';
 import type { EnrichedClockinRecord } from '../lib/clockinsApi';
 import type { CleaningAlertType } from '../lib/cleaningHubApi';
+import {
+  fetchCleaningHubKpis,
+  fetchCleaningHubToday,
+  fetchCleaningHubAlerts,
+  fetchCleaningHubWorkers,
+  fetchCleaningHubMaterials,
+  fetchCleaningHubMetrics,
+  type CleaningHubService,
+  type CleaningHubAlert,
+  type CleaningHubWorker,
+  type CleaningMaterial as HubApiMaterial,
+} from '../lib/cleaningHubApi';
 
 type AlertSev = 'error' | 'warning' | 'info';
 
@@ -428,6 +438,111 @@ function buildData(
   return { kpis, workers, services, alerts, incidents, materials, servicesByHour, profitByClient, unbilled };
 }
 
+const RECURRENCE_LABELS: Record<string, string> = {
+  daily: 'Diario',
+  weekly: 'Semanal',
+  biweekly: 'Quincenal',
+  monthly: 'Mensual',
+};
+
+function mapApiService(s: CleaningHubService): HubSvc {
+  const recType = String(s.recurrencePattern || '');
+  const recurrencePattern = s.isRecurrent
+    ? (RECURRENCE_LABELS[recType] || recType || 'Recurrente')
+    : undefined;
+  return {
+    id: s._id,
+    serviceNumber: s.serviceNumber || '',
+    clientName: s.clientName || '',
+    address: s.address || '',
+    cleaningType: s.cleaningType || 'general',
+    assignedToName: s.assignedToName || '',
+    status: s.status,
+    estimatedStart: s.estimatedStart || s.time || '08:00',
+    estimatedEnd: s.estimatedEnd || '',
+    price: Number(s.price || 0),
+    isRecurrent: Boolean(s.isRecurrent),
+    recurrencePattern,
+    zoneName: s.zoneName || s.zone || '',
+    checklistDone: Number(s.checklistDone || 0),
+    checklistTotal: Number(s.checklistTotal || 0),
+  };
+}
+
+function mapApiWorker(w: CleaningHubWorker): HubWorker {
+  return {
+    id: w.id,
+    name: w.name,
+    avatar: w.avatar || w.name.split(' ').map((n) => n[0] || '').join('').slice(0, 2).toUpperCase(),
+    clockedIn: w.clockedIn,
+    clockInTime: w.clockInTime,
+    hoursToday: w.hoursToday,
+    incidents: w.incidents,
+    rating: w.rating || 4,
+    servicesTotal: w.servicesTotal,
+    servicesCompleted: w.servicesCompleted,
+    currentService: w.currentService ? { clientName: w.currentService.clientName } : undefined,
+    nextService: w.nextService ? { clientName: w.nextService.clientName, time: w.nextService.time } : undefined,
+  };
+}
+
+function mapApiMaterial(m: HubApiMaterial): HubMaterial {
+  return {
+    id: m.id,
+    name: m.name,
+    currentStock: m.currentStock,
+    minStock: m.minStock,
+    unit: m.unit,
+    lastRestocked: m.lastRestocked,
+    isCritical: m.isCritical,
+  };
+}
+
+function mapApiAlert(a: CleaningHubAlert): HubAlert {
+  return {
+    id: a.id,
+    type: a.type,
+    severity: a.severity,
+    message: a.message,
+    route: a.route,
+  };
+}
+
+function mapIncidents(rawIncidents: CleaningIncident[]): HubIncident[] {
+  const todayOpen = rawIncidents.filter(
+    (i) => !i.deletedAt && (i.status === 'open' || i.status === 'in_progress'),
+  );
+  return todayOpen.slice(0, 20).map((i) => ({
+    id: i._id,
+    type: INCIDENT_TYPE_LABELS[i.incidentType] || i.incidentType,
+    severity: mapPriorityToSeverity(i.priority),
+    serviceNumber: `#${i.serviceNumber}`,
+    clientName: i.clientName,
+    workerName: i.workerName,
+    description: i.description,
+    time: i.createdAt?.slice(11, 16) || '',
+    status: i.status,
+  }));
+}
+
+async function loadClientFallback(
+  userId: string,
+  businessId: string,
+): Promise<HubData> {
+  const today = todayStr();
+  const [rawServices, rawWorkers, rawIncidents, rawMaterials, clockinRecords] =
+    await Promise.all([
+      listCleaningServicesRequest(userId),
+      listCleaningWorkersRequest(userId),
+      listCleaningIncidentsRequest(userId),
+      listCleaningMaterialsRequest(userId).catch(() => [] as CatalogMaterial[]),
+      businessId
+        ? fetchClockins(businessId, { date: today }).catch(() => [] as EnrichedClockinRecord[])
+        : ([] as EnrichedClockinRecord[]),
+    ]);
+  return buildData(rawServices, rawWorkers, rawIncidents, rawMaterials, clockinRecords, []);
+}
+
 const EMPTY_DATA: HubData = {
   kpis: {
     servicesToday: 0, servicesCompleted: 0, servicesInProgress: 0, servicesPending: 0,
@@ -457,27 +572,81 @@ export function useCleaningHubData(sseVersion: number) {
     setError(null);
 
     try {
-      const today = todayStr();
-
-      const [rawServices, rawWorkers, rawIncidents, rawMaterials, clockinRecords, rawRoutes] =
-        await Promise.all([
-          listCleaningServicesRequest(userId),
-          listCleaningWorkersRequest(userId),
-          listCleaningIncidentsRequest(userId),
-          listCleaningMaterialsRequest(userId).catch(() => [] as CatalogMaterial[]),
-          businessId
-            ? fetchClockins(businessId, { date: today }).catch(() => [] as EnrichedClockinRecord[])
-            : ([] as EnrichedClockinRecord[]),
-          listCleaningRoutesRequest(userId, { date: today }).catch(() => [] as CleaningRoute[]),
-        ]);
+      const hubResults = await Promise.allSettled([
+        fetchCleaningHubKpis(userId),
+        fetchCleaningHubToday(userId),
+        fetchCleaningHubAlerts(userId),
+        fetchCleaningHubWorkers(userId),
+        fetchCleaningHubMaterials(userId),
+        fetchCleaningHubMetrics(userId),
+        listCleaningIncidentsRequest(userId),
+      ]);
 
       if (seq !== fetchRef.current) return;
 
-      const result = buildData(rawServices, rawWorkers, rawIncidents, rawMaterials, clockinRecords, rawRoutes);
-      setData(result);
+      const [kpisRes, servicesRes, alertsRes, workersRes, materialsRes, metricsRes, incidentsRes] = hubResults;
+
+      if (kpisRes.status !== 'fulfilled' || servicesRes.status !== 'fulfilled') {
+        const result = await loadClientFallback(userId, businessId);
+        if (seq !== fetchRef.current) return;
+        setData(result);
+        return;
+      }
+
+      let fallback: HubData | null = null;
+      const getFallback = async () => {
+        if (!fallback) fallback = await loadClientFallback(userId, businessId);
+        return fallback;
+      };
+
+      const kpis = kpisRes.value;
+      const apiServices = servicesRes.value;
+      const services = apiServices.map(mapApiService);
+      const alerts = alertsRes.status === 'fulfilled'
+        ? alertsRes.value.map(mapApiAlert)
+        : (await getFallback()).alerts;
+      const workers = workersRes.status === 'fulfilled'
+        ? workersRes.value.map(mapApiWorker)
+        : (await getFallback()).workers;
+      const materials = materialsRes.status === 'fulfilled'
+        ? materialsRes.value.map(mapApiMaterial)
+        : (await getFallback()).materials;
+      const metrics = metricsRes.status === 'fulfilled' ? metricsRes.value : null;
+      const fb = metrics ? null : await getFallback();
+      const servicesByHour = metrics?.servicesByHour || fb?.servicesByHour || [];
+      const profitByClient = metrics?.profitByClient?.map((p) => ({
+        client: p.client,
+        revenue: Math.round(p.revenue),
+        cost: Math.round(p.cost),
+        margin: p.margin,
+      })) || fb?.profitByClient || [];
+      const rawIncidents = incidentsRes.status === 'fulfilled' ? incidentsRes.value : [];
+      const incidents = mapIncidents(rawIncidents);
+      const unbilled = apiServices
+        .filter((s) => s.status === 'completed' && !s.invoiceId)
+        .map(mapApiService)
+        .slice(0, 6);
+
+      setData({
+        kpis,
+        workers,
+        services,
+        alerts,
+        incidents,
+        materials,
+        servicesByHour,
+        profitByClient,
+        unbilled,
+      });
     } catch (err) {
-      if (seq !== fetchRef.current) return;
-      setError(err instanceof Error ? err.message : 'Error al cargar datos');
+      try {
+        const result = await loadClientFallback(userId, businessId);
+        if (seq !== fetchRef.current) return;
+        setData(result);
+      } catch {
+        if (seq !== fetchRef.current) return;
+        setError(err instanceof Error ? err.message : 'Error al cargar datos');
+      }
     } finally {
       if (seq === fetchRef.current) setLoading(false);
     }

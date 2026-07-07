@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
 import {
-  getCleaningHubKpis,
   listCleaningServices,
   createCleaningService,
   updateCleaningService,
@@ -64,8 +63,6 @@ import {
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const cleaningRouter = Router();
 
-cleaningRouter.get('/hub/kpis/:userId', getCleaningHubKpis);
-
 cleaningRouter.get('/services/:userId', listCleaningServices);
 cleaningRouter.post('/services/:userId', createCleaningService);
 cleaningRouter.get('/services/:userId/execution-summary', getExecutionSummary);
@@ -104,18 +101,18 @@ cleaningRouter.get('/workers/:userId/:workerId/services', listWorkerServices);
 cleaningRouter.get('/workers/:userId/:workerId/stats', getWorkerStats);
 cleaningRouter.get('/workers/:userId/productivity', getCleaningProductivity);
 
-cleaningRouter.get('/contracts/:userId', listServiceContracts);
-cleaningRouter.get('/contracts/:userId/stats', getServiceContractStats);
-cleaningRouter.get('/contracts/:userId/:contractId', getServiceContract);
-cleaningRouter.post('/contracts/:userId', createServiceContract);
-cleaningRouter.put('/contracts/:userId/:contractId', updateServiceContract);
-cleaningRouter.delete('/contracts/:userId/:contractId', removeServiceContract);
-cleaningRouter.post('/contracts/:userId/:contractId/activate', activateServiceContract);
-cleaningRouter.post('/contracts/:userId/:contractId/pause', pauseServiceContract);
-cleaningRouter.post('/contracts/:userId/:contractId/cancel', cancelServiceContract);
-cleaningRouter.post('/contracts/:userId/:contractId/renew', renewServiceContract);
-cleaningRouter.post('/contracts/:userId/:contractId/generate', generateContractServices);
-cleaningRouter.post('/contracts/:userId/generate-all', generateAllContractsServices);
+cleaningRouter.get('/service-contracts/:userId', listServiceContracts);
+cleaningRouter.get('/service-contracts/:userId/stats', getServiceContractStats);
+cleaningRouter.get('/service-contracts/:userId/:contractId', getServiceContract);
+cleaningRouter.post('/service-contracts/:userId', createServiceContract);
+cleaningRouter.put('/service-contracts/:userId/:contractId', updateServiceContract);
+cleaningRouter.delete('/service-contracts/:userId/:contractId', removeServiceContract);
+cleaningRouter.post('/service-contracts/:userId/:contractId/activate', activateServiceContract);
+cleaningRouter.post('/service-contracts/:userId/:contractId/pause', pauseServiceContract);
+cleaningRouter.post('/service-contracts/:userId/:contractId/cancel', cancelServiceContract);
+cleaningRouter.post('/service-contracts/:userId/:contractId/renew', renewServiceContract);
+cleaningRouter.post('/service-contracts/:userId/:contractId/generate', generateContractServices);
+cleaningRouter.post('/service-contracts/:userId/generate-all', generateAllContractsServices);
 
 cleaningRouter.get('/reports/:userId/overview', getCleaningOverview);
 cleaningRouter.get('/reports/:userId/profitability/clients', getClientProfitability);

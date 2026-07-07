@@ -121,6 +121,7 @@ export const gymConfig = {
     memberships: { type: 'gym_membership', idPrefix: 'gmp', fields: ['nombre','precioMensual','precioAnual','beneficios','sociosActivos','color','destacado'], required: ['nombre'] },
     routines:    { type: 'gym_routine',    idPrefix: 'gmr', fields: ['nombre','tipo','duracion','nivel','ejercicios','asignados'], required: ['nombre'] },
     accessLogs:  { type: 'gym_access',     idPrefix: 'gma', fields: ['miembro','horaEntrada','horaSalida','metodo','foto'], required: ['miembro'] },
+    classAttendance: { type: 'gym_class_attendance', idPrefix: 'gca', fields: ['classId','classNombre','memberId','memberNombre','hora'], required: ['classId','memberId'] },
   },
 };
 
@@ -139,12 +140,26 @@ export const clinicConfig = {
 export const eventsConfig = {
   name: 'events', dbSuffix: 'events',
   entities: {
-    events:    { type: 'ev_event',    idPrefix: 'eve', fields: ['nombre','tipo','fecha','lugar','cliente','invitados','presupuesto','estado'], required: ['nombre','fecha'] },
+    events: {
+      type: 'ev_event', idPrefix: 'eve',
+      fields: [
+        'nombre', 'tipo', 'fecha', 'lugar', 'cliente', 'clientId', 'clientEmail', 'clientTelefono',
+        'venueId', 'invitados', 'presupuesto', 'deposito', 'lineasPresupuesto', 'notas',
+        'estado', 'quoteSentAt', 'acceptedAt', 'contractedAt', 'finishedAt',
+      ],
+      required: ['nombre', 'fecha', 'cliente'],
+    },
+    quotes: {
+      type: 'ev_quote', idPrefix: 'evq',
+      fields: ['eventId', 'eventNombre', 'cliente', 'lineas', 'subtotal', 'iva', 'total', 'estado', 'validUntil', 'notas'],
+      required: ['eventId', 'cliente', 'total'],
+    },
     vendors:   { type: 'ev_vendor',   idPrefix: 'evv', fields: ['empresa','tipoServicio','contacto','telefono','email','valoracion','eventosRealizados','tarifaBase'], required: ['empresa'] },
-    guests:    { type: 'ev_guest',    idPrefix: 'evg', fields: ['nombre','evento','email','telefono','mesa','confirmacion','menu','acompanantes'], required: ['nombre','evento'] },
+    guests:    { type: 'ev_guest',    idPrefix: 'evg', fields: ['nombre','evento','eventId','email','telefono','mesa','confirmacion','menu','acompanantes'], required: ['nombre','evento'] },
     venues:    { type: 'ev_venue',    idPrefix: 'evn', fields: ['nombre','tipo','direccion','capacidad','precio','servicios','disponibilidad','valoracion'], required: ['nombre'] },
-    catering:  { type: 'ev_catering', idPrefix: 'evc', fields: ['evento','menu','tipo','comensales','precioPorPersona','total','alergiasDietas','proveedor','estado'], required: ['evento'] },
-    logistics: { type: 'ev_task',     idPrefix: 'evl', fields: ['evento','tarea','responsable','fechaLimite','estado','prioridad','categoria'], required: ['evento','tarea'] },
+    services:  { type: 'ev_service',  idPrefix: 'evs', fields: ['nombre','categoria','precio','unidad','descripcion','activo'], required: ['nombre','precio'] },
+    catering:  { type: 'ev_catering', idPrefix: 'evc', fields: ['evento','eventId','menu','tipo','comensales','precioPorPersona','total','alergiasDietas','proveedor','estado'], required: ['evento'] },
+    logistics: { type: 'ev_task',     idPrefix: 'evl', fields: ['evento','eventId','tarea','responsable','fechaLimite','estado','prioridad','categoria'], required: ['evento','tarea'] },
   },
 };
 

@@ -149,36 +149,7 @@ export function HairSalonWorkstationPage({ salesPoint, onBack }: HairSalonWorkst
   const [saving, setSaving] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'client', label: 'Cliente' },
-    { key: 'service', label: 'Servicio' },
-    { key: 'stylist', label: 'Estilista' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'time', label: 'Hora' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'client', label: 'Cliente', required: true, example: '' },
-    { key: 'service', label: 'Servicio', required: true, example: '' },
-    { key: 'stylist', label: 'Estilista', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'time', label: 'Hora', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} cita(s) parseada(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} cita(s) importada(s)`);
-  };
-
-  useModalClose(showNewModal, () => setShowNewModal(false));
+    useModalClose(showNewModal, () => setShowNewModal(false));
   useModalClose(!!showDetailModal, () => setShowDetailModal(null));
 
   const userId = user?.id || '';
@@ -376,8 +347,6 @@ export function HairSalonWorkstationPage({ salesPoint, onBack }: HairSalonWorkst
             <AddButtonDropdown
               label="Nueva cita"
               onQuickAdd={() => { setPrefillTime(null); setPrefillStylist(null); setShowNewModal(true); }}
-              onAIAdd={() => setShowAIModal(true)}
-              onImport={() => setShowImportModal(true)}
               quickAddLabel="Alta rápida"
               quickAddDesc="Formulario de cita"
             />
@@ -578,21 +547,6 @@ export function HairSalonWorkstationPage({ salesPoint, onBack }: HairSalonWorkst
       {showDetailModal && (
         <AppointmentDetailModal appt={showDetailModal} onClose={() => setShowDetailModal(null)} onUpdateStatus={handleUpdateStatus} onReschedule={handleReschedule} onReassign={handleReassign} onDelete={handleDelete} teamMembers={teamMembers} />
       )}
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="hairsalon_appointments"
-        moduleLabel="Citas"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Citas"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </div>
   );
 }

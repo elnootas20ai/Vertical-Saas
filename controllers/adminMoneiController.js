@@ -55,7 +55,6 @@ export async function getMoneiConfig(req, res) {
       ok: true,
       currentMode,
       maskedKey,
-      fullKey: activeKey || '',
       testMode: currentMode === 'test',
       commissionPercent: MONEI_COMMISSION_PERCENT,
       live: {

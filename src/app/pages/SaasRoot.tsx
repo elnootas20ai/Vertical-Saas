@@ -16,6 +16,8 @@ import { GroupProvider } from '../context/GroupContext';
 
 import { ActivationChecklistProvider } from '../context/ActivationChecklistContext';
 
+import { DashboardViewProvider } from '../context/DashboardViewContext';
+
 import { SetupProgressProvider } from '../context/SetupProgressContext';
 
 import { ScrapyardProvider } from '../context/ScrapyardContext';
@@ -462,9 +464,11 @@ function SaasContent() {
 
 
   return (
-    <SaasAppShell>
-      <Outlet />
-    </SaasAppShell>
+    <DashboardViewProvider>
+      <SaasAppShell>
+        <Outlet />
+      </SaasAppShell>
+    </DashboardViewProvider>
   );
 
 }

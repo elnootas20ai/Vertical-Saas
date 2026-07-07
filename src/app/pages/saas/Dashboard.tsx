@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { getVerticalDashboard } from '../../lib/verticalDashboardMap';
+import { loadVerticalKpiSnapshot, type VerticalKpiSnapshot } from '../../lib/dashboardVerticalKpis';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Layout } from '../../components/saas/Layout';
@@ -24,22 +26,6 @@ import type { BusinessType } from '../../lib/businessApi';
 import { clientsRouteForVertical, DELIVERY_CRM_UI_ENABLED } from '../../lib/deliveryCrmFeature';
 
 import { isWorkerAccount } from '../../lib/authApi';
-import { GymDashboard } from './dashboards/GymDashboard';
-import { ClinicDashboard } from './dashboards/ClinicDashboard';
-import { HotelDashboard } from './dashboards/HotelDashboard';
-import { ConstructionDashboard } from './dashboards/ConstructionDashboard';
-import { AcademyDashboard } from './dashboards/AcademyDashboard';
-import { RealEstateDashboard } from './dashboards/RealEstateDashboard';
-import { LawyerDashboard } from './dashboards/LawyerDashboard';
-import { NightclubDashboard } from './dashboards/NightclubDashboard';
-import { EventsDashboard } from './dashboards/EventsDashboard';
-import { HairSalonDashboard } from './dashboards/HairSalonDashboard';
-import { ScrapyardDashboard } from './dashboards/ScrapyardDashboard';
-import { SparePartsDashboard } from './dashboards/SparePartsDashboard';
-import { TaxiDashboard } from './dashboards/TaxiDashboard';
-import { PharmacyDashboard } from './dashboards/PharmacyDashboard';
-import { CarWashDashboard } from './dashboards/CarWashDashboard';
-import { VetDashboard } from './dashboards/VetDashboard';
 import {
   Car, TrendingUp, TrendingDown, FileText, AlertTriangle,
   Clock, Plus, ArrowRight, Euro, ShoppingCart, CalendarCheck,
@@ -49,11 +35,11 @@ import {
   DollarSign, Wallet, AlertCircle, UserCheck, BarChart3, Briefcase,
   ShieldAlert, PieChart, Zap, Building2, FileBarChart, Boxes,
   ArrowUpRight, ArrowDownRight, Minus, CalendarRange, BookmarkCheck, Receipt,
-  LayoutGrid, LayoutDashboard, Scale,
+  LayoutGrid, LayoutDashboard, Scale, UtensilsCrossed, ListChecks, Banknote,
 } from 'lucide-react';
 import { DashboardFinanceWidget } from '../../components/saas/finance/DashboardFinanceWidget';
 import { GeneralDashboard } from '../../components/saas/GeneralDashboard';
-import { DashboardViewProvider, useDashboardView } from '../../context/DashboardViewContext';
+import { useDashboardView } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
@@ -391,6 +377,19 @@ interface QuickAccessItem {
 
 function getQuickAccessItems(vertical: string): QuickAccessItem[] {
   /** Delivery: solo enlaces del vertical (sin taller, vehículos ni CRM compraventa genérico). */
+  if (vertical === 'restaurant') {
+    return [
+      { label: 'Sala', icon: <UtensilsCrossed className="w-5 h-5" />, route: '/saas/sala', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
+      { label: 'Reservas', icon: <BookmarkCheck className="w-5 h-5" />, route: '/saas/reservations', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
+      { label: 'Lista espera', icon: <ListChecks className="w-5 h-5" />, route: '/saas/lista-espera', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
+      { label: 'Caja', icon: <Banknote className="w-5 h-5" />, route: '/saas/caja', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+      { label: 'Clientes', icon: <Users className="w-5 h-5" />, route: '/saas/clients', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
+      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
+      { label: 'Equipo', icon: <UserCheck className="w-5 h-5" />, route: '/saas/team', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
+      { label: 'Finanzas', icon: <Wallet className="w-5 h-5" />, route: '/saas/finance', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
+    ];
+  }
+
   if (vertical === 'delivery') {
     return [
       { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery-ops', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
@@ -432,6 +431,7 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
       { label: 'Servicios', icon: <Users className="w-5 h-5" />, route: '/saas/cleaning-services', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
     ],
     gym: [
+      { label: 'Centro', icon: <LayoutDashboard className="w-5 h-5" />, route: '/saas/gym-hub', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
       { label: 'Socios', icon: <Users className="w-5 h-5" />, route: '/saas/gym-members', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
       { label: 'Clases', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/gym-classes', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
@@ -464,19 +464,19 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
       { label: 'VIP', icon: <Users className="w-5 h-5" />, route: '/saas/nightclub-vip', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
     events: [
-      { label: 'Eventos', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/events-management', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
-      { label: 'Proveedores', icon: <Users className="w-5 h-5" />, route: '/saas/events-vendors', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
+      { label: 'Centro eventos', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/vertical/eventos', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
+      { label: 'Contrataciones', icon: <FileText className="w-5 h-5" />, route: '/saas/vertical/eventos/contrataciones', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
     ],
     hairSalon: [
       { label: 'Citas', icon: <CalendarCheck className="w-5 h-5" />, route: '/saas/salon-appointments', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
       { label: 'Servicios', icon: <Boxes className="w-5 h-5" />, route: '/saas/salon-services', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
     scrapyard: [
-      { label: 'Centro', icon: <Activity className="w-5 h-5" />, route: '/saas/scrapyard-hub', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
+      { label: 'Centro', icon: <Activity className="w-5 h-5" />, route: '/saas/vertical/desguaces', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
       { label: 'Piezas', icon: <Boxes className="w-5 h-5" />, route: '/saas/scrapyard-parts', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
     spareParts: [
-      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/spareparts-catalog', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
+      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
       { label: 'Pedidos', icon: <ShoppingCart className="w-5 h-5" />, route: '/saas/spareparts-orders', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
     ],
     taxi: [
@@ -526,17 +526,16 @@ const FUNNEL_STAGE_KEYS = [
 
 
 export function Dashboard() {
-  return (
-    <DashboardViewProvider>
-      <DashboardPage />
-    </DashboardViewProvider>
-  );
+  return <DashboardPage />;
 }
 
 function DashboardPage() {
-  const { businesses, businessesFetchSettled } = useBusiness();
+  const { businesses, businessesFetchSettled, currentBusiness } = useBusiness();
   const { isPortfolioView, selectBusinessFromPortfolio } = useDashboardView();
   const portfolioPlan = usePortfolioPlanAccess();
+  const vertical = (currentBusiness?.businessType || 'carDealership') as BusinessType;
+  const VerticalDashboard = getVerticalDashboard(vertical);
+  const [showUnifiedDashboard, setShowUnifiedDashboard] = useState(false);
 
   if (!businessesFetchSettled) {
     return (
@@ -553,14 +552,18 @@ function DashboardPage() {
     return <GeneralDashboard onSelectBusiness={selectBusinessFromPortfolio} />;
   }
 
-  return <UnifiedDashboard />;
+  if (VerticalDashboard && !showUnifiedDashboard) {
+    return <VerticalDashboard onSelectGeneral={() => setShowUnifiedDashboard(true)} />;
+  }
+
+  return <UnifiedDashboard onBackToVertical={VerticalDashboard ? () => setShowUnifiedDashboard(false) : undefined} />;
 }
 
 // ═══════════════════════════════════════════════════════════
 // UNIFIED DASHBOARD (works for all verticals)
 // ═══════════════════════════════════════════════════════════
 
-function UnifiedDashboard() {
+function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void }) {
   const navigate = useNavigate();
   const { vehicles, leads, sales, documents, isLoadingVehicles, isLoadingClients } = useApp();
   const { user: authUser } = useAuth();
@@ -755,6 +758,28 @@ function UnifiedDashboard() {
       cancelled = true;
     };
   }, [isDeliveryVertical, authUser, currentBusiness?.business_id, currentBusiness?.businessType]);
+
+  const [verticalKpi, setVerticalKpi] = useState<VerticalKpiSnapshot | null>(null);
+  const [verticalKpiLoading, setVerticalKpiLoading] = useState(false);
+
+  useEffect(() => {
+    if (!financeUserId || isDeliveryVertical || isCompraventaVertical) {
+      setVerticalKpi(null);
+      return;
+    }
+    let cancelled = false;
+    setVerticalKpiLoading(true);
+    void loadVerticalKpiSnapshot(vertical, financeUserId, businessId)
+      .then((snap) => {
+        if (!cancelled) setVerticalKpi(snap);
+      })
+      .finally(() => {
+        if (!cancelled) setVerticalKpiLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [vertical, financeUserId, businessId, isDeliveryVertical, isCompraventaVertical]);
 
   useEffect(() => {
     try {
@@ -1112,6 +1137,16 @@ function UnifiedDashboard() {
         {/* ── Status bar ── */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-3">
+            {onBackToVertical && (
+              <button
+                type="button"
+                onClick={onBackToVertical}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                <LayoutDashboard className="w-3.5 h-3.5" />
+                Vista vertical
+              </button>
+            )}
             {authUser?.user_id && (
               serverLoading ? (
                 <span className="flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-gray-500">
@@ -1270,7 +1305,13 @@ function UnifiedDashboard() {
                       ? (pendingDeliveriesKpi > 0 ? { value: `${pendingDeliveriesKpi} en curso`, up: true } : undefined)
                       : (criticalStock > 0 ? { value: `${criticalStock} alertas`, up: false } : undefined)
                   }
-                  onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-ops' : '/saas/catalog')}
+                  onClick={() => navigate(
+                    vertical === 'delivery'
+                      ? '/saas/delivery-ops'
+                      : isRestaurantVertical
+                        ? '/saas/sala'
+                        : '/saas/catalog',
+                  )}
                   loading={serverLoading}
                 />
                 <KPICard
@@ -1292,7 +1333,13 @@ function UnifiedDashboard() {
                   iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
                   iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
                   trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
-                  onClick={() => navigate(vertical === 'delivery' ? '/saas/delivery-ops' : '/saas/workshop')}
+                  onClick={() => navigate(
+                    vertical === 'delivery'
+                      ? '/saas/delivery-ops'
+                      : isRestaurantVertical
+                        ? '/saas/caja'
+                        : '/saas/workshop',
+                  )}
                   loading={serverLoading}
                 />
               </div>
@@ -1454,8 +1501,9 @@ function UnifiedDashboard() {
                   cobrosCount={cobrosCount}
                   activeWorkers={activeWorkers}
                   pendingDeliveries={serverData?.kpis?.pendingDeliveries ?? 0}
-                  loading={serverLoading}
+                  loading={serverLoading || verticalKpiLoading}
                   salesClosure={serverData?.salesClosure}
+                  verticalKpi={verticalKpi}
                 />
               </div>
             </DraggableWidget>
@@ -1794,18 +1842,19 @@ function FinanceStat({ label, value, color, bg, icon, sub }: {
 
 function OperativeBlock({
   vertical, stockCount, oportunidades, openIncidents, cobrosCount, activeWorkers, pendingDeliveries, loading,
-  salesClosure,
+  salesClosure, verticalKpi,
 }: {
   vertical: string; stockCount: number; oportunidades: number; openIncidents: number;
   cobrosCount: number; activeWorkers: number; pendingDeliveries: number; loading: boolean;
   salesClosure?: SalesClosureKpis;
+  verticalKpi?: VerticalKpiSnapshot | null;
 }) {
   const navigate = useNavigate();
 
   const items = useMemo(() => {
     const crmRoute = clientsRouteForVertical(vertical);
-    const crmTitle = vertical === 'delivery' ? 'Clientes' : 'Oportunidades CRM';
-    const crmSub = vertical === 'delivery' ? 'Fichas de cliente' : 'Leads activos';
+    const crmTitle = vertical === 'delivery' || vertical === 'restaurant' ? 'Clientes' : 'Oportunidades CRM';
+    const crmSub = vertical === 'delivery' || vertical === 'restaurant' ? 'Fichas de cliente' : 'Leads activos';
 
     const base = [
       { title: crmTitle, value: String(oportunidades), sub: crmSub, icon: <ShoppingCart className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: crmRoute },
@@ -1817,8 +1866,9 @@ function OperativeBlock({
       carDealership: { title: 'Stock vehículos', value: String(stockCount), sub: 'Disponibles', icon: <Car className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: '/saas/vehicles' },
       workshop: { title: 'Órdenes taller', value: '—', sub: 'Abiertas', icon: <Wrench className="w-4 h-4" />, bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-600', route: '/saas/workshop' },
       delivery: { title: 'Pedidos activos', value: String(pendingDeliveries || 0), sub: 'En curso', icon: <Truck className="w-4 h-4" />, bg: pendingDeliveries > 0 ? 'bg-cyan-50 dark:bg-cyan-950/30' : 'bg-gray-50 dark:bg-gray-800', text: pendingDeliveries > 0 ? 'text-cyan-600' : 'text-gray-500', route: '/saas/delivery-ops' },
+      restaurant: { title: 'Sala', value: '—', sub: 'Mesas y TPV', icon: <UtensilsCrossed className="w-4 h-4" />, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-600', route: '/saas/sala' },
       cleaning: { title: 'Servicios hoy', value: '—', sub: 'Programados', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/cleaning-hub' },
-      gym: { title: 'Socios activos', value: '—', sub: 'Este mes', icon: <Users className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/gym-members' },
+      gym: { title: 'Socios activos', value: '—', sub: 'Registrados', icon: <Users className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/gym-hub' },
       clinic: { title: 'Citas hoy', value: '—', sub: 'Programadas', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/clinic-appointments' },
       hotel: { title: 'Habitaciones occ.', value: '—', sub: 'Ocupadas hoy', icon: <Building2 className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/hotel-rooms' },
       construction: { title: 'Proyectos activos', value: '—', sub: 'En curso', icon: <Briefcase className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/construction-projects' },
@@ -1826,10 +1876,10 @@ function OperativeBlock({
       realEstate: { title: 'Propiedades', value: '—', sub: 'En cartera', icon: <Building2 className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/realestate-properties' },
       lawyer: { title: 'Casos abiertos', value: '—', sub: 'En curso', icon: <Briefcase className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/lawyer-cases' },
       nightclub: { title: 'Eventos próximos', value: '—', sub: 'Programados', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/nightclub-events' },
-      events: { title: 'Eventos activos', value: '—', sub: 'En curso', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/events-management' },
+      events: { title: 'Eventos activos', value: '—', sub: 'En curso', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/vertical/eventos' },
       hairSalon: { title: 'Citas hoy', value: '—', sub: 'Programadas', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/salon-appointments' },
-      scrapyard: { title: 'Vehículos en desguace', value: '—', sub: 'En stock', icon: <Boxes className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/scrapyard-hub' },
-      spareParts: { title: 'Catálogo piezas', value: '—', sub: 'Disponibles', icon: <Boxes className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/spareparts-catalog' },
+      scrapyard: { title: 'Vehículos en desguace', value: '—', sub: 'En stock', icon: <Boxes className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/vertical/desguaces' },
+      spareParts: { title: 'Catálogo piezas', value: '—', sub: 'Disponibles', icon: <Boxes className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/catalog' },
       taxi: { title: 'Flota activa', value: '—', sub: 'Vehículos', icon: <Car className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/taxi-fleet' },
       pharmacy: { title: 'Inventario', value: '—', sub: 'Productos', icon: <Boxes className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/pharmacy-inventory' },
       carWash: { title: 'Servicios hoy', value: '—', sub: 'Programados', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/carwash-services' },
@@ -1838,7 +1888,17 @@ function OperativeBlock({
       butcherShop: { title: 'Centro operativo', value: '—', sub: 'Hoy', icon: <Activity className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/butcher-hub' },
     };
 
-    const vItem = verticalSpecific[vertical] || verticalSpecific.carDealership;
+    const vItem = verticalKpi
+      ? {
+          title: verticalKpi.label,
+          value: verticalKpi.value,
+          sub: verticalKpi.sub,
+          icon: verticalSpecific[vertical]?.icon ?? <Activity className="w-4 h-4" />,
+          bg: verticalSpecific[vertical]?.bg ?? 'bg-cyan-50 dark:bg-cyan-950/30',
+          text: verticalSpecific[vertical]?.text ?? 'text-cyan-600',
+          route: verticalKpi.route,
+        }
+      : (verticalSpecific[vertical] || verticalSpecific.carDealership);
     const row: typeof base = [vItem, ...base];
     if (vertical === 'carDealership' && salesClosure) {
       const n = salesClosure.soldAwaitingDelivery;
@@ -1853,7 +1913,7 @@ function OperativeBlock({
       });
     }
     return row;
-  }, [vertical, stockCount, oportunidades, cobrosCount, activeWorkers, pendingDeliveries, salesClosure]);
+  }, [vertical, stockCount, oportunidades, cobrosCount, activeWorkers, pendingDeliveries, salesClosure, verticalKpi]);
 
   return (
     <>

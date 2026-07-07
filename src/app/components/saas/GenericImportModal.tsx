@@ -6,6 +6,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { autoMapImportFields, type ImportHeaderAliases } from '../../lib/importHeaderMapping';
 import type { CatalogImportProgressReporter, CatalogImportReport } from '../../lib/catalogImportReport';
+import { isImportAbortError } from '../../lib/importAbort';
 import { CatalogImportReportPanel } from './CatalogImportReportPanel';
 
 export type CatalogImportHandlerResult = number | { count: number; report?: CatalogImportReport | null };
@@ -27,6 +28,7 @@ interface GenericImportModalProps {
   onImport: (
     entries: Record<string, string>[],
     onProgress?: CatalogImportProgressReporter,
+    signal?: AbortSignal,
   ) => Promise<CatalogImportHandlerResult | void> | CatalogImportHandlerResult | void;
   extraFileUpload?: {
     label: string;
@@ -77,13 +79,17 @@ export function GenericImportModal({
     percent?: number;
   } | null>(null);
   const [importReport, setImportReport] = useState<CatalogImportReport | null>(null);
+  const [importCancelled, setImportCancelled] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const extraFileRef = useRef<HTMLInputElement>(null);
+  const importAbortRef = useRef<AbortController | null>(null);
 
   const normalizedImportLabel = (importLabel || moduleLabel).trim();
 
   const handleClose = () => {
     if (importing) return;
+    importAbortRef.current = null;
+    setImportCancelled(false);
     setStep('upload');
     setRawHeaders([]);
     setRawData([]);
@@ -92,6 +98,17 @@ export function GenericImportModal({
     setImportProgress(null);
     setImportReport(null);
     onClose();
+  };
+
+  const handleCancelImport = () => {
+    if (!importing) return;
+    importAbortRef.current?.abort();
+    setImportCancelled(true);
+    setImportProgress((prev) => ({
+      phase: 'Cancelando…',
+      detail: prev?.detail,
+      percent: prev?.percent,
+    }));
   };
 
   const downloadTemplate = () => {
@@ -225,7 +242,10 @@ export function GenericImportModal({
       return;
     }
     setImporting(true);
+    setImportCancelled(false);
     setImportReport(null);
+    const abortController = new AbortController();
+    importAbortRef.current = abortController;
     setImportProgress({
       phase: 'Iniciando importación…',
       detail: `${mappedEntries.length} fila(s) en el archivo`,
@@ -233,7 +253,11 @@ export function GenericImportModal({
     });
     setStep('importing');
     try {
-      const raw = await onImport(mappedEntries, (update) => setImportProgress(update));
+      const raw = await onImport(
+        mappedEntries,
+        (update) => setImportProgress(update),
+        abortController.signal,
+      );
       const count =
         typeof raw === 'number' ? raw : typeof raw === 'object' && raw != null ? raw.count : mappedEntries.length;
       const report =
@@ -265,11 +289,19 @@ export function GenericImportModal({
 
       toast.success(`${count} entrada(s) importadas correctamente`);
       handleClose();
-    } catch {
-      toast.error('Error durante la importación');
-      setStep('preview');
+    } catch (err) {
+      if (isImportAbortError(err) || abortController.signal.aborted) {
+        toast.message('Importación cancelada');
+        setStep('preview');
+      } else {
+        toast.error('Error durante la importación');
+        setStep('preview');
+      }
+    } finally {
       setImporting(false);
       setImportProgress(null);
+      setImportCancelled(false);
+      importAbortRef.current = null;
     }
   };
 
@@ -552,7 +584,7 @@ export function GenericImportModal({
                   <p className="text-sm text-gray-500 dark:text-gray-400">{importProgress.detail}</p>
                 ) : (
                   <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Puede tardar 1–2 minutos con muchos productos. No cierres esta ventana.
+                    Puede tardar 1–2 minutos con muchos productos. Puedes cancelar en cualquier momento.
                   </p>
                 )}
               </div>
@@ -571,10 +603,18 @@ export function GenericImportModal({
 
         {/* Footer */}
         {step === 'importing' ? (
-          <div className="border-t border-gray-200 dark:border-gray-700 p-4 flex-shrink-0 bg-amber-50/80 dark:bg-amber-950/30">
+          <div className="border-t border-gray-200 dark:border-gray-700 p-4 flex-shrink-0 bg-amber-50/80 dark:bg-amber-950/30 flex flex-col sm:flex-row items-center justify-center gap-3">
             <p className="text-center text-sm font-medium text-amber-800 dark:text-amber-200">
-              Importación en curso — no cierres ni recargues la página
+              {importCancelled ? 'Cancelando importación…' : 'Importación en curso'}
             </p>
+            <button
+              type="button"
+              onClick={handleCancelImport}
+              disabled={importCancelled}
+              className="px-5 py-2.5 rounded-xl border-2 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 font-semibold text-sm hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Cancelar importación
+            </button>
           </div>
         ) : (
           <div className="border-t border-gray-200 dark:border-gray-700 p-6 flex gap-3 flex-shrink-0 bg-gray-50 dark:bg-gray-900">

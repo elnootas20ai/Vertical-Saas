@@ -1,0 +1,185 @@
+import { v4 as uuidv4 } from 'uuid';
+import {
+  ensureDatabase,
+  getCatalogDbName,
+  getAllDocuments,
+  getDocument,
+  putDocument,
+  softDeleteDocument,
+  findAccountByUserId,
+} from '../services/couchdb.js';
+
+function badRequest(res, error) {
+  return res.status(400).json({ ok: false, error });
+}
+
+function sanitizePromotion(doc) {
+  if (!doc || doc.type !== 'promotion') return null;
+  return {
+    id: doc._id,
+    name: String(doc.name || ''),
+    description: String(doc.description || ''),
+    type: String(doc.promoType || doc.typeKey || 'percentage'),
+    status: String(doc.status || 'draft'),
+    discountValue: Number(doc.discountValue || 0),
+    code: doc.code ? String(doc.code) : undefined,
+    startDate: doc.startDate || '',
+    endDate: doc.endDate || '',
+    maxUses: doc.maxUses ?? null,
+    currentUses: Number(doc.currentUses || 0),
+    targetAudience: doc.targetAudience || 'all',
+    clientIds: Array.isArray(doc.clientIds) ? doc.clientIds : [],
+    createdAt: doc.createdAt || '',
+    revenue: Number(doc.revenue || 0),
+    ordersUsed: Number(doc.ordersUsed || 0),
+    active: doc.active === true || doc.status === 'active',
+  };
+}
+
+function buildPromotionDocument(userId, data, existing = null) {
+  const id = existing?._id || data.id || `promo-${uuidv4()}`;
+  const status = String(data.status || existing?.status || 'draft');
+  return {
+    ...(existing || {}),
+    _id: id,
+    type: 'promotion',
+    user_id: userId,
+    name: String(data.name || existing?.name || '').trim(),
+    description: String(data.description ?? existing?.description ?? ''),
+    promoType: String(data.type || data.promoType || existing?.promoType || 'percentage'),
+    status,
+    active: status === 'active',
+    discountValue: Number(data.discountValue ?? existing?.discountValue ?? 0),
+    code: data.code !== undefined ? String(data.code || '').trim() : (existing?.code || ''),
+    startDate: data.startDate || existing?.startDate || '',
+    endDate: data.endDate || existing?.endDate || '',
+    maxUses: data.maxUses !== undefined ? data.maxUses : (existing?.maxUses ?? null),
+    currentUses: Number(data.currentUses ?? existing?.currentUses ?? 0),
+    targetAudience: data.targetAudience || existing?.targetAudience || 'all',
+    clientIds: Array.isArray(data.clientIds) ? data.clientIds : (existing?.clientIds || []),
+    revenue: Number(data.revenue ?? existing?.revenue ?? 0),
+    ordersUsed: Number(data.ordersUsed ?? existing?.ordersUsed ?? 0),
+    createdAt: existing?.createdAt || data.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export async function listPromotions(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const all = await getAllDocuments(req, db);
+    const items = all
+      .filter((d) => d?.type === 'promotion' && d?.user_id === userId && !d?.deletedAt)
+      .map(sanitizePromotion)
+      .filter(Boolean)
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+
+    return res.json({ ok: true, promotions: items });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al listar promociones' });
+  }
+}
+
+export async function createPromotion(req, res) {
+  try {
+    const { userId } = req.params;
+    const { promotion } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!promotion?.name?.trim()) return badRequest(res, 'El nombre es obligatorio');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const doc = buildPromotionDocument(userId, promotion);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.status(201).json({ ok: true, promotion: sanitizePromotion({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al crear promoción' });
+  }
+}
+
+export async function updatePromotion(req, res) {
+  try {
+    const { userId, promotionId } = req.params;
+    const { promotion } = req.body || {};
+    if (!userId || !promotionId) return badRequest(res, 'Faltan parámetros');
+    if (!promotion || typeof promotion !== 'object') return badRequest(res, 'Faltan datos');
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const existing = await getDocument(req, db, promotionId);
+    if (!existing || existing.type !== 'promotion' || existing.user_id !== userId || existing.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Promoción no encontrada' });
+    }
+
+    const doc = buildPromotionDocument(userId, promotion, existing);
+    const saved = await putDocument(req, db, doc._id, doc);
+    return res.json({ ok: true, promotion: sanitizePromotion({ ...doc, _rev: saved.rev }) });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar promoción' });
+  }
+}
+
+export async function removePromotion(req, res) {
+  try {
+    const { userId, promotionId } = req.params;
+    if (!userId || !promotionId) return badRequest(res, 'Faltan parámetros');
+
+    const db = getCatalogDbName();
+    const existing = await getDocument(req, db, promotionId);
+    if (!existing || existing.type !== 'promotion' || existing.user_id !== userId) {
+      return res.status(404).json({ ok: false, error: 'Promoción no encontrada' });
+    }
+
+    await softDeleteDocument(req, db, promotionId);
+    return res.json({ ok: true, id: promotionId });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar promoción' });
+  }
+}
+
+export async function syncPromotions(req, res) {
+  try {
+    const { userId } = req.params;
+    const { promotions } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!Array.isArray(promotions)) return badRequest(res, 'Falta array promotions');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+    const existing = (await getAllDocuments(req, db)).filter(
+      (d) => d?.type === 'promotion' && d?.user_id === userId && !d?.deletedAt,
+    );
+    const incomingIds = new Set(promotions.map((p) => p.id).filter(Boolean));
+
+    for (const old of existing) {
+      if (!incomingIds.has(old._id)) {
+        await softDeleteDocument(req, db, old._id);
+      }
+    }
+
+    const saved = [];
+    for (const p of promotions) {
+      const prev = p.id ? existing.find((e) => e._id === p.id) : null;
+      const doc = buildPromotionDocument(userId, p, prev || undefined);
+      const result = await putDocument(req, db, doc._id, doc);
+      saved.push(sanitizePromotion({ ...doc, _rev: result.rev }));
+    }
+
+    return res.json({ ok: true, promotions: saved });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al sincronizar promociones' });
+  }
+}

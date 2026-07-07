@@ -11,6 +11,10 @@ import {
   Rocket,
   SprayCan,
   Car,
+  Wrench,
+  Dumbbell,
+  PartyPopper,
+  FileText,
 } from 'lucide-react';
 import {
   isGuidedActivationBusinessType,
@@ -356,7 +360,7 @@ const CLEANING_TOUR_STEPS: OnboardingTourStep[] = [
     title: 'Registra clientes',
     description: 'Centraliza contactos para contratos recurrentes y facturación.',
     hint: 'Clientes → «Nuevo cliente».',
-    route: '/saas/clientes',
+    route: '/saas/vertical/limpieza/clientes',
     checklist: ['Al menos un cliente registrado'],
   },
   {
@@ -403,6 +407,214 @@ function buildCompraventaDoneStep(): OnboardingTourStep {
   };
 }
 
+function buildGymWelcomeStep(p?: OnboardingTourPersonalization): OnboardingTourStep {
+  const { firstName, businessName } = trimPersonalization(p);
+  const brand = 'Vertial Gimnasio';
+  let title: string;
+  if (firstName && businessName) {
+    title = `Hola, ${firstName} — ${businessName} en ${brand}`;
+  } else if (firstName) {
+    title = `Hola, ${firstName}. Bienvenido a ${brand}`;
+  } else if (businessName) {
+    title = `Bienvenido, ${businessName}`;
+  } else {
+    title = `Bienvenido a ${brand}`;
+  }
+
+  return {
+    id: 'welcome',
+    icon: <Sparkles className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-violet-400 to-purple-600',
+    title,
+    description: businessName
+      ? `Configuraremos ${businessName} para gestionar socios, clases, cuotas y accesos desde un solo panel. Te guiamos paso a paso.`
+      : 'Configuraremos tu gimnasio para gestionar socios, clases, cuotas y accesos desde un solo panel. Te guiamos paso a paso.',
+    hint: 'En el menú lateral, «Alta gimnasio» indica en todo momento qué falta por completar.',
+  };
+}
+
+function buildWorkshopWelcomeStep(p?: OnboardingTourPersonalization): OnboardingTourStep {
+  const { firstName, businessName } = trimPersonalization(p);
+  const brand = 'Vertial Taller';
+  let title: string;
+  if (firstName && businessName) {
+    title = `Hola, ${firstName} — ${businessName} en ${brand}`;
+  } else if (firstName) {
+    title = `Hola, ${firstName}. Bienvenido a ${brand}`;
+  } else if (businessName) {
+    title = `Bienvenido, ${businessName}`;
+  } else {
+    title = `Bienvenido a ${brand}`;
+  }
+
+  return {
+    id: 'welcome',
+    icon: <Sparkles className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-orange-400 to-amber-600',
+    title,
+    description: businessName
+      ? `Configuraremos ${businessName} para gestionar OTs, clientes y recambios desde un solo panel. Te guiamos paso a paso.`
+      : 'Configuraremos tu taller para gestionar órdenes de trabajo, clientes y recambios desde un solo panel. Te guiamos paso a paso.',
+    hint: 'En el menú lateral, «Alta taller» indica en todo momento qué falta por completar.',
+  };
+}
+
+function buildEventsWelcomeStep(p?: OnboardingTourPersonalization): OnboardingTourStep {
+  const { firstName, businessName } = trimPersonalization(p);
+  const brand = 'Vertial Eventos';
+  let title: string;
+  if (firstName && businessName) {
+    title = `Hola, ${firstName} — ${businessName} en ${brand}`;
+  } else if (firstName) {
+    title = `Hola, ${firstName}. Bienvenido a ${brand}`;
+  } else if (businessName) {
+    title = `Bienvenido, ${businessName}`;
+  } else {
+    title = `Bienvenido a ${brand}`;
+  }
+
+  return {
+    id: 'welcome',
+    icon: <Sparkles className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-fuchsia-400 to-pink-600',
+    title,
+    description: businessName
+      ? `Configuraremos ${businessName} para presupuestar, contratar y planificar eventos desde un solo panel. Sin TPV: el flujo va de presupuesto a pipeline y cierre.`
+      : 'Configuraremos tu agencia de eventos para presupuestar, contratar y planificar desde un solo panel. Sin TPV: el flujo va de presupuesto a pipeline y cierre.',
+    hint: 'En el menú lateral, «Alta eventos» indica en todo momento qué falta por completar.',
+  };
+}
+
+const GYM_TOUR_STEPS: OnboardingTourStep[] = [
+  {
+    id: 'gym_company',
+    icon: <Building2 className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-blue-500 to-indigo-600',
+    title: 'Revisa los datos de empresa',
+    description: 'Completa nombre, CIF, dirección y teléfono para contratos y facturación.',
+    hint: 'Ajustes → Empresa → icono lápiz en cada campo pendiente.',
+    route: '/saas/settings/empresa',
+    checklist: ['Nombre comercial', 'CIF / NIF', 'Dirección', 'Teléfono de contacto'],
+  },
+  {
+    id: 'gym_members',
+    icon: <Users className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-cyan-500 to-teal-600',
+    title: 'Registra socios',
+    description: 'Da de alta miembros con plan, contacto y estado de membresía.',
+    hint: 'Socios → «Nuevo socio».',
+    route: '/saas/gym-members',
+    checklist: ['Al menos un socio registrado'],
+  },
+  {
+    id: 'gym_classes',
+    icon: <Dumbbell className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-violet-500 to-purple-600',
+    title: 'Programa clases',
+    description: 'Crea clases con instructor, horario, día y capacidad.',
+    hint: 'Clases → «Nueva clase».',
+    route: '/saas/gym-classes',
+    checklist: ['Al menos una clase creada'],
+  },
+  {
+    id: 'gym_memberships',
+    icon: <Package className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-emerald-500 to-green-600',
+    title: 'Define cuotas',
+    description: 'Configura planes de membresía con precios mensuales o anuales.',
+    hint: 'Membresías → «Nueva cuota».',
+    route: '/saas/gym-memberships',
+    checklist: ['Al menos una cuota definida'],
+  },
+  {
+    id: 'gym_operate',
+    icon: <Rocket className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-orange-500 to-amber-600',
+    title: 'Listo para operar',
+    description: 'Con socios, clases y cuotas ya puedes controlar accesos y fichajes.',
+    hint: 'El hub del gimnasio concentra socios activos y actividad reciente.',
+    route: '/saas/gym-hub',
+    checklist: ['Empresa, socios y cuotas listos'],
+  },
+];
+
+const WORKSHOP_TOUR_STEPS: OnboardingTourStep[] = [
+  {
+    id: 'workshop_company',
+    icon: <Building2 className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-blue-500 to-indigo-600',
+    title: 'Revisa los datos de empresa',
+    description: 'Completa nombre, CIF, dirección y teléfono para presupuestos y facturas.',
+    hint: 'Ajustes → Empresa → icono lápiz en cada campo pendiente.',
+    route: '/saas/settings/empresa',
+    checklist: ['Nombre comercial', 'CIF / NIF', 'Dirección', 'Teléfono de contacto'],
+  },
+  {
+    id: 'workshop_clients',
+    icon: <Users className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-violet-500 to-purple-600',
+    title: 'Registra clientes',
+    description: 'Añade clientes y contactos para vincular órdenes de trabajo.',
+    hint: 'Clientes → «Nuevo cliente».',
+    route: '/saas/clientes',
+    checklist: ['Al menos un cliente registrado'],
+  },
+  {
+    id: 'workshop_orders',
+    icon: <Wrench className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-orange-500 to-amber-600',
+    title: 'Abre la primera OT',
+    description: 'Crea una orden de trabajo con vehículo, servicio y estado.',
+    hint: 'Taller → «Nueva orden de trabajo».',
+    route: '/saas/workshop',
+    checklist: ['Al menos una OT creada'],
+  },
+  {
+    id: 'workshop_parts',
+    icon: <Package className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-emerald-500 to-green-600',
+    title: 'Gestiona recambios',
+    description: 'Da de alta piezas, referencias y stock mínimo del taller.',
+    hint: 'Recambios → «Nuevo recambio».',
+    route: '/saas/parts',
+    checklist: ['Al menos un recambio registrado'],
+  },
+  {
+    id: 'workshop_operate',
+    icon: <Rocket className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-cyan-500 to-blue-600',
+    title: 'Listo para operar',
+    description: 'Con clientes, OTs y recambios ya puedes operar el taller al completo.',
+    hint: 'Invita mecánicos desde Equipo para asignar OTs.',
+    route: '/saas/workshop',
+    checklist: ['Clientes, OTs y recambios listos', 'Equipo invitado'],
+  },
+];
+
+function buildGymDoneStep(): OnboardingTourStep {
+  return {
+    id: 'done',
+    icon: <CheckCircle2 className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-emerald-500 to-teal-600',
+    title: '¡Listo para tu gimnasio!',
+    description:
+      'Ya conoces el flujo de arranque. En el menú lateral, «Alta gimnasio» te marca qué falta por completar hasta el 100%.',
+    hint: 'Puedes volver a ver este tour desde Ayuda → Tour interactivo.',
+  };
+}
+
+function buildWorkshopDoneStep(): OnboardingTourStep {
+  return {
+    id: 'done',
+    icon: <CheckCircle2 className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-emerald-500 to-teal-600',
+    title: '¡Listo para tu taller!',
+    description:
+      'Ya conoces el flujo de arranque. En el menú lateral, «Alta taller» te marca qué falta por completar hasta el 100%.',
+    hint: 'Puedes volver a ver este tour desde Ayuda → Tour interactivo.',
+  };
+}
+
 function buildCleaningDoneStep(): OnboardingTourStep {
   return {
     id: 'done',
@@ -411,6 +623,71 @@ function buildCleaningDoneStep(): OnboardingTourStep {
     title: '¡Listo para limpieza!',
     description:
       'Ya conoces el flujo de arranque. En el menú lateral, «Alta limpieza» te marca qué falta por completar hasta el 100%.',
+    hint: 'Puedes volver a ver este tour desde Ayuda → Tour interactivo.',
+  };
+}
+
+const EVENTS_TOUR_STEPS: OnboardingTourStep[] = [
+  {
+    id: 'events_company',
+    icon: <Building2 className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-blue-500 to-indigo-600',
+    title: 'Revisa los datos de empresa',
+    description: 'Completa nombre, CIF, dirección y teléfono para presupuestos y contratos.',
+    hint: 'Ajustes → Empresa → icono lápiz en cada campo pendiente.',
+    route: '/saas/settings/empresa',
+    checklist: ['Nombre comercial', 'CIF / NIF', 'Dirección', 'Teléfono de contacto'],
+  },
+  {
+    id: 'events_services',
+    icon: <Sparkles className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-fuchsia-500 to-pink-600',
+    title: 'Arma tu catálogo de servicios',
+    description: 'DJ, catering, coordinación… con precio fijo, por persona u hora. Es tu «carta» comercial, no un TPV.',
+    hint: 'Servicios → «Nuevo servicio».',
+    route: '/saas/events-services',
+    checklist: ['Al menos un servicio creado', 'Con precio mayor que 0'],
+  },
+  {
+    id: 'events_clients',
+    icon: <Users className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-violet-500 to-purple-600',
+    title: 'Registra clientes',
+    description: 'Contactos a los que enviarás presupuestos y contratos de evento.',
+    hint: 'Clientes → «Nuevo cliente».',
+    route: '/saas/clients',
+    checklist: ['Al menos un cliente registrado'],
+  },
+  {
+    id: 'events_first_contract',
+    icon: <FileText className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-cyan-500 to-teal-600',
+    title: 'Crea tu primera contratación',
+    description: 'El asistente arma el evento, las líneas de presupuesto y la fase inicial del pipeline.',
+    hint: 'Eventos → «Nueva contratación».',
+    route: '/saas/vertical/eventos/nueva-contratacion',
+    checklist: ['Evento creado en el pipeline'],
+  },
+  {
+    id: 'events_operate',
+    icon: <PartyPopper className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-orange-500 to-amber-600',
+    title: 'Planifica y cierra eventos',
+    description: 'Invitados, catering, logística y espacios se gestionan tras la contratación. El cierre es por fase, no por caja TPV.',
+    hint: 'Hub de eventos → pipeline → detalle del proyecto.',
+    route: '/saas/vertical/eventos',
+    checklist: ['Pipeline operativo', 'Planificación y cierre por evento'],
+  },
+];
+
+function buildEventsDoneStep(): OnboardingTourStep {
+  return {
+    id: 'done',
+    icon: <CheckCircle2 className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-emerald-500 to-teal-600',
+    title: '¡Listo para eventos!',
+    description:
+      'Ya conoces el flujo de arranque. En el menú lateral, «Alta eventos» te marca qué falta por completar hasta el 100%.',
     hint: 'Puedes volver a ver este tour desde Ayuda → Tour interactivo.',
   };
 }
@@ -427,6 +704,15 @@ export function getOnboardingTourSteps(
   }
   if (t === 'cleaning') {
     return [buildCleaningWelcomeStep(personalization), ...CLEANING_TOUR_STEPS, buildCleaningDoneStep()];
+  }
+  if (t === 'gym') {
+    return [buildGymWelcomeStep(personalization), ...GYM_TOUR_STEPS, buildGymDoneStep()];
+  }
+  if (t === 'workshop') {
+    return [buildWorkshopWelcomeStep(personalization), ...WORKSHOP_TOUR_STEPS, buildWorkshopDoneStep()];
+  }
+  if (t === 'events') {
+    return [buildEventsWelcomeStep(personalization), ...EVENTS_TOUR_STEPS, buildEventsDoneStep()];
   }
 
   const variant = t === 'restaurant' ? 'restaurant' : 'delivery';

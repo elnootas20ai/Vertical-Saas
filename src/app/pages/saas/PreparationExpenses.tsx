@@ -320,36 +320,7 @@ export function PreparationExpenses() {
   const [filterStatus, setFilterStatus] = useState<PreparationExpenseStatus | ''>(searchParams.get('status') as PreparationExpenseStatus || '');
   const [filterVehicle, setFilterVehicle] = useState(searchParams.get('vehicleId') || '');
   const [showFilters, setShowFilters] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'concept', label: 'Concepto' },
-    { key: 'amount', label: 'Importe' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'supplier', label: 'Proveedor' },
-    { key: 'category', label: 'Categoría' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'concept', label: 'Concepto', example: '' },
-    { key: 'amount', label: 'Importe', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'supplier', label: 'Proveedor', example: '' },
-    { key: 'category', label: 'Categoría', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} gasto(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} gasto(s) importado(s)`);
-  };
-
-  const accountRole = (user as Record<string, unknown>)?.role as string || '';
+    const accountRole = (user as Record<string, unknown>)?.role as string || '';
   const userIsManager = ['Admin', 'Gerente'].includes(accountRole);
 
   const fetchData = useCallback(async () => {
@@ -490,8 +461,6 @@ export function PreparationExpenses() {
           <AddButtonDropdown
                 label="Nuevo gasto"
                 onQuickAdd={() => { setEditingExpense(null); setShowCreateModal(true); }}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de gasto"
               />
@@ -688,22 +657,6 @@ export function PreparationExpenses() {
       <ExpenseModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onSave={handleCreate} vehicles={vehicles} />
       <ExpenseModal isOpen={!!editingExpense} onClose={() => setEditingExpense(null)} onSave={handleUpdate} editItem={editingExpense} vehicles={vehicles} />
       <ValidateModal isOpen={!!validatingExpense} onClose={() => setValidatingExpense(null)} expense={validatingExpense} onValidate={handleValidate} />
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="preparation_expenses"
-        moduleLabel="Gastos"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Gastos"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

@@ -1,0 +1,20 @@
+VERTIAL PRINT — Impresión térmica para TPV Vertial
+==================================================
+
+1. Descarga VertialPrint.exe desde tu panel Vertial (Ajustes → Impresora)
+   o directamente: https://vertialapp.com/downloads/VertialPrint.exe
+
+2. En el PC del mostrador (Windows), abre VertialPrint.exe.
+   Deja la ventana en segundo plano mientras usas el TPV.
+
+3. En el TPV (tablet o PC), configura la impresora:
+   - WiFi: pulsa «Buscar impresora» o escribe la IP de la Epson.
+   - USB: elige la impresora en la lista del PC.
+
+4. Si usas iPad/tablet:
+   - Vertial Print debe estar en un PC de la misma WiFi.
+   - En el TPV, pon la IP de ese PC en «PC del mostrador».
+
+Notas:
+- Windows puede pedir permiso de firewall la primera vez: acepta en redes privadas.
+- No hace falta instalar Node.js ni clonar ningún proyecto.

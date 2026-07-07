@@ -36,6 +36,7 @@ export function getVerticalHomePath(businessType?: string | null): string {
   if (bt === 'workshop') return '/saas/workshop';
   if (bt === 'butcherShop') return '/saas/vertical/carniceria';
   if (bt === 'cleaning') return '/saas/cleaning-hub';
+  if (bt === 'gym') return '/saas/gym-hub';
   if (bt === 'construction') return '/saas/construction-ops';
   if (supportsVehicleInventoryModule(bt)) return '/saas/dashboard';
   return '/saas/dashboard';

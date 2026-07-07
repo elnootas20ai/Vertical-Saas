@@ -170,53 +170,56 @@ export function buildCustomRolePermissionMatrix(permissions: string[]): AccountP
   return matrix;
 }
 
-/** Matriz de permisos por rol (equivalente a buildRolePermissions en Team.tsx). */
+/** Matriz de permisos por rol (alineada con buildDefaultPermissionMatrix en couchdb.js). */
 export function buildRolePermissionsMatrix(role = 'Usuario', roleDefinitions: RoleDefinition[] = []): AccountPermissionMatrix {
   const customRole = roleDefinitions.find((definition) => definition.id === role);
   if (customRole && !BUILTIN_ROLE_IDS.has(role)) {
     return buildCustomRolePermissionMatrix(customRole.permissions);
   }
 
-  const fullAccess = role === 'Admin' || role === 'Gerente';
+  const allEnabled =
+    role === 'Admin'
+    || role === 'Gerente'
+    || role === 'Administrador'
+    || role === 'Encargado';
+
   const base = Object.fromEntries(
-    ROLE_PERMISSION_OPTIONS.map((option) => [option.key, { view: fullAccess, edit: fullAccess }]),
+    ROLE_PERMISSION_OPTIONS.map((option) => [option.key, { view: allEnabled, edit: allEnabled }]),
   ) as AccountPermissionMatrix;
 
-  if (fullAccess) {
+  if (allEnabled) {
     return base;
   }
 
-  if (role === 'Comercial') {
-    ['vehicles', 'clients', 'sales', 'documents'].forEach((key) => {
-      base[key] = { view: true, edit: true };
-    });
-  }
+  const presets: Record<string, string[]> = {
+    Comercial: ['vehicles', 'clients', 'sales', 'documents'],
+    Administración: ['clients', 'documents', 'finance', 'ancove'],
+    Taller: ['workshop', 'vehicles'],
+    Usuario: ['vehicles', 'clients', 'sales', 'delivery', 'cash_register'],
+    'Mostrador / Atención': ['clients', 'sales', 'delivery', 'cash_register', 'documents'],
+    Cocina: ['delivery', 'documents'],
+    Reparto: ['delivery', 'fleet'],
+    Operaciones: ['clients', 'documents', 'sales'],
+  };
 
-  if (role === 'Administración') {
-    ['clients', 'documents', 'finance', 'ancove'].forEach((key) => {
+  const readWriteModules = presets[role] || [];
+  for (const key of readWriteModules) {
+    if (base[key]) {
       base[key] = { view: true, edit: true };
-    });
-  }
-
-  if (role === 'Taller') {
-    base.vehicles = { view: true, edit: true };
+    }
   }
 
   if (role === 'Usuario') {
-    base.vehicles = { view: true, edit: false };
     base.clients = { view: true, edit: false };
   }
 
   return base;
 }
 
-/** Permisos para inviteUser: undefined en roles predefinidos (el backend normaliza). */
+/** Permisos explícitos para inviteUser (siempre enviar matriz coherente con el rol). */
 export function getInvitePermissionsForUser(
   role: string,
   roleDefinitions: RoleDefinition[],
-): AccountPermissionMatrix | undefined {
-  if (BUILTIN_ROLE_IDS.has(role)) {
-    return undefined;
-  }
+): AccountPermissionMatrix {
   return buildRolePermissionsMatrix(role, roleDefinitions);
 }

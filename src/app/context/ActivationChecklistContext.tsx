@@ -25,6 +25,26 @@ import {
   EMPTY_CLEANING_ACTIVATION_FLAGS,
   type CleaningActivationFlags,
 } from '../lib/cleaningActivationChecklist';
+import {
+  buildGymActivationStepDefs,
+  EMPTY_GYM_ACTIVATION_FLAGS,
+  type GymActivationFlags,
+} from '../lib/gymActivationChecklist';
+import {
+  buildWorkshopActivationStepDefs,
+  EMPTY_WORKSHOP_ACTIVATION_FLAGS,
+  type WorkshopActivationFlags,
+} from '../lib/workshopActivationChecklist';
+import {
+  buildEventsActivationStepDefs,
+  EMPTY_EVENTS_ACTIVATION_FLAGS,
+  type EventsActivationFlags,
+} from '../lib/eventsActivationChecklist';
+import { loadEvents, loadEventServices } from '../lib/eventsFlow';
+import { createVerticalApi } from '../lib/verticalApiFactory';
+import { listWorkOrdersRequest } from '../lib/workshopApi';
+import { listPartsRequest } from '../lib/partsApi';
+import { WORKSHOP_DATA_CHANGED } from '../lib/workshopEvents';
 import { listClientsRequest } from '../lib/crmApi';
 import { loadCompraventaStores } from '../lib/compraventaSetup';
 import { listCleaningServicesRequest } from '../lib/cleaningApi';
@@ -44,6 +64,7 @@ import {
   isActivationChecklistDismissed,
   isActivationChecklistForceVisible,
   isOnboardingTourActive,
+  dismissOnboardingWelcomeTourForActivation,
   markOnboardingTourCompleted,
   notifyGuidedActivationComplete,
   setActivationChecklistDismissed,
@@ -150,7 +171,10 @@ function finalizeStepDefs(
 type ActivationFlagsBundle =
   | { kind: 'delivery'; flags: DeliveryActivationFlags }
   | { kind: 'compraventa'; flags: CompraventaActivationFlags }
-  | { kind: 'cleaning'; flags: CleaningActivationFlags };
+  | { kind: 'cleaning'; flags: CleaningActivationFlags }
+  | { kind: 'gym'; flags: GymActivationFlags }
+  | { kind: 'workshop'; flags: WorkshopActivationFlags }
+  | { kind: 'events'; flags: EventsActivationFlags };
 
 function buildStepDefsForBusiness(
   businessType: string | null | undefined,
@@ -163,7 +187,13 @@ function buildStepDefsForBusiness(
         ? 'compraventa'
         : businessType === 'cleaning'
           ? 'cleaning'
-          : null);
+          : businessType === 'gym'
+            ? 'gym'
+            : businessType === 'workshop'
+              ? 'workshop'
+              : businessType === 'events'
+                ? 'events'
+              : null);
 
   if (kind === 'delivery') {
     const flags = bundle?.kind === 'delivery'
@@ -185,6 +215,24 @@ function buildStepDefsForBusiness(
       ? bundle.flags
       : EMPTY_CLEANING_ACTIVATION_FLAGS;
     return buildCleaningActivationStepDefs(flags);
+  }
+  if (kind === 'gym') {
+    const flags = bundle?.kind === 'gym'
+      ? bundle.flags
+      : EMPTY_GYM_ACTIVATION_FLAGS;
+    return buildGymActivationStepDefs(flags);
+  }
+  if (kind === 'workshop') {
+    const flags = bundle?.kind === 'workshop'
+      ? bundle.flags
+      : EMPTY_WORKSHOP_ACTIVATION_FLAGS;
+    return buildWorkshopActivationStepDefs(flags);
+  }
+  if (kind === 'events') {
+    const flags = bundle?.kind === 'events'
+      ? bundle.flags
+      : EMPTY_EVENTS_ACTIVATION_FLAGS;
+    return buildEventsActivationStepDefs(flags);
   }
   return [];
 }
@@ -362,6 +410,88 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           };
           activationFlagsRef.current = nextBundle;
           setActivationFlags(nextBundle);
+          return;
+        }
+
+        if (businessType === 'gym') {
+          const gymMembersApi = createVerticalApi('gym', 'members');
+          const gymClassesApi = createVerticalApi('gym', 'classes');
+          const gymMembershipsApi = createVerticalApi('gym', 'memberships');
+          const [members, classes, memberships, usersRes] = await Promise.all([
+            gymMembersApi.list(dataUserId).catch(() => []),
+            gymClassesApi.list(dataUserId).catch(() => []),
+            gymMembershipsApi.list(dataUserId).catch(() => []),
+            businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
+          ]);
+
+          if (cancelled) return;
+
+          const nextBundle: ActivationFlagsBundle = {
+            kind: 'gym',
+            flags: {
+              ...companyFlags,
+              hasMember: members.length > 0,
+              hasClass: classes.length > 0,
+              hasMembership: memberships.length > 0,
+              hasTeamMember: (usersRes.users || []).length >= 2,
+            },
+          };
+          activationFlagsRef.current = nextBundle;
+          setActivationFlags(nextBundle);
+          return;
+        }
+
+        if (businessType === 'workshop') {
+          const [clients, orders, parts, usersRes] = await Promise.all([
+            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+            listWorkOrdersRequest(dataUserId, { businessId }).catch(() => []),
+            listPartsRequest(dataUserId, { businessId }).catch(() => []),
+            businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
+          ]);
+
+          if (cancelled) return;
+
+          const nextBundle: ActivationFlagsBundle = {
+            kind: 'workshop',
+            flags: {
+              ...companyFlags,
+              hasClient: clients.length > 0,
+              hasWorkOrder: orders.length > 0,
+              hasPart: parts.length > 0,
+              hasTeamMember: (usersRes.users || []).length >= 2,
+            },
+          };
+          activationFlagsRef.current = nextBundle;
+          setActivationFlags(nextBundle);
+          return;
+        }
+
+        if (businessType === 'events') {
+          const [services, clients, events, usersRes] = await Promise.all([
+            loadEventServices(dataUserId, false).catch(() => []),
+            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+            loadEvents(dataUserId).catch(() => []),
+            businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
+          ]);
+
+          if (cancelled) return;
+
+          const activeServices = services.filter((svc) => svc.activo !== false);
+          const pricedServices = activeServices.filter((svc) => Number(svc.precio ?? 0) > 0);
+
+          const nextBundle: ActivationFlagsBundle = {
+            kind: 'events',
+            flags: {
+              ...companyFlags,
+              hasService: activeServices.length > 0,
+              hasPricedService: pricedServices.length > 0,
+              hasClient: clients.length > 0,
+              hasEvent: events.length > 0,
+              hasTeamMember: (usersRes.users || []).length >= 2,
+            },
+          };
+          activationFlagsRef.current = nextBundle;
+          setActivationFlags(nextBundle);
         }
       } catch {
         if (cancelled || activationFlagsRef.current) return;
@@ -377,6 +507,18 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           const fallback: ActivationFlagsBundle = { kind: 'cleaning', flags: EMPTY_CLEANING_ACTIVATION_FLAGS };
           activationFlagsRef.current = fallback;
           setActivationFlags(fallback);
+        } else if (businessType === 'gym') {
+          const fallback: ActivationFlagsBundle = { kind: 'gym', flags: EMPTY_GYM_ACTIVATION_FLAGS };
+          activationFlagsRef.current = fallback;
+          setActivationFlags(fallback);
+        } else if (businessType === 'workshop') {
+          const fallback: ActivationFlagsBundle = { kind: 'workshop', flags: EMPTY_WORKSHOP_ACTIVATION_FLAGS };
+          activationFlagsRef.current = fallback;
+          setActivationFlags(fallback);
+        } else if (businessType === 'events') {
+          const fallback: ActivationFlagsBundle = { kind: 'events', flags: EMPTY_EVENTS_ACTIVATION_FLAGS };
+          activationFlagsRef.current = fallback;
+          setActivationFlags(fallback);
         }
       }
     };
@@ -388,12 +530,14 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     window.addEventListener('work-centers:changed', scheduleLoad);
     window.addEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
     window.addEventListener(DELIVERY_BRANDS_CHANGED, scheduleLoad);
+    window.addEventListener(WORKSHOP_DATA_CHANGED, scheduleLoad);
     window.addEventListener('focus', scheduleLoad);
     return () => {
       cancelled = true;
       window.removeEventListener('work-centers:changed', scheduleLoad);
       window.removeEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
       window.removeEventListener(DELIVERY_BRANDS_CHANGED, scheduleLoad);
+      window.removeEventListener(WORKSHOP_DATA_CHANGED, scheduleLoad);
       window.removeEventListener('focus', scheduleLoad);
     };
   }, [
@@ -463,9 +607,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
       prevCompletionPctRef.current = completionPct;
       return;
     }
-    if (isOnboardingTourActive(accountUserId, businessId)) return;
-    markOnboardingTourCompleted(accountUserId, businessId);
-    setOnboardingTourActive(accountUserId, businessId, false);
+    if (isOnboardingTourActive(accountUserId, businessId)) {
+      dismissOnboardingWelcomeTourForActivation(accountUserId, businessId);
+    } else {
+      markOnboardingTourCompleted(accountUserId, businessId);
+      setOnboardingTourActive(accountUserId, businessId, false);
+    }
     const prev = prevCompletionPctRef.current;
     prevCompletionPctRef.current = completionPct;
     if (prev < 100) {

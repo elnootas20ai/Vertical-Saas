@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useModalClose } from '../../hooks/useModalClose';
@@ -1169,13 +1170,29 @@ function ProductivityPanel({ userId, workers: allWorkers, onOpenWorker }: {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} trabajador(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!user?.id) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(user?.id, {
+      create: (uid, data) => createCleaningWorkerRequest(uid, data),
+    }, entries, (entry) => ({
+      name: entryStr(entry, 'name', 'nombre'),
+      phone: entryStr(entry, 'phone', 'telefono'),
+      email: entryStr(entry, 'email'),
+      role: entryStr(entry, 'role', 'rol') || 'worker',
+    }));
+    if (created > 0) {
+      toast.success(`${created} trabajador(es) creado(s)`);
+      void load();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} trabajador(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const dateRange = useMemo(() => {
     const now = new Date();

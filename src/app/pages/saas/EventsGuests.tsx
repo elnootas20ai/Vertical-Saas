@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -11,6 +12,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateVerticalEntries, entryNum, entryStr } from '../../lib/bulkVerticalImport';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -105,6 +107,9 @@ const EMPTY_FORM: GuestForm = { nombre: '', evento: '', email: '', telefono: '',
 
 export function EventsGuests() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const linkedEventName = searchParams.get('eventName') || '';
+  const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<Guest>('events', 'guests'), []);
   const eventsCatalogApi = useMemo(() => createVerticalApi<EventRecord>('events', 'events'), []);
   const userId = user?.user_id || user?.id || '';
@@ -141,13 +146,36 @@ export function EventsGuests() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} invitado(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const nombre = entryStr(e, 'name', 'nombre');
+      const email = entryStr(e, 'email');
+      if (!nombre || !email) return null;
+      return {
+        nombre,
+        email,
+        evento: entryStr(e, 'event', 'evento') || linkedEventName,
+        telefono: entryStr(e, 'phone', 'telefono'),
+        mesa: entryStr(e, 'table', 'mesa'),
+        confirmacion: (entryStr(e, 'status', 'confirmacion') || 'pendiente') as Confirmation,
+        menu: 'normal' as MenuType,
+        acompanantes: entryNum(e, 'companions', 'acompanantes'),
+      };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} invitado(s) creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún invitado');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} invitado(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -169,6 +197,10 @@ export function EventsGuests() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (linkedEventName) setFilterEvent(linkedEventName);
+  }, [linkedEventName]);
 
   const eventNameOptions = useMemo(() => {
     const s = new Set<string>();
@@ -200,7 +232,12 @@ export function EventsGuests() {
     return { confirmados, pendientes, especiales };
   }, [guests]);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setFormErrors({}); setShowModal(true); };
+  const openCreate = () => {
+    setEditing(null);
+    setForm(linkedEventName ? { ...EMPTY_FORM, evento: linkedEventName } : EMPTY_FORM);
+    setFormErrors({});
+    setShowModal(true);
+  };
   const openEdit = (g: Guest) => {
     setEditing(g);
     setForm({
@@ -253,11 +290,12 @@ export function EventsGuests() {
     }
 
     try {
+      const payload = linkedEventId && !editing ? { ...form, eventId: linkedEventId } : form;
       if (editing) {
-        await api.update(userId, editing._id, form);
+        await api.update(userId, editing._id, payload);
         addToast(`Invitado "${form.nombre}" actualizado. Email: ${form.email}`, 'success');
       } else {
-        await api.create(userId, form);
+        await api.create(userId, payload);
         addToast(`Invitado "${form.nombre}" añadido correctamente. Email: ${form.email}`, 'success');
       }
       await loadData();
@@ -276,6 +314,16 @@ export function EventsGuests() {
   return (
     <Layout title="Invitados / Asistentes">
       <div className="space-y-6">
+        {linkedEventName && (
+          <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>Evento: <strong>{linkedEventName}</strong></span>
+            {linkedEventId && (
+              <Link to={`/saas/vertical/eventos/${linkedEventId}`} className="font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
+                Volver al proyecto
+              </Link>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {statsCards.map(s => (
             <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-4`}>

@@ -4,99 +4,96 @@ Este documento describe cómo compilar y publicar la aplicación **Vertial** com
 
 ---
 
+## Estado del proyecto
+
+| Elemento | Estado |
+|----------|--------|
+| `capacitor.config.ts` | Configurado (`com.vertial.app`) |
+| Carpeta `android/` | Generada |
+| Carpeta `ios/` | Generada |
+| Iconos y splash | Generados desde `src/assets/logo.svg` |
+| Plugins nativos | Camera, SplashScreen, StatusBar, esc-pos-proxy (impresión WiFi) |
+
+---
+
 ## Requisitos previos
 
 | Plataforma | Herramientas necesarias |
 |------------|------------------------|
 | Android | [Android Studio](https://developer.android.com/studio) · JDK 17+ · Android SDK |
-| iOS | macOS + [Xcode](https://developer.apple.com/xcode/) 14+ |
+| iOS | macOS + [Xcode](https://developer.apple.com/xcode/) 14+ · CocoaPods |
+| Apple Developer Program | 99 USD/año — solo para App Store / TestFlight |
+| Google Play Console | 25 USD (una vez) — solo para publicar en Play Store |
 
 ---
 
-## Configuración inicial (una sola vez)
-
-### 1. Inicializar Capacitor
+## Comandos habituales
 
 ```bash
-# El archivo capacitor.config.ts ya existe en la raíz del proyecto
-# Solo hay que añadir las plataformas:
+# Compila la web y sincroniza con los proyectos nativos
+npm run cap:sync
 
-npm run cap:add:android   # añade la carpeta /android
-npm run cap:add:ios       # añade la carpeta /ios (requiere macOS)
-```
+# Regenerar iconos/splash (tras cambiar el logo)
+npm run cap:assets
 
-### 2. Configurar permisos de cámara
+# Abrir Android Studio (Windows/Mac/Linux)
+npm run cap:android
 
-**Android** — edita `android/app/src/main/AndroidManifest.xml` y asegúrate de que existen:
-
-```xml
-<uses-permission android:name="android.permission.CAMERA" />
-<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-<!-- Para Android < 13 -->
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
-```
-
-**iOS** — edita `ios/App/App/Info.plist` y añade:
-
-```xml
-<key>NSCameraUsageDescription</key>
-<string>Necesitamos acceso a la cámara para fotografiar los vehículos en entrada.</string>
-<key>NSPhotoLibraryUsageDescription</key>
-<string>Necesitamos acceso a tus fotos para adjuntarlas a los vehículos.</string>
-<key>NSPhotoLibraryAddUsageDescription</key>
-<string>Necesitamos guardar fotos de los vehículos en tu galería.</string>
+# Abrir Xcode (solo macOS)
+npm run cap:ios
 ```
 
 ---
 
-## Flujo de desarrollo y despliegue
+## Iconos y splash
 
-### Build + sync (el más usado)
+Los PNG fuente están en `resources/` (generados desde `src/assets/logo.svg`, la **V** con gradiente verde→azul):
+
+| Archivo | Uso |
+|---------|-----|
+| `icon.png` | Icono completo iOS / fallback (fondo `#030213` + V) |
+| `icon-foreground.png` | Solo la V (transparente) — adaptive icon Android |
+| `icon-background.png` | Fondo sólido `#030213` — adaptive icon Android |
+| `splash.png` | Pantalla de arranque (V centrada) |
+
+Para regenerar todos los tamaños nativos:
 
 ```bash
-# Compila la web y sincroniza los assets con los proyectos nativos
+npm run cap:assets
 npm run cap:sync
 ```
 
-### Abrir Android Studio
+---
 
-```bash
-npm run cap:android
-# → Compila la web, hace sync y abre Android Studio
-```
+## Permisos configurados
 
-### Abrir Xcode
+### Android (`AndroidManifest.xml`)
 
-```bash
-npm run cap:ios
-# → Compila la web, hace sync y abre Xcode
-```
+- Cámara y galería (Capacitor Camera)
+- Red local / WiFi (impresoras térmicas ESC/POS por IP)
 
-### Actualizar plugins nativos
+### iOS (`Info.plist`)
 
-```bash
-npm run cap:update
-```
+- `NSCameraUsageDescription`
+- `NSPhotoLibraryUsageDescription` / `NSPhotoLibraryAddUsageDescription`
+- `NSLocalNetworkUsageDescription` (impresoras en LAN)
 
 ---
 
 ## Live reload durante desarrollo
 
-Edita `capacitor.config.ts` y descomenta la sección `server.url` apuntando a tu IP local:
+Edita `capacitor.config.ts` y descomenta `server.url` apuntando a tu IP local:
 
 ```ts
 server: {
-  url: 'http://192.168.1.100:3005',  // tu IP local
+  url: 'http://192.168.1.100:3005',
   cleartext: true,
 },
 ```
 
-Luego ejecuta:
-
 ```bash
-npm run dev          # inicia el servidor Vite
-npm run cap:android  # abre Android Studio y ejecuta en dispositivo/emulador
+npm run dev
+npm run cap:android   # o cap:ios en Mac
 ```
 
 ---
@@ -104,25 +101,34 @@ npm run cap:android  # abre Android Studio y ejecuta en dispositivo/emulador
 ## Publicación en tiendas
 
 ### Google Play
-1. En Android Studio: **Build → Generate Signed Bundle/APK**
+
+1. Android Studio → **Build → Generate Signed Bundle/APK**
 2. Selecciona **Android App Bundle (.aab)**
-3. Configura tu Keystore (créalo si es la primera vez)
-4. Sube el `.aab` en [Google Play Console](https://play.google.com/console)
+3. Sube el `.aab` en [Google Play Console](https://play.google.com/console)
 
 ### App Store
-1. En Xcode: **Product → Archive**
-2. En el **Organizer**: **Distribute App → App Store Connect**
-3. Sigue el wizard y sube a [App Store Connect](https://appstoreconnect.apple.com/)
+
+1. Cuenta de pago en [Apple Developer Program](https://developer.apple.com/programs/enroll/)
+2. Xcode → **Product → Archive**
+3. **Organizer → Distribute App → App Store Connect**
+4. [App Store Connect](https://appstoreconnect.apple.com/)
+
+---
+
+## Impresión térmica nativa
+
+En la app nativa (Android/iPad), la impresión WiFi directa usa `esc-pos-proxy-capacitor-plugin` — no hace falta Vertial Print en PC.
+
+En Safari/iPad sin app nativa, sigue usándose el puente **Vertial Print** (Windows) o ePOS según el dispositivo.
 
 ---
 
 ## Arquitectura de la cámara
 
-La app usa el hook `useCamera` (`src/app/hooks/useCamera.ts`) que:
-- **En dispositivo nativo** (Android/iOS): usa el plugin `@capacitor/camera` con acceso a la cámara nativa.
-- **En navegador/PWA**: usa un `<input type="file" accept="image/*" capture="environment">` como fallback.
+El hook `useCamera` (`src/app/hooks/useCamera.ts`):
 
-El componente `CameraButton` (`src/app/components/saas/CameraButton.tsx`) encapsula este comportamiento y puede usarse en cualquier formulario de subida de fotos.
+- **App nativa**: plugin `@capacitor/camera`
+- **Navegador/PWA**: `<input type="file" capture="environment">`
 
 ---
 
@@ -134,3 +140,27 @@ El componente `CameraButton` (`src/app/components/saas/CameraButton.tsx`) encaps
 | Nombre | `Vertial` |
 | Web Dir | `dist` |
 | Versión inicial | `1.0.0` |
+
+---
+
+## Notas iOS en Windows
+
+La carpeta `ios/` ya está en el repo. Para compilar hace falta un **Mac** con Xcode y `pod install` (CocoaPods). En Windows solo se puede editar el código web y sincronizar assets; el build iOS se hace en Mac.
+
+---
+
+## Revisión App Store (Apple)
+
+Checklist completo: **`docs/APP_STORE_IOS.md`**
+
+Resumen de cumplimiento ya aplicado en código:
+
+| Requisito Apple | Solución en Vertial |
+|-----------------|---------------------|
+| 4.8 Sign in with Apple | Google oculto en iOS (`appStoreCompliance.ts`) |
+| 5.1.1(v) Eliminar cuenta | Ajustes → Seguridad + WorkerSecurity |
+| 3.1.1 IAP / suscripciones | Sin cobro MONEI en iOS; gestión en web |
+| 5.1.1 Purpose strings | Info.plist (cámara, fotos, ubicación, LAN) |
+| Privacy manifest | `PrivacyInfo.xcprivacy` |
+| Export encryption | `ITSAppUsesNonExemptEncryption = false` |
+| API en app nativa | `VITE_NATIVE_API_ORIGIN` + CORS Capacitor |

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
@@ -70,13 +71,34 @@ export function PharmacySuppliers() {
     { key: 'address', label: 'Dirección', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} proveedor(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const nombre = entryStr(e, 'nombre', 'name');
+    if (!nombre) return null;
+    return {
+      nombre,
+      tipo: entryStr(e, 'tipo', 'type') || 'distribuidor',
+      contacto: entryStr(e, 'contacto') || '',
+      telefono: entryStr(e, 'telefono', 'phone', 'tel') || '',
+      email: entryStr(e, 'email') || '',
+      ultimoPedido: entryStr(e, 'ultimoPedido') || '',
+      pedidosPendientes: entryNum(e, 'pedidosPendientes'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} proveedor creado creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} proveedor(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const loadData = useCallback(async () => {
     if (!userId) {

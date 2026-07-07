@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -68,13 +69,34 @@ export function AcademyGrades() {
     { key: 'comments', label: 'Comentarios', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} calificación(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const alumno = entryStr(e, 'alumno');
+    if (!alumno) return null;
+    return {
+      alumno,
+      curso: entryStr(e, 'curso', 'course', 'class') || '',
+      examen: entryStr(e, 'examen') || '',
+      nota: entryNum(e, 'nota'),
+      fecha: entryStr(e, 'fecha', 'date') || new Date().toISOString().slice(0, 10),
+      profesor: entryStr(e, 'profesor') || '',
+      observaciones: entryStr(e, 'observaciones', 'observations', 'notes') || '',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} calificación creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} calificación(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

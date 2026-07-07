@@ -20,6 +20,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 const TIPOS_COBRO: { value: CollectionTipoCobro; label: string; desc: string }[] = [
   { value: 'contado', label: 'Contado', desc: 'Pago único al formalizar' },
@@ -95,13 +96,28 @@ export function ConstructionCollections() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} cobro(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createConstructionCollection(uid, data as Partial<ConstructionCollection>),
+    }, entries, (entry) => ({
+      concepto: entryStr(entry, 'name', 'concepto', 'concept'),
+      importe: entryNum(entry, 'amount', 'importe'),
+      fecha: entryStr(entry, 'date', 'fecha') || new Date().toISOString().slice(0, 10),
+    }));
+    if (created > 0) {
+      toast.success(`${created} cobro(s) creado(s)`);
+      void load();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} cobro(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });

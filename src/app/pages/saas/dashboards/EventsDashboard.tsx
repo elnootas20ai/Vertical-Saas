@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { createVerticalDashboardApi, type VerticalDashboardData } from '../../../lib/verticalApiFactory';
+import { loadEvents } from '../../../lib/eventsFlow';
 import {
   CalendarDays,
   Briefcase,
@@ -26,11 +28,13 @@ type KpiCard = {
 };
 
 export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const dashApi = useMemo(() => createVerticalDashboardApi('events'), []);
   const userId = user?.user_id || user?.id || '';
 
   const [dashData, setDashData] = useState<VerticalDashboardData | null>(null);
+  const [events, setEvents] = useState<Awaited<ReturnType<typeof loadEvents>>>([]);
   const [loading, setLoading] = useState(true);
 
   const [showAllActivity, setShowAllActivity] = useState(false);
@@ -38,15 +42,21 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
   const loadData = useCallback(async () => {
     if (!userId) {
       setDashData(null);
+      setEvents([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const data = await dashApi.load(userId);
+      const [data, list] = await Promise.all([
+        dashApi.load(userId).catch(() => null),
+        loadEvents(userId),
+      ]);
       setDashData(data);
+      setEvents(list);
     } catch {
       setDashData(null);
+      setEvents([]);
     } finally {
       setLoading(false);
     }
@@ -58,11 +68,20 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
 
   const counts = dashData?.counts || {};
 
+  const ingresosMes = useMemo(() => {
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const revenueStages = ['enviado', 'aceptado', 'contratado', 'planificacion', 'en_curso', 'finalizado'];
+    return events
+      .filter((e) => e.fecha?.startsWith(monthPrefix) && revenueStages.includes(e.estado))
+      .reduce((s, e) => s + (Number(e.presupuesto) || 0), 0);
+  }, [events]);
+
   const kpis = useMemo<KpiCard[]>(
     () => [
       {
         icon: CalendarDays,
-        value: String(counts.events ?? 0),
+        value: String(events.filter((e) => !['finalizado', 'cancelado'].includes(e.estado)).length || counts.events || 0),
         label: 'Eventos activos',
         delta: '—',
         iconWrap: 'bg-blue-50 dark:bg-blue-900/30',
@@ -71,7 +90,7 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
       {
         icon: Briefcase,
         value: String(counts.vendors ?? 0),
-        label: 'Proveedores confirmados',
+        label: 'Externos confirmados',
         delta: '—',
         iconWrap: 'bg-violet-50 dark:bg-violet-900/30',
         iconColor: 'text-violet-600 dark:text-violet-400',
@@ -86,21 +105,21 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
       },
       {
         icon: Wallet,
-        value: `€${counts.catering ?? 0}`,
-        label: 'Presupuesto restante',
+        value: `${ingresosMes.toLocaleString('es-ES')} €`,
+        label: 'Ingresos mes',
         delta: '—',
         iconWrap: 'bg-emerald-50 dark:bg-emerald-900/30',
         iconColor: 'text-emerald-600 dark:text-emerald-400',
       },
     ],
-    [counts]
+    [counts, events, ingresosMes]
   );
 
   const quickActions = useMemo(
     () => [
-      { label: 'Nuevo evento', icon: PlusCircle },
-      { label: 'Añadir proveedor', icon: Briefcase },
-      { label: 'Enviar invitaciones', icon: Mail },
+      { label: 'Nueva contratación', path: '/saas/vertical/eventos/nueva-contratacion', icon: PlusCircle },
+      { label: 'Añadir externo', path: '/saas/events-vendors', icon: Briefcase },
+      { label: 'Ver invitados', path: '/saas/events-guests', icon: Mail },
     ],
     []
   );
@@ -119,12 +138,12 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
 
   const resumenMes = useMemo(
     () => [
-      { label: 'Eventos cerrados este mes', value: String(counts.events ?? 0) },
-      { label: 'Tasa media de confirmación', value: '—' },
+      { label: 'Eventos cerrados este mes', value: String(events.filter((e) => e.estado === 'finalizado').length) },
+      { label: 'Contrataciones en pipeline', value: String(events.filter((e) => !['finalizado', 'cancelado'].includes(e.estado)).length) },
       { label: 'Incidencias logísticas resueltas', value: String(counts.logistics ?? 0) },
-      { label: 'Facturación provisional', value: `€${counts.catering ?? 0}` },
+      { label: 'Facturación provisional', value: `${ingresosMes.toLocaleString('es-ES')} €` },
     ],
-    [counts]
+    [counts, events, ingresosMes]
   );
 
   const visibleActivity = showAllActivity ? actividades : actividades.slice(0, 4);
@@ -145,16 +164,25 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
               Resumen operativo
             </h1>
           </div>
-          {onSelectGeneral && (
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={onSelectGeneral}
-              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              onClick={() => navigate('/saas/vertical/eventos')}
+              className="inline-flex items-center gap-2 rounded-lg border border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-2 text-sm font-medium text-cyan-800 dark:text-cyan-200 hover:bg-cyan-100 dark:hover:bg-cyan-900/40 transition-colors"
             >
-              <LayoutGrid className="w-4 h-4" />
-              Vista general
+              Centro de eventos
             </button>
-          )}
+            {onSelectGeneral && (
+              <button
+                type="button"
+                onClick={onSelectGeneral}
+                className="inline-flex items-center gap-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-2 text-sm font-medium text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                Vista general
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -191,6 +219,7 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
                 <button
                   key={a.label}
                   type="button"
+                  onClick={() => navigate(a.path)}
                   className="inline-flex items-center gap-2 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 px-4 py-2.5 text-sm font-medium hover:opacity-90 transition-opacity"
                 >
                   <AIcon className="w-4 h-4 shrink-0" />
@@ -205,7 +234,7 @@ export function EventsDashboard({ onSelectGeneral }: EventsDashboardProps) {
           <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Actividad reciente</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              RSVPs, confirmaciones de proveedores y reservas de espacio
+              RSVPs, confirmaciones de externos y reservas de espacio
             </p>
             <ul className="mt-4 space-y-3">
               {visibleActivity.map((a, idx) => {

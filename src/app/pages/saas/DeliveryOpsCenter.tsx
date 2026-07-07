@@ -34,6 +34,7 @@ import {
   getOpsCenterRequest,
   localDateInputValue,
   pointOfSaleDisplayLabel,
+  dedupePointsOfSale,
   updateDeliveryOrderRequest,
   type OpsCenterData,
   type OpsCenterFilters,
@@ -1149,12 +1150,13 @@ export function DeliveryOpsCenter() {
 
   useEffect(() => {
     if (typeof window === 'undefined' || window.location.hash !== '#cocina') return;
-    if (opsPanel !== 'operativa') return;
+    const panel = searchParams.get('panel')?.trim();
+    if (panel && panel !== 'operativa') return;
     const t = window.setTimeout(() => {
       document.getElementById('ops-kitchen-widget')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 150);
     return () => window.clearTimeout(t);
-  }, [data, opsPanel]);
+  }, [data, searchParams]);
 
   useEffect(() => {
     if (activationFocus !== 'open-tpv') return;
@@ -1178,12 +1180,36 @@ export function DeliveryOpsCenter() {
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadSeqRef = useRef(0);
 
-  /** PDV visibles en Ops: primero los de la empresa activa (scope global), luego respuesta API. */
+  /** PDV visibles en Ops: scope global (activos + todos) y luego respuesta API. */
   const opsPdvs = useMemo(() => {
-    const fromScope = (activeStoreScope.pointsOfSale ?? []).filter((p) => p.active !== false);
-    if (fromScope.length > 0) return fromScope;
+    const scopePdvs = dedupePointsOfSale([
+      ...(activeStoreScope.pointsOfSale ?? []),
+      ...(activeStoreScope.allPointsOfSale ?? []),
+    ]).filter((p) => p.active !== false);
+    if (scopePdvs.length > 0) return scopePdvs;
     return (data?.pointsOfSale ?? []).filter((p) => p.active !== false);
-  }, [activeStoreScope.pointsOfSale, data?.pointsOfSale]);
+  }, [activeStoreScope.pointsOfSale, activeStoreScope.allPointsOfSale, data?.pointsOfSale]);
+
+  const resolvedOpsPdvId = useMemo(() => {
+    if (opsPdvs.length === 0) return null;
+    if (opsPdvs.length === 1) return opsPdvs[0]._id;
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    const saved = bid && dataUserId ? readDeliveryOpsSelectedPdvId(bid, dataUserId) : null;
+    const fromFilter = filters.salesPointId?.trim();
+    if (fromFilter && opsPdvs.some((p) => p._id === fromFilter)) return fromFilter;
+    return coerceSelectedPdvId(
+      opsPdvs,
+      saved || activeStoreScope.activeSalesPointId || activeStoreScope.activePreferenceRaw,
+    );
+  }, [
+    opsPdvs,
+    filters.salesPointId,
+    currentBusiness?.business_id,
+    currentBusiness?.id,
+    dataUserId,
+    activeStoreScope.activeSalesPointId,
+    activeStoreScope.activePreferenceRaw,
+  ]);
 
   /** Un solo PDV activo: fijamos el filtro para que la vista y la API queden ancladas a esa tienda (p. ej. gerente con una sede). */
   const singleActivePdvId = useMemo(() => {
@@ -1193,32 +1219,14 @@ export function DeliveryOpsCenter() {
   /** Con varias tiendas no pedimos datos hasta tener PDV elegido (evita mezclar KPIs al entrar). */
   const opsPdvFilterReady = useMemo(() => {
     if (opsPdvs.length <= 1) return true;
-    const id = filters.salesPointId?.trim();
-    if (id && opsPdvs.some((p) => p._id === id)) return true;
-    // Bootstrap: aún no hay tiendas en scope ni en la última respuesta → un fetch trae la lista.
-    if (opsPdvs.length === 0 && !data?.pointsOfSale?.length) return true;
-    return false;
-  }, [opsPdvs, filters.salesPointId, data?.pointsOfSale?.length]);
+    return Boolean(resolvedOpsPdvId);
+  }, [opsPdvs.length, resolvedOpsPdvId]);
 
-  /** Restaurar tienda desde scope/localStorage antes del fetch (no esperar a data.pointsOfSale). */
+  /** Alinear filtro Ops con sidebar / localStorage en cuanto haya PDVs en scope. */
   useEffect(() => {
-    if (opsPdvs.length <= 1) return;
-    const current = filters.salesPointId?.trim();
-    if (current && opsPdvs.some((p) => p._id === current)) return;
-    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
-    if (!bid || !dataUserId) return;
-    const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
-    const pdvId = coerceSelectedPdvId(opsPdvs, saved || activeStoreScope.activeSalesPointId);
-    if (!pdvId) return;
-    setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
-  }, [
-    opsPdvs,
-    filters.salesPointId,
-    currentBusiness?.business_id,
-    currentBusiness?.id,
-    dataUserId,
-    activeStoreScope.activeSalesPointId,
-  ]);
+    if (!resolvedOpsPdvId || opsPdvs.length <= 1) return;
+    setFilters((f) => (f.salesPointId === resolvedOpsPdvId ? f : { ...f, salesPointId: resolvedOpsPdvId }));
+  }, [resolvedOpsPdvId, opsPdvs.length]);
 
   useEffect(() => {
     if (!singleActivePdvId) return;
@@ -1306,12 +1314,12 @@ export function DeliveryOpsCenter() {
     const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
     const onStore = () => {
       if (!bid || !dataUserId) return;
-      const list = data?.pointsOfSale;
-      if (!list?.length) return;
+      const list = opsPdvs.length > 0 ? opsPdvs : (data?.pointsOfSale ?? []).filter((p) => p.active !== false);
+      if (!list.length) return;
       const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
       const pdvId = coerceSelectedPdvId(
         list,
-        saved || activeStoreScope.activeSalesPointId,
+        saved || activeStoreScope.activeSalesPointId || activeStoreScope.activePreferenceRaw,
       );
       if (pdvId) {
         setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
@@ -1324,7 +1332,9 @@ export function DeliveryOpsCenter() {
     currentBusiness?.id,
     dataUserId,
     data?.pointsOfSale,
+    opsPdvs,
     activeStoreScope.activeSalesPointId,
+    activeStoreScope.activePreferenceRaw,
   ]);
 
   const quickNav = useCallback(
@@ -1335,7 +1345,14 @@ export function DeliveryOpsCenter() {
   );
 
   const load = useCallback(async () => {
-    if (!authUserId || !opsPdvFilterReady) return;
+    if (!authUserId) {
+      setLoading(false);
+      return;
+    }
+    if (!opsPdvFilterReady) {
+      setLoading(false);
+      return;
+    }
     const seq = ++loadSeqRef.current;
     try {
       const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
@@ -1343,6 +1360,7 @@ export function DeliveryOpsCenter() {
         ...filters,
         date: filters.date || localDateInputValue(),
         ...(businessId ? { businessId } : {}),
+        ...(resolvedOpsPdvId ? { salesPointId: resolvedOpsPdvId } : {}),
       };
       const r = await getOpsCenterRequest(authUserId, effectiveFilters);
       if (seq !== loadSeqRef.current) return;
@@ -1352,7 +1370,14 @@ export function DeliveryOpsCenter() {
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
     }
-  }, [authUserId, filters, currentBusiness?.business_id, currentBusiness?.id, opsPdvFilterReady]);
+  }, [
+    authUserId,
+    filters,
+    currentBusiness?.business_id,
+    currentBusiness?.id,
+    opsPdvFilterReady,
+    resolvedOpsPdvId,
+  ]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1531,9 +1556,16 @@ export function DeliveryOpsCenter() {
 
             <Metrics kpis={data?.kpis || null} />
 
-            {loading && !data ? (
+            {loading && !data && opsPdvFilterReady ? (
               <div className="flex items-center justify-center py-20">
                 <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 dark:border-gray-600 dark:border-t-gray-100 rounded-full" />
+              </div>
+            ) : !opsPdvFilterReady && opsPdvs.length > 1 ? (
+              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-6 text-center text-sm text-amber-900 dark:text-amber-100">
+                <p className="font-semibold mb-2">Elige una tienda en el menú lateral</p>
+                <p className="text-amber-800/90 dark:text-amber-200/90">
+                  En <strong>Centros de trabajo</strong>, pulsa tu tienda para cargar la operativa de delivery.
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">

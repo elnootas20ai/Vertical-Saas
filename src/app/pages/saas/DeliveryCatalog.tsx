@@ -127,6 +127,7 @@ import {
   type CatalogImportReport,
   type CatalogImportRunResult,
 } from '../../lib/catalogImportReport';
+import { throwIfAborted } from '../../lib/importAbort';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { CatalogMoveModal } from '../../components/saas/CatalogMoveModal';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
@@ -2657,8 +2658,10 @@ export function CatalogPage() {
   const handleImportEntries = async (
     entries: Record<string, string>[],
     onProgress?: CatalogImportProgressReporter,
+    signal?: AbortSignal,
   ): Promise<CatalogImportRunResult> => {
     const progress = (phase: string, opts?: { detail?: string; current?: number; total?: number; percent?: number }) => {
+      throwIfAborted(signal);
       onProgress?.({ phase, ...opts });
     };
 
@@ -2731,6 +2734,7 @@ export function CatalogPage() {
     const items: Partial<CatalogItem>[] = [];
 
     for (let index = 0; index < importRows.length; index += 1) {
+      throwIfAborted(signal);
       const entry = importRows[index];
       if (index === 0 || index === importRows.length - 1 || index % 4 === 0) {
         progress('Preparando productos…', {
@@ -2788,7 +2792,8 @@ export function CatalogPage() {
       detail: 'Un momento — no cierres la ventana',
     });
 
-    let result = await bulkCreateCatalogItemsRequest(dataUserId, items);
+    let result = await bulkCreateCatalogItemsRequest(dataUserId, items, signal);
+    throwIfAborted(signal);
     const totalOk = (result.created || 0) + (result.updated ?? 0);
     if (totalOk > 0) {
       progress('Sincronizando marcas y TPV…', { percent: 58 });

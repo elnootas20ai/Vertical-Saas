@@ -348,7 +348,7 @@ async function checkPartsLowStock(ctx, parts, config) {
         category: 'parts_low_stock', source: 'stock',
         title: qty <= 0 ? 'Repuesto agotado' : 'Repuesto bajo stock',
         message: `"${part.name}" (${part.partNumber || part.reference || ''}) — stock: ${qty} (mín: ${min}).`,
-        entityId: part._id, entityType: 'part', route: '/saas/workshop/parts',
+        entityId: part._id, entityType: 'part', route: '/saas/parts',
         metadata: { partNumber: part.partNumber, name: part.name, stockQuantity: qty, minStock: min },
       }));
     }

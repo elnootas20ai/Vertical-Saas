@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -107,13 +108,38 @@ export function ScrapyardSales() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} venta(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const numVenta = entryStr(e, 'numVenta');
+    if (!numVenta) return null;
+    return {
+      numVenta,
+      cliente: entryStr(e, 'cliente', 'client') || '',
+      clienteTelefono: entryStr(e, 'clienteTelefono') || '',
+      piezas: [],
+      fecha: entryStr(e, 'fecha', 'date') || new Date().toISOString().slice(0, 10),
+      importe: entryNum(e, 'importe'),
+      formaPago: entryStr(e, 'formaPago') || 'Efectivo',
+      estado: entryStr(e, 'estado', 'status') || 'pendiente',
+      garantia: entryStr(e, 'garantia') || '3 meses',
+      notas: entryStr(e, 'notas', 'notes', 'description') || '',
+      fechaEntrega: entryStr(e, 'fechaEntrega'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} venta creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} venta(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

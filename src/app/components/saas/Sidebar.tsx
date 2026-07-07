@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useModalClose } from '../../hooks/useModalClose';
+import { useSwitchActiveBusiness } from '../../hooks/useSwitchActiveBusiness';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -16,7 +17,6 @@ import {
   UsersRound,
   Building2,
   Settings,
-  Phone,
   LogOut,
   User,
   HelpCircle,
@@ -66,6 +66,7 @@ import {
   Shield,
   Check,
   Plus,
+  PlusCircle,
   Dumbbell,
   Stethoscope,
   Hotel,
@@ -153,6 +154,7 @@ import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
 import { isCompraventaBusinessType, loadCompraventaStores, listCompraventaSidebarWorkCenters } from '../../lib/compraventaSetup';
 import { ActivationChecklist } from './ActivationChecklist';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
+import { useEventsActivationNav } from '../../hooks/useEventsActivationNav';
 import {
   isDeliveryOpsBusinessType,
   isRestaurantBusinessType,
@@ -163,8 +165,15 @@ import { useRestaurantStoreRows } from '../../hooks/useRestaurantStoreRows';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
+import { getEventsSidebarItemLock } from '../../lib/eventsActivationGates';
 import { isMenuItemVisibleForVertical } from '../../lib/verticalModuleVisibility';
+import { isSidebarItemUnlockedForPlan } from '../../lib/sidebarPlanCatalog';
+import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
 import { saasPathWithBusinessScope } from '../../lib/businessScopeUrl';
+import {
+  resolveActiveOpsStoreRowId,
+  resolveActiveWorkCenterRowId,
+} from '../../lib/activeStoreSidebarSelection';
 
 // Huella visual del calendario (fácil de revertir: poner a false).
 const CALENDAR_V2_VISUAL = true;
@@ -216,7 +225,7 @@ const HOME_GROUP: SidebarGroup = {
   id: 'home',
   label: 'Home',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['dashboard', 'alertas', 'calendar', 'chat', 'calls'],
+  itemIds: ['dashboard', 'alertas', 'calendar', 'chat'],
 };
 
 const menuItemDefs = [
@@ -225,7 +234,6 @@ const menuItemDefs = [
   { id: 'alertas', navKey: 'alertas', icon: <Bell className="w-5 h-5" />, path: '/saas/alerts' },
   { id: 'calendar',  navKey: 'calendar',  icon: <CalendarDays className="w-5 h-5" />,    path: '/saas/calendar' },
   { id: 'chat',      navKey: 'chat',      icon: <MessageSquare className="w-5 h-5" />,   path: '/saas/chat' },
-  { id: 'calls',     navKey: 'calls',     icon: <Phone className="w-5 h-5" />,           path: '/saas/calls', disabled: true, upcoming: true },
 
   // ── Clientes / CRM ──────────────────────────────────────────────────────────
   { id: 'clients',     navKey: 'clients',     icon: <Users className="w-5 h-5" />,     path: '/saas/crm/clientes?tab=clients' },
@@ -279,6 +287,7 @@ const menuItemDefs = [
   { id: 'compraventa-tasaciones', navKey: 'compraventaTasaciones', icon: <Scale className="w-5 h-5" />,              path: '/saas/vertical/compraventa/tasaciones' },
   { id: 'compraventa-entregas',   navKey: 'compraventaEntregas',   icon: <Truck className="w-5 h-5" />,              path: '/saas/vertical/compraventa/entregas' },
   { id: 'compraventa-crm',        navKey: 'compraventa-crm',       icon: <Kanban className="w-5 h-5" />,             path: '/saas/vertical/compraventa/crm' },
+  { id: 'compraventa-fiscal',     navKey: 'compraventaFiscal',     icon: <Calculator className="w-5 h-5" />,         path: '/saas/vertical/compraventa/calculadora-fiscal' },
   { id: 'dealership-workers',     navKey: 'dealershipWorkers',     icon: <BarChart3 className="w-5 h-5" />,          path: '/saas/dealership-workers' },
   { id: 'gastos-preparacion',     navKey: 'gastosPreparacion',     icon: <Receipt className="w-5 h-5" />,            path: '/saas/vertical/compraventa/gastos-preparacion' },
   { id: 'vehicles',     navKey: 'vehicles',     icon: <Car className="w-5 h-5" />,           path: '/saas/vehicles' },
@@ -309,6 +318,12 @@ const menuItemDefs = [
   { id: 'cleaning-hub',         navKey: 'cleaningHub',         icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/cleaning-hub' },
   { id: 'cleaning-contracts',   navKey: 'cleaningContracts',   icon: <FileStack className="w-5 h-5" />,      path: '/saas/vertical/limpieza/servicios' },
   { id: 'cleaning-services',    navKey: 'cleaningServices',    icon: <SprayCan className="w-5 h-5" />,       path: '/saas/cleaning-services' },
+  { id: 'cleaning-workers',     navKey: 'cleaningWorkers',     icon: <Users className="w-5 h-5" />,          path: '/saas/cleaning-workers' },
+  { id: 'cleaning-routes',      navKey: 'cleaningRoutes',      icon: <Route className="w-5 h-5" />,          path: '/saas/cleaning-routes' },
+  { id: 'cleaning-clients',     navKey: 'cleaningClients',     icon: <UserCheck className="w-5 h-5" />,      path: '/saas/vertical/limpieza/clientes' },
+  { id: 'cleaning-billing',     navKey: 'cleaningBilling',     icon: <Receipt className="w-5 h-5" />,        path: '/saas/cleaning-billing' },
+  { id: 'cleaning-materials',   navKey: 'cleaningMaterials',   icon: <Package className="w-5 h-5" />,        path: '/saas/cleaning-materials' },
+  { id: 'cleaning-reports',     navKey: 'cleaningReports',     icon: <BarChart3 className="w-5 h-5" />,      path: '/saas/cleaning-reports' },
   { id: 'cleaning-execution', navKey: 'cleaningExecution', icon: <Timer className="w-5 h-5" />,          path: '/saas/cleaning-execution' },
   { id: 'cleaning-checklist', navKey: 'cleaningChecklist', icon: <ClipboardCheck className="w-5 h-5" />, path: '/saas/cleaning-checklist' },
   { id: 'cleaning-quality',   navKey: 'cleaningQuality',   icon: <Star className="w-5 h-5" />,           path: '/saas/cleaning-quality' },
@@ -316,7 +331,10 @@ const menuItemDefs = [
   { id: 'cleaning-incidents', navKey: 'cleaningIncidents', icon: <AlertTriangle className="w-5 h-5" />,  path: '/saas/cleaning-incidents' },
 
   // ── Vertical: Gimnasio ─────────────────────────────────────────────────────
+  { id: 'gym-hub',          navKey: 'gymHub',          icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/gym-hub' },
+  { id: 'gym-members',      navKey: 'gymMembers',      icon: <Users className="w-5 h-5" />,         path: '/saas/gym-members' },
   { id: 'gym-classes',      navKey: 'gymClasses',      icon: <CalendarDays className="w-5 h-5" />, path: '/saas/gym-classes' },
+  { id: 'gym-trainers',     navKey: 'gymTrainers',     icon: <UserCheck className="w-5 h-5" />,    path: '/saas/gym-trainers' },
   { id: 'gym-memberships',  navKey: 'gymMemberships',  icon: <Award className="w-5 h-5" />,       path: '/saas/gym-memberships' },
   { id: 'gym-routines',     navKey: 'gymRoutines',     icon: <ClipboardList className="w-5 h-5" />, path: '/saas/gym-routines' },
   { id: 'gym-access',       navKey: 'gymAccess',       icon: <ShieldCheck className="w-5 h-5" />, path: '/saas/gym-access' },
@@ -370,9 +388,15 @@ const menuItemDefs = [
   { id: 'nightclub-artists',   navKey: 'nightclubArtists',   icon: <Mic className="w-5 h-5" />,           path: '/saas/nightclub-artists' },
 
   // ── Vertical: Eventos ──────────────────────────────────────────────────────
-  { id: 'events-management', navKey: 'eventsManagement', icon: <PartyPopper className="w-5 h-5" />,      path: '/saas/events-management' },
-  { id: 'events-catering',  navKey: 'eventsCatering',   icon: <UtensilsCrossed className="w-5 h-5" />,  path: '/saas/events-catering' },
-  { id: 'events-logistics', navKey: 'eventsLogistics',  icon: <ListChecks className="w-5 h-5" />,       path: '/saas/events-logistics' },
+  { id: 'events-hub', navKey: 'eventsHub', icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/vertical/eventos' },
+  { id: 'events-new-contract', navKey: 'eventsNewContract', icon: <PlusCircle className="w-5 h-5" />, path: '/saas/vertical/eventos/nueva-contratacion' },
+  { id: 'events-pipeline', navKey: 'eventsPipeline', icon: <FileText className="w-5 h-5" />, path: '/saas/vertical/eventos/contrataciones' },
+  { id: 'events-services', navKey: 'eventsServices', icon: <Sparkles className="w-5 h-5" />, path: '/saas/events-services' },
+  { id: 'events-venues', navKey: 'eventsVenues', icon: <MapPin className="w-5 h-5" />, path: '/saas/events-venues' },
+  { id: 'events-vendors', navKey: 'eventsVendors', icon: <Briefcase className="w-5 h-5" />, path: '/saas/events-vendors' },
+  { id: 'events-guests', navKey: 'eventsGuests', icon: <Users className="w-5 h-5" />, path: '/saas/events-guests' },
+  { id: 'events-catering', navKey: 'eventsCatering', icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/events-catering' },
+  { id: 'events-logistics', navKey: 'eventsLogistics', icon: <ListChecks className="w-5 h-5" />, path: '/saas/events-logistics' },
 
   // ── Vertical: Peluquería ───────────────────────────────────────────────────
   { id: 'salon-services',        navKey: 'salonServices',        icon: <Scissors className="w-5 h-5" />,     path: '/saas/salon-services' },
@@ -437,6 +461,7 @@ const workerMenuItemDefs = [
   { id: 'worker-chat',       navKey: 'workerChat',       icon: <MessageSquare className="w-5 h-5" />,   path: '/saas/worker/chat' },
   { id: 'worker-docs',       navKey: 'workerDocs',       icon: <FileText className="w-5 h-5" />,        path: '/saas/worker/documents' },
   { id: 'worker-butcher-orders', navKey: 'workerButcherOrders', icon: <ClipboardList className="w-5 h-5" />, path: '/saas/worker/butcher-orders', isNew: true },
+  { id: 'worker-materials', navKey: 'workerMaterials', icon: <Package className="w-5 h-5" />, path: '/saas/worker/materials' },
   { id: 'worker-onboarding', navKey: 'workerOnboarding', icon: <GraduationCap className="w-5 h-5" />,   path: '/saas/worker/onboarding', pro: true },
 
   // ── Configuración ───────────────────────────────────────────────────────────
@@ -467,11 +492,11 @@ const sidebarGroupDefs = [
   { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
-  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'] },
+  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-fiscal'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
   { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'sala', 'caja', 'web-config', 'delivery-integrations'] },
-  { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents'] },
-  { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-classes', 'gym-memberships', 'gym-routines', 'gym-access'] },
+  { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-workers', 'cleaning-routes', 'cleaning-clients', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents', 'cleaning-billing', 'cleaning-materials', 'cleaning-reports'] },
+  { id: 'gym',              icon: <Dumbbell className="w-4 h-4 shrink-0" />,      itemIds: ['gym-hub', 'gym-members', 'gym-classes', 'gym-trainers', 'gym-memberships', 'gym-routines', 'gym-access'] },
   { id: 'clinic',           icon: <Stethoscope className="w-4 h-4 shrink-0" />,   itemIds: ['clinic-history', 'clinic-treatments', 'clinic-prescriptions'] },
   { id: 'hotel',            icon: <Hotel className="w-4 h-4 shrink-0" />,          itemIds: ['hotel-reservations', 'hotel-rooms', 'hotel-checkin', 'hotel-housekeeping', 'hotel-room-service'] },
   { id: 'construction',     icon: <HardHat className="w-4 h-4 shrink-0" />,       itemIds: ['construction-ops', 'construction-projects', 'construction-execution', 'construction-quick-budget', 'construction-budgets', 'construction-partidas', 'construction-collections', 'construction-payments', 'construction-tasks', 'construction-incidents', 'construction-closure'] },
@@ -479,7 +504,7 @@ const sidebarGroupDefs = [
   { id: 'realEstate',       icon: <Building2 className="w-4 h-4 shrink-0" />,     itemIds: ['realestate-properties', 'realestate-visits', 'realestate-contracts', 'realestate-appraisals'] },
   { id: 'lawyer',           icon: <Scale className="w-4 h-4 shrink-0" />,          itemIds: ['lawyer-cases', 'lawyer-hearings', 'lawyer-deadlines'] },
   { id: 'nightclub',        icon: <Music className="w-4 h-4 shrink-0" />,          itemIds: ['nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-guestlist', 'nightclub-artists'] },
-  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-management', 'events-catering', 'events-logistics'] },
+  { id: 'events',           icon: <PartyPopper className="w-4 h-4 shrink-0" />,   itemIds: ['events-hub', 'events-new-contract', 'events-pipeline', 'events-services', 'events-venues', 'events-vendors', 'events-guests', 'events-catering', 'events-logistics'] },
   { id: 'hairSalon',        icon: <Scissors className="w-4 h-4 shrink-0" />,      itemIds: ['salon-services', 'salon-loyalty'] },
   { id: 'scrapyard',        icon: <Container className="w-4 h-4 shrink-0" />,    itemIds: ['scrapyard-hub', 'scrapyard-purchases', 'scrapyard-vehicles', 'scrapyard-dismantling', 'scrapyard-parts', 'scrapyard-deregistrations', 'scrapyard-expedition', 'scrapyard-environment', 'scrapyard-documentation'] },
   { id: 'spareParts',       icon: <Cog className="w-4 h-4 shrink-0" />,          itemIds: ['spareparts-compatibility', 'spareparts-counter'] },
@@ -525,11 +550,15 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
     catalogProviders: ['suppliers'],
     finanzas: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics', 'gastos-preparacion'],
     documentacion: ['doc-vehiculo', 'doc-contratos-cv', 'doc-facturas-cv', 'doc-itv-cv', 'doc-reparacion-cv', 'doc-cliente-cv', 'doc-anexos-cv'],
-    commercial: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas'],
+    commercial: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-fiscal'],
   },
   restaurant: {
     clientesCrm: ['clients'],
     delivery: ['sala', 'reservas', 'lista-espera', 'caja'],
+  },
+  events: {
+    clientesCrm: ['clients'],
+    catalogProviders: ['suppliers'],
   },
   delivery: {
     clientesCrm: ['clients', 'promotions'],
@@ -605,7 +634,8 @@ function SidebarInner({
   const navigate = useNavigate();
   const location = useLocation();
   const { logout, user } = auth;
-  const { businesses, businessesFetchSettled, currentBusiness, switchBusiness } = useBusiness();
+  const { businesses, businessesFetchSettled, currentBusiness } = useBusiness();
+  const switchActiveBusiness = useSwitchActiveBusiness();
   const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const {
     subscription,
@@ -648,6 +678,7 @@ function SidebarInner({
   const isRestaurantVertical = isRestaurantBusinessType(vertical);
   const isStrictDeliveryVertical = isDeliveryBusinessType(vertical);
   const usesOpsStoreSidebar = isDeliveryOpsBusinessType(vertical);
+  const showWorkCentersSidebar = usesOpsStoreSidebar || isCompraventa;
   const allowedGroups = vertical
     ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
     : new Set<string>();
@@ -873,6 +904,53 @@ function SidebarInner({
     salesPoints,
   ]);
 
+  /** Fila única activa en sidebar tiendas (evita doble selección PDV + centro). */
+  const activeOpsStoreRowId = useMemo(
+    () => resolveActiveOpsStoreRowId(
+      displayOpsStoreRows,
+      activeStore.activeSalesPointId,
+      activeStore.activePreferenceRaw,
+    ),
+    [displayOpsStoreRows, activeStore.activeSalesPointId, activeStore.activePreferenceRaw],
+  );
+
+  const activeCompraventaStoreRowId = useMemo(
+    () => resolveActiveWorkCenterRowId(
+      salesPoints.map((sp) => String(sp._id || sp.id || '').trim()).filter(Boolean),
+      selectedSidebarWorkCenterId,
+    ),
+    [salesPoints, selectedSidebarWorkCenterId],
+  );
+
+  const selectSidebarStore = useCallback((rawId: string) => {
+    if (!rawId.trim()) return;
+    const id = rawId.trim();
+    const pdvPool =
+      activeStore.allPointsOfSale.length > 0 ? activeStore.allPointsOfSale : activeStore.pointsOfSale;
+    if (usesOpsStoreSidebar) {
+      const row = displayOpsStoreRows.find((r) => r.rowId === id);
+      const pdvId = row?.pdvId || pdvPool.find((p) => p._id === id)?._id;
+      if (pdvId) {
+        activeStore.setActiveSalesPoint(pdvId);
+        void activeStore.refresh();
+        return;
+      }
+      if (row?.workCenterId) {
+        activeStore.setActiveWorkCenterPreference(row.workCenterId);
+        void activeStore.refresh();
+      }
+      return;
+    }
+    const pdv = pdvPool.find(
+      (p) => String(p.workCenterId || '').trim() === id && p.active !== false,
+    );
+    if (pdv) {
+      activeStore.setActiveSalesPoint(pdv._id);
+    } else {
+      activeStore.setActiveWorkCenterPreference(id);
+    }
+  }, [usesOpsStoreSidebar, displayOpsStoreRows, activeStore]);
+
   const getActiveCompanySelector = useCallback(() => {
     if (typeof window === 'undefined') return null;
     if (window.innerWidth < 768 && mobileOpen) {
@@ -919,11 +997,11 @@ function SidebarInner({
       setShowCompanyDropdown(false);
     };
     const timer = window.setTimeout(() => {
-      document.addEventListener('click', handleClickOutside);
+      document.addEventListener('mousedown', handleClickOutside);
     }, 0);
     return () => {
       window.clearTimeout(timer);
-      document.removeEventListener('click', handleClickOutside);
+      document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [showCompanyDropdown]);
 
@@ -931,6 +1009,8 @@ function SidebarInner({
   const navScrollMobileRef = useRef<HTMLElement>(null);
 
   const deliveryNav = useDeliveryActivationNav();
+  const eventsNav = useEventsActivationNav();
+  const planTier = useEffectivePlanTier();
 
   const menuItems: SidebarItem[] = useMemo(() => {
     return menuItemDefs.map((item) => {
@@ -938,24 +1018,56 @@ function SidebarInner({
         ...item,
         label: t(`nav.${item.navKey}`),
       };
-      if (!deliveryNav.isDelivery || item.disabled) {
-        return base;
+      let resolved: SidebarItem;
+      if (eventsNav.isEvents && !item.disabled) {
+        const lock = getEventsSidebarItemLock(item.id, {
+          hasPricedService: eventsNav.hasPricedService,
+          hasClient: eventsNav.hasClient,
+          hasEvent: eventsNav.hasEvent,
+        });
+        resolved = !lock.disabled
+          ? base
+          : {
+              ...base,
+              disabled: true,
+              lockTitle: lock.title,
+            };
+      } else if (!deliveryNav.isDelivery || item.disabled) {
+        resolved = base;
+      } else if (item.id === 'reports') {
+        resolved = { ...base, path: '/saas/vertical/delivery/informes' };
+      } else {
+        const lock = getDeliverySidebarItemLock(item.id, {
+          pdvReady: deliveryNav.pdvReady,
+          brandReady: deliveryNav.brandReady,
+        });
+        resolved = !lock.disabled
+          ? base
+          : {
+              ...base,
+              disabled: true,
+              lockTitle: lock.title,
+            };
       }
-      if (item.id === 'reports') {
-        return { ...base, path: '/saas/vertical/delivery/informes' };
+      if (isRestaurantVertical) {
+        const pathOverride = RESTAURANT_SIDEBAR_PATH_OVERRIDES[item.id];
+        if (pathOverride) {
+          resolved = { ...resolved, path: pathOverride };
+        }
       }
-      const lock = getDeliverySidebarItemLock(item.id, {
-        pdvReady: deliveryNav.pdvReady,
-        brandReady: deliveryNav.brandReady,
-      });
-      if (!lock.disabled) return base;
-      return {
-        ...base,
-        disabled: true,
-        lockTitle: lock.title,
-      };
+      return resolved;
     });
-  }, [t, deliveryNav.isDelivery, deliveryNav.pdvReady, deliveryNav.brandReady]);
+  }, [
+    t,
+    deliveryNav.isDelivery,
+    deliveryNav.pdvReady,
+    deliveryNav.brandReady,
+    eventsNav.isEvents,
+    eventsNav.hasPricedService,
+    eventsNav.hasClient,
+    eventsNav.hasEvent,
+    isRestaurantVertical,
+  ]);
 
   const sidebarGroups: SidebarGroup[] = sidebarGroupDefs.map(g => {
     const override = vertical ? VERTICAL_GROUP_ITEM_OVERRIDES[vertical]?.[g.id] : undefined;
@@ -993,6 +1105,10 @@ function SidebarInner({
   const workerHomeGroup: SidebarGroup = {
     ...WORKER_HOME_GROUP,
     label: t('sidebar.groups.workerMain'),
+    itemIds: [
+      ...WORKER_HOME_GROUP.itemIds,
+      ...(vertical === 'cleaning' ? ['worker-materials' as const] : []),
+    ],
   };
 
   const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase() || 'UU';
@@ -1020,6 +1136,7 @@ function SidebarInner({
     <div
       ref={companyDropdownPanelRef}
       data-company-dropdown-root
+      onPointerDown={(event) => event.stopPropagation()}
       className="fixed z-[9999] rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-xl"
       style={{
         top: companyDropdownStyle.top,
@@ -1044,16 +1161,11 @@ function SidebarInner({
               <button
                 key={business.business_id}
                 type="button"
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
-                  switchBusiness(business.business_id);
+                  const changed = switchActiveBusiness(business.business_id);
                   setShowCompanyDropdown(false);
-                  navigate(
-                    saasPathWithBusinessScope(
-                      `${location.pathname}${location.search}`,
-                      business.business_id,
-                    ),
-                    { replace: true, preventScrollReset: true },
-                  );
+                  if (changed) onMobileClose();
                 }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 ${isActiveBiz ? 'bg-blue-50 dark:bg-blue-950' : ''}`}
               >
@@ -1113,26 +1225,19 @@ function SidebarInner({
     if (item.id.startsWith('sp-')) {
       const rawId = item.id.slice('sp-'.length);
       if (rawId) {
-        const rows = usesOpsStoreSidebar ? displayOpsStoreRows : [];
-        const row = rows.find((r) => r.rowId === rawId);
-        const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
-        const pdvId = row?.pdvId || pdv?._id;
+        selectSidebarStore(rawId);
         if (usesOpsStoreSidebar) {
-          if (pdvId && activeStore.pointsOfSale.some((p) => p._id === pdvId)) {
-            activeStore.setActiveSalesPoint(pdvId);
-          } else if (row?.workCenterId) {
-            activeStore.setActiveWorkCenterPreference(row.workCenterId);
-          } else if (activeStore.pointsOfSale.length === 1) {
-            activeStore.setActiveSalesPoint(activeStore.pointsOfSale[0]._id);
-          }
           handleNavigate(isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops');
+          onMobileClose();
           return;
         }
         if (isCompraventa) {
           handleNavigate('/saas/vehicles');
+          onMobileClose();
           return;
         }
       }
+      onMobileClose();
       return;
     }
     handleNavigate(resolveSidebarItemPath(item, isRestaurantVertical));
@@ -1150,7 +1255,7 @@ function SidebarInner({
     'client-billing', 'costing', 'billing',
     'suppliers', 'compras-stock',
     'configuracion', 'settings', 'admin', 'gdpr',
-    'pipeline', 'sales-metrics', 'operations', 'calls', 'affiliates',
+    'pipeline', 'sales-metrics', 'operations', 'affiliates',
     // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
     'delivery-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders', 'delivery-integrations',
     'cleaning-hub', 'cleaning-workers', 'cleaning-services', 'cleaning-routes',
@@ -1164,7 +1269,6 @@ function SidebarInner({
     'realestate-properties', 'realestate-contracts', 'realestate-appraisals',
     'lawyer-cases', 'lawyer-deadlines',
     'nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-artists',
-    'events-management', 'events-catering', 'events-logistics',
     'salon-services', 'salon-loyalty',
     'butcher-hub', 'butcher-products', 'butcher-traceability',
     'tobacco-regulatory',
@@ -1181,6 +1285,9 @@ function SidebarInner({
     if (!isMenuItemVisibleForVertical(item.id, vertical)) {
       return false;
     }
+    if (!isSidebarItemUnlockedForPlan(item.id, planTier)) {
+      return false;
+    }
     if (!user) {
       return true;
     }
@@ -1192,7 +1299,7 @@ function SidebarInner({
       return false;
     }
     // Items siempre accesibles para el owner (entran sin permiso explícito).
-    if (!isWorker && ['dashboard', 'settings', 'configuracion', 'calls', 'chat', 'team'].includes(item.id)) {
+    if (!isWorker && ['dashboard', 'settings', 'configuracion', 'chat', 'team'].includes(item.id)) {
       return true;
     }
     // Items operativos siempre visibles para todos (chat es transversal).
@@ -1221,9 +1328,12 @@ function SidebarInner({
       || (item.id === 'compraventa-vehiculos' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-ventas' ? permissionMap.sales : undefined)
       || (item.id === 'compraventa-compras' ? permissionMap.vehicles : undefined)
+      || (item.id === 'compraventa-fiscal' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-tasaciones' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-entregas' ? permissionMap.sales : undefined)
-      || (item.id === 'compraventa-crm' ? permissionMap.clients : undefined);
+      || (item.id === 'compraventa-crm' ? permissionMap.clients : undefined)
+      || (['workshop', 'parts', 'tech'].includes(item.id) ? (permissionMap.workshop || permissionMap.vehicles) : undefined)
+      || (item.id.startsWith('events-') ? permissionMap.sales : undefined);
     if (!permission) {
       // Sin permiso definido: el owner lo ve, el worker no (defensa por defecto).
       return !isWorker;
@@ -1253,10 +1363,11 @@ function SidebarInner({
     (item.id === 'compraventa-vehiculos' && (location.pathname.startsWith('/saas/vehicles') || location.pathname.startsWith('/saas/locations'))) ||
     (item.id === 'compraventa-ventas' && location.pathname.startsWith('/saas/vertical/compraventa/ventas')) ||
     (item.id === 'compraventa-compras' && location.pathname.startsWith('/saas/vertical/compraventa/compras')) ||
+    (item.id === 'compraventa-fiscal' && location.pathname.startsWith('/saas/vertical/compraventa/calculadora-fiscal')) ||
     (item.id === 'compraventa-tasaciones' && location.pathname.startsWith('/saas/vertical/compraventa/tasaciones')) ||
     (item.id === 'compraventa-entregas' && location.pathname.startsWith('/saas/vertical/compraventa/entregas')) ||
     (item.id === 'compraventa-crm' && location.pathname.startsWith('/saas/vertical/compraventa/crm')) ||
-    (item.id === 'compraventa-hub' && location.pathname.startsWith('/saas/vertical/compraventa') && !location.pathname.includes('/compras') && !location.pathname.includes('/ventas') && !location.pathname.includes('/tasaciones') && !location.pathname.includes('/entregas') && !location.pathname.includes('/crm') && !location.pathname.includes('/gastos')) ||
+    (item.id === 'compraventa-hub' && location.pathname.startsWith('/saas/vertical/compraventa') && !location.pathname.includes('/compras') && !location.pathname.includes('/calculadora-fiscal') && !location.pathname.includes('/ventas') && !location.pathname.includes('/tasaciones') && !location.pathname.includes('/entregas') && !location.pathname.includes('/crm') && !location.pathname.includes('/gastos')) ||
     (item.id === 'dealership-workers' && location.pathname.startsWith('/saas/dealership-workers')) ||
     (item.id === 'gastos-preparacion' && location.pathname.startsWith('/saas/vertical/compraventa/gastos-preparacion')) ||
     (item.id === 'doc-vehiculo' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=vehiculo')) ||
@@ -1280,7 +1391,7 @@ function SidebarInner({
     (item.id === 'promotions' && location.pathname.startsWith('/saas/promotions')) ||
     (item.id === 'caja' && (location.pathname.startsWith('/saas/caja') || location.pathname.startsWith('/saas/vertical/delivery/caja'))) ||
     (item.id === 'sala' && location.pathname.startsWith('/saas/sala')) ||
-    (item.id === 'reservas' && location.pathname.startsWith('/saas/reservations')) ||
+    (item.id === 'reservas' && (location.pathname.startsWith('/saas/reservations') || location.pathname.startsWith('/saas/reservas'))) ||
     (item.id === 'lista-espera' && location.pathname.startsWith('/saas/lista-espera')) ||
     (item.id === 'web-orders' && location.pathname.startsWith('/saas/web-orders')) ||
     (item.id === 'web-config' && location.pathname.startsWith('/saas/web-config')) ||
@@ -1294,6 +1405,11 @@ function SidebarInner({
     (item.id === 'cleaning-quality' && location.pathname.startsWith('/saas/cleaning-quality')) ||
     (item.id === 'cleaning-reviews' && location.pathname.startsWith('/saas/cleaning-reviews')) ||
     (item.id === 'cleaning-incidents' && location.pathname.startsWith('/saas/cleaning-incidents')) ||
+    (item.id === 'cleaning-contracts' && location.pathname.startsWith('/saas/vertical/limpieza/servicios')) ||
+    (item.id === 'cleaning-billing' && (location.pathname.startsWith('/saas/cleaning-billing') || location.pathname.startsWith('/saas/vertical/limpieza/facturacion'))) ||
+    (item.id === 'cleaning-materials' && location.pathname.startsWith('/saas/cleaning-materials')) ||
+    (item.id === 'cleaning-reports' && (location.pathname.startsWith('/saas/cleaning-reports') || location.pathname.startsWith('/saas/vertical/limpieza/informes'))) ||
+    (item.id === 'cleaning-execution' && location.pathname.startsWith('/saas/cleaning-execution')) ||
     (item.id === 'catalog' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'catalog') ||
     (item.id === 'catalog-stock' && location.pathname.startsWith('/saas/inventory')) ||
     (item.id === 'costing' && location.pathname.startsWith('/saas/catalog') && catalogTab === 'escandallo') ||
@@ -1317,7 +1433,16 @@ function SidebarInner({
     (item.id.startsWith('realestate-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('lawyer-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('nightclub-') && location.pathname.startsWith(item.path)) ||
-    (item.id.startsWith('events-') && location.pathname.startsWith(item.path)) ||
+    (item.id.startsWith('events-') && (() => {
+      if (item.id === 'events-hub') {
+        return location.pathname === '/saas/vertical/eventos';
+      }
+      if (item.id === 'events-pipeline') {
+        return location.pathname.startsWith('/saas/vertical/eventos/contrataciones')
+          || /^\/saas\/vertical\/eventos\/(?!nueva-contratacion|contrataciones)[^/]+$/.test(location.pathname);
+      }
+      return location.pathname.startsWith(item.path);
+    })()) ||
     (item.id.startsWith('salon-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('scrapyard-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('spareparts-') && location.pathname.startsWith(item.path)) ||
@@ -1329,15 +1454,9 @@ function SidebarInner({
       const rawId = item.id.slice('sp-'.length);
       if (!rawId) return false;
       if (usesOpsStoreSidebar) {
-        const pdv = activeStore.allPointsOfSale.find((p) => p._id === rawId);
-        if (pdv && pdv.active === false) return false;
-        if (pdv) return activeStore.activeSalesPointId === pdv._id;
+        return activeOpsStoreRowId === rawId;
       }
-      if (isCompraventa) {
-        return selectedSidebarWorkCenterId === rawId;
-      }
-      if (!selectedSidebarWorkCenterId) return false;
-      return selectedSidebarWorkCenterId === rawId;
+      return activeCompraventaStoreRowId === rawId;
     })())
     );
   };
@@ -1428,7 +1547,10 @@ function SidebarInner({
       }))
       .filter((group) => group.items.length > 0);
     const [home, ...rest] = mapped;
-    return home ? [home, salesPointsGroup, ...rest] : [salesPointsGroup];
+    const withCenters = showWorkCentersSidebar
+      ? (home ? [home, salesPointsGroup, ...rest] : [salesPointsGroup, ...rest])
+      : mapped;
+    return withCenters;
   })();
 
   // Al cambiar de ruta, abrir el grupo que contiene la página activa (sin impedir cerrarlo después).
@@ -1726,7 +1848,7 @@ function SidebarInner({
                                 : (isCalendar
                                   ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-900 dark:text-violet-200 border-l-2 border-violet-600'
                                   : isSalesPointSubItem
-                                    ? 'bg-amber-50/70 dark:bg-amber-900/15 text-amber-800 dark:text-amber-200'
+                                    ? 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-200 border-l-2 border-amber-600'
                                     : 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-300 border-l-2 border-amber-600')
                               : (calendarV2
                                 ? 'bg-violet-50/60 dark:bg-violet-900/10 text-gray-900 dark:text-gray-100 border-l-2 border-violet-300/70 dark:border-violet-700/40 hover:bg-violet-50 dark:hover:bg-violet-900/15'

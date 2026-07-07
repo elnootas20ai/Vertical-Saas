@@ -1,7 +1,7 @@
 import { findBusinessById, listBusinessesByUser } from './couchdb.js';
 import { getAuthUserId, getMember } from './clockinsAccess.js';
 
-const ADMIN_ROLES = new Set(['Admin', 'Gerente', 'GerenteGrupo']);
+const ADMIN_ROLES = new Set(['Admin', 'Gerente', 'GerenteGrupo', 'Administrador', 'Encargado']);
 
 function normalizeBusinessId(value) {
   return String(value || '').replace(/^business:/, '').trim();

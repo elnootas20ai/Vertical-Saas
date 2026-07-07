@@ -518,34 +518,7 @@ function RecepcionesTab({ orders, userId, onReload }: { orders: PurchaseOrder[];
 
 function MovimientosTab({ movements, summary }: { movements: StockMovement[]; summary: MovementsSummary | null }) {
   const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'product', label: 'Producto' },
-    { key: 'supplier', label: 'Proveedor' },
-    { key: 'quantity', label: 'Cantidad' },
-    { key: 'price', label: 'Precio' },
-    { key: 'date', label: 'Fecha' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'product', label: 'Producto', example: '' },
-    { key: 'supplier', label: 'Proveedor', example: '' },
-    { key: 'quantity', label: 'Cantidad', example: '' },
-    { key: 'price', label: 'Precio', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} compra(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} compra(s) importado(s)`);
-  };
-
-  const filtered = typeFilter === 'all' ? movements : movements.filter((m) => m.movementType === typeFilter);
+    const filtered = typeFilter === 'all' ? movements : movements.filter((m) => m.movementType === typeFilter);
 
   return (
     <div>
@@ -667,24 +640,6 @@ function FacturacionTab({ invoices }: { invoices: PurchaseInvoice[] }) {
           </tbody>
         </table>
       </div>
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="purchases_stock"
-        moduleLabel="Stock"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Stock"
-        importLabel="Stock"
-        templateFileName="plantilla_stock.csv"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </div>
   );
 }

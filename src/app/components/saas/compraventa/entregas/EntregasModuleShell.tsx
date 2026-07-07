@@ -15,6 +15,7 @@ import type { SaleRecord } from '../../../../lib/salesTypes';
 import { EntregasListPanel } from './EntregasListPanel';
 import { EntregasDetailPanel } from './EntregasDetailPanel';
 import { EntregasDetailActionBar, type EntregaActionId } from './EntregasDetailActionBar';
+import { CompraventaSplitModuleShell } from '../CompraventaSplitModuleShell';
 import type { EntregaChecklistKey, EntregaListItem } from './entregasListData';
 
 export function EntregasModuleShell() {
@@ -115,39 +116,32 @@ export function EntregasModuleShell() {
   );
 
   return (
-    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950 md:min-h-[calc(100dvh-6.5rem)]">
-      <div className="shrink-0 border-b border-gray-200/80 dark:border-gray-800">
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-5">
-          <div className="min-w-0">
-            <h1 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-              Entregas
-            </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Último paso del ciclo: entrega del vehículo al cliente
-            </p>
-          </div>
-        </div>
-        {selectedEntrega ? (
+    <CompraventaSplitModuleShell
+      title="Entregas"
+      subtitle="Último paso del ciclo: entrega del vehículo al cliente"
+      headerBelow={
+        selectedEntrega ? (
           <EntregasDetailActionBar
             showActions
             disabled={actionLoading || loading}
             onAction={handleAction}
           />
-        ) : null}
-      </div>
-
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+        ) : null
+      }
+      listPanel={(
         <EntregasListPanel
           entregas={entregas}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
+      )}
+      detailPanel={(
         <EntregasDetailPanel
           entrega={selectedEntrega}
           checklistDisabled={actionLoading || loading}
           onToggleChecklist={handleToggleChecklist}
         />
-      </div>
-    </div>
+      )}
+    />
   );
 }

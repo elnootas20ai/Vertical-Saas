@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   X, Mail, User, Shield, ChevronDown, Wrench, Star, Check, CheckCircle2,
@@ -385,8 +385,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   useModalClose(true, onClose);
   const { t } = useTranslation();
   const { currentBusiness: ctxBusiness } = useBusiness();
-  void roles;
-  const roleOptions = ROLES.map((item) => ({ id: item.id, description: item.desc, permissions: [], users: 0 }));
+  const roleOptions = useMemo(() => {
+    if (roles?.length) return roles;
+    return ROLES.map((item) => ({ id: item.id, description: item.desc, permissions: [], users: 0 }));
+  }, [roles]);
 
   const businessList = businesses?.length ? businesses : ctxBusiness ? [ctxBusiness] : [];
   const hasMultipleBusinesses = businessList.length > 1;

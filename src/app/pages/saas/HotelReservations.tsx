@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -81,13 +82,35 @@ export function HotelReservations() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} reserva(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const guest = entryStr(e, 'guest');
+    if (!guest) return null;
+    return {
+      guest,
+      room: entryStr(e, 'room') || '',
+      checkIn: entryStr(e, 'checkIn') || '',
+      checkOut: entryStr(e, 'checkOut') || '',
+      nights: entryNum(e, 'nights'),
+      status: entryStr(e, 'status') || 'pendiente',
+      channel: entryStr(e, 'channel') || 'web',
+      amount: entryNum(e, 'amount'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} reserva creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} reserva(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(modalOpen, () => setModalOpen(false));
 

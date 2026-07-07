@@ -8,6 +8,7 @@ import { TasacionesListPanel } from './TasacionesListPanel';
 import { TasacionesDetailPanel } from './TasacionesDetailPanel';
 import { TasacionesNewButton } from './TasacionesDetailActionBar';
 import { TasacionesNewWizard } from './TasacionesNewWizard';
+import { CompraventaSplitModuleShell } from '../CompraventaSplitModuleShell';
 import type { TasacionListItem } from './tasacionesListData';
 
 export function TasacionesModuleShell() {
@@ -100,41 +101,37 @@ export function TasacionesModuleShell() {
   }, [userId, selectedTasacion, loadTasaciones]);
 
   return (
-    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950 md:min-h-[calc(100dvh-6.5rem)]">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200/80 px-4 py-3 dark:border-gray-800 md:px-5">
-        <div className="min-w-0">
-          <h1 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-            Tasaciones
-          </h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Oportunidades de compra antes de entrar al inventario
-          </p>
-        </div>
+    <CompraventaSplitModuleShell
+      title="Tasaciones"
+      subtitle="Oportunidades de compra antes de entrar al inventario"
+      headerAction={(
         <TasacionesNewButton disabled={loading || actionLoading} onClick={() => setWizardOpen(true)} />
-      </div>
-
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
+      )}
+      listPanel={(
         <TasacionesListPanel
           tasaciones={tasaciones}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
+      )}
+      detailPanel={(
         <TasacionesDetailPanel
           tasacion={selectedTasacion}
           onAccept={handleAccept}
           onReject={handleReject}
           actionsDisabled={actionLoading}
         />
-      </div>
-
-      <TasacionesNewWizard
-        open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
-        onCreated={async (tasacionId) => {
-          await loadTasaciones();
-          setSelectedId(tasacionId);
-        }}
-      />
-    </div>
+      )}
+      overlay={(
+        <TasacionesNewWizard
+          open={wizardOpen}
+          onClose={() => setWizardOpen(false)}
+          onCreated={async (tasacionId) => {
+            await loadTasaciones();
+            setSelectedId(tasacionId);
+          }}
+        />
+      )}
+    />
   );
 }

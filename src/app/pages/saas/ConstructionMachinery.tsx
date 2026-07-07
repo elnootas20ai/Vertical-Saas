@@ -40,36 +40,7 @@ export function ConstructionMachinery() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Machine | null>(null);
   const [form, setForm] = useState(emptyMachine);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'type', label: 'Tipo' },
-    { key: 'brand', label: 'Marca' },
-    { key: 'model', label: 'Modelo' },
-    { key: 'plate', label: 'Matrícula' },
-    { key: 'status', label: 'Estado' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'type', label: 'Tipo', example: '' },
-    { key: 'brand', label: 'Marca', example: '' },
-    { key: 'model', label: 'Modelo', example: '' },
-    { key: 'plate', label: 'Matrícula', required: true, example: '' },
-    { key: 'status', label: 'Estado', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} máquina(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} máquina(s) importado(s)`);
-  };
-
-  const filtered = useMemo(() => machines.filter(m => {
+    const filtered = useMemo(() => machines.filter(m => {
     const matchSearch = `${m.nombre} ${m.matricula} ${m.proyectoAsignado}`.toLowerCase().includes(search.toLowerCase());
     const matchEstado = filterEstado === 'todos' || m.estado === filterEstado;
     return matchSearch && matchEstado;
@@ -135,8 +106,6 @@ export function ConstructionMachinery() {
           <AddButtonDropdown
                 label="Nueva máquina"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de máquina"
               />
@@ -204,22 +173,6 @@ export function ConstructionMachinery() {
           </form>
         </div>
       )}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="construction_machinery"
-        moduleLabel="Maquinaria"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Maquinaria"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

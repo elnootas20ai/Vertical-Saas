@@ -499,7 +499,20 @@ export async function updateConfig(req, res) {
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     if (config.enabled && !config.imapHost && !account.supplierInvoiceConfig?.imapHost) {
-      return badRequest(res, 'Se requiere imapHost si el módulo está activado');
+      const { isImapConfigured } = await import('../services/imapService.js');
+      const draftHost = config.imapHost !== undefined ? String(config.imapHost).trim() : '';
+      const draftUser = config.imapUser !== undefined ? String(config.imapUser).trim() : '';
+      const draftPass = config.imapPassword && config.imapPassword !== '••••••••'
+        ? String(config.imapPassword)
+        : String(account.supplierInvoiceConfig?.imapPassword || '');
+      const hasAccountImap = Boolean(
+        (draftHost || account.supplierInvoiceConfig?.imapHost)
+        && (draftUser || account.supplierInvoiceConfig?.imapUser)
+        && (draftPass || account.supplierInvoiceConfig?.imapPassword),
+      );
+      if (!hasAccountImap && !isImapConfigured({})) {
+        return badRequest(res, 'Configura servidor IMAP o las variables SUPPLIER_INVOICE_IMAP_* en el servidor');
+      }
     }
 
     const existing = account.supplierInvoiceConfig || {};

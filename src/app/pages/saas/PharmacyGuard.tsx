@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
@@ -84,13 +85,28 @@ export function PharmacyGuard() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} guardia(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const fecha = entryStr(e, 'fecha', 'date');
+    if (!fecha) return null;
+    return {
+      fecha,
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} guardia creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} guardia(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const loadData = useCallback(async () => {
     if (!userId) {

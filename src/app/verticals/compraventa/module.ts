@@ -14,6 +14,11 @@ export const COMPRAVENTA_MODULE: VerticalModuleDefinition = {
     'src/app/pages/saas/vertical/compraventa',
     'src/app/components/saas/compraventa',
     'src/app/lib/compraventa',
+    'src/app/lib/compraventaFiscalCalculator.ts',
+    'src/app/lib/compraventaFiscalHistory.ts',
+    'src/app/lib/compraventaFiscalPrefill.ts',
+    'src/app/lib/compraventaFiscalTpoRates.ts',
+    'src/app/lib/fiscalConsultationApi.ts',
   ],
   legacySharedImports: [
     'deliverySetup',

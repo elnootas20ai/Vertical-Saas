@@ -248,7 +248,7 @@ export async function listServiceContractsRequest(
   if (filters?.workerId) params.set('workerId', filters.workerId);
   if (filters?.zone) params.set('zone', filters.zone);
   const qs = params.toString();
-  const path = `/api/cleaning/contracts/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`;
+  const path = `/api/cleaning/service-contracts/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`;
   const payload = await request<{ ok: boolean; contracts: ServiceContract[] }>(path);
   return payload.contracts || [];
 }
@@ -256,7 +256,7 @@ export async function listServiceContractsRequest(
 export async function getServiceContractRequest(userId: string, contractId: string): Promise<ServiceContract> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; contract: ServiceContract }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}`,
   );
   if (!payload.contract) throw new Error('Contrato no encontrado');
   return payload.contract;
@@ -265,7 +265,7 @@ export async function getServiceContractRequest(userId: string, contractId: stri
 export async function createServiceContractRequest(userId: string, data: Partial<ServiceContract>): Promise<ServiceContract> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; contract: ServiceContract }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify({ contract: data }) },
   );
   if (!payload.contract) throw new Error('Respuesta inválida del servidor');
@@ -275,7 +275,7 @@ export async function createServiceContractRequest(userId: string, data: Partial
 export async function updateServiceContractRequest(userId: string, contract: ServiceContract): Promise<ServiceContract> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; contract: ServiceContract }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/${encodeURIComponent(contract._id)}`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/${encodeURIComponent(contract._id)}`,
     { method: 'PUT', body: JSON.stringify({ contract }) },
   );
   if (!payload.contract) throw new Error('Respuesta inválida del servidor');
@@ -285,7 +285,7 @@ export async function updateServiceContractRequest(userId: string, contract: Ser
 export async function deleteServiceContractRequest(userId: string, contractId: string): Promise<void> {
   const id = normalizeUserId(userId);
   await request(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}`,
     { method: 'DELETE' },
   );
 }
@@ -293,7 +293,7 @@ export async function deleteServiceContractRequest(userId: string, contractId: s
 export async function activateContractRequest(userId: string, contractId: string): Promise<ServiceContract> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; contract: ServiceContract }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/activate`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/activate`,
     { method: 'POST' },
   );
   if (!payload.contract) throw new Error('Respuesta inválida del servidor');
@@ -303,7 +303,7 @@ export async function activateContractRequest(userId: string, contractId: string
 export async function pauseContractRequest(userId: string, contractId: string): Promise<ServiceContract> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; contract: ServiceContract }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/pause`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/pause`,
     { method: 'POST' },
   );
   if (!payload.contract) throw new Error('Respuesta inválida del servidor');
@@ -313,7 +313,7 @@ export async function pauseContractRequest(userId: string, contractId: string): 
 export async function cancelContractRequest(userId: string, contractId: string, reason?: string): Promise<ServiceContract> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; contract: ServiceContract }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/cancel`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/cancel`,
     { method: 'POST', body: JSON.stringify({ reason }) },
   );
   if (!payload.contract) throw new Error('Respuesta inválida del servidor');
@@ -323,7 +323,7 @@ export async function cancelContractRequest(userId: string, contractId: string, 
 export async function renewContractRequest(userId: string, contractId: string, newEndDate?: string): Promise<ServiceContract> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; contract: ServiceContract }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/renew`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/${encodeURIComponent(contractId)}/renew`,
     { method: 'POST', body: JSON.stringify({ newEndDate }) },
   );
   if (!payload.contract) throw new Error('Respuesta inválida del servidor');
@@ -333,7 +333,7 @@ export async function renewContractRequest(userId: string, contractId: string, n
 export async function getContractStatsRequest(userId: string): Promise<ServiceContractStats> {
   const id = normalizeUserId(userId);
   const payload = await request<{ ok: boolean; stats: ServiceContractStats }>(
-    `/api/cleaning/contracts/${encodeURIComponent(id)}/stats`,
+    `/api/cleaning/service-contracts/${encodeURIComponent(id)}/stats`,
   );
   return payload.stats;
 }

@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../../context/AuthContext';
+import { useBusiness } from '../../../context/BusinessContext';
 import {
   listWorkOrdersRequest,
   updateWorkOrderRequest,
@@ -143,6 +144,11 @@ function WorkOrderDetailPanel({
   onUpdate: (updated: WorkOrder) => void;
 }) {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const [timeEntries, setTimeEntries] = useState<TimeEntry[]>(wo.timeEntries || []);
   const [photos, setPhotos] = useState<string[]>(wo.photos || []);
   const [notes, setNotes] = useState(wo.notes || '');
@@ -173,7 +179,7 @@ function WorkOrderDetailPanel({
         photos,
         notes,
         ...overrides,
-      });
+      }, workshopScope);
       onUpdate(updated);
       if (!overrides) toast.success('Cambios guardados');
     } catch {
@@ -198,7 +204,7 @@ function WorkOrderDetailPanel({
         stageHistory: wo.status === 'pending'
           ? [...(wo.stageHistory || []), { status: 'in_progress' as WorkOrderStatus, date: new Date().toISOString(), user: mechanicName }]
           : wo.stageHistory,
-      });
+      }, workshopScope);
       onUpdate(updated);
       toast.success('Temporizador iniciado');
     } catch {
@@ -214,7 +220,7 @@ function WorkOrderDetailPanel({
     );
     setTimeEntries(next);
     try {
-      const updated = await updateWorkOrderRequest(userId, { ...wo, timeEntries: next, photos, notes });
+      const updated = await updateWorkOrderRequest(userId, { ...wo, timeEntries: next, photos, notes }, workshopScope);
       onUpdate(updated);
       toast.success('Temporizador parado');
     } catch {
@@ -232,7 +238,7 @@ function WorkOrderDetailPanel({
         notes,
         status: 'completed',
         stageHistory: [...(wo.stageHistory || []), { status: 'completed' as WorkOrderStatus, date: new Date().toISOString(), user: mechanicName }],
-      });
+      }, workshopScope);
       onUpdate(updated);
       toast.success('OT completada');
       onBack();
@@ -421,6 +427,11 @@ function WorkOrderDetailPanel({
 
 export function WorkerTpvWorkshop() {
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const navigate = useNavigate();
   const [orders, setOrders] = useState<WorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -434,14 +445,14 @@ export function WorkerTpvWorkshop() {
   const loadOrders = useCallback(async () => {
     if (!userId) return;
     try {
-      const data = await listWorkOrdersRequest(userId);
+      const data = await listWorkOrdersRequest(userId, workshopScope);
       setOrders(data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     } catch {
       toast.error('Error al cargar órdenes');
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, workshopScope]);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 

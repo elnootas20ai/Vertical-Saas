@@ -20,6 +20,8 @@ import {
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { exportMyDataRequest } from '../../../lib/authApi';
+import { DeleteAccountSection } from '../../../components/saas/DeleteAccountSection';
+import { IOS_PRIVACY_POLICY_URL } from '../../../lib/appStoreCompliance';
 
 export function WorkerSecurity() {
   const { t } = useTranslation();
@@ -256,10 +258,15 @@ export function WorkerSecurity() {
                 <p className="text-xs text-red-700 dark:text-red-300">{downloadError}</p>
               </div>
             )}
-            <button className="w-full text-left p-3 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors">
-              <p className="text-sm font-medium text-red-600 dark:text-red-400">{t('worker.security.deleteAccount')}</p>
-              <p className="text-xs text-gray-500 dark:text-gray-400">{t('worker.security.deleteAccountDesc')}</p>
-            </button>
+            <a
+              href={IOS_PRIVACY_POLICY_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400 px-3"
+            >
+              Política de privacidad
+            </a>
+            <DeleteAccountSection compact />
           </div>
         </div>
       </div>

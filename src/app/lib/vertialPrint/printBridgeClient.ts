@@ -14,6 +14,12 @@ export interface BridgePrinterInfo {
   isDefault?: boolean;
 }
 
+export interface BridgeNetworkPrinterInfo {
+  host: string;
+  port: number;
+  label?: string;
+}
+
 export interface BridgePrintConnection {
   type: 'network' | 'system';
   host?: string;
@@ -67,6 +73,44 @@ export async function fetchBridgePrinters(config?: VertialPrinterConfig): Promis
     return Array.isArray(data.printers) ? data.printers : [];
   } catch {
     return [];
+  }
+}
+
+/** Busca impresoras térmicas WiFi (puerto 9100) en la red local via Vertial Print. */
+export async function fetchBridgeNetworkPrinters(
+  config?: VertialPrinterConfig,
+  options?: { port?: number; timeoutMs?: number },
+): Promise<{ ok: boolean; printers: BridgeNetworkPrinterInfo[]; error?: string }> {
+  const port = Number(options?.port || 9100) || 9100;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(8000, Number(options?.timeoutMs || 25000)));
+    const res = await fetch(`${bridgeUrl(config)}/v1/network-printers?port=${port}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    const data = await res.json().catch(() => ({})) as {
+      ok?: boolean;
+      printers?: BridgeNetworkPrinterInfo[];
+      error?: string;
+    };
+    if (!res.ok || data.ok === false) {
+      return {
+        ok: false,
+        printers: [],
+        error: data.error || 'No se pudo buscar impresoras en la red',
+      };
+    }
+    return {
+      ok: true,
+      printers: Array.isArray(data.printers) ? data.printers : [],
+    };
+  } catch {
+    return {
+      ok: false,
+      printers: [],
+      error: 'Activa Vertial Print en el PC del mostrador (descarga VertialPrint.exe) y vuelve a buscar.',
+    };
   }
 }
 

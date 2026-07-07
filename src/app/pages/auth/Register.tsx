@@ -10,6 +10,7 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
+import { shouldHideThirdPartyAuthOnIos } from '../../lib/appStoreCompliance';
 import type { GoogleUserProfile } from '../../lib/authApi';
 import { LegalAgreementsModal } from '../../components/legal/LegalAgreementsModal';
 import { clearLegacyOnboardingDraft, setPendingVerifyEmail } from '../../lib/onboardingLocalKeys';
@@ -133,24 +134,25 @@ export function Register() {
     }
   }, [googleLogin, navigate]);
 
+  const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
+  const showGoogleAuth = googleClientConfigured && !hideGoogleOnIos;
   const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
   const googleBtnRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (googleReady && googleBtnRef.current && !isGoogleFlow) {
-      const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
-      renderButton(googleBtnRef.current, { theme, size: 'large', text: 'signup_with' });
-    }
-  }, [googleReady, renderButton, isGoogleFlow, resolvedTheme]);
+    if (!showGoogleAuth || !googleReady || !googleBtnRef.current || isGoogleFlow) return;
+    const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
+    renderButton(googleBtnRef.current, { theme, size: 'large', text: 'signup_with' });
+  }, [showGoogleAuth, googleReady, renderButton, isGoogleFlow, resolvedTheme]);
 
   useEffect(() => {
-    if (googleReady || !googleClientConfigured || isGoogleFlow) {
+    if (!showGoogleAuth || googleReady || isGoogleFlow) {
       setGoogleTimedOut(false);
       return;
     }
     const t = window.setTimeout(() => setGoogleTimedOut(true), 8000);
     return () => window.clearTimeout(t);
-  }, [googleReady, isGoogleFlow, googleClientConfigured]);
+  }, [showGoogleAuth, googleReady, isGoogleFlow]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -472,7 +474,7 @@ export function Register() {
                   : 'Crear cuenta'}
             </ACCESO__Button>
 
-            {!isGoogleFlow && (
+            {!isGoogleFlow && !hideGoogleOnIos && (
               <>
                 <div className="relative my-2">
                   <div className="absolute inset-0 flex items-center">
@@ -484,7 +486,7 @@ export function Register() {
                 </div>
 
                 <div className="flex justify-center w-full">
-                  {!googleClientConfigured ? null : !googleReady && !googleTimedOut ? (
+                  {!showGoogleAuth ? null : !googleReady && !googleTimedOut ? (
                     <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-gray-600 py-2 px-3 text-xs text-gray-500 dark:text-gray-400">
                       <span className="inline-block w-4 h-4 shrink-0 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" aria-hidden />
                       <span>Cargando Google…</span>
@@ -497,7 +499,7 @@ export function Register() {
                     <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
                   )}
                 </div>
-                {!googleClientConfigured && (
+                {!showGoogleAuth && (
                   <div className="w-full py-1.5 px-2 border border-gray-200 dark:border-gray-600 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 text-center">
                     Google no disponible (revisa VITE_GOOGLE_CLIENT_ID en build).
                   </div>

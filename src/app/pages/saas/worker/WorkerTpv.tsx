@@ -29,7 +29,6 @@ import { WorkerTpvHotel } from './WorkerTpvHotel';
 import { WorkerTpvTaxi } from './WorkerTpvTaxi';
 import { WorkerTpvStockReview } from './WorkerTpvStockReview';
 import { ButcherTpvPage } from '../ButcherTpvPage';
-import { EventsWorkstationPage } from '../EventsWorkstationPage';
 import { HairSalonWorkstationPage } from '../HairSalonWorkstationPage';
 import { Layout } from '../../../components/saas/Layout';
 import { TpvChromeScope } from '../../../context/TpvChromeContext';
@@ -71,12 +70,12 @@ const VERTICAL_MODULE: Partial<Record<BusinessType, React.ComponentType>> = {
   pharmacy: WorkerTpvPharmacy,
   carWash: WorkerTpvCarWash,
   vet: WorkerTpvVet,
-  events: EventsWorkstationPage,
   hairSalon: HairSalonWorkstationPage,
   nightclub: WorkerTpvNightclub,
   lawyer: WorkerTpvLawyer,
   tobaccoShop: WorkerTpvTobacco,
   academy: WorkerTpvAcademy,
+  gym: WorkerTpvGym,
   realEstate: WorkerTpvRealEstate,
   butcherShop: ButcherTpvPage,
 };
@@ -92,7 +91,6 @@ const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.R
   construction: { label: 'Obra', icon: <HardHat className="w-6 h-6" /> },
   pharmacy: { label: 'Farmacia', icon: <Pill className="w-6 h-6" /> },
   vet: { label: 'Clínica veterinaria', icon: <PawPrint className="w-6 h-6" /> },
-  events: { label: 'Centro de Eventos', icon: <PartyPopper className="w-6 h-6" /> },
   hairSalon: { label: 'Agenda Peluquería', icon: <Scissors className="w-6 h-6" /> },
   nightclub: { label: 'Puerta y Barra', icon: <Music className="w-6 h-6" /> },
   lawyer: { label: 'Despacho', icon: <Scale className="w-6 h-6" /> },
@@ -141,8 +139,12 @@ export function WorkerTpvDeliveryRoute() {
   );
 }
 
-/** Si hay tablet vinculada, ir al TPV fijado por el código (delivery). */
+/** Si hay tablet vinculada, ir al TPV fijado por el código (delivery). Eventos usa operaciones, no TPV. */
 export function WorkerTpvEntry() {
+  const { currentBusiness } = useBusiness();
+  if (currentBusiness?.businessType === 'events') {
+    return <Navigate to="/saas/worker/events" replace />;
+  }
   if (isTpvTabletBound()) {
     return <Navigate to={resolveTpvTabletWorkerPath()} replace />;
   }

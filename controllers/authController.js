@@ -1123,7 +1123,7 @@ export async function updateProfile(req, res) {
     const savedAccount = await saveAccount(req, updatedAccount);
     const persistedAccount = (await findAccountByUserId(req, savedAccount.user_id)) || savedAccount;
 
-    if (savedAccount.linkedBusinessId && (fullName !== undefined || email !== undefined || role !== undefined)) {
+    if (savedAccount.linkedBusinessId && (fullName !== undefined || email !== undefined || role !== undefined || permissions !== undefined)) {
       try {
         const business = await findBusinessById(req, savedAccount.linkedBusinessId);
         if (business && Array.isArray(business.members)) {
@@ -1134,6 +1134,9 @@ export async function updateProfile(req, res) {
               fullName: savedAccount.fullName || m.fullName,
               email: savedAccount.email || m.email,
               role: savedAccount.role || m.role,
+              permissions: permissions !== undefined
+                ? normalizePermissionMatrix(savedAccount.permissions, savedAccount.role || m.role)
+                : m.permissions,
             };
           });
           await saveBusiness(req, { ...business, members, updatedAt: new Date().toISOString() });
@@ -3463,6 +3466,23 @@ async function resolveTabletSessionAccount(req, business, pdv) {
   return null;
 }
 
+/** Si ya hay sesión JWT, conservar ese usuario cuando puede operar el PDV (no cambiar a otro trabajador). */
+async function resolveAccountForTpvTabletLogin(req, business, pdv) {
+  const sessionUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+  if (sessionUserId) {
+    const current = await findAccountByUserId(req, sessionUserId);
+    if (current && !current.deletedAt && current.status !== 'inactive') {
+      if (workerCanAccessPdvForTablet(current, business, pdv)) {
+        return { account: current, accessDenied: false };
+      }
+      return { account: null, accessDenied: true };
+    }
+  }
+
+  const account = await resolveTabletSessionAccount(req, business, pdv);
+  return { account, accessDenied: false };
+}
+
 async function performTpvTabletLogin(req, res, { terminalCode }) {
   const ip = getClientIp(req);
 
@@ -3482,7 +3502,14 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
 
-  const account = await resolveTabletSessionAccount(req, business, pdv);
+  const { account, accessDenied } = await resolveAccountForTpvTabletLogin(req, business, pdv);
+  if (accessDenied) {
+    return res.status(403).json({
+      ok: false,
+      error: 'No tienes acceso a esta tienda. Pide al encargado que te asigne el local correcto.',
+      code: 'STORE_NOT_ASSIGNED',
+    });
+  }
   if (!account) {
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }

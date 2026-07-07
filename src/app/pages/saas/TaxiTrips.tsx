@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -81,13 +82,29 @@ export function TaxiTrips() {
     { key: 'payment', label: 'Forma pago', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} carrera(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const conductor = entryStr(e, 'conductor');
+    if (!conductor) return null;
+    return {
+      numServicio: entryStr(e, 'numServicio') || '', conductor: '', vehiculo: '', origen: '', destino: '',
+      fechaHora: entryStr(e, 'fechaHora') || '', kmRecorridos: 0, importe: 0, formaPago: 'efectivo', tipo: 'urbano',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} carrera creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} carrera(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const loadData = useCallback(async () => {
     if (!user?.user_id) return;

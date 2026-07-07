@@ -56,34 +56,7 @@ export function ButcherSales() {
 
   const [clientSuggestions, setClientSuggestions] = useState<ButcherClient[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'client', label: 'Cliente' },
-    { key: 'product', label: 'Producto' },
-    { key: 'quantity', label: 'Cantidad' },
-    { key: 'price', label: 'Precio' },
-    { key: 'date', label: 'Fecha' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'client', label: 'Cliente', example: '' },
-    { key: 'product', label: 'Producto', example: '' },
-    { key: 'quantity', label: 'Cantidad', example: '' },
-    { key: 'price', label: 'Precio', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} venta(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} venta(s) importado(s)`);
-  };
-
-  const searchTimeout = useRef<any>(null);
+    const searchTimeout = useRef<any>(null);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -194,8 +167,6 @@ export function ButcherSales() {
             <AddButtonDropdown
                 label="Nueva venta"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de venta"
               />
@@ -315,22 +286,6 @@ export function ButcherSales() {
           </div>
         </div>
       )}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="butcher_sales"
-        moduleLabel="Ventas"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Ventas"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

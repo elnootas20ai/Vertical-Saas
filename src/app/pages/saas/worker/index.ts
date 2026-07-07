@@ -15,3 +15,4 @@ export { WorkerSecurity } from './WorkerSecurity';
 export { WorkerTpv, WorkerTpvEntry, WorkerTpvDeliveryRoute } from './WorkerTpv';
 export { WorkerConstructionReport } from './WorkerConstructionReport';
 export { WorkerStockReviewPage } from './WorkerStockReviewPage';
+export { WorkerEventsOps } from './WorkerEventsOps';

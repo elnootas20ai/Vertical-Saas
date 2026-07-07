@@ -13,6 +13,7 @@ import {
   ensureDatabase,
   getAllDocuments,
   findAccountByUserId,
+  listCleaningWorkersByUser,
 } from '../services/couchdb.js';
 import { getCleaningAlertSummary } from '../services/cleaningAlertEngine.js';
 
@@ -36,6 +37,15 @@ async function fetchDocsOfType(req, dbName, type) {
     const docs = await getAllDocuments(req, dbName);
     return docs.filter((d) => d?.type === type && !d?.deletedAt);
   } catch { return []; }
+}
+
+function workerInitials(name) {
+  return String(name || '')
+    .split(' ')
+    .map((n) => n[0] || '')
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 // ─── GET /api/cleaning-hub/kpis/:userId ─────────────────────────────────────
@@ -274,6 +284,35 @@ export async function getCleaningHubWorkers(req, res) {
     const openIncidents = incidents.filter((i) => !['resolved', 'cancelled', 'closed'].includes(i.status));
     for (const inc of openIncidents) {
       if (inc.workerId && workers.has(inc.workerId)) workers.get(inc.workerId).incidents++;
+    }
+
+    const rosterWorkers = await listCleaningWorkersByUser(req, userId);
+    for (const rw of rosterWorkers) {
+      if (rw.status !== 'active') continue;
+      const key = String(rw.teamMemberId || rw._id || '').trim();
+      if (!key) continue;
+      if (!workers.has(key)) {
+        workers.set(key, {
+          id: rw._id,
+          name: rw.name || '',
+          avatar: workerInitials(rw.name),
+          clockedIn: false,
+          clockInTime: '',
+          clockOutTime: '',
+          currentService: null,
+          nextService: null,
+          servicesTotal: 0,
+          servicesCompleted: 0,
+          hoursToday: 0,
+          incidents: 0,
+          rating: rw.specializations?.length ? 4.5 : 4,
+          _ratings: [],
+        });
+      } else {
+        const w = workers.get(key);
+        if (!w.name) w.name = rw.name || '';
+        if (!w.avatar) w.avatar = workerInitials(rw.name);
+      }
     }
 
     const result = [...workers.values()].map((w) => ({

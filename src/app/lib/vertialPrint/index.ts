@@ -26,7 +26,8 @@ export {
   isVertialPrinterConfigConfigured,
   printerLabelFromConfig,
 } from './printerConfigNormalize';
-export { fetchBridgeHealth, fetchBridgePrinters } from './printBridgeClient';
+export { fetchBridgeHealth, fetchBridgePrinters, fetchBridgeNetworkPrinters } from './printBridgeClient';
+export type { BridgeNetworkPrinterInfo } from './printBridgeClient';
 export {
   connectionToSetupKind,
   setupKindToConnection,
@@ -34,3 +35,17 @@ export {
   isAppleMobileDevice,
 } from './printerSetupStatus';
 export type { PrinterSetupKind, PrinterStatusSnapshot } from './printerSetupStatus';
+export {
+  VERTIAL_PRINT_EXE_PATH,
+  VERTIAL_PRINT_INSTALL_HINT,
+  resolveVertialPrintDownloadUrl,
+} from './vertialPrintInstaller';
+export { isVertialNativeApp } from './isNativeApp';
+export { sendNativeEscpos, pingNativePrinter, discoverNativeNetworkPrinters } from './nativePrintClient';
+export type { NativeNetworkPrinterInfo } from './nativePrintClient';
+export {
+  shouldUseEposPrint,
+  checkEposConnection,
+  sendEposTicket,
+  sendEposTestTicket,
+} from './eposPrintClient';

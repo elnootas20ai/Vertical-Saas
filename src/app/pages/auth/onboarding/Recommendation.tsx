@@ -234,6 +234,16 @@ export function Recommendation() {
               Plan elegido
             </div>
           )}
+          {selectedPlan.launchOffer ? (
+            <div className="shrink-0 mb-2 space-y-1">
+              <span className="inline-flex items-center rounded-full bg-violet-100 px-2.5 py-0.5 text-[10px] font-bold text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
+                {selectedPlan.launchOffer.badge}
+              </span>
+              <p className="text-[11px] leading-relaxed text-violet-800 dark:text-violet-200">
+                {selectedPlan.launchOffer.footnote}
+              </p>
+            </div>
+          ) : null}
 
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 shrink-0">
             Plan {selectedPlan.name}
@@ -370,6 +380,11 @@ export function Recommendation() {
                       Recomendado
                     </span>
                   ) : null}
+                  {plan.launchOffer ? (
+                    <span className="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
+                      {plan.launchOffer.badge}
+                    </span>
+                  ) : null}
                   {isSelected ? (
                     <span className="inline-flex items-center rounded-full bg-gray-900 px-2 py-0.5 text-[10px] font-bold text-white dark:bg-gray-100 dark:text-gray-900">
                       Seleccionado
@@ -395,6 +410,12 @@ export function Recommendation() {
                     Cupo base suficiente para tu operativa.
                   </p>
                 )}
+
+                {plan.launchOffer ? (
+                  <p className="mb-3 text-[11px] leading-relaxed text-violet-800 dark:text-violet-200">
+                    {plan.launchOffer.footnote}
+                  </p>
+                ) : null}
 
                 <ul className="space-y-1.5 mb-4 flex-1">
                   {plan.features.map((feature) => (

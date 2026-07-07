@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -79,13 +80,35 @@ export function RealEstateProperties() {
     { key: 'status', label: 'Estado', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} inmueble(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const referencia = entryStr(e, 'referencia', 'reference', 'sku');
+    if (!referencia) return null;
+    return {
+      referencia,
+      tipo: entryStr(e, 'tipo', 'type') || 'piso',
+      direccion: entryStr(e, 'direccion', 'address') || '',
+      m2: entryNum(e, 'm2'),
+      habitaciones: entryNum(e, 'habitaciones'),
+      precio: entryNum(e, 'precio', 'price'),
+      operacion: entryStr(e, 'operacion') || 'venta',
+      estado: entryStr(e, 'estado', 'status') || 'disponible',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} inmueble creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} inmueble(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(modalOpen, () => setModalOpen(false));
 
@@ -185,8 +208,6 @@ export function RealEstateProperties() {
             <AddButtonDropdown
                 label="Nuevo Inmueble"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de inmueble"
               />

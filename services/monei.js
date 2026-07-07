@@ -1,17 +1,25 @@
 import logger from './logger.js';
+import crypto from 'node:crypto';
 import { PUBLIC_PAYMENT_UNAVAILABLE, sanitizePaymentErrorForClient } from '../utils/paymentErrorMessages.js';
 
 const MONEI_API_BASE = 'https://api.monei.com/v1';
 
+function readEnvKey(...names) {
+  for (const name of names) {
+    const value = String(process.env[name] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
 // ── Credenciales desde .env ──────────────────────────────────────────────────
-// TOKEN_API_KEY / TOKEN_API_KEY_TEST = API keys (pk_live_xxx / pk_test_xxx)
-//   → van en el header Authorization para llamadas server-side
-// TOKEN_API_ID / TOKEN_API_ID_TEST = Account IDs (UUID)
-//   → identificadores de cuenta MONEI
-const LIVE_API_KEY = process.env.TOKEN_API_KEY || '';
-const TEST_API_KEY = process.env.TOKEN_API_KEY_TEST || '';
-const LIVE_ACCOUNT_ID = process.env.TOKEN_API_ID || '';
-const TEST_ACCOUNT_ID = process.env.TOKEN_API_ID_TEST || '';
+// TOKEN_API_KEY / TOKEN_API_KEY_TEST (o MONEI_API_KEY / MONEI_API_KEY_TEST)
+//   → header Authorization en llamadas server-side
+// TOKEN_API_ID / TOKEN_API_ID_TEST = Account IDs (UUID) → MONEI-Account-ID
+const LIVE_API_KEY = readEnvKey('TOKEN_API_KEY', 'MONEI_API_KEY');
+const TEST_API_KEY = readEnvKey('TOKEN_API_KEY_TEST', 'MONEI_API_KEY_TEST');
+const LIVE_ACCOUNT_ID = readEnvKey('TOKEN_API_ID', 'MONEI_ACCOUNT_ID');
+const TEST_ACCOUNT_ID = readEnvKey('TOKEN_API_ID_TEST', 'MONEI_ACCOUNT_ID_TEST');
 
 const DEFAULT_MODE =
   (process.env.MONEI_MODE || 'test').toLowerCase() === 'live' ? 'live' : 'test';
@@ -82,8 +90,17 @@ export function getMoneiCredentials(mode) {
 }
 
 /**
+ * API key de la plataforma Vertial (suscripciones SaaS).
+ * No usa pasarela por usuario — siempre .env según MONEI_MODE.
+ */
+export function resolvePlatformApiKey(mode = null) {
+  return getApiKeyForMode(mode || DEFAULT_MODE);
+}
+
+/**
  * Resuelve la API key a usar: primero intenta la config dinámica del usuario
  * (guardada en CouchDB settings), y si no existe usa la del .env.
+ * Usar solo para cobros del propio negocio del tenant, no suscripción Vertial.
  */
 export async function resolveApiKey(req, userId) {
   if (!userId || !req) return getApiKeyForMode(DEFAULT_MODE);
@@ -361,20 +378,100 @@ export async function refundPayment(
 
 // ── Webhooks ────────────────────────────────────────────────────────────────
 
-export function verifyWebhookSignature(rawBody, signatureHeader) {
+function parseMoneiSignatureHeader(signatureHeader) {
+  if (!signatureHeader || typeof signatureHeader !== 'string') return null;
+  const parts = signatureHeader.split(',').map((p) => p.trim());
+  let timestamp = '';
+  const signatures = [];
+  for (const part of parts) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+    const prefix = part.slice(0, eq);
+    const value = part.slice(eq + 1);
+    if (prefix === 't') timestamp = value;
+    if (prefix === 'v1' && value) signatures.push(value);
+  }
+  if (!timestamp || signatures.length === 0) return null;
+  return { timestamp, signatures };
+}
+
+export function resolveWebhookApiKey(payload) {
+  if (payload?.livemode === true) return getApiKeyForMode('live');
+  if (payload?.livemode === false) return getApiKeyForMode('test');
+  return getApiKeyForMode(DEFAULT_MODE);
+}
+
+export function isSkipMoneiWebhookVerify() {
+  const v = String(process.env.MONEI_WEBHOOK_SKIP_VERIFY || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+/**
+ * Verifica MONEI-Signature (HMAC-SHA256 sobre `${timestamp}.${rawBody}`).
+ * @see https://docs.monei.com/guides/verify-signature/
+ */
+export function verifyWebhookSignature(rawBody, signatureHeader, apiKey = null) {
+  const bodyStr =
+    typeof rawBody === 'string'
+      ? rawBody
+      : Buffer.isBuffer(rawBody)
+        ? rawBody.toString('utf8')
+        : String(rawBody || '');
+
   logger.info(
     {
       hasSignature: !!signatureHeader,
-      signaturePreview: signatureHeader
-        ? signatureHeader.slice(0, 30) + '...'
-        : null,
-      rawBodyLen: rawBody?.length ?? 0,
+      rawBodyLen: bodyStr.length,
+      skipVerify: isSkipMoneiWebhookVerify(),
     },
-    `[MONEI][WEBHOOK-SIG] signature=${signatureHeader ? 'present' : 'MISSING'}, rawBodyLen=${rawBody?.length ?? 0}`,
+    '[MONEI][WEBHOOK-SIG] verificando firma',
   );
-  if (!signatureHeader) {
-    logger.warn('[MONEI] Webhook recibido sin cabecera MONEI-Signature');
+
+  if (isSkipMoneiWebhookVerify()) {
+    logger.warn('[MONEI] MONEI_WEBHOOK_SKIP_VERIFY activo — firma NO validada (solo dev)');
     return true;
   }
-  return true;
+
+  if (!signatureHeader) {
+    logger.warn('[MONEI] Webhook recibido sin cabecera MONEI-Signature');
+    return false;
+  }
+
+  const key = apiKey || getApiKeyForMode(DEFAULT_MODE);
+  if (!key) {
+    logger.error('[MONEI] No hay API key para verificar webhook');
+    return false;
+  }
+
+  const parsed = parseMoneiSignatureHeader(signatureHeader);
+  if (!parsed) {
+    logger.warn('[MONEI] Cabecera MONEI-Signature mal formada');
+    return false;
+  }
+
+  const toleranceSec = Number(process.env.MONEI_WEBHOOK_TOLERANCE_SECONDS || 300);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const ts = Number(parsed.timestamp);
+  if (!Number.isFinite(ts) || Math.abs(nowSec - ts) > toleranceSec) {
+    logger.warn({ ts, nowSec, toleranceSec }, '[MONEI] Timestamp webhook fuera de tolerancia');
+    return false;
+  }
+
+  const signedPayload = `${parsed.timestamp}.${bodyStr}`;
+  const expected = crypto.createHmac('sha256', key).update(signedPayload, 'utf8').digest('hex');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+
+  for (const sig of parsed.signatures) {
+    try {
+      const sigBuf = Buffer.from(sig, 'utf8');
+      if (sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+        return true;
+      }
+    } catch {
+      /* siguiente firma */
+    }
+  }
+
+  logger.warn('[MONEI] Firma webhook inválida');
+  return false;
 }

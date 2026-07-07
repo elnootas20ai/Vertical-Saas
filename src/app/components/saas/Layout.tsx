@@ -11,6 +11,7 @@ import { GlobalSearchModal } from './GlobalSearchModal';
 import { BusinessCarousel } from './BusinessCarousel';
 import { useDashboardViewOptional } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
+import { useSwitchActiveBusiness } from '../../hooks/useSwitchActiveBusiness';
 import { PageLayoutProvider, usePageLayoutConfig, useRegisterPageLayout } from '../../context/PageLayoutContext';
 import { isChromelessSaasRoute } from '../../lib/saasChromelessRoute';
 
@@ -145,7 +146,8 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { title, subtitle, noPadding, titleClassName, subtitleClassName } = usePageLayoutConfig();
   const user = auth?.user;
-  const { businesses, currentBusiness, switchBusiness } = useBusiness();
+  const { businesses, currentBusiness } = useBusiness();
+  const switchActiveBusiness = useSwitchActiveBusiness();
   const dashboardView = useDashboardViewOptional();
   const portfolioPlan = usePortfolioPlanAccess();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -159,9 +161,8 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
   const showBusinessCarousel = isDashboard && businesses.length > 1;
 
   const handleSwitchBusiness = useCallback((businessId: string) => {
-    dashboardView?.enterBusinessView();
-    switchBusiness(businessId);
-  }, [switchBusiness, dashboardView]);
+    switchActiveBusiness(businessId);
+  }, [switchActiveBusiness]);
 
   const handlePortfolioTabClick = useCallback(() => {
     if (!portfolioPlan.canUsePortfolioView) {

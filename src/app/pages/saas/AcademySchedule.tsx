@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -73,13 +74,34 @@ export function AcademySchedule() {
     { key: 'room', label: 'Aula', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} horario(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const aula = entryStr(e, 'aula');
+    if (!aula) return null;
+    return {
+      aula,
+      curso: entryStr(e, 'curso', 'course', 'class') || '',
+      profesor: entryStr(e, 'profesor') || '',
+      dia: entryStr(e, 'dia') || 'Lunes',
+      horaInicio: entryStr(e, 'horaInicio') || '09:00',
+      horaFin: entryStr(e, 'horaFin') || '10:00',
+      capacidad: entryNum(e, 'capacidad'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} horario creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} horario(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

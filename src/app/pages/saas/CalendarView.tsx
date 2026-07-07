@@ -230,6 +230,10 @@ export function CalendarView() {
   const { leads, sales, vehicles, user } = useApp();
   const { user: authUser, listUsers } = useAuth();
   const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const { activeWorkCenters } = useWorkCenters();
 
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -332,12 +336,12 @@ export function CalendarView() {
   const loadWorkOrders = useCallback(async () => {
     if (!userId) return;
     try {
-      const orders = await listWorkOrdersRequest(userId);
+      const orders = await listWorkOrdersRequest(userId, workshopScope);
       setWorkOrders(orders.filter(wo => wo.status !== 'cancelled' && wo.status !== 'invoiced'));
     } catch {
       // silent
     }
-  }, [userId]);
+  }, [userId, workshopScope]);
 
   useEffect(() => { void loadAppointments(); void loadWorkOrders(); }, [loadAppointments, loadWorkOrders]);
 

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -264,13 +265,43 @@ export function ScrapyardExpedition() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} expedición(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const numPedido = entryStr(e, 'numPedido');
+    if (!numPedido) return null;
+    return {
+      numPedido,
+      cliente: entryStr(e, 'cliente', 'client') || '',
+      telefono: entryStr(e, 'telefono', 'phone', 'tel') || '',
+      piezas: entryStr(e, 'piezas') || '',
+      cantidadPiezas: entryNum(e, 'cantidadPiezas'),
+      fechaVenta: entryStr(e, 'fechaVenta') || new Date().toISOString().slice(0, 10),
+      fechaPreparacion: entryStr(e, 'fechaPreparacion') || '',
+      fechaExpedicion: entryStr(e, 'fechaExpedicion') || '',
+      responsable: entryStr(e, 'responsable') || '',
+      metodoEnvio: entryStr(e, 'metodoEnvio') || 'Mensajer\u00eda',
+      numSeguimiento: entryStr(e, 'numSeguimiento') || '',
+      direccionEnvio: entryStr(e, 'direccionEnvio') || '',
+      estadoExpedicion: entryStr(e, 'estadoExpedicion') || 'Pendiente preparaci\u00f3n',
+      estadoCobro: entryStr(e, 'estadoCobro') || 'Pendiente',
+      incidencia: entryStr(e, 'incidencia') || '',
+      notas: entryStr(e, 'notas', 'notes', 'description') || '',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} expedición creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} expedición(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

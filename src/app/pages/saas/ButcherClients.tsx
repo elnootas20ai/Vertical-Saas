@@ -63,34 +63,7 @@ export function ButcherClients() {
     timeline: TimelineEntry[]; stats: ClientHistoryStats; topProducts: TopProduct[];
   } | null>(null);
   const [drawerLoading, setDrawerLoading] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'phone', label: 'Teléfono' },
-    { key: 'email', label: 'Email' },
-    { key: 'address', label: 'Dirección' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'phone', label: 'Teléfono', example: '' },
-    { key: 'email', label: 'Email', example: '' },
-    { key: 'address', label: 'Dirección', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} cliente(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} cliente(s) importado(s)`);
-  };
-
-  useModalClose(showModal, () => setShowModal(false));
+    useModalClose(showModal, () => setShowModal(false));
 
   const fetchClients = useCallback(async () => {
     if (!userId) return;
@@ -227,8 +200,6 @@ export function ButcherClients() {
             <AddButtonDropdown
                 label="Nuevo cliente"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de cliente"
               />
@@ -504,22 +475,6 @@ export function ButcherClients() {
           </div>
         </div>
       )}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="butcher_clients"
-        moduleLabel="Clientes"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Clientes"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

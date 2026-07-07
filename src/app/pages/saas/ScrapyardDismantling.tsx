@@ -35,6 +35,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 // ─── Category icon map ───────────────────────────────────────────────────────
 
@@ -838,13 +839,29 @@ export function ScrapyardDismantling() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} desguace(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createScrapyardTask(uid, data),
+    }, entries, (entry) => ({
+      title: entryStr(entry, 'name', 'title', 'titulo'),
+      description: entryStr(entry, 'description', 'descripcion'),
+      status: 'pending',
+      taskType: 'dismantling',
+    }));
+    if (created > 0) {
+      toast.success(`${created} desguace(s) creado(s)`);
+      void loadSession();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} desguace(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const userId = (user as any)?.user_id || (user as any)?.id || '';
   const userName = (user as any)?.name || (user as any)?.email || 'Sistema';

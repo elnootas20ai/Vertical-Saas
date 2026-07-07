@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 /**
  * Vertial Print Bridge — puente local para impresoras térmicas ESC/POS.
- * Uso: npm run print-bridge
+ * Desarrollo: npm run print-bridge
+ * Clientes: descargar VertialPrint.exe desde vertialapp.com/downloads/
  *
- * Endpoints (127.0.0.1:39201):
+ * Endpoints (LAN :39201):
  *   GET  /v1/health
  *   GET  /v1/printers
+ *   GET  /v1/network-printers?port=9100
  *   POST /v1/print  { connection, data: base64 }
  */
 import express from 'express';
 import net from 'node:net';
+import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,8 +20,23 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 const PORT = Number(process.env.VERTIAL_PRINT_PORT || 39201);
-const HOST = '127.0.0.1';
-const VERSION = '1.0.0';
+/** 0.0.0.0 para que iPad/tablet en la misma WiFi llegue al PC del mostrador. */
+const HOST = String(process.env.VERTIAL_PRINT_HOST || '0.0.0.0').trim() || '0.0.0.0';
+const VERSION = '1.1.0';
+
+function listLocalIpv4Addresses() {
+  const ips = [];
+  const nets = os.networkInterfaces();
+  for (const entries of Object.values(nets)) {
+    for (const entry of entries || []) {
+      if (entry.family !== 'IPv4' && entry.family !== 4) continue;
+      if (entry.internal) continue;
+      const address = String(entry.address || '').trim();
+      if (address) ips.push(address);
+    }
+  }
+  return ips;
+}
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -71,6 +89,67 @@ function sendNetwork(host, port, buffer) {
       socket.destroy(new Error('Timeout conectando con la impresora de red'));
     });
     socket.on('error', reject);
+  });
+}
+
+function localIpv4Subnets() {
+  const prefixes = new Set();
+  const nets = os.networkInterfaces();
+  for (const entries of Object.values(nets)) {
+    for (const entry of entries || []) {
+      if (entry.family !== 'IPv4' && entry.family !== 4) continue;
+      if (entry.internal) continue;
+      const parts = String(entry.address || '').split('.');
+      if (parts.length !== 4) continue;
+      prefixes.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
+    }
+  }
+  if (prefixes.size === 0) {
+    prefixes.add('192.168.1');
+    prefixes.add('192.168.0');
+  }
+  return [...prefixes];
+}
+
+function probeNetworkHost(host, port, timeoutMs) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port }, () => {
+      socket.end();
+      resolve({ host, port });
+    });
+    socket.setTimeout(timeoutMs, () => {
+      socket.destroy();
+      resolve(null);
+    });
+    socket.on('error', () => resolve(null));
+  });
+}
+
+async function scanNetworkPrinters(port = 9100, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || 450);
+  const concurrency = Number(options.concurrency || 48);
+  const prefixes = localIpv4Subnets().slice(0, 3);
+  const found = new Map();
+
+  for (const prefix of prefixes) {
+    const hosts = [];
+    for (let i = 1; i <= 254; i += 1) {
+      hosts.push(`${prefix}.${i}`);
+    }
+    for (let offset = 0; offset < hosts.length; offset += concurrency) {
+      const batch = hosts.slice(offset, offset + concurrency);
+      const results = await Promise.all(
+        batch.map((host) => probeNetworkHost(host, port, timeoutMs)),
+      );
+      for (const hit of results) {
+        if (hit?.host) found.set(hit.host, hit);
+      }
+    }
+  }
+
+  return [...found.values()].sort((a, b) => {
+    const toNum = (ip) => ip.split('.').reduce((acc, n) => acc * 256 + Number(n), 0);
+    return toNum(a.host) - toNum(b.host);
   });
 }
 
@@ -169,6 +248,28 @@ app.get('/v1/printers', (_req, res) => {
   });
 });
 
+app.get('/v1/network-printers', async (req, res) => {
+  try {
+    const port = Number(req.query.port || 9100) || 9100;
+    const printers = await scanNetworkPrinters(port);
+    return res.json({
+      ok: true,
+      port,
+      subnets: localIpv4Subnets(),
+      printers: printers.map((item) => ({
+        host: item.host,
+        port: item.port,
+        label: `Impresora térmica · ${item.host}`,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'No se pudo buscar impresoras en la red',
+    });
+  }
+});
+
 app.post('/v1/print', async (req, res) => {
   try {
     const { connection, data } = req.body || {};
@@ -187,6 +288,14 @@ app.post('/v1/print', async (req, res) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`[Vertial Print] Escuchando en http://${HOST}:${PORT}`);
+  console.log(`[Vertial Print v${VERSION}] Activo en el puerto ${PORT}`);
+  const localIps = listLocalIpv4Addresses();
+  if (localIps.length) {
+    for (const ip of localIps) {
+      console.log(`  → http://${ip}:${PORT}`);
+    }
+  } else {
+    console.log(`  → http://127.0.0.1:${PORT}`);
+  }
   console.log('[Vertial Print] Deja esta ventana abierta mientras uses el TPV.');
 });

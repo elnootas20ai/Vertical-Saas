@@ -7,7 +7,8 @@ import {
   getAddonMonthlyPriceEur,
   PLAN_ADDON_ANNUAL_DISCOUNT,
 } from './planAddonCatalog';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
+import { VERTIAL_PLANS, type VertialPlanId, type VertialPlanDefinition } from './planCatalog';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType, isStrictDeliveryBusinessType } from './deliveryOpsTypes';
 import {
   emptyRestaurantNeedsForFormat,
   type RestaurantFormat,
@@ -35,6 +36,7 @@ export interface OnboardingPlanDefinition {
   maxBusinesses: number;
   maxCommercialBrands: number;
   features: string[];
+  launchOffer?: VertialPlanDefinition['launchOffer'];
 }
 
 export interface NeedsOptionDefinition {
@@ -50,59 +52,18 @@ function addonUnitMonthlyPrice(baseEur: number, billingMode: 'monthly' | 'annual
   return Math.round(baseEur * (1 - PLAN_ADDON_ANNUAL_DISCOUNT));
 }
 
-const DEFAULT_PLANS: OnboardingPlanDefinition[] = [
-  {
-    id: 'basic',
-    name: 'BASIC',
-    priceMonthly: 49,
-    priceAnnual: 39,
-    maxUsers: 2,
-    maxLocations: 1,
-    maxBusinesses: 1,
-    maxCommercialBrands: 0,
-    features: [
-      '1 empresa · 1 PDV',
-      'Marca principal incluida (General)',
-      'Hasta 2 trabajadores',
-      'Stock y operaciones',
-      'CRM básico',
-    ],
-  },
-  {
-    id: 'normal',
-    name: 'NORMAL',
-    priceMonthly: 149,
-    priceAnnual: 119,
-    maxUsers: 5,
-    maxLocations: 1,
-    maxBusinesses: 1,
-    maxCommercialBrands: 0,
-    features: [
-      '1 empresa · 1 PDV',
-      'Marca principal incluida (General)',
-      'Hasta 5 trabajadores',
-      'Firma digital',
-      'KPIs avanzados',
-    ],
-  },
-  {
-    id: 'pro',
-    name: 'PRO',
-    priceMonthly: 349,
-    priceAnnual: 279,
-    maxUsers: 12,
-    maxLocations: 2,
-    maxBusinesses: 3,
-    maxCommercialBrands: 1,
-    features: [
-      'Hasta 3 empresas · 2 PDV',
-      '1 marca extra (p. ej. Pizzería)',
-      'Hasta 12 trabajadores',
-      'API y webhooks',
-      'Soporte prioritario',
-    ],
-  },
-];
+const DEFAULT_PLANS: OnboardingPlanDefinition[] = VERTIAL_PLANS.map((p) => ({
+  id: p.id,
+  name: p.name,
+  priceMonthly: p.priceMonthly,
+  priceAnnual: p.priceAnnualMonthly,
+  maxUsers: p.maxUsers,
+  maxLocations: p.maxLocations,
+  maxBusinesses: p.maxBusinesses,
+  maxCommercialBrands: p.maxCommercialBrands,
+  features: p.features,
+  launchOffer: p.launchOffer,
+}));
 
 /** Cartas del paso 4 solo para vertical delivery (8 opciones → 6 claves de módulo). */
 export type DeliveryNeedKey =
@@ -193,7 +154,6 @@ export function modulesToDeliveryNeeds(modules: Partial<RequestedModules>): Deli
     clients: !!modules.crm,
     team: !!modules.crm,
     invoicing: !!modules.documentation,
-    analytics: !!modules.analytics,
     reports: !!modules.analytics,
   };
 }

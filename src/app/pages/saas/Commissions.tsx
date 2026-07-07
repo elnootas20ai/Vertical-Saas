@@ -240,8 +240,6 @@ function RuleModal({
                 <AddButtonDropdown
                 label="Nueva comisión"
                 onQuickAdd={addTier}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de comisión"
               />
@@ -993,37 +991,7 @@ function CommissionsContent() {
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [agentDetailTab, setAgentDetailTab] = useState<AgentDetailTab>('detalle');
   const [progressVersion, setProgressVersion] = useState(0);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'agent', label: 'Agente' },
-    { key: 'amount', label: 'Importe' },
-    { key: 'sale', label: 'Venta' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'status', label: 'Estado' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'agent', label: 'Agente', example: '' },
-    { key: 'amount', label: 'Importe', example: '' },
-    { key: 'sale', label: 'Venta', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'status', label: 'Estado', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} comisión(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} comisión(s) importado(s)`);
-  };
-
-
-  const progressItems = useMemo(
+    const progressItems = useMemo(
     () => (userId ? listProgress(userId) : []),
     [userId, progressVersion]
   );
@@ -1689,22 +1657,6 @@ function CommissionsContent() {
           />
         )}
       </div>
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="commissions"
-        moduleLabel="Comisiones"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Comisiones"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

@@ -128,13 +128,13 @@ export function OnboardingTour({ onComplete }: Props) {
       return;
     }
 
-    if (checklistComplete && !showLockRef.current) {
-      markOnboardingTourCompleted(accountUserId, businessId);
-      setOnboardingTourActive(accountUserId, businessId, false);
+    if (checklistComplete) {
+      if (accountUserId && businessId) {
+        markOnboardingTourCompleted(accountUserId, businessId);
+        setOnboardingTourActive(accountUserId, businessId, false);
+      }
+      showLockRef.current = false;
       setTourGate('hide');
-      return;
-    }
-    if (checklistComplete && showLockRef.current) {
       return;
     }
 
@@ -159,6 +159,15 @@ export function OnboardingTour({ onComplete }: Props) {
     const savedStepIndex = resolveOnboardingTourStepIndex(steps, accountUserId, businessId);
 
     const openTour = () => {
+      if (checklistComplete) {
+        if (accountUserId && businessId) {
+          markOnboardingTourCompleted(accountUserId, businessId);
+          setOnboardingTourActive(accountUserId, businessId, false);
+        }
+        showLockRef.current = false;
+        setTourGate('hide');
+        return;
+      }
       if (isOnboardingTourCompleted(accountUserId, businessId)) {
         if (!showLockRef.current) {
           setOnboardingTourActive(accountUserId, businessId, false);

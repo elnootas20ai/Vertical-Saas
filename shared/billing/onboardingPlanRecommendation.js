@@ -45,7 +45,7 @@ export function minimumOnboardingPlanId(params = {}) {
       : modulesFromDeliveryNeeds(params.deliveryNeeds || {});
   const moduleCount = countEnabledModules(modules);
   const deliveryCount =
-    businessType === 'delivery'
+    businessType === 'delivery' || businessType === 'restaurant'
       ? countDeliveryNeeds(params.deliveryNeeds || {})
       : 0;
 

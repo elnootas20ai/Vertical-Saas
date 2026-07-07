@@ -15,8 +15,6 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
-import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
-import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -563,33 +561,6 @@ export function EventsWorkstationPage({ salesPoint, onBack }: EventsWorkstationP
   const [chatLoading, setChatLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'tasks' | 'chat'>('tasks');
   const [searchEvents, setSearchEvents] = useState('');
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'venue', label: 'Local' },
-    { key: 'type', label: 'Tipo' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'venue', label: 'Local', example: '' },
-    { key: 'type', label: 'Tipo', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} evento(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} evento(s) importado(s)`);
-  };
-
 
   const selectedEvent = events.find(e => e.id === selectedEventId) ?? null;
 
@@ -765,8 +736,6 @@ export function EventsWorkstationPage({ salesPoint, onBack }: EventsWorkstationP
                 <AddButtonDropdown
                 label="Nuevo evento"
                 onQuickAdd={() => setShowNewEvent(true)}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de evento"
               />
@@ -961,21 +930,7 @@ export function EventsWorkstationPage({ salesPoint, onBack }: EventsWorkstationP
         <NewTaskModal eventId={selectedEvent.id} eventName={selectedEvent.nombre} onSave={handleAddTask} onClose={() => setShowNewTask(false)} />
       )}
     
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="events_workstation"
-        moduleLabel="Eventos"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Eventos"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
+      {/* IA/Import ocultos: datos locales en memoria */}
     </div>
   );
 }

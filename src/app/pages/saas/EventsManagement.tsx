@@ -1,7 +1,14 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
+import { normalizeEventStage, normalizeEventType, loadEvents } from '../../lib/eventsFlow';
+import {
+  EVENT_STAGE_CONFIG,
+  EVENT_TYPE_LABELS,
+  type EventContractStage,
+} from '../../lib/eventsTypes';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   Search, Plus, X, Edit3, Trash2, CalendarDays, MapPin,
@@ -12,43 +19,50 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
-
-type EventType = 'boda' | 'corporativo' | 'cumpleaños' | 'conferencia' | 'feria' | 'gala';
-type EventStatus = 'planificacion' | 'confirmado' | 'en_curso' | 'finalizado' | 'cancelado';
+import { bulkCreateVerticalEntries, entryNum, entryStr } from '../../lib/bulkVerticalImport';
 
 interface Event extends VerticalEntity {
   nombre: string;
-  tipo: EventType;
+  tipo: string;
   fecha: string;
   lugar: string;
   cliente: string;
   invitados: number;
   presupuesto: number;
-  estado: EventStatus;
+  estado: string;
 }
 
 type EventForm = Omit<Event, keyof VerticalEntity>;
 
-const TYPE_LABELS: Record<EventType, { label: string; bg: string; text: string }> = {
-  boda:         { label: 'Boda',         bg: 'bg-pink-100 dark:bg-pink-900/40',    text: 'text-pink-700 dark:text-pink-300' },
-  corporativo:  { label: 'Corporativo',  bg: 'bg-blue-100 dark:bg-blue-900/40',    text: 'text-blue-700 dark:text-blue-300' },
-  'cumpleaños': { label: 'Cumpleaños',   bg: 'bg-amber-100 dark:bg-amber-900/40',  text: 'text-amber-700 dark:text-amber-300' },
-  conferencia:  { label: 'Conferencia',  bg: 'bg-indigo-100 dark:bg-indigo-900/40', text: 'text-indigo-700 dark:text-indigo-300' },
-  feria:        { label: 'Feria',        bg: 'bg-teal-100 dark:bg-teal-900/40',    text: 'text-teal-700 dark:text-teal-300' },
-  gala:         { label: 'Gala',         bg: 'bg-purple-100 dark:bg-purple-900/40', text: 'text-purple-700 dark:text-purple-300' },
-};
+function stageBadge(estado: string) {
+  const normalized = normalizeEventStage(estado);
+  const cfg = EVENT_STAGE_CONFIG[normalized];
+  const legacyConfirm = estado === 'confirmado'
+    ? { label: 'Confirmado', bg: 'bg-emerald-50 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-300' }
+    : null;
+  return cfg || legacyConfirm || EVENT_STAGE_CONFIG.presupuesto;
+}
 
-const STATUS_CONFIG: Record<EventStatus, { label: string; bg: string; text: string; icon: React.ReactNode }> = {
-  planificacion: { label: 'Planificación', bg: 'bg-slate-100 dark:bg-slate-800',       text: 'text-slate-700 dark:text-slate-300', icon: <Clock className="w-3.5 h-3.5" /> },
-  confirmado:    { label: 'Confirmado',    bg: 'bg-emerald-50 dark:bg-emerald-900/30', text: 'text-emerald-700 dark:text-emerald-300', icon: <CheckCircle className="w-3.5 h-3.5" /> },
-  en_curso:      { label: 'En curso',      bg: 'bg-blue-50 dark:bg-blue-900/30',       text: 'text-blue-700 dark:text-blue-300', icon: <AlertCircle className="w-3.5 h-3.5" /> },
-  finalizado:    { label: 'Finalizado',    bg: 'bg-gray-100 dark:bg-gray-700/50',      text: 'text-gray-600 dark:text-gray-400', icon: <CheckCircle className="w-3.5 h-3.5" /> },
-  cancelado:     { label: 'Cancelado',     bg: 'bg-red-50 dark:bg-red-900/30',         text: 'text-red-700 dark:text-red-300', icon: <Ban className="w-3.5 h-3.5" /> },
-};
+function typeBadge(tipo: string) {
+  const normalized = normalizeEventType(tipo === 'cumpleaños' ? 'cumpleanos' : tipo);
+  const label = EVENT_TYPE_LABELS[normalized] || tipo || 'Otro';
+  const presets: Record<string, { bg: string; text: string }> = {
+    boda: { bg: 'bg-pink-100 dark:bg-pink-900/40', text: 'text-pink-700 dark:text-pink-300' },
+    corporativo: { bg: 'bg-blue-100 dark:bg-blue-900/40', text: 'text-blue-700 dark:text-blue-300' },
+    cumpleanos: { bg: 'bg-amber-100 dark:bg-amber-900/40', text: 'text-amber-700 dark:text-amber-300' },
+    conferencia: { bg: 'bg-indigo-100 dark:bg-indigo-900/40', text: 'text-indigo-700 dark:text-indigo-300' },
+    feria: { bg: 'bg-teal-100 dark:bg-teal-900/40', text: 'text-teal-700 dark:text-teal-300' },
+    gala: { bg: 'bg-purple-100 dark:bg-purple-900/40', text: 'text-purple-700 dark:text-purple-300' },
+    otro: { bg: 'bg-gray-100 dark:bg-gray-800', text: 'text-gray-700 dark:text-gray-300' },
+  };
+  const style = presets[normalized] || presets.otro;
+  return { label, ...style };
+}
 
 const EMPTY_FORM: EventForm = { nombre: '', tipo: 'boda', fecha: '', lugar: '', cliente: '', invitados: 0, presupuesto: 0, estado: 'planificacion' };
 
 export function EventsManagement() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const api = useMemo(() => createVerticalApi<Event>('events', 'events'), []);
   const userId = user?.user_id || user?.id || '';
@@ -56,8 +70,8 @@ export function EventsManagement() {
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState<EventStatus | ''>('');
-  const [filterType, setFilterType] = useState<EventType | ''>('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterType, setFilterType] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Event | null>(null);
   const [form, setForm] = useState<EventForm>(EMPTY_FORM);
@@ -71,7 +85,7 @@ export function EventsManagement() {
     }
     setLoading(true);
     try {
-      const list = await api.list(userId);
+      const list = await loadEvents(userId);
       setEvents(list);
     } finally {
       setLoading(false);
@@ -100,13 +114,35 @@ export function EventsManagement() {
     { key: 'budget', label: 'Presupuesto', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} evento(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const nombre = entryStr(e, 'name', 'nombre');
+      if (!nombre) return null;
+      return {
+        nombre,
+        fecha: entryStr(e, 'date', 'fecha') || new Date().toISOString().slice(0, 10),
+        lugar: entryStr(e, 'venue', 'lugar'),
+        cliente: entryStr(e, 'client', 'cliente'),
+        invitados: entryNum(e, 'capacity', 'invitados', 'guests'),
+        tipo: entryStr(e, 'type', 'tipo') || 'otro',
+        presupuesto: entryNum(e, 'budget', 'presupuesto', 'price'),
+        estado: entryStr(e, 'status', 'estado') || 'planificacion',
+      };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} evento(s) creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún evento');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} evento(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -118,11 +154,18 @@ export function EventsManagement() {
   }), [events, search, filterStatus, filterType]);
 
   const stats = useMemo(() => {
-    const activos = events.filter(e => ['planificacion', 'confirmado', 'en_curso'].includes(e.estado)).length;
-    const futureEvents = events.filter(e => e.estado !== 'finalizado' && e.estado !== 'cancelado').sort((a, b) => a.fecha.localeCompare(b.fecha));
-    const proximo = futureEvents[0]?.fecha || '—';
-    const ingresosmes = events.filter(e => e.fecha.startsWith('2026-04')).reduce((s, e) => s + e.presupuesto, 0);
-    const eventosAnio = events.length;
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const yearPrefix = String(now.getFullYear());
+    const activeStages = ['presupuesto', 'enviado', 'aceptado', 'contratado', 'planificacion', 'en_curso', 'confirmado'];
+    const revenueStages = ['contratado', 'planificacion', 'en_curso', 'finalizado', 'confirmado', 'aceptado', 'enviado'];
+    const activos = events.filter((e) => activeStages.includes(e.estado) || e.estado === 'confirmado').length;
+    const futureEvents = events.filter((e) => e.estado !== 'finalizado' && e.estado !== 'cancelado').sort((a, b) => a.fecha.localeCompare(b.fecha));
+    const proximo = futureEvents[0]?.fecha ? new Date(futureEvents[0].fecha).toLocaleDateString('es-ES') : '—';
+    const ingresosmes = events
+      .filter((e) => e.fecha?.startsWith(monthPrefix) && revenueStages.includes(normalizeEventStage(e.estado)))
+      .reduce((s, e) => s + (Number(e.presupuesto) || 0), 0);
+    const eventosAnio = events.filter((e) => e.fecha?.startsWith(yearPrefix)).length;
     return { activos, proximo, ingresosmes, eventosAnio };
   }, [events]);
 
@@ -199,11 +242,12 @@ export function EventsManagement() {
           <div className="flex gap-2 items-center flex-wrap">
             <select value={filterType} onChange={e => setFilterType(e.target.value as any)} disabled={loading} className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300">
               <option value="">Todos los tipos</option>
-              {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              {Object.entries(EVENT_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)} disabled={loading} className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300">
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} disabled={loading} className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300">
               <option value="">Todos los estados</option>
-              {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              {Object.entries(EVENT_STAGE_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              <option value="confirmado">Confirmado (legacy)</option>
             </select>
             <AddButtonDropdown
                 label="Nuevo Evento"
@@ -242,10 +286,14 @@ export function EventsManagement() {
                   </td>
                 </tr>
               ) : filtered.map(e => {
-                const st = STATUS_CONFIG[e.estado];
-                const tp = TYPE_LABELS[e.tipo];
+                const st = stageBadge(e.estado);
+                const tp = typeBadge(e.tipo);
                 return (
-                  <tr key={e._id} className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                  <tr
+                    key={e._id}
+                    className="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors cursor-pointer"
+                    onClick={() => navigate(`/saas/vertical/eventos/${e._id}`)}
+                  >
                     <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">{e.nombre}</td>
                     <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${tp.bg} ${tp.text}`}>{tp.label}</span></td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300"><span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{e.fecha}</span></td>
@@ -253,8 +301,8 @@ export function EventsManagement() {
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300 hidden md:table-cell">{e.cliente}</td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300 hidden lg:table-cell"><span className="flex items-center gap-1"><Users className="w-3 h-3" />{e.invitados}</span></td>
                     <td className="px-4 py-3 text-gray-600 dark:text-gray-300"><span className="flex items-center gap-1"><DollarSign className="w-3 h-3" />{fmt(e.presupuesto)}</span></td>
-                    <td className="px-4 py-3"><span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${st.bg} ${st.text}`}>{st.icon}{st.label}</span></td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3"><span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${st.bg} ${st.text}`}>{st.label}</span></td>
+                    <td className="px-4 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
                       <div className="flex justify-end gap-1">
                         <button onClick={() => openEdit(e)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400 transition-colors"><Edit3 className="w-4 h-4" /></button>
                         <button onClick={() => void handleDelete(e._id)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-500 hover:text-red-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
@@ -286,8 +334,8 @@ export function EventsManagement() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tipo</label>
-                  <select value={form.tipo} onChange={e => setForm(p => ({ ...p, tipo: e.target.value as EventType }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                    {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  <select value={form.tipo} onChange={e => setForm(p => ({ ...p, tipo: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                    {Object.entries(EVENT_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
                 <div>
@@ -317,8 +365,8 @@ export function EventsManagement() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Estado</label>
-                <select value={form.estado} onChange={e => setForm(p => ({ ...p, estado: e.target.value as EventStatus }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                  {Object.entries(STATUS_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                <select value={form.estado} onChange={e => setForm(p => ({ ...p, estado: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                  {Object.entries(EVENT_STAGE_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
             </div>

@@ -267,8 +267,6 @@ export function ClientBillingPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
 
   useNotificationOpen(
     useCallback((entityId: string) => {
@@ -277,32 +275,7 @@ export function ClientBillingPage() {
     }, [invoices]),
     !loading,
   );
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'client', label: 'Cliente' },
-    { key: 'amount', label: 'Importe' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'concept', label: 'Concepto' },
-    { key: 'dueDate', label: 'Vencimiento' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'client', label: 'Cliente', example: '' },
-    { key: 'amount', label: 'Importe', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'concept', label: 'Concepto', example: '' },
-    { key: 'dueDate', label: 'Vencimiento', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} factura(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} factura(s) importado(s)`);
-  };
-
-  const loadData = useCallback(async () => {
+    const loadData = useCallback(async () => {
     if (!financeUserId) return; setLoading(true);
     try {
       const [invs, cls] = await Promise.all([
@@ -373,8 +346,6 @@ export function ClientBillingPage() {
               <AddButtonDropdown
                 label="Nueva factura"
                 onQuickAdd={() => { setModalMode('create'); setEditInv(null); }}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de factura"
               />
@@ -427,22 +398,6 @@ export function ClientBillingPage() {
       </div>
       {modalMode && <InvoiceModal mode={modalMode} invoice={editInv} clients={clients} onSave={handleSave} onClose={() => { setModalMode(null); setEditInv(null); }} userId={financeUserId} />}
       {payInv && <PaymentModal invoice={payInv} onClose={() => setPayInv(null)} onSave={handlePay} />}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="client_billing"
-        moduleLabel="Facturación"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Facturación"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

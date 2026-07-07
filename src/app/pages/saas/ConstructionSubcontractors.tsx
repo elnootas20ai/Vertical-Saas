@@ -15,6 +15,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 const GREMIO_COLORS = [
   'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
@@ -80,13 +81,29 @@ export function ConstructionSubcontractors() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} subcontratista(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createConstructionGuild(uid, data as Partial<ConstructionGuild>),
+    }, entries, (entry) => ({
+      nombre: entryStr(entry, 'name', 'nombre'),
+      telefono: entryStr(entry, 'phone', 'telefono'),
+      email: entryStr(entry, 'email'),
+      tipo: 'subcontratista',
+    }));
+    if (created > 0) {
+      toast.success(`${created} subcontratista(s) creado(s)`);
+      void load();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} subcontratista(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const guildLabels = config?.guildLabels || {};
   const guildTypes = config?.guilds || [];

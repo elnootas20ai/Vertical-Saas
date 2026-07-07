@@ -39,15 +39,13 @@ import { Locations } from './pages/saas/Locations';
 import { LocationZone } from './pages/saas/LocationZone';
 import { ClientsPage } from './pages/saas/ClientsPage';
 import { ClientDetail } from './pages/saas/ClientDetail';
-import { Pipeline } from './pages/saas/Pipeline';
 import { ClientPortal } from './pages/public/ClientPortal';
 import { DocumentsPage } from './pages/saas/DocumentsPage';
 import { DocumentDetail } from './pages/saas/DocumentDetail';
+import { Pipeline } from './pages/saas/Pipeline';
 import { Sales } from './pages/saas/Sales';
 import { SaleDetail } from './pages/saas/SaleDetail';
 import { SalesMetrics } from './pages/saas/SalesMetrics';
-import { Calls } from './pages/saas/Calls';
-import { CallDetail } from './pages/saas/CallDetail';
 import { Ancove } from './pages/saas/Ancove';
 import { Team } from './pages/saas/Team';
 import { TeamMemberDetail } from './pages/saas/TeamMemberDetail';
@@ -121,7 +119,11 @@ import { RequirePdvTerminal } from './components/saas/RequirePdvTerminal';
 import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
 import { RedirectLegacyDeliveryTpv } from './components/saas/RedirectLegacyDeliveryTpv';
 import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
+import { RequireDeliveryVertical } from './components/saas/RequireDeliveryVertical';
+import { RequireCleaningVertical } from './components/saas/RequireCleaningVertical';
+import { RequireTeamManager } from './components/saas/RequireTeamManager';
 import { RequireWebOrderingVertical } from './components/saas/RequireWebOrderingVertical';
+import { RedirectEventsFromRetailRoutes } from './components/saas/RedirectEventsFromRetailRoutes';
 import { RequireSuperAdmin } from './components/saas/RequireSuperAdmin';
 import { RequireWorkerPermission } from './components/saas/RequireWorkerPermission';
 import { ChangelogPage } from './pages/saas/ChangelogPage';
@@ -138,14 +140,15 @@ import { CleaningServices } from './pages/saas/CleaningServices';
 import { CleaningRoutes } from './pages/saas/CleaningRoutes';
 import { CleaningExecution } from './pages/saas/CleaningExecution';
 import { ServiceContractsPage } from './pages/saas/ServiceContractsPage';
-// CleaningClientsPage removed (duplicate of ClientsPage)
+// Cleaning vertical pages (dedicated CRM/billing/stock for limpieza)
+import { CleaningClientsPage } from './pages/saas/CleaningClientsPage';
+import { CleaningBilling } from './pages/saas/CleaningBilling';
+import { CleaningMaterialsPage } from './pages/saas/CleaningMaterialsPage';
+import { CleaningReports } from './pages/saas/CleaningReports';
 import { CleaningChecklist } from './pages/saas/CleaningChecklist';
 import { CleaningQuality } from './pages/saas/CleaningQuality';
 import { CleaningReviews } from './pages/saas/CleaningReviews';
-// CleaningBilling removed (duplicate of ClientBillingPage)
 import { CleaningIncidents } from './pages/saas/CleaningIncidents';
-// CleaningMaterialsPage removed (duplicate of ComprasStockPage)
-// CleaningReports removed (duplicate of Reports)
 import { WorkerMaterials } from './pages/saas/worker/WorkerMaterials';
 import { Chat } from './pages/saas/Chat';
 import { SupplierBillingPage } from './pages/saas/SupplierBillingPage';
@@ -174,6 +177,9 @@ import { GymClasses } from './pages/saas/GymClasses';
 import { GymMemberships } from './pages/saas/GymMemberships';
 import { GymRoutines } from './pages/saas/GymRoutines';
 import { GymAccess } from './pages/saas/GymAccess';
+import { GymMembers } from './pages/saas/GymMembers';
+import { GymTrainers } from './pages/saas/GymTrainers';
+import { GymDashboard } from './pages/saas/dashboards/GymDashboard';
 
 // ── Clinic ──
 import { ClinicHistory } from './pages/saas/ClinicHistory';
@@ -232,9 +238,16 @@ import { NightclubGuestlist } from './pages/saas/NightclubGuestlist';
 import { NightclubArtists } from './pages/saas/NightclubArtists';
 
 // ── Events ──
-import { EventsManagement } from './pages/saas/EventsManagement';
 import { EventsCatering } from './pages/saas/EventsCatering';
 import { EventsLogistics } from './pages/saas/EventsLogistics';
+import { EventsVenues } from './pages/saas/EventsVenues';
+import { EventsVendors } from './pages/saas/EventsVendors';
+import { EventsGuests } from './pages/saas/EventsGuests';
+import { EventsServices } from './pages/saas/EventsServices';
+import { EventsHub } from './pages/saas/vertical/eventos/EventsHub';
+import { EventsContractWizardPage } from './pages/saas/vertical/eventos/EventsContractWizardPage';
+import { EventsPipelinePage } from './pages/saas/vertical/eventos/EventsPipelinePage';
+import { EventsProjectPage } from './pages/saas/vertical/eventos/EventsProjectPage';
 
 // ── Hair Salon ──
 import { SalonServices } from './pages/saas/SalonServices';
@@ -293,6 +306,7 @@ import { CompraventaComprasPage } from './pages/saas/vertical/compraventa/Compra
 import { CompraventaVentasPage } from './pages/saas/vertical/compraventa/CompraventaVentasPage';
 import { CompraventaTasacionesPage } from './pages/saas/vertical/compraventa/CompraventaTasacionesPage';
 import { CompraventaEntregasPage } from './pages/saas/vertical/compraventa/CompraventaEntregasPage';
+import { CompraventaFiscalCalculatorPage } from './pages/saas/vertical/compraventa/CompraventaFiscalCalculatorPage';
 import { PreparationExpenses } from './pages/saas/PreparationExpenses';
 import { ButcherWorkerOrders } from './pages/saas/ButcherWorkerOrders';
 
@@ -318,6 +332,7 @@ import {
   WorkerTpvDeliveryRoute,
   WorkerConstructionReport,
   WorkerStockReviewPage,
+  WorkerEventsOps,
 } from './pages/saas/worker';
 import { UserDashboard } from './pages/saas/UserDashboard';
 import { AuthRouteLoading } from './components/AuthRouteLoading';
@@ -540,11 +555,10 @@ export const router = createBrowserRouter([
           { path: 'sales/:id', element: <RequireWorkerPermission permission="sales"><SaleDetail /></RequireWorkerPermission> },
           { path: 'sales-metrics', element: <RequireBusinessOwner><SalesMetrics /></RequireBusinessOwner> },
           { path: 'reservations', element: <RequireWorkerPermission permission="reservations"><RestaurantReservationsRouteEntry /></RequireWorkerPermission> },
-          { path: 'calls', element: <RequireBusinessOwner><Calls /></RequireBusinessOwner> },
-          { path: 'calls/:id', element: <RequireBusinessOwner><CallDetail /></RequireBusinessOwner> },
+          { path: 'reservas', element: <Navigate to="/saas/reservations" replace /> },
           { path: 'ancove', element: <RequireWorkerPermission permission="ancove"><Ancove /></RequireWorkerPermission> },
-          { path: 'team', element: <RequireBusinessOwner><Team /></RequireBusinessOwner> },
-          { path: 'team/:userId', element: <RequireBusinessOwner><TeamMemberDetail /></RequireBusinessOwner> },
+          { path: 'team', element: <RequireTeamManager><Team /></RequireTeamManager> },
+          { path: 'team/:userId', element: <RequireTeamManager><TeamMemberDetail /></RequireTeamManager> },
           { path: 'invitations', Component: Invitations },
           { path: 'equipo', element: <Navigate to="/saas/team" replace /> },
           { path: 'equipo/:userId', Component: EquipoRedirect },
@@ -559,27 +573,27 @@ export const router = createBrowserRouter([
           { path: 'sales-points', element: <Navigate to="/saas/settings/tienda" replace /> },
           { path: 'work-centers', element: <Navigate to="/saas/settings/tienda" replace /> },
           { path: 'groups', Component: Groups },
-          { path: 'workshop', element: <RequireWorkerPermission permission={['vehicles', 'fleet']}><Workshop /></RequireWorkerPermission> },
-          { path: 'workshop/:id', element: <RequireWorkerPermission permission={['vehicles', 'fleet']}><WorkOrderDetail /></RequireWorkerPermission> },
-          { path: 'parts', element: <RequireWorkerPermission permission={['vehicles', 'fleet']}><Parts /></RequireWorkerPermission> },
-          { path: 'tech', element: <RequireWorkerPermission permission={['vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
+          { path: 'workshop', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><Workshop /></RequireWorkerPermission> },
+          { path: 'workshop/:id', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><WorkOrderDetail /></RequireWorkerPermission> },
+          { path: 'parts', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><Parts /></RequireWorkerPermission> },
+          { path: 'tech', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
           { path: 'payroll', element: <RequireBusinessOwner><PayrollPage /></RequireBusinessOwner> },
           { path: 'sala/setup', Component: SalaPage },
           { path: 'sala', Component: SalaPage },
           { path: 'lista-espera', Component: RestaurantWaitlistPage },
-          { path: 'tpv/locales', element: <RequireBusinessOwner><TpvQuickBridgePage /></RequireBusinessOwner> },
-          { path: 'tpv', element: <RequireBusinessOwner><TpvQuickBridgePage /></RequireBusinessOwner> },
+          { path: 'tpv/locales', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
+          { path: 'tpv', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },
-          { path: 'tpv/punto/:salesPointId', Component: SalesPointTpvPage },
+          { path: 'tpv/punto/:salesPointId', element: <RedirectEventsFromRetailRoutes><SalesPointTpvPage /></RedirectEventsFromRetailRoutes> },
           { path: 'clock-kiosk', Component: ClockKiosk },
           { path: 'income-expenses', element: <RequireBusinessOwner><IncomeExpensesPage /></RequireBusinessOwner> },
           { path: 'ebitda', element: <RequireBusinessOwner><EbitdaPage /></RequireBusinessOwner> },
           { path: 'taxes', element: <RequireBusinessOwner><TaxesPage /></RequireBusinessOwner> },
           { path: 'bank-reconciliation', element: <RequireBusinessOwner><BankReconciliationPage /></RequireBusinessOwner> },
-          { path: 'catalog', Component: VerticalCatalogEntry },
+          { path: 'catalog', element: <RedirectEventsFromRetailRoutes><VerticalCatalogEntry /></RedirectEventsFromRetailRoutes> },
           { path: 'inventory', element: <RequireBusinessOwner><InventoryPage /></RequireBusinessOwner> },
-          { path: 'articles', Component: VerticalArticlesRedirect },
+          { path: 'articles', element: <RedirectEventsFromRetailRoutes><VerticalArticlesRedirect /></RedirectEventsFromRetailRoutes> },
           { path: 'suppliers', element: <RequireBusinessOwner><Outlet /></RequireBusinessOwner>, children: [
             {
               element: <SuppliersLayout />,
@@ -598,21 +612,21 @@ export const router = createBrowserRouter([
           { path: 'finanzas/facturacion-clientes', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'client-billing', element: <RequireBusinessOwner><ClientBillingPage /></RequireBusinessOwner> },
           { path: 'costing', element: <Navigate to="/saas/catalog?tab=escandallo" replace /> },
-          { path: 'delivery', element: <RequireBusinessOwner><RedirectLegacyDelivery /></RequireBusinessOwner> },
-          { path: 'delivery-ops', element: <RequireBusinessOwner><DeliveryOpsCenter /></RequireBusinessOwner> },
-          { path: 'vertical/delivery/pedidos', element: <Navigate to="/saas/delivery-ops" replace /> },
-          { path: 'vertical/delivery', element: <Navigate to="/saas/delivery-ops" replace /> },
-          { path: 'delivery-reparto', element: <RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission> },
-          { path: 'vertical/delivery/reparto', element: <RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission> },
-          { path: 'delivery-kitchen', element: <RequireWorkerPermission permission="delivery"><DeliveryKitchen /></RequireWorkerPermission> },
-          { path: 'delivery-montaje', element: <RequireWorkerPermission permission="delivery"><DeliveryMontaje /></RequireWorkerPermission> },
+          { path: 'delivery', element: <RequireBusinessOwner><RequireDeliveryVertical><RedirectLegacyDelivery /></RequireDeliveryVertical></RequireBusinessOwner> },
+          { path: 'delivery-ops', element: <RequireBusinessOwner><RequireDeliveryVertical><DeliveryOpsCenter /></RequireDeliveryVertical></RequireBusinessOwner> },
+          { path: 'vertical/delivery/pedidos', element: <RequireDeliveryVertical><Navigate to="/saas/delivery-ops" replace /></RequireDeliveryVertical> },
+          { path: 'vertical/delivery', element: <RequireDeliveryVertical><Navigate to="/saas/delivery-ops" replace /></RequireDeliveryVertical> },
+          { path: 'delivery-reparto', element: <RequireDeliveryVertical><RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission></RequireDeliveryVertical> },
+          { path: 'vertical/delivery/reparto', element: <RequireDeliveryVertical><RequireWorkerPermission permission="delivery"><DeliveryReparto /></RequireWorkerPermission></RequireDeliveryVertical> },
+          { path: 'delivery-kitchen', element: <RequireDeliveryVertical><RequireWorkerPermission permission="delivery"><DeliveryKitchen /></RequireWorkerPermission></RequireDeliveryVertical> },
+          { path: 'delivery-montaje', element: <RequireDeliveryVertical><RequireWorkerPermission permission="delivery"><DeliveryMontaje /></RequireWorkerPermission></RequireDeliveryVertical> },
           { path: 'delivery-catalog', element: <Navigate to="/saas/catalog" replace /> },
-          { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RequireBusinessOwner> },
-          { path: 'caja', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRouteShell><RestaurantCajaRouteEntry /></TpvRouteShell></RequirePdvTerminal></RequireBusinessOwner> },
-          { path: 'caja/tpv', element: <RequireBusinessOwner><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RequireBusinessOwner> },
-          { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireBusinessOwner> },
-          { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><RequireWebOrderingVertical><DeliveryIntegrations /></RequireWebOrderingVertical></RequireBusinessOwner> },
-          { path: 'vertical/delivery/informes', element: <RequireBusinessOwner><DeliveryReports /></RequireBusinessOwner> },
+          { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequireDeliveryVertical><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RequireDeliveryVertical></RequireBusinessOwner> },
+          { path: 'caja', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><RequirePdvTerminal><TpvRouteShell><RestaurantCajaRouteEntry /></TpvRouteShell></RequirePdvTerminal></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
+          { path: 'caja/tpv', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
+          { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequireDeliveryVertical><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireDeliveryVertical></RequireBusinessOwner> },
+          { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><RequireDeliveryVertical><RequireWebOrderingVertical><DeliveryIntegrations /></RequireWebOrderingVertical></RequireDeliveryVertical></RequireBusinessOwner> },
+          { path: 'vertical/delivery/informes', element: <RequireBusinessOwner><RequireDeliveryVertical><DeliveryReports /></RequireDeliveryVertical></RequireBusinessOwner> },
           { path: 'delivery-crm', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'delivery-crm/worker', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'configuracion', element: <RequireBusinessOwner><ConfiguracionGeneral /></RequireBusinessOwner> },
@@ -626,27 +640,29 @@ export const router = createBrowserRouter([
           { path: 'help', Component: HelpCenter },
           { path: 'web-config', element: <RequireBusinessOwner><RequireWebOrderingVertical><WebConfig /></RequireWebOrderingVertical></RequireBusinessOwner> },
           { path: 'web-orders', element: <RequireBusinessOwner><RequireWebOrderingVertical><WebOrders /></RequireWebOrderingVertical></RequireBusinessOwner> },
-          { path: 'cleaning-hub', element: <RequireBusinessOwner><CleaningHub /></RequireBusinessOwner> },
-          { path: 'vertical/limpieza/servicios', Component: ServiceContractsPage },
-          { path: 'vertical/limpieza/clientes', element: <Navigate to="/saas/clients" replace /> },
-          { path: 'cleaning-workers', element: <RequireBusinessOwner><CleaningWorkers /></RequireBusinessOwner> },
-          { path: 'cleaning-services', element: <RequireBusinessOwner><CleaningServices /></RequireBusinessOwner> },
-          { path: 'cleaning-routes', element: <RequireBusinessOwner><CleaningRoutes /></RequireBusinessOwner> },
-          { path: 'cleaning-execution', Component: CleaningExecution },
-          { path: 'cleaning-checklist', Component: CleaningChecklist },
-          { path: 'cleaning-quality', element: <RequireBusinessOwner><CleaningQuality /></RequireBusinessOwner> },
-          { path: 'cleaning-reviews', element: <RequireBusinessOwner><CleaningReviews /></RequireBusinessOwner> },
-          { path: 'cleaning-incidents', element: <RequireBusinessOwner><CleaningIncidents /></RequireBusinessOwner> },
-          { path: 'cleaning-billing', element: <Navigate to="/saas/client-billing" replace /> },
-          { path: 'vertical/limpieza/facturacion', element: <Navigate to="/saas/client-billing" replace /> },
-          { path: 'cleaning-materials', element: <Navigate to="/saas/compras-stock" replace /> },
-          { path: 'cleaning-reports', element: <Navigate to="/saas/reports" replace /> },
-          { path: 'vertical/limpieza/informes', element: <Navigate to="/saas/reports" replace /> },
+          { path: 'vertical/limpieza', element: <RequireCleaningVertical><Navigate to="/saas/cleaning-hub" replace /></RequireCleaningVertical> },
+          { path: 'cleaning-hub', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningHub /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'vertical/limpieza/servicios', element: <RequireBusinessOwner><RequireCleaningVertical><ServiceContractsPage /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'vertical/limpieza/clientes', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningClientsPage /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-workers', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningWorkers /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-services', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningServices /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-routes', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningRoutes /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-execution', element: <RequireCleaningVertical><CleaningExecution /></RequireCleaningVertical> },
+          { path: 'cleaning-checklist', element: <RequireCleaningVertical><CleaningChecklist /></RequireCleaningVertical> },
+          { path: 'cleaning-quality', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningQuality /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-reviews', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningReviews /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-incidents', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningIncidents /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-billing', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningBilling /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'vertical/limpieza/facturacion', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningBilling /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-materials', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningMaterialsPage /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'cleaning-reports', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningReports /></RequireCleaningVertical></RequireBusinessOwner> },
+          { path: 'vertical/limpieza/informes', element: <RequireBusinessOwner><RequireCleaningVertical><CleaningReports /></RequireCleaningVertical></RequireBusinessOwner> },
 
           // Gym
-          { path: 'gym-members', element: <Navigate to="/saas/clients" replace /> },
+          { path: 'gym-hub', element: <RequireBusinessOwner><GymDashboard /></RequireBusinessOwner> },
+          { path: 'gym-members', element: <RequireBusinessOwner><GymMembers /></RequireBusinessOwner> },
           { path: 'gym-classes', element: <RequireBusinessOwner><GymClasses /></RequireBusinessOwner> },
-          { path: 'gym-trainers', element: <Navigate to="/saas/team" replace /> },
+          { path: 'gym-trainers', element: <RequireBusinessOwner><GymTrainers /></RequireBusinessOwner> },
           { path: 'gym-memberships', element: <RequireBusinessOwner><GymMemberships /></RequireBusinessOwner> },
           { path: 'gym-routines', element: <RequireBusinessOwner><GymRoutines /></RequireBusinessOwner> },
           { path: 'gym-access', element: <RequireBusinessOwner><GymAccess /></RequireBusinessOwner> },
@@ -726,12 +742,17 @@ export const router = createBrowserRouter([
           { path: 'nightclub-artists', element: <RequireBusinessOwner><NightclubArtists /></RequireBusinessOwner> },
 
           // Events
-          { path: 'events-management', element: <RequireBusinessOwner><EventsManagement /></RequireBusinessOwner> },
-          { path: 'events-vendors', element: <Navigate to="/saas/suppliers" replace /> },
-          { path: 'events-guests', element: <Navigate to="/saas/clients" replace /> },
-          { path: 'events-venues', element: <Navigate to="/saas/locations" replace /> },
-          { path: 'events-catering', element: <RequireBusinessOwner><EventsCatering /></RequireBusinessOwner> },
-          { path: 'events-logistics', element: <RequireBusinessOwner><EventsLogistics /></RequireBusinessOwner> },
+          { path: 'vertical/eventos', element: <RequireWorkerPermission permission="sales"><EventsHub /></RequireWorkerPermission> },
+          { path: 'vertical/eventos/nueva-contratacion', element: <RequireWorkerPermission permission="sales"><EventsContractWizardPage /></RequireWorkerPermission> },
+          { path: 'vertical/eventos/contrataciones', element: <RequireWorkerPermission permission="sales"><EventsPipelinePage /></RequireWorkerPermission> },
+          { path: 'vertical/eventos/:eventId', element: <RequireWorkerPermission permission="sales"><EventsProjectPage /></RequireWorkerPermission> },
+          { path: 'events-management', element: <Navigate to="/saas/vertical/eventos/contrataciones" replace /> },
+          { path: 'events-vendors', element: <RequireWorkerPermission permission="sales"><EventsVendors /></RequireWorkerPermission> },
+          { path: 'events-guests', element: <RequireWorkerPermission permission="sales"><EventsGuests /></RequireWorkerPermission> },
+          { path: 'events-venues', element: <RequireWorkerPermission permission="sales"><EventsVenues /></RequireWorkerPermission> },
+          { path: 'events-services', element: <RequireWorkerPermission permission="sales"><EventsServices /></RequireWorkerPermission> },
+          { path: 'events-catering', element: <RequireWorkerPermission permission="sales"><EventsCatering /></RequireWorkerPermission> },
+          { path: 'events-logistics', element: <RequireWorkerPermission permission="sales"><EventsLogistics /></RequireWorkerPermission> },
 
           // Hair Salon
           { path: 'salon-appointments', element: <Navigate to="/saas/calendar" replace /> },
@@ -839,6 +860,7 @@ export const router = createBrowserRouter([
           { path: 'vertical/compraventa/entrada-vehiculo', element: <RequireWorkerPermission permission="vehicles"><VehicleEntryPage /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/crm', element: <RequireWorkerPermission permission="clients"><CompraventaCrm /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/compras', element: <RequireBusinessOwner><CompraventaComprasPage /></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/calculadora-fiscal', element: <RequireBusinessOwner><CompraventaFiscalCalculatorPage /></RequireBusinessOwner> },
           { path: 'vertical/compraventa/ventas', element: <RequireWorkerPermission permission="sales"><CompraventaVentasPage /></RequireWorkerPermission> },
           { path: 'vertical/compraventa/tasaciones', element: <RequireBusinessOwner><CompraventaTasacionesPage /></RequireBusinessOwner> },
           { path: 'vertical/compraventa/gastos', element: <Navigate to="/saas/vertical/compraventa/gastos-preparacion" replace /> },
@@ -854,6 +876,7 @@ export const router = createBrowserRouter([
           { path: 'saas-flow-map', Component: SAAS__FlowMap },
 
           // Worker mode
+          { path: 'worker/events', Component: WorkerEventsOps },
           { path: 'worker/setup-profile', Component: WorkerIdentitySetup },
           { path: 'worker/complete-payroll', Component: WorkerPayrollSetup },
           { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },
@@ -873,6 +896,7 @@ export const router = createBrowserRouter([
           { path: 'worker/security', Component: WorkerSecurity },
           { path: 'worker/construction-report', Component: WorkerConstructionReport },
           { path: 'worker/butcher-orders', Component: ButcherWorkerOrders },
+          { path: 'worker/materials', element: <RequireCleaningVertical><WorkerMaterials /></RequireCleaningVertical> },
         ],
       },
       {

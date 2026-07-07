@@ -47,8 +47,10 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       hmr: true,
-      host: '0.0.0.0',
+      // En Windows, host 0.0.0.0 solo IPv4: localhost puede resolver a ::1 y no conectar.
+      host: true,
       port: 3015,
+      strictPort: true,
       watch: {
         ignored: [
           '**/.plugin-data/**',

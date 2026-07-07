@@ -27,6 +27,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 
 const MANAGER_ROLES = new Set(['Admin', 'Gerente', 'owner', 'admin', 'manager']);
 
@@ -1111,13 +1112,27 @@ function MaterialModal({ projects, userId, onClose, onSave }: {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} tarea(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createPlanningEntry(uid, data as Partial<ConstructionPlanningEntry>),
+    }, entries, (entry) => ({
+      titulo: entryStr(entry, 'name', 'titulo', 'title'),
+      fecha: entryStr(entry, 'date', 'fecha') || new Date().toISOString().slice(0, 10),
+    }));
+    if (created > 0) {
+      toast.success(`${created} planificación(es) creado(s)`);
+      void load();
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} tarea(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">

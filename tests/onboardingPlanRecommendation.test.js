@@ -141,7 +141,7 @@ describe('onboarding plan recommendation', () => {
       userCount: 3,
       locationCount: 1,
       businessCount: 1,
-      commercialBrandCount: 2,
+      commercialBrandCount: 3,
       modules: baseModules,
     });
     expect(rec.plan.id).toBe('pro');
@@ -156,8 +156,8 @@ describe('onboarding plan recommendation', () => {
       priceAnnual: 279,
       maxUsers: 12,
       maxLocations: 2,
-      maxBusinesses: 3,
-      maxCommercialBrands: 1,
+      maxBusinesses: 2,
+      maxCommercialBrands: 2,
       features: [],
     };
     const pricing = calculateOnboardingPricing({
@@ -171,11 +171,11 @@ describe('onboarding plan recommendation', () => {
     expect(pricing.baseCost).toBe(349);
     expect(pricing.extraPdv).toBe(1);
     expect(pricing.extraPdvCost).toBe(49);
-    expect(pricing.extraBusinesses).toBe(1);
-    expect(pricing.extraBusinessesCost).toBe(89);
-    expect(pricing.extraBrands).toBe(1);
-    expect(pricing.extraBrandsCost).toBe(19);
-    expect(pricing.total).toBe(349 + 49 + 89 + 19);
+    expect(pricing.extraBusinesses).toBe(2);
+    expect(pricing.extraBusinessesCost).toBe(178);
+    expect(pricing.extraBrands).toBe(0);
+    expect(pricing.extraBrandsCost).toBe(0);
+    expect(pricing.total).toBe(349 + 49 + 178);
   });
 
   it('calcula total anual con -20% en plan y ampliaciones', () => {
@@ -186,8 +186,8 @@ describe('onboarding plan recommendation', () => {
       priceAnnual: 279,
       maxUsers: 12,
       maxLocations: 2,
-      maxBusinesses: 3,
-      maxCommercialBrands: 1,
+      maxBusinesses: 2,
+      maxCommercialBrands: 2,
       features: [],
     };
     const pricing = calculateOnboardingPricing({
@@ -201,10 +201,10 @@ describe('onboarding plan recommendation', () => {
     expect(pricing.baseCost).toBe(279);
     expect(pricing.extraPdv).toBe(2);
     expect(pricing.extraPdvCost).toBe(78);
-    expect(pricing.extraBusinesses).toBe(1);
-    expect(pricing.extraBusinessesCost).toBe(71);
-    expect(pricing.extraBrands).toBe(3);
-    expect(pricing.extraBrandsCost).toBe(45);
-    expect(pricing.total).toBe(473);
+    expect(pricing.extraBusinesses).toBe(2);
+    expect(pricing.extraBusinessesCost).toBe(142);
+    expect(pricing.extraBrands).toBe(2);
+    expect(pricing.extraBrandsCost).toBe(30);
+    expect(pricing.total).toBe(529);
   });
 });

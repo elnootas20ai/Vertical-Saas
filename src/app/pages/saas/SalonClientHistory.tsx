@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -85,13 +86,36 @@ export function SalonClientHistory() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} registro(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const cliente = entryStr(e, 'cliente', 'client');
+    if (!cliente) return null;
+    return {
+      cliente,
+      fechaVisita: entryStr(e, 'fechaVisita') || '',
+      servicio: entryStr(e, 'servicio') || '',
+      estilista: entryStr(e, 'estilista'),
+      productoUsado: entryStr(e, 'productoUsado'),
+      notasTecnicas: entryStr(e, 'notasTecnicas') || '',
+      importe: entryNum(e, 'importe'),
+      fotosAntes: entryStr(e, 'fotosAntes') || '',
+      fotosDespues: entryStr(e, 'fotosDespues') || '',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} registro creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} registro(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

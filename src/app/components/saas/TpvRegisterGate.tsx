@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useBusiness } from '../../context/BusinessContext';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useApp } from '../../context/AppContext';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { writeBillingSelection } from '../../lib/billingSelection';
@@ -15,6 +16,7 @@ import {
   updateTpvRegisterSessionRequest,
   pointOfSaleDisplayLabel,
   buildDeliverySidebarStoreRows,
+  ensureDeliveryPdvForWorkCenter,
   type DeliverySidebarStoreRow,
   TPV_SESSION_SYNC_EVENT,
   type TpvRegisterSession,
@@ -44,8 +46,8 @@ import {
   filterStoresForWorkerAssignment,
   isInvitedWorkerUser,
 } from '../../lib/pdvScope';
-import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId, DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
-import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId, pickDefaultActivePdvId, DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
+import { resolveBusinessScopeId, repairMissingRetailDeliveryPdvs } from '../../lib/deliverySetup';
 import {
   loadRetailStoresForBusiness,
   readRetailScopeCacheForBusiness,
@@ -62,7 +64,22 @@ import {
   resolveTpvRegisterScope,
   shouldApplyTpvRegisterLoadResult,
 } from '../../lib/tpvRegisterScope';
-import { exitTpvTabletSessionPath, mergeTabletBindingPdv, readTpvTabletBinding } from '../../lib/tpvTabletSession';
+import {
+  exitTpvTabletSessionPath,
+  isTpvTabletWorkerPath,
+  mergeTabletBindingPdv,
+  readTpvTabletBinding,
+} from '../../lib/tpvTabletSession';
+
+function isTabletTpvBootstrapReady(): boolean {
+  if (typeof window === 'undefined') return false;
+  const binding = readTpvTabletBinding();
+  return Boolean(
+    binding?.pdvId
+    && binding?.businessId
+    && isTpvTabletWorkerPath(window.location.pathname),
+  );
+}
 import {
   filterUsersForStoreClockin,
   loadClockedInStoreWorkers,
@@ -339,6 +356,11 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const dataUserId = useMemo(
+    () => resolveBusinessDataUserId(user, currentBusiness),
+    [user, currentBusiness],
+  );
   const [workerName, setWorkerName] = useState('');
   const [selectedPdvId, setSelectedPdvId] = useState('');
   const [selectedTerminalId, setSelectedTerminalId] = useState('');
@@ -511,13 +533,30 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     }
   }, [isTabletMode, selectedPdv, selectedTerminalId, availableTerminals]);
 
-  const handleSelectStoreRow = (row: DeliverySidebarStoreRow) => {
-    if (row.needsPdv || !row.pdvId) {
-      toast.error('Completa la dirección de esta tienda en Ajustes (mín. 5 caracteres) y guarda.');
-      navigate('/saas/settings/tienda');
+  const handleSelectStoreRow = async (row: DeliverySidebarStoreRow) => {
+    if (row.pdvId && !row.needsPdv) {
+      handleSelectPdv(row.pdvId);
       return;
     }
-    handleSelectPdv(row.pdvId);
+    const wc = workCenters.find((w) => w._id === row.workCenterId);
+    if (wc && dataUserId) {
+      try {
+        const ensured = await ensureDeliveryPdvForWorkCenter(dataUserId, wc, {
+          business: currentBusiness ?? null,
+        });
+        if (ensured?._id) {
+          handleSelectPdv(ensured._id);
+          return;
+        }
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : 'No se pudo activar el PDV de esta tienda',
+        );
+        return;
+      }
+    }
+    toast.error('Completa la dirección de esta tienda en Ajustes (mín. 5 caracteres) y guarda.');
+    navigate('/saas/settings/tienda');
   };
 
   const handleSelectPdv = (pdvId: string) => {
@@ -2274,7 +2313,7 @@ export function TpvRegisterGate({
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !isTabletTpvBootstrapReady());
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   const [restaurantCloseWarnings, setRestaurantCloseWarnings] = useState<string[]>([]);
@@ -2769,7 +2808,8 @@ export function TpvRegisterGate({
 
       const loadOpts = {
         accountBusinessCount: accountBusinessCountRef.current,
-        skipPdvMerge: true as const,
+        skipPdvMerge: false as const,
+        ensureTabletCodes: true,
       };
 
       try {
@@ -2805,16 +2845,30 @@ export function TpvRegisterGate({
                   workCenters: workCentersRef.current,
                   pointsOfSale: pointsOfSaleRef.current,
                 })
-              : loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
-                  ...loadOpts,
-                  knownBusinessIds,
-                  // Restaurante: sin bootstrap pesado al abrir TPV (ya hecho en Ajustes / scope global).
-                  tpvBootstrap: workerUser && !isRestaurant,
-                }),
+              : (async () => {
+                  let state = await loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
+                    ...loadOpts,
+                    knownBusinessIds,
+                    tpvBootstrap: false,
+                  });
+                  if (state.dataUserId) {
+                    state = {
+                      ...state,
+                      pointsOfSale: await repairMissingRetailDeliveryPdvs(
+                        state.dataUserId,
+                        state.workCenters,
+                        state.pointsOfSale,
+                        biz ?? null,
+                      ),
+                    };
+                  }
+                  return state;
+                })(),
           ]);
         }
 
-        if (seq !== loadSeqRef.current || scopeBusinessIdRef.current !== bidAtStart) return;
+        if (seq !== loadSeqRef.current) return;
+        if (!isTabletSessionRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
 
         if (
           !shouldApplyTpvRegisterLoadResult({

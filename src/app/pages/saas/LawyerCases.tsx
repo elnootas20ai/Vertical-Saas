@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -103,13 +104,34 @@ export function LawyerCases() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} caso(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const caseNumber = entryStr(e, 'caseNumber');
+    if (!caseNumber) return null;
+    return {
+      expediente: entryStr(e, 'expediente') || '',
+      tipo: entryStr(e, 'tipo', 'type') || 'civil',
+      cliente: entryStr(e, 'cliente', 'client') || '',
+      fechaApertura: entryStr(e, 'fechaApertura') || '',
+      estado: entryStr(e, 'estado', 'status') || 'abierto',
+      abogado: entryStr(e, 'abogado'),
+      juzgado: entryStr(e, 'juzgado'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} caso creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} caso(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(modalOpen, () => setModalOpen(false));
 

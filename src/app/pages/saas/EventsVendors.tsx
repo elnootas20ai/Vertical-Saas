@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -11,6 +12,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateVerticalEntries, entryNum, entryStr } from '../../lib/bulkVerticalImport';
 
 type ServiceType = 'catering' | 'decoracion' | 'audio' | 'fotografia' | 'iluminacion' | 'florista' | 'mobiliario';
 
@@ -41,6 +43,9 @@ const EMPTY_FORM: VendorForm = { empresa: '', tipoServicio: 'catering', contacto
 
 export function EventsVendors() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const linkedEventName = searchParams.get('eventName') || '';
+  const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<Vendor>('events', 'vendors'), []);
   const userId = user?.user_id || user?.id || '';
 
@@ -88,13 +93,35 @@ export function EventsVendors() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} proveedor(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const empresa = entryStr(e, 'name', 'empresa', 'nombre');
+      if (!empresa) return null;
+      return {
+        empresa,
+        tipoServicio: (entryStr(e, 'category', 'tipoServicio') || 'catering') as ServiceType,
+        contacto: entryStr(e, 'contact', 'contacto') || empresa,
+        telefono: entryStr(e, 'phone', 'telefono'),
+        email: entryStr(e, 'email'),
+        valoracion: 5,
+        eventosRealizados: 0,
+        tarifaBase: entryNum(e, 'price', 'tarifaBase'),
+      };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} externo(s) creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún externo');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} proveedor(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -162,14 +189,24 @@ export function EventsVendors() {
   );
 
   const statsCards = [
-    { label: 'Proveedores activos', value: stats.activos, icon: <Building2 className="w-5 h-5 text-blue-500" />, bg: 'bg-blue-50 dark:bg-blue-900/30' },
+    { label: 'Externos activos', value: stats.activos, icon: <Building2 className="w-5 h-5 text-blue-500" />, bg: 'bg-blue-50 dark:bg-blue-900/30' },
     { label: 'Categorías', value: stats.categorias, icon: <Filter className="w-5 h-5 text-violet-500" />, bg: 'bg-violet-50 dark:bg-violet-900/30' },
     { label: 'Valoración media', value: stats.valorMedia, icon: <Star className="w-5 h-5 text-amber-500" />, bg: 'bg-amber-50 dark:bg-amber-900/30' },
   ];
 
   return (
-    <Layout title="Proveedores de Eventos">
+    <Layout title="Externos">
       <div className="space-y-6">
+        {linkedEventName && (
+          <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>Evento: <strong>{linkedEventName}</strong></span>
+            {linkedEventId && (
+              <Link to={`/saas/vertical/eventos/${linkedEventId}`} className="font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
+                Volver al proyecto
+              </Link>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {statsCards.map(s => (
             <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-4`}>
@@ -193,12 +230,12 @@ export function EventsVendors() {
               {Object.entries(SERVICE_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
             </select>
             <AddButtonDropdown
-                label="Nuevo Proveedor"
+                label="Nuevo externo"
                 onQuickAdd={openCreate}
                 onAIAdd={() => setShowAIModal(true)}
                 onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
-                quickAddDesc="Formulario de proveedor"
+                quickAddDesc="Formulario de externo"
               />
           </div>
         </div>
@@ -250,7 +287,7 @@ export function EventsVendors() {
                 );
               })}
               {!loading && filtered.length === 0 && (
-                <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400 dark:text-gray-500">No se encontraron proveedores</td></tr>
+                <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400 dark:text-gray-500">No se encontraron externos</td></tr>
               )}
             </tbody>
           </table>
@@ -261,7 +298,7 @@ export function EventsVendors() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowModal(false)}>
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{editing ? 'Editar Proveedor' : 'Nuevo Proveedor'}</h3>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{editing ? 'Editar externo' : 'Nuevo externo'}</h3>
               <button onClick={() => setShowModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-4">
@@ -318,14 +355,14 @@ export function EventsVendors() {
         isOpen={showAIModal}
         onClose={() => setShowAIModal(false)}
         module="events_vendors"
-        moduleLabel="Proveedores"
+        moduleLabel="Externos"
         fields={MODULE_AI_FIELDS}
         onEntriesParsed={handleAIEntries}
       />
       <GenericImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
-        moduleLabel="Proveedores"
+        moduleLabel="Externos"
         fields={MODULE_IMPORT_FIELDS}
         onImport={handleImportEntries}
       />

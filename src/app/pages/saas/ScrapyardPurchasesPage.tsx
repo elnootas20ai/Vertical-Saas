@@ -195,34 +195,7 @@ export function ScrapyardPurchasesPage() {
   const [rejectNote, setRejectNote] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [actionTarget, setActionTarget] = useState<VehicleAcquisition | null>(null);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'vehicle', label: 'Vehículo' },
-    { key: 'seller', label: 'Vendedor' },
-    { key: 'price', label: 'Precio' },
-    { key: 'date', label: 'Fecha' },
-    { key: 'notes', label: 'Notas' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'vehicle', label: 'Vehículo', example: '' },
-    { key: 'seller', label: 'Vendedor', example: '' },
-    { key: 'price', label: 'Precio', example: '' },
-    { key: 'date', label: 'Fecha', example: '' },
-    { key: 'notes', label: 'Notas', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} compra(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} compra(s) importado(s)`);
-  };
-
-  useModalClose(showForm, () => setShowForm(false));
+    useModalClose(showForm, () => setShowForm(false));
   useModalClose(showDetail, () => setShowDetail(false));
   useModalClose(showRejectModal, () => setShowRejectModal(false));
 
@@ -444,8 +417,6 @@ export function ScrapyardPurchasesPage() {
             <AddButtonDropdown
                 label="Nueva compra"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de compra"
               />
@@ -946,22 +917,6 @@ export function ScrapyardPurchasesPage() {
           </div>
         </div>
       )}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="scrapyard_purchases"
-        moduleLabel="Compras"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Compras"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

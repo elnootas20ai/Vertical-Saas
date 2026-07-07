@@ -32,6 +32,7 @@ import {
   mapClientToExportRow,
   type ClientExportRow,
 } from '../../lib/crmImportTemplates';
+import { isImportAbortError } from '../../lib/importAbort';
 
 interface ImportError { row: number; field: string; message: string; value: unknown; }
 
@@ -94,10 +95,10 @@ export function CrmImportWizard({
   importBusinessId,
   clientExportRows = [],
 }: CrmImportWizardProps) {
-  useModalClose(isOpen, onClose);
   const { addLead, addClient, refreshClients, refreshLeads, leads: existingLeads, clientsTotalCount } = useApp();
   const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
+  const importAbortRef = useRef<AbortController | null>(null);
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [mode, setMode] = useState<ImportMode>(initialMode ?? 'leads');
@@ -111,6 +112,8 @@ export function CrmImportWizard({
   const [importResult, setImportResult] = useState<{ created: number; failed: number } | null>(null);
   const [parsingFile, setParsingFile] = useState(false);
   const [exportingClients, setExportingClients] = useState(false);
+
+  useModalClose(isOpen && !importing, onClose);
 
   useEffect(() => {
     if (initialMode) setMode(initialMode);
@@ -349,6 +352,8 @@ export function CrmImportWizard({
 
   const handleImport = async () => {
     setImporting(true);
+    const abortController = new AbortController();
+    importAbortRef.current = abortController;
     let created = 0;
     let failed = 0;
 
@@ -422,7 +427,9 @@ export function CrmImportWizard({
             user.user_id,
             clientsToCreate,
             (done, total) => setImportProgress({ done, total }),
-            importBusinessId ? { businessId: importBusinessId } : undefined,
+            importBusinessId
+              ? { businessId: importBusinessId, signal: abortController.signal }
+              : { signal: abortController.signal },
           );
           created = result.created.length;
           failed = clientsToCreate.length - created;
@@ -436,13 +443,28 @@ export function CrmImportWizard({
         }
       }
     } catch (err) {
-      console.error('Import error:', err);
-      failed++;
+      if (isImportAbortError(err) || abortController.signal.aborted) {
+        toast.message('Importación cancelada');
+        setStep(2);
+      } else {
+        console.error('Import error:', err);
+        failed++;
+        setImportResult({ created, failed });
+      }
+    } finally {
+      setImporting(false);
+      setImportProgress(null);
+      importAbortRef.current = null;
     }
 
-    setImporting(false);
-    setImportProgress(null);
-    setImportResult({ created, failed });
+    if (!abortController.signal.aborted) {
+      setImportResult({ created, failed });
+    }
+  };
+
+  const handleCancelImport = () => {
+    if (!importing) return;
+    importAbortRef.current?.abort();
   };
 
   const handleReset = () => {
@@ -645,18 +667,25 @@ export function CrmImportWizard({
           {step === 3 && (
             <div className="space-y-4">
               {importing && importProgress ? (
-                <div className="text-center py-12">
-                  <LoaderCircle className="w-10 h-10 text-blue-600 animate-spin mx-auto mb-4" />
+                <div className="text-center py-12 space-y-5">
+                  <LoaderCircle className="w-10 h-10 text-blue-600 animate-spin mx-auto" />
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Importando clientes...</p>
                   <p className="text-xs text-gray-500 mt-1">
                     {importProgress.done} / {importProgress.total}
                   </p>
-                  <div className="max-w-sm mx-auto mt-4 h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
+                  <div className="max-w-sm mx-auto h-2 rounded-full bg-gray-100 dark:bg-gray-700 overflow-hidden">
                     <div
                       className="h-full bg-blue-600 transition-all duration-300"
                       style={{ width: `${Math.round((importProgress.done / Math.max(importProgress.total, 1)) * 100)}%` }}
                     />
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleCancelImport}
+                    className="px-5 py-2.5 rounded-lg border-2 border-rose-300 text-rose-700 dark:border-rose-800 dark:text-rose-300 text-sm font-semibold hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
+                  >
+                    Cancelar importación
+                  </button>
                 </div>
               ) : importResult ? (
                 <div className="text-center py-10">

@@ -85,7 +85,7 @@ function computeLiveSeconds(record: ClockinRecord | null): number {
   return Math.max(0, Math.floor((totalMs - breakMs) / 1000));
 }
 
-const TPV_VERTICAL_CONFIG: Partial<Record<BusinessType, { label: string; description: string; icon: React.ReactNode; gradient: string }>> = {
+const TPV_VERTICAL_CONFIG: Partial<Record<BusinessType, { label: string; description: string; icon: React.ReactNode; gradient: string; path?: string }>> = {
   delivery:      { label: 'Cocina y Pedidos',   description: 'Gestiona pedidos, cocina, montaje y reparto',         icon: <ChefHat className="w-6 h-6" />,       gradient: 'from-orange-500 to-red-600' },
   workshop:      { label: 'Taller Mecánico',     description: 'Órdenes de trabajo, temporizador y fotos',           icon: <Wrench className="w-6 h-6" />,        gradient: 'from-blue-500 to-indigo-600' },
   cleaning:      { label: 'Servicios Limpieza',  description: 'Check-in, checklist de tareas y cobro',              icon: <SprayCan className="w-6 h-6" />,      gradient: 'from-cyan-500 to-teal-600' },
@@ -96,7 +96,7 @@ const TPV_VERTICAL_CONFIG: Partial<Record<BusinessType, { label: string; descrip
   nightclub:     { label: 'Mi Puesto - Discoteca', description: 'Puerta, lista, aforo y pedidos de barra',             icon: <Music className="w-6 h-6" />,       gradient: 'from-fuchsia-600 to-purple-800' },
   hairSalon:     { label: 'Mi Puesto - Peluquería', description: 'Citas del día, servicios y cobro rápido en caja',     icon: <Scissors className="w-6 h-6" />,       gradient: 'from-violet-500 to-fuchsia-600' },
   realEstate:    { label: 'Mi Puesto - Inmobiliaria', description: 'Visitas del día, propiedades y estados rápidos',    icon: <Building2 className="w-6 h-6" />,      gradient: 'from-teal-500 to-cyan-700' },
-  events:        { label: 'Centro de Eventos',       description: 'Gestión de eventos, montajes y coordinación',       icon: <PartyPopper className="w-6 h-6" />,    gradient: 'from-pink-500 to-rose-600' },
+  events:        { label: 'Operaciones eventos', description: 'Eventos de hoy, logística y coordinación en campo', icon: <PartyPopper className="w-6 h-6" />,    gradient: 'from-pink-500 to-rose-600', path: '/saas/worker/events' },
   construction:  { label: 'Mi Puesto - Obra',        description: 'Partes de trabajo, materiales y horas',             icon: <HardHat className="w-6 h-6" />,        gradient: 'from-amber-500 to-orange-700' },
   vet:           { label: 'Mi Puesto - Veterinario', description: 'Consultas, pacientes y vacunaciones',               icon: <PawPrint className="w-6 h-6" />,       gradient: 'from-lime-500 to-green-700' },
   lawyer:        { label: 'Mi Puesto - Despacho',    description: 'Expedientes, agenda y tiempo facturable',           icon: <Scale className="w-6 h-6" />,          gradient: 'from-slate-500 to-gray-700' },
@@ -355,7 +355,7 @@ export function WorkerHome() {
         {/* TPV Module CTA */}
         {tpvConfig && (
           <button
-            onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
+            onClick={() => navigate(tpvConfig.path || AUTH_PATHS.tpvTabletLogin)}
             className={`relative overflow-hidden rounded-2xl p-5 text-white transition-all hover:shadow-xl active:scale-[0.99] bg-gradient-to-br ${tpvConfig.gradient}`}
           >
             <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full -translate-y-20 translate-x-20" />

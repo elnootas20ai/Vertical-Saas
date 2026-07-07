@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 
@@ -93,13 +94,35 @@ export function TobaccoLottery() {
     { key: 'date', label: 'Fecha', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} boleto(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const number = entryStr(e, 'number', 'numero', 'name', 'nombre');
+    if (!number) return null;
+    return {
+      numero: entryStr(e, 'numero') || '',
+      sorteo: entryStr(e, 'sorteo') || 'loteria_nacional',
+      fecha: entryStr(e, 'fecha', 'date') || new Date().toISOString().slice(0, 10),
+      serie: entryStr(e, 'serie') || '',
+      fraccion: entryStr(e, 'fraccion') || '',
+      precioVenta: entryNum(e, 'precioVenta'),
+      estado: entryStr(e, 'estado', 'status') || 'disponible',
+      premio: entryNum(e, 'premio'),
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} boleto creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} boleto(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 

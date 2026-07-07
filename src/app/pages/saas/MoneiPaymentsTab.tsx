@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Eye,
-  EyeOff,
   Copy,
   Check,
   CreditCard,
@@ -52,7 +50,6 @@ async function apiFetch(path: string, init?: RequestInit) {
 
 interface MoneiConfig {
   maskedKey: string;
-  fullKey: string;
   testMode: boolean;
   commissionPercent: number;
   live?: { hasApiKey: boolean; hasPublicKey: boolean };
@@ -278,12 +275,11 @@ function BarChartForecast({ forecast }: { forecast: ForecastItem[] }) {
 // ─── Token Card ──────────────────────────────────────────────────────────────
 
 function TokenCard({ config }: { config: MoneiConfig | null }) {
-  const [showKey, setShowKey] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
-    if (config?.fullKey) {
-      navigator.clipboard.writeText(config.fullKey).then(() => {
+    if (config?.maskedKey) {
+      navigator.clipboard.writeText(config.maskedKey).then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       });
@@ -311,29 +307,25 @@ function TokenCard({ config }: { config: MoneiConfig | null }) {
       <div className="flex items-center gap-2">
         <div className="flex-1 relative">
           <input
-            type={showKey ? 'text' : 'password'}
+            type="password"
             readOnly
-            value={showKey ? config.fullKey : config.maskedKey}
-            className="w-full px-4 py-2.5 pr-20 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-mono text-sm text-gray-800 dark:text-gray-200"
+            value={config.maskedKey}
+            className="w-full px-4 py-2.5 pr-12 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-mono text-sm text-gray-800 dark:text-gray-200"
           />
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1">
             <button
-              onClick={() => setShowKey(!showKey)}
-              className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-              title={showKey ? 'Ocultar' : 'Ver'}
-            >
-              {showKey ? <EyeOff className="w-4 h-4 text-gray-500" /> : <Eye className="w-4 h-4 text-gray-500" />}
-            </button>
-            <button
               onClick={handleCopy}
               className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
-              title="Copiar"
+              title="Copiar clave enmascarada"
             >
               {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4 text-gray-500" />}
             </button>
           </div>
         </div>
       </div>
+      <p className="text-xs text-gray-500">
+        La clave completa solo está en el servidor (.env). Admin ve versión enmascarada.
+      </p>
       <div className="flex items-center gap-4 text-xs text-gray-500">
         <span className="flex items-center gap-1"><Percent className="w-3.5 h-3.5" /> Comisión MONEI: <strong className="text-gray-700 dark:text-gray-300">{config.commissionPercent}%</strong></span>
         {config.testMode && (

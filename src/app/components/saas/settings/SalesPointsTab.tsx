@@ -14,6 +14,7 @@ import {
   readWorkCenterBusinessId,
   resolveBusinessScopeId,
   knownBusinessIdsFromList,
+  repairMissingRetailDeliveryPdvs,
   type DeliveryStoresState,
 } from '../../../lib/deliverySetup';
 import {
@@ -63,12 +64,14 @@ import { BusinessHoursEditor } from './BusinessHoursEditor';
 import {
   buildPdvCodeFromParts,
   ensureDeliveryPdvForWorkCenter,
+  ensureTabletCodesForPointsOfSale,
   isPdvCodeAlreadyUsed,
   parsePdvCodeParts,
   PDV_RETAIL_LIMITS,
   pointOfSaleDisplayLabel,
   regenerateTerminalCodeRequest,
   deletePointOfSaleRequest,
+  resolveWorkCenterPdvAddress,
   sanitizePdvCodeInput,
   sanitizePdvCodeLiveInput,
   sanitizeRetailTextField,
@@ -1680,24 +1683,42 @@ export function SalesPointsTab() {
       const showSpinner = !hasDisplayedStoresRef.current;
       if (showSpinner) setLoading(true);
 
+      const skipPdvMerge = options?.skipPdvMerge ?? false;
       const retailLoadOpts = {
         accountBusinessCount: accountBusinessCountRef.current ?? businessesNow.length,
         knownBusinessIds: knownBusinessIdsFromList(businessesNow),
         includeInactivePdvs: true,
         tpvBootstrap: false,
-        skipPdvMerge: true,
+        skipPdvMerge,
         ensureTabletCodes: false,
+      };
+
+      const applyRetailStateWithRepair = async (state: DeliveryStoresState) => {
+        if (isCompraventaRef.current && !isDeliveryAccountRef.current && !isOpsBusinessRef.current) {
+          return state;
+        }
+        if (!state.dataUserId || skipPdvMerge) return state;
+        return {
+          ...state,
+          pointsOfSale: await repairMissingRetailDeliveryPdvs(
+            state.dataUserId,
+            state.workCenters,
+            state.pointsOfSale,
+            bizNow ?? null,
+          ),
+        };
       };
 
       try {
         const isCompraventaOnly =
           isCompraventaRef.current && !isDeliveryAccountRef.current && !isOpsBusinessRef.current;
-        const state = isCompraventaOnly
+        let state = isCompraventaOnly
           ? await loadCompraventaStores(userNow, bizNow, {
               includeInactivePdvs: true,
               ensureTabletCodes: false,
             })
           : await loadRetailStoresForBusiness(userNow, bizNow!, businessesNow, retailLoadOpts);
+        state = await applyRetailStateWithRepair(state);
         if (seq !== loadSeqRef.current) return;
         if ((businessScopeId || resolveBusinessScopeId(currentBusinessRef.current)) !== bid) return;
         applyDeliveryStoresState(state);
@@ -1716,14 +1737,15 @@ export function SalesPointsTab() {
                 tpvBootstrap: false,
               })
             : await loadDeliveryStores(userNow, bizNow, {
-                skipPdvMerge: true,
+                skipPdvMerge,
                 includeInactivePdvs: true,
                 ensureTabletCodes: false,
                 accountBusinessCount: accountBusinessCountRef.current ?? businessesNow.length,
                 knownBusinessIds: knownBusinessIdsFromList(businessesNow),
               });
+          let fallbackState = await applyRetailStateWithRepair(fallback);
           if (seq !== loadSeqRef.current) return;
-          applyDeliveryStoresState(fallback);
+          applyDeliveryStoresState(fallbackState);
           toast.warning(getRetailLocationCopy(pdvWizardVariantRef.current).syncWarning);
         } catch (fallbackErr) {
           const msg =
@@ -2048,7 +2070,7 @@ export function SalesPointsTab() {
           const displayName = sanitizeStoreDisplayName(String(wcData.name || ''));
           const normCode = pdvCodeToSave ? sanitizePdvCodeInput(pdvCodeToSave) : '';
           const linkedPdv = deliveryPdvsByWorkCenter[updated._id];
-          const addr = [updated.address, updated.postalCode, updated.city].filter(Boolean).join(', ');
+          const addr = resolveWorkCenterPdvAddress(updated);
 
           let savedPdv: PointOfSale | null = null;
           if (linkedPdv?._id) {
@@ -2069,6 +2091,24 @@ export function SalesPointsTab() {
               pdvName: displayName,
             });
           }
+          if (!savedPdv) {
+            toast.error(retailCopy.missingPdvEdit);
+            throw new Error('pdv missing');
+          }
+          const [withTablet] = await ensureTabletCodesForPointsOfSale(dataUserId, [savedPdv]);
+          savedPdv = withTablet ?? savedPdv;
+          setDeliveryPdvsByWorkCenter((prev) => ({
+            ...prev,
+            [updated._id]: {
+              _id: savedPdv!._id,
+              _rev: savedPdv!._rev,
+              code: savedPdv!.code,
+              name: String(savedPdv!.name || ''),
+              address: savedPdv!.address,
+              workCenterId: updated._id,
+              terminalCode: savedPdv!.terminalCode,
+            },
+          }));
           if (savedPdv && businessIdForWc) {
             persistRetailScopeAfterStoreSave(
               businessIdForWc,
@@ -2093,7 +2133,7 @@ export function SalesPointsTab() {
         setEditingItem(null);
         setForceCreatePdv(false);
         toast.success(`"${updated.name}" actualizado`);
-        void loadData({ skipPdvMerge: true });
+        void loadData();
       } else {
         const businessIdForWc = resolveBusinessScopeId(currentBusiness ?? null);
         if (usesRetailPdvFlow && !businessIdForWc) {
@@ -2161,9 +2201,11 @@ export function SalesPointsTab() {
             setEditingItem(null);
             setForceCreatePdv(false);
             toast.error(retailCopy.partialSaveWarning);
-            void loadData({ skipPdvMerge: true });
+            void loadData();
             return;
           }
+          const [createdWithTablet] = await ensureTabletCodesForPointsOfSale(dataUserId, [createdPdv]);
+          createdPdv = createdWithTablet ?? createdPdv;
           if (isDelivery) {
             await bootstrapRetailStoreAfterCreate(user, currentBusiness, {
               workCenter: created,
@@ -2218,7 +2260,7 @@ export function SalesPointsTab() {
             ? `"${created.name}" y PDV ${pointOfSaleDisplayLabel(createdPdv)} guardados`
             : `"${created.name}" creada`,
         );
-        await loadData({ skipPdvMerge: true });
+        await loadData();
         if (isDeliveryAccount || isOpsBusiness) void activeStore.refresh();
         if (isRestaurantBusinessType(currentBusiness?.businessType) && createdPdv) {
           writeSalaSetupPending(businessIdForWc, createdPdv._id);
@@ -2313,7 +2355,7 @@ export function SalesPointsTab() {
       notifyDeliveryWorkCentersChanged(businessScopeId);
       notifyDeliveryActiveStoreChanged();
       await activeStore.refresh();
-      await loadData({ skipPdvMerge: true });
+      await loadData();
       toast.success(`"${deleteTarget.name}" eliminado`);
       setDeleteTarget(null);
     } catch {

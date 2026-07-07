@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import {
   listWorkOrdersRequest,
   updateWorkOrderRequest,
@@ -671,6 +672,11 @@ export function WorkOrderDetail() {
   const navigate = useNavigate();
   const { id } = useParams();
   const { user, listUsers } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const workshopScope = useMemo(
+    () => ({ businessId: currentBusiness?.id }),
+    [currentBusiness?.id],
+  );
   const [workOrder, setWorkOrder] = useState<WorkOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -712,7 +718,7 @@ export function WorkOrderDetail() {
   const load = useCallback(async () => {
     if (!user?.id || !id) return;
     try {
-      const all = await listWorkOrdersRequest(user.id);
+      const all = await listWorkOrdersRequest(user.id, workshopScope);
       const found = all.find(w => w._id === id || w.id === id);
       if (!found) {
         toast.error('Orden de trabajo no encontrada');
@@ -733,7 +739,7 @@ export function WorkOrderDetail() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, id]);
+  }, [user?.id, id, navigate, workshopScope]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { loadMechanics(); }, [loadMechanics]);
@@ -757,7 +763,7 @@ export function WorkOrderDetail() {
         totalLaborCost,
         totalMaterialsCost,
         totalCost: totalLaborCost + totalMaterialsCost,
-      });
+      }, workshopScope);
       setWorkOrder(updated);
       toast.success('Orden de trabajo guardada');
     } catch {
@@ -785,7 +791,7 @@ export function WorkOrderDetail() {
           ...(workOrder.stageHistory || []),
           { status, date: new Date().toISOString(), user: user.fullName || 'Sistema' },
         ],
-      });
+      }, workshopScope);
       setWorkOrder(updated);
       toast.success(`Estado: ${STATUS_CONFIG[status].label}`);
     } catch {

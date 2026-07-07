@@ -13,11 +13,16 @@ import {
   AlertTriangle,
   X,
   Store,
+  Radar,
 } from 'lucide-react';
 import type { PointOfSale } from '../../lib/deliveryApi';
 import {
   DEFAULT_PRINTER_CONFIG,
+  discoverNativeNetworkPrinters,
   fetchBridgePrinters,
+  fetchBridgeNetworkPrinters,
+  isVertialNativeApp,
+  shouldUseEposPrint,
   loadLegacyPrinterConfig,
   printTestTicket,
   resolveEffectivePrinterConfig,
@@ -41,6 +46,7 @@ import {
   settingsChoiceCardClass,
   settingsListCardClass,
 } from './settings/settingsFormStyles';
+import { VertialPrintInstallHint } from './VertialPrintInstallHint';
 
 const SETUP_OPTIONS: Array<{ id: PrinterSetupKind; label: string; hint: string; icon: typeof Wifi }> = [
   {
@@ -106,6 +112,8 @@ export function TpvPrinterSetupPanel({
     scope?.terminalId ? 'terminal' : 'store',
   );
   const [printers, setPrinters] = useState<Array<{ name: string }>>([]);
+  const [networkPrinters, setNetworkPrinters] = useState<Array<{ host: string; port: number; label?: string }>>([]);
+  const [scanningNetwork, setScanningNetwork] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
@@ -118,6 +126,8 @@ export function TpvPrinterSetupPanel({
   const terminalLabel = scope?.terminalLabel?.trim() || 'este TPV';
   const storeLabel = scope?.storeLabel?.trim() || 'toda la tienda';
   const hasTerminalScope = Boolean(scope?.terminalId);
+  const isNativeApp = isVertialNativeApp();
+  const usesDirectWifi = isNativeApp || shouldUseEposPrint(config);
 
   const terminalHasOverride = useMemo(() => {
     if (!scope?.terminalId || !pdv) return false;
@@ -137,7 +147,7 @@ export function TpvPrinterSetupPanel({
     setStatusLoading(true);
     try {
       setStatus(await evaluatePrinterStatus(nextConfig));
-      if (nextConfig.connectionType !== 'browser') {
+      if (nextConfig.connectionType !== 'browser' && !isVertialNativeApp()) {
         setPrinters(await fetchBridgePrinters(nextConfig));
       }
     } finally {
@@ -223,7 +233,65 @@ export function TpvPrinterSetupPanel({
     }
   };
 
-  const showIpadBridgeHint = isAppleMobileDevice() && kind !== 'browser';
+  const showIpadBridgeHint = !usesDirectWifi && isAppleMobileDevice() && kind !== 'browser';
+
+  const handleScanNetworkPrinters = useCallback(async () => {
+    setScanningNetwork(true);
+    setNetworkPrinters([]);
+    try {
+      if (isNativeApp) {
+        const result = await discoverNativeNetworkPrinters({
+          port: config.networkPort || 9100,
+          timeoutMs: 20000,
+        });
+        if (!result.ok) {
+          toast.error(result.error || 'No se pudo buscar impresoras');
+          return;
+        }
+        setNetworkPrinters(result.printers);
+        if (result.printers.length === 0) {
+          toast.message('No se encontró ninguna impresora térmica en la WiFi del local.');
+        } else if (result.printers.length === 1) {
+          patch({ networkHost: result.printers[0].host, networkPort: result.printers[0].port || 9100 });
+          toast.success(`Impresora detectada: ${result.printers[0].host}`);
+        } else {
+          toast.success(`${result.printers.length} impresoras encontradas. Elige la tuya.`);
+        }
+        return;
+      }
+
+      if (shouldUseEposPrint(config)) {
+        toast.message('En iPad/Safari escribe la IP de la impresora (ej. 192.168.1.200). Sale en su ticket de configuración.');
+        return;
+      }
+
+      const health = await evaluatePrinterStatus(config);
+      if (!health.bridgeOk) {
+        toast.error(
+          isAppleMobileDevice()
+            ? 'Primero activa Vertial Print en el PC del mostrador (misma WiFi).'
+            : 'Descarga e inicia Vertial Print en este PC.',
+        );
+        return;
+      }
+      const result = await fetchBridgeNetworkPrinters(config, { port: config.networkPort || 9100 });
+      if (!result.ok) {
+        toast.error(result.error || 'No se pudo buscar impresoras');
+        return;
+      }
+      setNetworkPrinters(result.printers);
+      if (result.printers.length === 0) {
+        toast.message('No se encontró ninguna impresora térmica en la WiFi del local.');
+      } else if (result.printers.length === 1) {
+        patch({ networkHost: result.printers[0].host, networkPort: result.printers[0].port || 9100 });
+        toast.success(`Impresora detectada: ${result.printers[0].host}`);
+      } else {
+        toast.success(`${result.printers.length} impresoras encontradas. Elige la tuya.`);
+      }
+    } finally {
+      setScanningNetwork(false);
+    }
+  }, [config, isNativeApp]);
 
   return (
     <div className={variant === 'page' ? 'space-y-6 max-w-2xl' : 'flex flex-col min-h-0'}>
@@ -312,6 +380,67 @@ export function TpvPrinterSetupPanel({
           </button>
         </section>
 
+        {!statusLoading && !usesDirectWifi && kind !== 'browser' && !status?.bridgeOk && (
+          <VertialPrintInstallHint remotePc={isAppleMobileDevice()} />
+        )}
+
+        {shouldUseEposPrint(config) && kind === 'wifi' && config.networkHost && (
+          <div className={`${settingsListCardClass()} space-y-3`}>
+            <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+              iPad — impresora <strong>{config.networkHost}</strong>
+            </p>
+            {isAppleMobileDevice() && (
+              <div className="space-y-2 rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/20 p-3">
+                <p className="text-xs font-semibold text-indigo-900 dark:text-indigo-200">
+                  Si no imprime directo: PC del mostrador + Vertial Print
+                </p>
+                <ol className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed list-decimal list-inside space-y-1">
+                  <li>En el PC Windows: descarga e inicia <strong>VertialPrint.exe</strong> (ventana negra abierta).</li>
+                  <li>Pon abajo la IP de ese PC (misma WiFi). Ejemplo: 192.168.1.50</li>
+                  <li>Guardar → Probar impresión</li>
+                </ol>
+                <label className="block">
+                  <span className={settingsLabelClass}>IP del PC con Vertial Print</span>
+                  <input
+                    className={settingsInputClass}
+                    value={config.bridgeHost}
+                    onChange={(e) => patch({ bridgeHost: e.target.value.trim() })}
+                    placeholder="Ejemplo: 192.168.1.50"
+                    inputMode="decimal"
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+            )}
+            <details className="text-xs text-gray-500 dark:text-gray-400">
+              <summary className="cursor-pointer font-medium text-gray-600 dark:text-gray-300">
+                Impresión directa iPad (ePOS, opcional)
+              </summary>
+              <ol className="mt-2 leading-relaxed list-decimal list-inside space-y-1">
+                <li>
+                  Abre{' '}
+                  <a
+                    href={`https://${config.networkHost}:8043`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-indigo-600 dark:text-indigo-400 underline underline-offset-2"
+                  >
+                    https://{config.networkHost}:8043
+                  </a>
+                  {' '}→ acepta el certificado.
+                </li>
+                <li>Vuelve al TPV y prueba otra vez.</li>
+              </ol>
+            </details>
+          </div>
+        )}
+
+        {isNativeApp && kind === 'wifi' && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+            En la app Vertial la tablet habla directo con la impresora: pon la IP o pulsa «Buscar impresora».
+          </p>
+        )}
+
         <div>
           <button
             type="button"
@@ -371,8 +500,49 @@ export function TpvPrinterSetupPanel({
 
               {kind === 'wifi' && (
                 <div className={`${settingsListCardClass()} space-y-4`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className={settingsLabelClass}>Impresora en la WiFi del local</p>
+                    <button
+                      type="button"
+                      onClick={() => void handleScanNetworkPrinters()}
+                      disabled={scanningNetwork || saving}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {scanningNetwork ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Radar className="w-3.5 h-3.5" />
+                      )}
+                      {scanningNetwork ? 'Buscando…' : 'Buscar impresora'}
+                    </button>
+                  </div>
+
+                  {networkPrinters.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Impresoras detectadas (térmica puerto 9100):</p>
+                      <div className="grid gap-2">
+                        {networkPrinters.map((item) => (
+                          <button
+                            key={item.host}
+                            type="button"
+                            onClick={() => patch({
+                              networkHost: item.host,
+                              networkPort: item.port || 9100,
+                            })}
+                            className={settingsChoiceCardClass(config.networkHost === item.host) + ' text-left px-4 py-3 w-full'}
+                          >
+                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.host}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              {item.label || 'Impresora térmica WiFi'}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <label className="block">
-                    <span className={settingsLabelClass}>Número de la impresora</span>
+                    <span className={settingsLabelClass}>Número de la impresora (IP)</span>
                     <input
                       className={settingsInputClass}
                       value={config.networkHost}
@@ -383,7 +553,7 @@ export function TpvPrinterSetupPanel({
                     />
                   </label>
                   <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                    Mantén pulsado el botón de la impresora unos segundos hasta que salga un ticket. El número suele estar abajo, tipo <strong>192.168.1.45</strong>.
+                    Pulsa <strong>Buscar impresora</strong> para que Vertial la detecte en la red, o imprime un ticket de prueba desde la Epson y copia la IP (ej. <strong>192.168.1.200</strong>).
                   </p>
                 </div>
               )}
@@ -403,10 +573,13 @@ export function TpvPrinterSetupPanel({
                       ))}
                     </select>
                   </label>
-                  {printers.length === 0 && (
+                  {printers.length === 0 && !status?.bridgeOk && (
+                    <VertialPrintInstallHint remotePc={false} compact />
+                  )}
+                  {printers.length === 0 && status?.bridgeOk && (
                     <p className="text-xs text-amber-800 dark:text-amber-300 flex items-start gap-1.5">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                      Instala la impresora en Windows y asegúrate de que Vertial Print está activo en este PC.
+                      Instala la impresora en Windows y elígela en la lista de arriba.
                     </p>
                   )}
                 </div>
@@ -487,7 +660,11 @@ export function TpvPrinterSetupPanel({
         {status?.bridgeOk && (
           <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-            Servicio de impresión conectado. iPad y PC pueden imprimir tickets.
+            {isNativeApp
+              ? 'Impresora lista. La tablet imprime directo por WiFi.'
+              : shouldUseEposPrint(config)
+                ? 'Impresora Epson lista para Safari/iPad.'
+                : 'Servicio de impresión conectado. iPad y PC pueden imprimir tickets.'}
           </p>
         )}
       </div>

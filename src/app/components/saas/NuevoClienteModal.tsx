@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp, type Client, type ClientAddress, type PaymentMethod, type ClientCreatedFrom } from '../../context/AppContext';
+import { DuplicatesMergeModal } from './DuplicatesMergeModal';
+import { mergeClientRequest, mergeLeadRequest } from '../../lib/crmApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useClientDuplicateSearch } from '../../hooks/useClientDuplicateSearch';
 import { getDniOrNieError, getCifError } from '../../lib/dniCifValidator';
@@ -119,7 +121,7 @@ export function NuevoClienteModal({
   initialData, vincularA, perfil: perfilProp,
 }: NuevoClienteModalProps) {
   const { user } = useAuth();
-  const { addClient } = useApp();
+  const { addClient, clients, leads, updateClient, deleteClient } = useApp();
   const userId = user?.user_id || '';
   const effectivePerfil: Perfil = perfilProp || (MANAGER_ROLES.includes(user?.role || '') ? 'gerente' : 'trabajador');
   const isGerente = effectivePerfil === 'gerente';
@@ -136,6 +138,7 @@ export function NuevoClienteModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [showExtraAddresses, setShowExtraAddresses] = useState(false);
+  const [showMergeModal, setShowMergeModal] = useState(false);
 
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -188,6 +191,7 @@ export function NuevoClienteModal({
       setErrors({});
       setSaving(false);
       setShowExtraAddresses(false);
+      setShowMergeModal(false);
       clearDuplicates();
     }
   }, [open, clearDuplicates]);
@@ -488,16 +492,24 @@ export function NuevoClienteModal({
                     <Plus className="w-3.5 h-3.5" />
                     Crear nuevo igualmente
                   </button>
-                  {isGerente && (
+                  {isGerente && duplicates.length >= 2 && (
                     <button
                       type="button"
-                      onClick={() => {
-                        // TODO: Open DuplicatesMergeModal
-                      }}
+                      onClick={() => setShowMergeModal(true)}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
                     >
                       <Merge className="w-3.5 h-3.5" />
-                      Fusionar
+                      Fusionar duplicados
+                    </button>
+                  )}
+                  {isGerente && duplicates.length === 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowMergeModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs font-medium rounded-xl border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                    >
+                      <Merge className="w-3.5 h-3.5" />
+                      Gestionar duplicados
                     </button>
                   )}
                 </div>
@@ -727,6 +739,25 @@ export function NuevoClienteModal({
           </button>
         </div>
       </div>
+
+      {showMergeModal && userId ? (
+        <DuplicatesMergeModal
+          leads={leads || []}
+          clients={clients || []}
+          onMergeLead={async (keepId, deleteId) => {
+            await mergeLeadRequest(userId, keepId, deleteId);
+          }}
+          onMergeClient={async (keepId, deleteId) => {
+            const merged = await mergeClientRequest(userId, keepId, deleteId);
+            if (merged) await updateClient(keepId, merged);
+            await deleteClient(deleteId);
+          }}
+          onClose={() => {
+            setShowMergeModal(false);
+            clearDuplicates();
+          }}
+        />
+      ) : null}
     </div>
   );
 }

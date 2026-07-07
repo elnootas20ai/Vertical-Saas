@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
@@ -12,6 +13,7 @@ import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateVerticalEntries, entryNum, entryStr } from '../../lib/bulkVerticalImport';
 
 type CateringType = 'cocktail' | 'sentado' | 'buffet' | 'food_truck';
 type CateringStatus = 'cotizado' | 'confirmado' | 'servido';
@@ -69,6 +71,9 @@ const EMPTY_FORM: CateringForm = { evento: '', menu: '', tipo: 'buffet', comensa
 
 export function EventsCatering() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const linkedEventName = searchParams.get('eventName') || '';
+  const linkedEventId = searchParams.get('eventId') || '';
   const api = useMemo(() => createVerticalApi<CateringOrder>('events', 'catering'), []);
   const eventsCatalogApi = useMemo(() => createVerticalApi<EventRecord>('events', 'events'), []);
   const vendorsCatalogApi = useMemo(() => createVerticalApi<VendorRecord>('events', 'vendors'), []);
@@ -151,13 +156,38 @@ export function EventsCatering() {
     { key: 'notes', label: 'Notas', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} servicio de catering(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+      const menu = entryStr(e, 'name', 'menu', 'nombre');
+      if (!menu) return null;
+      const comensales = entryNum(e, 'guests', 'comensales');
+      const precioPorPersona = entryNum(e, 'price', 'precioPorPersona');
+      return {
+        evento: entryStr(e, 'event', 'evento') || linkedEventName,
+        menu,
+        tipo: (entryStr(e, 'type', 'tipo') || 'buffet') as CateringType,
+        comensales,
+        precioPorPersona,
+        total: comensales * precioPorPersona,
+        alergiasDietas: entryStr(e, 'notes', 'alergiasDietas'),
+        proveedor: entryStr(e, 'provider', 'proveedor'),
+        estado: 'cotizado' as CateringStatus,
+      };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} servicio(s) de catering creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún servicio de catering');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} servicio de catering(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   useModalClose(showModal, () => setShowModal(false));
 
@@ -165,8 +195,9 @@ export function EventsCatering() {
     const ms = o.evento.toLowerCase().includes(search.toLowerCase()) || o.menu.toLowerCase().includes(search.toLowerCase()) || o.proveedor.toLowerCase().includes(search.toLowerCase());
     const mst = !filterStatus || o.estado === filterStatus;
     const mt = !filterType || o.tipo === filterType;
-    return ms && mst && mt;
-  }), [orders, search, filterStatus, filterType]);
+    const me = !linkedEventName || o.evento === linkedEventName;
+    return ms && mst && mt && me;
+  }), [orders, search, filterStatus, filterType, linkedEventName]);
 
   const stats = useMemo(() => {
     const serviciosMes = orders.filter(o => o.estado !== 'cotizado').length;
@@ -175,7 +206,11 @@ export function EventsCatering() {
     return { serviciosMes, ingresos, pendientes };
   }, [orders]);
 
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowModal(true); };
+  const openCreate = () => {
+    setEditing(null);
+    setForm(linkedEventName ? { ...EMPTY_FORM, evento: linkedEventName } : EMPTY_FORM);
+    setShowModal(true);
+  };
   const openEdit = (o: CateringOrder) => {
     setEditing(o);
     setForm({
@@ -205,11 +240,12 @@ export function EventsCatering() {
   const handleSave = async () => {
     if (!form.evento || !form.menu || !userId) return;
     const computed: CateringForm = { ...form, total: form.comensales * form.precioPorPersona };
+    const payload = linkedEventId && !editing ? { ...computed, eventId: linkedEventId } : computed;
     try {
       if (editing) {
-        await api.update(userId, editing._id, computed);
+        await api.update(userId, editing._id, payload);
       } else {
-        await api.create(userId, computed);
+        await api.create(userId, payload);
       }
       await loadData();
       setShowModal(false);
@@ -229,6 +265,16 @@ export function EventsCatering() {
   return (
     <Layout title="Catering">
       <div className="space-y-6">
+        {linkedEventName && (
+          <div className="rounded-xl border border-cyan-200 dark:border-cyan-800 bg-cyan-50 dark:bg-cyan-950/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>Evento: <strong>{linkedEventName}</strong></span>
+            {linkedEventId && (
+              <Link to={`/saas/vertical/eventos/${linkedEventId}`} className="font-semibold text-cyan-700 dark:text-cyan-300 hover:underline">
+                Volver al proyecto
+              </Link>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {statsCards.map(s => (
             <div key={s.label} className={`${s.bg} rounded-xl p-4 flex items-center gap-4`}>
@@ -244,7 +290,7 @@ export function EventsCatering() {
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div className="relative flex-1 max-w-md w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar evento, menú, proveedor..." disabled={loading} className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar evento, menú, externo..." disabled={loading} className="w-full pl-10 pr-4 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
           </div>
           <div className="flex gap-2 items-center flex-wrap">
             <select value={filterType} onChange={e => setFilterType(e.target.value as any)} disabled={loading} className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm text-gray-700 dark:text-gray-300">
@@ -277,7 +323,7 @@ export function EventsCatering() {
                 <th className="text-left px-4 py-3 font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">€/persona</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500 dark:text-gray-400">Total</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500 dark:text-gray-400 hidden lg:table-cell">Alergias/Dietas</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">Proveedor</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">Externo</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-500 dark:text-gray-400">Estado</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-500 dark:text-gray-400">Acciones</th>
               </tr>
@@ -353,9 +399,9 @@ export function EventsCatering() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Proveedor</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Externo</label>
                   <select value={form.proveedor} onChange={e => setForm(p => ({ ...p, proveedor: e.target.value }))} className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
-                    <option value="">Seleccionar proveedor…</option>
+                    <option value="">Seleccionar externo…</option>
                     {proveedorOptions.map(p => <option key={p} value={p}>{p}</option>)}
                     {form.proveedor && !proveedorOptions.includes(form.proveedor) ? (
                       <option value={form.proveedor}>{form.proveedor}</option>

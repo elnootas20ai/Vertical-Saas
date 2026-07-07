@@ -106,6 +106,25 @@ if (upload.status !== 0) {
     );
     process.exit(upload.status ?? 1);
   }
+
+  // scp en Windows a veces deja index.html nuevo sin los JS grandes; reintento assets/.
+  const assetsDir = resolve(REPO_ROOT, 'dist', 'assets');
+  if (existsSync(assetsDir)) {
+    console.log('[deploy:frontend] Verificando subida de dist/assets/ ...');
+    const assetsTarget = `${target}assets/`;
+    const assetsScp = ['-r'];
+    if (identity) assetsScp.push('-i', identity);
+    assetsScp.push('dist/assets/.', assetsTarget);
+    const assetsUpload = spawnSync('scp', assetsScp, {
+      cwd: REPO_ROOT,
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+    });
+    if (assetsUpload.status !== 0) {
+      console.warn('[deploy:frontend] Reintento de assets/ falló; comprueba el bundle JS en el VPS.');
+    }
+  }
+
   console.warn(
     '[deploy:frontend] Subido con scp. Si algo "viejo" sigue en el servidor, borra archivos huérfanos en el VPS o usa rsync --delete.',
   );

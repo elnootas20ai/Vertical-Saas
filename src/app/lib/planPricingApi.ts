@@ -4,6 +4,8 @@ import { ensureCouchDb } from './ensureCouchDb';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
+import { VERTIAL_PLANS, vertialPlanToPricingFeatures } from './planCatalog';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface PlanFeature {
@@ -33,54 +35,15 @@ export interface PlanPricingConfig {
 
 // ── Defaults (match current hardcoded values) ─────────────────────────────────
 
-export const DEFAULT_PLANS: PlanDefinition[] = [
-  {
-    id: 'basic',
-    name: 'Básico',
-    monthlyPrice: 49,
-    features: [
-      { text: 'Hasta 3 usuarios', included: true },
-      { text: '1 ubicación', included: true },
-      { text: 'Stock hasta 50 vehículos', included: true },
-      { text: 'Documentos básicos', included: true },
-      { text: 'API completa', included: false },
-      { text: 'Gestor dedicado', included: false },
-    ],
-    highlight: false,
-    order: 0,
-  },
-  {
-    id: 'normal',
-    name: 'Normal',
-    monthlyPrice: 149,
-    features: [
-      { text: 'Hasta 10 usuarios', included: true },
-      { text: 'Hasta 3 ubicaciones', included: true },
-      { text: 'Stock ilimitado', included: true },
-      { text: 'Todos los módulos', included: true },
-      { text: 'API completa', included: false },
-      { text: 'Gestor dedicado', included: false },
-    ],
-    highlight: true,
-    badge: 'Más popular',
-    order: 1,
-  },
-  {
-    id: 'pro',
-    name: 'Pro',
-    monthlyPrice: 349,
-    features: [
-      { text: 'Usuarios ilimitados', included: true },
-      { text: 'Hasta 10 ubicaciones', included: true },
-      { text: 'Stock ilimitado', included: true },
-      { text: 'Todos los módulos', included: true },
-      { text: 'API completa', included: true },
-      { text: 'Gestor dedicado', included: true },
-    ],
-    highlight: false,
-    order: 2,
-  },
-];
+export const DEFAULT_PLANS: PlanDefinition[] = VERTIAL_PLANS.map((plan, index) => ({
+  id: plan.id,
+  name: plan.displayName,
+  monthlyPrice: plan.priceMonthly,
+  features: vertialPlanToPricingFeatures(plan),
+  highlight: plan.id === 'normal',
+  badge: plan.launchOffer?.badge ?? (plan.id === 'normal' ? 'Más popular' : undefined),
+  order: index,
+}));
 
 export const DEFAULT_ANNUAL_DISCOUNT = 0.20;
 

@@ -9,6 +9,7 @@ import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbo
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
+import { shouldHideThirdPartyAuthOnIos } from '../../lib/appStoreCompliance';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { seedRetailScopeCacheFromTabletLogin } from '../../lib/tabletLoginStoreSeed';
@@ -270,18 +271,19 @@ export function Login() {
     }
   }, [googleLogin, navigate, t]);
 
+  const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
+  const showGoogleAuth = googleClientConfigured && !hideGoogleOnIos;
   const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
   const googleBtnRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (googleReady && googleBtnRef.current) {
-      const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
-      renderButton(googleBtnRef.current, { theme, size: 'medium', text: 'signin_with' });
-    }
-  }, [googleReady, renderButton, resolvedTheme]);
+    if (!showGoogleAuth || !googleReady || !googleBtnRef.current) return;
+    const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
+    renderButton(googleBtnRef.current, { theme, size: 'medium', text: 'signin_with' });
+  }, [showGoogleAuth, googleReady, renderButton, resolvedTheme]);
 
   useEffect(() => {
-    if (googleReady || !googleClientConfigured) {
+    if (!showGoogleAuth || googleReady) {
       setGoogleTimedOut(false);
       return;
     }
@@ -289,7 +291,7 @@ export function Login() {
       setGoogleTimedOut(true);
     }, 8000);
     return () => window.clearTimeout(timeout);
-  }, [googleReady, googleClientConfigured]);
+  }, [showGoogleAuth, googleReady]);
 
   return (
     <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-800 flex items-start justify-center px-4 pt-4 pb-5 sm:pt-6">
@@ -521,6 +523,8 @@ export function Login() {
               {t('auth.submit')}
             </ACCESO__Button>
 
+            {!hideGoogleOnIos && (
+            <>
             <div className="relative my-3">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-200 dark:border-gray-700" />
@@ -531,7 +535,7 @@ export function Login() {
             </div>
 
             <div className="flex justify-center w-full">
-              {!googleClientConfigured ? null : !googleReady && !googleTimedOut ? (
+              {!showGoogleAuth ? null : !googleReady && !googleTimedOut ? (
                 <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-2 px-3 text-sm text-gray-500 dark:text-gray-400">
                   <svg className="w-5 h-5 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -547,13 +551,15 @@ export function Login() {
                 <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
               )}
             </div>
-            {!googleClientConfigured && (
+            {!showGoogleAuth && !hideGoogleOnIos && (
               <div className="w-full py-3 px-4 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
                 Inicio con Google no está activo en este sitio: falta{' '}
                 <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> en el{' '}
                 <strong>build</strong> del frontend (debe ser el mismo Client ID que{' '}
                 <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">GOOGLE_CLIENT_ID</code> en el servidor).
               </div>
+            )}
+            </>
             )}
 
             <button

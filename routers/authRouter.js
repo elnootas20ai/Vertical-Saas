@@ -52,7 +52,7 @@ import {
   updateProfile,
   verifyEmail,
 } from '../controllers/authController.js';
-import { requireAuth, requireAuthAndEmailVerified, requireAuthForProfileUpdate } from '../middleware/auth.js';
+import { requireAuth, requireAuthAndEmailVerified, requireAuthForProfileUpdate, optionalAuth } from '../middleware/auth.js';
 import { authSessionLimiter, emailVerificationLimiter, loginCodeLimiter, loginLimiter, registerLimiter, recoverLimiter, teamLoginLimiter, tpvTabletAuthLimiter } from '../middleware/rateLimiter.js';
 import {
   validate,
@@ -97,9 +97,9 @@ authRouter.post('/resend-verification', emailVerificationLimiter, validate(recov
 authRouter.post('/accept-invite', recoverLimiter, validate(acceptInviteSchema), acceptInvite);
 // Team login: miembros entran con código de empresa + usuario + contraseña
 authRouter.post('/team-login', teamLoginLimiter, validate(teamLoginSchema), teamLogin);
-// TPV tablet: código de tienda + PIN (activación o cambio de trabajador)
-authRouter.post('/tpv-tablet/activate', tpvTabletAuthLimiter, validate(tpvTabletLoginSchema), tpvTabletActivate);
-authRouter.post('/tpv-tablet/switch', tpvTabletAuthLimiter, validate(tpvTabletLoginSchema), tpvTabletSwitch);
+// TPV tablet: código de tienda (conserva sesión actual si ya estás logueado)
+authRouter.post('/tpv-tablet/activate', tpvTabletAuthLimiter, optionalAuth, validate(tpvTabletLoginSchema), tpvTabletActivate);
+authRouter.post('/tpv-tablet/switch', tpvTabletAuthLimiter, optionalAuth, validate(tpvTabletLoginSchema), tpvTabletSwitch);
 // POS switch: cambio rápido de usuario en TPV (requiere sesión activa)
 authRouter.post('/pos-switch', requireAuthAndEmailVerified, validate(posSwitchUserSchema), posSwitchUser);
 

@@ -37,36 +37,7 @@ export function ConstructionMaterials() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Material | null>(null);
   const [form, setForm] = useState(emptyMaterial);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'category', label: 'Categoría' },
-    { key: 'unit', label: 'Unidad' },
-    { key: 'price', label: 'Precio' },
-    { key: 'supplier', label: 'Proveedor' },
-    { key: 'stock', label: 'Stock' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'category', label: 'Categoría', example: '' },
-    { key: 'unit', label: 'Unidad', example: '' },
-    { key: 'price', label: 'Precio', example: '' },
-    { key: 'supplier', label: 'Proveedor', example: '' },
-    { key: 'stock', label: 'Stock', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} material(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} material(s) importado(s)`);
-  };
-
-  useModalClose(modalOpen, () => setModalOpen(false));
+    useModalClose(modalOpen, () => setModalOpen(false));
 
   const filtered = useMemo(() => materials.filter(m => {
     const matchSearch = `${m.nombre} ${m.proveedor} ${m.proyectoDestino}`.toLowerCase().includes(search.toLowerCase());
@@ -129,8 +100,6 @@ export function ConstructionMaterials() {
           <AddButtonDropdown
                 label="Nuevo material"
                 onQuickAdd={openCreate}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de material"
               />
@@ -199,22 +168,6 @@ export function ConstructionMaterials() {
           </form>
         </div>
       )}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="construction_materials"
-        moduleLabel="Materiales"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Materiales"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

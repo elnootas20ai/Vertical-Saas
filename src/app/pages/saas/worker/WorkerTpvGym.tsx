@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
+import { createVerticalApi, type VerticalEntity } from '../../../lib/verticalApiFactory';
 import {
   ArrowLeft,
   Dumbbell,
@@ -15,6 +16,7 @@ import {
   UserCheck,
   ChevronRight,
   DoorOpen,
+  Loader2,
 } from 'lucide-react';
 
 type MemberStatus = 'activo' | 'inactivo' | 'prueba';
@@ -35,6 +37,7 @@ interface AccessLog {
 }
 
 interface ClassAttendance {
+  recordId: string;
   memberId: string;
   hora: string;
 }
@@ -48,6 +51,65 @@ interface GymClass {
   capacidad: number;
   inscritos: number;
   asistentes: ClassAttendance[];
+}
+
+interface ApiMember extends VerticalEntity {
+  nombre: string;
+  email: string;
+  plan: string;
+  estado: string;
+}
+
+interface ApiClass extends VerticalEntity {
+  nombre: string;
+  instructor: string;
+  horario: string;
+  dia: string;
+  capacidad: number;
+  inscritos: number;
+}
+
+interface ApiAccessLog extends VerticalEntity {
+  miembro: string;
+  horaEntrada: string;
+  horaSalida?: string | null;
+}
+
+interface ApiClassAttendance extends VerticalEntity {
+  classId: string;
+  classNombre: string;
+  memberId: string;
+  memberNombre: string;
+  hora: string;
+}
+
+const DAY_KEYS = ['domingo', 'lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado'] as const;
+
+function mapMemberStatus(raw: string): MemberStatus {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'activo') return 'activo';
+  if (s === 'prueba') return 'prueba';
+  if (s === 'congelado') return 'prueba';
+  return 'inactivo';
+}
+
+function resolveMemberIdFromAccessRef(ref: string, members: GymMember[]): string {
+  const token = String(ref || '').trim();
+  if (!token) return '';
+  const byId = members.find((m) => m.id === token);
+  if (byId) return byId.id;
+  const byName = members.find((m) => m.nombre === token);
+  return byName?.id || token;
+}
+
+function parseClassTimes(horario: string) {
+  const parts = String(horario || '08:00').split('-').map((p) => p.trim());
+  return { horaInicio: parts[0] || '08:00', horaFin: parts[1] || parts[0] || '09:00' };
+}
+
+function isTodayClass(dia: string) {
+  const today = DAY_KEYS[new Date().getDay()];
+  return String(dia || '').trim().toLowerCase() === today;
 }
 
 const MEMBER_STATUS_CFG: Record<MemberStatus, { label: string; color: string; bg: string }> = {
@@ -129,94 +191,114 @@ export function WorkerTpvGym() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const workerName = user?.firstName ? `${user.firstName} ${user?.lastName || ''}`.trim() : 'Operario';
+  const userId = user?.user_id || user?.id || '';
+
+  const membersApi = useMemo(() => createVerticalApi<ApiMember>('gym', 'members'), []);
+  const classesApi = useMemo(() => createVerticalApi<ApiClass>('gym', 'classes'), []);
+  const accessApi = useMemo(() => createVerticalApi<ApiAccessLog>('gym', 'accessLogs'), []);
+  const attendanceApi = useMemo(() => createVerticalApi<ApiClassAttendance>('gym', 'classAttendance'), []);
 
   const [tab, setTab] = useState<ActiveTab>('socios');
   const [search, setSearch] = useState('');
   const [filterMember, setFilterMember] = useState<MemberFilter>('all');
   const [filterClass, setFilterClass] = useState<ClassFilter>('all');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const [members, setMembers] = useState<GymMember[]>(() => [
-    {
-      id: uuidv4(),
-      nombre: 'Laura Méndez',
-      email: 'laura.m@email.com',
-      estado: 'activo',
-      tipoMembresia: 'Mensual premium',
-      ultimoAcceso: new Date(Date.now() - 86400000 * 2).toISOString(),
-    },
-    {
-      id: uuidv4(),
-      nombre: 'Carlos Ruiz',
-      email: 'carlos.ruiz@email.com',
-      estado: 'activo',
-      tipoMembresia: 'Anual',
-      ultimoAcceso: new Date().toISOString(),
-    },
-    {
-      id: uuidv4(),
-      nombre: 'Ana Torres',
-      email: 'ana.t@email.com',
-      estado: 'prueba',
-      tipoMembresia: 'Prueba 7 días',
-      ultimoAcceso: null,
-    },
-    {
-      id: uuidv4(),
-      nombre: 'Pedro Sánchez',
-      email: 'pedro.s@email.com',
-      estado: 'inactivo',
-      tipoMembresia: 'Mensual (vencido)',
-      ultimoAcceso: new Date(Date.now() - 86400000 * 40).toISOString(),
-    },
-  ]);
-
-  const [classes, setClasses] = useState<GymClass[]>(() => [
-    {
-      id: uuidv4(),
-      nombre: 'Spinning',
-      horaInicio: '08:00',
-      horaFin: '08:45',
-      instructor: 'Marta López',
-      capacidad: 20,
-      inscritos: 14,
-      asistentes: [],
-    },
-    {
-      id: uuidv4(),
-      nombre: 'Yoga',
-      horaInicio: '10:30',
-      horaFin: '11:30',
-      instructor: 'Javier Ortega',
-      capacidad: 15,
-      inscritos: 15,
-      asistentes: [],
-    },
-    {
-      id: uuidv4(),
-      nombre: 'HIIT',
-      horaInicio: '18:00',
-      horaFin: '18:45',
-      instructor: 'Marta López',
-      capacidad: 12,
-      inscritos: 9,
-      asistentes: [],
-    },
-    {
-      id: uuidv4(),
-      nombre: 'Pilates',
-      horaInicio: '19:30',
-      horaFin: '20:30',
-      instructor: 'Elena Vidal',
-      capacidad: 10,
-      inscritos: 6,
-      asistentes: [],
-    },
-  ]);
-
-  const [accessLogs, setAccessLogs] = useState<AccessLog[]>(() => []);
+  const [members, setMembers] = useState<GymMember[]>([]);
+  const [classes, setClasses] = useState<GymClass[]>([]);
+  const [accessLogs, setAccessLogs] = useState<AccessLog[]>([]);
 
   const [attendanceClassId, setAttendanceClassId] = useState<string | null>(null);
   const [attendanceSearch, setAttendanceSearch] = useState('');
+
+  const loadData = useCallback(async () => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const [apiMembers, apiClasses, apiLogs, apiAttendance] = await Promise.all([
+        membersApi.list(userId),
+        classesApi.list(userId),
+        accessApi.list(userId).catch(() => []),
+        attendanceApi.list(userId).catch(() => [] as ApiClassAttendance[]),
+      ]);
+
+      const logs: AccessLog[] = apiLogs.map((log) => ({
+        id: log._id,
+        memberId: String(log.miembro || ''),
+        timestamp: String(log.horaEntrada || log.createdAt || ''),
+      }));
+      setAccessLogs(logs);
+
+      const mappedMembers: GymMember[] = apiMembers.map((m) => ({
+        id: m._id,
+        nombre: String(m.nombre || ''),
+        email: String(m.email || ''),
+        estado: mapMemberStatus(String(m.estado || '')),
+        tipoMembresia: String(m.plan || '—'),
+        ultimoAcceso: null,
+      }));
+
+      const lastAccessByMember = new Map<string, string>();
+      for (const log of logs) {
+        const memberId = resolveMemberIdFromAccessRef(log.memberId, mappedMembers);
+        if (!memberId) continue;
+        const prev = lastAccessByMember.get(memberId);
+        if (!prev || log.timestamp > prev) lastAccessByMember.set(memberId, log.timestamp);
+      }
+
+      setMembers(
+        mappedMembers.map((m) => ({
+          ...m,
+          ultimoAcceso: lastAccessByMember.get(m.id) || null,
+        })),
+      );
+
+      const attendanceByClass = new Map<string, ClassAttendance[]>();
+      for (const record of apiAttendance) {
+        const hora = String(record.hora || record.createdAt || '');
+        if (!isSameCalendarDay(hora)) continue;
+        const classId = String(record.classId || '');
+        if (!classId) continue;
+        const list = attendanceByClass.get(classId) || [];
+        list.push({
+          recordId: record._id,
+          memberId: String(record.memberId || ''),
+          hora,
+        });
+        attendanceByClass.set(classId, list);
+      }
+
+      setClasses(
+        apiClasses
+          .filter((c) => isTodayClass(String(c.dia || '')))
+          .map((c) => {
+            const { horaInicio, horaFin } = parseClassTimes(String(c.horario || ''));
+            return {
+              id: c._id,
+              nombre: String(c.nombre || ''),
+              horaInicio,
+              horaFin,
+              instructor: String(c.instructor || '—'),
+              capacidad: Number(c.capacidad || 0),
+              inscritos: Number(c.inscritos || 0),
+              asistentes: attendanceByClass.get(c._id) || [],
+            };
+          }),
+      );
+    } catch {
+      toast.error('No se pudieron cargar los datos del gimnasio');
+    } finally {
+      setLoading(false);
+    }
+  }, [userId, membersApi, classesApi, accessApi, attendanceApi]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
   const accessLogsToday = useMemo(
     () => accessLogs.filter(l => l.memberId && isSameCalendarDay(l.timestamp)),
@@ -283,30 +365,88 @@ export function WorkerTpvGym() {
     });
   }, [members, attendanceClass, attendanceSearch]);
 
-  const checkInMember = (memberId: string) => {
+  const checkInMember = async (memberId: string) => {
+    if (!userId || saving) return;
+    const member = members.find((m) => m.id === memberId);
+    if (!member) return;
+    setSaving(true);
     const now = new Date().toISOString();
-    setMembers(prev => prev.map(m => (m.id === memberId ? { ...m, ultimoAcceso: now } : m)));
-    setAccessLogs(prev => [...prev, { id: uuidv4(), memberId, timestamp: now }]);
+    try {
+      await accessApi.create(userId, {
+        miembro: member.id,
+        horaEntrada: now,
+        horaSalida: null,
+        metodo: 'tarjeta',
+        foto: '',
+      });
+      setMembers((prev) => prev.map((m) => (m.id === memberId ? { ...m, ultimoAcceso: now } : m)));
+      setAccessLogs((prev) => [...prev, { id: `local-${now}`, memberId: member.id, timestamp: now }]);
+      toast.success(`Entrada registrada: ${member.nombre}`);
+    } catch {
+      toast.error('No se pudo registrar la entrada');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const addClassAttendance = (classId: string, memberId: string) => {
+  const addClassAttendance = async (classId: string, memberId: string) => {
+    if (!userId || saving) return;
+    const gymClass = classes.find((c) => c.id === classId);
+    const member = members.find((m) => m.id === memberId);
+    if (!gymClass || !member) return;
+    if (gymClass.asistentes.some((a) => a.memberId === memberId)) return;
+
+    setSaving(true);
     const now = new Date().toISOString();
-    setClasses(prev =>
-      prev.map(c => {
-        if (c.id !== classId) return c;
-        if (c.asistentes.some(a => a.memberId === memberId)) return c;
-        return { ...c, asistentes: [...c.asistentes, { memberId, hora: now }] };
-      }),
-    );
-    setAttendanceSearch('');
+    try {
+      const record = await attendanceApi.create(userId, {
+        classId,
+        classNombre: gymClass.nombre,
+        memberId,
+        memberNombre: member.nombre,
+        hora: now,
+      });
+      setClasses((prev) =>
+        prev.map((c) => {
+          if (c.id !== classId) return c;
+          return {
+            ...c,
+            asistentes: [...c.asistentes, { recordId: record._id, memberId, hora: now }],
+          };
+        }),
+      );
+      setAttendanceSearch('');
+      toast.success(`Asistencia registrada: ${member.nombre}`);
+    } catch {
+      toast.error('No se pudo registrar la asistencia');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const removeClassAttendance = (classId: string, memberId: string) => {
-    setClasses(prev =>
-      prev.map(c =>
-        c.id === classId ? { ...c, asistentes: c.asistentes.filter(a => a.memberId !== memberId) } : c,
-      ),
-    );
+  const removeClassAttendance = async (classId: string, memberId: string) => {
+    if (!userId || saving) return;
+    const gymClass = classes.find((c) => c.id === classId);
+    const attendance = gymClass?.asistentes.find((a) => a.memberId === memberId);
+    if (!attendance) return;
+
+    setSaving(true);
+    try {
+      if (attendance.recordId) {
+        await attendanceApi.remove(userId, attendance.recordId);
+      }
+      setClasses((prev) =>
+        prev.map((c) =>
+          c.id === classId
+            ? { ...c, asistentes: c.asistentes.filter((a) => a.memberId !== memberId) }
+            : c,
+        ),
+      );
+    } catch {
+      toast.error('No se pudo quitar la asistencia');
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (attendanceClass) {
@@ -576,7 +716,12 @@ export function WorkerTpvGym() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        {tab === 'socios' ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+            <Loader2 className="w-8 h-8 animate-spin mb-2" />
+            <p className="text-sm font-medium">Cargando gimnasio…</p>
+          </div>
+        ) : tab === 'socios' ? (
           filteredMembers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-400">
               <Users className="w-10 h-10 mb-2" />

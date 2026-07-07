@@ -467,8 +467,6 @@ function GroupDetailPanel({ group }: { group: BusinessGroup }) {
               <AddButtonDropdown
                 label="Nuevo grupo"
                 onQuickAdd={() => setShowAddBusiness(true)}
-                onAIAdd={() => setShowAIModal(true)}
-                onImport={() => setShowImportModal(true)}
                 quickAddLabel="Alta rápida"
                 quickAddDesc="Formulario de grupo"
               />
@@ -649,33 +647,7 @@ export function Groups() {
   const { groups, currentGroup, switchGroup, deleteGroup, isLoading, reloadGroups } = useGroup();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
-
-  const MODULE_AI_FIELDS: AIFieldDef[] = [
-    { key: 'name', label: 'Nombre' },
-    { key: 'description', label: 'Descripción' },
-    { key: 'type', label: 'Tipo' },
-    { key: 'members', label: 'Miembros' },
-  ];
-
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = [
-    { key: 'name', label: 'Nombre', required: true, example: '' },
-    { key: 'description', label: 'Descripción', example: '' },
-    { key: 'type', label: 'Tipo', example: '' },
-    { key: 'members', label: 'Miembros', example: '' },
-  ];
-
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} grupo(s) parseado(s) con IA`);
-  };
-
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} grupo(s) importado(s)`);
-  };
-
-
-  async function handleDelete(groupId: string) {
+    async function handleDelete(groupId: string) {
     if (!confirm('¿Eliminar este grupo empresarial? Las empresas vinculadas no se eliminarán.')) return;
     setDeletingId(groupId);
     await deleteGroup(groupId);
@@ -781,22 +753,6 @@ export function Groups() {
           onCreated={() => void reloadGroups()}
         />
       )}
-    
-      <AIAddModal
-        isOpen={showAIModal}
-        onClose={() => setShowAIModal(false)}
-        module="groups"
-        moduleLabel="Grupos"
-        fields={MODULE_AI_FIELDS}
-        onEntriesParsed={handleAIEntries}
-      />
-      <GenericImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        moduleLabel="Grupos"
-        fields={MODULE_IMPORT_FIELDS}
-        onImport={handleImportEntries}
-      />
     </Layout>
   );
 }

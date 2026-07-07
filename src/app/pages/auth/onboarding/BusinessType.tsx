@@ -63,6 +63,9 @@ export function BusinessType() {
       });
     }
     updateData('businessType', selectedType);
+    if (selectedType === 'workshop') {
+      updateData('requestedModules', { ...data.requestedModules, workshop: true });
+    }
     if (isRestaurantBusinessType(selectedType)) {
       updateData('restaurantFormat', 'restaurant');
     } else {

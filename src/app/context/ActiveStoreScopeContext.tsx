@@ -17,7 +17,9 @@ import {
   DELIVERY_ACTIVE_STORE_CHANGED,
   coerceSelectedPdvId,
   notifyDeliveryActiveStoreChanged,
+  pickDefaultActivePdvId,
   readDeliveryOpsSelectedPdvId,
+  resolvePreferenceToPdvId,
   writeDeliveryOpsSelectedPdvId,
 } from '../lib/deliveryOpsPdvSelection';
 import {
@@ -34,6 +36,7 @@ import {
   resolveBusinessScopeId,
   knownBusinessIdsFromList,
   filterPointsOfSaleForWorkCenters,
+  repairMissingRetailDeliveryPdvs,
 } from '../lib/deliverySetup';
 import {
   filterRetailWorkCentersForScope,
@@ -300,6 +303,19 @@ function ActiveStoreScopeProviderImpl({
   useLayoutEffect(() => {
     setInitialLoading(false);
 
+    // Tablet TPV: el código fija tienda antes de que el selector global cambie de empresa.
+    if (isTpvTabletWorkerPath(location.pathname)) {
+      const binding = readTpvTabletBinding();
+      if (binding?.pdvId && binding?.businessId) {
+        const { retail, allPdvs } = buildTabletScopeRows(binding);
+        if (retail.length > 0 || allPdvs.length > 0) {
+          hasDisplayedStoresRef.current = true;
+          applyStores(retail, allPdvs);
+          return;
+        }
+      }
+    }
+
     if (!businessId) {
       storeBusinessIdRef.current = null;
       emptyRetryDoneRef.current = false;
@@ -397,7 +413,7 @@ function ActiveStoreScopeProviderImpl({
       };
 
       try {
-        const state = await loadRetailStoresForBusiness(
+        let state = await loadRetailStoresForBusiness(
           authUser,
           biz as Business,
           businessesRef.current,
@@ -405,10 +421,21 @@ function ActiveStoreScopeProviderImpl({
             ...loadOpts,
             includeInactivePdvs: true,
             tpvBootstrap: false,
-            skipPdvMerge: true,
+            skipPdvMerge: false,
             ensureTabletCodes: false,
           },
         );
+        if (state.dataUserId) {
+          state = {
+            ...state,
+            pointsOfSale: await repairMissingRetailDeliveryPdvs(
+              state.dataUserId,
+              state.workCenters,
+              state.pointsOfSale,
+              biz as Business,
+            ),
+          };
+        }
 
         if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
 
@@ -450,8 +477,8 @@ function ActiveStoreScopeProviderImpl({
     if (authInitializing || !businessId || !businessesFetchSettled) return;
     const uid = String(user?.user_id || user?.id || '').trim();
     if (!uid) return;
-    void load();
-  }, [authInitializing, businessId, businessesFetchSettled, user?.user_id, user?.id, load]);
+    void load({ force: location.pathname.includes('/delivery-ops') });
+  }, [authInitializing, businessId, businessesFetchSettled, user?.user_id, user?.id, load, location.pathname]);
 
   /** Un solo reintento si la lista sigue vacía tras F5 (evita bucle infinito de loading en topbar). */
   useEffect(() => {
@@ -592,18 +619,25 @@ function ActiveStoreScopeProviderImpl({
   }, [pointsOfSale, activePreferenceRaw]);
 
   useEffect(() => {
-    if (!businessId || !dataUserId || pointsOfSale.length === 0) return;
+    if (!businessId || !dataUserId) return;
     const raw = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-    const targetId = coerceSelectedPdvId(pointsOfSale, raw);
-    if (!targetId) {
-      if (raw) {
-        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
+    if (!raw) return;
+
+    const active = pointsOfSale.filter((p) => p.active !== false);
+    if (active.length === 0) return;
+
+    if (raw.startsWith('wc:')) {
+      const resolved = resolvePreferenceToPdvId(active, raw);
+      if (resolved && resolved !== raw) {
+        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, resolved);
         bump();
       }
       return;
     }
-    if (raw !== targetId) {
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, targetId);
+
+    if (!active.some((p) => p._id === raw)) {
+      const fallback = pickDefaultActivePdvId(active);
+      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, fallback);
       bump();
     }
   }, [businessId, dataUserId, pointsOfSale, bump]);
@@ -612,22 +646,32 @@ function ActiveStoreScopeProviderImpl({
     (pdvId: string) => {
       if (!businessId || !dataUserId || !pdvId.trim()) return;
       const id = pdvId.trim();
-      if (!pointsOfSale.some((p) => p._id === id && p.active !== false)) return;
+      const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
+      if (pool.length > 0 && !pool.some((p) => p._id === id && p.active !== false)) return;
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
       notifyDeliveryActiveStoreChanged();
       bump();
     },
-    [businessId, dataUserId, pointsOfSale, bump],
+    [businessId, dataUserId, pointsOfSale, allPointsOfSale, bump],
   );
 
   const setActiveWorkCenterPreference = useCallback(
     (workCenterId: string) => {
       if (!businessId || !dataUserId || !workCenterId.trim()) return;
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, `wc:${workCenterId.trim()}`);
+      const wc = workCenterId.trim();
+      const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
+      const linkedPdv = pool.find(
+        (p) => String(p.workCenterId || '').trim() === wc && p.active !== false,
+      );
+      if (linkedPdv) {
+        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, linkedPdv._id);
+      } else {
+        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, `wc:${wc}`);
+      }
       notifyDeliveryActiveStoreChanged();
       bump();
     },
-    [businessId, dataUserId, bump],
+    [businessId, dataUserId, pointsOfSale, allPointsOfSale, bump],
   );
 
   const displayLabelForActive = useMemo(() => {

@@ -57,7 +57,7 @@ export const INVOICES_DB = 'invoice';
 export const FLEET_DB = 'fleet';
 export const NOTIFICATIONS_DB = 'notifications';
 export const ACCOUNT_ACTIVITY_LIMIT = 50;
-export const TEAM_PERMISSION_KEYS = ['vehicles', 'clients', 'sales', 'reservations', 'documents', 'finance', 'ancove', 'team', 'fleet', 'delivery', 'cash_register', 'cleaning_materials', 'acquisitions', 'butcher_waste', 'butcher_purchases', 'reports', 'scrapyard_docs', 'scrapyard'];
+export const TEAM_PERMISSION_KEYS = ['vehicles', 'clients', 'sales', 'reservations', 'documents', 'finance', 'ancove', 'team', 'fleet', 'delivery', 'cash_register', 'cleaning_materials', 'acquisitions', 'butcher_waste', 'butcher_purchases', 'reports', 'scrapyard_docs', 'scrapyard', 'workshop'];
 
 export const ROLE_DEFINITIONS = [
   {
@@ -83,7 +83,7 @@ export const ROLE_DEFINITIONS = [
   {
     id: 'Taller',
     description: 'Gestión de reparaciones, preparación y estado de vehículos.',
-    permissions: ['vehicles'],
+    permissions: ['workshop', 'vehicles'],
   },
   {
     id: 'Usuario',
@@ -1189,7 +1189,7 @@ export function buildDefaultPermissionMatrix(role = 'Usuario') {
   const presets = {
     Comercial: ['vehicles', 'clients', 'sales', 'documents'],
     Administración: ['clients', 'documents', 'finance', 'ancove'],
-    Taller: ['vehicles'],
+    Taller: ['workshop', 'vehicles'],
     // "Usuario" es el rol por defecto cuando se invita a un trabajador sin elegir
     // rol específico. Le damos visibilidad operativa básica multi-vertical
     // (sales/delivery/cash_register) para que un trabajador delivery, peluquería,
@@ -1199,6 +1199,7 @@ export function buildDefaultPermissionMatrix(role = 'Usuario') {
     'Mostrador / Atención': ['clients', 'sales', 'delivery', 'cash_register', 'documents'],
     Cocina: ['delivery', 'documents'],
     Reparto: ['delivery', 'fleet'],
+    Operaciones: ['clients', 'documents', 'sales'],
   };
 
   const readWriteModules = presets[role] || [];
@@ -5162,6 +5163,7 @@ export function buildWorkOrderDocument(userId, data = {}, existing = null) {
     id,
     woNumber,
     user_id: userId,
+    business_id: String(data.business_id || existing?.business_id || ''),
     vehicleId: String(data.vehicleId || ''),
     vehicleBrand: String(data.vehicleBrand || ''),
     vehicleModel: String(data.vehicleModel || ''),
@@ -5210,6 +5212,7 @@ export function sanitizeWorkOrder(doc) {
     id: doc._id,
     woNumber: doc.woNumber || '',
     user_id: doc.user_id,
+    business_id: doc.business_id || '',
     vehicleId: doc.vehicleId || '',
     vehicleBrand: doc.vehicleBrand || '',
     vehicleModel: doc.vehicleModel || '',
@@ -5246,13 +5249,34 @@ export function sanitizeWorkOrder(doc) {
   };
 }
 
-export async function listWorkOrdersByUser(req, userId) {
+export async function listWorkOrdersByUser(req, userId, businessId = null) {
   const db = getWorkshopDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
+  const scopeId = String(businessId || '').trim();
   return docs
-    .filter((doc) => doc?.type === 'work_order' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter((doc) => {
+      if (doc?.type !== 'work_order' || doc?.deletedAt) return false;
+      if (userId && doc?.user_id !== userId) return false;
+      if (scopeId && doc?.business_id && doc.business_id !== scopeId) return false;
+      return true;
+    })
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+}
+
+export async function listPartsByUser(req, userId, businessId = null) {
+  const db = getPartsDbName();
+  await ensureDatabase(req, db);
+  const docs = await getAllDocuments(req, db);
+  const scopeId = String(businessId || '').trim();
+  return docs
+    .filter((doc) => {
+      if (doc?.type !== 'part' || doc?.deletedAt) return false;
+      if (userId && doc?.user_id !== userId) return false;
+      if (scopeId && doc?.business_id && doc.business_id !== scopeId) return false;
+      return true;
+    })
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }
 
 export function buildPartDocument(userId, data = {}, existing = null) {
@@ -5267,6 +5291,7 @@ export function buildPartDocument(userId, data = {}, existing = null) {
     id,
     partNumber,
     user_id: userId,
+    business_id: String(data.business_id || existing?.business_id || ''),
     name: String(data.name || ''),
     reference: String(data.reference || ''),
     category: String(data.category || 'otro'),
@@ -5291,6 +5316,7 @@ export function sanitizePart(doc) {
     id: doc._id,
     partNumber: doc.partNumber || '',
     user_id: doc.user_id,
+    business_id: doc.business_id || '',
     name: doc.name || '',
     reference: doc.reference || '',
     category: doc.category || 'otro',
@@ -5305,15 +5331,6 @@ export function sanitizePart(doc) {
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
   };
-}
-
-export async function listPartsByUser(req, userId) {
-  const db = getPartsDbName();
-  await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return docs
-    .filter((doc) => doc?.type === 'part' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
-    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }
 
 // ─── DELIVERY ─────────────────────────────────────────────────────────────────
@@ -12471,4 +12488,54 @@ export async function listVehicleAcquisitionsByUser(req, userId) {
   return docs
     .filter((d) => d?.type === 'vehicle_acquisition' && !d?.deletedAt && (!userId || d?.user_id === userId))
     .sort((a, b) => String(b.acquisitionDate || b.createdAt || '').localeCompare(String(a.acquisitionDate || a.createdAt || '')));
+}
+
+// ── Consultas fiscales compraventa ─────────────────────────────────────────────
+
+export function buildFiscalConsultationDocument(userId, data = {}, existing = null, businessId = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || data._id || `fiscal:${uuidv4()}`;
+  return {
+    _id: id,
+    type: 'fiscal_consultation',
+    user_id: userId,
+    business_id: businessId || data.business_id || existing?.business_id || null,
+    vehicleId: normalizeOptionalText(data.vehicleId) || existing?.vehicleId || '',
+    acquisitionId: normalizeOptionalText(data.acquisitionId) || existing?.acquisitionId || '',
+    form: data.form || existing?.form || {},
+    result: data.result || existing?.result || {},
+    summary: data.summary || existing?.summary || {},
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    deletedAt: existing?.deletedAt || null,
+  };
+}
+
+export function sanitizeFiscalConsultation(doc) {
+  if (!doc || doc.type !== 'fiscal_consultation' || doc.deletedAt) return null;
+  return {
+    id: doc._id,
+    _rev: doc._rev,
+    businessId: doc.business_id || undefined,
+    vehicleId: doc.vehicleId || '',
+    acquisitionId: doc.acquisitionId || '',
+    form: doc.form || {},
+    result: doc.result || {},
+    summary: doc.summary || {},
+    createdAt: doc.createdAt || doc.updatedAt || new Date().toISOString(),
+    updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
+  };
+}
+
+export async function listFiscalConsultationsByUser(req, userId, businessId = null) {
+  await ensureDatabase(req, VEHICLES_DB);
+  const docs = await getAllDocuments(req, VEHICLES_DB);
+  return docs
+    .filter((d) => {
+      if (d?.type !== 'fiscal_consultation' || d?.deletedAt) return false;
+      if (userId && d?.user_id !== userId) return false;
+      if (businessId && String(d?.business_id || '') !== String(businessId)) return false;
+      return true;
+    })
+    .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
 }

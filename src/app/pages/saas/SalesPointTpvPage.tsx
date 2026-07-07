@@ -1,10 +1,9 @@
-import { useParams, useNavigate } from 'react-router';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { Layout } from '../../components/saas/Layout';
 import { TpvProvider } from '../../context/TpvContext';
 import { TpvModePage } from './TpvModePage';
 import { DealershipCatalogPage } from './DealershipCatalogPage';
-import { EventsWorkstationPage } from './EventsWorkstationPage';
 import { HairSalonWorkstationPage } from './HairSalonWorkstationPage';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -36,7 +35,7 @@ export function SalesPointTpvPage() {
   }, [isDelivery, salesPointId, user, currentBusiness, navigate]);
 
   useEffect(() => {
-    if (isDelivery) {
+    if (isDelivery || isEvents) {
       setLoading(false);
       return;
     }
@@ -51,7 +50,11 @@ export function SalesPointTpvPage() {
       })
       .catch(() => setSalesPoint(null))
       .finally(() => setLoading(false));
-  }, [user?.id, salesPointId, isDelivery]);
+  }, [user?.id, salesPointId, isDelivery, isEvents]);
+
+  if (isEvents) {
+    return <Navigate to="/saas/vertical/eventos" replace />;
+  }
 
   if (isDelivery && salesPointId) {
     return (
@@ -88,15 +91,6 @@ export function SalesPointTpvPage() {
   if (isCarDealership) {
     return (
       <DealershipCatalogPage
-        salesPoint={salesPoint}
-        onBack={() => navigate(-1)}
-      />
-    );
-  }
-
-  if (isEvents) {
-    return (
-      <EventsWorkstationPage
         salesPoint={salesPoint}
         onBack={() => navigate(-1)}
       />

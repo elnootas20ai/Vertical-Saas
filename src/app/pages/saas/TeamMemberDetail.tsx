@@ -2059,17 +2059,27 @@ export function TeamMemberDetail() {
               <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-900/30">
                 <MessageSquare className="w-8 h-8 text-blue-500" />
               </div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Enviar mensaje a {member.fullName}</h3>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Chat con {member.fullName}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-6">
-                El chat interno estará disponible próximamente. Podrás enviar mensajes directos a los miembros del equipo.
+                Envía mensajes directos a {member.fullName} dentro del chat del equipo. También puedes usar el canal general para hablar con todo el equipo.
               </p>
-              <button
-                onClick={() => navigate('/saas/chat')}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
-              >
-                <MessageSquare className="w-4 h-4" />
-                Ir al Chat
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/saas/chat?dm=${encodeURIComponent(member.user_id)}`)}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Abrir chat directo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/chat')}
+                  className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-600 px-5 py-3 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                >
+                  Ver chat del equipo
+                </button>
+              </div>
             </div>
           </div>
         )}

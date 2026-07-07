@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import { useModalClose } from '../../hooks/useModalClose';
 import { toast } from 'sonner';
+import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
@@ -82,13 +83,28 @@ export function VetVaccinations() {
     { key: 'vet', label: 'Veterinario', example: '' },
   ];
 
-  const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} vacunaci?n(s) parseado(s) con IA`);
+  const persistEntries = async (entries: Record<string, unknown>[]) => {
+    if (!userId) {
+      toast.error('Sesión no válida');
+      return;
+    }
+    const created = await bulkCreateVerticalEntries(userId, api, entries, (e) => {
+    const paciente = entryStr(e, 'paciente');
+    if (!paciente) return null;
+    return {
+      fecha: entryStr(e, 'fecha', 'date') || '2026-04-01', paciente: '', especie: 'perro', vacuna: '', lote: '', proximaDosis: '', veterinario: '', estado: 'pendiente',
+    };
+    });
+    if (created > 0) {
+      await loadData();
+      toast.success(`${created} vacunaci?n creado(s)`);
+    } else {
+      toast.error('No se pudo crear ningún registro');
+    }
   };
 
-  const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} vacunaci?n(s) importado(s)`);
-  };
+  const handleAIEntries = persistEntries;
+  const handleImportEntries = async (entries: Record<string, string>[]) => persistEntries(entries);
 
   const loadData = useCallback(async () => {
     if (!userId) {

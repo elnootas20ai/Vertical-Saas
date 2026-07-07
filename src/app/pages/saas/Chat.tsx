@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -541,6 +541,7 @@ function NewChatModal({ open, onClose, onCreateDM, onCreateGroup, onInviteMember
 export function Chat() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { channelId: urlChannelId } = useParams<{ channelId?: string }>();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
@@ -564,6 +565,7 @@ export function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pendingDmUserIdRef = useRef<string | null>(null);
 
   const businessId = currentBusiness?.business_id || '';
   const userId = user?.user_id || '';
@@ -618,7 +620,7 @@ export function Chat() {
       const chs = res.channels || [];
       setChannels(chs);
 
-      if (!activeChannelId && chs.length > 0) {
+      if (!activeChannelId && !urlChannelId && !searchParams.get('dm') && chs.length > 0) {
         const general = chs.find((ch) => ch.channelType === 'general');
         const firstId = general?.channelId || chs[0].channelId;
         setActiveChannelId(firstId);
@@ -629,11 +631,41 @@ export function Chat() {
     } finally {
       setLoading(false);
     }
-  }, [businessId, userId, activeChannelId, navigate]);
+  }, [businessId, userId, activeChannelId, navigate, urlChannelId, searchParams]);
 
   useEffect(() => {
     if (businessId) loadChannels();
   }, [businessId, loadChannels]);
+
+  // Abrir DM desde ?dm=userId (p. ej. ficha de miembro del equipo)
+  useEffect(() => {
+    const dmUserId = searchParams.get('dm');
+    if (!dmUserId || !businessId || loading || !userId || dmUserId === userId) return;
+    if (pendingDmUserIdRef.current === dmUserId) return;
+    pendingDmUserIdRef.current = dmUserId;
+    setSearchParams({}, { replace: true });
+
+    void (async () => {
+      try {
+        const res = await createChannel(businessId, {
+          name: '',
+          channelType: 'direct',
+          members: [userId, dmUserId],
+        });
+        if (res.channel) {
+          if (!res.existing) {
+            setChannels((prev) => [res.channel!, ...prev]);
+          }
+          setActiveChannelId(res.channel.channelId);
+          navigate(`/saas/chat/${res.channel.channelId}`, { replace: true });
+          setShowMobileSidebar(false);
+        }
+      } catch (err) {
+        console.error('Error opening DM from query:', err);
+        pendingDmUserIdRef.current = null;
+      }
+    })();
+  }, [searchParams, businessId, loading, userId, navigate, setSearchParams]);
 
   // Sync URL param
   useEffect(() => {

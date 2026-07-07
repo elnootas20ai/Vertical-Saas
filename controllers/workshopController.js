@@ -37,13 +37,23 @@ async function ensurePartOwner(req, userId, partId) {
 
 // ─── WORK ORDERS ─────────────────────────────────────────────────────────────
 
+function resolveBusinessId(req, body = {}) {
+  return String(
+    req.query?.businessId ||
+    body?.workOrder?.business_id ||
+    body?.part?.business_id ||
+    '',
+  ).trim() || null;
+}
+
 export async function listWorkOrders(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    const workOrders = await listWorkOrdersByUser(req, userId);
+    const businessId = resolveBusinessId(req);
+    const workOrders = await listWorkOrdersByUser(req, userId, businessId);
     return res.json({ ok: true, workOrders: workOrders.map(sanitizeWorkOrder) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar órdenes de trabajo' });
@@ -140,7 +150,8 @@ export async function listParts(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    const parts = await listPartsByUser(req, userId);
+    const businessId = resolveBusinessId(req);
+    const parts = await listPartsByUser(req, userId, businessId);
     return res.json({ ok: true, parts: parts.map(sanitizePart) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar recambios' });

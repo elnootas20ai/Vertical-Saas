@@ -19,6 +19,7 @@ import {
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
+import { bulkCreateVerticalEntries, entryStr } from '../../lib/bulkVerticalImport';
 import { toast } from 'sonner';
 
 const TIPOS_OBRA = ['casa', 'local', 'piso', 'promoción', 'colegio', 'gimnasio', 'oficina', 'nave', 'reforma', 'otro'];
@@ -93,11 +94,24 @@ export function ConstructionProjects() {
   ];
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
-    toast.success(`${entries.length} proyecto(s) parseado(s) con IA`);
+    if (!userId) return;
+    const created = await bulkCreateVerticalEntries(userId, {
+      create: (uid, data) => createConstructionProject(uid, data as Partial<ConstructionProject>),
+    }, entries, (entry) => ({
+      nombre: entryStr(entry, 'name', 'nombre'),
+      direccion: entryStr(entry, 'address', 'direccion', 'address'),
+      clienteNombre: entryStr(entry, 'client', 'cliente'),
+      fechaInicio: entryStr(entry, 'startDate', 'fechaInicio', 'date'),
+      estado: 'borrador' as EstadoObra,
+    }));
+    if (created > 0) {
+      toast.success(`${created} proyecto(s) creado(s)`);
+      void load();
+    }
   };
 
   const handleImportEntries = async (entries: Record<string, string>[]) => {
-    toast.success(`${entries.length} proyecto(s) importado(s)`);
+    await handleAIEntries(entries);
   };
 
   useModalClose(modalOpen, () => setModalOpen(false));

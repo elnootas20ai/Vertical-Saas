@@ -43,7 +43,7 @@ function applyCleaningStepLocks(
         ...step,
         locked: true,
         lockedReason: 'Registra un cliente antes de invitar al equipo.',
-        unlockRoute: '/saas/clientes',
+        unlockRoute: '/saas/vertical/limpieza/clientes',
       };
     }
     if (step.id === 'cleaning_operate' && !flags.hasPricedService) {
@@ -78,7 +78,7 @@ const CLEANING_ACTIVATION_STEP_DEFS = (
     number: 2,
     label: 'Clientes',
     description: 'Registra clientes y contactos para contratos y facturación',
-    route: '/saas/clientes',
+    route: '/saas/vertical/limpieza/clientes',
     icon: 'users',
     subSteps: [
       { id: 'first_client', label: 'Primer cliente registrado', completed: flags.hasClient },
