@@ -2,23 +2,23 @@ import type { VerticalModuleDefinition } from '../types';
 
 /**
  * Módulo Restauración — vertical propio (bar, restaurante, sala).
- * Reutiliza el motor operativo de pedidos/TPV/cocina vía rutas compartidas,
+ * Reutiliza el motor operativo de pedidos/TPV vía rutas compartidas,
  * pero con frontera de código y datos separada de delivery puro.
+ * Las rutas delivery-* (ops, kitchen, montaje) NO pertenecen a este módulo:
+ * las bloquea RequireDeliveryVertical y redirigen a /saas/sala.
  */
 export const RESTAURANT_MODULE: VerticalModuleDefinition = {
   id: 'restaurant',
   businessType: 'restaurant',
   routePrefixes: [
-    '/saas/delivery-ops',
-    '/saas/delivery-kitchen',
-    '/saas/delivery-montaje',
     '/saas/tpv',
-    '/saas/tpv-rapido',
     '/saas/sala',
     '/saas/sala/setup',
     '/saas/reservations',
     '/saas/lista-espera',
     '/saas/caja',
+    '/saas/cocina',
+    '/saas/vertical/restaurant',
     '/saas/worker/tpv/delivery',
   ],
   codeRoots: [

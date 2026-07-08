@@ -27,6 +27,7 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
   'tpv-locales': { minPlan: 'basic' },
   caja: { minPlan: 'basic' },
   sala: { minPlan: 'basic' },
+  cocina: { minPlan: 'basic' },
   reservas: { minPlan: 'basic' },
   'lista-espera': { minPlan: 'basic' },
   'delivery-ops': { minPlan: 'basic' },

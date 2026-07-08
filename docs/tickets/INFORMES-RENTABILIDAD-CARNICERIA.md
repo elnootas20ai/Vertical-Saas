@@ -7,6 +7,13 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~55% hecho a nivel de código, ~15% funcional.** Existe la tríada completa `ButcherReports.tsx` (8 pestañas, filtros con presets, exportación CSV/Excel/PDF por pestaña, polling con `visibilityState`, skeleton, banner y restricción de pestañas para trabajador) + `butcherReportsApi.ts` (6 funciones) + `controllers/butcherReportsController.js` con los 6 endpoints (KPIs, ventas-trabajador con clockins, top-productos, evolución, categorías, tiendas) y `routers/butcherReportsRouter.js`. i18n `butcherReports` en 5 idiomas y acceso rápido en ButcherHub.
+**Bloqueadores críticos:** el router NO está montado en `index.js` (la API `/api/butcher-reports` es inaccesible) y la ruta `/saas/vertical/carniceria/informes` redirige a `/saas/reports` en `routes.tsx`, por lo que la página es inalcanzable. No hay ítem "Informes" en el Sidebar. **Falta además:** modelos IC-01 tal cual (no hay `butcher_store` ni `butcherService.js`; las ventas `butcher_sale` dependen de `butcherSalesRouter`, también sin montar), permiso `butcher_reports` en `TEAM_PERMISSION_KEYS` y enforcement backend por rol, alertas de margen bajo/caída de ventas/producto estrella, SSE en la página, filtro de producto con autocomplete y filtros en URL.
+
+---
+
 ## Auditoría de lo existente
 
 ### Ya implementado
@@ -206,8 +213,8 @@ Todas las páginas Butcher* usan estado local con datos mock o `useState`. Para 
 
 #### Criterios de aceptación
 
-- [ ] La función `getButcherDbName` existe y la base se crea automáticamente con `ensureDatabase`
-- [ ] Se pueden crear, listar, actualizar y soft-delete documentos de los 5 tipos
+- [x] La función `getButcherDbName` existe y la base se crea automáticamente con `ensureDatabase` *(DB global `{prefix}-butcher`, no `butcher_{userId}`)*
+- [ ] Se pueden crear, listar, actualizar y soft-delete documentos de los 5 tipos *(existen builders para `butcher_product`, `butcher_batch`, `butcher_waste`, `butcher_purchase_entry`; NO existe `butcher_store` ni `services/butcherService.js`; `butcher_sale` se gestiona en `butcherSalesController.js` pero su router no está montado)*
 - [ ] `listButcherDocs` acepta filtro por `type`, rango de `fecha`, `tiendaId`, `trabajadorId`, `categoria`
 - [ ] Los documentos se validan: campos obligatorios, tipos numéricos > 0, fechas válidas
 - [ ] El campo `margen` en `butcher_sale` se calcula automáticamente a partir de `total - costeTotal`
@@ -295,13 +302,15 @@ Se necesita un endpoint unificado que agregue datos de ventas, compras, merma, s
 
 #### Criterios de aceptación
 
-- [ ] Los 6 endpoints responden correctamente con datos reales de CouchDB
-- [ ] Todos los endpoints aceptan filtros de fecha (`from`, `to`), tienda y trabajador
-- [ ] Los cálculos de margen y beneficio son correctos: `margen = venta - coste`, `beneficio = ventas - costesVentas - merma`
-- [ ] Las variaciones porcentuales (`vsPrevPeriod`) comparan con el periodo anterior de igual duración
-- [ ] El endpoint `/tiendas` cruza correctamente ventas, merma y compras por `tiendaId`
-- [ ] El endpoint `/ventas-trabajador` cruza ventas con fichajes para calcular `ventasPorHora`
-- [ ] Rendimiento < 2s para un mes de datos con ~1000 ventas, ~100 mermas, ~50 compras
+> **Nota auditoría:** `controllers/butcherReportsController.js` y `routers/butcherReportsRouter.js` existen con los 6 endpoints, pero el router **no está montado en `index.js`** — la API `/api/butcher-reports` no es alcanzable en runtime.
+
+- [ ] Los 6 endpoints responden correctamente con datos reales de CouchDB *(código completo, pero inaccesibles por falta de montaje)*
+- [x] Todos los endpoints aceptan filtros de fecha (`from`, `to`), tienda y trabajador *(`parseRange` + `filterDoc` con storeId/workerId/category)*
+- [x] Los cálculos de margen y beneficio son correctos: `margen = venta - coste`, `beneficio = ventas - costesVentas - merma`
+- [x] Las variaciones porcentuales (`vsPrevPeriod`) comparan con el periodo anterior de igual duración *(`prevRange`)*
+- [x] El endpoint `/tiendas` cruza correctamente ventas, merma y compras por `tiendaId`
+- [x] El endpoint `/ventas-trabajador` cruza ventas con fichajes para calcular `ventasPorHora` *(usa `loadClockins`)*
+- [ ] Rendimiento < 2s para un mes de datos con ~1000 ventas, ~100 mermas, ~50 compras *(no verificable; API sin montar)*
 - [ ] Errores 400 si falta `userId` o las fechas son inválidas; errores 500 con log de error
 
 ---
@@ -453,13 +462,15 @@ Se necesita una página dedicada en `/saas/vertical/carniceria/informes` que mue
 
 #### Criterios de aceptación
 
-- [ ] La página carga en `/saas/vertical/carniceria/informes` y muestra los 6 KPIs principales
-- [ ] Las 8 pestañas renderizan datos correctos con gráficas interactivas
-- [ ] Los gráficos tienen tooltips con formato euros (`€`) y porcentajes
-- [ ] El diseño es responsive: en móvil KPIs en 2 columnas, gráficas apiladas
-- [ ] Dark mode funciona en todos los elementos (tarjetas, gráficas, tablas, badges)
-- [ ] Loading skeleton mientras se cargan datos (no pantalla en blanco)
-- [ ] La cuenta de resultados muestra cálculos correctos y se actualiza con los filtros
+> **Nota auditoría:** `ButcherReports.tsx` y `butcherReportsApi.ts` existen y están completos a nivel de código (8 pestañas, KPIs, gráficas Recharts, skeleton), pero en `routes.tsx` la ruta `vertical/carniceria/informes` **redirige a `/saas/reports`**, así que el componente no es alcanzable. Además su API backend no está montada.
+
+- [ ] La página carga en `/saas/vertical/carniceria/informes` y muestra los 6 KPIs principales *(la ruta redirige a `/saas/reports`)*
+- [x] Las 8 pestañas renderizan datos correctos con gráficas interactivas *(tabs `resumen|ventas|trabajadores|categorias|tiendas|merma|compras|margenes` implementadas)*
+- [x] Los gráficos tienen tooltips con formato euros (`€`) y porcentajes
+- [x] El diseño es responsive: en móvil KPIs en 2 columnas, gráficas apiladas
+- [x] Dark mode funciona en todos los elementos (tarjetas, gráficas, tablas, badges)
+- [x] Loading skeleton mientras se cargan datos (no pantalla en blanco)
+- [ ] La cuenta de resultados muestra cálculos correctos y se actualiza con los filtros *(no verificable en runtime: API sin montar)*
 - [ ] Sin errores de TypeScript ni linter
 
 ---
@@ -515,10 +526,10 @@ La barra de filtros debe permitir segmentar todos los datos por múltiples dimen
 
 #### Criterios de aceptación
 
-- [ ] Los 5 filtros aparecen y funcionan correctamente
-- [ ] Cambiar cualquier filtro recarga los datos de la pestaña activa
-- [ ] Los filtros persisten al cambiar de pestaña
-- [ ] El filtro de trabajador se oculta para perfil `trabajador`
+- [ ] Los 5 filtros aparecen y funcionan correctamente *(hay 4: periodo con presets + personalizado, tienda, trabajador, categoría; NO hay filtro de producto)*
+- [x] Cambiar cualquier filtro recarga los datos de la pestaña activa *(re-fetch vía `useMemo(filters)` + `useEffect`)*
+- [x] Los filtros persisten al cambiar de pestaña *(estado a nivel de componente)*
+- [x] El filtro de trabajador se oculta para perfil `trabajador` *(condicionado a `isGerente`)*
 - [ ] La URL se actualiza con los query params de los filtros
 - [ ] El buscador de producto tiene autocomplete con debounce 300ms
 - [ ] Botón "Limpiar filtros" resetea todo a valores por defecto
@@ -582,12 +593,12 @@ Dos de las pestañas clave del informe son "Categorías" y "Tiendas", que permit
 
 #### Criterios de aceptación
 
-- [ ] Tab Categorías muestra distribución PieChart + evolución StackedAreaChart + tabla detallada
-- [ ] Tab Tiendas muestra comparativa BarChart agrupado + tabla detallada + evolución LineChart
-- [ ] Los colores de categorías son consistentes en todas las gráficas y tablas
+- [x] Tab Categorías muestra distribución PieChart + evolución StackedAreaChart + tabla detallada
+- [ ] Tab Tiendas muestra comparativa BarChart agrupado + tabla detallada + evolución LineChart *(hay BarChart + tabla, sin LineChart de evolución por tienda)*
+- [x] Los colores de categorías son consistentes en todas las gráficas y tablas *(`CAT_COLORS`)*
 - [ ] Las tablas son ordenables por columna
-- [ ] Si solo hay 1 tienda, el tab Tiendas muestra un mensaje informativo "Añade más puntos de venta para comparar" con enlace a configuración
-- [ ] Los datos se filtran correctamente al aplicar filtros de periodo, trabajador, etc.
+- [x] Si solo hay 1 tienda, el tab Tiendas muestra un mensaje informativo "Añade más puntos de venta para comparar" con enlace a configuración
+- [ ] Los datos se filtran correctamente al aplicar filtros de periodo, trabajador, etc. *(implementado, pero no verificable en runtime: API sin montar)*
 
 ---
 
@@ -630,10 +641,10 @@ El gerente necesita poder descargar los informes para compartirlos, archivarlos 
 
 #### Criterios de aceptación
 
-- [ ] Los 3 formatos de exportación funcionan para las 8 pestañas
+- [x] Los 3 formatos de exportación funcionan para las 8 pestañas *(dropdown Exportar con CSV/Excel/PDF contextual por pestaña; Excel cae a CSV si falla `xlsx`)*
 - [ ] El Excel tiene formato numérico correcto (euros, porcentajes)
-- [ ] El PDF tiene cabecera con nombre del negocio y periodo, tabla legible
-- [ ] El CSV usa separador `;` y BOM UTF-8
+- [ ] El PDF tiene cabecera con nombre del negocio y periodo, tabla legible *(cabecera con título del informe, sin nombre del negocio)*
+- [x] El CSV usa separador `;` y BOM UTF-8
 - [ ] Los filtros aplicados se reflejan en la cabecera del informe exportado
 - [ ] Si no hay datos, el botón muestra tooltip "No hay datos para exportar"
 
@@ -681,11 +692,11 @@ Los informes no deben ser un callejón sin salida. El gerente debe poder navegar
 
 #### Criterios de aceptación
 
-- [ ] Desde cualquier tabla del informe se puede navegar al detalle del producto/trabajador/proveedor
-- [ ] El sidebar muestra el ítem "Informes" dentro del grupo carnicería
-- [ ] Los enlaces cruzados desde ButcherHub, ButcherSales y ButcherWaste funcionan
-- [ ] El breadcrumb navega correctamente al Hub
-- [ ] Las claves i18n están en los 5 idiomas
+- [x] Desde cualquier tabla del informe se puede navegar al detalle del producto/trabajador/proveedor *(navigate a butcher-products/workers/suppliers/sales/waste/inventory en `ButcherReports.tsx`)*
+- [ ] El sidebar muestra el ítem "Informes" dentro del grupo carnicería *(no existe ítem `butcher-reports` en `Sidebar.tsx`)*
+- [ ] Los enlaces cruzados desde ButcherHub, ButcherSales y ButcherWaste funcionan *(solo existe el acceso rápido de ButcherHub, y su destino redirige a `/saas/reports`)*
+- [x] El breadcrumb navega correctamente al Hub *("Centro Operativo" → `/saas/butcher-hub`)*
+- [x] Las claves i18n están en los 5 idiomas *(`butcherReports` en ES/EN/PT/FR/IT)*
 
 ---
 
@@ -767,13 +778,15 @@ El motor de alertas actual (`alertEngine.js`) tiene reglas para vehículos, fact
 
 #### Criterios de aceptación
 
-- [ ] Las 4 reglas de alerta se ejecutan cada hora para cuentas `butcherShop`
-- [ ] Las alertas aparecen en notificaciones (SSE + Web Push) y en el panel de informes
-- [ ] La deduplicación evita alertas repetidas el mismo día para el mismo producto/tienda
-- [ ] Los umbrales son configurables por cuenta
-- [ ] La alerta de caída de ventas solo se evalúa en horario comercial (8-21h)
-- [ ] La alerta de producto estrella cruza correctamente top ventas con stock actual
-- [ ] Las alertas incluyen ruta para navegación directa al módulo afectado
+> **Nota auditoría:** existe `services/butcherAlertEngine.js` (arranca en `index.js`) con ~20 reglas propias: merma alta/crítica/anómala (`butcher_waste_critical`, `butcher_waste_anomaly`, umbrales configurables por `alertConfig`), stock bajo/crítico/agotado, lotes caducados, precio sin actualizar, báscula, caja, tickets, inventario y compras. Pero de las 4 reglas de ESTE ticket solo está cubierta "merma alta"; **no hay** alerta de margen bajo por producto, ni de caída de ventas vs histórico, ni de producto estrella (top ventas × stock).
+
+- [ ] Las 4 reglas de alerta se ejecutan cada hora para cuentas `butcherShop` *(solo merma alta; el motor corre cada 30 min filtrando `businessType === 'butcherShop'`)*
+- [ ] Las alertas aparecen en notificaciones (SSE + Web Push) y en el panel de informes *(van al sistema de notificaciones; el panel de informes usa `stockCritico` de KPIs, no la lista de alertas)*
+- [x] La deduplicación evita alertas repetidas el mismo día para el mismo producto/tienda *(dedupKey por regla en `alertEmitter`)*
+- [x] Los umbrales son configurables por cuenta *(`alertConfig.butcherWasteWarningPct`/`butcherWasteCriticalPct` y similares; no con las claves `butcher.*` propuestas)*
+- [ ] La alerta de caída de ventas solo se evalúa en horario comercial (8-21h) *(la regla no existe)*
+- [ ] La alerta de producto estrella cruza correctamente top ventas con stock actual *(la regla no existe)*
+- [x] Las alertas incluyen ruta para navegación directa al módulo afectado *(campo `route` en cada alerta)*
 
 ---
 
@@ -830,13 +843,15 @@ El gerente ve toda la rentabilidad. El trabajador no debe ver márgenes, benefic
 
 #### Criterios de aceptación
 
-- [ ] Un gerente ve las 8 pestañas, todos los KPIs y todos los filtros
-- [ ] Un trabajador sin permiso ve solo 3 pestañas y sus propios datos
-- [ ] El backend filtra datos por `trabajadorId` cuando el usuario es trabajador
+> **Nota auditoría:** el permiso `butcher_reports` NO existe en `TEAM_PERMISSION_KEYS` (hay `reports` genérico) y `butcherReportsRouter.js` no tiene middleware de permisos. La restricción por rol está solo en el frontend (`TABS_WORKER`, `isGerente`, envío de `workerId` propio).
+
+- [x] Un gerente ve las 8 pestañas, todos los KPIs y todos los filtros
+- [x] Un trabajador sin permiso ve solo 3 pestañas y sus propios datos *(`TABS_WORKER = ['resumen','ventas','categorias']`; solo restricción en cliente)*
+- [ ] El backend filtra datos por `trabajadorId` cuando el usuario es trabajador *(el backend acepta `workerId` como filtro pero no lo impone según rol)*
 - [ ] El endpoint `/tiendas` devuelve 403 para trabajador sin permiso
-- [ ] El banner de restricción aparece para el perfil trabajador
-- [ ] Si al trabajador se le concede `butcher_reports`, ve todo como un gerente
-- [ ] No se puede acceder a datos de otros trabajadores manipulando la URL/API
+- [x] El banner de restricción aparece para el perfil trabajador *("Vista trabajador" con icono Shield)*
+- [ ] Si al trabajador se le concede `butcher_reports`, ve todo como un gerente *(el permiso no existe)*
+- [ ] No se puede acceder a datos de otros trabajadores manipulando la URL/API *(sin enforcement backend)*
 
 ---
 
@@ -877,12 +892,12 @@ Los datos de la carnicería cambian constantemente durante el día (ventas, merm
 
 #### Criterios de aceptación
 
-- [ ] Los KPIs se actualizan cada 30s cuando la página está visible
-- [ ] El polling reduce a 5min cuando el navegador está en segundo plano
+- [x] Los KPIs se actualizan cada 30s cuando la página está visible *(polling con `setInterval` + `document.hidden`)*
+- [x] El polling reduce a 5min cuando el navegador está en segundo plano
 - [ ] El indicador "En vivo" muestra el estado correcto (activo/pausa)
-- [ ] Las alertas SSE llegan en tiempo real y actualizan el panel
+- [ ] Las alertas SSE llegan en tiempo real y actualizan el panel *(no hay suscripción SSE en la página)*
 - [ ] La animación de actualización es sutil (no distrae)
-- [ ] Las peticiones se cancelan correctamente al cambiar filtros rápido
+- [x] Las peticiones se cancelan correctamente al cambiar filtros rápido *(`AbortSignal` en todas las funciones del API client)*
 - [ ] No hay memory leaks al desmontar el componente
 
 ---
@@ -931,11 +946,11 @@ La página de informes necesita ser accesible desde la barra lateral y tener su 
 
 #### Criterios de aceptación
 
-- [ ] El ítem "Informes" aparece en el sidebar dentro del grupo carnicería
-- [ ] La ruta `/saas/vertical/carniceria/informes` carga el componente correctamente
-- [ ] El icono es `BarChart3` consistente con el patrón de informes existente
-- [ ] Las claves i18n están en los 5 idiomas
-- [ ] El acceso rápido desde ButcherHub navega correctamente
+- [ ] El ítem "Informes" aparece en el sidebar dentro del grupo carnicería *(no existe en `Sidebar.tsx`)*
+- [ ] La ruta `/saas/vertical/carniceria/informes` carga el componente correctamente *(en `routes.tsx` es un `<Navigate to="/saas/reports" />` — NO carga `ButcherReports`)*
+- [x] El icono es `BarChart3` consistente con el patrón de informes existente *(en el acceso rápido de ButcherHub)*
+- [x] Las claves i18n están en los 5 idiomas
+- [ ] El acceso rápido desde ButcherHub navega correctamente *(existe el ítem, pero acaba en `/saas/reports` genérico por la redirección)*
 
 ---
 

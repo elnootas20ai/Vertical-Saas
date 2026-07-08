@@ -5,6 +5,11 @@
 **Objetivo:** Controlar el dinero en efectivo del repartidor durante su turno de reparto.
 **Fecha:** 2026-04-14
 
+## Estado auditado (08/07/2026)
+
+~50% hecho, con un matiz importante: el componente `src/app/components/delivery/DriverCashModal.tsx` está construido y es muy completo (config del gerente, bloqueo de duplicados, edición/borrado de movimientos, reapertura con historial, flujo `pending_review` con aprobar/rechazar/ajustar, justificantes con umbral, historial con filtros y "cargar más"), y el backend acompaña (409 anti-duplicados, endpoints `GET/PUT /api/settings/driver-cash`, cierre que vuelca el efectivo a la caja TPV, alerta de descuadre en `deliveryAlertEngine.js`). PERO el componente no está importado desde ninguna página: no se puede invocar desde Reparto ni desde ninguna tab, así que nada de esto es accesible para el usuario.
+Falta de verdad: cablear `DriverCashModal` a la UI, el auto-cobro al marcar entregado (FLOT-06, sin hook backend), la integración con el módulo de Finanzas (FLOT-07: hoy solo se registra `cash_in` en la sesión TPV), la alerta de cobro sin registrar, las incidencias `cash_incident` (FLOT-12, nada implementado) y la vista/widget de trabajador (FLOT-10).
+
 ---
 
 ## Auditoría de lo existente
@@ -147,15 +152,15 @@ interface DriverCashModalProps {
 - Las funciones de estado (`cashSessions`, `setCashSessions`) se mueven al componente modal o a un hook `useDriverCashSessions(userId)`
 
 #### Criterios de aceptación
-- [ ] Componentes extraídos a archivo dedicado (`DriverCashModal.tsx`)
-- [ ] Modal funcional con apertura/cierre animado
-- [ ] Se puede invocar desde tab Reparto como botón de acción
-- [ ] Se puede usar embebido en la tab Caja existente sin regresión
-- [ ] Props `onSessionClosed` permite al padre reaccionar al cierre (para FLOT-07)
-- [ ] Hook `useDriverCashSessions(userId)` encapsula carga, cache y actualizaciones
-- [ ] Responsive: ocupa 90% viewport en móvil, máximo 720px en desktop
-- [ ] Dark mode coherente con el diseño actual
-- [ ] Sin regresión: toda la funcionalidad actual (apertura, movimientos, cierre, historial) sigue funcionando
+- [x] Componentes extraídos a archivo dedicado (`DriverCashModal.tsx`)
+- [ ] Modal funcional con apertura/cierre animado (el componente existe y renderiza como modal, pero NO está importado desde ninguna página)
+- [ ] Se puede invocar desde tab Reparto como botón de acción (sin punto de invocación en la app)
+- [ ] Se puede usar embebido en la tab Caja existente sin regresión (soporta `embedded` pero nadie lo usa)
+- [x] Props `onSessionClosed` permite al padre reaccionar al cierre (para FLOT-07)
+- [x] Hook `useDriverCashSessions(userId)` encapsula carga, cache y actualizaciones
+- [x] Responsive: ocupa 90% viewport en móvil, máximo 720px en desktop
+- [x] Dark mode coherente con el diseño actual
+- [ ] Sin regresión: toda la funcionalidad actual (apertura, movimientos, cierre, historial) sigue funcionando (no verificable: el componente no está cableado)
 
 ---
 
@@ -202,9 +207,9 @@ Si el negocio tiene dos repartidores con el mismo nombre (raro pero posible):
 - El campo `driverName` ya es libre, así que esto se resuelve por convención
 
 #### Criterios de aceptación
-- [ ] Backend rechaza con `409` si ya existe sesión abierta para el mismo `driverName`
-- [ ] Frontend muestra aviso antes de enviar si detecta conflicto
-- [ ] El mensaje de error indica desde cuándo está abierta la sesión existente
+- [x] Backend rechaza con `409` si ya existe sesión abierta para el mismo `driverName`
+- [x] Frontend muestra aviso antes de enviar si detecta conflicto (aviso inline + botón deshabilitado si `blockDuplicateSession`)
+- [x] El mensaje de error indica desde cuándo está abierta la sesión existente
 - [ ] Botón "Ir a su caja" lleva a la sesión activa
 
 ---
@@ -253,13 +258,13 @@ export interface CashTransaction {
 - Si se necesita corregir, primero hay que reabrir la sesión (FLOT-04)
 
 #### Criterios de aceptación
-- [ ] Se puede editar importe, método de pago y descripción de un movimiento en sesión abierta
-- [ ] Se puede eliminar un movimiento con confirmación
-- [ ] Los KPIs y el saldo esperado se recalculan al editar/eliminar
-- [ ] Se registra `editedAt`/`editedBy` cuando se modifica un movimiento
-- [ ] Se guarda `originalAmount` si el importe cambió
-- [ ] Movimientos de sesiones cerradas no son editables/eliminables
-- [ ] Log de actividad registra edición y eliminación de movimientos
+- [x] Se puede editar importe, método de pago y descripción de un movimiento en sesión abierta
+- [x] Se puede eliminar un movimiento con confirmación
+- [x] Los KPIs y el saldo esperado se recalculan al editar/eliminar
+- [x] Se registra `editedAt`/`editedBy` cuando se modifica un movimiento
+- [x] Se guarda `originalAmount` si el importe cambió
+- [x] Movimientos de sesiones cerradas no son editables/eliminables
+- [ ] Log de actividad registra edición y eliminación de movimientos (el backend solo registra "Actualizó caja repartidor" genérico)
 
 ---
 
@@ -333,13 +338,13 @@ metadata: { previousDifference: doc.difference, reason },
 ```
 
 #### Criterios de aceptación
-- [ ] Botón "Reabrir caja" visible solo para gerente en sesiones cerradas de las últimas 24h
-- [ ] Modal de confirmación con motivo obligatorio
-- [ ] La sesión pasa a `status: 'open'` y se limpian datos de cierre
-- [ ] Se guarda historial de reaperturas en `reopenHistory`
-- [ ] Log de actividad registra la reapertura con motivo
-- [ ] Tras la reapertura, la sesión aparece de nuevo en "Cajas abiertas"
-- [ ] El historial de reaperturas es visible en la sesión cerrada (tras re-cerrar)
+- [x] Botón "Reabrir caja" visible solo para gerente en sesiones cerradas de las últimas 24h (oculto en `workerMode`)
+- [x] Modal de confirmación con motivo obligatorio
+- [x] La sesión pasa a `status: 'open'` y se limpian datos de cierre
+- [x] Se guarda historial de reaperturas en `reopenHistory`
+- [ ] Log de actividad registra la reapertura con motivo (registra "Reabrió caja repartidor" pero sin el motivo)
+- [x] Tras la reapertura, la sesión aparece de nuevo en "Cajas abiertas"
+- [x] El historial de reaperturas es visible en la sesión cerrada (tras re-cerrar)
 
 ---
 
@@ -411,14 +416,14 @@ driverCashConfig?: {
 ```
 
 #### Criterios de aceptación
-- [ ] Se puede adjuntar foto/documento a una transacción de gasto
-- [ ] Preview de imagen antes de guardar
-- [ ] Icono visual en movimientos con adjuntos
+- [x] Se puede adjuntar foto/documento a una transacción de gasto (1 archivo, máx 2MB; el ticket pedía 0-3)
+- [ ] Preview de imagen antes de guardar (solo muestra el nombre del archivo)
+- [x] Icono visual en movimientos con adjuntos (badge "Justif.")
 - [ ] Lightbox para ver adjuntos en detalle
 - [ ] Badge "Sin justificante" en gastos sin adjuntos
-- [ ] Aviso al cerrar si hay gastos sin justificante
-- [ ] Umbral configurable por el gerente
-- [ ] Funciona desde móvil con cámara (Capacitor)
+- [ ] Aviso al cerrar si hay gastos sin justificante (en su lugar, bloquea crear el gasto sin justificante si supera el umbral)
+- [x] Umbral configurable por el gerente (`requireJustificationAbove`)
+- [ ] Funciona desde móvil con cámara (Capacitor) — no verificado
 
 ---
 
@@ -480,11 +485,11 @@ Modificar la función que actualiza el estado del pedido (`updateDeliveryOrder` 
 - Asegurar atomicidad: si el pedido se actualiza pero la transacción falla, loguear el error pero no bloquear la entrega
 
 #### Criterios de aceptación
-- [ ] Al marcar pedido como entregado, se crea transacción automática en la sesión del repartidor
+- [ ] Al marcar pedido como entregado, se crea transacción automática en la sesión del repartidor (no hay hook en el backend; el auto-registro existente va a la sesión TPV, no a la caja del repartidor)
 - [ ] No crea duplicados si ya existe transacción para ese pedido
-- [ ] Badge "⚡ Auto" distingue transacciones automáticas de manuales
+- [x] Badge "⚡ Auto" distingue transacciones automáticas de manuales (la UI soporta `tx.auto`)
 - [ ] Si el repartidor no tiene caja abierta, se genera alerta (FLOT-08)
-- [ ] Configuración opt-in para activar/desactivar la automatización
+- [ ] Configuración opt-in para activar/desactivar la automatización (el toggle `autoRegisterDeliveryPayments` existe pero nada lo consume)
 - [ ] La automatización funciona con todos los métodos de pago (efectivo, tarjeta, bizum)
 - [ ] Si falla la creación de la transacción, el pedido se marca como entregado igualmente (no bloquea)
 
@@ -576,13 +581,13 @@ Si aún no existen cuentas bancarias (FIN-01), el cierre funciona igual pero:
 - Los datos de cierre quedan en la sesión para poder reconciliar después
 
 #### Criterios de aceptación
-- [ ] Al cerrar caja, se crea movimiento de ingreso en finanzas con el efectivo real entregado
+- [ ] Al cerrar caja, se crea movimiento de ingreso en finanzas con el efectivo real entregado (en su lugar se registra un `cash_in` en la sesión de caja TPV abierta, no en Finanzas)
 - [ ] Si hay faltante, se crea movimiento de gasto por el descuadre
 - [ ] Si hay sobrante, se crea movimiento de ingreso por el sobrante
 - [ ] El resumen pre-cierre muestra claramente qué se registrará
-- [ ] Los movimientos creados tienen referencia al `session._id` para trazabilidad
-- [ ] Si Finanzas no está configurado, el cierre funciona igualmente sin error
-- [ ] Callback `onSessionClosed` permite integraciones del padre
+- [ ] Los movimientos creados tienen referencia al `session._id` para trazabilidad (solo el `cash_in` de TPV referencia la sesión)
+- [x] Si Finanzas no está configurado, el cierre funciona igualmente sin error (el volcado a TPV va en try/catch)
+- [x] Callback `onSessionClosed` permite integraciones del padre
 
 ---
 
@@ -736,13 +741,13 @@ Ejecutar las 3 funciones de chequeo pasando las sesiones y pedidos.
 El banner de alertas del modal de flotante consume las alertas de categorías `driver_session_open`, `driver_cash_mismatch`, y `unregistered_cash_payment`.
 
 #### Criterios de aceptación
-- [ ] `checkDriverSessionsOpen()` detecta cajas abiertas más de X horas (configurable)
-- [ ] `checkDriverSessionMismatch()` detecta descuadres superiores al umbral (configurable)
+- [ ] `checkDriverSessionsOpen()` detecta cajas abiertas más de X horas (configurable) — existe una variante en `deliveryAlertEngine.js` ("caja repartidor sin actividad" tras 2h sin pedidos), con condiciones distintas
+- [x] `checkDriverSessionMismatch()` detecta descuadres superiores al umbral (configurable) — `delivery_driver_mismatch` en `deliveryAlertEngine.js` con `driverMismatchThreshold`
 - [ ] `checkUnregisteredCashPayments()` detecta pedidos entregados sin cobro en la caja del repartidor
-- [ ] Las 3 reglas integradas en el ciclo del `alertEngine`
+- [ ] Las 3 reglas integradas en el ciclo del `alertEngine` (viven en `deliveryAlertEngine.js`, y solo 2 de 3 de forma parcial)
 - [ ] Configuración de activación/desactivación y umbrales por regla
-- [ ] Notificaciones in-app + SSE + Web Push como las alertas existentes
-- [ ] Las alertas se muestran en el banner del modal de flotante (FLOT-01)
+- [ ] Notificaciones in-app + SSE + Web Push como las alertas existentes (no verificado para estas reglas)
+- [x] Las alertas se muestran en el banner del modal de flotante (FLOT-01) — el modal calcula su propio banner client-side
 
 ---
 
@@ -829,16 +834,16 @@ reviewNotes?: string;     // notas del gerente al aprobar/rechazar
 ```
 
 #### Criterios de aceptación
-- [ ] Nuevo estado `pending_review` funcional en el modelo y la UI
-- [ ] Configuración `requireManagerApproval` activa/desactiva el flujo de revisión
-- [ ] Si está activo: trabajador cierra → `pending_review`, gerente aprueba → `closed`
-- [ ] Si está inactivo: cierre directo (sin regresión)
-- [ ] El gerente puede aprobar, rechazar o ajustar el efectivo
-- [ ] Al aprobar, se ejecuta la integración con Finanzas (FLOT-07)
-- [ ] Al rechazar, la sesión vuelve a `open` con nota de rechazo
-- [ ] Sección "Pendientes de revisión" en el modal
-- [ ] Campos `reviewedBy`, `reviewedAt`, `reviewNotes` se guardan
-- [ ] Log de actividad registra la aprobación/rechazo
+- [x] Nuevo estado `pending_review` funcional en el modelo y la UI
+- [x] Configuración `requireManagerApproval` activa/desactiva el flujo de revisión
+- [x] Si está activo: trabajador cierra → `pending_review`, gerente aprueba → `closed`
+- [x] Si está inactivo: cierre directo (sin regresión)
+- [x] El gerente puede aprobar, rechazar o ajustar el efectivo
+- [ ] Al aprobar, se ejecuta la integración con Finanzas (FLOT-07) — además, el volcado a caja TPV solo salta en transición desde `open`, no al aprobar desde `pending_review`
+- [x] Al rechazar, la sesión vuelve a `open` con nota de rechazo
+- [x] Sección "Pendientes de revisión" en el modal
+- [x] Campos `reviewedBy`, `reviewedAt`, `reviewNotes` se guardan
+- [ ] Log de actividad registra la aprobación/rechazo (solo logs genéricos de actualización)
 
 ---
 
@@ -909,13 +914,13 @@ El endpoint actual `/api/delivery/driver-sessions/:userId` ya filtra por `userId
 - O filtrar client-side desde la lista completa (menos eficiente pero funcional)
 
 #### Criterios de aceptación
-- [ ] Widget "Mi caja" visible para trabajadores con sesión activa
+- [ ] Widget "Mi caja" visible para trabajadores con sesión activa (`DriverCashModal` soporta `workerMode` pero ninguna vista de trabajador lo renderiza)
 - [ ] El trabajador puede ver su saldo, movimientos y KPIs
 - [ ] Puede registrar cobros y gastos desde su vista
 - [ ] Puede cerrar su caja (respetando configuración de aprobación)
 - [ ] No puede operar cajas de otros repartidores
-- [ ] No puede abrir cajas ni modificar configuración
-- [ ] Campo `driverUserId` vincula sesión con cuenta de usuario
+- [ ] No puede abrir cajas ni modificar configuración (en `workerMode` el componente SÍ le deja abrir su propia caja)
+- [ ] Campo `driverUserId` vincula sesión con cuenta de usuario (se sigue usando `driverName`)
 - [ ] El widget se oculta si no hay sesión activa
 
 ---
@@ -970,12 +975,12 @@ Encima de la lista, mostrar totales del rango seleccionado:
 - Indicar total de sesiones en el rango filtrado
 
 #### Criterios de aceptación
-- [ ] Filtros funcionales: fecha, repartidor, con descuadre
-- [ ] KPIs agregados del rango filtrado
+- [ ] Filtros funcionales: fecha, repartidor, con descuadre (hay repartidor y descuadre; falta el filtro de fecha)
+- [x] KPIs agregados del rango filtrado
 - [ ] Exportación CSV (resumen y detallado) funcional
 - [ ] Exportación PDF con formato profesional
-- [ ] Paginación con "Cargar más"
-- [ ] Los filtros se mantienen al paginar
+- [x] Paginación con "Cargar más"
+- [x] Los filtros se mantienen al paginar
 
 ---
 
@@ -1138,13 +1143,13 @@ Los componentes de flotante (`DriverCashModal`, `DriverFloatOpenForm`, etc.) rec
 - Alertas → umbrales
 
 #### Criterios de aceptación
-- [ ] Panel de configuración accesible desde el modal
-- [ ] Todos los parámetros configurables se guardan y persisten
-- [ ] Valores por defecto razonables si no se ha configurado nada
-- [ ] Endpoint `GET/PUT /api/settings/driver-cash/:userId` funcional
-- [ ] Hook `useDriverCashConfig` proporciona la config a los componentes
-- [ ] Botón "Restaurar valores por defecto" funcional
-- [ ] Solo accesible para perfil gerente (verificar permisos)
+- [x] Panel de configuración accesible desde el modal
+- [x] Todos los parámetros configurables se guardan y persisten
+- [x] Valores por defecto razonables si no se ha configurado nada (`DEFAULT_DRIVER_CASH_CONFIG`)
+- [x] Endpoint `GET/PUT /api/settings/driver-cash/:userId` funcional
+- [x] Hook `useDriverCashConfig` proporciona la config a los componentes (integrado dentro de `useDriverCashSessions`)
+- [x] Botón "Restaurar valores por defecto" funcional
+- [ ] Solo accesible para perfil gerente (verificar permisos) — solo se oculta con la prop `workerMode`, sin verificación real de permisos
 
 ---
 

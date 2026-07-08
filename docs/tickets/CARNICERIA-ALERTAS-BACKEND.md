@@ -8,6 +8,13 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~85% hecho.** El backend está prácticamente completo: modelos CouchDB (`butcher_product/batch/waste/scale_status/inventory_count` en `couchdb.js`), CRUD montado en `/api/butcher` (`butcherRouter.js`), motor `butcherAlertEngine.js` arrancado en `index.js` (ciclo 30 min + básculas cada 5 min), configuración en `alertController.js`, KPIs y dashAlerts de carnicería en el dashboard, endpoint resumen `/api/butcher/alerts/:userId/summary` y módulo compartido `alertEmitter.js`.
+**Falta de verdad:** la distribución fina por perfil (CARN-ALR-05): no hay evento SSE `butcher_alert` dedicado, ni helpers `getActiveWorkerUserIds`/ventana de 12h para trabajadores (la distribución se hace por roles configurados en `alertEmitter.resolveRecipients`). Tampoco hay vistas CouchDB dedicadas (se usa `fetchAllDocsOfType`), ni evento de reconexión de báscula, ni rate-limit específico del ping.
+
+---
+
 ## Índice
 
 1. [Contexto y estado actual](#contexto-y-estado-actual)
@@ -297,17 +304,17 @@ Crear los builders, sanitizers y helpers CRUD en `couchdb.js` para los nuevos ti
 
 #### Tareas
 
-- [ ] Crear `getButcherDbName()` que devuelva el nombre de la BD de carnicería (o reusar `getDeliveryDbName()` si se decide compartir)
-- [ ] Crear `buildButcherProductDocument({ userId, businessId, name, category, subcategory, sku, pricePerKg, stockKg, minStockKg, unit, conservation })` → documento con `type: 'butcher_product'`
-- [ ] Crear `sanitizeButcherProduct(doc)` → exponer campos seguros
-- [ ] Crear `buildButcherBatchDocument({ userId, businessId, productId, batchNumber, origin, slaughterhouse, healthGuide, animalId, receptionDate, expirationDate, receptionWeightKg, currentWeightKg, temperature, healthStatus, zone })` → `type: 'butcher_batch'`
-- [ ] Crear `sanitizeButcherBatch(doc)`
-- [ ] Crear `buildButcherWasteDocument({ userId, businessId, productId, batchId, date, wasteKg, reason, category, notes, registeredBy })` → `type: 'butcher_waste'`
-- [ ] Crear `sanitizeButcherWaste(doc)`
-- [ ] Crear `buildButcherScaleStatusDocument({ businessId, scaleId, name, connected, ip, model, location })` → `type: 'butcher_scale_status'`
-- [ ] Crear `sanitizeButcherScaleStatus(doc)`
-- [ ] Crear `buildButcherInventoryCountDocument({ userId, businessId, date, countedBy, items })` → `type: 'butcher_inventory_count'`, calcular `totalDifferenceKg` y `differencePct` por item
-- [ ] Crear `sanitizeButcherInventoryCount(doc)`
+- [x] Crear `getButcherDbName()` que devuelva el nombre de la BD de carnicería (o reusar `getDeliveryDbName()` si se decide compartir)
+- [x] Crear `buildButcherProductDocument({ userId, businessId, name, category, subcategory, sku, pricePerKg, stockKg, minStockKg, unit, conservation })` → documento con `type: 'butcher_product'`
+- [x] Crear `sanitizeButcherProduct(doc)` → exponer campos seguros
+- [x] Crear `buildButcherBatchDocument({ userId, businessId, productId, batchNumber, origin, slaughterhouse, healthGuide, animalId, receptionDate, expirationDate, receptionWeightKg, currentWeightKg, temperature, healthStatus, zone })` → `type: 'butcher_batch'`
+- [x] Crear `sanitizeButcherBatch(doc)`
+- [x] Crear `buildButcherWasteDocument({ userId, businessId, productId, batchId, date, wasteKg, reason, category, notes, registeredBy })` → `type: 'butcher_waste'`
+- [x] Crear `sanitizeButcherWaste(doc)`
+- [x] Crear `buildButcherScaleStatusDocument({ businessId, scaleId, name, connected, ip, model, location })` → `type: 'butcher_scale_status'`
+- [x] Crear `sanitizeButcherScaleStatus(doc)`
+- [x] Crear `buildButcherInventoryCountDocument({ userId, businessId, date, countedBy, items })` → `type: 'butcher_inventory_count'`, calcular `totalDifferenceKg` y `differencePct` por item
+- [x] Crear `sanitizeButcherInventoryCount(doc)`
 - [ ] Crear vistas CouchDB (`ensureDesignDocument`) para consultas frecuentes:
   - `butcher_products_by_user` (emisión por `user_id`)
   - `butcher_batches_by_user` (emisión por `user_id`)
@@ -386,13 +393,13 @@ Exponer endpoints REST para gestionar los datos de carnicería que alimentarán 
 
 #### Tareas
 
-- [ ] Crear `routers/butcherRouter.js` con todas las rutas
-- [ ] Crear `controllers/butcherController.js` con handlers
-- [ ] Montar en `index.js`: `app.use('/api/butcher', requireAuth, burstLimiter, planAwareLimiter, butcherRouter)` + alias `/api/v2/butcher`
-- [ ] Validar body con comprobaciones manuales (como el resto del proyecto) o Zod si ya se usa
-- [ ] El endpoint de ping de báscula actualiza `lastPingAt` y `connected: true`
-- [ ] El endpoint de resumen de merma calcula `totalWasteKg`, `wastePct` (sobre peso de recepción del lote) para un rango de fechas
-- [ ] El endpoint de discrepancias devuelve ítems con `|differencePct| > umbral` (configurable, por defecto 3%)
+- [x] Crear `routers/butcherRouter.js` con todas las rutas
+- [x] Crear `controllers/butcherController.js` con handlers
+- [x] Montar en `index.js`: `app.use('/api/butcher', requireAuth, burstLimiter, planAwareLimiter, butcherRouter)` + alias `/api/v2/butcher`
+- [x] Validar body con comprobaciones manuales (como el resto del proyecto) o Zod si ya se usa
+- [x] El endpoint de ping de báscula actualiza `lastPingAt` y `connected: true`
+- [x] El endpoint de resumen de merma calcula `totalWasteKg`, `wastePct` (sobre peso de recepción del lote) para un rango de fechas
+- [x] El endpoint de discrepancias devuelve ítems con `|differencePct| > umbral` (configurable, por defecto 3%)
 
 #### Criterios de aceptación
 
@@ -528,7 +535,7 @@ Crear el motor de alertas específico de carnicería como módulo independiente 
 
 #### Tareas
 
-- [ ] Crear `services/butcherAlertEngine.js` con la estructura:
+- [x] Crear `services/butcherAlertEngine.js` con la estructura:
   - `getButcherAlertConfig(account)` → devuelve umbrales con defaults
   - `checkButcherStock(userId, products, config)` → reglas 1, 2, 3
   - `checkButcherBatches(userId, batches, products, config)` → reglas 4, 5
@@ -540,10 +547,10 @@ Crear el motor de alertas específico de carnicería como módulo independiente 
   - `checkButcherInventory(userId, counts, config)` → regla 11
   - `runButcherAlertsForUser(userId)` → orquesta todas las reglas
   - `startButcherAlertEngine()` → scheduler propio
-- [ ] Reutilizar `emitAlert()` del `alertEngine.js` existente (exportarla o extraerla a un módulo compartido `services/alertEmitter.js`)
-- [ ] Ejecutar las reglas de báscula cada 5 minutos (ciclo rápido independiente)
-- [ ] Ejecutar el resto de reglas cada 30 minutos (más frecuente que el motor genérico de 1h, porque carnicería es perecedera)
-- [ ] Filtrar solo usuarios con `account.businessType === 'butcherShop'`
+- [x] Reutilizar `emitAlert()` del `alertEngine.js` existente (exportarla o extraerla a un módulo compartido `services/alertEmitter.js`)
+- [x] Ejecutar las reglas de báscula cada 5 minutos (ciclo rápido independiente)
+- [x] Ejecutar el resto de reglas cada 30 minutos (más frecuente que el motor genérico de 1h, porque carnicería es perecedera)
+- [x] Filtrar solo usuarios con `account.businessType === 'butcherShop'`
 
 #### Criterios de aceptación
 
@@ -616,8 +623,8 @@ Extender la configuración de alertas (`account.alertConfig`) para incluir los u
 
 #### Tareas
 
-- [ ] Añadir las nuevas claves al array `allowedKeys` en `updateAlertSettings` del `alertController.js`
-- [ ] Añadir defaults en `getButcherAlertConfig()` del `butcherAlertEngine.js`
+- [x] Añadir las nuevas claves al array `allowedKeys` en `updateAlertSettings` del `alertController.js`
+- [x] Añadir defaults en `getButcherAlertConfig()` del `butcherAlertEngine.js`
 - [ ] Documentar los campos con comentarios en el código
 - [ ] Validar tipos numéricos (parsear a `Number`, rechazar NaN) y booleanos
 
@@ -659,7 +666,7 @@ ALERTA GENERADA
 
 #### Tareas
 
-- [ ] Añadir campo `audience` al metadata de cada alerta: `['manager']`, `['worker']`, o `['manager', 'worker']`
+- [x] Añadir campo `audience` al metadata de cada alerta: `['manager']`, `['worker']`, o `['manager', 'worker']`
 - [ ] Crear helper `getBusinessOwnerUserId(businessId)` que devuelve el userId del propietario del negocio
 - [ ] Crear helper `getActiveWorkerUserIds(businessId)` que devuelve los userIds de trabajadores con sesión TPV activa
 - [ ] Modificar el flujo de emisión para que, además de `emitAlert()` al userId original, también emita a los userIds de los roles correspondientes según `audience`
@@ -744,12 +751,12 @@ butcherKpis: {
 
 #### Tareas
 
-- [ ] Detectar `account.businessType === 'butcherShop'` en el handler de KPIs
-- [ ] Fetch de datos: productos, lotes, merma del día, básculas, sesiones TPV, último inventario
-- [ ] Calcular `butcherKpis` con los conteos
-- [ ] Generar `dashAlerts` específicos según condiciones
-- [ ] Incluir `butcherKpis` en el response solo para negocios carnicería
-- [ ] No alterar el comportamiento para otros tipos de negocio
+- [x] Detectar `account.businessType === 'butcherShop'` en el handler de KPIs
+- [x] Fetch de datos: productos, lotes, merma del día, básculas, sesiones TPV, último inventario
+- [x] Calcular `butcherKpis` con los conteos
+- [x] Generar `dashAlerts` específicos según condiciones
+- [x] Incluir `butcherKpis` en el response solo para negocios carnicería
+- [x] No alterar el comportamiento para otros tipos de negocio
 
 #### Criterios de aceptación
 
@@ -826,11 +833,11 @@ Crear un endpoint dedicado que devuelva el resumen completo de alertas activas d
 
 #### Tareas
 
-- [ ] Crear `getButcherAlertSummary(userId)` en `butcherAlertEngine.js`
-- [ ] Crear handler `getButcherAlerts` en `butcherController.js`
-- [ ] Añadir ruta `GET /api/butcher/alerts/:userId/summary` al `butcherRouter.js`
-- [ ] Calcular promedios semanales de merma para comparación
-- [ ] Incluir flag `isAnomaly` calculado contra la media semanal
+- [x] Crear `getButcherAlertSummary(userId)` en `butcherAlertEngine.js`
+- [x] Crear handler `getButcherAlerts` en `butcherController.js`
+- [x] Añadir ruta `GET /api/butcher/alerts/:userId/summary` al `butcherRouter.js`
+- [x] Calcular promedios semanales de merma para comparación
+- [ ] Incluir flag `isAnomaly` calculado contra la media semanal *(existe `isAnomaly`, pero se calcula contra el umbral configurado, no contra la media semanal)*
 
 #### Criterios de aceptación
 
@@ -854,15 +861,15 @@ Registrar el motor de alertas de carnicería en el arranque del servidor, junto 
 
 #### Tareas
 
-- [ ] Importar `startButcherAlertEngine` en `index.js`
-- [ ] Añadir llamada en el bloque de arranque (junto a `startAlertEngine()`):
+- [x] Importar `startButcherAlertEngine` en `index.js`
+- [x] Añadir llamada en el bloque de arranque (junto a `startAlertEngine()`):
   ```javascript
   // Butcher alert engine — ciclo de 30 min + báscula cada 5 min
   startButcherAlertEngine();
   ```
-- [ ] Asegurar que el delay de inicio es posterior al del motor genérico (ej: 20s vs 15s)
-- [ ] Añadir log de inicio: `Motor de alertas de carnicería arrancado`
-- [ ] Exportar `stopButcherAlertEngine()` para shutdown limpio
+- [x] Asegurar que el delay de inicio es posterior al del motor genérico (ej: 20s vs 15s)
+- [x] Añadir log de inicio: `Motor de alertas de carnicería arrancado`
+- [x] Exportar `stopButcherAlertEngine()` para shutdown limpio
 
 #### Criterios de aceptación
 
@@ -886,13 +893,13 @@ Extraer la función `emitAlert()` y helpers relacionados (`daysBetween`, `fetchA
 
 #### Tareas
 
-- [ ] Crear `services/alertEmitter.js` con:
-  - `emitAlert({ userId, dedupKey, level, category, title, message, entityId, entityType, route, metadata })`
+- [x] Crear `services/alertEmitter.js` con:
+  - `emitAlert({ userId, dedupKey, level, category, title, message, entityId, entityType, route, metadata })` *(implementado como `emitGlobalAlert`)*
   - `daysBetween(dateStr, now)`
   - `fetchAllDocsOfType(dbName, type)`
   - `fetchAllDocs(dbName)`
-- [ ] Modificar `alertEngine.js` para importar desde `alertEmitter.js`
-- [ ] El `butcherAlertEngine.js` importa desde `alertEmitter.js`
+- [x] Modificar `alertEngine.js` para importar desde `alertEmitter.js`
+- [x] El `butcherAlertEngine.js` importa desde `alertEmitter.js`
 - [ ] Verificar que los tests existentes (si los hay) siguen pasando
 
 #### Criterios de aceptación
@@ -942,9 +949,9 @@ ALERTA → SSE a trabajadores del negocio
 
 #### Tareas
 
-- [ ] Endpoint de ping: recibe `{ weight?: number, status?: string }` opcional (la báscula puede enviar peso actual y estado)
-- [ ] Actualizar `lastPingAt`, `connected: true`, y opcionalmente `lastWeight`, `lastStatus`
-- [ ] En el ciclo rápido del motor: marcar `connected: false` si timeout y emitir alerta
+- [x] Endpoint de ping: recibe `{ weight?: number, status?: string }` opcional (la báscula puede enviar peso actual y estado)
+- [x] Actualizar `lastPingAt`, `connected: true`, y opcionalmente `lastWeight`, `lastStatus`
+- [x] En el ciclo rápido del motor: marcar `connected: false` si timeout y emitir alerta
 - [ ] Cuando la báscula vuelve a hacer ping tras desconexión: emitir evento SSE `butcher_scale_reconnected` (info, no alerta)
 - [ ] Rate limiting específico para el ping (mayor que el normal: 100 req/min ya que es un heartbeat)
 

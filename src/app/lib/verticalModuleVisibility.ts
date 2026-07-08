@@ -17,7 +17,6 @@ export const VERTICAL_HIDDEN_MENU_ITEMS: Partial<Record<BusinessType, readonly s
     'delivery-reparto',
     'delivery-montaje',
     'delivery',
-    'tpv-rapido',
     'tpv',
     'tpv-locales',
     'promotions',

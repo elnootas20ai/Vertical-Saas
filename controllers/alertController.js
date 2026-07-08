@@ -8,10 +8,18 @@ import { getCompraventaAlertConfig } from '../services/compraventaAlertEngine.js
 
 const fakeReq = { headers: {} };
 
+/** Los endpoints legacy van scoped por userId: solo el propio usuario de la sesión. */
+function isOwnUserId(req, userId) {
+  const sessionId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+  if (!sessionId) return true; // sin payload no podemos comparar; el middleware ya exigió sesión
+  return sessionId === String(userId || '').trim();
+}
+
 export async function getAlerts(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
+    if (!isOwnUserId(req, userId)) return res.status(403).json({ ok: false, error: 'No autorizado' });
 
     const summary = await getAlertSummary(userId);
     return res.json({ ok: true, ...summary });
@@ -27,6 +35,7 @@ export async function triggerAlertCheck(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
+    if (!isOwnUserId(req, userId)) return res.status(403).json({ ok: false, error: 'No autorizado' });
 
     const summary = await getAlertSummary(userId);
     const motors = await runAllAlertMotors();
@@ -49,6 +58,7 @@ export async function getAlertSettings(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
+    if (!isOwnUserId(req, userId)) return res.status(403).json({ ok: false, error: 'No autorizado' });
 
     const account = await findAccountByUserId(fakeReq, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });
@@ -67,6 +77,7 @@ export async function updateAlertSettings(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
+    if (!isOwnUserId(req, userId)) return res.status(403).json({ ok: false, error: 'No autorizado' });
 
     const account = await findAccountByUserId(fakeReq, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Cuenta no encontrada' });

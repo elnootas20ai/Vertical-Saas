@@ -8,6 +8,16 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~75% hecho y operativo.** Este módulo está montado y accesible: la página `ScrapyardDocumentationPage.tsx` existe y está en `routes.tsx` (`/saas/vertical/desguaces/documentacion`, gated por permiso `scrapyard_docs`), el ítem `scrapyard-documentation` está en el Sidebar, y el backend de documentos soporta todo el modelo del desguace.
+
+- **Completo (verificado):** DDOC-01 (subcategorías desguace en `VALID_DOC_SUB_CATEGORIES`, campos `partId`/`acquisitionId`/`deregistrationType`/`isScrapyard`/`documentHash` en `buildDocumentRecord` + `sanitizeDocumentRecord`, `getScrapyardRequiredDocs`, tipos en `documentsApi.ts`), DDOC-04 backend (filtro `q` multi-campo incl. pieza + filtros `partId`/`acquisitionId`/`isScrapyard`/`archived` en `listDocuments`), DDOC-05 (prompt OCR en `index.js` con bajas/certificados/albarán grúa, `OCR_TYPE_TO_SUB_CATEGORY` ampliado, propagación de `deregistrationDate/Type`), DDOC-09 parcial-alto (auto-categorización OCR, auto-link matrícula/VIN + adquisición abierta, detección de duplicados por hash con 409), DDOC-12 (página + ruta + sidebar + tabs + deep-link `?tab=`/dossier).
+- **Parcial:** DDOC-02/03 (tabs desguace y `ScrapyardDocDossier` con fases existen, pero el checklist del dossier frontend es estático por fases, no dinámico por estado del vehículo), DDOC-07 (existen `scrapyard_pending_deregistration` y `scrapyard_vehicle_missing_docs` en `scrapyardAlertEngine.js`; NO hay alerta de OCR incompleto específica de desguace ni de documento duplicado), DDOC-08 (widget "Alertas documentales" existe en `dashboards/ScrapyardDashboard.tsx` con endpoint `/api/documents/:userId/alerts`; falta KPI de completitud), DDOC-10 (permiso `scrapyard_docs` existe y gatea la ruta, pero sin los 7 permisos granulares ni enforcement 403 en backend).
+- **Pendiente de verdad:** DDOC-13 (el histórico de `DocumentDetail.tsx` sigue siendo sintético, generado desde el estado del documento, no consume activity log real), archivado automático al compactar (existe filtro `archived` pero no se encontró `archiveVehicleDocuments`), vinculación automática a pieza por código (solo manual), y permisos gerente/trabajador reales.
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona
@@ -281,12 +291,12 @@ export const SCRAPYARD_DOC_ICONS: Record<string, string> = {
 
 #### Criterios de aceptación
 
-- [ ] Las nuevas subcategorías se aceptan y persisten sin romper documentos existentes
-- [ ] `buildDocumentRecord` acepta y persiste `partId`, `acquisitionId`, `deregistrationId`, `documentHash` y demás campos nuevos
-- [ ] Los documentos existentes sin los campos nuevos devuelven valores por defecto seguros
-- [ ] `sanitizeDocumentRecord` expone todos los campos nuevos al frontend
-- [ ] `getScrapyardRequiredDocs` devuelve la lista correcta de docs obligatorios según el estado del vehículo
-- [ ] `documentsApi.ts` refleja todos los tipos e interfaces nuevos
+- [x] Las nuevas subcategorías se aceptan y persisten sin romper documentos existentes — `VALID_DOC_SUB_CATEGORIES` ampliada en `couchdb.js`
+- [x] `buildDocumentRecord` acepta y persiste `partId`, `acquisitionId`, `deregistrationId`, `documentHash` y demás campos nuevos
+- [x] Los documentos existentes sin los campos nuevos devuelven valores por defecto seguros
+- [x] `sanitizeDocumentRecord` expone todos los campos nuevos al frontend
+- [x] `getScrapyardRequiredDocs` devuelve la lista correcta de docs obligatorios según el estado del vehículo — `couchdb.js`
+- [x] `documentsApi.ts` refleja todos los tipos e interfaces nuevos — `ScrapyardDocCategory`, `partId`, `documentHash`, etc.
 - [ ] Tests unitarios validan retrocompatibilidad con documentos legacy
 
 ---
@@ -399,11 +409,11 @@ Usar contenedor con `overflow-x-auto` y `scroll-snap` para tablets y móviles.
 
 #### Criterios de aceptación
 
-- [ ] En vertical `scrapyard`, los tabs son los definidos arriba
-- [ ] En otras verticales, se mantienen los tabs genéricos o los de compraventa
-- [ ] El conteo de documentos por tab es correcto y se actualiza al añadir/eliminar
-- [ ] Los tabs son scrollables horizontalmente en pantallas pequeñas
-- [ ] La URL refleja el tab activo con query param `?tab=`
+- [x] En vertical `scrapyard`, los tabs son los definidos arriba — `SCRAPYARD_TAB_DEFS` en `ScrapyardDocumentationPage.tsx` (página dedicada, no en `DocumentsPage`)
+- [x] En otras verticales, se mantienen los tabs genéricos o los de compraventa — `DocumentsPage.tsx` no se modificó
+- [ ] El conteo de documentos por tab es correcto y se actualiza al añadir/eliminar (no verificado)
+- [ ] Los tabs son scrollables horizontalmente en pantallas pequeñas (no verificado)
+- [x] La URL refleja el tab activo con query param `?tab=`
 - [ ] Al cambiar de tab hay transición suave (fade o slide)
 
 ---
@@ -503,16 +513,16 @@ Botón toggle en la toolbar para alternar entre:
 
 #### Criterios de aceptación
 
-- [ ] Se puede alternar entre vista lista y vista expediente
-- [ ] La vista expediente agrupa documentos por vehículo
-- [ ] El checklist de obligatorios es dinámico según el estado del vehículo
-- [ ] Los documentos se agrupan por fase (entrada, descontaminación, baja, piezas)
-- [ ] Se muestra badge de urgencia cuando la baja lleva demasiado tiempo pendiente
-- [ ] Se puede subir un documento directamente al expediente de un vehículo
-- [ ] Documentos de piezas del vehículo aparecen en una sección dedicada
-- [ ] Vehículos sin documentos aparecen con expediente vacío y CTA para subir
-- [ ] Documentos sin vehículo aparecen en sección "Sin asignar"
-- [ ] Funciona en desktop (tabla expandible) y en móvil (acordeón)
+- [x] Se puede alternar entre vista lista y vista expediente — `viewMode: 'list' | 'dossier'` en `ScrapyardDocumentationPage.tsx`
+- [x] La vista expediente agrupa documentos por vehículo — componente `ScrapyardDocDossier.tsx`
+- [ ] El checklist de obligatorios es dinámico según el estado del vehículo — en frontend `SCRAPYARD_REQUIRED_DOCS` es una lista estática por fases (el dinámico por estado solo existe en backend `getScrapyardRequiredDocs`)
+- [x] Los documentos se agrupan por fase (entrada, descontaminación, baja, piezas) — `ScrapyardDocDossier.tsx` filtra por `phase`
+- [ ] Se muestra badge de urgencia cuando la baja lleva demasiado tiempo pendiente (no verificado)
+- [ ] Se puede subir un documento directamente al expediente de un vehículo (no verificado)
+- [ ] Documentos de piezas del vehículo aparecen en una sección dedicada (no verificado)
+- [ ] Vehículos sin documentos aparecen con expediente vacío y CTA para subir (no verificado)
+- [ ] Documentos sin vehículo aparecen en sección "Sin asignar" (no verificado)
+- [ ] Funciona en desktop (tabla expandible) y en móvil (acordeón) (no verificado)
 
 ---
 
@@ -590,14 +600,14 @@ Botón "Filtros" que despliega panel con:
 
 #### Criterios de aceptación
 
-- [ ] Se puede buscar por matrícula parcial (ej: "1234" encuentra "1234 ABC")
-- [ ] Se puede buscar por VIN parcial
-- [ ] Se puede buscar por nombre o código de pieza
-- [ ] Se puede buscar por nombre de proveedor o cliente
-- [ ] Se puede filtrar por subcategoría documental con chips
-- [ ] El filtro avanzado permite combinar múltiples criterios
-- [ ] La búsqueda es instantánea (client-side con datos ya cargados)
-- [ ] Funciona correctamente en desktop y en móvil
+- [x] Se puede buscar por matrícula parcial (ej: "1234" encuentra "1234 ABC") — filtro `q` en `listDocuments` incluye `registrationPlate`
+- [x] Se puede buscar por VIN parcial — filtro `q` incluye `vin`
+- [x] Se puede buscar por nombre o código de pieza — filtro `q` incluye `partName` y `partCode`
+- [x] Se puede buscar por nombre de proveedor o cliente — filtro `q` incluye `clientName` y `supplierName`
+- [x] Se puede filtrar por subcategoría documental — filtro `docSubCategory` en backend + tabs por subcategorías en la página
+- [ ] El filtro avanzado permite combinar múltiples criterios — no hay panel de filtro avanzado desplegable (multi-select, rango fechas, slider OCR)
+- [ ] La búsqueda es instantánea (client-side con datos ya cargados) (no verificado)
+- [ ] Funciona correctamente en desktop y en móvil (no verificado)
 
 ---
 
@@ -718,15 +728,15 @@ if (ocrResult.expiryDate) doc.expiryDate = ocrResult.expiryDate;
 
 #### Criterios de aceptación
 
-- [ ] El prompt OCR reconoce documentos de baja DGT y extrae tipo y fecha
-- [ ] El prompt reconoce certificados de destrucción y descontaminación
-- [ ] El prompt reconoce albaranes de grúa y extrae empresa y nº albarán
-- [ ] El mapeo `OCR_TYPE_TO_SUB_CATEGORY` incluye los tipos nuevos del desguace
-- [ ] El modal OCR muestra campos relevantes según el tipo detectado
-- [ ] Los datos extraídos se propagan a los campos correspondientes del documento
-- [ ] El campo `confidence` se guarda como `ocrConfidence`
-- [ ] Funciona con documentos reales de baja DGT españoles
-- [ ] Funciona con certificados de descontaminación
+- [x] El prompt OCR reconoce documentos de baja DGT y extrae tipo y fecha — prompt en `index.js` incluye `baja_temporal`/`baja_definitiva`, `deregistrationType`
+- [x] El prompt reconoce certificados de destrucción y descontaminación — incluye `certificado_destruccion`, `certificado_descontaminacion`, `treatmentCenter`
+- [x] El prompt reconoce albaranes de grúa — incluye `albaran_grua` y `acta_retirada`
+- [x] El mapeo `OCR_TYPE_TO_SUB_CATEGORY` incluye los tipos nuevos del desguace — `documentsController.js`
+- [ ] El modal OCR muestra campos relevantes según el tipo detectado (no verificado en `SAAS__OcrScanModal.tsx`)
+- [x] Los datos extraídos se propagan a los campos correspondientes del documento — `createDocument` propaga `deregistrationDate/Type`, `itvExpiryDate`, `docSubCategory`
+- [x] El campo `confidence` se guarda como `ocrConfidence` — campo existente en `buildDocumentRecord`
+- [ ] Funciona con documentos reales de baja DGT españoles (requiere prueba manual)
+- [ ] Funciona con certificados de descontaminación (requiere prueba manual)
 
 ---
 
@@ -818,15 +828,15 @@ En `SAAS__UploadDocumentModal`, cuando el negocio es `scrapyard`, añadir select
 
 #### Criterios de aceptación
 
-- [ ] Tras OCR con matrícula detectada, el vehículo se pre-selecciona automáticamente
-- [ ] Si el vehículo tiene adquisición abierta, se vincula automáticamente
-- [ ] Documentos de baja actualizan `fechaBaja` y `tipoBaja` del vehículo
-- [ ] La vinculación a pieza funciona por código interno
-- [ ] Se muestra toast informativo cuando se auto-vincula
-- [ ] El usuario puede corregir o rechazar las vinculaciones automáticas
-- [ ] Los selectores en el modal de subida tienen búsqueda con autocomplete
-- [ ] Se puede buscar vehículo por matrícula o bastidor
-- [ ] Se puede buscar pieza por código o nombre
+- [x] Tras OCR con matrícula detectada, el vehículo se pre-selecciona automáticamente — `autoLinkByPlateOrVin` en `documentsController.js`
+- [x] Si el vehículo tiene adquisición abierta, se vincula automáticamente — `autoLinkByPlateOrVin` busca `vehicle_acquisition` abierta y asigna `acquisitionId`
+- [ ] Documentos de baja actualizan `fechaBaja` y `tipoBaja` del vehículo — se guardan `deregistrationDate/Type` en el documento, pero no se encontró actualización del documento del vehículo
+- [ ] La vinculación a pieza funciona por código interno — no existe `autoLinkToPart`; solo vinculación manual con `partId`
+- [ ] Se muestra toast informativo cuando se auto-vincula (no verificado)
+- [ ] El usuario puede corregir o rechazar las vinculaciones automáticas (no hay panel de vinculaciones post-OCR)
+- [ ] Los selectores en el modal de subida tienen búsqueda con autocomplete (no verificado)
+- [x] Se puede buscar vehículo por matrícula o bastidor — filtro `q` incluye `registrationPlate` y `vin`
+- [x] Se puede buscar pieza por código o nombre — filtro `q` incluye `partName` y `partCode`
 
 ---
 
@@ -1013,15 +1023,15 @@ scrapyardDocAlertsConfig: {
 
 #### Criterios de aceptación
 
-- [ ] Se genera alerta cuando un vehículo de desguace tiene documentos obligatorios faltantes
-- [ ] Se genera alerta cuando un vehículo despiezado/compactado lleva >7 días sin baja DGT
-- [ ] La alerta de baja pendiente sube a nivel `alert` (crítica) después de 30 días
-- [ ] Se genera alerta cuando un OCR tiene confianza <60%
-- [ ] Se genera alerta cuando se detecta un documento duplicado (mismo hash + mismo vehículo)
-- [ ] Las alertas tienen deduplicación (no se repiten)
-- [ ] Las alertas se envían por SSE y Web Push
-- [ ] Las alertas incluyen enlace directo al expediente del vehículo
-- [ ] Los umbrales son configurables por cuenta
+- [x] Se genera alerta cuando un vehículo de desguace tiene documentos obligatorios faltantes — `checkVehicleMissingDocs` (`scrapyard_vehicle_missing_docs`) en `scrapyardAlertEngine.js`, usa `getScrapyardRequiredDocs`
+- [x] Se genera alerta cuando un vehículo despiezado/compactado lleva días sin baja DGT — `checkPendingDeregistration` (`scrapyard_pending_deregistration`)
+- [ ] La alerta de baja pendiente sube a nivel `alert` (crítica) después de 30 días (escalado no verificado; existe flag `escalable: true`)
+- [ ] Se genera alerta cuando un OCR tiene confianza <60% — no hay regla de OCR incompleto específica de desguace en `scrapyardAlertEngine.js`
+- [ ] Se genera alerta cuando se detecta un documento duplicado — el duplicado se bloquea con 409 al subir, pero no hay alerta periódica de duplicados
+- [x] Las alertas tienen deduplicación (no se repiten) — `dedupKey` en `emit` del motor
+- [x] Las alertas se envían por SSE y Web Push — usa la infraestructura común de `alertEngine.js`/`alertEmitter`
+- [x] Las alertas incluyen enlace directo al expediente del vehículo — campo `route` en las alertas
+- [x] Los umbrales son configurables por cuenta — `getScrapyardAlertConfig` (`vehicleMissingDocsGraceDays`, etc.)
 
 ---
 
@@ -1070,13 +1080,13 @@ Añadir a los KPIs del dashboard:
 
 #### Criterios de aceptación
 
-- [ ] El widget aparece en el Dashboard del vertical `scrapyard`
-- [ ] Muestra recuento de alertas activas agrupadas por tipo
-- [ ] Las bajas pendientes >30 días se destacan en rojo
-- [ ] Cada alerta es clickeable y lleva al recurso afectado
-- [ ] Si no hay alertas, muestra "Todo en orden" con check verde
-- [ ] El KPI de completitud documental es correcto
-- [ ] El diseño es consistente con los demás widgets del dashboard
+- [x] El widget aparece en el Dashboard del vertical `scrapyard` — sección "Alertas documentales" en `dashboards/ScrapyardDashboard.tsx`, consume `/api/documents/:userId/alerts` filtrado por `isScrapyard`
+- [x] Muestra recuento de alertas activas — badge con `docAlerts.length` y listado de hasta 8
+- [ ] Las bajas pendientes >30 días se destacan en rojo (escalado visual no verificado)
+- [x] Cada alerta es clickeable y lleva al recurso afectado — "ver todo" navega a `/saas/vertical/desguaces/documentacion`
+- [ ] Si no hay alertas, muestra "Todo en orden" con check verde — el bloque se oculta si no hay alertas
+- [ ] El KPI de completitud documental es correcto (no hay KPI "expedientes completos / total")
+- [x] El diseño es consistente con los demás widgets del dashboard
 
 ---
 
@@ -1185,15 +1195,15 @@ Los documentos archivados aparecen con estilo atenuado y badge "Archivado".
 
 #### Criterios de aceptación
 
-- [ ] Documentos creados por OCR se auto-categorizan según el tipo detectado
-- [ ] Si el OCR detecta matrícula, se vincula automáticamente al vehículo
-- [ ] Si el vehículo tiene adquisición abierta, se vincula automáticamente
-- [ ] Documentos de baja actualizan `fechaBaja` y `tipoBaja` del vehículo
+- [x] Documentos creados por OCR se auto-categorizan según el tipo detectado — `OCR_TYPE_TO_SUB_CATEGORY` en `createDocument`
+- [x] Si el OCR detecta matrícula, se vincula automáticamente al vehículo — `autoLinkByPlateOrVin`
+- [x] Si el vehículo tiene adquisición abierta, se vincula automáticamente — asigna `acquisitionId` en el auto-link
+- [ ] Documentos de baja actualizan `fechaBaja` y `tipoBaja` del vehículo — solo se guardan en el documento, no en el vehículo
 - [ ] Documentos de descontaminación marcan `descontaminacionCompleta` en el vehículo
-- [ ] Se detectan duplicados por hash antes de guardar (error 409)
-- [ ] Al compactar un vehículo, sus documentos se marcan como archivados
-- [ ] Los documentos archivados son visibles pero con estilo diferenciado
-- [ ] El flujo completo (subir → OCR → categorizar → vincular → archivar) funciona sin intervención manual
+- [x] Se detectan duplicados por hash antes de guardar (error 409) — `checkDuplicateDocument` + `documentHash` en `createDocument`
+- [ ] Al compactar un vehículo, sus documentos se marcan como archivados — no existe `archiveVehicleDocuments` (sí existe el filtro `archived` en listado)
+- [ ] Los documentos archivados son visibles pero con estilo diferenciado (no verificado)
+- [ ] El flujo completo (subir → OCR → categorizar → vincular → archivar) funciona sin intervención manual — falta el paso de archivado automático
 
 ---
 
@@ -1255,12 +1265,12 @@ El trabajador ve la sección "Documentación" en el sidebar pero con acceso limi
 
 #### Criterios de aceptación
 
-- [ ] El gerente ve todos los documentos y tiene CRUD completo + validación
-- [ ] El trabajador ve solo documentos relevantes y puede crear + leer (no eliminar ni validar)
-- [ ] Los botones de eliminar/validar no aparecen en la UI del trabajador
+- [ ] El gerente ve todos los documentos y tiene CRUD completo + validación — sin flujo de validación de expediente
+- [ ] El trabajador ve solo documentos relevantes y puede crear + leer (no eliminar ni validar) — no hay filtrado por vehículos asignados
+- [ ] Los botones de eliminar/validar no aparecen en la UI del trabajador (no verificado)
 - [ ] El trabajador no ve documentos financieros (facturas con precios, contratos)
-- [ ] El backend rechaza con 403 las acciones no permitidas
-- [ ] El trabajador tiene acceso a documentación en el Sidebar
+- [ ] El backend rechaza con 403 las acciones no permitidas — sin middleware de permisos por acción en `documentsRouter`
+- [x] El trabajador tiene acceso a documentación en el Sidebar — existe permiso `scrapyard_docs` en `TEAM_PERMISSION_KEYS` y la ruta se gatea con `RequireWorkerPermission permission={['scrapyard_docs', 'documents']}`
 
 ---
 
@@ -1330,12 +1340,12 @@ Desde la página medioambiental:
 
 #### Criterios de aceptación
 
-- [ ] Desde la ficha del vehículo se accede al expediente documental
-- [ ] Desde la adquisición se ven los documentos vinculados
-- [ ] Desde las bajas se ve el estado documental del expediente de baja
-- [ ] Desde las piezas se ven los documentos asociados
-- [ ] Todos los enlaces de navegación cruzada funcionan correctamente
-- [ ] Se puede subir un documento desde cualquier módulo con contexto pre-rellenado
+- [x] Desde la ficha del vehículo se accede al expediente documental — `ScrapyardVehicleDetail.tsx` usa `ScrapyardDocDossier`/enlace a documentación
+- [ ] Desde la adquisición se ven los documentos vinculados — `ScrapyardPurchasesPage.tsx` no referencia el dossier documental (no verificado checklist de docs por adquisición)
+- [x] Desde las bajas se ve el estado documental — `ScrapyardDeregistrations.tsx` enlaza con documentación
+- [x] Desde las piezas se ven los documentos asociados — `ScrapyardParts.tsx` enlaza con documentación
+- [ ] Todos los enlaces de navegación cruzada funcionan correctamente (verificados parcialmente: vehículos, bajas, piezas, medioambiental, dashboard)
+- [ ] Se puede subir un documento desde cualquier módulo con contexto pre-rellenado (no verificado)
 
 ---
 
@@ -1431,13 +1441,13 @@ Insertar en el grupo `scrapyard` de `menuGroupDefs`, después de ventas y antes 
 
 #### Criterios de aceptación
 
-- [ ] La página es accesible desde `/saas/vertical/desguaces/documentacion`
-- [ ] Aparece en el Sidebar del vertical desguace
-- [ ] Los KPIs reflejan datos reales
-- [ ] Se puede alternar entre vista lista y vista expedientes
-- [ ] El deep linking funciona (abrir directamente un expediente por URL)
-- [ ] Es responsive en todos los breakpoints
-- [ ] El i18n está configurado
+- [x] La página es accesible desde `/saas/vertical/desguaces/documentacion` — ruta en `routes.tsx` con gate `scrapyard_docs`
+- [x] Aparece en el Sidebar del vertical desguace — ítem `scrapyard-documentation` en el grupo `scrapyard`
+- [ ] Los KPIs reflejan datos reales (no verificado el detalle de los 4 KPIs)
+- [x] Se puede alternar entre vista lista y vista expedientes — `viewMode` en la página
+- [x] El deep linking funciona — lee `?tab=` y parámetro de vehículo para abrir dossier
+- [ ] Es responsive en todos los breakpoints (no verificado)
+- [ ] El i18n está configurado (no verificado `nav.scrapyardDocumentation`)
 
 ---
 
@@ -1489,12 +1499,12 @@ Mostrar el histórico como línea temporal visual con:
 
 #### Criterios de aceptación
 
-- [ ] El histórico muestra datos reales, no mock
-- [ ] Cada acción sobre el documento genera una entrada de activity log
-- [ ] El timeline se renderiza cronológicamente (más reciente arriba)
-- [ ] Cada entrada muestra actor, acción, descripción y fecha
+- [ ] El histórico muestra datos reales, no mock — `DocumentDetail.tsx` sigue generando el histórico sintéticamente desde el estado del documento (no consume activity log)
+- [ ] Cada acción sobre el documento genera una entrada de activity log (no verificado que se consuma)
+- [x] El timeline se renderiza cronológicamente (más reciente arriba) — UI de timeline existente
+- [x] Cada entrada muestra actor, acción, descripción y fecha — pero con datos sintéticos
 - [ ] Las acciones automáticas se distinguen de las manuales
-- [ ] Se muestra estado vacío si el documento es nuevo
+- [ ] Se muestra estado vacío si el documento es nuevo (no verificado)
 
 ---
 

@@ -18,7 +18,7 @@ Documento **para humanos y para el asistente**: resume el “qué es” y el “
 |----------------------------|----------------|----------------|
 | **50 €**                   | Entrada / básico | **1 PDV** |
 | **150 €**                  | Intermedio     | **1 PDV** |
-| **350 €**                  | Alto / multi-sede base | **2 PDV** · **1 marca** (sin contar «General») |
+| **350 €** (Pro)            | Alto / multi-sede base | **2 PDV** · **2 empresas** · **2 marcas** (sin contar «General») |
 
 | Ampliación (plan Pro) | Precio/mes | Qué suma |
 |----------------------|------------|----------|

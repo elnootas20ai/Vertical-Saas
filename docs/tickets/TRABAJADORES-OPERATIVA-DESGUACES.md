@@ -7,6 +7,16 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~55% hecho; el backend está completo y montado, pero la página está desactivada por routing.** `routes.tsx` redirige tanto `/saas/scrapyard-workers` como `/saas/vertical/desguaces/trabajadores` a `/saas/team` con el comentario "ScrapyardWorkers removed (duplicate of Team)", y no hay ítem `scrapyard-workers` en el Sidebar.
+
+- **Completo (verificado):** SW-01 (`buildScrapyardWorkerDocument` y `buildScrapyardTaskDocument` en `couchdb.js`), SW-02 (CRUD de workers y tasks + start/pause/resume/complete + `getWorkerProductivity` en `scrapyardController.js`, montados en `/api/scrapyard/workers|tasks` vía `scrapyardRouter` en `index.js`), SW-03 (`listScrapyardWorkers`, `listScrapyardTasks`, `startScrapyardTask`, etc. en `scrapyardApi.ts`), SW-08 (las 6 alertas de trabajadores implementadas en `checkScrapyardWorkerAlerts` de `alertEngine.js`: no_clockin, overtime, doc_expired, low_perf, task_pending_overdue, task_unassigned).
+- **Parcial:** SW-05/SW-06 — `ScrapyardWorkers.tsx` existe con pestañas, filtros y modal, pero usa el API genérico `createVerticalApi('scrapyard-ops','workers')` en vez de `/api/scrapyard/workers`, y las tareas/alertas están vacías ("hasta integración" según comentario del propio código). Además la página es inaccesible por la redirección.
+- **Pendiente de verdad:** SW-04 (reactivar ruta + sidebar, decisión de producto pendiente: se consolidó en Equipo core), SW-07 (conectar la página al API real de workers/tasks/productividad), SW-09 (conexiones cruzadas: ScrapyardHub sigue enlazando a `/saas/team`; ScrapyardReports con datos mock). Las alertas de SW-08 enlazan a `/saas/vertical/desguaces/trabajadores`, que hoy redirige a `/saas/team`.
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona
@@ -274,11 +284,11 @@ Crear `ScrapyardWorker` y `ScrapyardTask` en `src/app/lib/scrapyardApi.ts` con s
 
 #### Criterios de aceptación
 
-- [ ] `buildScrapyardWorkerDocument` existe en `couchdb.js` con todos los campos.
-- [ ] `buildScrapyardTaskDocument` existe en `couchdb.js` con todos los campos.
-- [ ] Las interfaces `ScrapyardWorkerDocument` y `ScrapyardTaskDocument` están en `scrapyardApi.ts`.
-- [ ] El campo `trabajadores` en `buildDismantlingSession` acepta objetos `{ workerId, workerName }` además del string plano (retrocompatibilidad).
-- [ ] El campo `desmontadoPor` en `buildScrapyardPartDocument` acepta `{ workerId, workerName }`.
+- [x] `buildScrapyardWorkerDocument` existe en `couchdb.js` con todos los campos.
+- [x] `buildScrapyardTaskDocument` existe en `couchdb.js` con todos los campos.
+- [x] Las interfaces `ScrapyardWorker`/`ScrapyardTask` están en `scrapyardApi.ts`.
+- [ ] El campo `trabajadores` en `buildDismantlingSession` acepta objetos `{ workerId, workerName }` además del string plano (no verificado).
+- [ ] El campo `desmontadoPor` en `buildScrapyardPartDocument` acepta `{ workerId, workerName }` (sigue siendo string plano).
 - [ ] Tests manuales: crear, leer, actualizar documentos de ambos tipos en CouchDB.
 
 ---

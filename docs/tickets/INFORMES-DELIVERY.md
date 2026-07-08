@@ -6,6 +6,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~55% cubierto, pero con una implementación distinta a la planeada (este ticket no usa checkboxes). El plan apuntaba a `src-delivery/` (mock); lo que existe en producción es `src/app/pages/saas/DeliveryReports.tsx` + `controllers/deliveryReportsController.js` con datos reales y 7 endpoints (`kpis`, `evolucion`, `canales`, `rendimiento`, `incidencias`, `top-productos`, `tiendas`). Eso cubre en esencia INF-01 (rendimiento/tiempos), INF-02 (canales con comisiones y margen neto por canal), INF-03 parcial (resumen + evolución, sin heatmap ni dimensión trabajador), INF-04 (productos top) e INF-07 (incidencias), con filtros de periodo y PDV y export CSV. Falta de verdad: INF-05 (ventas por trabajador), INF-06 (informe de caja y diferencias), INF-08 (filtros multiselección canal/trabajador), INF-09 (motor de alertas en informes), INF-10 (permisos gerente/trabajador en informes), INF-12 (automatización/envío) e INF-13 (SSE en informes). No hay niveles Base/Normal/Pro ni insights.
+
+---
+
 ## Estado actual
 
 ### Ya implementado

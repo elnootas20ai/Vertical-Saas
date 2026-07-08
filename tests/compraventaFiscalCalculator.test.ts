@@ -6,6 +6,7 @@ import {
   computeFiscalResult,
   computeVehicleVatStatus,
   normalizeFiscalForm,
+  parseNum,
   type FiscalFormInput,
   type PurchaseOrigin,
   type SellerId,
@@ -196,13 +197,24 @@ describe('compraventaFiscalCalculator — matriz venta', () => {
 });
 
 describe('compraventaFiscalCalculator — importación y TPO', () => {
-  it('importación 20.000 € → 26.620 € coste real', () => {
+  it('importación 20.000 € → arancel 2.000 + IVA deducible 4.620, coste real neto 22.000', () => {
     const r = computeFiscalResult(
       baseForm({ origin: 'outside_eu', seller: 'import_any', purchasePrice: '20000' }),
     );
     expect(r.purchase?.tariffEstimate).toBe(2000);
     expect(r.purchase?.vatSupported).toBe(4620);
-    expect(r.purchase?.realPurchaseCost).toBe(26620);
+    expect(r.purchase?.vatDeductible).toBe(4620);
+    // El IVA de aduana se recupera; el coste real es CIF + arancel, no incluye IVA.
+    expect(r.purchase?.realPurchaseCost).toBe(22000);
+  });
+
+  it('compra a empresa ES con IVA → coste real neto = base (IVA recuperable)', () => {
+    const r = computeFiscalResult(
+      baseForm({ seller: 'company_vat', purchasePrice: '10000' }),
+    );
+    expect(r.purchase?.vatSupported).toBe(2100);
+    expect(r.purchase?.vatDeductible).toBe(2100);
+    expect(r.purchase?.realPurchaseCost).toBe(10000);
   });
 
   it('TPO Valencia 6% ≠ Madrid 4%', () => {
@@ -218,6 +230,32 @@ describe('compraventaFiscalCalculator — importación y TPO', () => {
     const r = computeFiscalResult(baseForm({ purchasePrice: '25.000' }));
     expect(r.purchase?.realPurchaseCost).toBe(25000);
   });
+});
+
+describe('parseNum — formatos de importe', () => {
+  const cases: [string, number][] = [
+    ['', 0],
+    ['0', 0],
+    ['8000', 8000],
+    ['25.000', 25000], // ES miles
+    ['1.234.567', 1234567], // ES miles múltiples
+    ['1.234,56', 1234.56], // ES miles + decimal
+    ['1234,56', 1234.56], // ES decimal
+    ['1234.56', 1234.56], // EN decimal
+    ['1,234.56', 1234.56], // EN miles + decimal
+    ['12.50', 12.5], // punto decimal (2 cifras → no es grupo de miles)
+    ['12.5', 12.5], // punto decimal (1 cifra)
+    ['25.000 €', 25000], // con símbolo de moneda
+    ['  9.500  ', 9500], // con espacios
+    ['-500', 0], // negativos no válidos
+    ['abc', 0], // texto → 0
+  ];
+
+  for (const [input, expected] of cases) {
+    it(`"${input}" → ${expected}`, () => {
+      expect(parseNum(input)).toBe(expected);
+    });
+  }
 });
 
 describe('compraventaFiscalCalculator — nuevo/usado (art. 13.2ª)', () => {

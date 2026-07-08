@@ -103,6 +103,8 @@ import { RedirectLegacyDelivery } from './components/saas/RedirectLegacyDelivery
 import { SalaPage } from './pages/saas/SalaPage';
 import { RestaurantWaitlistPage } from './verticals/restaurant/RestaurantWaitlistPage';
 import { RestaurantReservationsRouteEntry } from './verticals/restaurant/RestaurantReservationsRouteEntry';
+import { RestaurantKitchenRouteEntry } from './verticals/restaurant/RestaurantKitchenRouteEntry';
+import { RestaurantReportsPage } from './verticals/restaurant/RestaurantReportsPage';
 import { RestaurantCajaRouteEntry } from './verticals/restaurant/RestaurantCajaRouteEntry';
 import { DeliveryReparto } from './pages/saas/DeliveryReparto';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
@@ -581,7 +583,9 @@ export const router = createBrowserRouter([
           { path: 'payroll', element: <RequireBusinessOwner><PayrollPage /></RequireBusinessOwner> },
           { path: 'sala/setup', Component: SalaPage },
           { path: 'sala', Component: SalaPage },
-          { path: 'lista-espera', Component: RestaurantWaitlistPage },
+          { path: 'lista-espera', element: <RequireWorkerPermission permission="delivery"><RestaurantWaitlistPage /></RequireWorkerPermission> },
+          { path: 'cocina', element: <RequireWorkerPermission permission="delivery"><RestaurantKitchenRouteEntry /></RequireWorkerPermission> },
+          { path: 'vertical/restaurant/informes', element: <RequireBusinessOwner><RestaurantReportsPage /></RequireBusinessOwner> },
           { path: 'tpv/locales', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },

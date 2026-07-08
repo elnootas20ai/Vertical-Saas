@@ -47,6 +47,7 @@ import {
 } from './cashRegisterAlertConfig.js';
 import { resolveDeliveryAlertConfig } from './deliveryOperationalAlertConfig.js';
 import { broadcastToBusiness } from './sseService.js';
+import { shouldRunBackgroundEngine } from './engineIdleGate.js';
 import logger from './logger.js';
 
 const TAG = 'DELIVERY_ALERT_ENGINE';
@@ -170,6 +171,13 @@ async function emitDeliveryAlert({ userId, businessId, alertType, dedupKey, prio
       id: result.id, alertType, priority: finalPriority, escalated,
       title, message, data, route, targetRoles, createdAt: new Date().toISOString(),
     });
+    if (escalated) {
+      broadcastToBusiness(businessId, 'delivery:alert_escalated', {
+        alertId: result.id, alertType,
+        oldPriority: basePriority, newPriority: finalPriority,
+        escalatedAt: new Date().toISOString(),
+      });
+    }
   }
   return result;
 }
@@ -473,6 +481,14 @@ async function reconcileDeliveryAlerts(businessId, userId, activeAlerts) {
       ].slice(-50);
       await putDocument(fakeReq, NOTIFICATIONS_DB, doc._id, updated);
       resolved++;
+      escalationTracker.delete(`dalert:${key}`);
+      if (businessId) {
+        broadcastToBusiness(businessId, 'delivery:alert_resolved', {
+          alertId: doc._id,
+          alertType: doc.metadata?.alertType || doc.category,
+          resolvedAt: now,
+        });
+      }
     }
   } catch (e) {
     logger.warn({ tag: TAG, businessId, userId, err: e?.message }, 'Error reconciliando alertas delivery');
@@ -520,6 +536,17 @@ async function runForUser(userId) {
   let cnt = 0;
   for (const a of allPending) { if (await emitDeliveryAlert({ userId, businessId: bId, ...a })) cnt++; }
   if (reconciled > 0) logger.info({ tag: TAG, userId, businessId: bId, reconciled }, 'Alertas delivery obsoletas resueltas');
+  if (bId && (allPending.length > 0 || reconciled > 0)) {
+    const byPriority = { high: 0, medium: 0, low: 0 };
+    const byType = {};
+    for (const a of allPending) {
+      byPriority[a.priority] = (byPriority[a.priority] || 0) + 1;
+      byType[a.alertType] = (byType[a.alertType] || 0) + 1;
+    }
+    broadcastToBusiness(bId, 'delivery:alerts_summary', {
+      total: allPending.length, byPriority, byType, updatedAt: new Date().toISOString(),
+    });
+  }
   return cnt;
 }
 
@@ -639,6 +666,12 @@ export async function triggerReactiveAlert(userId, eventType, payload) {
 let engineTimer = null;
 export function startDeliveryAlertEngine() {
   logger.info({ tag: TAG }, `Motor alertas delivery — eventos + barrido cada ${SAFETY_SWEEP_MS / 60_000} min`);
-  setTimeout(() => { runDeliveryAlerts().catch(() => null); engineTimer = setInterval(() => runDeliveryAlerts().catch(() => null), SAFETY_SWEEP_MS); }, STARTUP_DELAY_MS);
+  setTimeout(() => {
+    runDeliveryAlerts().catch(() => null);
+    engineTimer = setInterval(() => {
+      if (!shouldRunBackgroundEngine('delivery_alerts')) return;
+      runDeliveryAlerts().catch(() => null);
+    }, SAFETY_SWEEP_MS);
+  }, STARTUP_DELAY_MS);
 }
 export function stopDeliveryAlertEngine() { if (engineTimer) { clearInterval(engineTimer); engineTimer = null; } }

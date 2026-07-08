@@ -5,6 +5,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~75% implementado (este ticket no usa checkboxes; auditoría por bloques). Hecho: KDS-01/02 (items con `extras`, `allergens`, `ingredients`, `outOfStock`, `catalogItemId` y pedido con `takenBy/takenByName/takenAt`, `salesPointId`, `kitchenNotes`, `kitchenPriority` en `buildDeliveryOrderDocument`), KDS-03 (auto-timestamps por transición + `stageHistory`), KDS-07/08/09/10/11/12 (página `DeliveryKitchen.tsx` con Kanban, `KitchenOrderCard`, `KanbanColumn`, acciones tomar/listo/incidencia, modal de incidencia, toggle Kanban/lista), KDS-13 (tiempo real vía `useDeliveryOrdersLive`: SSE + fallback polling 30s), KDS-16 parcial (sonido de nuevo pedido con toggle persistido) y KDS-17 (marcar agotado desde tarjeta con confirmación). Desviaciones: ruta final `/saas/delivery-kitchen` (no `/saas/vertical/delivery/cocina`; `/saas/cocina` va al KDS de restaurante). Falta de verdad: KDS-04 no tiene endpoints dedicados `out-of-stock` (el frontend lo hace con updates genéricos de catálogo/pedidos), KDS-06 no existe (`/kitchen-metrics` sin implementar) y las alertas de cocina viven en `deliveryAlertEngine.js` (saturación/retraso) sin las reglas `kitchen_queue_high`/`kitchen_overload` como tales.
+
+---
+
 ## Estado actual del sistema
 
 ### Ya implementado (backend)

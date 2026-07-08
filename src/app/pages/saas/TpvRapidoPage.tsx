@@ -92,6 +92,7 @@ import {
 import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
 import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
+import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/CeoTpvStorePicker';
 import { WorkerTpvDelivery } from './worker/WorkerTpvDelivery';
 import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
@@ -1987,6 +1988,25 @@ export function TpvRapidoOrderFlow({
             ? { tableNumber: restaurantTable.number, tableId: restaurantTable.id }
             : {}),
         };
+
+        // Sin conexión: encolar el pedido para sincronizar al reconectar (solo flujo
+        // delivery puro; en restaurante hay mesas/cuentas que requieren el servidor).
+        if (!isBrowserOnline() && !restaurantTable && !restaurantDiningOrder) {
+          enqueueTpvOfflineItem('order_create', { userId, orderData });
+          const offlineId = `offline-order:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+          setCreatedOrder({
+            ...orderData,
+            _id: offlineId,
+            id: offlineId,
+            type: 'delivery_order',
+            user_id: userId,
+            orderNumber: 'PENDIENTE',
+            createdAt: now,
+            updatedAt: now,
+          } as DeliveryOrder);
+          toast.info('Sin conexión — pedido guardado en cola; se enviará al recuperar la conexión');
+          return;
+        }
 
         const { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
 

@@ -12138,7 +12138,7 @@ function normalizeAlertScopeId(value) {
   return String(value || '').replace(/^business:/, '').trim();
 }
 
-function notificationMatchesScope(doc, scopeId, { includeDeleted = false } = {}) {
+export function notificationMatchesScope(doc, scopeId, { includeDeleted = false } = {}) {
   if (!doc || doc.type !== 'notification') return false;
   if (doc.deletedAt && !includeDeleted) return false;
   const scope = normalizeAlertScopeId(scopeId);

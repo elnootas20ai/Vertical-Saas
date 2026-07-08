@@ -7,6 +7,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~85% implementado. Backend completo: modelo cliente (`defaultPaymentMethod`, `phonePrefix`, `addresses` en `couchdb.js`), búsqueda por teléfono (`searchClientsByPhone` + `clientsRouter`), hook `useClientPhoneSearch` y `PhonePrefixSelector` existen y funcionan. La página `TpvRapidoPage.tsx` está creada y en producción (ruta `/saas/vertical/delivery/tpv`). Desviaciones: la búsqueda usa debounce 400ms/mín. 2 caracteres y también busca por nombre (más amplio que lo especificado); el backend corta en <2 dígitos, no <3. Falta: verificación de rendimiento <200ms y navegación por teclado (flechas) en el selector de prefijos.
+
+---
+
 ## Auditoria de lo existente
 
 ### Lo que YA funciona
@@ -82,12 +88,12 @@ addresses: Array.isArray(client.addresses) ? client.addresses : [],
 **Valores `defaultPaymentMethod`:** `''`, `'efectivo'`, `'tarjeta'`, `'bizum'`, `'otros'`
 
 #### Criterios de aceptacion
-- [ ] `defaultPaymentMethod` se persiste y devuelve en todas las respuestas
-- [ ] `phonePrefix` se persiste y devuelve (default `'+34'`)
-- [ ] `addresses` se persiste como array y devuelve en todas las respuestas
-- [ ] Clientes existentes sin estos campos devuelven valores por defecto sin error
-- [ ] El campo `address` (string original) sigue funcionando
-- [ ] Sin regresion en endpoints existentes
+- [x] `defaultPaymentMethod` se persiste y devuelve en todas las respuestas
+- [x] `phonePrefix` se persiste y devuelve (default `'+34'`)
+- [x] `addresses` se persiste como array y devuelve en todas las respuestas
+- [x] Clientes existentes sin estos campos devuelven valores por defecto sin error
+- [x] El campo `address` (string original) sigue funcionando
+- [ ] Sin regresion en endpoints existentes (no verificado con tests)
 
 ---
 
@@ -116,8 +122,8 @@ deliveryAddressId?: string;
 ```
 
 #### Criterios de aceptacion
-- [ ] Interfaces incluyen todos los campos nuevos como opcionales
-- [ ] Sin errores TypeScript en componentes existentes
+- [x] Interfaces incluyen todos los campos nuevos como opcionales (`orderType` se implementó como `deliveryType`)
+- [ ] Sin errores TypeScript en componentes existentes (no verificado con typecheck)
 
 ---
 
@@ -155,10 +161,10 @@ export async function searchClientsByPhoneRequest(
 **4. Vista CouchDB (recomendado):** `clients/by-phone-digits` para busquedas rapidas.
 
 #### Criterios de aceptacion
-- [ ] Responde en < 200ms para hasta 10.000 clientes
-- [ ] Busca por fragmento (minimo 3 digitos), ignora espacios/guiones/prefijo
-- [ ] Devuelve maximo `limit` resultados con datos completos del cliente
-- [ ] Si `q` < 3 digitos, devuelve array vacio
+- [ ] Responde en < 200ms para hasta 10.000 clientes (escaneo en memoria, sin vista CouchDB; no medido)
+- [x] Busca por fragmento (minimo 3 digitos), ignora espacios/guiones/prefijo
+- [x] Devuelve maximo `limit` resultados con datos completos del cliente
+- [ ] Si `q` < 3 digitos, devuelve array vacio (el backend corta en < 2 caracteres, no < 3)
 
 ---
 
@@ -185,10 +191,10 @@ function useClientPhoneSearch(params: {
 4. `selectClient` guarda cliente completo y limpia resultados
 
 #### Criterios de aceptacion
-- [ ] Debounce correcto, no dispara en cada keystroke
-- [ ] `AbortController` cancela peticiones anteriores
-- [ ] Sin memory leak al desmontar
-- [ ] `selectClient` almacena cliente completo con direcciones y forma de pago
+- [x] Debounce correcto, no dispara en cada keystroke
+- [x] `AbortController` cancela peticiones anteriores
+- [x] Sin memory leak al desmontar
+- [x] `selectClient` almacena cliente completo con direcciones y forma de pago
 
 ---
 
@@ -208,9 +214,9 @@ interface PhonePrefixSelectorProps {
 +34 Espana (default), +33 Francia, +351 Portugal, +44 Reino Unido, +49 Alemania, +39 Italia, +212 Marruecos, +40 Rumania, +57 Colombia, +593 Ecuador, +54 Argentina, +52 Mexico, +51 Peru, +1 Estados Unidos
 
 #### Criterios de aceptacion
-- [ ] +34 default y primero en lista
-- [ ] Dropdown con banderas emoji, prefijo y nombre
-- [ ] Buscador interno por nombre o prefijo
-- [ ] Cierre: seleccionar, clic fuera, Escape
-- [ ] Modo compact (bandera + prefijo inline)
-- [ ] Responsive, dark mode, navegacion teclado
+- [x] +34 default y primero en lista
+- [x] Dropdown con banderas emoji, prefijo y nombre
+- [x] Buscador interno por nombre o prefijo
+- [x] Cierre: seleccionar, clic fuera, Escape
+- [x] Modo compact (bandera + prefijo inline)
+- [ ] Responsive, dark mode, navegacion teclado (dark mode si; falta navegacion con flechas)

@@ -6,6 +6,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~41% completado (32/78 criterios). Núcleo backend hecho: `cleaningMaterialsController.js` + `cleaningMaterialsRouter.js` con materiales (subtype `cleaning_material`), entregas, devoluciones, solicitudes, inventarios y consumo por servicio; `materialStockService.js` descuenta/suma stock vía kardex (`stockMovementService`); 3 de 4 alertas de materiales en `alertEngine.js`; permiso `cleaning_materials` en `TEAM_PERMISSION_KEYS`; página `CleaningMaterialsPage.tsx` con 7 pestañas y deep linking. Falta de verdad: vista trabajador de materiales (MAT-12, `WorkerTpvCleaning.tsx` sin nada de material), stock por ubicación/kits (MAT-06), pestañas Consumo y Compras, sugerencias de compra (MAT-08), vínculo compra→gasto financiero (MAT-09), ajuste de stock al aprobar inventario, idempotencia/rollback en movimientos, conexión con Dashboard (MAT-15) y con `CleaningServices.tsx` (MAT-16).
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona
@@ -151,11 +157,11 @@ Al activar la vertical de limpieza, crear un catálogo base de materiales sugeri
 
 #### Criterios de aceptación
 
-- Los materiales de limpieza se crean como `catalog_item` con `subtype: 'cleaning_material'`
-- Los campos específicos de limpieza se guardan y recuperan correctamente
-- El listado filtra solo los materiales de limpieza (no todo el catálogo)
-- Compatibles con stock, pedidos de compra y alertas existentes del catálogo core
-- Al dar de alta una empresa de limpieza, se sugiere el catálogo base
+- [x] Los materiales de limpieza se crean como `catalog_item` con `subtype: 'cleaning_material'`
+- [x] Los campos específicos de limpieza se guardan y recuperan correctamente
+- [x] El listado filtra solo los materiales de limpieza (no todo el catálogo)
+- [x] Compatibles con stock, pedidos de compra y alertas existentes del catálogo core
+- [ ] Al dar de alta una empresa de limpieza, se sugiere el catálogo base
 
 ---
 
@@ -268,12 +274,12 @@ Tipos `MaterialDelivery`, `MaterialDeliveryLine` y funciones request para todos 
 
 #### Criterios de aceptación
 
-- Se puede crear una entrega de material a un trabajador con N líneas
-- Al confirmar la entrega, el stock se descuenta automáticamente
-- El trabajador recibe notificación push
-- El movimiento queda registrado en el kardex (si CS-02 existe; si no, actualiza `stockQuantity` directamente)
-- Se puede filtrar por trabajador, servicio, cliente y fecha
-- El trabajador puede confirmar recepción
+- [x] Se puede crear una entrega de material a un trabajador con N líneas
+- [x] Al confirmar la entrega, el stock se descuenta automáticamente *(`processDeliveryStockDeduction` en `materialStockService.js`)*
+- [ ] El trabajador recibe notificación push
+- [x] El movimiento queda registrado en el kardex (si CS-02 existe; si no, actualiza `stockQuantity` directamente)
+- [ ] Se puede filtrar por trabajador, servicio, cliente y fecha *(la UI solo tiene búsqueda por texto en catálogo)*
+- [x] El trabajador puede confirmar recepción *(endpoint `/deliveries/:userId/:deliveryId/confirm`; sin UI de trabajador)*
 
 ---
 
@@ -359,11 +365,11 @@ export interface MaterialReturnLine {
 
 #### Criterios de aceptación
 
-- Se puede registrar la devolución de material desde una entrega previa
-- El stock se suma automáticamente al aceptar la devolución (solo si `reusable`)
-- La entrega original refleja el estado de devolución
-- Se registra el movimiento en el kardex
-- Material dañado/inutilizable no vuelve al stock pero queda registrado
+- [x] Se puede registrar la devolución de material desde una entrega previa
+- [x] El stock se suma automáticamente al aceptar la devolución (solo si `reusable`)
+- [x] La entrega original refleja el estado de devolución *(`updateDeliveryReturnQuantities`)*
+- [x] Se registra el movimiento en el kardex
+- [x] Material dañado/inutilizable no vuelve al stock pero queda registrado
 
 ---
 
@@ -436,11 +442,11 @@ En `WorkerTpvCleaning.tsx`, cuando el trabajador está en un servicio `in_progre
 
 #### Criterios de aceptación
 
-- Se puede vincular materiales consumidos a un servicio de limpieza
-- Se calcula automáticamente el coste de material del servicio
-- El trabajador puede registrar consumos desde su vista móvil
-- Los consumos se reflejan en el kardex
-- El gerente ve un resumen de coste por servicio (mano de obra + material)
+- [x] Se puede vincular materiales consumidos a un servicio de limpieza *(`registerServiceConsumption` + campos `materialsUsed`/`materialCost` en `cleaning_service`)*
+- [x] Se calcula automáticamente el coste de material del servicio
+- [ ] El trabajador puede registrar consumos desde su vista móvil *(`WorkerTpvCleaning.tsx` no tiene sección de materiales)*
+- [ ] Los consumos se reflejan en el kardex *(`registerServiceConsumption` no registra movimiento ni descuenta stock)*
+- [ ] El gerente ve un resumen de coste por servicio (mano de obra + material) *(solo agregado en informes; sin desglose en el detalle del servicio)*
 
 ---
 
@@ -491,10 +497,10 @@ materialBilling: {
 
 #### Criterios de aceptación
 
-- Se puede consultar el consumo de material por cliente
-- El sistema distingue si el material se factura incluido o aparte
-- Se puede generar una factura de materiales para un cliente
-- El informe muestra comparativa vs media
+- [x] Se puede consultar el consumo de material por cliente *(agregación `byClient` en el informe de materiales de `cleaningReportsController.js`; no existen los endpoints dedicados `consumption/by-client`)*
+- [ ] El sistema distingue si el material se factura incluido o aparte
+- [ ] Se puede generar una factura de materiales para un cliente
+- [ ] El informe muestra comparativa vs media
 
 ---
 
@@ -554,11 +560,11 @@ vehiclePlate?: string;        // Matrícula si es vehículo
 
 #### Criterios de aceptación
 
-- Cada trabajador puede tener un "almacén virtual" (kit/vehículo)
-- Las entregas transfieren stock del almacén central al kit del trabajador
-- Se puede consultar el stock de cada trabajador
-- Al registrar consumo en servicio, se descuenta del kit del trabajador
-- El gerente ve un resumen global de stock distribuido
+- [ ] Cada trabajador puede tener un "almacén virtual" (kit/vehículo) *(no existen los tipos `vehicle`/`worker_kit` en warehouse)*
+- [ ] Las entregas transfieren stock del almacén central al kit del trabajador
+- [ ] Se puede consultar el stock de cada trabajador *(no existen los endpoints `worker-stock`)*
+- [ ] Al registrar consumo en servicio, se descuenta del kit del trabajador
+- [ ] El gerente ve un resumen global de stock distribuido
 
 ---
 
@@ -615,12 +621,12 @@ Por cada línea con reusable && condition !== 'unusable':
 
 #### Criterios de aceptación
 
-- Toda entrega confirmada descuenta stock automáticamente
-- Toda devolución aceptada suma stock automáticamente
-- Los movimientos quedan en el kardex con referencia a la entrega/devolución
-- No se producen descuentos duplicados
-- La cancelación revierte los movimientos correctamente
-- Si no hay stock suficiente, se puede configurar si se bloquea o se permite con alerta
+- [x] Toda entrega confirmada descuenta stock automáticamente
+- [x] Toda devolución aceptada suma stock automáticamente
+- [x] Los movimientos quedan en el kardex con referencia a la entrega/devolución *(`referenceId`/`referenceType`)*
+- [ ] No se producen descuentos duplicados *(sin verificación de idempotencia por `referenceId`)*
+- [ ] La cancelación revierte los movimientos correctamente
+- [ ] Si no hay stock suficiente, se puede configurar si se bloquea o se permite con alerta
 
 ---
 
@@ -678,10 +684,10 @@ interface PurchaseSuggestion {
 
 #### Criterios de aceptación
 
-- Las sugerencias consideran consumo histórico y servicios planificados
-- Se muestra la cobertura estimada en semanas
-- Se puede convertir sugerencias en pedidos de compra con un clic
-- La urgencia refleja la criticidad real (cobertura < 1 semana = critical)
+- [ ] Las sugerencias consideran consumo histórico y servicios planificados *(no existe el endpoint `purchase-suggestions` ni especialización cleaning en `autoOrderService.js`)*
+- [ ] Se muestra la cobertura estimada en semanas
+- [ ] Se puede convertir sugerencias en pedidos de compra con un clic
+- [ ] La urgencia refleja la criticidad real (cobertura < 1 semana = critical)
 
 ---
 
@@ -723,9 +729,9 @@ Añadir categorías de gasto:
 
 #### Criterios de aceptación
 
-- La compra de material genera gasto financiero automáticamente
-- Las categorías de gasto son específicas de limpieza
-- Se puede consultar un informe de gasto en materiales
+- [ ] La compra de material genera gasto financiero automáticamente
+- [ ] Las categorías de gasto son específicas de limpieza
+- [ ] Se puede consultar un informe de gasto en materiales *(no existe `expense-report`; el informe de costes de materiales de CleaningReports cubre consumo, no compras)*
 
 ---
 
@@ -789,11 +795,11 @@ cleaningMaterialAlerts: {
 
 #### Criterios de aceptación
 
-- Las 4 alertas se ejecutan en el ciclo de `alertEngine.js`
-- Cada alerta tiene su configuración on/off y umbrales
-- Las alertas llevan a la pestaña correcta de la página de materiales
-- Se deduplican correctamente (una por entidad por ciclo de 24h)
-- Se envían por SSE + Web Push
+- [ ] Las 4 alertas se ejecutan en el ciclo de `alertEngine.js` *(existen `material_not_delivered`, `abnormal_consumption` y `material_expiring`; falta `inventory_discrepancy`)*
+- [x] Cada alerta tiene su configuración on/off y umbrales *(en `getAlertConfig()`)*
+- [ ] Las alertas llevan a la pestaña correcta de la página de materiales
+- [x] Se deduplican correctamente (una por entidad por ciclo de 24h)
+- [x] Se envían por SSE + Web Push *(vía la emisión estándar del motor genérico)*
 
 ---
 
@@ -922,13 +928,13 @@ Subvista "Stock por trabajador":
 
 #### Criterios de aceptación
 
-- Página accesible en `/saas/vertical/limpieza/materiales`
-- Todas las pestañas cargan y funcionan con datos reales
-- KPIs del resumen se calculan en tiempo real
-- Deep linking funcional
-- Responsive: funciona en tablet y móvil
-- Diseño coherente con el resto de páginas del SaaS (MUI + Tailwind + Lucide icons)
-- Aparece en el sidebar del grupo "Limpieza"
+- [ ] Página accesible en `/saas/vertical/limpieza/materiales` *(implementada en `/saas/cleaning-materials`)*
+- [ ] Todas las pestañas cargan y funcionan con datos reales *(7 pestañas: Resumen, Catálogo, Stock, Entregas, Devoluciones, Solicitudes, Historial; faltan Consumo y Compras)*
+- [x] KPIs del resumen se calculan en tiempo real
+- [x] Deep linking funcional *(`?tab=` vía `useSearchParams`)*
+- [x] Responsive: funciona en tablet y móvil
+- [x] Diseño coherente con el resto de páginas del SaaS (MUI + Tailwind + Lucide icons)
+- [x] Aparece en el sidebar del grupo "Limpieza"
 
 ---
 
@@ -985,12 +991,12 @@ Nueva pestaña o sección fija en la parte superior:
 
 #### Criterios de aceptación
 
-- El trabajador ve su stock asignado
-- Puede confirmar recepciones de material
-- Puede registrar consumos durante un servicio activo
-- Puede solicitar material faltante
-- La UI es mobile-first y fácil de usar con guantes (botones grandes)
-- Las solicitudes llegan al gerente como notificación
+- [ ] El trabajador ve su stock asignado *(`WorkerTpvCleaning.tsx` no tiene nada de materiales)*
+- [ ] Puede confirmar recepciones de material *(endpoint backend existe, sin UI de trabajador)*
+- [ ] Puede registrar consumos durante un servicio activo
+- [ ] Puede solicitar material faltante *(los endpoints de `material-requests` existen en backend, sin UI de trabajador)*
+- [ ] La UI es mobile-first y fácil de usar con guantes (botones grandes)
+- [ ] Las solicitudes llegan al gerente como notificación
 
 ---
 
@@ -1031,10 +1037,10 @@ En `services/couchdb.js`, añadir `'cleaning_materials'` a `TEAM_PERMISSION_KEYS
 
 #### Criterios de aceptación
 
-- El gerente tiene acceso completo a la gestión de materiales
-- El trabajador solo ve su material asignado y puede registrar consumos/solicitudes
-- Los permisos se configuran desde la pantalla de equipo (Team)
-- Un gerente puede dar/quitar acceso a materiales a miembros individuales
+- [x] El gerente tiene acceso completo a la gestión de materiales
+- [ ] El trabajador solo ve su material asignado y puede registrar consumos/solicitudes *(no existe vista de trabajador)*
+- [x] Los permisos se configuran desde la pantalla de equipo (Team) *(`cleaning_materials` en `TEAM_PERMISSION_KEYS`)*
+- [x] Un gerente puede dar/quitar acceso a materiales a miembros individuales
 
 ---
 
@@ -1128,11 +1134,11 @@ En la pestaña "Stock" de MAT-11:
 
 #### Criterios de aceptación
 
-- Se puede iniciar un inventario físico de un almacén o kit de trabajador
-- El sistema precarga las cantidades esperadas
-- Al completar, muestra las discrepancias con detalle
-- Al aprobar, ajusta el stock automáticamente con movimientos en el kardex
-- Se dispara alerta si la discrepancia supera el umbral configurado
+- [x] Se puede iniciar un inventario físico de un almacén o kit de trabajador *(endpoints de `inventory` en el router; sin kits)*
+- [x] El sistema precarga las cantidades esperadas
+- [ ] Al completar, muestra las discrepancias con detalle
+- [ ] Al aprobar, ajusta el stock automáticamente con movimientos en el kardex *(`approveInventoryCount` solo cambia el estado, no ajusta stock)*
+- [ ] Se dispara alerta si la discrepancia supera el umbral configurado *(la regla `inventory_discrepancy` no existe)*
 
 ---
 
@@ -1179,10 +1185,10 @@ cleaningMaterials: {
 
 #### Criterios de aceptación
 
-- Dashboard muestra KPIs de materiales de limpieza
-- El widget navega a la página de materiales
-- Las alertas de materiales aparecen en el panel general
-- Los datos se actualizan en tiempo real
+- [ ] Dashboard muestra KPIs de materiales de limpieza *(sin bloque `cleaningMaterials` en `dashboardController.js`)*
+- [ ] El widget navega a la página de materiales
+- [ ] Las alertas de materiales aparecen en el panel general
+- [ ] Los datos se actualizan en tiempo real
 
 ---
 
@@ -1225,10 +1231,10 @@ Al completar un servicio (`status: 'completed'`):
 
 #### Criterios de aceptación
 
-- Cada servicio muestra si tiene materiales asociados
-- Se puede añadir materiales desde el detalle del servicio
-- Se calcula y muestra el margen del servicio
-- La vista de calidad incluye información de material
+- [ ] Cada servicio muestra si tiene materiales asociados *(`CleaningServices.tsx` no referencia materiales)*
+- [ ] Se puede añadir materiales desde el detalle del servicio
+- [ ] Se calcula y muestra el margen del servicio
+- [ ] La vista de calidad incluye información de material
 
 ---
 

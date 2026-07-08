@@ -6,6 +6,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~85% hecho.** Bloques completos: IR-04 (Top Vehículos), IR-05 (Gastos preparación), IR-07 (Panel alertas), IR-08 (Alertas backend `checkLowAvgMargin` + `checkExcessPreparationCost`), IR-11 (Previsión cierre de mes, salvo mensaje "Sin datos"). Casi completos: IR-01/IR-02/IR-03/IR-06 (filtros, tab Proveedores, rendimiento económico por comercial y permisos con tabs sensibles funcionan). Falta de verdad: exportaciones del tab Proveedores y del rendimiento económico de Comerciales; exportación de inventario no respeta filtros; restricción "trabajador solo ve sus métricas" en tab Comerciales; IR-09 completo (no hay SSE refresh, solo polling de datos lazy); enlaces de matrícula en tablas y de comercial/proveedor (IR-10, solo hay links en Top 5 y shortcuts de cabecera).
+
+---
+
 ## Auditoría de lo existente
 
 ### Ya implementado (backend + frontend)
@@ -147,14 +153,14 @@ const [filterVehicleStatus, setFilterVehicleStatus] = useState<string>('all');
 
 #### Criterios de aceptación
 
-- [ ] Los 4 selectores se muestran en la barra de filtros, colapsan bien en móvil.
-- [ ] Filtrar por marca filtra inventario, rotación, margen, rentabilidad, comparativa, ventas.
-- [ ] Filtrar por comercial filtra ventas, leads, comerciales.
-- [ ] Filtrar por proveedor filtra inventario, rotación, margen, compras por proveedor.
-- [ ] Filtrar por estado filtra inventario, rotación, stock aging.
-- [ ] Limpiar filtros resetea todos a "all".
-- [ ] Los filtros persisten al cambiar de pestaña.
-- [ ] Las exportaciones exportan datos filtrados, no el total.
+- [x] Los 4 selectores se muestran en la barra de filtros, colapsan bien en móvil.
+- [ ] Filtrar por marca filtra inventario, rotación, margen, rentabilidad, comparativa, ventas. *(Filtra todo excepto ventas: `filteredSales` no aplica marca.)*
+- [x] Filtrar por comercial filtra ventas, leads, comerciales.
+- [x] Filtrar por proveedor filtra inventario, rotación, margen, compras por proveedor.
+- [x] Filtrar por estado filtra inventario, rotación, stock aging.
+- [x] Limpiar filtros resetea todos a "all".
+- [x] Los filtros persisten al cambiar de pestaña.
+- [ ] Las exportaciones exportan datos filtrados, no el total. *(La exportación de inventario usa `vehicles` sin filtrar.)*
 
 ---
 
@@ -187,12 +193,12 @@ No existe ningún informe que agrupe las compras de vehículos por proveedor. El
 
 #### Criterios de aceptación
 
-- [ ] La pestaña "Proveedores" aparece en el tab bar.
-- [ ] Los 4 KPIs se calculan correctamente.
-- [ ] El gráfico top 10 y la tabla muestran datos reales.
-- [ ] El filtro de proveedor y de marca (IR-01) filtran los datos.
-- [ ] Los 3 formatos de exportación funcionan.
-- [ ] Estado vacío con icono y mensaje si no hay datos.
+- [x] La pestaña "Proveedores" aparece en el tab bar.
+- [x] Los 4 KPIs se calculan correctamente.
+- [x] El gráfico top 10 y la tabla muestran datos reales.
+- [x] El filtro de proveedor y de marca (IR-01) filtran los datos.
+- [ ] Los 3 formatos de exportación funcionan. *(No hay caso `proveedores` en los handlers de export.)*
+- [x] Estado vacío con icono y mensaje si no hay datos.
 
 ---
 
@@ -223,10 +229,10 @@ El tab "Comerciales" actual muestra métricas CRM (leads, contactados, conversi�
 
 #### Criterios de aceptación
 
-- [ ] La sección muestra la facturación real basada en `sales` completadas.
-- [ ] El margen real descuenta costes asociados al vehículo.
-- [ ] Filtro de comercial y periodo aplican correctamente.
-- [ ] Exportaciones incluyen ambas tablas (CRM + rendimiento económico).
+- [x] La sección muestra la facturación real basada en `sales` completadas.
+- [x] El margen real descuenta costes asociados al vehículo.
+- [x] Filtro de comercial y periodo aplican correctamente.
+- [ ] Exportaciones incluyen ambas tablas (CRM + rendimiento económico). *(El export de `comerciales` solo incluye datos CRM.)*
 - [ ] Si el usuario es "trabajador" sin permiso, solo ve sus propios datos (depende de IR-06).
 
 ---
@@ -256,11 +262,11 @@ La tabla de margen real ya ordena vehículos por margen descendente, pero no hay
 
 #### Criterios de aceptación
 
-- [ ] Se muestran los Top 5 ganadores y Top 5 pérdidas.
-- [ ] Cada card muestra: vehículo, matrícula, margen real, días en stock.
-- [ ] KPIs de "venta más rápida" y "mayor tiempo en stock" son correctos.
-- [ ] Al hacer clic se navega a la ficha del vehículo.
-- [ ] Filtros afectan al ranking.
+- [x] Se muestran los Top 5 ganadores y Top 5 pérdidas.
+- [x] Cada card muestra: vehículo, matrícula, margen real, días en stock.
+- [x] KPIs de "venta más rápida" y "mayor tiempo en stock" son correctos.
+- [x] Al hacer clic se navega a la ficha del vehículo.
+- [x] Filtros afectan al ranking.
 
 ---
 
@@ -293,12 +299,12 @@ Cada vehículo tiene un array `associatedCosts` con objetos `{ category, amount,
 
 #### Criterios de aceptación
 
-- [ ] Los 4 KPIs se calculan correctamente a partir de `associatedCosts`.
-- [ ] El PieChart muestra categorías con porcentaje.
-- [ ] La tabla muestra todas las categorías encontradas.
-- [ ] El gráfico Top 10 permite identificar vehículos con mayor gasto.
-- [ ] Filtros de marca, proveedor y estado filtran los datos.
-- [ ] Estado vacío con mensaje si no hay gastos.
+- [x] Los 4 KPIs se calculan correctamente a partir de `associatedCosts`.
+- [x] El PieChart muestra categorías con porcentaje.
+- [x] La tabla muestra todas las categorías encontradas.
+- [x] El gráfico Top 10 permite identificar vehículos con mayor gasto.
+- [x] Filtros de marca, proveedor y estado filtran los datos.
+- [x] Estado vacío con mensaje si no hay gastos.
 
 ---
 
@@ -345,11 +351,11 @@ const canViewFullReports = useMemo(() => {
 
 #### Criterios de aceptación
 
-- [ ] Admin/Gerente ven todas las pestañas.
-- [ ] Comercial/Taller/Usuario NO ven: Rentabilidad, Margen Real, Financiero, Grupo.
-- [ ] Un comercial puede obtener acceso si se le activa `reports.view` en permisos de equipo.
+- [x] Admin/Gerente ven todas las pestañas.
+- [x] Comercial/Taller/Usuario NO ven: Rentabilidad, Margen Real, Financiero, Grupo.
+- [x] Un comercial puede obtener acceso si se le activa `reports.view` en permisos de equipo.
 - [ ] En tab Comerciales, un trabajador solo ve sus propias métricas.
-- [ ] `TEAM_PERMISSION_KEYS` incluye `'reports'`.
+- [x] `TEAM_PERMISSION_KEYS` incluye `'reports'`.
 
 ---
 
@@ -379,10 +385,10 @@ Las alertas del motor se muestran en el dashboard y como notificaciones push, pe
 
 #### Criterios de aceptación
 
-- [ ] El panel muestra 0-4 alertas según datos reales.
-- [ ] Solo visible para usuarios con `canViewFullReports`.
-- [ ] Se puede descartar individualmente cada alerta.
-- [ ] Si no hay alertas activas, el panel no se renderiza.
+- [x] El panel muestra 0-4 alertas según datos reales.
+- [x] Solo visible para usuarios con `canViewFullReports`.
+- [x] Se puede descartar individualmente cada alerta.
+- [x] Si no hay alertas activas, el panel no se renderiza.
 
 ---
 
@@ -422,11 +428,11 @@ excessCostThreshold: Number(cfg.excessCostThreshold || 1500), // euros máximo m
 
 #### Criterios de aceptación
 
-- [ ] Alerta de margen bajo se genera cuando cae por debajo del umbral (default 8%).
-- [ ] Alerta de exceso de gasto se genera cuando supera el umbral (default 1.500 euros).
-- [ ] Ambas respetan dedup (1 por día).
-- [ ] Se envían por SSE y Web Push.
-- [ ] Los umbrales son configurables por cuenta en `alertConfig`.
+- [x] Alerta de margen bajo se genera cuando cae por debajo del umbral (default 8%). *(`checkLowAvgMargin`, config `lowAvgMargin*`.)*
+- [x] Alerta de exceso de gasto se genera cuando supera el umbral (default 1.500 euros). *(`checkExcessPreparationCost`, config `excessPrepCost*`; evalúa gasto por vehículo, no la media.)*
+- [x] Ambas respetan dedup (1 por día).
+- [x] Se envían por SSE y Web Push.
+- [x] Los umbrales son configurables por cuenta en `alertConfig`.
 
 ---
 
@@ -487,10 +493,10 @@ La página muestra datos de vehículos, ventas, comerciales, finanzas y gastos, 
 
 #### Criterios de aceptación
 
-- [ ] La matrícula en cualquier tabla es un enlace clicable a `/saas/vehicles/:id`.
+- [ ] La matrícula en cualquier tabla es un enlace clicable a `/saas/vehicles/:id`. *(Solo hay links en las cards Top 5, no en las tablas.)*
 - [ ] El nombre del comercial enlaza a su perfil o a ventas filtradas.
 - [ ] El nombre del proveedor enlaza a vehículos filtrados por proveedor.
-- [ ] Los shortcuts se muestran en la cabecera.
+- [x] Los shortcuts se muestran en la cabecera.
 
 ---
 
@@ -524,12 +530,12 @@ El tab Forecast calcula unidades y revenue proyectados pero no estima el margen 
 
 #### Criterios de aceptación
 
-- [ ] La sección aparece en la pestaña Rentabilidad.
-- [ ] Muestra datos reales del mes vs proyección lineal al cierre.
-- [ ] Los 3 escenarios se calculan y se muestran con colores diferenciados.
-- [ ] La barra de progreso del mes es precisa.
-- [ ] Solo visible para usuarios con `canViewFullReports`.
-- [ ] Si no hay datos, se muestra "Sin datos suficientes".
+- [x] La sección aparece en la pestaña Rentabilidad.
+- [x] Muestra datos reales del mes vs proyección lineal al cierre.
+- [x] Los 3 escenarios se calculan y se muestran con colores diferenciados.
+- [x] La barra de progreso del mes es precisa.
+- [x] Solo visible para usuarios con `canViewFullReports` (la pestaña Rentabilidad es sensible).
+- [ ] Si no hay datos, se muestra "Sin datos suficientes". *(Si `monthEndForecast` es null la sección simplemente no se renderiza.)*
 
 ---
 

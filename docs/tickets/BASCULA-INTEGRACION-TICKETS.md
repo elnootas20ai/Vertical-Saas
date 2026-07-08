@@ -7,6 +7,13 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~55% hecho.** La base está construida y montada: modelo `scale_device` con builder/sanitizer en `couchdb.js`, CRUD + asignación a terminal + `reportScaleStatus` en `deliveryController.js` bajo `/api/delivery/scale-devices` (router montado), tipos y funciones cliente en `deliveryApi.ts` (incl. `TerminalConfig.scaleDeviceId/scaleName` y `WeightTraceData`), `scaleService.ts` completo (Web Serial, Web Bluetooth, red WS/HTTP, parseo SICS/CAS/Epelsa/Dibal/genérico, tara/cero, `SCALE_PRESETS`, `getScaleCapabilities`), hook `useScale.ts` (auto-conexión, reconexión con backoff, caché localStorage) y `ScaleWeightWidget.tsx` (modos card/inline/compact, barra de estabilidad, fallback manual, atajos).
+**Falta de verdad (el hueco es la integración):** `useScale` y `ScaleWeightWidget` **no se usan en ninguna página** — `WorkerTpvButcherShop.tsx` sigue con input manual `pesoInput`; no hay pantalla de configuración de básculas para el gerente (BAS-10); no se persiste `weightTrace` en ningún pedido ni existe `scale_weight_log`/`weight-summary` (BAS-08/12); las alertas de báscula se limitan a `butcher_scale_disconnected` por ping periódico (`reportScaleStatus` emite SSE pero no crea notificación, y no hay `scale_unassigned` ni `scale_invalid_weight`).
+
+---
+
 ## Estado actual del sistema
 
 ### Ya implementado (backend + frontend)
@@ -353,12 +360,12 @@ export const SCALE_PRESETS: Record<string, Partial<ScaleDevice>> = {
 ```
 
 #### Criterios de aceptación
-- [ ] CRUD de `scale_device` funcional vía API
-- [ ] Validación de campos obligatorios según tipo de conexión
-- [ ] Presets de configuración para al menos 6 marcas/modelos
-- [ ] La entidad se almacena en la BD de delivery
-- [ ] Soft delete funcional
-- [ ] Cliente TypeScript con tipos e interfaces completos
+- [x] CRUD de `scale_device` funcional vía API *(`/api/delivery/scale-devices/...` montado; `buildScaleDeviceDocument`/`sanitizeScaleDevice` en `couchdb.js`)*
+- [ ] Validación de campos obligatorios según tipo de conexión *(solo valida `name` y `connectionType`; no exige host/port para red ni deviceName para bluetooth)*
+- [x] Presets de configuración para al menos 6 marcas/modelos *(`SCALE_PRESETS` en `scaleService.ts` con 8 presets)*
+- [x] La entidad se almacena en la BD de delivery *(`getDeliveryDbName()`)*
+- [x] Soft delete funcional *(`softDeleteDocument` en `removeScaleDevice`)*
+- [x] Cliente TypeScript con tipos e interfaces completos *(`ScaleDevice` y subtipos en `deliveryApi.ts`)*
 
 ---
 
@@ -448,13 +455,13 @@ export async function getTerminalScaleRequest(
 ```
 
 #### Criterios de aceptación
-- [ ] `TerminalConfig` incluye `scaleDeviceId` y `scaleName`
-- [ ] Se puede asignar una báscula a un terminal vía API
-- [ ] Se puede desasignar pasando `scaleDeviceId` vacío
-- [ ] Una báscula no se puede asignar a dos terminales del mismo PDV
-- [ ] PDV existentes sin báscula siguen funcionando (retrocompatibilidad)
-- [ ] El endpoint de consulta devuelve la configuración completa del dispositivo
-- [ ] Se emite evento SSE al cambiar la asignación
+- [x] `TerminalConfig` incluye `scaleDeviceId` y `scaleName`
+- [x] Se puede asignar una báscula a un terminal vía API *(`PUT .../terminals/:terminalId/scale`)*
+- [x] Se puede desasignar pasando `scaleDeviceId` vacío
+- [x] Una báscula no se puede asignar a dos terminales del mismo PDV *(se desasigna del anterior en `assignScaleToTerminal`)*
+- [x] PDV existentes sin báscula siguen funcionando (retrocompatibilidad) *(default `''`)*
+- [x] El endpoint de consulta devuelve la configuración completa del dispositivo *(`getTerminalScale` devuelve el `ScaleDevice` sanitizado)*
+- [x] Se emite evento SSE al cambiar la asignación *(`scale:assignment_changed`)*
 
 ---
 
@@ -701,15 +708,17 @@ export function getScaleCapabilities(): {
 ```
 
 #### Criterios de aceptación
-- [ ] Conexión USB/Serial funcional con Web Serial API en Chrome/Edge
-- [ ] Conexión Bluetooth funcional con Web Bluetooth API
-- [ ] Conexión de red funcional con WebSocket y HTTP
-- [ ] Parseo correcto de al menos 3 protocolos: SICS/MT, genérico ASCII, modo continuo
-- [ ] Eventos `onWeightChange` y `onStableWeight` se emiten correctamente
-- [ ] Evento `onStatusChange` refleja el ciclo de vida de la conexión
-- [ ] Evento `onError` se emite ante fallos de comunicación
-- [ ] Comandos de tara y puesta a cero funcionan en protocolos que los soportan
-- [ ] La clase detecta si la API necesaria no está disponible y lo comunica
+> **Nota auditoría:** `src/app/services/scaleService.ts` está implementado por completo (clase `ScaleService`, presets, capacidades). Los criterios con "funcional" se marcan a nivel de código; no se ha podido probar con hardware real.
+
+- [x] Conexión USB/Serial funcional con Web Serial API en Chrome/Edge *(`connectSerial` con filtros vendorId)*
+- [x] Conexión Bluetooth funcional con Web Bluetooth API *(`connectBluetooth` con notificaciones GATT)*
+- [x] Conexión de red funcional con WebSocket y HTTP *(`connectNetwork`; TCP directo rechazado con mensaje)*
+- [x] Parseo correcto de al menos 3 protocolos: SICS/MT, genérico ASCII, modo continuo *(además CAS, Epelsa y Dibal)*
+- [x] Eventos `onWeightChange` y `onStableWeight` se emiten correctamente
+- [x] Evento `onStatusChange` refleja el ciclo de vida de la conexión
+- [x] Evento `onError` se emite ante fallos de comunicación
+- [x] Comandos de tara y puesta a cero funcionan en protocolos que los soportan *(`tare()`/`zero()` con `tareSupported`)*
+- [x] La clase detecta si la API necesaria no está disponible y lo comunica *(`getScaleCapabilities` + mensajes de error)*
 
 ---
 
@@ -804,15 +813,17 @@ const SCALE_CACHE_KEY = `scale_last_device_${terminalId}`;
 Si `hasScale === false` (no hay báscula asignada), el hook devuelve un estado "sin báscula" que permite a los componentes caer automáticamente al input manual de peso. Esto mantiene retrocompatibilidad total.
 
 #### Criterios de aceptación
-- [ ] El hook carga la configuración de la báscula del terminal al montar
-- [ ] Auto-conexión funcional si hay báscula asignada
-- [ ] `currentWeight` se actualiza reactivamente con cada lectura
-- [ ] `isStable` refleja si la lectura es estable
-- [ ] `acceptWeight()` captura peso estable y lo devuelve
-- [ ] Reconexión automática con backoff ante pérdida de conexión
-- [ ] Si no hay báscula asignada, `hasScale === false` y los componentes usan input manual
-- [ ] Se limpia correctamente al desmontar (cierre de puerto, listeners)
-- [ ] Caché de último dispositivo para reconexión rápida
+> **Nota auditoría:** `src/app/hooks/useScale.ts` está implementado, pero **ningún componente lo consume** todavía (solo lo usa `ScaleWeightWidget`, que tampoco se monta en ninguna página).
+
+- [x] El hook carga la configuración de la báscula del terminal al montar *(`getTerminalScaleRequest`)*
+- [x] Auto-conexión funcional si hay báscula asignada
+- [x] `currentWeight` se actualiza reactivamente con cada lectura
+- [x] `isStable` refleja si la lectura es estable
+- [x] `acceptWeight()` captura peso estable y lo devuelve
+- [x] Reconexión automática con backoff ante pérdida de conexión *(`RECONNECT_DELAYS`)*
+- [x] Si no hay báscula asignada, `hasScale === false` y los componentes usan input manual
+- [x] Se limpia correctamente al desmontar (cierre de puerto, listeners)
+- [x] Caché de último dispositivo para reconexión rápida *(localStorage por terminal)*
 
 ---
 
@@ -918,15 +929,17 @@ Versión mini para mostrar en cada línea de producto:
 Botón "Pesar" que captura una lectura puntual para esa línea.
 
 #### Criterios de aceptación
-- [ ] Widget muestra peso en tiempo real con fuente monoespaciada
-- [ ] Indicador de estado visible y claro (conectada, leyendo, estable, error)
-- [ ] Barra de estabilidad funcional
-- [ ] Botón "Aceptar peso" solo habilitado cuando lectura estable
-- [ ] Tara y Cero funcionan (si el dispositivo lo soporta)
-- [ ] Tres modos de visualización: card, inline, compact
-- [ ] Toggle automático/manual persistido
-- [ ] Si no hay báscula asignada, muestra input manual como fallback
-- [ ] Responsive: funciona en PC táctil y tablet
+> **Nota auditoría:** `src/app/components/saas/ScaleWeightWidget.tsx` está implementado con todo lo de abajo, pero **no se importa en ningún TPV** — el widget no aparece en ninguna pantalla real.
+
+- [x] Widget muestra peso en tiempo real con fuente monoespaciada
+- [x] Indicador de estado visible y claro (conectada, leyendo, estable, error)
+- [x] Barra de estabilidad funcional *(`stabilityPercent` con colores verde/ámbar/rojo)*
+- [x] Botón "Aceptar peso" solo habilitado cuando lectura estable *(toast "Espera a que el peso se estabilice")*
+- [x] Tara y Cero funcionan (si el dispositivo lo soporta) *(+ atajos T y Ctrl+0)*
+- [x] Tres modos de visualización: card, inline, compact
+- [x] Toggle automático/manual persistido *(`scale_capture_mode` en localStorage)*
+- [x] Si no hay báscula asignada, muestra input manual como fallback
+- [ ] Responsive: funciona en PC táctil y tablet *(no verificable sin integración en páginas)*
 
 ---
 
@@ -1021,13 +1034,15 @@ interface TicketLine {
 ```
 
 #### Criterios de aceptación
+> **Nota auditoría:** NO implementado. `WorkerTpvButcherShop.tsx` sigue usando input manual `pesoInput` sin `useScale` ni `ScaleWeightWidget`.
+
 - [ ] Si hay báscula asignada, el widget la muestra y captura peso real
-- [ ] Si no hay báscula, se mantiene el input manual (retrocompatibilidad total)
+- [ ] Si no hay báscula, se mantiene el input manual (retrocompatibilidad total) *(es el único modo que existe)*
 - [ ] Modo automático: al tocar producto, captura peso estable y crea línea
 - [ ] Modo manual: se captura peso con botón "Aceptar" antes de seleccionar producto
 - [ ] Se puede editar el peso manualmente tras capturar de la báscula
 - [ ] Cada línea de ticket indica si el peso es de báscula o manual
-- [ ] El total se recalcula automáticamente al aceptar peso
+- [ ] El total se recalcula automáticamente al aceptar peso *(existe `total = peso × precioKg` solo con entrada manual)*
 - [ ] Funciona en PC táctil y tablet
 
 ---
@@ -1138,6 +1153,8 @@ En `catalog_item`, nuevo campo booleano opcional:
 - Registrar `weightSource` en cada línea.
 
 #### Criterios de aceptación
+> **Nota auditoría:** NO implementado. No existe `ScaleContext`, ni `sellByWeight` en `catalog_item`, ni `WeighProductDialog`.
+
 - [ ] `ScaleContext` disponible en todos los componentes de TPV
 - [ ] Detección automática de productos que requieren peso según unidad de medida
 - [ ] Campo `sellByWeight` en `catalog_item` para forzar venta por peso
@@ -1248,6 +1265,8 @@ export async function listScaleWeightLogsRequest(
 ```
 
 #### Criterios de aceptación
+> **Nota auditoría:** solo existe el tipo `WeightTraceData` en `deliveryApi.ts`; no se usa en `DeliveryOrderItem`, no se persiste, y no existe `scale_weight_log` ni su endpoint.
+
 - [ ] Cada línea de venta con peso incluye `weightTrace` con todos los metadatos
 - [ ] El log de auditoría `scale_weight_log` se crea por cada pesaje
 - [ ] El log es consultable por rango de fechas, dispositivo, producto y operador
@@ -1362,14 +1381,16 @@ export interface ScaleAlertConfig {
 ```
 
 #### Criterios de aceptación
-- [ ] Alerta `scale_disconnected` se genera cuando el frontend reporta desconexión
-- [ ] Alerta `scale_invalid_weight` se genera con lecturas fuera de rango
+> **Nota auditoría:** existe el endpoint `POST /scale-devices/:userId/:deviceId/status` (`reportScaleStatus`), que emite el evento SSE `scale:status_changed` pero **no crea notificación persistente**. Aparte, `butcherAlertEngine.js` emite `butcher_scale_disconnected` cada 5 min basándose en el ping de básculas del módulo carnicería (`butcher_scale_status`), no en `scale_device`. El resto de alertas no existe.
+
+- [ ] Alerta `scale_disconnected` se genera cuando el frontend reporta desconexión *(solo evento SSE, sin notificación)*
+- [ ] Alerta `scale_invalid_weight` se genera con lecturas fuera de rango *(no existe el endpoint `/alert`)*
 - [ ] Alerta `scale_reading_interrupted` se genera si se pierde lectura durante venta
 - [ ] Alerta `scale_unassigned` se genera periódicamente si hay básculas sin asignar
 - [ ] Alerta `scale_missing_for_vertical` se genera para verticales que necesitan peso
 - [ ] Todas las alertas son configurables (on/off) por negocio
-- [ ] Las alertas en tiempo real llegan por SSE al gerente y al puesto afectado
-- [ ] Las alertas periódicas se deduplicaciones correctamente (1 por día)
+- [ ] Las alertas en tiempo real llegan por SSE al gerente y al puesto afectado *(solo `scale:status_changed` y `scale:assignment_changed`)*
+- [ ] Las alertas periódicas se deduplicaciones correctamente (1 por día) *(solo la de carnicería, con dedup de 30 min)*
 - [ ] Ruta de navegación correcta en cada alerta
 
 ---
@@ -1487,6 +1508,8 @@ También accesible desde la card de la báscula: botón "Asignar a terminal" →
 | `ScaleAssignmentSelector.tsx` | Selector de asignación a terminal |
 
 #### Criterios de aceptación
+> **Nota auditoría:** NO implementado. No existen `ScaleDeviceList.tsx`, `ScaleDeviceForm.tsx`, `ScaleConnectionTest.tsx` ni `ScaleAssignmentSelector.tsx`, ni pestaña de dispositivos en TPV/Settings. La API backend sí está lista para soportar esta pantalla.
+
 - [ ] Listado de básculas con estado visual (activa, sin asignar, asignada)
 - [ ] Wizard de creación con presets que pre-rellenan campos
 - [ ] Los campos técnicos se muestran según tipo de conexión seleccionado
@@ -1583,12 +1606,14 @@ En el resumen del ticket (antes de cobrar):
 - Si el peso × precio genera un total > umbral configurable (ej: 500 €) → confirmación al trabajador ("¿Estás seguro? Total = 523,40 €").
 
 #### Criterios de aceptación
-- [ ] Al aceptar peso, la línea se crea con total = peso × precio/kg
+> **Nota auditoría:** depende de BAS-06/07 (sin hacer). En carnicería el recálculo `total = peso × precioKg` y el peso total del ticket ya funcionan con entrada manual.
+
+- [ ] Al aceptar peso, la línea se crea con total = peso × precio/kg *(solo con input manual en carnicería)*
 - [ ] Al re-pesar, la línea se actualiza y el total se recalcula
-- [ ] El total del ticket se actualiza en cascada
+- [x] El total del ticket se actualiza en cascada *(en `WorkerTpvButcherShop`)*
 - [ ] El resumen muestra desglose de peso por línea
-- [ ] Se muestra el peso total del ticket
-- [ ] Validaciones de peso ≤ 0, peso > maxWeight, total > umbral
+- [x] Se muestra el peso total del ticket *(`ticketWeight` en carnicería)*
+- [ ] Validaciones de peso ≤ 0, peso > maxWeight, total > umbral *(solo peso > 0)*
 - [ ] Funciona en carnicería, TPV genérico, sala y delivery
 
 ---
@@ -1666,6 +1691,8 @@ export async function getWeightSummaryRequest(
 ```
 
 #### Criterios de aceptación
+> **Nota auditoría:** NO implementado. No hay persistencia de `weightTrace`, ni endpoint `/weight-summary`, ni descuento de stock por peso vinculado a pesajes.
+
 - [ ] `weightTrace` se persiste correctamente en cada línea del pedido
 - [ ] El resumen de peso vendido funciona con filtros de fecha, producto, PDV y operador
 - [ ] Desglose por producto, por día y por operador
@@ -1742,13 +1769,15 @@ Mensajes claros y accionables:
 Estos atajos deben estar documentados en un tooltip del widget.
 
 #### Criterios de aceptación
-- [ ] La báscula se conecta automáticamente al abrir el TPV (si tiene permiso previo)
+> **Nota auditoría:** las piezas existen en `useScale`/`ScaleWeightWidget` (auto-conexión, reconexión, atajos T/Ctrl+0/Enter), pero al no estar integradas en el TPV del trabajador nada de esto es visible en la aplicación.
+
+- [ ] La báscula se conecta automáticamente al abrir el TPV (si tiene permiso previo) *(la lógica existe en el hook, sin integrar en el TPV)*
 - [ ] Banner de estado visible pero discreto
 - [ ] Primera conexión guía al trabajador por el diálogo del navegador
 - [ ] Mensajes de error claros y accionables
-- [ ] Atajos de teclado funcionales (T=tara, 0=cero, Enter=aceptar)
-- [ ] Si no hay báscula asignada, la experiencia es idéntica a la actual (transparente)
-- [ ] Reconexión automática ante pérdida de comunicación
+- [ ] Atajos de teclado funcionales (T=tara, 0=cero, Enter=aceptar) *(implementados en el widget, no montado)*
+- [x] Si no hay báscula asignada, la experiencia es idéntica a la actual (transparente)
+- [ ] Reconexión automática ante pérdida de comunicación *(implementada en el hook, sin integrar)*
 
 ---
 

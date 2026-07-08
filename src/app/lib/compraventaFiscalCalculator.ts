@@ -219,9 +219,39 @@ export function defaultSellerForOrigin(origin: PurchaseOrigin): SellerId {
   return SELLERS_BY_ORIGIN[origin][0]?.id ?? 'private';
 }
 
-function parseNum(value: string): number {
-  const normalized = String(value || '').trim().replace(/\./g, '').replace(',', '.');
-  const n = Number(normalized);
+/**
+ * Convierte un importe escrito por el usuario a número, aceptando formato
+ * español ("1.234,56") e inglés ("1,234.56" / "1234.56") sin confundir
+ * los separadores de miles con los decimales.
+ */
+export function parseNum(value: string): number {
+  let s = String(value ?? '')
+    .trim()
+    .replace(/[^\d.,-]/g, ''); // quita €, espacios, letras…
+  if (!s) return 0;
+
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+
+  if (hasComma && hasDot) {
+    // El último separador que aparece es el decimal.
+    if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+      s = s.replace(/\./g, '').replace(',', '.'); // ES: punto=miles, coma=decimal
+    } else {
+      s = s.replace(/,/g, ''); // EN: coma=miles, punto=decimal
+    }
+  } else if (hasComma) {
+    s = s.replace(/\./g, '').replace(',', '.'); // solo coma → decimal
+  } else if (hasDot) {
+    // Solo puntos: puede ser miles ("25.000") o decimal ("25.5").
+    const parts = s.split('.');
+    const looksGrouped =
+      parts.length > 2 || (parts.length === 2 && parts[1].length === 3);
+    if (looksGrouped) s = s.replace(/\./g, '');
+    // en otro caso se conserva como decimal
+  }
+
+  const n = Number(s);
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
@@ -328,12 +358,15 @@ function analyzePurchase(
         tpoEstimate: 0,
         tpoRateLabel,
         tariffEstimate: 0,
-        realPurchaseCost: round2(base + vat),
-        purchaseBaseForMargin: round2(base + vat),
+        realPurchaseCost: round2(base),
+        purchaseBaseForMargin: round2(base),
         rebuEligible: false,
         rebuReason: 'Dedujiste IVA en la compra — reventa en régimen general.',
         legalRefs: ['Art. 92 LIVA (deducción)', 'Art. 131 LIVA (REBU no aplicable)'],
-        reminders: ['Factura de compra con IVA desglosado obligatoria.'],
+        reminders: [
+          'Factura de compra con IVA desglosado obligatoria.',
+          `Pagas ${formatEuro(round2(base + vat))} (IVA incl.) pero recuperas ${formatEuro(vat)}: coste real ${formatEuro(round2(base))}.`,
+        ],
       };
     }
     if (form.seller === 'company_exempt' || form.seller === 'reseller_rebu') {
@@ -482,12 +515,15 @@ function analyzePurchase(
       tpoEstimate: 0,
       tpoRateLabel,
       tariffEstimate: tariff,
-      realPurchaseCost: round2(cif + tariff + vat),
-      purchaseBaseForMargin: round2(cif + tariff + vat),
+      realPurchaseCost: round2(cif + tariff),
+      purchaseBaseForMargin: round2(cif + tariff),
       rebuEligible: false,
       rebuReason: 'Importación con IVA deducible — régimen general en venta.',
       legalRefs: ['Art. 86 LIVA (importación)', 'Arancel aduanero (~10% orientativo)'],
-      reminders: ['DUA obligatorio · arancel orientativo según partida.'],
+      reminders: [
+        'DUA obligatorio · arancel orientativo según partida.',
+        `Desembolso en aduana ${formatEuro(round2(cif + tariff + vat))} (arancel + IVA); recuperas el IVA ${formatEuro(vat)}. Coste real ${formatEuro(round2(cif + tariff))}.`,
+      ],
     };
   }
 

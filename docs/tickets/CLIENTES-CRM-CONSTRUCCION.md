@@ -6,6 +6,10 @@
 **Perfiles:** Gerente (ve todos los clientes, estado comercial y relación económica) · Trabajador (solo datos operativos de clientes asignados si se autoriza)  
 **Fecha:** 14 abril 2026
 
+## Estado auditado (08/07/2026)
+
+**~55% completado (58/106 criterios).** Backend prácticamente completo: modelo ampliado en `couchdb.js` (CC-01), endpoints de detalle/notas/histórico/duplicados/búsqueda/quick/from-lead/from-crm-client/link-crm en `constructionController.js` + `constructionRouter.js` (CC-02/04/05), alertas de cliente en `getConstructionAlerts` (5 de 6, falta `cliente_sin_consentimiento`), facturas CRM en el detalle (CC-13 backend) y filtro `workerId` server-side. Frontend: `ConstructionClients.tsx` implementa lista+KPIs+filtros+drawer 7 tabs+modal con duplicados+import CRM+perfil gerente/trabajador, **PERO la página NO está enrutada**: `routes.tsx` redirige `construction-clients` → `/saas/clients` y `vertical/construccion/clientes` → `/saas/crm/clientes` ("ConstructionClients removed"), y no hay entrada en el sidebar. Faltan de verdad: enrutar la página (o descartarla), validación CIF/teléfono en modal, modo rápido `quickMode`, tab de leads e importación múltiple, gráfico Recharts en tab Económico, y reflejo de pagos de presupuesto en facturación.
+
 ---
 
 ## Auditoría del estado actual
@@ -173,10 +177,10 @@ Los documentos existentes sin los campos nuevos se normalizan con defaults vací
 
 #### Criterios de aceptación
 
-- [ ] `buildConstructionClientDocument` incluye todos los campos nuevos con defaults seguros
-- [ ] `sanitizeConstructionClient` normaliza docs viejos (sin campos nuevos) sin error
-- [ ] Un cliente creado con solo `nombre` sigue funcionando (retrocompatible)
-- [ ] Los campos de enum (`tipoCliente`, `estadoComercial`, `regimenIva`, etc.) rechazan valores fuera de la lista y usan default
+- [x] `buildConstructionClientDocument` incluye todos los campos nuevos con defaults seguros
+- [x] `sanitizeConstructionClient` normaliza docs viejos (sin campos nuevos) sin error
+- [x] Un cliente creado con solo `nombre` sigue funcionando (retrocompatible)
+- [x] Los campos de enum (`tipoCliente`, `estadoComercial`, `regimenIva`, etc.) rechazan valores fuera de la lista y usan default
 
 ---
 
@@ -304,13 +308,13 @@ Ampliar `GET /api/construction/clients/:userId` con query params:
 
 #### Criterios de aceptación
 
-- [ ] Endpoint `/detail` retorna client + obras + presupuestos + resumen económico + alertas
-- [ ] Endpoint de notas crea notas con tipo, autor y fecha
-- [ ] Endpoint de histórico combina eventos de múltiples fuentes en timeline unificado
-- [ ] Endpoint de duplicados detecta coincidencias por CIF, teléfono, email y nombre
-- [ ] El listado soporta filtros y búsqueda server-side
-- [ ] Cada endpoint valida `userId` y retorna 400 si falta
-- [ ] Paginación en histórico funciona correctamente
+- [x] Endpoint `/detail` retorna client + obras + presupuestos + resumen económico + alertas
+- [x] Endpoint de notas crea notas con tipo, autor y fecha
+- [x] Endpoint de histórico combina eventos de múltiples fuentes en timeline unificado
+- [x] Endpoint de duplicados detecta coincidencias por CIF, teléfono, email y nombre
+- [x] El listado soporta filtros y búsqueda server-side (`q`, `estadoComercial`, `tipoCliente`, `responsableId`, `tags`, `conObrasActivas`, `conImpagos`, `workerId`, `sortBy`, `sortOrder`)
+- [x] Cada endpoint valida `userId` y retorna 400 si falta
+- [x] Paginación en histórico funciona correctamente (`limit`/`offset`)
 
 ---
 
@@ -346,12 +350,12 @@ Ampliar `entityType` con valor `'client'` para estas alertas.
 
 #### Criterios de aceptación
 
-- [ ] Las 6 alertas se generan correctamente con datos reales
+- [ ] Las 6 alertas se generan correctamente con datos reales — implementadas 5 (`cliente_duplicado`, `cliente_sin_datos_fiscales`, `cliente_con_impagos`, `cliente_presupuesto_pendiente`, `cliente_inactivo`); falta `cliente_sin_consentimiento`
 - [ ] El cálculo de duplicados es eficiente (no O(n²) con miles de clientes; agrupar por CIF y teléfono)
-- [ ] Las alertas de impagos cruzan presupuestos con sus pagos
-- [ ] La interfaz TS `ConstructionAlert` incluye `entityType: 'client'`
-- [ ] Las alertas nuevas aparecen en `getConstructionAlerts` junto con las existentes
-- [ ] El endpoint responde < 500ms con 100 clientes y 200 presupuestos
+- [x] Las alertas de impagos cruzan presupuestos con sus pagos
+- [x] La interfaz TS `ConstructionAlert` incluye `entityType: 'client'`
+- [x] Las alertas nuevas aparecen en `getConstructionAlerts` junto con las existentes
+- [ ] El endpoint responde < 500ms con 100 clientes y 200 presupuestos — sin medir
 
 ---
 
@@ -423,12 +427,12 @@ En `constructionController.js`, al crear un `construction_budget` o `constructio
 
 #### Criterios de aceptación
 
-- [ ] Lead CRM se convierte en cliente de obra con campos mapeados correctamente
-- [ ] Cliente CRM Core se convierte en cliente de obra con datos fiscales completos
-- [ ] El vínculo `crmClientId` / `crmLeadId` se guarda bidireccional
+- [x] Lead CRM se convierte en cliente de obra con campos mapeados correctamente
+- [x] Cliente CRM Core se convierte en cliente de obra con datos fiscales completos
+- [ ] El vínculo `crmClientId` / `crmLeadId` se guarda bidireccional — `linkCrmClient` solo guarda en `construction_client`, no en el cliente CRM
 - [ ] Al crear obra/presupuesto, si hay vínculo CRM, se registra interacción
-- [ ] Los endpoints validan que el lead/cliente CRM exista antes de convertir
-- [ ] Se detecta si ya existe conversión previa y retorna error 409 (conflict)
+- [x] Los endpoints validan que el lead/cliente CRM exista antes de convertir
+- [x] Se detecta si ya existe conversión previa y retorna error 409 (conflict)
 
 ---
 
@@ -477,10 +481,10 @@ Retorna máximo 10 clientes que coincidan por nombre, CIF o teléfono. Para usar
 
 #### Criterios de aceptación
 
-- [ ] El endpoint `/quick` crea cliente Y vincula a obra/presupuesto en una sola llamada
-- [ ] Si hay duplicados, los retorna en la respuesta (sin bloquear la creación)
-- [ ] El endpoint `/search` retorna ≤ 10 resultados con latencia < 200ms
-- [ ] Si `vincularA.id` no existe, retorna 404
+- [x] El endpoint `/quick` crea cliente Y vincula a obra/presupuesto en una sola llamada
+- [x] Si hay duplicados, los retorna en la respuesta (sin bloquear la creación)
+- [x] El endpoint `/search` retorna ≤ 10 resultados con latencia < 200ms (límite 10 implementado; latencia no medida)
+- [ ] Si `vincularA.id` no existe, retorna 404 — si el destino no existe simplemente no vincula (no retorna 404)
 
 ---
 
@@ -610,10 +614,10 @@ export async function importFromCrmClient(userId: string, crmClientId: string): 
 
 #### Criterios de aceptación
 
-- [ ] Todas las interfaces reflejan el modelo del backend
-- [ ] Todas las funciones API apuntan a los endpoints correctos
-- [ ] Los tipos de las funciones son estrictos (no `any` innecesarios)
-- [ ] Compatibilidad con clientes existentes (campos opcionales con defaults)
+- [x] Todas las interfaces reflejan el modelo del backend
+- [x] Todas las funciones API apuntan a los endpoints correctos
+- [x] Los tipos de las funciones son estrictos (no `any` innecesarios)
+- [x] Compatibilidad con clientes existentes (campos opcionales con defaults)
 
 ---
 
@@ -699,15 +703,17 @@ PIE
 
 #### Criterios de aceptación
 
-- [ ] 4 KPIs con datos reales calculados del listado y presupuestos
-- [ ] 6+ filtros con persistencia en URL query params + localStorage
-- [ ] Tabla responsiva: tabla desktop, cards móvil
-- [ ] Badges de estado comercial con colores correctos
-- [ ] Panel de alertas de clientes (colapsable, solo si hay alertas)
-- [ ] Click en cliente abre drawer de detalle
-- [ ] Acciones por fila funcionales (editar, nuevo presupuesto, nueva obra)
-- [ ] Diferenciación gerente/trabajador implementada
-- [ ] Búsqueda server-side con debounce 300ms
+> ⚠️ Nota de auditoría: `ConstructionClients.tsx` implementa todo lo siguiente, pero la página NO está enrutada (`routes.tsx` redirige a `/saas/clients`).
+
+- [ ] 4 KPIs con datos reales calculados del listado y presupuestos — hay 4 KPIs (Total, En obra, Alertas, Sin datos fiscales), pero sin métricas de presupuestos (pendiente de cobro)
+- [ ] 6+ filtros con persistencia en URL query params + localStorage — hay 5 filtros, se leen de la URL al cargar pero no se persisten al cambiar ni en localStorage
+- [x] Tabla responsiva: tabla desktop, cards móvil
+- [x] Badges de estado comercial con colores correctos
+- [x] Panel de alertas de clientes (colapsable, solo si hay alertas)
+- [x] Click en cliente abre drawer de detalle
+- [ ] Acciones por fila funcionales (editar, nuevo presupuesto, nueva obra) — solo editar y eliminar
+- [x] Diferenciación gerente/trabajador implementada
+- [x] Búsqueda server-side con debounce 300ms
 - [ ] Paginación si > 25 clientes
 
 ---
@@ -858,20 +864,20 @@ TIMELINE COMPLETO
 
 #### Criterios de aceptación
 
-- [ ] Drawer abre al click en cliente desde la tabla (CC-07)
-- [ ] 7 tabs funcionales con datos reales
-- [ ] Tab General muestra todos los datos del cliente organizados
-- [ ] Tab Obras muestra obras vinculadas con estado y progreso
-- [ ] Tab Presupuestos muestra presupuestos con estado y pagos
-- [ ] Tab Económico (solo gerente) muestra resumen financiero con gráfico
-- [ ] Tab Documentos con upload, OCR y gestión
-- [ ] Tab Notas con creación, timeline y tipos
-- [ ] Tab Histórico con timeline unificado y filtro por tipo
-- [ ] Estado comercial editable inline desde el header del drawer
-- [ ] Tags editables inline
-- [ ] Responsive: full-screen en móvil
-- [ ] Dark mode completo
-- [ ] Datos cargados desde endpoint `/detail` (CC-02)
+- [x] Drawer abre al click en cliente desde la tabla (CC-07)
+- [x] 7 tabs funcionales con datos reales
+- [x] Tab General muestra todos los datos del cliente organizados
+- [x] Tab Obras muestra obras vinculadas con estado y progreso
+- [x] Tab Presupuestos muestra presupuestos con estado y pagos
+- [ ] Tab Económico (solo gerente) muestra resumen financiero con gráfico — resumen sí, sin gráfico Recharts
+- [ ] Tab Documentos con upload, OCR y gestión — upload sí; sin OCR integrado ni eliminar/descargar
+- [x] Tab Notas con creación, timeline y tipos
+- [ ] Tab Histórico con timeline unificado y filtro por tipo — timeline + "Cargar más" sí, sin filtro por tipo
+- [x] Estado comercial editable inline desde el header del drawer
+- [ ] Tags editables inline — se muestran pero no son editables
+- [x] Responsive: full-screen en móvil
+- [x] Dark mode completo
+- [x] Datos cargados desde endpoint `/detail` (CC-02)
 
 ---
 
@@ -956,17 +962,17 @@ MODAL (max-w-2xl, max-h-[90vh] overflow-y-auto)
 
 #### Criterios de aceptación
 
-- [ ] Modal con todas las secciones colapsables
-- [ ] Sección fiscal abierta por defecto si tipo = empresa/autónomo
-- [ ] Detección de duplicados en tiempo real al salir del campo (blur)
-- [ ] Banner de duplicados con opciones "Usar existente" / "Crear de todos modos"
+- [ ] Modal con todas las secciones colapsables — fiscal/contactos/origen colapsables; falta sección de dirección estructurada
+- [x] Sección fiscal abierta por defecto si tipo = empresa/autónomo
+- [x] Detección de duplicados en tiempo real al salir del campo (blur, debounce 500ms)
+- [ ] Banner de duplicados con opciones "Usar existente" / "Crear de todos modos" — banner sí, sin botones de acción
 - [ ] Validación CIF/NIF con `dniCifValidator.ts`
 - [ ] Validación teléfono ≥ 9 dígitos
 - [ ] Modo rápido con campos reducidos para usar desde obra/presupuesto
-- [ ] Componente exportable como `<CreateEditClientModal>` para reutilizar
+- [ ] Componente exportable como `<CreateEditClientModal>` para reutilizar — `ClientModal` es interno de la página
 - [ ] Al guardar en modo rápido, retorna el cliente para vincularlo (callback `onClientCreated`)
-- [ ] Dark mode completo
-- [ ] Responsive
+- [x] Dark mode completo
+- [x] Responsive
 
 ---
 
@@ -1011,13 +1017,13 @@ Crear componente `<ClienteAutocomplete>` que encapsule:
 
 #### Criterios de aceptación
 
-- [ ] En Obras: al crear/editar, el campo cliente es autocomplete con búsqueda
-- [ ] En Presupuestos: igual que obras
-- [ ] Opción "Crear nuevo cliente" visible si la búsqueda no encuentra coincidencia exacta
-- [ ] El modal de creación rápida se abre sin salir del formulario de obra/presupuesto
-- [ ] Al crear el nuevo cliente, los campos `clienteId` y `clienteNombre` se rellenan automáticamente
+- [x] En Obras: al crear/editar, el campo cliente es autocomplete con búsqueda
+- [x] En Presupuestos: igual que obras
+- [x] Opción "Crear nuevo cliente" visible si la búsqueda no encuentra coincidencia exacta
+- [ ] El modal de creación rápida se abre sin salir del formulario de obra/presupuesto — abre `/saas/construction-clients?crear=1` en pestaña nueva (y esa ruta redirige al CRM)
+- [ ] Al crear el nuevo cliente, los campos `clienteId` y `clienteNombre` se rellenan automáticamente — solo se preserva el nombre tecleado
 - [ ] Si se cierra el modal sin crear, se vuelve al formulario de obra/presupuesto intacto
-- [ ] `<ClienteAutocomplete>` es componente reutilizable exportado
+- [x] `<ClienteAutocomplete>` es componente reutilizable exportado
 
 ---
 
@@ -1073,12 +1079,12 @@ URL query params en `/saas/construction-clients`:
 
 #### Criterios de aceptación
 
-- [ ] `construction-clients` aparece en el sidebar del grupo Constructora
+- [ ] `construction-clients` aparece en el sidebar del grupo Constructora — NO está; además `routes.tsx` redirige la ruta al CRM Core
 - [ ] Orden de items del sidebar correcto
 - [ ] Desde Obras y Presupuestos se puede navegar al cliente
-- [ ] Desde ficha de cliente se puede navegar a obras y presupuestos
-- [ ] Deep linking por query params funcional
-- [ ] `?open=clienteId` abre el drawer al cargar la página
+- [x] Desde ficha de cliente se puede navegar a obras y presupuestos (tabs Obras/Presupuestos con `?open=`)
+- [ ] Deep linking por query params funcional — implementado en el componente (`?open`, `?tab`) pero inoperativo porque la ruta redirige
+- [ ] `?open=clienteId` abre el drawer al cargar la página — ídem
 
 ---
 
@@ -1132,15 +1138,15 @@ Opción 2 (preferida): se implementa un nuevo query param `workerId` en el lista
 
 #### Criterios de aceptación
 
-- [ ] Gerente ve todos los clientes y todas las columnas/tabs
-- [ ] Trabajador ve solo clientes de sus obras asignadas
-- [ ] KPIs se adaptan al perfil
-- [ ] Filtros económicos ocultos para trabajador
-- [ ] Tab "Económico" oculta para trabajador
-- [ ] Trabajador no puede eliminar clientes
-- [ ] Trabajador no puede cambiar estado comercial
-- [ ] Toggle "vista trabajador" visible solo para gerente
-- [ ] El filtrado server-side por `workerId` funciona correctamente
+- [x] Gerente ve todos los clientes y todas las columnas/tabs
+- [ ] Trabajador ve solo clientes de sus obras asignadas — el filtro `workerId` existe en backend pero la página no lo envía
+- [x] KPIs se adaptan al perfil
+- [x] Filtros económicos ocultos para trabajador
+- [x] Tab "Económico" oculta para trabajador
+- [x] Trabajador no puede eliminar clientes
+- [x] Trabajador no puede cambiar estado comercial
+- [x] Toggle "vista trabajador" visible solo para gerente
+- [x] El filtrado server-side por `workerId` funciona correctamente (implementado en `listClients`)
 
 ---
 
@@ -1183,10 +1189,10 @@ resumenEconomico: {
 
 #### Criterios de aceptación
 
-- [ ] El detalle del cliente incluye facturas del CRM si hay vínculo
-- [ ] El resumen económico combina presupuestos de obra + facturas CRM
+- [x] El detalle del cliente incluye facturas del CRM si hay vínculo (`getClientDetail` consulta `invoices` por `crmClientId`)
+- [x] El resumen económico combina presupuestos de obra + facturas CRM
 - [ ] Al registrar pago en presupuesto, se refleja en facturación si hay vínculo CRM
-- [ ] Tab Económico muestra facturas si existen
+- [ ] Tab Económico muestra facturas si existen — el backend las devuelve pero el tab no las pinta
 - [ ] Enlace funcional a `ClientBillingPage`
 
 ---

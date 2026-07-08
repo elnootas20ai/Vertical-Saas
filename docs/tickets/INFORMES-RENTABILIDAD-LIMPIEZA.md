@@ -6,6 +6,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~41% completado (40/97 criterios). Bloque backend prácticamente completo: los 9 endpoints de analítica en `cleaningReportsController.js` con filtros de fecha/cliente/trabajador/zona/tipo, rentabilidad cruzando costes laborales reales y materiales, tendencias vs periodo anterior. Frontend `CleaningReports.tsx` con las 9 pestañas, KPIs, gráficos Recharts, presets de periodo, filtros colapsables, gating financiero por rol, SSE de refresco y export Excel. Falta de verdad: alertas de rentabilidad en el motor (IRL-12, sin implementar), export PDF/CSV, ordenación de tablas, sincronización de filtros con URL, validación de permisos en backend, navegación cruzada por fila (cliente/trabajador/servicio) e insights automáticos en comparativas.
+
+---
+
 ## Auditoría de lo existente
 
 ### Ya implementado (backend + frontend)
@@ -353,12 +359,12 @@ interface ComparativeReport {
 
 #### Criterios de aceptación
 
-- [ ] Los 8 endpoints devuelven datos correctos con filtros de fecha, cliente, trabajador y zona.
-- [ ] Los cálculos de rentabilidad cruzan correctamente ingresos con costes laborales y de materiales.
-- [ ] Los endpoints funcionan con datos existentes de `cleaning_service` (sin necesitar módulos planificados).
-- [ ] Cada endpoint tiene manejo de errores y respuesta `{ ok: false, error }` si falla.
-- [ ] Solo accesible para Admin/Gerente (validación de rol).
-- [ ] Rendimiento aceptable: < 3 segundos para 1000 servicios.
+- [x] Los 8 endpoints devuelven datos correctos con filtros de fecha, cliente, trabajador y zona. *(9 endpoints en `cleaningReportsController.js`, filtros from/to/clientId/workerId/zone/cleaningType)*
+- [x] Los cálculos de rentabilidad cruzan correctamente ingresos con costes laborales y de materiales.
+- [x] Los endpoints funcionan con datos existentes de `cleaning_service` (sin necesitar módulos planificados).
+- [x] Cada endpoint tiene manejo de errores y respuesta `{ ok: false, error }` si falla.
+- [ ] Solo accesible para Admin/Gerente (validación de rol). *(sin validación de rol en backend, solo gating en frontend)*
+- [ ] Rendimiento aceptable: < 3 segundos para 1000 servicios. *(no verificado)*
 
 ---
 
@@ -485,16 +491,16 @@ Si no hay datos para el periodo seleccionado, mostrar ilustración con mensaje: 
 
 #### Criterios de aceptación
 
-- [ ] Página accesible en `/saas/vertical/limpieza/informes`.
-- [ ] Aparece en el sidebar dentro del grupo "Limpieza".
-- [ ] 9 pestañas visibles y navegables.
-- [ ] 6 KPIs calculados y con trend comparativo.
-- [ ] 5 filtros funcionan y persisten al cambiar de pestaña.
-- [ ] Chips de filtros activos + botón "Limpiar".
-- [ ] Exportaciones (Excel, PDF, CSV) por pestaña activa.
-- [ ] Responsive en los 3 breakpoints.
-- [ ] Dark mode compatible.
-- [ ] Loading states con skeletons.
+- [x] Página accesible en `/saas/vertical/limpieza/informes`.
+- [x] Aparece en el sidebar dentro del grupo "Limpieza".
+- [x] 9 pestañas visibles y navegables.
+- [ ] 6 KPIs calculados y con trend comparativo. *(los 6 KPIs existen pero el trend no compara con el periodo anterior)*
+- [x] 5 filtros funcionan y persisten al cambiar de pestaña.
+- [ ] Chips de filtros activos + botón "Limpiar". *(hay botón "Limpiar filtros" pero no chips)*
+- [ ] Exportaciones (Excel, PDF, CSV) por pestaña activa. *(solo Excel global con hojas Resumen/Clientes/Trabajadores)*
+- [x] Responsive en los 3 breakpoints.
+- [x] Dark mode compatible.
+- [ ] Loading states con skeletons. *(spinner genérico, no skeletons)*
 - [ ] Estado vacío con mensaje y CTA.
 
 ---
@@ -558,14 +564,14 @@ Sortable por todas las columnas numéricas. Default: ordenado por margen bruto d
 
 #### Criterios de aceptación
 
-- [ ] Los 4 KPIs se calculan correctamente.
-- [ ] El gráfico de barras muestra ingresos vs costes por cliente.
+- [ ] Los 4 KPIs se calculan correctamente. *(hay 4 KPIs pero distintos a los especificados: faltan "cliente más/menos rentable")*
+- [x] El gráfico de barras muestra ingresos vs costes por cliente.
 - [ ] El PieChart muestra distribución de ingresos.
-- [ ] La tabla es sortable y muestra colores por margen.
+- [ ] La tabla es sortable y muestra colores por margen. *(colores por margen sí, ordenación no)*
 - [ ] El indicador de concentración advierte si hay riesgo.
-- [ ] Los filtros globales (periodo, zona, tipo) filtran los datos.
+- [x] Los filtros globales (periodo, zona, tipo) filtran los datos.
 - [ ] Click en nombre del cliente navega a su ficha (si existe clientId).
-- [ ] Estado vacío si no hay datos.
+- [x] Estado vacío si no hay datos. *(mensaje "Sin datos para el período seleccionado" en tabla)*
 
 ---
 
@@ -618,12 +624,12 @@ Barra de progreso visual: "X de Y servicios completados este mes (Z%)" con color
 
 #### Criterios de aceptación
 
-- [ ] KPIs calculados con datos reales de `execution.realMinutes` y `execution.plannedMinutes`.
-- [ ] Gráfico de evolución con toggle diario/semanal/mensual.
-- [ ] Gráfico de desviación por trabajador o cliente.
-- [ ] Tabla de servicios recientes navegable.
-- [ ] Filtros globales aplican correctamente.
-- [ ] Exportaciones funcionan.
+- [x] KPIs calculados con datos reales de `execution.realMinutes` y `execution.plannedMinutes`.
+- [ ] Gráfico de evolución con toggle diario/semanal/mensual. *(gráfico diario sin toggle)*
+- [ ] Gráfico de desviación por trabajador o cliente. *(en esta pestaña solo desviación por día; el gráfico por trabajador está en la pestaña Trabajadores)*
+- [ ] Tabla de servicios recientes navegable. *(tabla sí, sin navegación al detalle)*
+- [x] Filtros globales aplican correctamente.
+- [ ] Exportaciones funcionan. *(el Excel global no incluye hoja de servicios)*
 
 ---
 
@@ -695,13 +701,13 @@ Si el usuario es trabajador: solo ve sus propias métricas, sin ranking ni datos
 
 #### Criterios de aceptación
 
-- [ ] Ranking completo con todas las columnas.
-- [ ] Gráficos de barras y de evolución funcionales.
-- [ ] Sección "Necesita atención" detecta problemas.
-- [ ] Filtros globales aplican (especialmente filtro de trabajador individual).
-- [ ] Un trabajador solo ve sus datos (IRL-10).
+- [ ] Ranking completo con todas las columnas. *(tabla amplia pero faltan posición #, horas previstas, coste laboral y coste material como columnas)*
+- [ ] Gráficos de barras y de evolución funcionales. *(barras sí — horas plan vs real y rentabilidad —, LineChart de evolución temporal no)*
+- [ ] Sección "Necesita atención" detecta problemas. *(existe en CleaningWorkers.tsx, no en esta pestaña)*
+- [x] Filtros globales aplican (especialmente filtro de trabajador individual).
+- [ ] Un trabajador solo ve sus datos (IRL-10). *(la pestaña entera se oculta a no-gerentes; no hay vista propia)*
 - [ ] Click en nombre del trabajador navega a su ficha.
-- [ ] Exportaciones incluyen la tabla completa.
+- [x] Exportaciones incluyen la tabla completa. *(hoja "Trabajadores" en el Excel con todos los campos)*
 
 ---
 
@@ -772,11 +778,11 @@ Cada incidencia: fecha, servicio, cliente, trabajador, tipo, severidad, descripc
 
 #### Criterios de aceptación
 
-- [ ] Ambas pestañas calculan KPIs correctos.
-- [ ] Gráficos de evolución y distribución funcionales.
-- [ ] Tablas por trabajador y por cliente con ordenación.
-- [ ] Tabla de detalle con todos los campos.
-- [ ] Filtros globales aplican.
+- [x] Ambas pestañas calculan KPIs correctos.
+- [x] Gráficos de evolución y distribución funcionales.
+- [ ] Tablas por trabajador y por cliente con ordenación. *(por trabajador sí en ambas; falta tabla por cliente en incidencias y ninguna es ordenable)*
+- [ ] Tabla de detalle con todos los campos. *(absentismo con detalle parcial — sin dirección/check-in —; incidencias sin tabla de detalle)*
+- [x] Filtros globales aplican.
 - [ ] Exportaciones por pestaña.
 
 ---
@@ -829,11 +835,11 @@ Si `materialCost === 0` en todos los servicios: "No hay datos de consumo de mate
 
 #### Criterios de aceptación
 
-- [ ] KPIs calculados desde `cleaning_service.materialCost` y `materialsUsed[]`.
-- [ ] Gráfico de evolución mensual.
-- [ ] Top 10 materiales y top 10 clientes por gasto.
-- [ ] Tabla con toggle por material/cliente/trabajador.
-- [ ] Filtros globales aplican.
+- [x] KPIs calculados desde `cleaning_service.materialCost` y `materialsUsed[]`.
+- [x] Gráfico de evolución mensual.
+- [ ] Top 10 materiales y top 10 clientes por gasto. *(gráfico top materiales sí; gasto por cliente solo en tabla)*
+- [ ] Tabla con toggle por material/cliente/trabajador. *(tablas por cliente y trabajador sin toggle; sin tabla por material)*
+- [x] Filtros globales aplican.
 - [ ] Estado vacío con CTA a materiales.
 
 ---
@@ -881,11 +887,11 @@ Nº factura, fecha, cliente, importe, estado (pagada/pendiente/vencida), días d
 
 #### Criterios de aceptación
 
-- [ ] KPIs calculados correctamente.
-- [ ] Gráfico de evolución mensual con facturado vs cobrado.
-- [ ] Tabla de facturación por cliente con indicadores de cobro.
-- [ ] Filtros globales aplican.
-- [ ] Si no hay facturas reales, estima desde precios de servicios con nota explicativa.
+- [x] KPIs calculados correctamente.
+- [x] Gráfico de evolución mensual con facturado vs cobrado.
+- [x] Tabla de facturación por cliente con indicadores de cobro.
+- [x] Filtros globales aplican.
+- [ ] Si no hay facturas reales, estima desde precios de servicios con nota explicativa. *(el backend estima, pero la UI no muestra nota explicativa)*
 
 ---
 
@@ -935,11 +941,11 @@ Cada insight como card con icono de bombilla, texto descriptivo y datos concreto
 
 #### Criterios de aceptación
 
-- [ ] Toggle entre "Por zona" y "Por tipo de servicio".
-- [ ] Gráficos de barras comparativos funcionales.
-- [ ] Tablas completas con semáforo de margen.
+- [ ] Toggle entre "Por zona" y "Por tipo de servicio". *(ambas vistas se muestran apiladas, sin toggle)*
+- [x] Gráficos de barras comparativos funcionales.
+- [x] Tablas completas con semáforo de margen.
 - [ ] Insights automáticos generados dinámicamente.
-- [ ] Filtros globales aplican (excepto el propio filtro de zona/tipo que se desactiva en su vista).
+- [x] Filtros globales aplican (excepto el propio filtro de zona/tipo que se desactiva en su vista).
 
 ---
 
@@ -1003,11 +1009,11 @@ const canViewFinancials = useMemo(() => {
 
 #### Criterios de aceptación
 
-- [ ] Admin/Gerente ven las 9 pestañas completas.
-- [ ] Trabajador solo ve: Resumen (limitado), Servicios (propios), opcionalmente Absentismo (propio).
-- [ ] Trabajador NO ve: Clientes, Materiales, Facturación, Comparativas, ni KPIs financieros.
-- [ ] En Trabajadores, un trabajador solo ve sus propias métricas.
-- [ ] `TEAM_PERMISSION_KEYS` incluye `'cleaning_reports'`.
+- [x] Admin/Gerente ven las 9 pestañas completas.
+- [ ] Trabajador solo ve: Resumen (limitado), Servicios (propios), opcionalmente Absentismo (propio). *(ve las pestañas no financieras pero con datos de todo el equipo, no filtrados a los suyos)*
+- [ ] Trabajador NO ve: Clientes, Materiales, Facturación, Comparativas, ni KPIs financieros. *(Clientes/Trabajadores/Materiales/Facturación y KPIs financieros se ocultan, pero Comparativas queda visible con ingresos)*
+- [ ] En Trabajadores, un trabajador solo ve sus propias métricas. *(la pestaña se oculta completa, no hay vista propia)*
+- [ ] `TEAM_PERMISSION_KEYS` incluye `'cleaning_reports'`. *(no existe en `services/couchdb.js`; el frontend sí lee `perms.cleaning_reports`)*
 - [ ] Los endpoints backend validan permisos.
 
 ---
@@ -1068,11 +1074,11 @@ Al cargar la página, leer filtros de la URL. Al cambiar filtros, actualizar la 
 
 #### Criterios de aceptación
 
-- [ ] Los 5 filtros funcionan y se aplican a todas las pestañas.
+- [x] Los 5 filtros funcionan y se aplican a todas las pestañas.
 - [ ] Filtros sincronizados con URL (deep linking).
-- [ ] Chips visibles con filtros activos + botón limpiar.
-- [ ] Responsive con panel colapsable en móvil.
-- [ ] Autocomplete en selectores de cliente, trabajador y zona.
+- [ ] Chips visibles con filtros activos + botón limpiar. *(solo botón "Limpiar filtros")*
+- [x] Responsive con panel colapsable en móvil.
+- [ ] Autocomplete en selectores de cliente, trabajador y zona. *(selects simples, sin búsqueda)*
 
 ---
 
@@ -1173,7 +1179,7 @@ cleaningReportAlerts: {
 
 #### Criterios de aceptación
 
-- [ ] Las 4 reglas de alerta se evalúan en el ciclo del alert engine.
+- [ ] Las 4 reglas de alerta se evalúan en el ciclo del alert engine. *(solo existe un `client_low_profitability` calculado al vuelo en `cleaningClientsController.js`, fuera del motor)*
 - [ ] Cada alerta tiene su configuración on/off y umbrales.
 - [ ] Las alertas respetan dedup (1 por entidad por periodo).
 - [ ] Se envían por SSE + Web Push.
@@ -1214,10 +1220,10 @@ Los datos se cargan al montar el componente y al cambiar filtros, pero no se act
 
 #### Criterios de aceptación
 
-- [ ] Al completar un servicio desde otro dispositivo, los datos se refrescan.
-- [ ] Debounce de 3 segundos funciona.
+- [x] Al completar un servicio desde otro dispositivo, los datos se refrescan. *(EventSource sobre `/api/events` con tipos cleaning_service, cleaning_incident, clockin…)*
+- [x] Debounce de 3 segundos funciona.
 - [ ] Toast al actualizar.
-- [ ] Timestamp de última actualización visible.
+- [x] Timestamp de última actualización visible.
 - [ ] Indicador de conexión SSE.
 
 ---
@@ -1263,7 +1269,7 @@ Chips/botones de acceso directo: Dashboard, Servicios, Trabajadores, Fichajes, M
 - [ ] Servicios enlazan al detalle.
 - [ ] Materiales enlazan a la página de materiales.
 - [ ] Facturas enlazan a la vista de facturación.
-- [ ] Barra de navegación rápida funcional.
+- [x] Barra de navegación rápida funcional. *(NavLinks a servicios, trabajadores, incidencias y materiales en la pestaña Resumen)*
 - [ ] Otros módulos tienen links hacia informes.
 
 ---
@@ -1323,13 +1329,13 @@ Lista compacta de alertas activas de rentabilidad con acciones rápidas.
 
 #### Criterios de aceptación
 
-- [ ] Gráfico de evolución mensual con ingresos, costes y margen.
-- [ ] 6 mini-cards de estado actual calculadas.
-- [ ] Mini rankings de clientes y trabajadores.
+- [ ] Gráfico de evolución mensual con ingresos, costes y margen. *(el Resumen tiene "Servicios por día" y top clientes, no evolución financiera mensual)*
+- [ ] 6 mini-cards de estado actual calculadas. *(hay cards de absentismo e incidencias, pero no "servicios hoy", "trabajadores hoy", vencimientos ni cobros)*
+- [x] Mini rankings de clientes y trabajadores.
 - [ ] Previsión de cierre de mes funcional.
 - [ ] Alertas activas visibles.
-- [ ] Responsive con cards apiladas en móvil.
-- [ ] Para trabajador: solo ve mini-cards operativas (servicios, horas propias).
+- [x] Responsive con cards apiladas en móvil.
+- [x] Para trabajador: solo ve mini-cards operativas (servicios, horas propias). *(los bloques financieros del Resumen se ocultan sin `canViewFinancials`; los datos operativos no se filtran a los propios)*
 
 ---
 

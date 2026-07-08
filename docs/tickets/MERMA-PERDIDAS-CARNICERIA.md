@@ -9,6 +9,13 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~65% hecho.** El núcleo funciona de verdad: modelo `butcher_waste` en `couchdb.js`, servicio `butcherWasteService.js` (registro con movimiento de stock tipo `waste`, gasto automático en finanzas, alertas en tiempo real vía `evaluateWasteAlerts`), rutas montadas bajo `/api/butcher/waste`, cliente `butcherWasteApi.ts` y página `ButcherWaste.tsx` refactorizada con datos reales (ruta `/saas/butcher-waste` con permiso `butcher_waste`). Las alertas periódicas de merma corren en `butcherAlertEngine.js` y el Hub usa el resumen real.
+**Falta de verdad:** coste real ajustado por merma (MRM-08 completo: `realCostPrice`, `recalculateRealCost`, endpoint `real-costs`), eliminación de merma con reversión de stock, endpoints detalle/update/by-worker/by-batch, configuración específica de umbrales (MRM-06), vistas diferenciadas por rol en la página (pestañas Análisis/Costes reales), descuento del peso del lote al registrar merma, y la ruta alias `/saas/vertical/carniceria/merma`.
+
+---
+
 ## Índice
 
 1. [Contexto y estado actual](#contexto-y-estado-actual)
@@ -284,7 +291,7 @@ Crear el builder, sanitizer y helpers de consulta para el documento `butcher_was
 
 #### Tareas
 
-- [ ] Crear `buildButcherWasteDocument({ userId, businessId, catalogItemId, catalogItemName, catalogItemSku, batchId, batchNumber, wasteType, weight, unit, estimatedCost, costPriceAtTime, date, registeredBy, registeredByName, notes })`:
+- [x] Crear `buildButcherWasteDocument({ userId, businessId, catalogItemId, catalogItemName, catalogItemSku, batchId, batchNumber, wasteType, weight, unit, estimatedCost, costPriceAtTime, date, registeredBy, registeredByName, notes })`:
   - Generar `_id` con formato `butcher_waste:{userId}:{uuidv4()}`
   - `type: 'butcher_waste'`
   - Validar `wasteType` contra enum: `hueso`, `grasa`, `recortes`, `caducado`, `rotura`, `perdida_manual`
@@ -295,9 +302,9 @@ Crear el builder, sanitizer y helpers de consulta para el documento `butcher_was
   - `reviewedBy`, `reviewedByName`, `reviewedAt`, `reviewNotes`: null por defecto
   - `stockMovementId`, `financeMovementId`: vacío por defecto (se rellenan en el servicio)
   - Incluir `createdAt`, `updatedAt`, `deletedAt: null`
-- [ ] Crear `sanitizeButcherWaste(doc)` — exponer campos seguros, eliminar `_rev`
-- [ ] Crear `listButcherWasteByUser(req, userId)` — listar documentos `type: 'butcher_waste'` del usuario, filtrando `deletedAt: null`
-- [ ] Crear vista CouchDB `butcher_waste_by_user_and_date` con emisión por `[user_id, date]` en `setupDatabaseIndexes()`
+- [x] Crear `sanitizeButcherWaste(doc)` — exponer campos seguros, eliminar `_rev`
+- [x] Crear `listButcherWasteByUser(req, userId)` — listar documentos `type: 'butcher_waste'` del usuario, filtrando `deletedAt: null`
+- [ ] Crear vista CouchDB `butcher_waste_by_user_and_date` con emisión por `[user_id, date]` en `setupDatabaseIndexes()` *(se usa `fetchAllDocs` + filtro en memoria, sin vistas)*
 - [ ] Crear vista CouchDB `butcher_waste_by_product` con emisión por `[user_id, catalogItemId]`
 - [ ] Crear vista CouchDB `butcher_waste_by_batch` con emisión por `[user_id, batchId]`
 
@@ -333,7 +340,7 @@ Crear el servicio central de merma que orquesta todo: persiste el registro, desc
 
 **Registro de merma (`recordWaste`):**
 
-- [ ] Crear función `recordWaste(req, userId, data)`:
+- [x] Crear función `recordWaste(req, userId, data)`: *(implementada como `registerWaste` en `butcherWasteService.js`; NO actualiza `currentWeightKg` del lote — paso 7 pendiente)*
   1. Validar que `catalogItemId` existe en el catálogo (fetch `catalog_item`)
   2. Si `batchId` proporcionado, validar que el lote existe y pertenece al producto
   3. Construir documento con `buildButcherWasteDocument`
@@ -353,7 +360,7 @@ Crear el servicio central de merma que orquesta todo: persiste el registro, desc
 
 **Listado y filtros (`listWaste`):**
 
-- [ ] Crear función `listWaste(req, userId, filters)`:
+- [x] Crear función `listWaste(req, userId, filters)`: *(en `butcherController.listWaste` con `listButcherWasteByUser`; filtros from/to/wasteType/reviewStatus/registeredBy, sin paginación `limit`/`skip`)*
   - Filtros soportados: `dateFrom`, `dateTo`, `wasteType`, `catalogItemId`, `batchId`, `registeredBy`, `reviewStatus`
   - Ordenar por `date` descendente (más recientes primero)
   - Paginar con `limit` y `skip`
@@ -361,7 +368,7 @@ Crear el servicio central de merma que orquesta todo: persiste el registro, desc
 
 **Resumen analítico (`getWasteSummary`):**
 
-- [ ] Crear función `getWasteSummary(req, userId, dateFrom, dateTo)`:
+- [x] Crear función `getWasteSummary(req, userId, dateFrom, dateTo)`:
   - `totalWeight`: peso total de merma en el periodo (en kg)
   - `totalCost`: coste estimado total de merma
   - `byType`: desglose por tipo de merma `{ hueso: { weight, cost, count }, grasa: {...}, ... }`
@@ -372,7 +379,7 @@ Crear el servicio central de merma que orquesta todo: persiste el registro, desc
 
 **Porcentaje de merma por producto (`getProductWasteRate`):**
 
-- [ ] Crear función `getProductWasteRate(req, userId, catalogItemId, dateFrom, dateTo)`:
+- [x] Crear función `getProductWasteRate(req, userId, catalogItemId, dateFrom, dateTo)`: *(implementada como `getWasteRate`, % sobre recepción de lotes activos)*
   - `totalPurchased`: kg comprados del producto en el periodo (desde `stock_movement` tipo `purchase_reception`)
   - `totalWasted`: kg de merma registrada del producto en el periodo
   - `wasteRate`: `(totalWasted / totalPurchased) * 100` — porcentaje de merma
@@ -381,7 +388,7 @@ Crear el servicio central de merma que orquesta todo: persiste el registro, desc
 
 **Revisión de merma (`reviewWaste`):**
 
-- [ ] Crear función `reviewWaste(req, userId, wasteId, reviewData)`:
+- [x] Crear función `reviewWaste(req, userId, wasteId, reviewData)`: *(sin comprobación de rol Admin/Gerente en el servicio)*
   - Solo usuarios con rol `Admin` o `Gerente` pueden revisar
   - Actualizar `reviewStatus` a `reviewed` o `disputed`
   - Guardar `reviewedBy`, `reviewedByName`, `reviewedAt`, `reviewNotes`
@@ -459,7 +466,7 @@ Exponer la API REST para gestionar mermas desde el frontend. Seguir el patrón e
 
 #### Tareas
 
-- [ ] Crear `controllers/butcherWasteController.js` con handlers que invocan `butcherWasteService`:
+- [ ] Crear `controllers/butcherWasteController.js` con handlers que invocan `butcherWasteService`: *(los handlers existen en `butcherController.js`: listWaste, createWaste, getWasteSummary, reviewButcherWaste, getButcherWasteRate, getButcherWasteReporting; faltan getWaste, updateWaste, deleteWaste, getByWorker, getByBatch)*
   - `listWaste`: parsear query params, llamar al servicio, retornar `{ ok: true, items, total, page, pageSize }`
   - `createWaste`: validar body, llamar a `recordWaste`, retornar `{ ok: true, waste, actions }` donde `actions` describe las automatizaciones ejecutadas
   - `getWaste`: fetch por ID, retornar `{ ok: true, waste }`
@@ -470,12 +477,13 @@ Exponer la API REST para gestionar mermas desde el frontend. Seguir el patrón e
   - `getProductRate`: retornar `{ ok: true, rate }`
   - `getByWorker`: retornar `{ ok: true, workers: [...] }`
   - `getByBatch`: retornar `{ ok: true, items: [...], totals }`
-- [ ] Crear `routers/butcherWasteRouter.js` con las rutas
-- [ ] Montar en `index.js`:
+- [ ] Crear `routers/butcherWasteRouter.js` con las rutas *(las rutas viven en `butcherRouter.js` bajo `/api/butcher/waste/...`; faltan detalle, update, delete, by-worker y by-batch)*
+- [x] Montar en `index.js`:
   ```javascript
   ['/api/butcher-waste', requireAuth, burstLimiter, planAwareLimiter, butcherWasteRouter],
   ```
   (Se duplica automáticamente en `/api/v2/butcher-waste` por el bucle existente)
+  *(Nota auditoría: montado bajo `/api/butcher/waste/...` dentro de `butcherRouter`, no bajo `/api/butcher-waste`)*
 - [ ] Validar body del POST con comprobaciones manuales (patrón del proyecto):
   - `catalogItemId`: obligatorio, string no vacío
   - `weight`: obligatorio, number > 0
@@ -512,10 +520,10 @@ Añadir `waste` como tipo válido de movimiento de stock para que las mermas se 
 
 #### Tareas
 
-- [ ] Añadir `'waste'` al array `VALID_MOVEMENT_TYPES`
-- [ ] Añadir `'waste'` al `Set` `OUTBOUND_TYPES`
-- [ ] Verificar que `recordMovement` descuenta `catalog_item.stockQuantity` correctamente para tipo `waste` (ya debería funcionar por ser outbound, pero confirmar)
-- [ ] Añadir `'waste'` a `alertConstants.js` en `CATEGORY_TO_SOURCE`:
+- [x] Añadir `'waste'` al array `VALID_MOVEMENT_TYPES`
+- [x] Añadir `'waste'` al `Set` `OUTBOUND_TYPES`
+- [x] Verificar que `recordMovement` descuenta `catalog_item.stockQuantity` correctamente para tipo `waste` (ya debería funcionar por ser outbound, pero confirmar)
+- [x] Añadir `'waste'` a `alertConstants.js` en `CATEGORY_TO_SOURCE`: *(registradas con source `carniceria`)*
   ```javascript
   butcher_waste_high: 'stock',
   butcher_waste_repeated: 'stock',
@@ -594,16 +602,16 @@ Implementar 4 reglas de alerta que se evalúan tanto en tiempo real (al registra
 
 #### Tareas
 
-- [ ] Crear función `evaluateWasteAlerts(req, userId, wasteDoc)` en `butcherWasteService.js`:
+- [x] Crear función `evaluateWasteAlerts(req, userId, wasteDoc)` en `butcherWasteService.js`:
   - Recibe el documento de merma recién creado
   - Ejecuta las 4 reglas en orden
   - Para cada regla disparada: llamar a `emitAlert()` del `alertEmitter.js`
   - Retornar array de alertas generadas (para informar al frontend en la respuesta del POST)
-- [ ] Crear función `checkButcherWasteAlerts(userId)` para el ciclo periódico:
+- [x] Crear función `checkButcherWasteAlerts(userId)` para el ciclo periódico: *(implementada como `checkButcherWaste` en `butcherAlertEngine.js`)*
   - Consultar mermas del día y de los últimos 7 días
   - Ejecutar reglas 1 y 2 (las periódicas)
   - Usar dedup para no repetir alertas ya emitidas
-- [ ] Integrar `checkButcherWasteAlerts` en el ciclo del `alertEngine.js`:
+- [x] Integrar `checkButcherWasteAlerts` en el ciclo del `alertEngine.js`: *(corre en el ciclo de 30 min del `butcherAlertEngine`, no en el motor genérico)*
   - Solo para usuarios con `account.businessType === 'butcherShop'`
   - Ejecutar en cada ciclo (1h) junto con las demás reglas
 - [ ] Configuración de umbrales (ver MRM-06)
@@ -711,7 +719,7 @@ Merma registrada (X kg de Solomillo a 24 €/kg = 57.60 €)
 
 #### Tareas
 
-- [ ] En `recordWaste`, después de crear el documento y descontar stock:
+- [x] En `recordWaste`, después de crear el documento y descontar stock: *(implementado en `registerWaste`: crea movimiento `pago` categoría `merma` con `buildFinanceDocument` siempre que `estimatedCost > 0`, SIN toggle `butcherWasteAutoFinance`)*
   - Leer config `butcherWasteAutoFinance`
   - Si `true`: crear movimiento financiero usando `buildFinanceDocument` de `couchdb.js`:
     - `type: 'pago'`
@@ -809,7 +817,7 @@ Crear el cliente HTTP TypeScript para consumir la API de merma desde el frontend
 
 #### Tareas
 
-- [ ] Definir tipos TypeScript:
+- [x] Definir tipos TypeScript: *(`WasteType`, `ReviewStatus` — con valores `pending/approved/rejected` —, `ButcherWasteRecord`, `WasteSummary`, `WasteReporting`; sin `ProductWasteRate`, `WasteFilters` ni `RealCostEntry`)*
 
 ```typescript
 type WasteType = 'hueso' | 'grasa' | 'recortes' | 'caducado' | 'rotura' | 'perdida_manual';
@@ -888,7 +896,7 @@ interface RealCostEntry {
 }
 ```
 
-- [ ] Implementar funciones:
+- [x] Implementar funciones: *(implementadas contra `/api/butcher/waste/...`: list, create, review, summary, rate, reporting; faltan getWaste, updateWaste, deleteWaste, getByWorker, getByBatch, getRealCosts)*
 
 | Función | Método | Ruta | Descripción |
 |---|---|---|---|
@@ -904,7 +912,7 @@ interface RealCostEntry {
 | `getByBatch(userId, batchId)` | GET | `/api/butcher-waste/:userId/by-batch/:batchId` | Merma por lote |
 | `getRealCosts(userId)` | GET | `/api/butcher-waste/:userId/real-costs` | Tabla de costes reales |
 
-- [ ] Constantes exportadas:
+- [x] Constantes exportadas: *(`WASTE_TYPE_LABELS`, `WASTE_TYPE_COLORS`, `REVIEW_STATUS_LABELS`, `REVIEW_STATUS_COLORS`)*
 
 ```typescript
 export const WASTE_TYPE_LABELS: Record<WasteType, string> = {
@@ -1009,22 +1017,22 @@ Refactorizar completamente la página `ButcherWaste.tsx` para que consuma datos 
 
 #### Tareas
 
-- [ ] Eliminar `INITIAL_DATA`, `useState<WasteEntry[]>` y toda la lógica local
-- [ ] Sustituir tipo `MotivoMerma` por `WasteType` del API client (6 tipos nuevos)
+- [x] Eliminar `INITIAL_DATA`, `useState<WasteEntry[]>` y toda la lógica local *(la página usa `listButcherWasteRequest`/`getButcherWasteSummaryRequest`)*
+- [x] Sustituir tipo `MotivoMerma` por `WasteType` del API client (6 tipos nuevos)
 - [ ] Sustituir tipo `CategoriaProducto` por categorías del catálogo real
 - [ ] Añadir hooks:
-  - `useWasteList(userId, filters)` — fetch de mermas con filtros
+  - `useWasteList(userId, filters)` — fetch de mermas con filtros *(se hace inline con `loadData`, no hooks dedicados; sin `useRealCosts`)*
   - `useWasteSummary(userId, dateRange)` — fetch del resumen
   - `useRealCosts(userId)` — fetch de costes reales
-- [ ] Implementar selector de producto conectado al catálogo (`catalog_item`) vía API existente
+- [ ] Implementar selector de producto conectado al catálogo (`catalog_item`) vía API existente *(el formulario usa campo de texto libre `productName`)*
 - [ ] Implementar selector de lote conectado a lotes del producto (si existe API de lotes)
-- [ ] Implementar selector de trabajador conectado a miembros del negocio
-- [ ] Implementar las 4 pestañas con contenido real
+- [ ] Implementar selector de trabajador conectado a miembros del negocio *(auto-asigna el usuario actual)*
+- [ ] Implementar las 4 pestañas con contenido real *(sin pestañas: una sola vista con KPIs, filtros, tabla y modales de registro/revisión)*
 - [ ] Implementar diferenciación por rol (usar `useAuth` para obtener rol del usuario):
   - Si `accountType === 'user'` o rol === `'Usuario'` → vista trabajador
   - Si `accountType === 'company'` o rol === `'Admin'`/`'Gerente'` → vista gerente
-- [ ] Mantener el design system existente (dark mode, bordes, tipografía, rounded-xl)
-- [ ] Registrar ruta adicional en `routes.tsx`:
+- [x] Mantener el design system existente (dark mode, bordes, tipografía, rounded-xl)
+- [ ] Registrar ruta adicional en `routes.tsx`: *(solo existe `/saas/butcher-waste`)*
   ```typescript
   { path: 'vertical/carniceria/merma', Component: ButcherWaste },
   ```
@@ -1090,16 +1098,18 @@ El formulario de registro es la herramienta principal del trabajador. Debe ser r
 
 #### Tareas
 
+> **Nota auditoría:** existe un modal de registro básico dentro de `ButcherWaste.tsx` (fecha, tipo con select, producto como texto libre, categoría, lote texto libre, peso, coste manual, motivo, observaciones, loading en botón). No es el componente rico descrito abajo.
+
 - [ ] **Selector de producto:**
   - Combobox con búsqueda (por nombre, SKU)
   - Carga productos del catálogo vía API existente (`/api/delivery/catalog/:userId`)
   - Al seleccionar: mostrar `costPrice` actual, stock actual, y cargar lotes disponibles
   - Si el producto tiene stock 0, mostrar warning "Este producto ya no tiene stock"
-- [ ] **Selector de tipo de merma:**
+- [x] **Selector de tipo de merma:** *(select con los 6 tipos; sin chips visuales)*
   - 6 opciones con colores diferenciados
   - Vista de botones/chips en vez de select (más visual y táctil)
   - Los 6 tipos: hueso, grasa, recortes, caducado, rotura, pérdida manual
-- [ ] **Campo peso:**
+- [x] **Campo peso:** *(input numérico step 0.01; validación `> 0` la hace el backend, sin comprobar stock)*
   - Input numérico con step 0.1
   - Validación: > 0
   - Validación: no puede superar el stock actual del producto (warning, no bloqueo)
@@ -1113,14 +1123,14 @@ El formulario de registro es la herramienta principal del trabajador. Debe ser r
   - Carga lotes vía API (si existe endpoint de lotes, sino ocultar el campo)
   - Muestra: código de lote, fecha de expiración, peso restante
   - Opcional: si no se selecciona lote, la merma se registra sin vinculación a lote
-- [ ] **Campo fecha:**
+- [x] **Campo fecha:** *(date picker con default hoy; sin límites de fechas)*
   - Date picker, default: hoy
   - No permite fechas futuras
   - Permite registrar merma de días anteriores (máximo 7 días atrás)
 - [ ] **Campo trabajador:**
   - Auto-rellenado con el usuario logueado (no editable para trabajadores)
   - El gerente puede seleccionar a quién atribuir la merma (selector de miembros del equipo)
-- [ ] **Observaciones:**
+- [x] **Observaciones:** *(textarea libre; sin placeholders por tipo)*
   - Textarea libre, opcional
   - Placeholder con ejemplo según tipo de merma seleccionado:
     - hueso: "Ej: Hueso limpio de cadera"
@@ -1221,11 +1231,11 @@ El Hub de carnicería (`ButcherHub.tsx`) muestra KPIs de merma con datos mock (`
 
 #### Tareas
 
-- [ ] Reemplazar `mermaHoyKg` y `mermaMesPct` en `generateMockData()` con llamadas a `getWasteSummary`
-- [ ] Reemplazar `dailyWaste` (gráfica de merma semanal) con datos reales de `getWasteSummary` con rango de 7 días
-- [ ] Reemplazar `workers[].mermaKg` con datos reales de `getByWorker`
+- [x] Reemplazar `mermaHoyKg` y `mermaMesPct` en `generateMockData()` con llamadas a `getWasteSummary` *(usa `getButcherWasteSummaryRequest` con `dailyTrend` y `wastePct` reales)*
+- [x] Reemplazar `dailyWaste` (gráfica de merma semanal) con datos reales de `getWasteSummary` con rango de 7 días *(usa `dailyTrend.slice(-7)`)*
+- [ ] Reemplazar `workers[].mermaKg` con datos reales de `getByWorker` *(sigue derivado de actividad, no del resumen `byWorker`)*
 - [ ] Reemplazar alerta mock `merma_alta` con alertas reales del sistema de notificaciones
-- [ ] Mantener el enlace "Ver todo" de la gráfica de merma apuntando a `/saas/butcher-waste`
+- [x] Mantener el enlace "Ver todo" de la gráfica de merma apuntando a `/saas/butcher-waste`
 
 #### Criterios de aceptación
 
@@ -1259,6 +1269,8 @@ Crear endpoints de reporting avanzado para la sección de Informes de la aplicac
 | `GET` | `/api/butcher-waste/:userId/report/cost-impact` | Impacto total en costes: merma vs ventas, merma vs compras |
 
 #### Tareas
+
+> **Nota auditoría:** existe `getWasteReporting(req, userId, period)` en `butcherWasteService.js` (endpoint `GET /api/butcher/waste/reporting/data`) que cubre parcialmente esto: comparativa con periodo anterior, `dailyBreakdown`, `topProducts`, `byWorker` y `byWasteType`. No existen los 5 endpoints `report/*` dedicados.
 
 - [ ] `getTrends(userId, period)`: agregar merma por semana o mes, devolver serie temporal con `{ period, weight, cost, count, avgPerDay }`
 - [ ] `getByTypePeriod(userId, dateFrom, dateTo, groupBy)`: merma agrupada por `wasteType` y por periodo (día/semana/mes)

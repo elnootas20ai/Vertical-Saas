@@ -143,6 +143,7 @@ import { startButcherAlertEngine } from './services/butcherAlertEngine.js';
 import { startConstructionAlertEngine } from './services/constructionAlertEngine.js';
 import { startDeliveryAlertEngine } from './services/deliveryAlertEngine.js';
 import { startCleaningAlertEngine } from './services/cleaningAlertEngine.js';
+import { markSystemActivity, shouldRunBackgroundEngine } from './services/engineIdleGate.js';
 import { startSupplierInvoicePolling } from './services/supplierInvoiceScheduler.js';
 import { runAutoOrdersForAllUsers } from './services/autoOrderService.js';
 import { startSubscriptionLifecycle } from './services/subscriptionLifecycle.js';
@@ -366,6 +367,15 @@ app.get('/api/health', (_req, res) => {
 // El cliente puede leer X-API-Version para detectar la versión activa.
 app.use((req, res, next) => {
   res.setHeader('X-API-Version', '2');
+  next();
+});
+
+// ENGINE_IDLE: cualquier petición real a /api marca actividad; los motores en
+// segundo plano se pausan solos cuando no hay actividad y dejan de consumir
+// CouchDB. /api/health queda fuera (se declara antes de este middleware) para
+// que los pings de monitores externos no mantengan los motores despiertos.
+app.use('/api', (req, _res, next) => {
+  markSystemActivity();
   next();
 });
 
@@ -2310,6 +2320,22 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       } catch { /* scrapyard dashboard alerts best-effort */ }
     }
 
+    // ── Alertas delivery activas (KPI para dashboard) ──
+    let deliveryAlertsKpi = null;
+    if (['delivery', 'restaurant'].includes(businessType)) {
+      try {
+        const { getDeliveryAlertSummary } = await import('./services/deliveryAlertEngine.js');
+        const dSummary = await getDeliveryAlertSummary(userId);
+        if (dSummary?.summary?.total > 0) {
+          deliveryAlertsKpi = {
+            total: dSummary.summary.total,
+            critical: dSummary.summary.byPriority?.high || 0,
+            warning: (dSummary.summary.byPriority?.medium || 0) + (dSummary.summary.byPriority?.low || 0),
+          };
+        }
+      } catch { /* alertas delivery no bloquean el dashboard */ }
+    }
+
     // ── Quick Finance ──
     const quickFinance = {
       incomeMonth: incomeMonth + salesVolume + deliveryRevenueMonth,
@@ -2525,6 +2551,7 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       quickFinance,
       ...(butcherKpis ? { butcherKpis } : {}),
       ...(constructionKpis ? { constructionKpis } : {}),
+      ...(deliveryAlertsKpi ? { deliveryAlerts: deliveryAlertsKpi } : {}),
       salesClosure,
       updatedAt: now.toISOString(),
     };
@@ -3140,35 +3167,61 @@ setTimeout(() => {
     });
 }, 3000);
 
-// V-10 → ALERT_ENGINE: Motor unificado de alertas (Compras + Stock + Ventas + Operación)
-// Reemplaza el antiguo runStockAlerts individual. Fase 1.
-startAlertEngine();
+// ENGINE_OFF: interruptor global de motores en segundo plano.
+// - En desarrollo (NODE_ENV=development) NO arrancan por defecto: un backend local
+//   olvidado dejaba los motores escaneando CouchDB 24/7. BACKGROUND_ENGINES=on los fuerza.
+// - En producción arrancan siempre (con la puerta de inactividad de engineIdleGate),
+//   salvo BACKGROUND_ENGINES=off.
+const backgroundEnginesEnabled = (() => {
+  const flag = String(process.env.BACKGROUND_ENGINES || '').trim().toLowerCase();
+  if (flag === 'off' || flag === 'false' || flag === '0') return false;
+  if (flag === 'on' || flag === 'true' || flag === '1') return true;
+  return process.env.NODE_ENV !== 'development';
+})();
 
-// ALDV-02: Motor alertas delivery — eventos + barrido seguridad 15 min (umbrales CEO)
-startDeliveryAlertEngine();
+if (!backgroundEnginesEnabled) {
+  logger.info(
+    { tag: 'ENGINE_IDLE', nodeEnv: process.env.NODE_ENV || '' },
+    'Motores en segundo plano DESACTIVADOS (development o BACKGROUND_ENGINES=off) — CouchDB solo se usa al atender peticiones',
+  );
+}
 
-// ALLP-03: Motor alertas limpieza — ciclo rápido 120s independiente
-startCleaningAlertEngine();
+if (backgroundEnginesEnabled) {
+  // V-10 → ALERT_ENGINE: Motor unificado de alertas (Compras + Stock + Ventas + Operación)
+  // Reemplaza el antiguo runStockAlerts individual. Fase 1.
+  startAlertEngine();
 
-// CARN-ALR: Motor alertas carniceria — principal 30 min + bascula 5 min
-startButcherAlertEngine();
+  // ALDV-02: Motor alertas delivery — eventos + barrido seguridad 15 min (umbrales CEO)
+  startDeliveryAlertEngine();
 
-// PO-01: Pedidos automáticos a proveedores — cada 2 horas
-setTimeout(() => runAutoOrdersForAllUsers().catch(() => null), 15000);
-setInterval(() => runAutoOrdersForAllUsers().catch(() => null), 2 * 3600000);
+  // ALLP-03: Motor alertas limpieza — ciclo rápido 120s independiente
+  startCleaningAlertEngine();
 
-// I-05: Backup automático de CouchDB con gzip + rotación
+  // CARN-ALR: Motor alertas carniceria — principal 30 min + bascula 5 min
+  startButcherAlertEngine();
+
+  // PO-01: Pedidos automáticos a proveedores — cada 2 horas (pausado si no hay actividad)
+  setTimeout(() => runAutoOrdersForAllUsers().catch(() => null), 15000);
+  setInterval(() => {
+    if (!shouldRunBackgroundEngine('auto_orders')) return;
+    runAutoOrdersForAllUsers().catch(() => null);
+  }, 2 * 3600000);
+}
+
+// I-05: Backup automático de CouchDB con gzip + rotación (siempre activo: protege datos)
 startBackupScheduler();
 
-// Facturas proveedor por email: polling IMAP (SUPPLIER_INVOICE_IMAP_* y/o credenciales por cuenta en CouchDB)
-setTimeout(() => {
-  startSupplierInvoicePolling().catch((err) =>
-    logger.error({ tag: 'SINV_SCHED', err: err?.message }, 'Error iniciando polling facturas proveedor'),
-  );
-}, 22_000);
+if (backgroundEnginesEnabled) {
+  // Facturas proveedor por email: polling IMAP (SUPPLIER_INVOICE_IMAP_* y/o credenciales por cuenta en CouchDB)
+  setTimeout(() => {
+    startSupplierInvoicePolling().catch((err) =>
+      logger.error({ tag: 'SINV_SCHED', err: err?.message }, 'Error iniciando polling facturas proveedor'),
+    );
+  }, 22_000);
 
-// S-06: Subscription lifecycle — trial expiry, grace period, suspension + emails
-startSubscriptionLifecycle();
+  // S-06: Subscription lifecycle — trial expiry, grace period, suspension + emails
+  startSubscriptionLifecycle();
+}
 
 // CRM-02: Workflow engine scheduler — runs every 4 hours
 async function runAllWorkflows() {
@@ -3201,8 +3254,13 @@ async function runAllWorkflows() {
   }
 }
 
-setTimeout(() => runAllWorkflows().catch(() => null), 20000);
-setInterval(() => runAllWorkflows().catch(() => null), 4 * 3600000);
+if (backgroundEnginesEnabled) {
+  setTimeout(() => runAllWorkflows().catch(() => null), 20000);
+  setInterval(() => {
+    if (!shouldRunBackgroundEngine('crm_workflows')) return;
+    runAllWorkflows().catch(() => null);
+  }, 4 * 3600000);
+}
 
 // C-08/C-09: Lead engine — reasignación + SLA — cada hora
 async function runLeadEngine() {
@@ -3234,8 +3292,13 @@ async function runLeadEngine() {
   }
 }
 
-setTimeout(() => runLeadEngine().catch(() => null), 30000);
-setInterval(() => runLeadEngine().catch(() => null), 3600000);
+if (backgroundEnginesEnabled) {
+  setTimeout(() => runLeadEngine().catch(() => null), 30000);
+  setInterval(() => {
+    if (!shouldRunBackgroundEngine('lead_engine')) return;
+    runLeadEngine().catch(() => null);
+  }, 3600000);
+}
 
 setInterval(() => {
   const mem = process.memoryUsage();
@@ -3299,8 +3362,9 @@ setInterval(() => {
 }, 30000);
 
 // CouchDB caído: chequeo periódico del /_up (usa el mismo healthService).
+// Solo con motores activos (producción): en dev no tiene sentido pingear Couch cada 5 min.
 let lastCouchOk = true;
-setInterval(async () => {
+if (backgroundEnginesEnabled) setInterval(async () => {
   try {
     const cfg = getCouchConfigFromService({ headers: {} });
     const authHeader = buildCouchAuthHeader({ headers: {} });
@@ -3341,7 +3405,7 @@ setInterval(async () => {
     }
     lastCouchOk = false;
   }
-}, Number(process.env.ALERT_COUCH_INTERVAL_MS || 60_000));
+}, Number(process.env.ALERT_COUCH_INTERVAL_MS || 300_000));
 
 function escapeHtml(s) {
   return String(s)

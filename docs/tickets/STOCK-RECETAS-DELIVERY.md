@@ -5,6 +5,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~60% implementado, con el backend muy avanzado (este ticket no usa checkboxes). Hecho: STK-01 (entidad `recipe` con `recipeModel.js`, `recipeController.js`, `recipeRouter.js`, `recipeApi.ts` y sync desde CostingPage vía `recipeSyncFromCosting.ts`), STK-02 (`stockCategory` en `catalog_item`), STK-03 (`recipeStockService.js` con `deductByRecipe`/`deductOrderByRecipe`, idempotencia, reversión con `restoreDeliveryOrderStockFromMovements`, integrado en `deliveryController.js` + embalaje por canal en `orderChannelStockService.js`), STK-04 (`wasteRouter.js` montado en `/api/waste`) y STK-05 (`stockCountRouter.js` en `/api/stock-counts`). Falta de verdad: STK-08 — no existe la página dedicada `/saas/vertical/delivery/stock` (el stock vive en `ComprasStockPage`/`StockTabPanel`/`InventoryPanel` y vistas worker de revisión de stock); STK-06 — las alertas específicas (`high_waste` delivery, `critical_product_today`, `recipe_missing`, `stock_discrepancy`, `ingredient_expiring`) no están en `alertEngine.js` (solo existe merma alta de carnicería); STK-13 — sin informes dedicados de rotación/food-cost/precisión de inventario.
+
+---
+
 ## Estado actual del sistema
 
 ### Ya implementado (backend)

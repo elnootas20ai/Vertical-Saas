@@ -20,7 +20,6 @@ export const DELIVERY_MODULE: VerticalModuleDefinition = {
     '/saas/delivery-catalog',
     '/saas/delivery-integrations',
     '/saas/tpv',
-    '/saas/tpv-rapido',
     '/saas/sala',
     '/saas/caja',
     '/saas/vertical/delivery',

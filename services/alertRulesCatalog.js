@@ -66,6 +66,12 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('register_high_return', 'delivery', 'pdvs', 'Devoluciones elevadas en caja', 'Importe de devoluciones del día por encima del umbral', { ...pushInApp, urgency: 'medium' }),
   r('delivery_order_cancelled', 'delivery', 'delivery', 'Pedido cancelado', 'Un trabajador o el TPV canceló un pedido', { ...pushInApp, urgency: 'high' }),
 
+  // ─── Sala (bar / restaurante) ─────────────────────────────────────────────
+  r('sala_long_occupied_table', 'sala', 'delivery', 'Mesa abierta demasiado tiempo', 'Mesa ocupada sin cobrar más tiempo del límite configurado', { ...pushInApp, urgency: 'medium' }),
+  r('sala_served_pending_close', 'sala', 'delivery', 'Mesa servida sin cobrar', 'Mesa servida pendiente de cobro demasiado tiempo', { ...pushInApp, urgency: 'medium' }),
+  r('sala_slow_kitchen_comanda', 'sala', 'delivery', 'Comanda lenta en cocina', 'Comanda enviada a cocina que supera el tiempo máximo de preparación', { ...pushInApp, urgency: 'high' }),
+  r('sala_incident', 'sala', 'delivery', 'Incidencia en sala', 'Ítems cancelados u otras incidencias en una mesa', { urgency: 'medium' }),
+
   // ─── Finanzas / compras / conciliación / OCR ─────────────────────────────
   r('payment_received', 'finanzas', 'finanzas', 'Pago recibido', 'Se registra un cobro o pago', { enabled: false, urgency: 'low' }),
   r('payment_overdue', 'finanzas', 'finanzas', 'Pago vencido', 'Cobro pendiente que supera la fecha de vencimiento', { ...pushEmail, urgency: 'critical' }),

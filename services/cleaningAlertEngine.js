@@ -23,6 +23,7 @@ import { emitGlobalAlert } from './alertEmitter.js';
 import { broadcastToBusiness, broadcastToUser } from './sseService.js';
 import logger from './logger.js';
 import { canEmitCleaningAlerts } from './moduleAlertUtils.js';
+import { shouldRunBackgroundEngine } from './engineIdleGate.js';
 
 const TAG = 'CLEANING_ALERT_ENGINE';
 const DEFAULT_INTERVAL_MS = 120_000;
@@ -775,7 +776,10 @@ export function startCleaningAlertEngine() {
   logger.info({ tag: TAG }, `Motor alertas limpieza — inicio en ${STARTUP_DELAY_MS / 1000}s, ciclo: ${DEFAULT_INTERVAL_MS / 1000}s`);
   setTimeout(() => {
     runCleaningAlerts().catch(() => null);
-    engineTimer = setInterval(() => runCleaningAlerts().catch(() => null), DEFAULT_INTERVAL_MS);
+    engineTimer = setInterval(() => {
+      if (!shouldRunBackgroundEngine('cleaning_alerts')) return;
+      runCleaningAlerts().catch(() => null);
+    }, DEFAULT_INTERVAL_MS);
   }, STARTUP_DELAY_MS);
 }
 

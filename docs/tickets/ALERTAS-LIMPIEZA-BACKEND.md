@@ -6,6 +6,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~64% completado (61/95 criterios). Núcleo hecho: `services/cleaningAlertEngine.js` existe con ciclo de 120s, dedup de 5 min, escalado 15/30 min, las 9 reglas (ALLP-04..12), constantes/categorías en `alertConstants.js`, bloque `cleaning` en `getAlertConfig()`, arranque en `index.js`, alertas reactivas desde `cleaningController.js` (7 eventos) y los 6 endpoints del Cleaning Hub (`/api/cleaning/hub/*`, frontend alineado). Falta de verdad: resolución automática de alertas persistidas (ALLP-13), routing real por rol trabajador y push dirigido al trabajador (ALLP-14), 3 de los 5 eventos SSE (escalated/acknowledged/summary) y endpoint de acknowledge (ALLP-15), escritura del bloque `cleaning` vía PUT config (falta en `allowedKeys`), sección cleaning en el summary core y conteo en dashboard global (ALLP-18).
+
+---
+
 ## Estado actual del sistema
 
 ### Ya implementado
@@ -152,10 +158,10 @@ Registrar todas las categorías de alerta de limpieza en `alertConstants.js` y a
    | `cleaning_incomplete_checklist` | low | Sí | Calidad — tareas sin completar |
 
 **Criterios de aceptación:**
-- `alertConstants.js` exporta las nuevas categorías y fuente `limpieza`.
-- `deriveSourceFromCategory('cleaning_service_uncovered')` devuelve `'limpieza'`.
-- `normalizeSource('limpieza')` devuelve `'limpieza'`.
-- El sistema arranca sin errores.
+- [x] `alertConstants.js` exporta las nuevas categorías y fuente `limpieza`.
+- [x] `deriveSourceFromCategory('cleaning_service_uncovered')` devuelve `'limpieza'`.
+- [x] `normalizeSource('limpieza')` devuelve `'limpieza'`.
+- [x] El sistema arranca sin errores.
 
 ---
 
@@ -245,11 +251,11 @@ Extender `getAlertConfig()` en `alertEngine.js` con un bloque `cleaning` que con
    - Si no hay datos de limpieza, mantener `cleaning.enabled: false` para no evaluar reglas innecesarias.
 
 **Criterios de aceptación:**
-- La configuración se lee y escribe correctamente vía `GET/PUT /api/alerts/:userId/config`.
-- Los defaults se aplican automáticamente si no hay configuración previa.
-- La migración es suave: cuentas sin bloque `cleaning` obtienen defaults sensatos.
-- Validación de tipos en la escritura.
-- Un negocio sin vertical de limpieza no ejecuta reglas cleaning.
+- [ ] La configuración se lee y escribe correctamente vía `GET/PUT /api/alerts/:userId/config`. *(lectura sí — bloque `cleaning` en `getAlertConfig()` —, pero `allowedKeys` de `updateAlertSettings()` no incluye `cleaning`, así que no se puede escribir)*
+- [x] Los defaults se aplican automáticamente si no hay configuración previa.
+- [x] La migración es suave: cuentas sin bloque `cleaning` obtienen defaults sensatos.
+- [ ] Validación de tipos en la escritura.
+- [x] Un negocio sin vertical de limpieza no ejecuta reglas cleaning. *(`canEmitCleaningAlerts()` de `moduleAlertUtils.js`)*
 
 ---
 
@@ -337,13 +343,13 @@ Crear un ciclo de evaluación rápido (cada 120 segundos por defecto, configurab
    - Health check: si el ciclo no se ejecuta en 5 min, registrar warning.
 
 **Criterios de aceptación:**
-- El motor arranca automáticamente con el servidor.
-- El ciclo se ejecuta cada 120 segundos (configurable vía `alertConfig.cleaning.engineIntervalSeconds`).
-- La deduplicación impide alertas repetidas en ventanas de 5 minutos.
-- El escalado automático de prioridad funciona a los 15 y 30 minutos.
-- El motor no bloquea ni degrada el rendimiento del servidor Express.
-- Solo evalúa businesses con `cleaning.enabled: true`.
-- Se puede detener y reiniciar sin pérdida de estado.
+- [x] El motor arranca automáticamente con el servidor. *(`startCleaningAlertEngine()` en `index.js`)*
+- [ ] El ciclo se ejecuta cada 120 segundos (configurable vía `alertConfig.cleaning.engineIntervalSeconds`). *(ciclo fijo de 120s; `engineIntervalSeconds` se lee en config pero el scheduler no lo usa)*
+- [x] La deduplicación impide alertas repetidas en ventanas de 5 minutos.
+- [x] El escalado automático de prioridad funciona a los 15 y 30 minutos. *(`applyEscalation()`)*
+- [ ] El motor no bloquea ni degrada el rendimiento del servidor Express. *(no verificado con carga)*
+- [x] Solo evalúa businesses con `cleaning.enabled: true`.
+- [x] Se puede detener y reiniciar sin pérdida de estado. *(`stopCleaningAlertEngine()`)*
 
 ---
 
@@ -409,11 +415,11 @@ Para cada cleaning_service con date === hoy o date === mañana:
    - El propio trabajador: nunca (no tiene asignación).
 
 **Criterios de aceptación:**
-- Se detectan servicios de hoy y mañana sin trabajador asignado.
-- La prioridad es alta si el servicio es hoy y queda poco tiempo.
-- Se detectan servicios cuyo trabajador asignado está inactivo o de vacaciones.
-- La alerta incluye datos del servicio (número, cliente, dirección, hora).
-- Se navega al servicio afectado desde la alerta.
+- [x] Se detectan servicios de hoy y mañana sin trabajador asignado.
+- [x] La prioridad es alta si el servicio es hoy y queda poco tiempo.
+- [ ] Se detectan servicios cuyo trabajador asignado está inactivo o de vacaciones. *(no se cruzan `business.members.status` ni `vacation_request`)*
+- [x] La alerta incluye datos del servicio (número, cliente, dirección, hora).
+- [x] Se navega al servicio afectado desde la alerta.
 
 ---
 
@@ -487,11 +493,11 @@ Para cada trabajador con servicios asignados hoy:
    - El propio trabajador: enviar push "¿Estás en camino? Tu servicio en {cliente} empezaba a las {hora}".
 
 **Criterios de aceptación:**
-- Se detectan trabajadores que no se presentan tras la gracia.
-- Se distingue entre ausencia total (sin clockin) y ausencia parcial (clockin pero no check-in).
-- Se calculan los servicios y clientes afectados.
-- Se envía push al trabajador ausente como recordatorio.
-- Se envía alerta al gerente con el impacto completo.
+- [x] Se detectan trabajadores que no se presentan tras la gracia.
+- [x] Se distingue entre ausencia total (sin clockin) y ausencia parcial (clockin pero no check-in).
+- [ ] Se calculan los servicios y clientes afectados. *(`affectedServices` sí; `affectedClients` no)*
+- [ ] Se envía push al trabajador ausente como recordatorio. *(el motor no usa `sendPushToUser`; solo SSE)*
+- [x] Se envía alerta al gerente con el impacto completo.
 
 ---
 
@@ -558,10 +564,10 @@ Para cada cleaning_service con date === hoy y status === 'assigned':
    - Trabajador: enviar push "Recuerda fichar entrada para tu servicio en {cliente} a las {hora}".
 
 **Criterios de aceptación:**
-- Se detectan servicios cuyo check-in no se ha realizado a X minutos del inicio.
-- La alerta es preventiva (antes de la hora del servicio).
-- Se envía push al trabajador como recordatorio.
-- No se duplica con ALLP-05 (son complementarias por ventana temporal).
+- [x] Se detectan servicios cuyo check-in no se ha realizado a X minutos del inicio.
+- [x] La alerta es preventiva (antes de la hora del servicio).
+- [ ] Se envía push al trabajador como recordatorio.
+- [x] No se duplica con ALLP-05 (son complementarias por ventana temporal).
 
 ---
 
@@ -634,11 +640,11 @@ Para cada cleaning_incident con status ∈ {open, in_progress, pending}:
    - Trabajador asignado al servicio: si hay `workerId` en la incidencia.
 
 **Criterios de aceptación:**
-- Incidencias de tipos críticos generan alerta inmediata con prioridad alta.
-- Incidencias normales escalan según las horas sin resolución.
-- Se detectan también incidencias de ejecución sin resolver en servicios completados.
-- La alerta enlaza directamente a la incidencia.
-- Se incluyen datos relevantes: tipo, prioridad, cliente, trabajador, descripción truncada.
+- [x] Incidencias de tipos críticos generan alerta inmediata con prioridad alta.
+- [x] Incidencias normales escalan según las horas sin resolución.
+- [ ] Se detectan también incidencias de ejecución sin resolver en servicios completados. *(solo se evalúan docs `cleaning_incident`, no `execution.incidents[]`)*
+- [x] La alerta enlaza directamente a la incidencia.
+- [ ] Se incluyen datos relevantes: tipo, prioridad, cliente, trabajador, descripción truncada. *(todo salvo la descripción truncada)*
 
 ---
 
@@ -708,11 +714,11 @@ Para cada cliente con servicios de limpieza activos (recurrentes o planificados)
    - Trabajador: nunca (no debe saber del impago).
 
 **Criterios de aceptación:**
-- Se detectan clientes con impago que tienen servicios de limpieza activos.
-- Se calcula el importe total pendiente y los días de retraso.
-- La prioridad escala según los días de retraso.
-- Se incluyen datos de facturas impagadas y próximos servicios.
-- Solo el gerente recibe esta alerta.
+- [x] Se detectan clientes con impago que tienen servicios de limpieza activos.
+- [x] Se calcula el importe total pendiente y los días de retraso.
+- [x] La prioridad escala según los días de retraso.
+- [ ] Se incluyen datos de facturas impagadas y próximos servicios. *(`unpaidItems` sí; `nextScheduledService` no)*
+- [ ] Solo el gerente recibe esta alerta. *(`targetRoles` va en metadata pero el SSE es `broadcastToBusiness` sin filtrado backend por rol)*
 
 ---
 
@@ -809,11 +815,11 @@ Para cada miembro del equipo con servicios de limpieza asignados:
    - Trabajador: solo si es su propio contrato laboral.
 
 **Criterios de aceptación:**
-- Se detectan servicios recurrentes con fecha de fin próxima.
-- Se detectan contratos laborales de trabajadores de limpieza próximos a vencer.
-- La prioridad escala según los días restantes.
-- Se incluye el impacto económico (ingresos mensuales en riesgo).
-- Se diferencia entre contrato de servicio y contrato laboral.
+- [x] Se detectan servicios recurrentes con fecha de fin próxima.
+- [x] Se detectan contratos laborales de trabajadores de limpieza próximos a vencer.
+- [x] La prioridad escala según los días restantes.
+- [ ] Se incluye el impacto económico (ingresos mensuales en riesgo). *(sin `monthlyRevenue` en metadata)*
+- [x] Se diferencia entre contrato de servicio y contrato laboral.
 
 ---
 
@@ -905,11 +911,11 @@ Para cada material de limpieza (catalog_item con subtype 'cleaning_material'):
    - Trabajador: nunca (la gestión de compras es del gerente).
 
 **Criterios de aceptación:**
-- Se detectan materiales agotados con prioridad alta.
-- Se detectan materiales bajo mínimo con prioridad media.
-- Se calcula la cobertura estimada basándose en servicios planificados.
-- Funciona tanto con `subtype: 'cleaning_material'` como con catálogo genérico.
-- La alerta incluye la estimación de cobertura en días.
+- [x] Se detectan materiales agotados con prioridad alta.
+- [x] Se detectan materiales bajo mínimo con prioridad media.
+- [x] Se calcula la cobertura estimada basándose en servicios planificados.
+- [x] Funciona tanto con `subtype: 'cleaning_material'` como con catálogo genérico. *(fallback por `materialType`)*
+- [x] La alerta incluye la estimación de cobertura en días.
 
 ---
 
@@ -990,11 +996,11 @@ Para cada cleaning_route con status === 'active' y date === hoy:
    - Trabajador de la ruta: enviar push "Tu ruta lleva X min de retraso".
 
 **Criterios de aceptación:**
-- Se detecta el retraso en cada entrada de ruta.
-- Se calcula el retraso acumulado de la ruta completa.
-- La prioridad escala según los minutos de retraso.
-- Se incluye el impacto en servicios posteriores.
-- Se envía push al trabajador con su retraso.
+- [x] Se detecta el retraso en cada entrada de ruta.
+- [x] Se calcula el retraso acumulado de la ruta completa.
+- [x] La prioridad escala según los minutos de retraso.
+- [x] Se incluye el impacto en servicios posteriores. *(`remainingEntries` en metadata)*
+- [ ] Se envía push al trabajador con su retraso.
 
 ---
 
@@ -1074,12 +1080,12 @@ Para cada trabajador con servicios de limpieza hoy:
    - Trabajador: notificar cuando alcanza el 90% de su jornada.
 
 **Criterios de aceptación:**
-- Se calcula correctamente las horas trabajadas combinando servicios y fichajes.
-- Se detecta el exceso diario y semanal con umbrales independientes.
-- Se evita el doble conteo de horas.
-- Se descuentan pausas y descansos.
-- La alerta incluye el porcentaje de jornada consumida.
-- Se envía notificación preventiva al trabajador al 90%.
+- [x] Se calcula correctamente las horas trabajadas combinando servicios y fichajes.
+- [x] Se detecta el exceso diario y semanal con umbrales independientes.
+- [ ] Se evita el doble conteo de horas. *(heurística con `Math.max`; el acumulado semanal desde clockins es dudoso)*
+- [x] Se descuentan pausas y descansos. *(`pauseLog` y `break_start/break_end`)*
+- [x] La alerta incluye el porcentaje de jornada consumida.
+- [ ] Se envía notificación preventiva al trabajador al 90%. *(hay alerta warning al 90% pero dirigida a gerentes, sin push al trabajador)*
 
 ---
 
@@ -1150,11 +1156,11 @@ Implementar la lógica transversal de priorización, escalado temporal y resoluc
    ```
 
 **Criterios de aceptación:**
-- Cada tipo de alerta tiene una condición de resolución clara.
-- Las alertas se resuelven automáticamente en el mismo ciclo que detecta la resolución.
-- El escalado temporal funciona a los 15 y 30 minutos.
-- Se emiten eventos SSE de resolución y escalado.
-- Las alertas resueltas mantienen historial con `resolvedAt`.
+- [ ] Cada tipo de alerta tiene una condición de resolución clara. *(no existe `resolveCleaningAlerts()`)*
+- [ ] Las alertas se resuelven automáticamente en el mismo ciclo que detecta la resolución.
+- [x] El escalado temporal funciona a los 15 y 30 minutos.
+- [ ] Se emiten eventos SSE de resolución y escalado. *(`cleaning:alert_resolved` solo en el flujo reactivo; `cleaning:alert_escalated` no existe)*
+- [ ] Las alertas resueltas mantienen historial con `resolvedAt`.
 
 ---
 
@@ -1221,12 +1227,12 @@ Implementar la distribución de alertas de limpieza según el rol del destinatar
    - Push al trabajador: tono de recordatorio, no de reproche.
 
 **Criterios de aceptación:**
-- Las alertas llegan al gerente siempre.
-- Los trabajadores solo reciben alertas de su turno y sus servicios.
-- Push solo se envía en prioridad alta.
-- Las alertas se persisten en notificaciones y se incluyen en el resumen de alertas core.
-- El SSE funciona con `broadcastToBusiness` para distribuir a todos los conectados.
-- Los mensajes se adaptan al perfil del destinatario.
+- [x] Las alertas llegan al gerente siempre. *(persistencia vía `emitGlobalAlert()` + SSE)*
+- [ ] Los trabajadores solo reciben alertas de su turno y sus servicios. *(no hay `routeCleaningAlert()`; el filtrado por rol queda en manos del frontend vía `targetRoles`)*
+- [ ] Push solo se envía en prioridad alta. *(el push depende de los canales del `alertEmitter`, sin regla específica por prioridad para limpieza)*
+- [ ] Las alertas se persisten en notificaciones y se incluyen en el resumen de alertas core. *(se persisten con `source: 'limpieza'`, pero `getAlertSummary()` del motor genérico no tiene sección cleaning)*
+- [x] El SSE funciona con `broadcastToBusiness` para distribuir a todos los conectados.
+- [ ] Los mensajes se adaptan al perfil del destinatario.
 
 ---
 
@@ -1266,11 +1272,11 @@ Definir y emitir los eventos SSE específicos de alertas de limpieza para que el
    - Permite actualizar badges del dashboard sin polling.
 
 **Criterios de aceptación:**
-- Los 5 eventos SSE se emiten correctamente.
-- El payload incluye toda la información necesaria para actualizar la UI sin re-fetch.
-- El evento `alert_triggered` se recibe en < 2 segundos.
-- La resolución automática emite `alert_resolved` en el mismo ciclo.
-- El reconocimiento funciona y se propaga por SSE.
+- [ ] Los 5 eventos SSE se emiten correctamente. *(solo `cleaning:alert_triggered` y `cleaning:alert_resolved` reactivo; faltan escalated, acknowledged y alerts_summary)*
+- [x] El payload incluye toda la información necesaria para actualizar la UI sin re-fetch.
+- [ ] El evento `alert_triggered` se recibe en < 2 segundos. *(no medido)*
+- [ ] La resolución automática emite `alert_resolved` en el mismo ciclo.
+- [ ] El reconocimiento funciona y se propaga por SSE. *(no existe el endpoint de acknowledge)*
 
 ---
 
@@ -1359,13 +1365,13 @@ Crear el controller y router para `/api/cleaning-hub/*` que el frontend ya esper
    - Cálculos de servicios por hora, rentabilidad por cliente, horas por trabajador, tendencia semanal.
 
 **Criterios de aceptación:**
-- Los 6 endpoints responden con la estructura que espera `cleaningHubApi.ts`.
-- Los KPIs se calculan en tiempo real sobre datos del día.
-- Las alertas devueltas son las alertas activas del motor de limpieza.
-- Los trabajadores incluyen datos de fichaje y servicio actual.
-- Los materiales incluyen el flag `isCritical`.
-- Las métricas se calculan correctamente.
-- Todos los endpoints están protegidos con auth y rate limiting.
+- [x] Los 6 endpoints responden con la estructura que espera `cleaningHubApi.ts`. *(montados en `/api/cleaning/hub`, frontend alineado)*
+- [x] Los KPIs se calculan en tiempo real sobre datos del día.
+- [x] Las alertas devueltas son las alertas activas del motor de limpieza. *(`getCleaningAlertSummary()`)*
+- [x] Los trabajadores incluyen datos de fichaje y servicio actual.
+- [x] Los materiales incluyen el flag `isCritical`.
+- [x] Las métricas se calculan correctamente.
+- [x] Todos los endpoints están protegidos con auth y rate limiting. *(`requireAuthAndEmailVerified` + `burstLimiter` + `planAwareLimiter`)*
 
 ---
 
@@ -1429,12 +1435,12 @@ Complementar el ciclo periódico de 120 segundos con alertas reactivas que se di
    ```
 
 **Criterios de aceptación:**
-- Los eventos de escritura disparan alertas reactivas en < 2 segundos.
-- Las alertas reactivas respetan la deduplicación.
-- La respuesta HTTP no se bloquea por la evaluación de alertas.
-- Solo se evalúan las reglas relevantes al evento.
-- Los errores en alertas reactivas no afectan al flujo principal.
-- Las resoluciones reactivas emiten SSE `cleaning:alert_resolved`.
+- [ ] Los eventos de escritura disparan alertas reactivas en < 2 segundos. *(7 eventos integrados en `cleaningController.js`; falta `stock_updated` desde el catálogo)*
+- [x] Las alertas reactivas respetan la deduplicación.
+- [x] La respuesta HTTP no se bloquea por la evaluación de alertas. *(fire-and-forget con `.catch()`)*
+- [x] Solo se evalúan las reglas relevantes al evento. *(`EVENT_TO_RULES`)*
+- [x] Los errores en alertas reactivas no afectan al flujo principal.
+- [x] Las resoluciones reactivas emiten SSE `cleaning:alert_resolved`.
 
 ---
 
@@ -1537,11 +1543,11 @@ Asegurar que el motor de alertas de limpieza está correctamente integrado con t
    - Coordinar con la regla `contract_expiring` del motor genérico para no duplicar alertas de contrato laboral.
 
 **Criterios de aceptación:**
-- Las alertas de limpieza se incluyen en el resumen de alertas core.
-- El dashboard global incluye conteo de alertas de limpieza.
-- Los eventos de escritura en servicios, fichajes, facturas y stock disparan evaluación reactiva.
-- No se duplican alertas entre el motor genérico y el de limpieza.
-- El diagrama de conexiones se cumple íntegramente.
+- [ ] Las alertas de limpieza se incluyen en el resumen de alertas core. *(`getAlertSummary()` no agrega sección cleaning)*
+- [ ] El dashboard global incluye conteo de alertas de limpieza. *(no existe campo `cleaningAlerts` en los KPIs del dashboard)*
+- [ ] Los eventos de escritura en servicios, fichajes, facturas y stock disparan evaluación reactiva. *(solo servicios/incidencias/rutas; fichajes, facturas y stock no)*
+- [ ] No se duplican alertas entre el motor genérico y el de limpieza. *(el motor genérico tiene `checkCleaningRouteAlerts` con categoría `cleaning_route` que solapa con `cleaning_route_delayed`; sin coordinación explícita)*
+- [ ] El diagrama de conexiones se cumple íntegramente.
 
 ---
 

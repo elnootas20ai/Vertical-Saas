@@ -13,6 +13,7 @@ import {
   listAlertsByBusiness,
   getAlertsSummary,
   sanitizeNotification,
+  notificationMatchesScope,
 } from '../services/couchdb.js';
 import {
   mutateAlertStatus,
@@ -28,11 +29,15 @@ function isRevisionConflict(error) {
   return /conflict|409|_rev|updated/i.test(msg);
 }
 
-async function updateAlertDocWithRetry(req, alertId, mutateFn) {
+async function updateAlertDocWithRetry(req, alertId, mutateFn, scopeId = null) {
   for (let attempt = 0; attempt < ALERT_PUT_MAX_ATTEMPTS; attempt += 1) {
     await ensureDatabase(req, NOTIFICATIONS_DB);
     const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
     if (!doc || doc.type !== 'notification' || doc.deletedAt) {
+      return null;
+    }
+    // La alerta debe pertenecer al scope (businessId/userId) de la URL.
+    if (scopeId && !notificationMatchesScope(doc, scopeId)) {
       return null;
     }
 
@@ -157,7 +162,7 @@ export async function getAlertTimeline(req, res) {
     await ensureDatabase(req, NOTIFICATIONS_DB);
     const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
 
-    if (!doc || doc.type !== 'notification') {
+    if (!doc || doc.type !== 'notification' || !notificationMatchesScope(doc, businessId, { includeDeleted: true })) {
       return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
     }
 
@@ -214,7 +219,7 @@ export async function updateAlertStatus(req, res) {
     const userId = req.authUser?.userId || null;
     const updated = await updateAlertDocWithRetry(req, alertId, (doc) =>
       mutateAlertStatus(doc, { status, userId, now }),
-    );
+    businessId);
 
     if (!updated) {
       return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
@@ -263,7 +268,7 @@ export async function bulkUpdateAlertStatus(req, res) {
       try {
         const updated = await updateAlertDocWithRetry(req, id, (doc) =>
           mutateAlertStatus(doc, { status, userId, now }),
-        );
+        businessId);
         return updated ? 'updated' : 'error';
       } catch {
         return 'error';
@@ -298,7 +303,7 @@ export async function assignAlert(req, res) {
     await ensureDatabase(req, NOTIFICATIONS_DB);
     const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
 
-    if (!doc || doc.type !== 'notification' || doc.deletedAt) {
+    if (!doc || doc.type !== 'notification' || doc.deletedAt || !notificationMatchesScope(doc, businessId)) {
       return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
     }
 
@@ -333,7 +338,7 @@ export async function deleteAlert(req, res) {
     await ensureDatabase(req, NOTIFICATIONS_DB);
     const doc = await getDocument(req, NOTIFICATIONS_DB, alertId);
 
-    if (!doc || doc.type !== 'notification') {
+    if (!doc || doc.type !== 'notification' || !notificationMatchesScope(doc, businessId)) {
       return res.status(404).json({ ok: false, error: 'Alerta no encontrada' });
     }
     if (doc.deletedAt) {

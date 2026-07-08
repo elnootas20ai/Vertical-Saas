@@ -5,6 +5,11 @@
 **Tipo:** Módulo opcional dentro de la vertical Delivery.
 **Fecha:** 2026-04-14
 
+## Estado auditado (08/07/2026)
+
+~65% hecho. Completo: entidad `Driver` + CRUD + stats (REP-01/02/03), página `DeliveryReparto.tsx` con vistas gerente/trabajador, asignación manual con modal (Recomendado/Saturado), flujo iniciar ruta → entregado → cobrado con `departedAt`/`deliveredAt` (usa estado dedicado `en_reparto`, más allá del ticket), 4 de 5 alertas client-side, Maps/Llamar/WhatsApp y "Modo repartidor" para gerente. Datos en vivo por SSE + polling 30s (`useDeliveryOrdersLive`).
+Falta de verdad: enlace "Reparto" en la sidebar (la página existe en `/saas/vertical/delivery/reparto` pero no está en `Sidebar.tsx`), panel de configuración/zonas en UI (el backend `reparto_config` sí existe), auto-assign solo por carga (sin modos proximity/hybrid ni ETA), casi todo REP-14 (conexiones CRM/Equipo/Dashboard) y REP-15 (feature flag `ownDeliveryEnabled` existe en backend pero nada lo usa para gatear UI). Ojo: el endpoint `/drivers/:userId/stats` devuelve un shape distinto al tipo `DriverStats` del frontend (no incluye `assignedCount`), lo que afecta a la alerta de repartidor saturado.
+
 ---
 
 ## Auditoría de lo existente
@@ -150,10 +155,10 @@ paymentCollectedBy?: string;      // Quién cobró (driverId)
 - La UI muestra `assignedDriver` como fallback si no hay `driverId`.
 
 #### Criterios de aceptación
-- [ ] Documento `driver` se persiste en `*-delivery` de CouchDB
-- [ ] `DeliveryOrder` tiene los nuevos campos sin romper pedidos existentes
-- [ ] `buildDriverDocument` y `sanitizeDriver` en `couchdb.js`
-- [ ] Vista CouchDB creada para listar drivers por `user_id`
+- [x] Documento `driver` se persiste en `*-delivery` de CouchDB
+- [x] `DeliveryOrder` tiene los nuevos campos sin romper pedidos existentes
+- [x] `buildDriverDocument` y `sanitizeDriver` en `couchdb.js`
+- [ ] Vista CouchDB creada para listar drivers por `user_id` (se usa `listDriversByUser`, no verificada vista dedicada)
 
 ---
 
@@ -200,10 +205,10 @@ Este endpoint devuelve para cada repartidor activo:
 - Último pedido entregado (hora)
 
 #### Criterios de aceptación
-- [ ] CRUD de drivers funcional bajo `/api/delivery/drivers/:userId`
-- [ ] Stats endpoint devuelve datos en tiempo real cruzando con pedidos
-- [ ] Misma estructura de respuesta que otros endpoints delivery (`{ ok, drivers }`)
-- [ ] `requireAuth` y limiters aplicados (ya están en el montaje del router en `index.js`)
+- [x] CRUD de drivers funcional bajo `/api/delivery/drivers/:userId`
+- [ ] Stats endpoint devuelve datos en tiempo real cruzando con pedidos (existe y cruza con pedidos, pero el shape no coincide con `DriverStats`: devuelve `totalOrders/delivered/pending`, sin `assignedCount` ni `pendingCashAmount`)
+- [x] Misma estructura de respuesta que otros endpoints delivery (`{ ok, drivers }`)
+- [x] `requireAuth` y limiters aplicados (ya están en el montaje del router en `index.js`)
 
 ---
 
@@ -253,11 +258,11 @@ export interface DriverStats {
 Añadir los campos nuevos (`driverId`, `departedAt`, `estimatedDeliveryMinutes`, `estimatedArrivalAt`, `zone`, `deliveryDistance`, `paymentCollected`, `paymentCollectedAt`, `paymentCollectedBy`) al interface existente.
 
 #### Criterios de aceptación
-- [ ] Tipo `Driver` exportado desde `deliveryApi.ts`
-- [ ] Tipo `DriverStats` exportado
-- [ ] 5 funciones API client funcionando con los endpoints
-- [ ] `DeliveryOrder` actualizado con nuevos campos (opcionales)
-- [ ] Sin romper compilación TypeScript en componentes existentes
+- [x] Tipo `Driver` exportado desde `deliveryApi.ts`
+- [x] Tipo `DriverStats` exportado
+- [x] 5 funciones API client funcionando con los endpoints
+- [x] `DeliveryOrder` actualizado con nuevos campos (opcionales)
+- [ ] Sin romper compilación TypeScript en componentes existentes (no verificado con build)
 
 ---
 
@@ -340,13 +345,13 @@ function useRepartoData() {
 ```
 
 #### Criterios de aceptación
-- [ ] Página accesible en `/saas/vertical/delivery/reparto`
-- [ ] Aparece en sidebar bajo "Vertical: Delivery"
-- [ ] KPIs calculados en tiempo real
-- [ ] Detecta rol y muestra vista correcta
-- [ ] Polling de datos cada 30s
-- [ ] Layout responsive (mobile-first)
-- [ ] Dark mode compatible
+- [x] Página accesible en `/saas/vertical/delivery/reparto` (también `/saas/delivery-reparto`)
+- [ ] Aparece en sidebar bajo "Vertical: Delivery" (no hay enlace "Reparto" en `Sidebar.tsx`)
+- [x] KPIs calculados en tiempo real
+- [x] Detecta rol y muestra vista correcta
+- [x] Polling de datos cada 30s (SSE con fallback de polling a 30s vía `useDeliveryOrdersLive`)
+- [x] Layout responsive (mobile-first)
+- [x] Dark mode compatible
 
 ---
 
@@ -450,15 +455,15 @@ Incluir tarjeta especial **"Sin asignar"** al principio con los pedidos que no t
 Input de búsqueda que filtra por: número de pedido, nombre de cliente, dirección, teléfono, nombre de repartidor.
 
 #### Criterios de aceptación
-- [ ] Toggle "Por pedidos / Por repartidores" funcional
-- [ ] Filtros completos: estado, repartidor, zona, tiempo, pago
-- [ ] Cards de pedido con toda la info requerida
-- [ ] Cards de repartidor con stats en tiempo real
-- [ ] Expansión inline o drawer al clic en repartidor
-- [ ] Tarjeta "Sin asignar" visible
-- [ ] Búsqueda global funcional
-- [ ] Responsive en mobile, tablet y desktop
-- [ ] Dark mode compatible
+- [x] Toggle "Por pedidos / Por repartidores" funcional
+- [ ] Filtros completos: estado, repartidor, zona, tiempo, pago (hay estado, repartidor, pago y búsqueda; faltan zona y tiempo)
+- [x] Cards de pedido con toda la info requerida
+- [x] Cards de repartidor con stats en tiempo real
+- [x] Expansión inline o drawer al clic en repartidor
+- [x] Tarjeta "Sin asignar" visible
+- [x] Búsqueda global funcional
+- [x] Responsive en mobile, tablet y desktop
+- [x] Dark mode compatible
 
 ---
 
@@ -546,16 +551,16 @@ Cada card muestra prominentemente:
 - Cambiar configuración del módulo
 
 #### Criterios de aceptación
-- [ ] Repartidor solo ve sus pedidos asignados
-- [ ] Sub-tabs: Pendientes, En ruta, Entregados
-- [ ] Botón "Iniciar ruta" registra `departedAt`
-- [ ] Botón "Entregado" registra `deliveredAt` y cambia estado
-- [ ] Botón "Cobrado" registra pago (solo para efectivo pendiente)
-- [ ] Maps con modo navegación (dirección, no solo búsqueda)
-- [ ] Llamar + WhatsApp funcionales
-- [ ] KPIs del repartidor visibles
-- [ ] UI optimizada para uso con una mano en movimiento
-- [ ] No puede ver ni modificar pedidos de otros
+- [x] Repartidor solo ve sus pedidos asignados
+- [x] Sub-tabs: Pendientes, En ruta, Entregados
+- [x] Botón "Iniciar ruta" registra `departedAt`
+- [x] Botón "Entregado" registra `deliveredAt` y cambia estado
+- [x] Botón "Cobrado" registra pago (solo para efectivo pendiente)
+- [x] Maps con modo navegación (dirección, no solo búsqueda)
+- [x] Llamar + WhatsApp funcionales
+- [x] KPIs del repartidor visibles
+- [ ] UI optimizada para uso con una mano en movimiento (no verificado en dispositivo)
+- [x] No puede ver ni modificar pedidos de otros
 
 ---
 
@@ -627,14 +632,14 @@ Ordenar repartidores con lógica de sugerencia:
 Desde la vista "Por repartidores", permitir seleccionar varios pedidos sin asignar y asignarlos a un repartidor de golpe con un botón "Asignar seleccionados a...".
 
 #### Criterios de aceptación
-- [ ] Modal muestra lista real de repartidores con stats
-- [ ] Indicador "Recomendado" basado en zona + carga
-- [ ] Indicador "Saturado" para repartidores al límite
-- [ ] Repartidores offline/break aparecen deshabilitados
-- [ ] La asignación actualiza `driverId` + `assignedDriver` + `stageHistory`
-- [ ] Pedido en `assembly` pasa a `delivery` al asignar
+- [x] Modal muestra lista real de repartidores con stats
+- [ ] Indicador "Recomendado" basado en zona + carga (existe, pero solo por estado activo + carga; no considera zona)
+- [x] Indicador "Saturado" para repartidores al límite
+- [x] Repartidores offline/break aparecen deshabilitados
+- [x] La asignación actualiza `driverId` + `assignedDriver` + `stageHistory`
+- [ ] Pedido en `assembly` pasa a `delivery` al asignar (la asignación no cambia el estado; el flujo actual usa estados en español `listo`/`en_reparto`)
 - [ ] Asignación múltiple funcional
-- [ ] Búsqueda de repartidor en el modal
+- [x] Búsqueda de repartidor en el modal
 
 ---
 
@@ -733,13 +738,13 @@ estimatedDeliveryMinutes = basePreparationMinutes + (distancia_km × estimatedMi
 Guardar `estimatedDeliveryMinutes` y `estimatedArrivalAt` en el pedido.
 
 #### Criterios de aceptación
-- [ ] Documento `reparto_config` con CRUD
-- [ ] Endpoint `/auto-assign/:orderId` funcional con 3 modos
+- [x] Documento `reparto_config` con CRUD (`buildRepartoConfigDocument` + GET/PUT `/reparto-config/:userId`)
+- [ ] Endpoint `/auto-assign/:orderId` funcional con 3 modos (existe, pero solo asigna por carga; sin proximity/hybrid ni zonas)
 - [ ] Trigger automático al completar montaje (si activado)
-- [ ] Panel de configuración accesible solo para gerente
-- [ ] Gestión de zonas con CPs, tiempo base y recargo
+- [ ] Panel de configuración accesible solo para gerente (no hay UI de configuración; la página solo lee la config)
+- [ ] Gestión de zonas con CPs, tiempo base y recargo (soportado en backend, sin UI)
 - [ ] Cálculo de ETA al asignar
-- [ ] Si no hay repartidor disponible, respuesta clara sin error
+- [x] Si no hay repartidor disponible, respuesta clara sin error (400 con mensaje "No hay repartidores disponibles")
 
 ---
 
@@ -797,11 +802,11 @@ Opcionalmente, reflejar filtros en query params de la URL para poder compartir u
 ```
 
 #### Criterios de aceptación
-- [ ] 6 filtros funcionales y combinables
-- [ ] Contadores en cada opción de filtro
+- [ ] 6 filtros funcionales y combinables (hay 4: búsqueda, estado, repartidor, pago; faltan zona y tiempo)
+- [ ] Contadores en cada opción de filtro (solo el filtro de estado los muestra)
 - [ ] Mobile: filtros en bottom sheet
-- [ ] Desktop: barra horizontal compacta
-- [ ] Búsqueda global en tiempo real
+- [x] Desktop: barra horizontal compacta
+- [x] Búsqueda global en tiempo real
 - [ ] Filtros persistidos en sessionStorage
 - [ ] Botón "Limpiar filtros" visible cuando hay filtros activos
 
@@ -876,12 +881,12 @@ toast.success('Teléfono copiado');
 En el drawer de detalle de pedido (tanto en vista gerente como trabajador), mostrar los mismos botones de contacto de forma prominente.
 
 #### Criterios de aceptación
-- [ ] Popover de contacto con 3 opciones (llamar, WhatsApp, copiar)
-- [ ] Link WhatsApp genera URL correcta con prefijo internacional
+- [ ] Popover de contacto con 3 opciones (llamar, WhatsApp, copiar) — hay botones directos Llamar/WhatsApp, sin popover ni copiar
+- [x] Link WhatsApp genera URL correcta con prefijo internacional (`waUrl` en `DeliveryReparto.tsx`)
 - [ ] Mensajes predefinidos de WhatsApp con variables reemplazadas
 - [ ] Copiar teléfono al portapapeles con feedback
-- [ ] Funciona tanto en vista gerente como trabajador
-- [ ] En mobile: WhatsApp y llamar abren la app nativa directamente
+- [x] Funciona tanto en vista gerente como trabajador
+- [x] En mobile: WhatsApp y llamar abren la app nativa directamente (enlaces `tel:` y `wa.me`)
 
 ---
 
@@ -980,13 +985,13 @@ Cuando un pedido se marca como entregado, recalcular:
 - `driver.stats.averageDeliveryMinutes` = media ponderada incluyendo esta nueva entrega
 
 #### Criterios de aceptación
-- [ ] "Iniciar ruta" registra `departedAt` sin cambiar `status`
-- [ ] "Entregado" registra `deliveredAt` y cambia `status` a `delivered`
-- [ ] Modal de confirmación con opción de cobro
-- [ ] `stageHistory` actualizado con cada acción
-- [ ] Stats del repartidor recalculadas al entregar
+- [ ] "Iniciar ruta" registra `departedAt` sin cambiar `status` (registra `departedAt` pero SÍ cambia el estado: se implementó un estado dedicado `en_reparto`, superando el ticket)
+- [x] "Entregado" registra `deliveredAt` y cambia `status` a `delivered` (equivalente en español: `entregado`)
+- [ ] Modal de confirmación con opción de cobro (el marcado de entrega es directo, sin modal; el cobro es un botón aparte)
+- [x] `stageHistory` actualizado con cada acción
+- [ ] Stats del repartidor recalculadas al entregar (las stats se calculan al vuelo en el endpoint, no se persisten en `driver.stats`)
 - [ ] Duración calculada disponible en historial
-- [ ] El tab "Reparto" de `Delivery.tsx` sigue funcionando (retrocompatible)
+- [ ] El tab "Reparto" de `Delivery.tsx` sigue funcionando (retrocompatible) — `Delivery.tsx` ya no existe; se reemplazó por páginas dedicadas
 
 ---
 
@@ -1060,13 +1065,13 @@ Cuando aparece una nueva alerta de severidad `error`, reproducir un sonido breve
 Mostrar badge con número de alertas activas junto al enlace "Reparto" en la sidebar.
 
 #### Criterios de aceptación
-- [ ] 5 tipos de alerta implementados con las condiciones especificadas
-- [ ] Panel de alertas visible en la página de reparto
-- [ ] Cada alerta tiene acción directa (asignar, contactar, reasignar, resolver, cobrar)
-- [ ] Las alertas se recalculan con cada polling de datos
+- [ ] 5 tipos de alerta implementados con las condiciones especificadas (hay 4: `ready_no_dispatch`, `delivery_delayed`, `driver_overloaded`, `delivered_unpaid`; falta `delivery_failed`; además `driver_overloaded` depende de `assignedCount` que el endpoint de stats no devuelve)
+- [x] Panel de alertas visible en la página de reparto
+- [ ] Cada alerta tiene acción directa (asignar, contactar, reasignar, resolver, cobrar) — las alertas son solo texto
+- [x] Las alertas se recalculan con cada polling de datos
 - [ ] Sonido opcional para alertas de error
 - [ ] Badge de alertas en sidebar
-- [ ] Solo visible para gerente (el repartidor no ve alertas globales)
+- [x] Solo visible para gerente (el repartidor no ve alertas globales)
 
 ---
 
@@ -1118,12 +1123,12 @@ Cuando el gerente está activo como repartidor:
 Desde el panel de gestión, el gerente se ve a sí mismo en la lista de repartidores disponibles y puede asignarse pedidos normalmente.
 
 #### Criterios de aceptación
-- [ ] Botón "Activarme como repartidor" visible para gerente
-- [ ] Crea o activa documento `Driver` con `isManager: true`
-- [ ] Toggle para alternar entre panel de gestión y mis entregas
+- [x] Botón "Activarme como repartidor" visible para gerente (botón "Modo repartidor", solo si ya existe su perfil `Driver` con `isManager`)
+- [ ] Crea o activa documento `Driver` con `isManager: true` (no lo crea automáticamente; requiere que exista)
+- [x] Toggle para alternar entre panel de gestión y mis entregas
 - [ ] Al desactivarse, ofrece reasignar pedidos pendientes
-- [ ] Se ve como repartidor disponible en el modal de asignación
-- [ ] No pierde acceso a funciones de gerente mientras está activo
+- [x] Se ve como repartidor disponible en el modal de asignación
+- [x] No pierde acceso a funciones de gerente mientras está activo
 
 ---
 
@@ -1184,14 +1189,14 @@ El módulo de reparto no existe aislado. Debe conectarse con los módulos existe
   - Enlace "Ver todo" → `/saas/vertical/delivery/reparto`.
 
 #### Criterios de aceptación
-- [ ] Columna "Repartidor" visible en tabla de pedidos
+- [ ] Columna "Repartidor" visible en tabla de pedidos (no encontrada en `DeliveryOrders.tsx`)
 - [ ] Enlace "Ver en reparto" desde detalle de pedido
-- [ ] Trigger de auto-asignación al completar montaje
-- [ ] Caja de repartidor usa lista de entidades `Driver`
+- [ ] Trigger de auto-asignación al completar montaje (no encontrado en `DeliveryMontaje.tsx`)
+- [ ] Caja de repartidor usa lista de entidades `Driver` (no verificado)
 - [ ] Sección "Últimas entregas" en ficha CRM del cliente
 - [ ] Stats de delivery en ficha de miembro del equipo
 - [ ] Widget "Reparto en vivo" en Dashboard
-- [ ] Todos los enlaces bidireccionales funcionales
+- [ ] Todos los enlaces bidireccionales funcionales (solo hay enlaces rápidos desde Reparto hacia otros módulos)
 
 ---
 
@@ -1259,12 +1264,12 @@ Al desactivar el módulo:
 - Mostrar aviso: "Módulo desactivado — tus datos se conservan".
 
 #### Criterios de aceptación
-- [ ] Campo `ownDeliveryEnabled` en settings del negocio
+- [x] Campo `ownDeliveryEnabled` en settings del negocio (existe en `reparto_config`, no en settings; default `false`)
 - [ ] Pantalla de activación atractiva con beneficios listados
-- [ ] Sidebar oculta enlace si módulo desactivado
+- [ ] Sidebar oculta enlace si módulo desactivado (no hay enlace de Reparto en sidebar; el flag no gatea nada en UI)
 - [ ] Página muestra pantalla de activación si no está activo
-- [ ] Al desactivar no se borran datos
-- [ ] Retrocompatible: negocios existentes sin el campo ven el módulo desactivado por defecto
+- [ ] Al desactivar no se borran datos (no verificable: no hay UI de activación/desactivación)
+- [ ] Retrocompatible: negocios existentes sin el campo ven el módulo desactivado por defecto (el flag no se consulta en frontend)
 
 ---
 

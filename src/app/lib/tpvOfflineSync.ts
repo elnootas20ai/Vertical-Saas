@@ -1,4 +1,5 @@
 import {
+  createDeliveryOrderRequest,
   updateDeliveryOrderRequest,
   updateTpvRegisterSessionRequest,
   type DeliveryOrder,
@@ -20,6 +21,16 @@ export type TpvOfflineSyncResult = {
 
 async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
   const p = item.payload;
+
+  if (item.type === 'order_create') {
+    const userId = String(p.userId || '').trim();
+    const orderData = p.orderData as Partial<DeliveryOrder> | undefined;
+    if (!userId || !orderData || !Array.isArray(orderData.items) || orderData.items.length === 0) {
+      return false;
+    }
+    await createDeliveryOrderRequest(userId, orderData);
+    return true;
+  }
 
   if (item.type === 'order_update') {
     const userId = String(p.userId || '').trim();

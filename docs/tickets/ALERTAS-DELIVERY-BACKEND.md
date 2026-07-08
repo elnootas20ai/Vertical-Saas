@@ -6,6 +6,33 @@
 
 ---
 
+## ✅ ESTADO: IMPLEMENTADO (auditado contra código el 08/07/2026)
+
+El motor vive en `services/deliveryAlertEngine.js` + `controllers/deliveryAlertController.js` + `routers/deliveryAlertRouter.js` (montado en `/api/delivery/alerts`). Decisión de diseño que sustituye al polling de 60s del diseño original: **motor por eventos** (alertas reactivas en cada escritura de pedido/caja/stock) + **barrido de seguridad cada 15 min**, con umbrales configurables por el CEO (`deliveryOperationalAlertConfig.js`).
+
+| Ticket | Estado | Dónde |
+|--------|--------|-------|
+| ALDV-01 Configuración | ✅ Hecho | `resolveDeliveryAlertConfig()` en `deliveryOperationalAlertConfig.js`, GET/PUT `/api/delivery/alerts/:userId/config` |
+| ALDV-02 Motor independiente | ✅ Hecho (eventos + barrido 15 min, no polling 60s) | `startDeliveryAlertEngine()`, dedup 5 min en `Map`, arrancado en `index.js` |
+| ALDV-03 Pedido retrasado por fase | ✅ Hecho | `checkDelayedOrders()` + `deliveryAlertStatusUtils.js` (fases/es-en, `stageHistory`) |
+| ALDV-04 Cocina saturada | ✅ Hecho (incluye cola desbordada `delivery_queue_overflow`) | `checkKitchenSaturation()` |
+| ALDV-05 Producto agotado en servicio | ✅ Hecho (ciclo + reactivo en `stock_updated`) | `checkDeliveryStock()` + `triggerReactiveAlert` en `deliveryController` |
+| ALDV-06 Rider saturado | ✅ Hecho (incluye `delivery_no_active_riders` y `delivery_unassigned_order`) | `checkRiderSaturation()` |
+| ALDV-07 Caja pendiente de cierre | ✅ Hecho (incluye caja olvidada, caja sin abrir `delivery_register_not_opened` y descuadre repartidor `delivery_driver_mismatch` reactivo) | `checkCashPendingClose()`, `checkRegisterNotOpened()` |
+| ALDV-08 Canal con caída | ✅ Hecho (respeta franjas activas) | `checkChannelHealth()` |
+| ALDV-09 Margen bajo | ✅ Hecho (1 de cada 15 ciclos) | `checkLowMargin()` |
+| ALDV-10 Fallidas / sin cobro / reincidentes | ✅ Hecho | `checkFailedDeliveries()`, `checkUnpaidOrders()`, `checkRepeatIncidentClients()` |
+| ALDV-11 Priorización + escalado | ✅ Hecho (escalado 15/30 min, resolución automática con `reconcileDeliveryAlerts()`) | `ALERT_CLASSIFICATION`, `applyEscalation()` |
+| ALDV-12 Routing por rol | ✅ Hecho vía `emitGlobalAlert()` (roles/canales/quietHours por negocio, `alertRulesCatalog.js`) | `services/alertEmitter.js` |
+| ALDV-13 SSE tiempo real | ✅ Hecho — `delivery:alert_triggered`, `delivery:alert_resolved`, `delivery:alert_escalated`, `delivery:alert_acknowledged`, `delivery:alerts_summary` | engine + controller |
+| ALDV-14 Endpoints API | ✅ Hecho — list, active, config, check, stats, history, acknowledge, dismiss | `deliveryAlertRouter.js` |
+| ALDV-15 Integración ecosistema | ✅ Hecho — resumen core (`getAlertSummary().delivery`), dashboard KPIs (`deliveryAlerts`), centro de alertas | `alertEngine.js`, `index.js` |
+| ALDV-16 Alertas reactivas | ✅ Hecho — `triggerReactiveAlert()` en crear/actualizar pedido, stock y sesiones de caja (fire-and-forget) | `deliveryController.js` |
+
+Notas vs diseño original: los estados usan la nomenclatura real en español (`nuevo/cocina/listo/en_reparto/entregado`) normalizada en `deliveryAlertStatusUtils.js`; las alertas se persisten como notificaciones del centro global (id estable `alert:{category}:{dedupKey}`) en vez de colección propia; acknowledge/dismiss operan sobre esas notificaciones.
+
+---
+
 ## Estado actual del sistema
 
 ### Ya implementado

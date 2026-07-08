@@ -7,6 +7,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~54% completado (38/71 criterios). Bloques sólidos: modelo `cleaning_worker` + CRUD completo (CW-01), página `CleaningWorkers.tsx` con 3 tabs, KPIs, filtros, drawer de 4 pestañas (CW-02/03), endpoint de productividad con retrasos/absentismo/coste por cliente (CW-05 parcial), panel de productividad (CW-06) y las 5 alertas de trabajador en `alertEngine.js` (CW-07). Falta de verdad: selector de trabajador en el formulario de `CleaningServices.tsx` (sigue texto libre), drag & drop en asignación diaria, cruce con fichajes (`clockedHours`/eficiencia), vista "Mi jornada" del trabajador con mapa (CW-08), conexiones con Equipo/Fichajes/Finanzas/Dashboard (CW-09) y sistema de permisos granular (CW-10; solo existe `workerPermissions` en el modelo).
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona
@@ -239,13 +245,13 @@ Migración suave: servicios existentes sin `workerId` siguen mostrando `assigned
 No hace falta nueva entrada en `internalRouters`: las rutas se añaden al `cleaningRouter` existente que ya está montado en `/api/cleaning`.
 
 #### Criterios de aceptación
-- [ ] Documento `cleaning_worker` se persiste en DB `*-cleaning`
-- [ ] CRUD completo (5 endpoints) funcional
-- [ ] API client con tipos TypeScript exportados
-- [ ] `sanitizeCleaningWorker` no expone `_rev` ni campos internos de CouchDB
-- [ ] `CleaningService` acepta `workerId` opcional con fallback a `assignedToName`
-- [ ] Soft delete funciona correctamente (no aparece en listados)
-- [ ] Log de actividad en creación, actualización y eliminación
+- [x] Documento `cleaning_worker` se persiste en DB `*-cleaning`
+- [x] CRUD completo (5 endpoints) funcional
+- [x] API client con tipos TypeScript exportados (`cleaningWorkersApi.ts`)
+- [x] `sanitizeCleaningWorker` no expone `_rev` ni campos internos de CouchDB
+- [x] `CleaningService` acepta `workerId` opcional con fallback a `assignedToName`
+- [x] Soft delete funciona correctamente (no aparece en listados)
+- [x] Log de actividad en creación, actualización y eliminación
 
 ---
 
@@ -320,14 +326,14 @@ Abre modal/drawer de creación (CW-03).
 - Añadir el active path check.
 
 #### Criterios de aceptación
-- [ ] Página accesible en `/saas/cleaning-workers`
-- [ ] 4 KPIs calculados en tiempo real desde datos de trabajadores y servicios
-- [ ] Búsqueda y filtros funcionan combinados
-- [ ] Toggle tarjetas/tabla persiste en localStorage
-- [ ] Badge de documentación caducada visible
-- [ ] Responsive: stack de tarjetas 1 col en móvil, 2 en tablet, 3-4 en desktop
-- [ ] Sidebar muestra el item con highlight cuando está activo
-- [ ] Diseño consistente con las demás páginas de la vertical (CleaningServices, CleaningQuality)
+- [x] Página accesible en `/saas/cleaning-workers`
+- [x] 4 KPIs calculados en tiempo real desde datos de trabajadores y servicios
+- [x] Búsqueda y filtros funcionan combinados (búsqueda + estado + contrato + zona; falta el toggle "Disponibles hoy")
+- [x] Toggle tarjetas/tabla persiste en localStorage
+- [x] Badge de documentación caducada visible
+- [x] Responsive: stack de tarjetas 1 col en móvil, 2 en tablet, 3-4 en desktop
+- [x] Sidebar muestra el item con highlight cuando está activo
+- [x] Diseño consistente con las demás páginas de la vertical (CleaningServices, CleaningQuality)
 
 ---
 
@@ -422,13 +428,13 @@ Formulario editable con secciones visuales:
 Placeholder que se completa en CW-06 con métricas individuales.
 
 #### Criterios de aceptación
-- [ ] Drawer se abre y cierra con animación suave
-- [ ] Todos los campos se guardan con `updateCleaningWorker` al pulsar "Guardar"
-- [ ] Documentación muestra alertas visuales por caducidad
-- [ ] Tab servicios muestra histórico filtrable
-- [ ] Tab materiales permite asignar y devolver
-- [ ] Responsive: drawer ocupa 100% ancho en móvil
-- [ ] Formulario de creación reutiliza el mismo componente con campos vacíos
+- [x] Drawer se abre y cierra con animación suave
+- [x] Todos los campos se guardan con `updateCleaningWorker` al pulsar "Guardar"
+- [x] Documentación muestra alertas visuales por caducidad (badges caducados/por caducar)
+- [ ] Tab servicios muestra histórico filtrable — lista de servicios sin filtros de período
+- [ ] Tab materiales permite asignar y devolver — devolver funciona; no hay modal de "Asignar material"
+- [x] Responsive: drawer ocupa 100% ancho en móvil
+- [x] Formulario de creación reutiliza el mismo componente con campos vacíos (modal "Editar/Nuevo trabajador")
 
 ---
 
@@ -510,13 +516,13 @@ Añadir a `cleaningWorkersApi.ts`:
 | `listUnassignedServices(userId, date)` | Lista servicios sin trabajador asignado para una fecha |
 
 #### Criterios de aceptación
-- [ ] Selector de trabajador funciona en el formulario de creación y edición de servicio
+- [ ] Selector de trabajador funciona en el formulario de creación y edición de servicio — `CleaningServices.tsx` sigue usando input de texto libre
 - [ ] Selector muestra carga y disponibilidad en tiempo real
-- [ ] Vista de asignación diaria muestra planificación visual
+- [x] Vista de asignación diaria muestra planificación visual (tab "Asignación diaria" con servicios por trabajador + sin asignar; no es grid horario)
 - [ ] Drag & drop de servicios sin asignar a trabajadores funciona
-- [ ] Endpoint PATCH assign actualiza servicio y vincula trabajador
-- [ ] Endpoint GET services por worker filtra por rango de fechas
-- [ ] Retrocompatibilidad: servicios sin `workerId` siguen mostrando `assignedToName`
+- [x] Endpoint PATCH assign actualiza servicio y vincula trabajador
+- [x] Endpoint GET services por worker filtra por rango de fechas
+- [x] Retrocompatibilidad: servicios sin `workerId` siguen mostrando `assignedToName`
 
 ---
 
@@ -645,13 +651,13 @@ Añadir a `cleaningWorkersApi.ts`:
 | `getWorkerStats(userId, workerId, period)` | Stats rápido de un trabajador individual |
 
 #### Criterios de aceptación
-- [ ] Endpoint productividad calcula las 6 categorías de métricas correctamente
-- [ ] Retrasos se detectan con umbral de 15 min (configurable)
-- [ ] Absentismo descuenta vacaciones aprobadas si worker está vinculado a equipo
-- [ ] Coste laboral por cliente se agrega correctamente
-- [ ] Respuesta incluye `totals` globales y detalle por worker
-- [ ] Solo accesible por Admin/Gerente
-- [ ] Endpoint de stats individual funciona con períodos today/week/month
+- [ ] Endpoint productividad calcula las 6 categorías de métricas correctamente — 5 de 6; falta cruce con fichajes (`clockedHours`/`efficiency`)
+- [ ] Retrasos se detectan con umbral de 15 min (configurable) — umbral de 15 min hardcodeado, no configurable
+- [ ] Absentismo descuenta vacaciones aprobadas si worker está vinculado a equipo — no cruza con `VacationRequest`
+- [x] Coste laboral por cliente se agrega correctamente (usa coste/hora medio del equipo, no del worker exacto)
+- [x] Respuesta incluye `totals` globales y detalle por worker
+- [ ] Solo accesible por Admin/Gerente — sin control de rol en el endpoint
+- [x] Endpoint de stats individual funciona con períodos today/week/month
 
 ---
 
@@ -735,13 +741,13 @@ Tarjetas de alerta visual (estilo warning cards) que destacan:
 Cada tarjeta: nombre del trabajador, métrica problemática, botón "Ver ficha".
 
 #### Criterios de aceptación
-- [ ] Todas las métricas se refrescan al cambiar período
-- [ ] Ranking ordenable por cualquier columna
-- [ ] Gráfico de coste laboral por cliente legible con hover tooltips
-- [ ] Gráficos de tendencia se ocultan si período < 7 días
-- [ ] Sección "Necesita atención" vacía si todo va bien (muestra mensaje positivo)
-- [ ] Responsive: gráficos se apilan en móvil, tabla scroll horizontal
-- [ ] Loading states con skeletons mientras se cargan datos
+- [x] Todas las métricas se refrescan al cambiar período (Hoy/Semana/Mes/Personalizado con rango)
+- [ ] Ranking ordenable por cualquier columna — tabla de ranking existe pero sin ordenación por click
+- [x] Gráfico de coste laboral por cliente legible con hover tooltips — barras de progreso con top 3 en rojo, sin tooltips
+- [ ] Gráficos de tendencia se ocultan si período < 7 días — no hay gráficos de tendencia
+- [x] Sección "Necesita atención" vacía si todo va bien (muestra mensaje positivo)
+- [x] Responsive: gráficos se apilan en móvil, tabla scroll horizontal
+- [ ] Loading states con skeletons mientras se cargan datos — spinner genérico, no skeletons
 
 ---
 
@@ -840,13 +846,13 @@ cleaningWorkerAlerts: {
 ```
 
 #### Criterios de aceptación
-- [ ] Las 5 categorías de alertas se evalúan cada ciclo del alert engine
-- [ ] Solo se evalúan si `businessType === 'cleaning'` o existen workers de limpieza
-- [ ] Dedup funciona: la misma alerta no se duplica en el mismo período
-- [ ] Alertas se emiten por SSE y Web Push
-- [ ] Umbrales configurables por el admin
-- [ ] Alerta de ausencia respeta gracia de 30 min (configurable)
-- [ ] Alerta de documentación cubre tanto caducados como próximos a caducar
+- [x] Las 5 categorías de alertas se evalúan cada ciclo del alert engine (`checkCleaningWorkerAlerts`)
+- [x] Solo se evalúan si `businessType === 'cleaning'` o existen workers de limpieza (return si no hay workers)
+- [x] Dedup funciona: la misma alerta no se duplica en el mismo período (dedupKeys por worker/fecha/semana/doc)
+- [x] Alertas se emiten por SSE y Web Push (vía `emitAlert` estándar del motor)
+- [ ] Umbrales configurables por el admin — 10%, 30 min, 30 días y 40%/3 están hardcodeados
+- [ ] Alerta de ausencia respeta gracia de 30 min (configurable) — gracia de 30 min fija, no configurable
+- [x] Alerta de documentación cubre tanto caducados como próximos a caducar
 
 ---
 
@@ -905,7 +911,7 @@ Tarjetas en la parte superior:
 - Cada item: fecha, cliente, duración, rating.
 
 #### Criterios de aceptación
-- [ ] Timeline de jornada muestra servicios del día ordenados por hora
+- [ ] Timeline de jornada muestra servicios del día ordenados por hora — `WorkerTpvCleaning.tsx` sigue siendo vista TPV, sin "Mi jornada"
 - [ ] Hora actual visible como referencia en el timeline
 - [ ] Mini mapa muestra ubicaciones de servicios con ruta
 - [ ] Resumen rápido calcula en tiempo real
@@ -978,9 +984,9 @@ No implementar funcionalidad de rutas completa ahora. Solo preparar la infraestr
 - [ ] Badge "Trabajador limpieza" aparece en Team.tsx si el miembro está vinculado
 - [ ] Fichajes muestra métricas de limpieza junto a ventas para negocios de limpieza
 - [ ] Dashboard muestra widget de personal limpieza
-- [ ] Endpoint de labor-cost devuelve coste laboral del período
-- [ ] Dashboard-summary cacheable y liviano
-- [ ] Campos de ruta preparados en CleaningService (sin UI de optimización)
+- [ ] Endpoint de labor-cost devuelve coste laboral del período — no existe
+- [ ] Dashboard-summary cacheable y liviano — no existe
+- [x] Campos de ruta preparados en CleaningService (el módulo de rutas `cleaning_route` ya existe y va más allá)
 
 ---
 
@@ -1057,10 +1063,10 @@ workerPermissions: {
 Editable por el gerente desde la ficha del trabajador (CW-03, sección "Permisos").
 
 #### Criterios de aceptación
-- [ ] Endpoints protegidos por permisos específicos de limpieza
-- [ ] Gerente ve todo: costes, productividad, documentación, asignaciones
+- [ ] Endpoints protegidos por permisos específicos de limpieza — las claves `cleaning_workers_*` no existen
+- [x] Gerente ve todo: costes, productividad, documentación, asignaciones (la ruta está protegida con `RequireBusinessOwner`)
 - [ ] Trabajador solo ve su jornada y sus servicios
-- [ ] Tab documentación del worker respeta `canViewOwnDocs`
+- [ ] Tab documentación del worker respeta `canViewOwnDocs` — el campo `workerPermissions` existe en el modelo pero no se usa en UI
 - [ ] Sidebar oculta `cleaning-workers` para roles sin permiso
 - [ ] Un trabajador no puede ver datos de otro trabajador
 - [ ] Permisos integrados con sistema de roles existente (`ROLE_DEFINITIONS`)

@@ -304,6 +304,7 @@ const menuItemDefs = [
   { id: 'delivery-ops',     navKey: 'deliveryOps',     icon: <Activity className="w-5 h-5" />, path: '/saas/delivery-ops' },
   { id: 'tpv',              navKey: 'tpv',             icon: <Receipt className="w-5 h-5" />,  path: '/saas/tpv' },
   { id: 'sala',             navKey: 'sala',             icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/sala' },
+  { id: 'cocina',           navKey: 'deliveryKitchen',  icon: <ChefHat className="w-5 h-5" />, path: '/saas/cocina' },
   { id: 'reservas',         navKey: 'reservations',     icon: <BookmarkCheck className="w-5 h-5" />, path: '/saas/reservations' },
   { id: 'lista-espera',     navKey: 'listaEspera',      icon: <ListChecks className="w-5 h-5" />, path: '/saas/lista-espera' },
   { id: 'tpv-locales',      navKey: 'tpvLocales',      icon: <Store className="w-5 h-5" />,    path: '/saas/tpv/locales' },
@@ -554,7 +555,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   },
   restaurant: {
     clientesCrm: ['clients'],
-    delivery: ['sala', 'reservas', 'lista-espera', 'caja'],
+    delivery: ['sala', 'cocina', 'tpv-rapido', 'caja', 'reservas', 'lista-espera'],
   },
   events: {
     clientesCrm: ['clients'],
@@ -569,6 +570,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
 const RESTAURANT_SIDEBAR_PATH_OVERRIDES: Record<string, string> = {
   caja: '/saas/caja',
   'tpv-rapido': '/saas/caja/tpv',
+  reports: '/saas/vertical/restaurant/informes',
 };
 
 function resolveSidebarItemPath(item: SidebarItem, isRestaurantVertical: boolean): string {
@@ -1316,7 +1318,7 @@ function SidebarInner({
       item.id === 'tpv-locales' ||
       item.id === 'caja';
     const deliveryOperational =
-      item.id === 'sala' || item.id === 'reservas' || item.id === 'lista-espera';
+      item.id === 'sala' || item.id === 'cocina' || item.id === 'reservas' || item.id === 'lista-espera';
     const permission = permissionMap[item.id]
       || (item.id === 'catalog-stock' ? permissionMap.catalog : undefined)
       || (item.id === 'leads' ? permissionMap.clients : undefined)
@@ -1391,6 +1393,8 @@ function SidebarInner({
     (item.id === 'promotions' && location.pathname.startsWith('/saas/promotions')) ||
     (item.id === 'caja' && (location.pathname.startsWith('/saas/caja') || location.pathname.startsWith('/saas/vertical/delivery/caja'))) ||
     (item.id === 'sala' && location.pathname.startsWith('/saas/sala')) ||
+    (item.id === 'cocina' && location.pathname.startsWith('/saas/cocina')) ||
+    (item.id === 'reports' && location.pathname.startsWith('/saas/vertical/restaurant/informes')) ||
     (item.id === 'reservas' && (location.pathname.startsWith('/saas/reservations') || location.pathname.startsWith('/saas/reservas'))) ||
     (item.id === 'lista-espera' && location.pathname.startsWith('/saas/lista-espera')) ||
     (item.id === 'web-orders' && location.pathname.startsWith('/saas/web-orders')) ||

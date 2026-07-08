@@ -64,6 +64,7 @@ import { emitGlobalAlert } from './alertEmitter.js';
 import { runCompraventaAlerts, getCompraventaAlertConfig } from './compraventaAlertEngine.js';
 import { runScrapyardAlerts, getScrapyardAlertConfig } from './scrapyardAlertEngine.js';
 import { expireOverdueRequests, sendScheduledReminders } from './signatureAutomation.js';
+import { shouldRunBackgroundEngine } from './engineIdleGate.js';
 import logger from './logger.js';
 
 const ALERT_INTERVAL_MS = 3_600_000;
@@ -3493,17 +3494,19 @@ async function checkLongOccupiedTables(ctx, salaDocs, config) {
     if (!table.occupiedAt) continue;
     const mins = (now.getTime() - new Date(table.occupiedAt).getTime()) / 60_000;
     if (mins >= threshold) {
-      alerts.push({
-        type: 'long_occupied_table',
-        severity: mins >= threshold * 2 ? 'critical' : 'warning',
-        entityId: table._id,
-        entityLabel: `Mesa #${table.number}`,
+      const critical = mins >= threshold * 2;
+      alerts.push(await emit({
+        ...ctx, dedupKey: `salaoccupied-${table._id}`,
+        level: critical ? 'alert' : 'warning', priority: critical ? 'high' : 'medium',
+        category: 'sala_long_occupied_table', source: 'delivery',
+        title: 'Mesa abierta demasiado tiempo',
         message: `Mesa #${table.number} lleva ${Math.floor(mins / 60)}h ${Math.floor(mins % 60)}min abierta sin cobrar`,
-        ...ctx,
-      });
+        entityId: table._id, entityType: 'dining_table', route: '/saas/sala',
+        metadata: { tableNumber: table.number, minutes: Math.floor(mins) },
+      }));
     }
   }
-  return alerts;
+  return alerts.filter(Boolean);
 }
 
 async function checkServedPendingClose(ctx, salaDocs, config) {
@@ -3515,17 +3518,18 @@ async function checkServedPendingClose(ctx, salaDocs, config) {
   for (const order of orders) {
     const mins = (now.getTime() - new Date(order.servedAt).getTime()) / 60_000;
     if (mins >= threshold) {
-      alerts.push({
-        type: 'served_pending_close',
-        severity: 'warning',
-        entityId: order._id,
-        entityLabel: `Mesa #${order.tableNumber}`,
+      alerts.push(await emit({
+        ...ctx, dedupKey: `salapending-${order._id}`,
+        level: 'warning', priority: 'medium',
+        category: 'sala_served_pending_close', source: 'delivery',
+        title: 'Mesa servida sin cobrar',
         message: `Mesa #${order.tableNumber} servida hace ${Math.floor(mins)}min — pendiente de cobro`,
-        ...ctx,
-      });
+        entityId: order._id, entityType: 'dining_order', route: '/saas/sala',
+        metadata: { tableNumber: order.tableNumber, minutes: Math.floor(mins) },
+      }));
     }
   }
-  return alerts;
+  return alerts.filter(Boolean);
 }
 
 async function checkSlowKitchenComandas(ctx, salaDocs, config) {
@@ -3540,18 +3544,20 @@ async function checkSlowKitchenComandas(ctx, salaDocs, config) {
       if (!comanda.sentToKitchenAt) continue;
       const mins = (now.getTime() - new Date(comanda.sentToKitchenAt).getTime()) / 60_000;
       if (mins >= threshold) {
-        alerts.push({
-          type: 'slow_kitchen_comanda',
-          severity: mins >= threshold * 2 ? 'critical' : 'warning',
-          entityId: order._id,
-          entityLabel: `Comanda #${comanda.orderNumber} Mesa #${order.tableNumber}`,
+        const critical = mins >= threshold * 2;
+        alerts.push(await emit({
+          ...ctx, dedupKey: `slowcomanda-${order._id}-${comanda.id || comanda.orderNumber || ''}`,
+          level: critical ? 'alert' : 'warning', priority: critical ? 'high' : 'medium',
+          category: 'sala_slow_kitchen_comanda', source: 'delivery',
+          title: 'Comanda lenta en cocina',
           message: `Comanda #${comanda.orderNumber} de Mesa #${order.tableNumber} lleva ${Math.floor(mins)}min en cocina`,
-          ...ctx,
-        });
+          entityId: order._id, entityType: 'dining_order', route: '/saas/cocina',
+          metadata: { tableNumber: order.tableNumber, comandaNumber: comanda.orderNumber, minutes: Math.floor(mins) },
+        }));
       }
     }
   }
-  return alerts;
+  return alerts.filter(Boolean);
 }
 
 async function checkSalaIncidents(ctx, salaDocs, config) {
@@ -3564,17 +3570,18 @@ async function checkSalaIncidents(ctx, salaDocs, config) {
       .flatMap((c) => c.items || [])
       .filter((i) => i.status === 'cancelled');
     if (cancelledItems.length > 0) {
-      alerts.push({
-        type: 'sala_incident',
-        severity: 'warning',
-        entityId: order._id,
-        entityLabel: `Mesa #${order.tableNumber}`,
+      alerts.push(await emit({
+        ...ctx, dedupKey: `salaincident-${order._id}`,
+        level: 'warning', priority: 'medium',
+        category: 'sala_incident', source: 'delivery',
+        title: 'Incidencia en sala',
         message: `Incidencia en Mesa #${order.tableNumber}: ${cancelledItems.length} ítem(s) cancelado(s)`,
-        ...ctx,
-      });
+        entityId: order._id, entityType: 'dining_order', route: '/saas/sala',
+        metadata: { tableNumber: order.tableNumber, cancelledItems: cancelledItems.length },
+      }));
     }
   }
-  return alerts;
+  return alerts.filter(Boolean);
 }
 
 async function runSalaAlerts(ctx, userId, config) {
@@ -3738,7 +3745,31 @@ export async function getAlertSummary(userId) {
     construction: await getConstructionSummaryForUser(userId, now, config),
     butcher: await getButcherAlerts(userId, now),
     compraventa: await getCompraventaSummaryForUser(userId, vehicles, now),
+    delivery: await getDeliverySummaryForUser(userId),
   };
+}
+
+/** ALDV-15: agrega las alertas del motor delivery al resumen core. */
+async function getDeliverySummaryForUser(userId) {
+  try {
+    const { getDeliveryAlertSummary } = await import('./deliveryAlertEngine.js');
+    const result = await getDeliveryAlertSummary(userId);
+    if (!result?.summary?.total) return null;
+    const sorted = [...result.alerts].sort((a, b) => {
+      const order = { high: 0, medium: 1, low: 2 };
+      return (order[a.priority] ?? 2) - (order[b.priority] ?? 2);
+    });
+    return {
+      active: result.summary.total,
+      byPriority: result.summary.byPriority,
+      byType: result.summary.byType,
+      mostCritical: sorted[0]
+        ? { alertType: sorted[0].alertType, priority: sorted[0].priority, title: sorted[0].title }
+        : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function getConstructionSummaryForUser(userId, now, config) {
@@ -3905,7 +3936,10 @@ export function startAlertEngine() {
 
   setTimeout(() => {
     runAlertEngine().catch(() => null);
-    engineTimer = setInterval(() => runAlertEngine().catch(() => null), ALERT_INTERVAL_MS);
+    engineTimer = setInterval(() => {
+      if (!shouldRunBackgroundEngine('alert_engine')) return;
+      runAlertEngine().catch(() => null);
+    }, ALERT_INTERVAL_MS);
   }, STARTUP_DELAY_MS);
 }
 

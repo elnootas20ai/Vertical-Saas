@@ -2,6 +2,7 @@ import logger from './logger.js';
 import { isImapConfigured } from './imapService.js';
 import { processIncomingEmails } from './supplierInvoiceProcessor.js';
 import { ACCOUNTS_DB, ensureDatabase, getAllDocuments } from './couchdb.js';
+import { shouldRunBackgroundEngine } from './engineIdleGate.js';
 
 const POLL_INTERVAL_MS = Number(process.env.SUPPLIER_INVOICE_POLL_INTERVAL_MS || 300_000);
 const STARTUP_DELAY_MS = 20_000;
@@ -110,6 +111,7 @@ export async function startSupplierInvoicePolling() {
   }, STARTUP_DELAY_MS);
 
   intervalId = setInterval(() => {
+    if (!shouldRunBackgroundEngine('supplier_invoice_poll')) return;
     runPollCycle().catch((err) =>
       logger.error({ tag: 'SINV_SCHED', err: err.message }, 'Error en ciclo periódico'),
     );

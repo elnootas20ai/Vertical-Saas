@@ -6,6 +6,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~55% hecho.** Bloques completos: PV-01 (modelo comercial completo en `buildVehicleDocument`/`sanitizeVehicle`), PV-03 (margen persistido + bloqueo precio mínimo configurable), PV-04 (endpoint `commercial-status` con transiciones validadas y sync de inventario), PV-06 (alertas en `compraventaAlertEngine.js`), y PV-08 casi completo (`PublicacionVentaPage` con pipeline/tabla/cards, KPIs, ficha comercial, deep-link; falta entrada en Sidebar, drag&drop y gating por permisos). Parciales: PV-02 (backend guarda `reasonCategory`/`priceVariation` y la cadena API acepta el motivo, pero el modal en `VehicleDetail` no está cableado y el backend no rechaza sin motivo), PV-05 (los canales se muestran pero NO hay flujo publicar/retirar con URL — solo plantillas de copiar/pegar, confirmado), PV-07 (sub-permisos backend `buildVehicleSubPermissions` + `stripFinancials`, sin validación de precio por rol ni UI). Falta de verdad: PV-09/PV-10/PV-12/PV-13 (conexiones Vehículos/CRM/Dashboard/Documentación). Ojo: el cierre de venta SÍ crea movimiento financiero (`ensureSaleIncomeFromClosure`), PV-11 parcial.
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona

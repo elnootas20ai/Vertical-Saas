@@ -2622,6 +2622,7 @@ export function CatalogPage() {
       const mapped = await mapImportEntryToCatalogItem(entry as Record<string, string>, {
         businessId: businessId || '',
         brandCache,
+        vertical: catalogVertical,
       });
       if (!mapped) continue;
       brandCache = mapped.brandCache;

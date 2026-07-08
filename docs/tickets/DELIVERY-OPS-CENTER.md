@@ -5,6 +5,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~85% implementado (este ticket no usa checkboxes; auditoría por bloques). Hecho: DL-01 (`delivery_config` + CRUD en `deliveryRouter`), DL-02 (`salesPointId`/`salesPointName` en pedidos), DL-03 (`GET /api/delivery/ops-center/:userId` con filtros PDV/canal/franja/fecha), DL-04 (eventos SSE `delivery:order_created`/`order_status_changed`/`incident_*` + motor `deliveryAlertEngine.js`), DL-05/06/07 (página `DeliveryOpsCenter.tsx` con FiltersBar, Pipeline clicable y SSE + fallback), DL-09 a DL-16 (widgets de alertas, métricas, cocina, montaje, reparto, caja, incidencias y mesas). Desviaciones: la ruta final es `/saas/delivery-ops` (no `/saas/vertical/delivery`); el motor de alertas es por eventos + barrido cada 15 min (no polling 60s); no hay filtro por sede/`workCenterId` en el endpoint. DL-18 se implementó distinto: los trabajadores reciben 403 en ops-center y se les redirige a sus páginas operativas (cocina/TPV/reparto), no una vista limitada del centro.
+
+---
+
 ## Estado actual del sistema
 
 ### Ya implementado (backend + frontend)

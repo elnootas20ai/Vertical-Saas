@@ -589,6 +589,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     }
     try {
       if (window.history.length > 1) window.history.back();
+      else if (isRestaurantBusinessType(currentBusiness?.businessType)) navigate('/saas/caja');
       else navigate('/saas/delivery-ops');
     } catch {
       // ignore

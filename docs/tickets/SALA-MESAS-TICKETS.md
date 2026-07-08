@@ -4,6 +4,12 @@
 **Objetivo:** Gestionar el servicio en local cuando el negocio tenga mesas físicas (módulo opcional).  
 **Fecha:** 2026-04-14
 
+## Estado auditado (08/07/2026)
+
+~60% hecho, con backend casi completo: `salaRouter.js` + `salaController.js` cubren mesas/muros/plano, pedidos `dining_order` con comandas, split (equal/by_item/custom), merge, pago parcial, cierre con verificaciones y forzado, pickups, vínculo CRM y stats de mesa; `salaApi.ts` tiene todos los tipos y funciones; las 4 alertas de sala están en `alertEngine.js`; hay SSE (`sala:*`) en cada transición y transiciones automáticas de mesa (occupied/served/pending_payment/available).
+Arquitectura distinta al ticket: `/saas/sala` es un CONFIGURADOR (SalaManager: salas, mesas, TPVs por tienda, wizard), la operación de mesas/comandas vive en el TPV de restaurante (`RestaurantTpvPage` + `restaurantDiningTpv.ts`, con modal de comensales y split equitativo) y la cocina de comandas en `RestaurantKitchenPage` (separada de la cocina delivery, no unificada).
+Falta de verdad: feature flag de módulo (SALA-03, no existe `modules.sala`), permiso `sala` en backend (`TEAM_PERMISSION_KEYS` no lo incluye; solo está en `roleCatalog.ts`), UI de split por ítem/personalizado y de unir mesas, integración del cobro con Finanzas, recogidas visibles en sala (solo endpoint) y vinculación CRM/historial de sala en la ficha de cliente.
+
 ---
 
 ## Auditoría de lo existente
@@ -210,13 +216,13 @@ app.use('/api/sala', requireAuth, salaRouter);
 Crear helper en el frontend que al cargar la nueva página de sala detecte datos en `tpv_tables`, `tpv_walls`, `tpv_bars` en localStorage, los envíe al servidor vía `saveDiningTable` / `saveDiningWall` / `saveFloorConfig` y marque la migración como completada (`tpv_migrated_to_server: true`).
 
 #### Criterios de aceptación
-- [ ] Documentos `dining_table`, `dining_wall`, `dining_floor_config` se persisten en CouchDB
-- [ ] CRUD completo funcional vía API y API client
-- [ ] Campos `capacity`, `currentGuests`, `occupiedAt`, `occupiedBy` disponibles
-- [ ] Estado `reserved` y `pending_payment` añadidos respecto al modelo actual
-- [ ] Bulk update de posiciones funciona para drag & drop
+- [x] Documentos `dining_table`, `dining_wall`, `dining_floor_config` se persisten en CouchDB
+- [x] CRUD completo funcional vía API y API client
+- [x] Campos `capacity`, `currentGuests`, `occupiedAt`, `occupiedBy` disponibles
+- [x] Estado `reserved` y `pending_payment` añadidos respecto al modelo actual
+- [x] Bulk update de posiciones funciona para drag & drop (además hay `bulk-create`)
 - [ ] Migración automática de datos de localStorage al servidor
-- [ ] Los datos se comparten entre dispositivos del mismo negocio
+- [x] Los datos se comparten entre dispositivos del mismo negocio (persistencia servidor + SSE)
 
 ---
 
@@ -367,14 +373,14 @@ export interface DiningPayment {
 | `cancelDiningOrder(userId, orderId, reason)` | Cancelar pedido |
 
 #### Criterios de aceptación
-- [ ] Documento `dining_order` se persiste en CouchDB con todas las comandas como subdocumento
-- [ ] Una mesa puede tener múltiples comandas secuenciales (1ª ronda, 2ª ronda…)
-- [ ] Cada ítem de comanda admite campo `notes` para observaciones (alergias, preferencias)
-- [ ] El total del pedido se recalcula automáticamente al añadir/editar/cancelar comandas
-- [ ] Los pagos se registran individualmente para soportar cuentas divididas
-- [ ] El estado de la comanda transiciona: `draft` → `sent_to_kitchen` → `in_preparation` → `ready` → `served`
-- [ ] No se puede cerrar un pedido si hay importes pendientes de pago
-- [ ] Cancelar una comanda ya enviada requiere `cancelledReason`
+- [x] Documento `dining_order` se persiste en CouchDB con todas las comandas como subdocumento
+- [x] Una mesa puede tener múltiples comandas secuenciales (1ª ronda, 2ª ronda…)
+- [x] Cada ítem de comanda admite campo `notes` para observaciones (alergias, preferencias)
+- [x] El total del pedido se recalcula automáticamente al añadir/editar/cancelar comandas
+- [x] Los pagos se registran individualmente para soportar cuentas divididas
+- [x] El estado de la comanda transiciona: `draft` → `sent_to_kitchen` → `in_preparation` → `ready` → `served`
+- [x] No se puede cerrar un pedido si hay importes pendientes de pago (salvo cierre forzado con motivo)
+- [x] Cancelar una comanda ya enviada requiere `cancelledReason`
 
 ---
 
@@ -426,8 +432,10 @@ export interface BusinessSettings {
 - Los trabajadores ven o no el módulo según el toggle + sus permisos individuales.
 
 #### Criterios de aceptación
+Nota de auditoría: no existe `modules.sala`; la visibilidad de Sala se resuelve por vertical de negocio (restaurante/delivery) en `Sidebar.tsx`, no por toggle.
+
 - [ ] Toggle de módulo persiste en la configuración del negocio
-- [ ] El sidebar oculta/muestra "Sala" según el estado del toggle
+- [ ] El sidebar oculta/muestra "Sala" según el estado del toggle (se muestra según la vertical, no según toggle)
 - [ ] La ruta `/saas/sala` redirige si el módulo está desactivado
 - [ ] Solo Admin/Gerente pueden cambiar el toggle
 - [ ] La UI de settings muestra un card descriptivo del módulo
@@ -502,14 +510,16 @@ Al seleccionar una mesa en cualquier vista:
 | `DiningFilters.tsx` | `components/saas/sala/` | Barra de filtros (zona, estado, búsqueda) |
 
 #### Criterios de aceptación
-- [ ] Ruta `/saas/sala` accesible desde el sidebar (si módulo activo)
-- [ ] Vista mapa funcional con todas las features del canvas actual
+Nota de auditoría: `/saas/sala` existe pero renderiza `SalaManager` (configurador de salas/mesas/TPVs con wizard), no la vista operativa de servicio descrita aquí; la operación vive en el TPV de restaurante.
+
+- [x] Ruta `/saas/sala` accesible desde el sidebar (si módulo activo)
+- [ ] Vista mapa funcional con todas las features del canvas actual (la página actual es de configuración, no el mapa operativo con estados en vivo)
 - [ ] Vista listado como alternativa al mapa, con cards y filtros
 - [ ] KPIs visibles: mesas ocupadas, comensales, pedidos abiertos, facturación turno
-- [ ] Panel lateral se abre al seleccionar una mesa
+- [ ] Panel lateral se abre al seleccionar una mesa (hay panel de detalle de sala/mesa, pero de configuración)
 - [ ] Panel lateral muestra diferentes acciones según estado de la mesa
 - [ ] Responsive: en móvil la vista listado es la principal, mapa en horizontal/tablet
-- [ ] Traducciones en los 5 idiomas del sistema
+- [ ] Traducciones en los 5 idiomas del sistema (no verificado)
 
 ---
 
@@ -561,14 +571,14 @@ Actualmente al añadir un producto a una mesa en `TpvTab`, se crea directamente 
 - Total acumulado del pedido visible en la parte inferior del panel.
 
 #### Criterios de aceptación
-- [ ] Modal de apertura de mesa con campo de comensales obligatorio
-- [ ] Se puede vincular opcionalmente un cliente de CRM al abrir mesa
-- [ ] Selector de productos con categorías, búsqueda y notas por ítem
-- [ ] Las comandas se crean como borrador (`draft`) antes de enviar
-- [ ] Botón "Enviar a cocina" cambia status y emite evento SSE
-- [ ] Las comandas se numeran secuencialmente dentro del pedido
-- [ ] Total del pedido se recalcula en tiempo real al añadir/editar ítems
-- [ ] Se puede crear una nueva comanda sin cerrar la anterior (rondas)
+- [x] Modal de apertura de mesa con campo de comensales obligatorio (`RestaurantSeatGuestsModal` en el TPV de restaurante)
+- [ ] Se puede vincular opcionalmente un cliente de CRM al abrir mesa (el endpoint existe, sin UI en la apertura)
+- [ ] Selector de productos con categorías, búsqueda y notas por ítem (el TPV tiene catálogo; notas por ítem no verificadas)
+- [x] Las comandas se crean como borrador (`draft`) antes de enviar (`restaurantDiningTpv.ts`)
+- [x] Botón "Enviar a cocina" cambia status y emite evento SSE (`sala:comanda_sent`)
+- [x] Las comandas se numeran secuencialmente dentro del pedido
+- [x] Total del pedido se recalcula en tiempo real al añadir/editar ítems
+- [x] Se puede crear una nueva comanda sin cerrar la anterior (rondas)
 
 ---
 
@@ -632,14 +642,16 @@ export function useSalaSSE(businessId: string, handlers: SalaSSEHandlers) {
 ```
 
 #### Criterios de aceptación
-- [ ] La vista de cocina muestra comandas de sala junto a pedidos de delivery
-- [ ] Las comandas de sala se distinguen visualmente con badge "SALA — Mesa X"
-- [ ] Al marcar una comanda como "lista" en cocina, la mesa de sala se actualiza en tiempo real
-- [ ] Cuando todas las comandas están listas, la mesa pasa automáticamente a `served`
-- [ ] Los eventos SSE se emiten y reciben correctamente
-- [ ] Múltiples dispositivos ven los cambios en tiempo real (camarero tablet + cocina pantalla)
+Nota de auditoría: existe una cocina dedicada a comandas de sala (`RestaurantKitchenPage`, vertical restaurante) separada de la cocina delivery (`DeliveryKitchen`); no hay vista unificada.
+
+- [ ] La vista de cocina muestra comandas de sala junto a pedidos de delivery (son dos páginas separadas)
+- [ ] Las comandas de sala se distinguen visualmente con badge "SALA — Mesa X" (se muestra "Mesa N", pero no en vista mixta)
+- [x] Al marcar una comanda como "lista" en cocina, la mesa de sala se actualiza en tiempo real
+- [x] Cuando todas las comandas están listas, la mesa pasa automáticamente a `served`
+- [x] Los eventos SSE se emiten y reciben correctamente (`sala:comanda_sent/status_changed/cancelled` + suscripción en cocina/dashboard)
+- [ ] Múltiples dispositivos ven los cambios en tiempo real (camarero tablet + cocina pantalla) — no verificado con dispositivos de equipo
 - [ ] Filtro en cocina para ver solo sala, solo delivery, o todo
-- [ ] La cancelación de una comanda desde sala llega a cocina con motivo
+- [x] La cancelación de una comanda desde sala llega a cocina con motivo
 
 ---
 
@@ -708,14 +720,14 @@ Tres modos de separación:
 | `mergeDiningOrders(userId, sourceOrderIds, targetOrderId)` | Unir pedidos |
 
 #### Criterios de aceptación
-- [ ] División equitativa calcula correctamente total / N con redondeo al céntimo
-- [ ] División por ítem permite asignar ítems individuales o fracciones a cuentas
-- [ ] División personalizada valida que la suma iguale el total
-- [ ] Cada sub-cuenta se puede cobrar con método de pago diferente
-- [ ] La mesa no se puede cerrar hasta que todas las sub-cuentas estén pagadas
-- [ ] Unir mesas consolida los pedidos correctamente y libera las mesas origen
-- [ ] Solo se pueden unir mesas con pedidos en estado `open` o `served`
-- [ ] El historial refleja la división/unión con los detalles de cada pago
+- [x] División equitativa calcula correctamente total / N con redondeo al céntimo (backend `splitOrder` + `RestaurantSplitBillModal`)
+- [ ] División por ítem permite asignar ítems individuales o fracciones a cuentas (backend soporta `by_item`, sin UI)
+- [ ] División personalizada valida que la suma iguale el total (backend soporta `custom`, sin UI; validación no verificada)
+- [x] Cada sub-cuenta se puede cobrar con método de pago diferente (pagos individuales con `method`)
+- [x] La mesa no se puede cerrar hasta que todas las sub-cuentas estén pagadas
+- [ ] Unir mesas consolida los pedidos correctamente y libera las mesas origen (endpoint `mergeOrders` existe, sin UI ni verificación)
+- [ ] Solo se pueden unir mesas con pedidos en estado `open` o `served` (no verificado)
+- [ ] El historial refleja la división/unión con los detalles de cada pago (no verificado)
 
 ---
 
@@ -790,15 +802,15 @@ Ampliar `printReceipt` actual para incluir:
 - NIF del cliente (si vinculado CRM y factura solicitada).
 
 #### Criterios de aceptación
-- [ ] Modal de cobro con resumen completo del pedido por comandas
-- [ ] Soporte para descuento (% o fijo) con motivo obligatorio
-- [ ] Métodos de pago: efectivo, tarjeta, bizum, transferencia, otro
-- [ ] Cálculo de cambio automático para efectivo
-- [ ] Campo de propina opcional
-- [ ] Cierre de mesa con verificaciones automáticas (comandas servidas, pago completo)
-- [ ] Cierre forzado con motivo si las verificaciones fallan
-- [ ] Al cerrar: mesa pasa a available, evento SSE emitido
-- [ ] Se genera movimiento financiero automáticamente si el módulo está activo
+- [ ] Modal de cobro con resumen completo del pedido por comandas (cobro en TPV restaurante, resumen por comandas no verificado)
+- [ ] Soporte para descuento (% o fijo) con motivo obligatorio (campos `discount`/`discountReason` existen en el modelo, UI no verificada)
+- [x] Métodos de pago: efectivo, tarjeta, bizum, transferencia, otro (tipo `DiningPayment.method`)
+- [ ] Cálculo de cambio automático para efectivo (campos `amountReceived`/`changeGiven` existen, UI no verificada)
+- [ ] Campo de propina opcional (campo `tip` existe, UI no verificada)
+- [x] Cierre de mesa con verificaciones automáticas (comandas servidas, pago completo)
+- [x] Cierre forzado con motivo si las verificaciones fallan
+- [x] Al cerrar: mesa pasa a available, evento SSE emitido
+- [ ] Se genera movimiento financiero automáticamente si el módulo está activo (`payOrder`/`closeOrder` no tocan Finanzas)
 - [ ] Ticket mejorado con desglose por comanda, descuento, propina y datos fiscales
 
 ---
@@ -839,11 +851,13 @@ Si el pedido pickup pasa a `ready` y la pantalla de sala está abierta:
 - Evento SSE `delivery:pickup_ready` escuchado por la pantalla de sala.
 
 #### Criterios de aceptación
+Nota de auditoría: el endpoint `GET /api/sala/pickups/:userId` y `listPickupOrdersRequest` existen, pero ninguna pantalla los consume.
+
 - [ ] Los pedidos de recogida pendientes aparecen en la pantalla de sala
 - [ ] Se pueden marcar como entregados desde sala (sin ir a Delivery)
 - [ ] KPI de recogidas pendientes visible
 - [ ] Notificación en tiempo real cuando una recogida está lista
-- [ ] Solo aparecen recogidas en estado `ready` o `assembly`, no todas
+- [ ] Solo aparecen recogidas en estado `ready` o `assembly`, no todas (no verificado)
 
 ---
 
@@ -895,11 +909,11 @@ Middleware que verifica `permissions.sala.edit` antes de permitir operaciones de
 - `SalaPage.tsx`: si `!permissions.sala?.edit`, ocultar botones de acción (abrir mesa, cobrar, etc.) y mostrar la sala en modo solo lectura.
 
 #### Criterios de aceptación
-- [ ] Clave `sala` añadida a `ROLE_PERMISSION_OPTIONS`
+- [x] Clave `sala` añadida a `ROLE_PERMISSION_OPTIONS` (`roleCatalog.ts`)
 - [ ] Roles predefinidos actualizados con valores por defecto para `sala`
-- [ ] Sidebar oculta/muestra sala según permiso `view`
+- [ ] Sidebar oculta/muestra sala según permiso `view` (se gatea por vertical, no por permiso `sala`)
 - [ ] Acciones de escritura protegidas por permiso `edit`
-- [ ] Endpoints backend protegidos por middleware de permisos
+- [ ] Endpoints backend protegidos por middleware de permisos (`sala` NO está en `TEAM_PERMISSION_KEYS` de `couchdb.js`)
 - [ ] El gerente puede asignar permisos de sala a trabajadores individuales desde Team
 
 ---
@@ -988,13 +1002,13 @@ export interface SalaAlertThresholds {
 ```
 
 #### Criterios de aceptación
-- [ ] Alerta `long_occupied_table` se genera cuando una mesa lleva más de X horas abierta
-- [ ] Alerta `served_pending_close` se genera cuando una mesa servida lleva más de X minutos sin cobrar
-- [ ] Alerta `slow_kitchen_comanda` se genera cuando una comanda lleva más de X minutos en cocina
-- [ ] Alerta `sala_incident` se genera para cancelaciones e incidencias
-- [ ] Los umbrales son configurables por negocio
-- [ ] Las alertas solo se ejecutan si el módulo de sala está activo
-- [ ] Las alertas aparecen en el dashboard del gerente y en la pantalla de sala
+- [x] Alerta `long_occupied_table` se genera cuando una mesa lleva más de X horas abierta (`alertEngine.js`)
+- [x] Alerta `served_pending_close` se genera cuando una mesa servida lleva más de X minutos sin cobrar
+- [x] Alerta `slow_kitchen_comanda` se genera cuando una comanda lleva más de X minutos en cocina
+- [x] Alerta `sala_incident` se genera para cancelaciones e incidencias
+- [x] Los umbrales son configurables por negocio (`salaLongOccupiedMinutes`, `salaServedPendingMinutes`, `salaSlowKitchenMinutes`, `salaIncidentsEnabled`)
+- [ ] Las alertas solo se ejecutan si el módulo de sala está activo (se omiten si no hay documentos de sala, pero no existe flag de módulo)
+- [ ] Las alertas aparecen en el dashboard del gerente y en la pantalla de sala (no verificado en UI)
 
 ---
 
@@ -1046,12 +1060,12 @@ Mostrar un mini-flujo visual en la card/plano de cada mesa ocupada:
 - Si hay múltiples comandas en distintas etapas, mostrar la más retrasada.
 
 #### Criterios de aceptación
-- [ ] Mesa transiciona automáticamente según la tabla de transiciones
-- [ ] Todas las transiciones automáticas emiten evento SSE
-- [ ] Cronómetro de ocupación visible en cada mesa
+- [x] Mesa transiciona automáticamente según la tabla de transiciones (crear pedido → occupied, todas ready → served, servidas → pending_payment, cerrar/cancelar → available)
+- [x] Todas las transiciones automáticas emiten evento SSE (`sala:table_status_changed`)
+- [ ] Cronómetro de ocupación visible en cada mesa (no verificado en UI)
 - [ ] Colores del cronómetro cambian según umbrales
 - [ ] Mini-flujo visual de etapas visible en cada mesa ocupada
-- [ ] La transición automática no interfiere con cambios manuales (el camarero siempre puede forzar un estado)
+- [x] La transición automática no interfiere con cambios manuales (endpoint `PATCH /tables/:id/status` manual disponible)
 
 ---
 
@@ -1097,6 +1111,8 @@ Al cobrar, si hay cliente vinculado:
 | `/api/sala/:userId/orders/:id/client` | PUT | Vincular/desvincular cliente a pedido |
 
 #### Criterios de aceptación
+Nota de auditoría: el endpoint `PUT /orders/:id/client` y `linkClientToOrderRequest` existen; el resto es UI sin implementar.
+
 - [ ] Se puede vincular un cliente de CRM al abrir mesa o en cualquier momento
 - [ ] Buscador de clientes con autocompletado
 - [ ] Opción de crear cliente rápido si no existe
@@ -1153,11 +1169,11 @@ Visible solo si el usuario tiene rol Admin o Gerente. Cards de KPIs expandidos:
 - Horarios de servicio de sala (si aplica).
 
 #### Criterios de aceptación
-- [ ] Dashboard con KPIs expandidos visible para Admin/Gerente
+- [ ] Dashboard con KPIs expandidos visible para Admin/Gerente (existe `RestaurantDashboard.tsx` con datos de sala, KPIs concretos no verificados)
 - [ ] Panel de alertas con acciones rápidas
-- [ ] Tabla de rendimiento por camarero
-- [ ] Acceso a configuración completa de sala desde Settings
-- [ ] Los trabajadores sin rol gerente ven la sala simplificada (solo mapa + operación)
+- [ ] Tabla de rendimiento por camarero (hay stats de tiempos por mesa vía `/table-stats`, no por camarero)
+- [ ] Acceso a configuración completa de sala desde Settings (la configuración vive en `/saas/sala` — SalaManager, no en Settings)
+- [ ] Los trabajadores sin rol gerente ven la sala simplificada (operan desde el TPV de restaurante, no verificado el gating)
 
 ---
 
@@ -1196,12 +1212,12 @@ Una vez que `/saas/sala` esté operativo:
 - Cualquier otra referencia a `tpv/locales` en el código.
 
 #### Criterios de aceptación
-- [ ] `/saas/tpv/locales` redirige a `/saas/sala` si el módulo está activo
+- [ ] `/saas/tpv/locales` redirige a `/saas/sala` si el módulo está activo (hoy apunta a `TpvQuickBridgePage`)
 - [ ] Si el módulo no está activo, la ruta antigua sigue funcionando
-- [ ] `TpvTab.tsx` queda limpio sin la lógica de plano de mesas
-- [ ] Componentes reutilizables extraídos (canvas, modales)
-- [ ] Sidebar se actualiza dinámicamente según el estado del módulo
-- [ ] No hay enlaces rotos a la ruta antigua
+- [ ] `TpvTab.tsx` queda limpio sin la lógica de plano de mesas (no verificado)
+- [x] Componentes reutilizables extraídos (canvas, modales) — el módulo sala vive en `components/saas/sala/manager/` y `restaurantDiningTpv.ts`
+- [ ] Sidebar se actualiza dinámicamente según el estado del módulo (se resuelve por vertical, no por módulo)
+- [ ] No hay enlaces rotos a la ruta antigua (no verificado)
 
 ---
 

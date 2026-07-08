@@ -4,6 +4,7 @@ export type TpvOfflineQueueItemType =
   | 'clock_in'
   | 'clock_out'
   | 'sale'
+  | 'order_create'
   | 'order_update'
   | 'register_tx';
 

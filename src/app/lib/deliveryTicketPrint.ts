@@ -16,6 +16,7 @@ export async function printDeliveryTicket(
       toast.success('Ticket enviado a la impresora');
     }
   } catch {
-    toast.error('No se pudo imprimir el ticket');
+    const num = String(options.order?.orderNumber || '').trim();
+    toast.error(num ? `No se pudo imprimir el ticket del pedido #${num}` : 'No se pudo imprimir el ticket');
   }
 }

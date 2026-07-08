@@ -7,6 +7,33 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~60% del código escrito, pero NO funcional en runtime.** Backend completo en `services/butcherShop.js` (builders/sanitizers de `butcher_client`, `butcher_order` con 3 tipos y numeración PED/RES/ENC, `butcher_sale` con contadores de cliente) + `butcherClientsController/OrdersController/SalesController` (incl. search, history, hábitos manuales, today, convert-sale, void, stats, link/unlink CRM) + los 3 routers. Frontend completo: `ButcherClients.tsx`, `ButcherOrders.tsx`, `ButcherSales.tsx` y `ButcherWorkerOrders.tsx` (Kanban) consumen la API real vía `butcherApi.ts`.
+**Bloqueadores críticos:** los routers `butcherClientsRouter`, `butcherOrdersRouter` y `butcherSalesRouter` se importan en `index.js` pero **NO se montan** (`app.use` ausente) → toda la API `/api/butcher-clients|orders|sales` devuelve 404. En `routes.tsx`, `/saas/butcher-clients` redirige a `/saas/clients`, `/saas/butcher-orders` a `/saas/suppliers/ordenes-compra` y `/saas/butcher-sales` a `/saas/sales` → las páginas específicas son inalcanzables (solo `worker/butcher-orders` carga componente real). No hay ítem de clientes en el Sidebar. **Falta además:** alertas BCP-05 como notificaciones (existe `getButcherAlerts` en `alertEngine.js` pero solo alimenta un resumen, no emite `butcher_order_overdue_pickup`/`butcher_special_not_prepared`/`butcher_reservations_today`), trigger automático de hábitos tras venta (solo endpoint manual), reserva de stock (BCP-13, no existe `stock_reservation`), widgets de Dashboard (BCP-14) e identificación de cliente en TPV (BCP-12).
+
+### Estado por ticket
+
+| Ticket | Estado | Nota |
+|---|---|---|
+| BCP-01 Cliente backend | Código completo, API sin montar | Builders en `butcherShop.js`, no en `couchdb.js`; falta `findButcherClientByPhone` dedicada (la búsqueda cubre teléfono) |
+| BCP-02 Pedidos backend | Código completo, API sin montar | 3 tipos + numeración + today + convert-sale implementados |
+| BCP-03 Ventas backend | Código completo, API sin montar | Contadores de cliente y void con reversión; sin `paymentDetails` mixto detallado |
+| BCP-04 Hábitos | Parcial | `analyzeButcherClientHabits` existe como endpoint manual; sin trigger post-venta ni `lastHabitAnalysis` |
+| BCP-05 Alertas | No hecho como alertas | `getButcherAlerts` solo aporta resumen; no emite notificaciones |
+| BCP-06 Página Clientes | Hecha pero inalcanzable | `ButcherClients.tsx` con KPIs, búsqueda, drawer; la ruta redirige al CRM |
+| BCP-07 Pedidos frontend | Hecha pero inalcanzable | Conectada a API real; ruta redirige a órdenes de compra |
+| BCP-08 Ventas frontend | Hecha pero inalcanzable | Conectada a API real + stats; ruta redirige a `/saas/sales` |
+| BCP-09 Historial | Parcial | Historial en drawer vía `getButcherClientHistoryRequest`; sin página completa con gráficos |
+| BCP-10 Routing/Sidebar | No hecho | Rutas redirigidas, sin ítem sidebar `butcher-clients` |
+| BCP-11 CRM link | Parcial | Endpoints link/unlink existen (sin montar); sin UI ni sincronización de interacciones |
+| BCP-12 TPV | No hecho | `WorkerTpvButcherShop` no identifica cliente |
+| BCP-13 Reserva stock | No hecho | No existe `stock_reservation` |
+| BCP-14 Dashboard widgets | No hecho | — |
+| BCP-15 Vista trabajador | Hecha | `ButcherWorkerOrders.tsx` Kanban en `/saas/worker/butcher-orders` (sin SSE, sin drag & drop) |
+
+---
+
 ## Auditoría de lo existente
 
 ### Vertical carnicería — Páginas actuales

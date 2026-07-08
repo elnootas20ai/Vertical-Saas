@@ -629,7 +629,7 @@ export async function saveAlertsConfig(req, res) {
       if (business?.owner_user_id) {
         await syncCashRegisterAlertsToAccount(req, business.owner_user_id, sanitizedOperational.cashRegister);
         await syncDeliveryAlertsToAccount(req, business.owner_user_id, sanitizedOperational.delivery);
-        if (business.businessType === 'delivery') {
+        if (business.businessType === 'delivery' || business.businessType === 'restaurant') {
           await syncDeliveryLegacyFlagsOff(req, business.owner_user_id);
         }
       }
@@ -648,7 +648,8 @@ export async function seedAlertsConfigIfMissing(req, businessId, businessType) {
   const existing = await getSettingsDoc(req, 'alerts', id);
   if (existing?.rules?.length) return;
 
-  const vertical = businessType === 'delivery' ? 'delivery' : null;
+  // Restaurante usa el mismo motor operativo delivery → mismo paquete de reglas por defecto.
+  const vertical = (businessType === 'delivery' || businessType === 'restaurant') ? 'delivery' : null;
   const rules = mergeAlertRules([], { vertical });
 
   await saveSettingsDoc(req, 'alerts', id, {

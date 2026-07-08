@@ -43,6 +43,11 @@ Thumbs.db
 .cache/
 .parcel-cache/
 
+# Firma release Android — NUNCA versionar (guarda copia de seguridad fuera del repo)
+android/keystore.properties
+android/*.keystore
+*.jks
+
 # Capacitor / nativo (artefactos locales; las carpetas android/ e ios/ sí se versionan)
 android/.gradle/
 android/app/build/

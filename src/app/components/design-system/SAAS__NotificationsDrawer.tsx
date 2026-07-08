@@ -37,7 +37,7 @@ import {
   dismissDocumentAlert,
   dismissDocumentAlerts,
 } from '../../lib/documentAlertsApi';
-import { getAlertResolveLabel, alertHasNavigateTarget } from '../../lib/alertActions';
+import { mapAlertsForBusinessVertical } from '../../lib/alertActions';
 import { toast } from 'sonner';
 
 interface Props {
@@ -163,21 +163,25 @@ function AlertCenterDrawer({
     pollMs: isOpen ? 30_000 : 60_000,
   });
 
+  const businessType = currentBusiness?.businessType;
+
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [activeDept, setActiveDept] = useState('all');
   const busyAlertIds = useRef(new Set<string>());
-  const loadInflightRef = useRef<Promise<void> | null>(null);
+  const loadInflightRef = useRef<{ deptId: string; promise: Promise<void> } | null>(null);
   const loadSeqRef = useRef(0);
   useModalClose(isOpen, onClose);
 
   const loadAlerts = useCallback(async (deptId = activeDept, options?: { silent?: boolean }) => {
     if (!businessId) return;
 
-    if (loadInflightRef.current) {
-      return loadInflightRef.current;
+    // Solo reutiliza la petición en curso si es del mismo departamento;
+    // al cambiar de pestaña se lanza una nueva y el seq descarta la obsoleta.
+    if (loadInflightRef.current?.deptId === deptId) {
+      return loadInflightRef.current.promise;
     }
 
     const silent = options?.silent === true;
@@ -197,7 +201,7 @@ function AlertCenterDrawer({
         });
         if (seq !== loadSeqRef.current) return;
 
-        const serverAlerts = res.alerts || [];
+        const serverAlerts = mapAlertsForBusinessVertical(res.alerts || [], businessType);
         setAlerts(serverAlerts);
 
         if (includeDocs && dataUserId) {
@@ -215,13 +219,13 @@ function AlertCenterDrawer({
     };
 
     const promise = run().finally(() => {
-      if (loadInflightRef.current === promise) {
+      if (loadInflightRef.current?.promise === promise) {
         loadInflightRef.current = null;
       }
     });
-    loadInflightRef.current = promise;
+    loadInflightRef.current = { deptId, promise };
     return promise;
-  }, [businessId, activeDept, dataUserId, departmentSourceFilter]);
+  }, [businessId, activeDept, dataUserId, departmentSourceFilter, businessType]);
 
   const syncAndReload = useCallback(async () => {
     if (!businessId || syncing) return;

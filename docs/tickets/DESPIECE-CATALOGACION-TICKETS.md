@@ -6,6 +6,16 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~80% hecho y operativo.** Este módulo SÍ está montado y accesible (a diferencia de otros verticales): `scrapyardRouter` está montado en `index.js` bajo `/api/scrapyard` (piezas CRUD + bulk + despiece + workers + tasks), la ruta `/saas/vertical/desguaces/despiece(/:vehicleId)` existe en `routes.tsx` y el ítem `scrapyard-dismantling` está en el Sidebar.
+
+- **Completo (verificado):** DP-01 (`buildScrapyardPartDocument`, `normalizePartCategory/Status`, `generatePartCode`, CRUD + `bulkCreateParts` en `scrapyardController.js`, cliente `scrapyardApi.ts`), DP-02 (estados desguace en vehículo, `normalizeScrapyardOrigin`, `dismantlingProgress`/`totalPartsExtracted`, `PATCH .../dismantling-status`), DP-03 (`buildDismantlingSession`, `DEFAULT_DISMANTLING_TEMPLATE`, 8 endpoints de despiece), DP-04 (`ScrapyardVehicles.tsx` usa `listVehiclesRequest`/create/update/delete reales y muestra estados de despiece), DP-05 (`ScrapyardDismantling.tsx` completo: checklist, extraer, no-aplica, pieza custom, pausar/reanudar/completar), DP-08 (las 5 alertas `checkPartsWithoutPrice/Location/DuplicateReferences/WithoutPhotos/IncompleteDismantling` integradas en `alertEngine.js` con config por cuenta), DP-11 (ruta + sidebar).
+- **Parcial:** DP-06 (`ScrapyardParts.tsx` conectado a API real, vista tabla/grid y acción "Vender pieza"; falta verificar filtro por vehículo origen), DP-07 (endpoint `search-compatible` montado y editor de compatibilidades dentro de la página de despiece; sin vista CouchDB `by_compatibility` dedicada), DP-09 (piezas↔despiece↔vehículos conectados; pero `ScrapyardSales.tsx` y `ScrapyardInventory.tsx` usan el API genérico `verticalApiFactory`, no el modelo `scrapyard_part`).
+- **Pendiente de verdad:** DP-10 — `useScrapyardPermissions.ts` existe pero con permisos de entrada/documentación (`scrapyard.entry.*`), no los granulares de despiece (`set_part_price`, `complete_dismantling`, `validate_cataloging`); no hay verificación de permisos por endpoint en backend ni flujo de validación gerente con badge. Tampoco existen las vistas CouchDB propuestas (`by_vehicle`, `by_referencia`, `by_dismantling_status`); los listados filtran en memoria.
+
+---
+
 ## Auditoría de lo existente
 
 ### Ya implementado (frontend — solo UI mock, sin backend)

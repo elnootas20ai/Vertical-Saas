@@ -4,6 +4,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~70% implementado. `TpvRapidoPage.tsx` existe (~4.000 líneas) con los 4 pasos (cliente, tipo entrega, productos, pago), ruta, sidebar, creación de pedido con `clientId`/`paymentMethod`, pantalla de confirmación y reset. Desviación de diseño: el flujo muestra un paso a la vez con botón «Atrás», no pasos colapsados con resumen; los permisos se implementaron vía puerta de caja TPV (`TpvRegisterGate`) y `restaurantPermissions`, no con la matriz `delivery.view/edit` de TPV-12. Falta de verdad: `deliveryAddressId` no se persiste en backend, `lastUsedAt` de direcciones nunca se actualiza, no se preselecciona `defaultPaymentMethod` del cliente, no hay lazy loading de la página y «Cancelar» no pide confirmación.
+
+---
+
 ### TPV-06 -- Frontend: Pagina `TpvRapidoPage` -- Estructura y paso 1 (Telefono + Busqueda)
 
 **Tipo:** Frontend (pagina nueva) | **Prioridad:** Critica | **Esfuerzo:** Alto (6-8h) | **Dep:** TPV-02, TPV-04, TPV-05
@@ -64,17 +70,17 @@ Cada paso aparece al completar el anterior. Los pasos completados se colapsan mo
 - < 6 digitos: "Introduce al menos 6 digitos"
 
 #### Criterios de aceptacion
-- [ ] Pagina carga en `/saas/vertical/delivery/tpv`
-- [ ] Autofocus en input telefono al entrar
-- [ ] PhonePrefixSelector funciona con +34 default
-- [ ] Busqueda con debounce 300ms (minimo 3 digitos)
-- [ ] Resultados en tarjetas con animacion suave
-- [ ] Al seleccionar: autocarga nombre, telefono, direcciones, notas, forma de pago
-- [ ] Formulario "Crear cliente" inline, no modal
-- [ ] Validacion con feedback visual
-- [ ] Alerta duplicados funcional
-- [ ] Paso 1 se colapsa tras completar mostrando resumen
-- [ ] Responsive (desktop, tablet, movil) + dark mode
+- [x] Pagina carga en `/saas/vertical/delivery/tpv`
+- [x] Autofocus en input telefono al entrar
+- [x] PhonePrefixSelector funciona con +34 default
+- [x] Busqueda con debounce (400ms, min. 2 caracteres, tambien por nombre)
+- [x] Resultados en tarjetas (`ClientResultCard`)
+- [x] Al seleccionar: autocarga nombre, telefono, direcciones, notas, forma de pago
+- [x] Formulario "Crear cliente" inline, no modal
+- [x] Validacion con feedback visual (shake + bordes rojos)
+- [ ] Alerta duplicados funcional (solo aviso post-creacion, sin "Usar existente"/"Crear igualmente")
+- [ ] Paso 1 se colapsa tras completar mostrando resumen (flujo de un paso a la vez con "Atras", sin colapso)
+- [x] Responsive (desktop, tablet, movil) + dark mode
 
 ---
 
@@ -107,14 +113,14 @@ Cada paso aparece al completar el anterior. Los pasos completados se colapsan mo
 - Sin direcciones guardadas: formulario aparece automaticamente
 
 #### Criterios de aceptacion
-- [ ] Dos tarjetas seleccionables de tipo entrega
-- [ ] Direcciones se cargan desde `client.addresses`
-- [ ] `isDefault` preseleccionada
-- [ ] Nueva direccion se guarda via API (no solo en memoria)
-- [ ] Se actualiza `lastUsedAt`
-- [ ] "Recogida" salta selector direcciones
-- [ ] Paso se colapsa con resumen tras completar
-- [ ] Responsive + dark mode
+- [x] Dos tarjetas seleccionables de tipo entrega
+- [x] Direcciones se cargan desde `client.addresses`
+- [x] `isDefault` preseleccionada (implementado como `isPrimary`)
+- [x] Nueva direccion se guarda via API (no solo en memoria)
+- [ ] Se actualiza `lastUsedAt` (siempre se guarda `null`, nunca se actualiza)
+- [x] "Recogida" salta selector direcciones
+- [ ] Paso se colapsa con resumen tras completar (flujo de un paso a la vez, sin colapso)
+- [x] Responsive + dark mode
 
 ---
 
@@ -133,14 +139,14 @@ Cada paso aparece al completar el anterior. Los pasos completados se colapsan mo
 **Resumen pedido (inline):** Lista items con cantidad, nombre, total linea. Botones -/+ y papelera. Subtotal automatico. Carrito vacio: "Anade productos para continuar".
 
 #### Criterios de aceptacion
-- [ ] Catalogo desde `listCatalogItemsRequest` (solo `active`)
-- [ ] Busqueda filtra por nombre y descripcion
-- [ ] Chips de categorias filtran el grid
-- [ ] Anadir, incrementar, decrementar, eliminar productos
-- [ ] Resumen con desglose y total por linea
-- [ ] Subtotal calculado automaticamente
-- [ ] Agotados atenuados con badge
-- [ ] Grid responsive + dark mode + animaciones suaves
+- [x] Catalogo solo `active` (via `useTpvCatalog` con cache, no llamada directa)
+- [ ] Busqueda filtra por nombre y descripcion (busca por nombre, categoria, SKU y codigo de barras; no por descripcion)
+- [x] Chips de categorias filtran el grid
+- [x] Anadir, incrementar, decrementar, eliminar productos
+- [x] Resumen con desglose y total por linea
+- [x] Subtotal calculado automaticamente
+- [x] Agotados atenuados con badge (opacity + badge "N/D"/"Sin €")
+- [x] Grid responsive + dark mode + animaciones suaves
 
 ---
 
@@ -170,17 +176,17 @@ Cada paso aparece al completar el anterior. Los pasos completados se colapsan mo
 4. Exito: confirmacion (ver TPV-13). Error: toast + formulario NO se resetea
 
 #### Criterios de aceptacion
-- [ ] 4 metodos de pago como tarjetas seleccionables
-- [ ] `defaultPaymentMethod` del cliente preseleccionado
-- [ ] Calculadora cambio solo con "Efectivo", calculo correcto
-- [ ] Observaciones guardan en `notes`
-- [ ] Estado inicial "Nuevo" default
-- [ ] Footer fijo con resumen completo
-- [ ] "Guardar (Nuevo)" -> status `pending`
-- [ ] "Cobrar y enviar" -> status `preparing`
-- [ ] "Cancelar" pide confirmacion
-- [ ] Validacion completa antes de crear
-- [ ] Pedido con `clientId` vinculado + `lastUsedAt` actualizado
+- [x] 4 metodos de pago como tarjetas seleccionables
+- [ ] `defaultPaymentMethod` del cliente preseleccionado (solo se muestra como badge, no se preselecciona)
+- [x] Calculadora cambio solo con "Efectivo", calculo correcto (oculta ademas en domicilio)
+- [x] Observaciones guardan en `notes`
+- [x] Estado inicial "Nuevo" default
+- [ ] Footer fijo con resumen completo (footer fijo con total y n.º items, sin cliente/direccion/pago)
+- [x] "Guardar (Nuevo)" -> status `nuevo` (equivalente a `pending`)
+- [x] "Cobrar y enviar" -> status `cocina` (equivalente a `preparing`)
+- [ ] "Cancelar" pide confirmacion (sale/vacia sin dialogo)
+- [x] Validacion completa antes de crear
+- [ ] Pedido con `clientId` vinculado + `lastUsedAt` actualizado (`clientId` si; `lastUsedAt` no se actualiza)
 
 ---
 
@@ -207,10 +213,10 @@ itemIds: ['tpv', 'tpv-locales', 'delivery', 'tpv-rapido', 'delivery-catalog', 'w
 ```
 
 #### Criterios de aceptacion
-- [ ] Ruta `/saas/vertical/delivery/tpv` carga la pagina
-- [ ] Item "TPV Rapido" en sidebar con icono Zap
-- [ ] Lazy loading activo
-- [ ] Permisos sidebar respetados
+- [x] Ruta `/saas/vertical/delivery/tpv` carga la pagina
+- [x] Item "TPV Rapido" en sidebar con icono Zap
+- [ ] Lazy loading activo (import estatico en `routes.tsx`, no `lazy()`)
+- [x] Permisos sidebar respetados (permiso `delivery` en items operativos)
 
 ---
 
@@ -225,11 +231,11 @@ itemIds: ['tpv', 'tpv-locales', 'delivery', 'tpv-rapido', 'delivery-catalog', 'w
 **`Sidebar.tsx`:** Items del grupo `delivery` (incl. `tpv-rapido`) usan permiso `delivery`.
 
 #### Criterios de aceptacion
-- [ ] `TEAM_PERMISSION_KEYS` incluye `'delivery'`
-- [ ] Admin/Gerente obtienen `delivery: { view: true, edit: true }` automaticamente
-- [ ] Sidebar oculta/muestra items delivery segun permiso
-- [ ] Settings/Roles muestra `delivery` configurable
-- [ ] Sin regresion en permisos existentes
+- [x] `TEAM_PERMISSION_KEYS` incluye `'delivery'`
+- [x] Admin/Gerente obtienen `delivery: { view: true, edit: true }` automaticamente (permiso `all`)
+- [x] Sidebar oculta/muestra items delivery segun permiso
+- [x] Settings/Roles muestra `delivery` configurable ("Delivery / Pedidos" en `Team.tsx`)
+- [ ] Sin regresion en permisos existentes (no verificado con tests)
 
 ---
 
@@ -249,10 +255,10 @@ itemIds: ['tpv', 'tpv-locales', 'delivery', 'tpv-rapido', 'delivery-catalog', 'w
 | Config TPV | Si | No | -- |
 
 #### Criterios de aceptacion
-- [ ] Sin `delivery.view` -> redirect a dashboard
-- [ ] `view:true, edit:false` -> crear y cobrar, sin config
-- [ ] `edit:true` -> todas las opciones
-- [ ] Selector estado oculto para trabajadores
+- [ ] Sin `delivery.view` -> redirect a dashboard (se implemento distinto: puerta de caja `TpvRegisterGate` + `restaurantPermissions`)
+- [ ] `view:true, edit:false` -> crear y cobrar, sin config (modelo de permisos distinto al especificado)
+- [ ] `edit:true` -> todas las opciones (modelo de permisos distinto al especificado)
+- [ ] Selector estado oculto para trabajadores (se oculta en modo tablet, no por rol)
 - [ ] Sin flicker al redirigir
 
 ---
@@ -268,13 +274,13 @@ itemIds: ['tpv', 'tpv-locales', 'delivery', 'tpv-rapido', 'delivery-catalog', 'w
 **Conexion cocina:** Pedido via API con status correcto. `WorkerTpvDelivery.tsx` y `Delivery.tsx` lo ven en polling 30s (ya existente).
 
 #### Criterios de aceptacion
-- [ ] Confirmacion con animacion tras exito
-- [ ] Resumen completo del pedido
-- [ ] "Crear otro" resetea flujo + autofocus telefono
-- [ ] "Ver pedido" navega a Delivery con pedido seleccionado
-- [ ] Pedido visible en cocina/operativa en < 30s
-- [ ] Error: toast + formulario NO se resetea
-- [ ] Numero pedido auto-generado
+- [x] Confirmacion con animacion tras exito
+- [ ] Resumen completo del pedido (muestra numero, cliente, total, n.º productos y tipo; falta direccion/pago/estado)
+- [x] "Crear otro" resetea flujo + autofocus telefono
+- [ ] "Ver pedido" navega a Delivery con pedido seleccionado (navega a delivery-ops/caja pero sin seleccionar el pedido)
+- [x] Pedido visible en cocina/operativa en < 30s
+- [x] Error: toast + formulario NO se resetea
+- [x] Numero pedido auto-generado
 
 ---
 
@@ -291,12 +297,12 @@ itemIds: ['tpv', 'tpv-locales', 'delivery', 'tpv-rapido', 'delivery-catalog', 'w
 **`sanitizeDeliveryOrder`:** Incluir nuevos campos.
 
 #### Criterios de aceptacion
-- [ ] `clientId` persiste y se devuelve
-- [ ] `paymentMethod` persiste (efectivo/tarjeta/bizum/otros)
-- [ ] `orderType` persiste (domicilio/recogida)
-- [ ] `deliveryAddressId` persiste
-- [ ] `lastUsedAt` actualizado al crear pedido con `clientId`
-- [ ] Sin regresion en creacion desde `Delivery.tsx`
+- [x] `clientId` persiste y se devuelve
+- [x] `paymentMethod` persiste (efectivo/tarjeta/bizum/otros)
+- [x] `orderType` persiste (implementado como `deliveryType` domicilio/recogida)
+- [ ] `deliveryAddressId` persiste (el frontend lo envia pero `buildDeliveryOrderDocument` no lo guarda)
+- [ ] `lastUsedAt` actualizado al crear pedido con `clientId` (no implementado)
+- [ ] Sin regresion en creacion desde `Delivery.tsx` (no verificado)
 
 ---
 
@@ -322,11 +328,11 @@ itemIds: ['tpv', 'tpv-locales', 'delivery', 'tpv-rapido', 'delivery-catalog', 'w
 Componente `TpvAlert` reutilizable: `type`, `message`, `action?`, `secondaryAction?`, `dismissible?`
 
 #### Criterios de aceptacion
-- [ ] 10 alertas implementadas
-- [ ] Error: rojo. Warning: ambar
-- [ ] Acciones cuando corresponde
-- [ ] Shake suave, inline (no modal)
-- [ ] Dark mode
+- [ ] 10 alertas implementadas (existen A1, A5, A6, A7, A10; A2 parcial; no hay componente `TpvAlert` reutilizable)
+- [x] Error: rojo. Warning: ambar
+- [ ] Acciones cuando corresponde (la alerta de duplicado no ofrece acciones)
+- [x] Shake suave, inline (no modal)
+- [x] Dark mode
 
 ---
 
@@ -352,13 +358,13 @@ Componente `TpvAlert` reutilizable: `type`, `message`, `action?`, `secondaryActi
 **Micro-interacciones:** Hover tarjetas scale(1.02). Click + salta numero. Total tipo odometro. Telefono: busqueda -> spinner. Check final: animacion stroke-dasharray.
 
 #### Criterios de aceptacion
-- [ ] Animaciones suaves (200ms ease-out)
-- [ ] Pasos colapsan con resumen + editar
-- [ ] Footer sticky con backdrop blur
-- [ ] Responsive desktop/tablet/movil
-- [ ] Dark mode completo
-- [ ] Micro-interacciones sin afectar rendimiento
-- [ ] Coherente con sistema de diseno (Tailwind, Radix, Lucide)
+- [x] Animaciones suaves (transiciones en pasos y botones)
+- [ ] Pasos colapsan con resumen + editar (flujo de un paso a la vez con "Atras")
+- [x] Footer sticky (sin backdrop blur; el header de trabajadores si lo tiene)
+- [x] Responsive desktop/tablet/movil
+- [x] Dark mode completo
+- [ ] Micro-interacciones sin afectar rendimiento (parcial: sin odometro ni check animado stroke-dasharray)
+- [x] Coherente con sistema de diseno (Tailwind, Radix, Lucide)
 
 ---
 

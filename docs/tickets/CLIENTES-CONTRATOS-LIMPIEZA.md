@@ -6,6 +6,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+~47% completado (49/105 criterios). Backend muy avanzado: `cleaningClientsController.js` implementa lista agregada, perfil 360°, stats, alertas (6/7 tipos), rentabilidad con 3 modelos de precio y CRUD de ubicaciones. Frontend `CleaningClientsPage.tsx` completo: cards/tabla, filtros en URL, paginación, CSV, banner de alertas, drawer con 7 pestañas y panel de cartera. **Fallos reales detectados:** el perfil backend no devuelve `serviceStats`/`incidentStats`/`invoiceStats`/`revenueHistory` que el drawer espera (romperá las pestañas de stats), el endpoint de cartera responde `profitability` pero la API lee `portfolio` (panel sin datos), y los servicios generados desde contrato NO heredan `clientId`. Faltan: modal de nuevo cliente, CRUD de ubicaciones/notas en UI, filtrado por trabajador (CLI-09), conexión CRM↔limpieza (CLI-10) y widget de Dashboard (CLI-11).
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona
@@ -332,16 +338,16 @@ Crear un controlador separado para mantener el código organizado (el `cleaningC
 
 #### Criterios de aceptación
 
-- [ ] Endpoint de lista devuelve clientes con datos agregados de contratos, incidencias y facturación
-- [ ] Endpoint de perfil devuelve toda la información del cliente en una sola llamada
-- [ ] Soporta filtros: estado, responsable, zona, búsqueda por texto
-- [ ] Datos de ubicaciones extraídos y deduplicados de contratos/servicios
+- [x] Endpoint de lista devuelve clientes con datos agregados de contratos, incidencias y facturación
+- [x] Endpoint de perfil devuelve toda la información del cliente en una sola llamada — pero NO incluye `serviceStats`/`incidentStats`/`invoiceStats` que el frontend espera (devuelve `summary`)
+- [x] Soporta filtros: estado, responsable, zona, búsqueda por texto
+- [x] Datos de ubicaciones extraídos y deduplicados de contratos/servicios
 - [ ] Estadísticas de incidencias calculan tendencia (mejorando/estable/empeorando)
 - [ ] Estadísticas de facturación incluyen historial de pagos por mes
-- [ ] Rentabilidad calculada como ingresos – costes (si hay datos de coste/hora del trabajador)
-- [ ] Alertas del cliente calculadas y devueltas en el perfil
-- [ ] Endpoint de stats devuelve distribución de rentabilidad
-- [ ] API client TypeScript con tipos completos
+- [x] Rentabilidad calculada como ingresos – costes (si hay datos de coste/hora del trabajador)
+- [x] Alertas del cliente calculadas y devueltas en el perfil
+- [x] Endpoint de stats devuelve distribución de rentabilidad
+- [x] API client TypeScript con tipos completos — los tipos declaran stats que el backend no devuelve
 - [ ] Rendimiento: la lista debe cargar en < 2s para 100 clientes
 
 ---
@@ -428,13 +434,13 @@ Cuando se crea un `service_contract` con una dirección nueva para un cliente:
 
 #### Criterios de aceptación
 
-- [ ] CRUD completo de ubicaciones por cliente
-- [ ] Cada ubicación incluye: nombre, dirección completa, zona, contacto, acceso, m², notas
-- [ ] Sincronización automática: crear contrato genera ubicación si no existe
+- [x] CRUD completo de ubicaciones por cliente
+- [x] Cada ubicación incluye: nombre, dirección completa, zona, contacto, acceso, m², notas
+- [ ] Sincronización automática: crear contrato genera ubicación si no existe — solo se derivan al leer el perfil, no se crean documentos
 - [ ] Campo `locationId` en `service_contract` para vincular a ubicación
-- [ ] Deduplicación de direcciones (normalizar antes de comparar)
-- [ ] Borrado lógico con `deletedAt`
-- [ ] API client TypeScript con tipos
+- [ ] Deduplicación de direcciones (normalizar antes de comparar) — dedup por igualdad exacta, sin normalizar
+- [x] Borrado lógico con `deletedAt`
+- [x] API client TypeScript con tipos
 
 ---
 
@@ -515,15 +521,15 @@ Añadir función `checkCleaningClientAlerts(userId)` en `alertEngine.js`:
 
 #### Criterios de aceptación
 
-- [ ] Se generan los 7 tipos de alerta definidos con las condiciones correctas
-- [ ] Cada alerta tiene severidad correcta según los umbrales definidos
-- [ ] Alertas integradas con `alertEngine.js` existente
-- [ ] Endpoint de alertas con filtros por severidad y tipo
-- [ ] Función dismiss funcional (alerta no reaparece hasta el siguiente período)
-- [ ] Deduplicación: no se repite alerta para el mismo cliente/tipo/semana
-- [ ] API client TypeScript completa
-- [ ] La alerta de impagos calcula el importe total pendiente
-- [ ] La alerta de incidencias repetidas incluye el tipo de incidencia y el conteo
+- [ ] Se generan los 7 tipos de alerta definidos con las condiciones correctas — 6 de 7 implementados; falta `client_quality_drop`
+- [ ] Cada alerta tiene severidad correcta según los umbrales definidos — falta el umbral de ">30 días vencida" en impagos
+- [ ] Alertas integradas con `alertEngine.js` existente — se calculan bajo demanda en el endpoint, no vía motor
+- [ ] Endpoint de alertas con filtros por severidad y tipo — endpoint existe pero sin query filters
+- [x] Función dismiss funcional (alerta no reaparece hasta el siguiente período)
+- [x] Deduplicación: no se repite alerta para el mismo cliente/tipo/semana — `alertId` estable por cliente/tipo
+- [x] API client TypeScript completa
+- [x] La alerta de impagos calcula el importe total pendiente
+- [x] La alerta de incidencias repetidas incluye el tipo de incidencia y el conteo
 
 ---
 
@@ -635,15 +641,15 @@ El perfil del cliente (CLI-01) incluye los últimos 12 meses de historial para l
 
 #### Criterios de aceptación
 
-- [ ] Rentabilidad calculada como ingresos – costes por cliente y período
-- [ ] Soporta los 3 modelos de precio (mensual, por servicio, por hora)
-- [ ] Coste calculado a partir de horas × coste/hora del trabajador
-- [ ] Si no hay coste/hora: clasificación `unknown` con aviso claro
-- [ ] Umbrales de clasificación: high (≥30%), medium (15-29%), low (1-14%), negative (≤0%)
-- [ ] Endpoint de rentabilidad individual y de cartera completa
+- [x] Rentabilidad calculada como ingresos – costes por cliente y período
+- [x] Soporta los 3 modelos de precio (mensual, por servicio, por hora)
+- [x] Coste calculado a partir de horas × coste/hora del trabajador (usa horas reales de fichaje si existen)
+- [x] Si no hay coste/hora: clasificación `unknown` con aviso claro
+- [x] Umbrales de clasificación: high (≥30%), medium (15-29%), low (1-14%), negative (≤0%)
+- [x] Endpoint de rentabilidad individual y de cartera completa — OJO: responde clave `profitability` pero el API client lee `portfolio` (mismatch)
 - [ ] Historial mensual de rentabilidad (últimos 12 meses)
-- [ ] Alerta automática para clientes con rentabilidad negativa
-- [ ] Distribución de rentabilidad en las estadísticas globales
+- [x] Alerta automática para clientes con rentabilidad negativa
+- [x] Distribución de rentabilidad en las estadísticas globales
 
 ---
 
@@ -717,13 +723,13 @@ Cuando se crea una incidencia desde un servicio:
 
 #### Criterios de aceptación
 
-- [ ] Campo `clientId` añadido a `CleaningService` (opcional, retrocompatible)
-- [ ] Servicios generados desde contrato heredan `clientId` automáticamente
+- [x] Campo `clientId` añadido a `CleaningService` (opcional, retrocompatible)
+- [ ] Servicios generados desde contrato heredan `clientId` automáticamente — `generateContractServices` NO pasa `clientId` al construir el servicio
 - [ ] Incidencias creadas desde servicio heredan `clientId`
-- [ ] Facturas de limpieza marcadas con `sourceVertical = 'cleaning'`
+- [ ] Facturas de limpieza marcadas con `sourceVertical = 'cleaning'` — campo no existe en el modelo de factura
 - [ ] Proceso de vinculación retroactiva funcional (link-services)
-- [ ] El perfil del cliente cruza datos de las 4 fuentes correctamente
-- [ ] No se rompe la funcionalidad existente (campos opcionales)
+- [x] El perfil del cliente cruza datos de las 4 fuentes correctamente (servicios, incidencias, facturas, notas)
+- [x] No se rompe la funcionalidad existente (campos opcionales)
 - [ ] Campo `sourceVertical` añadido al modelo de factura sin romper facturas existentes
 
 ---
@@ -872,22 +878,22 @@ Filtros persistentes en URL query params (para compartir links filtrados).
 
 #### Criterios de aceptación
 
-- [ ] Página accesible en `/saas/vertical/limpieza/clientes`
-- [ ] Toggle vista cards / vista tabla
-- [ ] 6 KPIs calculados y visibles en la cabecera con indicadores secundarios
-- [ ] Filtros por: búsqueda, estado, responsable, zona, rentabilidad, impagos, incidencias
-- [ ] Filtros persistentes en URL query params
-- [ ] Ordenación por 7 campos con dirección ascendente/descendente
-- [ ] Paginación (20 clientes por página)
-- [ ] Cards de cliente con: ubicación, contratos, frecuencia, precio, rentabilidad, alertas
-- [ ] Tabla de cliente con todas las columnas definidas
+- [x] Página accesible en `/saas/vertical/limpieza/clientes`
+- [x] Toggle vista cards / vista tabla
+- [x] 6 KPIs calculados y visibles en la cabecera con indicadores secundarios
+- [ ] Filtros por: búsqueda, estado, responsable, zona, rentabilidad, impagos, incidencias — faltan los filtros de impagos e incidencias
+- [x] Filtros persistentes en URL query params
+- [x] Ordenación por 7 campos con dirección ascendente/descendente
+- [x] Paginación (20 clientes por página)
+- [x] Cards de cliente con: ubicación, contratos, frecuencia, precio, rentabilidad, alertas
+- [x] Tabla de cliente con todas las columnas definidas
 - [ ] Botón "+ Nuevo cliente" con modal adaptado a limpieza
-- [ ] Botón "Exportar" a CSV
-- [ ] Sidebar actualizado con nuevo ítem + badge de alertas
-- [ ] Responsive en 3 breakpoints
-- [ ] Dark mode completo
-- [ ] Banner de alertas colapsable con acciones
-- [ ] Carga lazy para rendimiento
+- [x] Botón "Exportar" a CSV
+- [ ] Sidebar actualizado con nuevo ítem + badge de alertas — el ítem existe pero sin badge
+- [x] Responsive en 3 breakpoints
+- [x] Dark mode completo
+- [x] Banner de alertas colapsable con acciones (descartar, ver cliente)
+- [ ] Carga lazy para rendimiento — filtrado/paginación client-side sobre la lista completa
 
 ---
 
@@ -1200,19 +1206,19 @@ Incluye:
 
 #### Criterios de aceptación
 
-- [ ] Drawer/sub-página con cabecera sticky del cliente
-- [ ] Mini-KPIs siempre visibles: facturación, margen, impagos, incidencias, calidad
-- [ ] 7 pestañas funcionales: Contratos, Ubicaciones, Servicios, Incidencias, Facturas, Rentabilidad, Notas
-- [ ] Pestaña Contratos: lista completa con acciones (editar, pausar, renovar, generar)
-- [ ] Pestaña Ubicaciones: CRUD con datos de contacto y acceso
-- [ ] Pestaña Servicios: timeline próximos + realizados con estadísticas
-- [ ] Pestaña Incidencias: abiertas + historial + tendencia + patrón
-- [ ] Pestaña Facturas: lista con estados + acciones de cobro + resumen
-- [ ] Pestaña Rentabilidad: gráfica 12 meses + desglose + clasificación
-- [ ] Pestaña Notas: CRUD inline + notas importantes + notas del sistema
-- [ ] Cada pestaña carga datos bajo demanda (lazy)
+- [x] Drawer/sub-página con cabecera sticky del cliente
+- [ ] Mini-KPIs siempre visibles: facturación, margen, impagos, incidencias, calidad — UI hecha pero el backend no devuelve `invoiceStats`/`serviceStats` (datos rotos)
+- [ ] 7 pestañas funcionales: Contratos, Ubicaciones, Servicios, Incidencias, Facturas, Rentabilidad, Notas — las 7 pestañas existen, pero Servicios/Incidencias/Facturas dependen de stats que el backend no devuelve
+- [ ] Pestaña Contratos: lista completa con acciones (editar, pausar, renovar, generar) — lista completa pero sin acciones
+- [ ] Pestaña Ubicaciones: CRUD con datos de contacto y acceso — solo lectura (muestra contacto, acceso, m²)
+- [ ] Pestaña Servicios: timeline próximos + realizados con estadísticas — solo recientes, sin sección "próximos"
+- [ ] Pestaña Incidencias: abiertas + historial + tendencia + patrón — UI de tendencia hecha, backend no la calcula
+- [ ] Pestaña Facturas: lista con estados + acciones de cobro + resumen — tabla sin acciones de cobro
+- [ ] Pestaña Rentabilidad: gráfica 12 meses + desglose + clasificación — gráfica Recharts hecha, backend no devuelve `revenueHistory`
+- [ ] Pestaña Notas: CRUD inline + notas importantes + notas del sistema — solo lectura con destacado de importantes
+- [ ] Cada pestaña carga datos bajo demanda (lazy) — todo viene en la llamada única de perfil
 - [ ] Acciones del menú "···": Editar en CRM, Crear contrato, Crear incidencia, Archivar
-- [ ] Responsive + dark mode
+- [x] Responsive + dark mode
 - [ ] Links cruzados funcionales (contrato → calendario, factura → PDF, incidencia → detalle)
 
 ---
@@ -1300,15 +1306,15 @@ Widget dedicado en el análisis de cartera:
 
 #### Criterios de aceptación
 
-- [ ] Panel "Análisis de cartera" accesible solo para roles gerente
-- [ ] Distribución de rentabilidad con colores y totales
-- [ ] Top 5 clientes más rentables
-- [ ] Lista de clientes problemáticos (rentabilidad negativa + incidencias + impagos)
-- [ ] Gráfica de evolución mensual (Recharts)
+- [x] Panel "Análisis de cartera" accesible solo para roles gerente
+- [x] Distribución de rentabilidad con colores y totales (gráfica de barras Recharts) — OJO: el endpoint responde `profitability` y la API espera `portfolio`, el panel no recibe datos
+- [x] Top 5 clientes más rentables
+- [ ] Lista de clientes problemáticos (rentabilidad negativa + incidencias + impagos) — solo por rentabilidad, sin cruzar incidencias/impagos
+- [ ] Gráfica de evolución mensual (Recharts) — el panel no tiene gráfica de evolución temporal
 - [ ] Exportación PDF e Excel del informe
 - [ ] Acciones masivas: asignar responsable, exportar, etiquetar
-- [ ] Widget de renovaciones próximas con acción rápida
-- [ ] Todos los datos financieros visibles (precios, márgenes, costes)
+- [ ] Widget de renovaciones próximas con acción rápida — solo KPI contador, sin listado ni acción
+- [x] Todos los datos financieros visibles (precios, márgenes, costes)
 - [ ] Configuración de umbrales de alertas
 
 ---
@@ -1421,14 +1427,14 @@ El trabajador usa principalmente el móvil:
 
 #### Criterios de aceptación
 
-- [ ] El trabajador solo ve clientes donde tiene servicios asignados
+- [ ] El trabajador solo ve clientes donde tiene servicios asignados — la lista no se filtra por trabajador; solo cambia el título a "Mis Clientes"
 - [ ] Cards de cliente con: ubicación, horario, contacto, acceso, próximo servicio
-- [ ] NO muestra: precios, facturas, rentabilidad, CIF, responsable comercial
-- [ ] Detalle simplificado con 4 pestañas: Servicios, Ubicación, Instrucciones, Incidencias
+- [x] NO muestra: precios, facturas, rentabilidad, CIF, responsable comercial — pestañas Facturas/Rentabilidad y columnas financieras ocultas para no-gerentes
+- [ ] Detalle simplificado con 4 pestañas: Servicios, Ubicación, Instrucciones, Incidencias — ve las pestañas generales sin financieras, no el set simplificado
 - [ ] KPIs adaptados: clientes, servicios semana, horas semana, próximo servicio
 - [ ] Links funcionales: teléfono (`tel:`), dirección (Google Maps)
 - [ ] Responsive optimizado para móvil
-- [ ] Dark mode
+- [x] Dark mode
 - [ ] Si el trabajador no tiene clientes asignados: empty state con mensaje claro
 
 ---
@@ -1501,9 +1507,9 @@ Respuesta:
 
 - [ ] Sección "Vertical Limpieza" visible en la ficha del cliente CRM (si tiene datos de limpieza)
 - [ ] Link "Ver en CRM →" desde la vista de limpieza al CRM genérico
-- [ ] Datos del cliente siempre sincronizados (fuente única en `*-clients`)
+- [x] Datos del cliente siempre sincronizados (fuente única en `*-clients`) — el perfil lee el `client` del CRM en tiempo real
 - [ ] Modal de creación de cliente adaptado a limpieza
-- [ ] Endpoint de verificación de vinculación funcional
+- [ ] Endpoint de verificación de vinculación funcional — `check-crm-link` no existe
 - [ ] Navegación bidireccional fluida entre CRM y vista limpieza
 
 ---
@@ -1564,11 +1570,11 @@ En el feed del Dashboard, incluir eventos de clientes de limpieza:
 
 #### Criterios de aceptación
 
-- [ ] Widget visible en Dashboard para vertical `cleaning`
+- [ ] Widget visible en Dashboard para vertical `cleaning` — no existe sección `cleaningClients` en el dashboard
 - [ ] KPIs de cartera calculados: clientes, facturación, margen, alertas
 - [ ] Alertas de clientes visibles dentro del widget
 - [ ] Click en widget navega a `/saas/vertical/limpieza/clientes`
-- [ ] Feed de actividad incluye eventos de clientes de limpieza
+- [x] Feed de actividad incluye eventos de clientes de limpieza — `logAccountActivity` registra ubicaciones, alertas descartadas y generación de servicios
 - [ ] Responsive + dark mode
 
 ---

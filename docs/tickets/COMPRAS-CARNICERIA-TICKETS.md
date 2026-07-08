@@ -6,6 +6,13 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~50% hecho a nivel de código, pero el módulo NO está conectado.** Existen completos `controllers/butcherPurchaseController.js` (confirmación con coste medio ponderado, histórico de costes, lote automático, OCR, finanzas), `routers/butcherPurchaseRouter.js`, `src/app/lib/butcherPurchaseApi.ts` y la página `ButcherPurchasesPage.tsx` (tabs registro/historial/lotes/facturas, OCR, modo rápido/completo). Las 5 alertas de compras (CC-11) SÍ están operativas vía `butcherAlertEngine.js`.
+**Falta de verdad:** el router NO está montado en `index.js` (`/api/butcher-purchases` devuelve 404), la página NO está enrutada (`/saas/vertical/carniceria/compras` redirige a `/saas/suppliers/ordenes-compra`) ni aparece en el Sidebar, y el controlador importa `generateBatchCode` de `couchdb.js` **que no existe** (el módulo fallaría al cargarse). La entidad `lot`/`lotApi.ts` del ticket no existe (se usa `butcher_batch`), y no hay permisos granulares ni conexión bidireccional con facturas.
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona (backend + frontend)
@@ -126,8 +133,8 @@ Layout de la página con:
 - Añadir clave `nav.butcherPurchases: 'Purchases'` en EN
 
 #### Criterios de aceptación
-- [ ] La página carga en `/saas/vertical/carniceria/compras`
-- [ ] Aparece en el sidebar del vertical carnicería como primera opción
+- [ ] La página carga en `/saas/vertical/carniceria/compras` *(`ButcherPurchasesPage.tsx` existe, pero la ruta redirige a `/saas/suppliers/ordenes-compra` y la página no está registrada en `routes.tsx`)*
+- [ ] Aparece en el sidebar del vertical carnicería como primera opción *(el grupo `butcherShop` del Sidebar no tiene item de compras)*
 - [ ] Las pestañas navegan correctamente con `?tab=`
 - [ ] KPIs se renderizan con skeleton/placeholder
 - [ ] Deep linking funciona: `/saas/vertical/carniceria/compras?tab=lotes` abre la pestaña correcta
@@ -263,13 +270,13 @@ export interface PurchaseEntry {
 - Registrar bajo `/api/purchase-entries` y `/api/v2/purchase-entries`
 
 #### Criterios de aceptación
-- [ ] Documento `purchase_entry` se persiste en la BD catálogo
-- [ ] CRUD completo funcional vía API y API client
+- [x] Documento `purchase_entry` se persiste en la BD catálogo *(implementado como `butcher_purchase_entry` en la BD butcher — `buildButcherPurchaseEntryDocument` en `couchdb.js`)*
+- [ ] CRUD completo funcional vía API y API client *(controlador y `butcherPurchaseApi.ts` completos, pero `butcherPurchaseRouter` NO está montado en `index.js`)*
 - [ ] Campos obligatorios se validan en el backend
 - [ ] `totalCost` se calcula automáticamente
 - [ ] `isComplete` se evalúa comparando cantidad recibida vs comprada
-- [ ] Endpoint de stats devuelve KPIs correctos
-- [ ] Soft-delete funciona sin romper historial
+- [x] Endpoint de stats devuelve KPIs correctos *(`getPurchaseEntryStats`: total €, kg, coste medio — código existe, ruta sin montar)*
+- [x] Soft-delete funciona sin romper historial *(`deletePurchaseEntry` con `deletedAt`)*
 
 ---
 
@@ -389,8 +396,8 @@ Tipos `Lot`, `LotStatus`, funciones `list/get/create/update/delete/consumeLotReq
 - Generar alertas para lotes `near_expiry` y `expired`
 
 #### Criterios de aceptación
-- [ ] Documento `lot` persiste en BD catálogo
-- [ ] Código de lote se genera automáticamente con formato correcto
+- [ ] Documento `lot` persiste en BD catálogo *(no existe entidad `lot`; el equivalente es `butcher_batch` en la BD butcher, con CRUD montado en `/api/butcher/batches`)*
+- [ ] Código de lote se genera automáticamente con formato correcto *(el controlador llama a `generateBatchCode`, pero esa función NO existe en `couchdb.js` — import roto)*
 - [ ] No se repiten códigos de lote para el mismo día/animal
 - [ ] `expirationStatus` se calcula correctamente
 - [ ] Los lotes se pueden filtrar por producto, estado, caducidad
@@ -502,7 +509,7 @@ Toggle en la esquina superior derecha:
 - [ ] Los campos calculados se actualizan en tiempo real
 - [ ] El indicador de coste vs media funciona correctamente
 - [ ] La generación de lote devuelve un código único
-- [ ] El OCR pre-rellena campos al escanear factura
+- [x] El OCR pre-rellena campos al escanear factura *(`handleOcrScan` en `ButcherPurchasesPage.tsx` llama a `/api/ocr/scan` y pre-rellena; la página no es accesible por ruta)*
 - [ ] Los documentos se pueden subir y previsualizar
 - [ ] Las validaciones impiden guardar datos incorrectos
 - [ ] El modo rápido/completo funciona y se recuerda la preferencia
@@ -638,11 +645,11 @@ Al llamar a `POST /api/purchase-entries/:userId/:entryId/confirm`:
 - Registrar `confirmedAt` para auditoría
 
 #### Criterios de aceptación
-- [ ] Al confirmar entrada, `stockQuantity` del `catalog_item` se incrementa
+- [x] Al confirmar entrada, `stockQuantity` del `catalog_item` se incrementa *(implementado sobre `butcher_product.stockKg` en `confirmPurchaseEntry`)*
 - [ ] Si hay `warehouseStock`, se incrementa el almacén correcto
 - [ ] El lote queda marcado como disponible para venta o elaboración según destino
-- [ ] No se produce doble suma si se llama dos veces
-- [ ] El movimiento de stock queda registrado (si el servicio existe)
+- [x] No se produce doble suma si se llama dos veces *(guard: solo confirma entradas en estado `draft`)*
+- [ ] El movimiento de stock queda registrado (si el servicio existe) *(`stockMovementService` existe pero `butcherPurchaseController` no lo usa)*
 
 ---
 
@@ -718,11 +725,11 @@ desviacion = |costPerUnit - costPrice| / costPrice
 - Este flag lo usa CC-12 para generar alerta
 
 #### Criterios de aceptación
-- [ ] Al confirmar entrada, `catalog_item.costPrice` se recalcula como media ponderada
-- [ ] Se guardan `lastPurchaseDate`, `lastPurchasePrice`, `lastSupplierId`
-- [ ] El snapshot de coste anterior/nuevo se guarda en la `purchase_entry`
-- [ ] El `costHistory` se actualiza (últimas 50 entradas)
-- [ ] El coste anómalo se detecta y se marca
+- [x] Al confirmar entrada, `catalog_item.costPrice` se recalcula como media ponderada *(sobre `butcher_product.costPerKg`)*
+- [x] Se guardan `lastPurchaseDate`, `lastPurchasePrice`, `lastSupplierId`
+- [x] El snapshot de coste anterior/nuevo se guarda en la `purchase_entry`
+- [x] El `costHistory` se actualiza (últimas 50 entradas)
+- [x] El coste anómalo se detecta y se marca *(flag `costAnomaly` a >20% + regla `butcher_purchase_cost_anomaly` en el motor de alertas)*
 
 ---
 
@@ -774,10 +781,10 @@ Añadir campo `requiresLot` a `catalog_item` (boolean):
 - Default para carnicería: `true` para productos frescos, `false` para elaborados envasados
 
 #### Criterios de aceptación
-- [ ] Al confirmar entrada sin lote, se genera uno automáticamente
-- [ ] El código de lote sigue el formato y no se repite
-- [ ] El lote contiene todos los datos de trazabilidad de la entrada
-- [ ] Si se proporciona lote existente, se actualiza la cantidad
+- [x] Al confirmar entrada sin lote, se genera uno automáticamente *(bloque en `confirmPurchaseEntry`, aunque depende del `generateBatchCode` inexistente)*
+- [ ] El código de lote sigue el formato y no se repite *(`generateBatchCode` no existe en `couchdb.js`)*
+- [x] El lote contiene todos los datos de trazabilidad de la entrada *(origin, matadero, guía sanitaria, temperatura, zona)*
+- [x] Si se proporciona lote existente, se actualiza la cantidad *(suma a `currentWeightKg` y `receptionWeightKg`)*
 - [ ] La configuración `requiresLot` funciona correctamente
 
 ---
@@ -838,13 +845,13 @@ Al confirmar la entrada con datos OCR:
 ```
 
 #### Criterios de aceptación
-- [ ] El OCR pre-rellena correctamente los campos del formulario
-- [ ] El match de proveedor funciona por CIF y por nombre (fuzzy)
+- [x] El OCR pre-rellena correctamente los campos del formulario *(`createFromOcr` + `handleOcrScan` en la página)*
+- [x] El match de proveedor funciona por CIF y por nombre (fuzzy) *(CIF normalizado exacto + nombre por substring en `createFromOcr`)*
 - [ ] El match de producto funciona por nombre y SKU
-- [ ] Si múltiples líneas OCR, se permite crear entradas por lote
+- [x] Si múltiples líneas OCR, se permite crear entradas por lote *(`createFromOcr` crea una entrada por línea)*
 - [ ] La factura se crea automáticamente si no existía
-- [ ] El documento escaneado se archiva y se vincula
-- [ ] El flujo completo funciona end-to-end
+- [ ] El documento escaneado se archiva y se vincula *(solo vía endpoint manual `attach-document`)*
+- [ ] El flujo completo funciona end-to-end *(router sin montar)*
 
 ---
 
@@ -899,11 +906,11 @@ Los documentos asociados a una compra (albarán, factura, foto de la mercancía,
 - Click abre panel lateral con previews de documentos
 
 #### Criterios de aceptación
-- [ ] Los documentos se guardan con categoría `purchase_document`
-- [ ] La vinculación bidireccional funciona (documento → entrada, entrada → documento)
-- [ ] Se pueden subir múltiples documentos por entrada
+- [x] Los documentos se guardan con categoría `purchase_document` *(categoría real: `compra_mercancia`, en `attachDocument`)*
+- [x] La vinculación bidireccional funciona (documento → entrada, entrada → documento) *(`linkedEntityId` en el documento + `documentIds[]` en la entrada)*
+- [x] Se pueden subir múltiples documentos por entrada
 - [ ] Los documentos se pueden previsualizar
-- [ ] Al eliminar una entrada (soft), los documentos no se eliminan (son independientes)
+- [x] Al eliminar una entrada (soft), los documentos no se eliminan (son independientes)
 
 ---
 
@@ -1016,11 +1023,11 @@ purchaseAlerts: {
 - Panel de alertas lateral (drawer) accesible desde el badge del header
 
 #### Criterios de aceptación
-- [ ] Las 5 alertas se generan correctamente en el ciclo periódico
+- [x] Las 5 alertas se generan correctamente en el ciclo periódico *(`checkButcherPurchases` en `butcherAlertEngine.js`: sin factura, coste anómalo, incompleta, lote sin caducidad, proveedor no identificado — motor activo)*
 - [ ] Las alertas de coste anómalo y mercancía incompleta se emiten al confirmar
 - [ ] Cada alerta lleva al registro correcto
-- [ ] Las alertas son configurables por cuenta
-- [ ] Las alertas se deduplican (una por entrada por día)
+- [ ] Las alertas son configurables por cuenta *(no hay claves `purchaseAlerts` en `allowedKeys` de `alertController.js`)*
+- [x] Las alertas se deduplican (una por entrada por día) *(dedupKey + deduplicación diaria del emisor)*
 - [ ] Las alertas se muestran correctamente en la UI
 
 ---
@@ -1102,9 +1109,9 @@ Ya cubierto en CC-10. Adicionalmente:
 
 #### Criterios de aceptación
 - [ ] El historial de compras por proveedor muestra datos reales
-- [ ] Las facturas se vinculan bidireccionalmente con entradas
+- [ ] Las facturas se vinculan bidireccionalmente con entradas *(`linkInvoice` solo actualiza la entrada, no la factura)*
 - [ ] La validación factura vs entrada funciona (± margen)
-- [ ] El movimiento financiero se crea correctamente (si configurado)
+- [x] El movimiento financiero se crea correctamente (si configurado) *(`createFinanceFromEntry` crea `pago` en BD finanzas; endpoint manual, sin config automática)*
 - [ ] Los documentos se filtran por categoría `purchase_document`
 - [ ] Los links cruzados navegan correctamente
 
@@ -1204,7 +1211,7 @@ En el middleware de cada endpoint de `purchaseEntryController.js`:
 - Filtrar por `performedBy` si no `canViewHistory`
 
 #### Criterios de aceptación
-- [ ] El permiso `purchases` se puede asignar a miembros de equipo
+- [x] El permiso `purchases` se puede asignar a miembros de equipo *(existe como `butcher_purchases` en `TEAM_PERMISSION_KEYS`)*
 - [ ] Los sub-permisos se pueden configurar por miembro
 - [ ] La UI oculta/deshabilita elementos según permisos
 - [ ] Los costes no se envían al frontend si el usuario no tiene permiso
@@ -1277,7 +1284,7 @@ La pestaña "Lotes" de la página debe permitir gestionar los lotes activos, ver
 - PDF de etiqueta de lote (para imprimir): código, producto, proveedor, fecha entrada, caducidad, origen, guía sanitaria
 
 #### Criterios de aceptación
-- [ ] Los lotes se cargan del backend con filtros funcionales
+- [ ] Los lotes se cargan del backend con filtros funcionales *(existe `LotsTab` embebido en `ButcherPurchasesPage.tsx` que carga `/api/butcher/batches`, pero la página no es accesible)*
 - [ ] El semáforo de caducidad funciona correctamente
 - [ ] La barra de progreso de cantidad es visual y precisa
 - [ ] El detalle de lote muestra toda la información

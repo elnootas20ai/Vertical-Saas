@@ -8,6 +8,12 @@
 
 ---
 
+## Estado auditado (08/07/2026)
+
+**~65% hecho.** Bloques completos: DOC-01 (modelo de datos, salvo tests), DOC-02 (búsqueda avanzada front+back), DOC-03 (tabs compraventa + Sidebar), DOC-05 (OCR modo vehículo con prompt propio), DOC-08 (alertas en `compraventaAlertEngine.js` + `alertEngine.js`). Parciales: DOC-10 (permisos backend `docPermission` y UI gerente, pero worker sin acceso en Sidebar), DOC-11 (dossier en `VehicleDetail` tab docs), DOC-12 (auto-categorización y auto-vinculación por matrícula, sin archivado al cerrar venta). Falta de verdad: vista "Expedientes" con toggle en `DocumentsPage` (DOC-04, el componente `VehicleDocDossier` existe pero solo se usa en `VehicleDetail`); histórico real en `DocumentDetail` (sigue mock, aunque el endpoint `getDocumentHistory` ya existe); `DocumentAlertsWidget` creado pero NO montado en el Dashboard (DOC-09); auto-vinculación/autocomplete en modales (DOC-06).
+
+---
+
 ## Auditoría de lo existente
 
 ### Lo que YA funciona
@@ -162,10 +168,10 @@ export interface DocumentRecord {
 
 #### Criterios de aceptación
 
-- [ ] `buildDocumentRecord` acepta y persiste los nuevos campos sin romper documentos existentes
-- [ ] Los documentos existentes sin los campos nuevos devuelven valores por defecto seguros
-- [ ] `sanitizeDocumentRecord` expone todos los campos nuevos al frontend
-- [ ] `DocumentRecord` en `documentsApi.ts` refleja los campos nuevos
+- [x] `buildDocumentRecord` acepta y persiste los nuevos campos sin romper documentos existentes
+- [x] Los documentos existentes sin los campos nuevos devuelven valores por defecto seguros
+- [x] `sanitizeDocumentRecord` expone todos los campos nuevos al frontend
+- [x] `DocumentRecord` en `documentsApi.ts` refleja los campos nuevos
 - [ ] Tests unitarios validan que documentos legacy se normalizan correctamente
 
 ---
@@ -242,13 +248,13 @@ Chips filtrables por subcategoría con contadores:
 
 #### Criterios de aceptación
 
-- [ ] Se puede buscar por matrícula parcial (ej: "1234" encuentra "1234 ABC")
-- [ ] Se puede buscar por VIN parcial
-- [ ] Se puede buscar por nombre de cliente
-- [ ] Se puede buscar por nombre de proveedor
-- [ ] Se puede filtrar por subcategoría documental
-- [ ] La búsqueda es instantánea (client-side) con datos ya cargados
-- [ ] Funciona en desktop y en móvil
+- [x] Se puede buscar por matrícula parcial (ej: "1234" encuentra "1234 ABC")
+- [x] Se puede buscar por VIN parcial
+- [x] Se puede buscar por nombre de cliente
+- [x] Se puede buscar por nombre de proveedor
+- [x] Se puede filtrar por subcategoría documental
+- [x] La búsqueda es instantánea (client-side) con datos ya cargados
+- [x] Funciona en desktop y en móvil
 
 ---
 
@@ -317,12 +323,12 @@ Reemplazar los items `doc-society`, `doc-contracts`, etc. por items específicos
 
 #### Criterios de aceptación
 
-- [ ] En vertical `carDealership`, los tabs son los de compraventa
-- [ ] En otras verticales, se mantienen los tabs genéricos actuales
-- [ ] El conteo de documentos por tab es correcto
-- [ ] Los tabs son scrollables horizontalmente en móvil
-- [ ] La URL refleja el tab activo (`?tab=vehiculo`, `?tab=contratos`, etc.)
-- [ ] El Sidebar muestra ítems coherentes con los tabs de compraventa
+- [x] En vertical `carDealership`, los tabs son los de compraventa
+- [x] En otras verticales, se mantienen los tabs genéricos actuales
+- [x] El conteo de documentos por tab es correcto
+- [x] Los tabs son scrollables horizontalmente en móvil
+- [x] La URL refleja el tab activo (`?tab=vehiculo`, `?tab=contratos`, etc.)
+- [x] El Sidebar muestra ítems coherentes con los tabs de compraventa
 
 ---
 
@@ -391,10 +397,10 @@ Para cada vehículo, calcular cuántos de los obligatorios están presentes y cu
 
 #### Criterios de aceptación
 
-- [ ] Se puede alternar entre vista lista y vista expediente
+- [ ] Se puede alternar entre vista lista y vista expediente *(No hay toggle en `DocumentsPage`; `VehicleDocDossier` solo se usa en `VehicleDetail`.)*
 - [ ] La vista expediente agrupa documentos por vehículo
-- [ ] Cada expediente muestra la barra de progreso documental
-- [ ] Se muestra claramente qué documentos faltan
+- [x] Cada expediente muestra la barra de progreso documental *(vía `VehicleDocDossier`.)*
+- [x] Se muestra claramente qué documentos faltan *(vía `VehicleDocDossier`.)*
 - [ ] Se puede subir un documento directamente al expediente de un vehículo
 - [ ] Vehículos sin documentos aparecen con expediente vacío y CTA para subir
 - [ ] Documentos sin vehículo aparecen en sección "Sin asignar"
@@ -476,17 +482,17 @@ Tras recibir el resultado OCR, si se detecta `registrationPlate`:
 
 #### Criterios de aceptación
 
-- [ ] El endpoint acepta `ocrMode: 'vehicle'` y usa el prompt de vehículo
-- [ ] El prompt de vehículo extrae matrícula, bastidor, titular, NIF, fecha caducidad
-- [ ] El modal OCR permite elegir entre modo financiero y modo vehículo
-- [ ] Si se detecta matrícula, se auto-vincula al vehículo existente
+- [x] El endpoint acepta `ocrMode: 'vehicle'` y usa el prompt de vehículo
+- [x] El prompt de vehículo extrae matrícula, bastidor, titular, NIF, fecha caducidad
+- [x] El modal OCR permite elegir entre modo financiero y modo vehículo
+- [x] Si se detecta matrícula, se auto-vincula al vehículo existente *(en backend, `autoLinkByPlateOrVin` al crear el documento.)*
 - [ ] Si se detecta nombre/NIF de cliente, se auto-vincula al cliente existente
-- [ ] El campo `confidence` se guarda como `ocrConfidence` en el documento
-- [ ] Los campos extraídos se guardan en `ocrData` del documento
-- [ ] Funciona con permisos de circulación españoles
-- [ ] Funciona con fichas técnicas
-- [ ] Funciona con ITV (detecta fecha caducidad)
-- [ ] Funciona con contratos de compraventa (detecta comprador/vendedor)
+- [ ] El campo `confidence` se guarda como `ocrConfidence` en el documento *(el modelo lo soporta, pero no se localiza dónde se persiste `confidenceScore` → `ocrConfidence` al crear desde el modal.)*
+- [x] Los campos extraídos se guardan en `ocrData` del documento
+- [x] Funciona con permisos de circulación españoles
+- [x] Funciona con fichas técnicas
+- [x] Funciona con ITV (detecta fecha caducidad)
+- [x] Funciona con contratos de compraventa (detecta comprador/vendedor)
 
 ---
 
@@ -568,12 +574,12 @@ Reemplazar los `<select>` planos de vehículo/cliente por un componente de búsq
 
 #### Criterios de aceptación
 
-- [ ] Tras OCR con matrícula detectada, el vehículo se pre-selecciona automáticamente
-- [ ] Tras OCR con NIF/nombre, el cliente se pre-selecciona automáticamente
+- [ ] Tras OCR con matrícula detectada, el vehículo se pre-selecciona automáticamente *(La vinculación ocurre en backend al guardar, no como pre-selección en el modal.)*
+- [ ] Tras OCR con NIF/nombre, el cliente se pre-selecciona automáticamente *(El pipeline muestra `entityMatches` de cliente, pero no pre-selecciona `clientId`.)*
 - [ ] Se muestra un toast informativo cuando se auto-vincula
 - [ ] El usuario puede corregir la vinculación automática
 - [ ] Los selectores de vehículo/cliente tienen búsqueda con autocomplete
-- [ ] Se puede buscar vehículo por matrícula o bastidor
+- [ ] Se puede buscar vehículo por matrícula o bastidor *(No existe endpoint `/search` en `vehicleRouter.js`.)*
 - [ ] Se puede buscar cliente por nombre o NIF
 
 ---
@@ -647,8 +653,8 @@ Mostrar el histórico como una línea temporal visual con:
 
 #### Criterios de aceptación
 
-- [ ] El histórico muestra datos reales, no mock
-- [ ] Cada acción sobre el documento genera una entrada de activity log
+- [ ] El histórico muestra datos reales, no mock *(El endpoint `getDocumentHistory` existe en backend, pero `DocumentDetail.tsx` sigue derivando el historial del estado, sin llamar a la API.)*
+- [ ] Cada acción sobre el documento genera una entrada de activity log *(Crear/actualizar/eliminar sí se loguean; firmar, OCR y descarga no verificado.)*
 - [ ] El timeline se renderiza cronológicamente (más reciente arriba)
 - [ ] Cada entrada muestra actor, acción, descripción y fecha
 - [ ] El diseño del timeline es consistente con el resto de la UI
@@ -824,15 +830,15 @@ await checkIncompleteOcr(userId);
 
 #### Criterios de aceptación
 
-- [ ] Se genera alerta cuando un vehículo activo tiene documentos obligatorios faltantes
-- [ ] Se genera alerta cuando la ITV de un vehículo está caducada
-- [ ] Se genera alerta cuando la ITV caduca en los próximos 30 días
-- [ ] Se genera alerta cuando un contrato lleva > 48h sin firmar
-- [ ] Se genera alerta cuando un OCR tiene confianza < 60%
-- [ ] Las alertas tienen deduplicación de 24h (no se repiten)
-- [ ] Las alertas se envían por SSE y Web Push
-- [ ] Las alertas incluyen enlace directo al documento/vehículo afectado
-- [ ] Las alertas aparecen en el panel de notificaciones existente
+- [x] Se genera alerta cuando un vehículo activo tiene documentos obligatorios faltantes *(`checkVehicleMissingDocs` en `compraventaAlertEngine.js`.)*
+- [x] Se genera alerta cuando la ITV de un vehículo está caducada *(`checkStockItvExpiry`.)*
+- [x] Se genera alerta cuando la ITV caduca en los próximos 30 días
+- [x] Se genera alerta cuando un contrato lleva > 48h sin firmar *(`alertEngine.js` — `pendingContractsEnabled`, umbral 48h.)*
+- [x] Se genera alerta cuando un OCR tiene confianza < 60%
+- [x] Las alertas tienen deduplicación de 24h (no se repiten) *(dedupKey por entidad, ventana de 48h para docs.)*
+- [x] Las alertas se envían por SSE y Web Push
+- [x] Las alertas incluyen enlace directo al documento/vehículo afectado
+- [x] Las alertas aparecen en el panel de notificaciones existente
 
 ---
 
@@ -874,7 +880,7 @@ Al hacer click, navegar al documento o vehículo afectado usando la `route` de l
 
 #### Criterios de aceptación
 
-- [ ] El widget aparece en el Dashboard de la vertical `carDealership`
+- [ ] El widget aparece en el Dashboard de la vertical `carDealership` *(El componente `DocumentAlertsWidget.tsx` existe pero NO se importa/monta en ninguna página.)*
 - [ ] Muestra el recuento de alertas activas por tipo
 - [ ] Cada alerta es clickeable y lleva al recurso afectado
 - [ ] Si no hay alertas, muestra estado "Todo en orden" con check verde
@@ -944,12 +950,12 @@ O bien permitir que el worker acceda a `/saas/documents` pero con UI limitada ba
 
 #### Criterios de aceptación
 
-- [ ] El gerente ve todos los documentos y puede CRUD completo + validar
-- [ ] El trabajador ve los documentos relevantes y solo puede crear + leer
-- [ ] El trabajador no puede eliminar ni validar documentos
-- [ ] Los botones de eliminar/validar no aparecen en la UI del trabajador
-- [ ] El backend rechaza con 403 las acciones no permitidas para el rol
-- [ ] El trabajador tiene acceso a la sección de documentación en el Sidebar
+- [x] El gerente ve todos los documentos y puede CRUD completo + validar
+- [ ] El trabajador ve los documentos relevantes y solo puede crear + leer *(No hay filtrado por vehículos asignados y `updateDocument` no está protegido por rol.)*
+- [x] El trabajador no puede eliminar ni validar documentos *(`docPermission('delete')` en el router.)*
+- [x] Los botones de eliminar/validar no aparecen en la UI del trabajador *(Firmar/enviar/plantilla gateados por `isManager`.)*
+- [x] El backend rechaza con 403 las acciones no permitidas para el rol
+- [ ] El trabajador tiene acceso a la sección de documentación en el Sidebar *(`documentacion` sigue en `ADMIN_ONLY_GROUPS`.)*
 
 ---
 
@@ -993,12 +999,12 @@ Ya cubierto en DOC-09 (widget de alertas documentales).
 
 #### Criterios de aceptación
 
-- [ ] `VehicleDetail` muestra pestaña "Documentación" con mini-expediente
-- [ ] Se puede subir un documento directamente desde el detalle del vehículo
+- [x] `VehicleDetail` muestra pestaña "Documentación" con mini-expediente *(tab `docs` con `VehicleDocDossier`.)*
+- [ ] Se puede subir un documento directamente desde el detalle del vehículo *(No se pasan `onUpload`/`onOcr` al dossier.)*
 - [ ] Los gastos del vehículo permiten adjuntar justificante documental
-- [ ] `SaleDetail` muestra los documentos vinculados a la operación
-- [ ] Si faltan docs obligatorios para cerrar venta, se muestra warning visible
-- [ ] Cada enlace navega correctamente al documento o expediente
+- [x] `SaleDetail` muestra los documentos vinculados a la operación *(checklist de `generatedDocuments` con obligatorios.)*
+- [x] Si faltan docs obligatorios para cerrar venta, se muestra warning visible *(`CloseSaleWizard` con checklist y cierre por excepción.)*
+- [x] Cada enlace navega correctamente al documento o expediente
 
 ---
 
@@ -1065,12 +1071,12 @@ Si el OCR detecta un documento ITV con fecha de caducidad, guardar en `itvExpiry
 
 #### Criterios de aceptación
 
-- [ ] Documentos creados por OCR se auto-categorizan según el tipo detectado
-- [ ] Si el OCR detecta matrícula, se vincula automáticamente al vehículo
-- [ ] Si el OCR detecta fecha de caducidad ITV, se guarda en `itvExpiryDate`
-- [ ] Al cerrar una venta, los documentos del expediente se marcan como archivados
+- [x] Documentos creados por OCR se auto-categorizan según el tipo detectado *(`OCR_TYPE_TO_SUB_CATEGORY` en `documentsController.js`.)*
+- [x] Si el OCR detecta matrícula, se vincula automáticamente al vehículo *(`autoLinkByPlateOrVin`.)*
+- [x] Si el OCR detecta fecha de caducidad ITV, se guarda en `itvExpiryDate`
+- [ ] Al cerrar una venta, los documentos del expediente se marcan como archivados *(Existe el campo y filtro `archived`, pero ningún código lo activa al cerrar la venta.)*
 - [ ] Los documentos archivados son visibles pero con estilo diferenciado
-- [ ] El flujo completo (subir → OCR → categorizar → vincular → archivar) funciona sin intervención manual
+- [ ] El flujo completo (subir → OCR → categorizar → vincular → archivar) funciona sin intervención manual *(Falta el paso de archivado.)*
 
 ---
 
@@ -1138,12 +1144,12 @@ Cada tab vacío muestra un empty state con ilustración y CTA específico:
 
 #### Criterios de aceptación
 
-- [ ] Los KPIs reflejan el estado real de la documentación
-- [ ] Cada subcategoría tiene su icono diferenciado
+- [ ] Los KPIs reflejan el estado real de la documentación *(Stats genéricos por pestaña, no los KPIs específicos de compraventa del ticket.)*
+- [x] Cada subcategoría tiene su icono diferenciado *(`DOC_SUB_CATEGORY_ICONS`.)*
 - [ ] Las transiciones entre tabs son suaves
 - [ ] Hay skeleton loaders durante la carga
-- [ ] El responsive funciona correctamente en los 3 breakpoints
-- [ ] Los empty states son contextuales y tienen CTA claro
+- [x] El responsive funciona correctamente en los 3 breakpoints *(tabla desktop + cards móvil.)*
+- [x] Los empty states son contextuales y tienen CTA claro
 
 ---
 

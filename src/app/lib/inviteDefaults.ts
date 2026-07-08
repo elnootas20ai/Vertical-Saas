@@ -1,5 +1,6 @@
 import type { BusinessType } from './businessApi';
 import { isDeliveryBusinessType } from './deliverySetup';
+import { isRestaurantBusinessType } from './deliveryOpsTypes';
 import { WORKER_DEFAULT_LANDING_PATH } from './workerProfileCompletion';
 
 export const INVITE_LANDING_PAGE_DEFS = [
@@ -13,6 +14,7 @@ export const INVITE_LANDING_PAGE_DEFS = [
   { id: '/saas/delivery-reparto', key: 'delivery-reparto' },
   { id: '/saas/delivery-kitchen', key: 'delivery-kitchen' },
   { id: '/saas/delivery-ops', key: 'delivery-ops' },
+  { id: '/saas/cocina', key: 'cocina' },
 ] as const;
 
 export type InviteLandingPageId = (typeof INVITE_LANDING_PAGE_DEFS)[number]['id'];
@@ -34,6 +36,12 @@ const RETAIL_LANDING_IDS = new Set<InviteLandingPageId>([
   '/saas/calendar',
 ]);
 
+const RESTAURANT_LANDING_IDS = new Set<InviteLandingPageId>([
+  WORKER_DEFAULT_LANDING_PATH,
+  '/saas/cocina',
+  '/saas/calendar',
+]);
+
 const GENERIC_LANDING_IDS = new Set<InviteLandingPageId>([
   WORKER_DEFAULT_LANDING_PATH,
   '/saas/documents',
@@ -47,6 +55,9 @@ export function getInviteLandingPagesForBusiness(
   const bt = (businessType || '') as BusinessType;
   if (isDeliveryBusinessType(bt)) {
     return INVITE_LANDING_PAGE_DEFS.filter((p) => DELIVERY_LANDING_IDS.has(p.id));
+  }
+  if (isRestaurantBusinessType(bt)) {
+    return INVITE_LANDING_PAGE_DEFS.filter((p) => RESTAURANT_LANDING_IDS.has(p.id));
   }
   if (bt === 'carDealership' || bt === 'workshop' || bt === 'spareParts' || bt === 'scrapyard') {
     return INVITE_LANDING_PAGE_DEFS.filter((p) => RETAIL_LANDING_IDS.has(p.id));
@@ -64,6 +75,10 @@ export function getDefaultInviteLandingPage(
     if (role === 'Reparto') return '/saas/delivery-reparto';
     if (role === 'Cocina') return '/saas/delivery-kitchen';
     if (role === 'Encargado' || role === 'Administrador') return '/saas/delivery-ops';
+    return WORKER_DEFAULT_LANDING_PATH;
+  }
+  if (isRestaurantBusinessType(businessType)) {
+    if (role === 'Cocina') return '/saas/cocina';
     return WORKER_DEFAULT_LANDING_PATH;
   }
   if (role === 'Administrador' || role === 'Encargado') return WORKER_DEFAULT_LANDING_PATH;

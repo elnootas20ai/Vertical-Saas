@@ -53,7 +53,7 @@ import {
   Layers, Sparkles,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getAlertResolveLabel, alertHasNavigateTarget } from '../../lib/alertActions';
+import { getAlertResolveLabel, alertHasNavigateTarget, mapAlertsForBusinessVertical } from '../../lib/alertActions';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -155,7 +155,7 @@ export default function AlertCenterPage() {
           from: historyFrom || undefined,
           to: historyTo || undefined,
         });
-        setAlerts(alertsRes.alerts);
+        setAlerts(mapAlertsForBusinessVertical(alertsRes.alerts, currentBusiness?.businessType));
         setPagination(alertsRes.pagination);
       } else {
         const alertsRes = await fetchAlerts(businessId, {
@@ -163,7 +163,10 @@ export default function AlertCenterPage() {
           search: searchTerm || undefined,
           ...(sourceFilter ? { source: sourceFilter } : {}),
         });
-        const merged = mergeAlertLists(alertsRes.alerts || [], docAlerts);
+        const merged = mergeAlertLists(
+          mapAlertsForBusinessVertical(alertsRes.alerts || [], currentBusiness?.businessType),
+          docAlerts,
+        );
         const search = searchTerm.trim().toLowerCase();
         const filtered = search
           ? merged.filter((a) =>
@@ -181,7 +184,7 @@ export default function AlertCenterPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [businessId, dataUserId, filters, searchTerm, isHistory, isSettings, includeDeleted, historyFrom, historyTo, activeDepartment, departmentSourceFilter]);
+  }, [businessId, dataUserId, filters, searchTerm, isHistory, isSettings, includeDeleted, historyFrom, historyTo, activeDepartment, departmentSourceFilter, currentBusiness?.businessType]);
 
   const sseToken = useMemo(() => {
     const headers = getAuthHeaders();

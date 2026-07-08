@@ -35,9 +35,10 @@ describe('onboarding subscription provisioning', () => {
       businessCount: 5,
       commercialBrandCount: 3,
     });
+    // Pro incluye 2 PDV, 2 empresas y 2 marcas: el resto van como cupos extra.
     expect(extras.extraPointOfSaleSlots).toBe(2);
-    expect(extras.extraBusinessSlots).toBe(2);
-    expect(extras.extraCommercialBrandSlots).toBe(2);
+    expect(extras.extraBusinessSlots).toBe(3);
+    expect(extras.extraCommercialBrandSlots).toBe(1);
   });
 
   it('sube a PRO si piden basic con marcas extra en onboarding', () => {

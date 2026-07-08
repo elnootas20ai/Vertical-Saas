@@ -24,6 +24,7 @@ import {
 } from './alertEmitter.js';
 import logger from './logger.js';
 import { canEmitPdvCashAlerts } from './pdvAlertUtils.js';
+import { shouldRunBackgroundEngine } from './engineIdleGate.js';
 
 const MAIN_INTERVAL_MS = 30 * 60_000;
 const SCALE_INTERVAL_MS = 5 * 60_000;
@@ -709,9 +710,15 @@ export function startButcherAlertEngine() {
   logger.info({ tag: TAG }, `Motor alertas carniceria programado - inicio en ${STARTUP_DELAY_MS / 1000}s, principal cada ${MAIN_INTERVAL_MS / 60000} min, bascula cada ${SCALE_INTERVAL_MS / 60000} min`);
   setTimeout(() => {
     runButcherAlertEngine().catch(() => null);
-    mainTimer = setInterval(() => runButcherAlertEngine().catch(() => null), MAIN_INTERVAL_MS);
+    mainTimer = setInterval(() => {
+      if (!shouldRunBackgroundEngine('butcher_alerts')) return;
+      runButcherAlertEngine().catch(() => null);
+    }, MAIN_INTERVAL_MS);
     runButcherScaleChecks().catch(() => null);
-    scaleTimer = setInterval(() => runButcherScaleChecks().catch(() => null), SCALE_INTERVAL_MS);
+    scaleTimer = setInterval(() => {
+      if (!shouldRunBackgroundEngine('butcher_scale')) return;
+      runButcherScaleChecks().catch(() => null);
+    }, SCALE_INTERVAL_MS);
   }, STARTUP_DELAY_MS);
 }
 

@@ -4,6 +4,10 @@
 **Objetivo:** Controlar qué servicio se presta, dónde, con qué frecuencia y por cuánto dinero.
 **Fecha:** 2026-04-14
 
+## Estado auditado (08/07/2026)
+
+**~38% completado (38/99 criterios).** Backend prácticamente completo: modelo `service_contract` (SVC-01) con CRUD, activate/pause/cancel/renew, stats y motor de generación de servicios (SVC-04) en `cleaningController.js` + `cleaningRouter.js` (`/api/cleaning/service-contracts`). Facturación parcial vía `cleaningBillingEngine.js` y alertas vía `cleaningAlertEngine.js`. `ServiceContractsPage.tsx` existe con KPIs, tabla y modal, pero las pestañas Calendario y Servicios son placeholders ("Próximamente"), no hay wizard, ni detalle de contrato, ni selector CRM/equipo (cliente y trabajador siguen siendo texto libre), ni vista diferenciada trabajador. Faltan: SVC-02 (vínculo CRM), SVC-03 (selector equipo), SVC-05 (calendario), SVC-11 (dashboard) y la mayoría de conexiones frontend.
+
 ---
 
 ## Auditoría de lo existente
@@ -243,17 +247,17 @@ export interface ServiceContract {
 Añadir tipo `service_contract` a `DEFAULT_NUMBERING` en `settingsController.js` con prefijo `CTR-` y mismo patrón que `contract`.
 
 #### Criterios de aceptación
-- [ ] Documento `service_contract` se persiste en la DB `*-cleaning`
-- [ ] CRUD completo funcional desde API client y endpoints REST
-- [ ] Soporta los 12 tipos de cliente definidos
-- [ ] Soporta 3 modelos de precio (mensual, por servicio, por hora)
-- [ ] Soporta frecuencias desde diario hasta bajo demanda + personalizada
-- [ ] Horario definido como array de slots (día + hora inicio + hora fin)
-- [ ] Trabajador asignado vinculado por ID del equipo (no texto libre)
-- [ ] Materiales como array de strings con flag de quién los aporta
-- [ ] Estado del contrato independiente del estado de ejecución del servicio
-- [ ] Numeración automática con prefijo `CTR-`
-- [ ] Borrado lógico con `deletedAt`
+- [x] Documento `service_contract` se persiste en la DB `*-cleaning`
+- [x] CRUD completo funcional desde API client y endpoints REST
+- [x] Soporta los 12 tipos de cliente definidos
+- [x] Soporta 3 modelos de precio (mensual, por servicio, por hora)
+- [x] Soporta frecuencias desde diario hasta bajo demanda + personalizada
+- [x] Horario definido como array de slots (día + hora inicio + hora fin)
+- [ ] Trabajador asignado vinculado por ID del equipo (no texto libre) — el modelo tiene `assignedWorkerId` pero la UI solo guarda el nombre
+- [x] Materiales como array de strings con flag de quién los aporta
+- [x] Estado del contrato independiente del estado de ejecución del servicio
+- [x] Numeración automática con prefijo `CTR-`
+- [x] Borrado lógico con `deletedAt`
 
 ---
 
@@ -372,8 +376,8 @@ Los `cleaning_service` existentes con `assignedToName` relleno pero sin `assigne
 
 #### Criterios de aceptación
 - [ ] Selector de trabajadores del equipo real (no texto libre)
-- [ ] Guarda `assignedWorkerId` + `assignedWorkerName`
-- [ ] Soporte para trabajador suplente
+- [ ] Guarda `assignedWorkerId` + `assignedWorkerName` — el modelo lo soporta, pero el formulario solo envía el nombre
+- [x] Soporte para trabajador suplente
 - [ ] Validación de conflicto horario al asignar
 - [ ] Carga semanal visible (horas totales del trabajador)
 - [ ] Sección en TeamMemberDetail con servicios asignados
@@ -482,14 +486,14 @@ Función en el servidor que se ejecuta automáticamente (cron o al iniciar seman
 - Log de la generación para trazabilidad
 
 #### Criterios de aceptación
-- [ ] Los servicios individuales se generan correctamente según frecuencia y horario
-- [ ] No se duplican servicios para la misma fecha/hora/contrato
-- [ ] Los servicios generados incluyen `contractId` para trazabilidad
-- [ ] Soporta todas las frecuencias definidas en SVC-01
-- [ ] El endpoint `generate` funciona para un contrato y para todos
-- [ ] Los servicios generados heredan: cliente, dirección, tipo, trabajador, tareas, precio
-- [ ] El precio por servicio se calcula correctamente según el modelo (mensual/por servicio/por hora)
-- [ ] Generación batch automática para la semana siguiente
+- [x] Los servicios individuales se generan correctamente según frecuencia y horario
+- [x] No se duplican servicios para la misma fecha/hora/contrato
+- [x] Los servicios generados incluyen `contractId` para trazabilidad
+- [x] Soporta todas las frecuencias definidas en SVC-01
+- [x] El endpoint `generate` funciona para un contrato y para todos
+- [ ] Los servicios generados heredan: cliente, dirección, tipo, trabajador, tareas, precio — todo salvo las tareas (no se copian las `tasks` por tipo)
+- [x] El precio por servicio se calcula correctamente según el modelo (mensual/por servicio/por hora)
+- [ ] Generación batch automática para la semana siguiente — solo bajo demanda vía endpoint, sin cron
 
 ---
 
@@ -655,14 +659,14 @@ En el detalle del contrato, pestaña/sección "Facturación":
 - Link a cada factura en la vista de facturación del CRM
 
 #### Criterios de aceptación
-- [ ] Se puede generar factura desde un contrato para un período
+- [ ] Se puede generar factura desde un contrato para un período — `cleaningBillingEngine.js` factura desde `cleaning_contract`, no desde `service_contract` (no lee `billingEnabled`/`billingDay`)
 - [ ] El cálculo respeta el modelo de precio (mensual/servicio/hora)
-- [ ] La factura se crea vía `clientInvoicesApi` con líneas detalladas
-- [ ] Los servicios facturados se marcan con `invoiceId`
-- [ ] La facturación automática genera factura el día configurado
+- [x] La factura se crea vía el sistema de facturas de cliente (`client_invoice`) con líneas detalladas
+- [x] Los servicios facturados se marcan con `invoiceId`
+- [ ] La facturación automática genera factura el día configurado — solo bajo demanda vía endpoints `/api/cleaning/billing`
 - [ ] Historial de facturas visible en el detalle del contrato
-- [ ] No se duplican facturas para el mismo período
-- [ ] Compatible con la automatización FIN-04 de Finanzas
+- [x] No se duplican facturas para el mismo período (`billingStatus`/`nextInvoiceDate`)
+- [x] Compatible con la automatización FIN-04 de Finanzas (`generatePendingFinanceEntry`)
 
 ---
 
@@ -734,13 +738,13 @@ Mismo patrón que HORARIOS-VACACIONES.md (HV-06):
 - Contador de alertas en el sidebar junto a "Servicios"
 
 #### Criterios de aceptación
-- [ ] Se generan los 6 tipos de alerta definidos
-- [ ] Las alertas se integran en el ciclo del `alertEngine` existente
+- [ ] Se generan los 6 tipos de alerta definidos — el motor `cleaningAlertEngine.js` cubre `service_uncovered` y `contract_renewal` (+9 reglas más), pero faltan `service_no_schedule`, `client_service_uncovered` y `contract_expired` como tales
+- [x] Las alertas se integran en el sistema de alertas global (motor dedicado `cleaningAlertEngine` + `emitGlobalAlert`)
 - [ ] Banner visible en la página de servicios con diseño correcto por severity
 - [ ] Cada alerta tiene botón de acción funcional
 - [ ] Alertas dismissables (localStorage)
 - [ ] Contador de alertas en el sidebar
-- [ ] Configuración de activación/desactivación por regla
+- [x] Configuración de activación/desactivación por regla (`getCleaningAlertConfig`)
 
 ---
 
@@ -911,16 +915,16 @@ Si el usuario no es gerente, la página muestra vista simplificada:
 - Header: "Mis servicios asignados"
 
 #### Criterios de aceptación
-- [ ] Página accesible en `/saas/vertical/limpieza/servicios`
-- [ ] 4 pestañas funcionales (Contratos, Calendario, Servicios, Mapa de zonas)
-- [ ] KPIs calculados y visibles en la cabecera
-- [ ] Modal de creación de contrato con wizard de 5 pasos
+- [x] Página accesible en `/saas/vertical/limpieza/servicios`
+- [ ] 4 pestañas funcionales (Contratos, Calendario, Servicios, Mapa de zonas) — solo Contratos funciona; Calendario y Servicios son placeholders, Mapa no existe
+- [x] KPIs calculados y visibles en la cabecera
+- [ ] Modal de creación de contrato con wizard de 5 pasos — modal de una sola vista con secciones
 - [ ] Detalle del contrato con timeline + facturas + acciones
-- [ ] Tabla de contratos con filtros, búsqueda y ordenación
-- [ ] Redirect desde `/saas/cleaning-services`
-- [ ] Sidebar actualizado con nuevo ítem
+- [ ] Tabla de contratos con filtros, búsqueda y ordenación — hay búsqueda y filtro por estado, falta ordenación
+- [ ] Redirect desde `/saas/cleaning-services` — sigue mostrando `CleaningServices.tsx`
+- [x] Sidebar actualizado con nuevo ítem
 - [ ] Vista reducida para trabajador no-admin
-- [ ] Responsive + dark mode
+- [x] Responsive + dark mode
 - [ ] Carga lazy de pestañas pesadas (calendario, mapa)
 
 ---
@@ -974,12 +978,12 @@ Modificar `WorkerTpvCleaning.tsx` para:
 - Opción de añadir fotos antes/después (activar los campos `photosBefore`/`photosAfter` que ya existen)
 
 #### Criterios de aceptación
-- [ ] `checkInAt` y `checkOutAt` se registran al iniciar/finalizar servicio
+- [x] `checkInAt` y `checkOutAt` se registran al iniciar/finalizar servicio (endpoints `check-in`/`check-out` + `CleaningExecution.tsx`)
 - [ ] `realDuration` calculada automáticamente
 - [ ] Opción de crear fichaje automáticamente al iniciar servicio
 - [ ] Comparativa horas contratadas vs. reales en detalle del contrato
-- [ ] Cronómetro visible en el TPV del trabajador durante el servicio
-- [ ] Fotos antes/después funcionales en el TPV del trabajador
+- [x] Cronómetro visible en el TPV del trabajador durante el servicio
+- [ ] Fotos antes/después funcionales en el TPV del trabajador — existen en `CleaningExecution.tsx`, no en `WorkerTpvCleaning.tsx`
 
 ---
 
@@ -1060,14 +1064,14 @@ En `WorkerTpvCleaning.tsx`:
 - Dirección con link a Google Maps para navegación
 
 #### Criterios de aceptación
-- [ ] CRUD de zonas funcional
-- [ ] Los contratos pueden asignarse a una zona
-- [ ] Se puede generar ruta diaria para un trabajador
-- [ ] La ruta ordena los servicios del día
+- [ ] CRUD de zonas funcional — `zone` es un string libre en el contrato, no existe la entidad `cleaning_zone`
+- [x] Los contratos pueden asignarse a una zona
+- [x] Se puede generar ruta diaria para un trabajador (`generateCleaningRoutes` + `CleaningRoutes.tsx`)
+- [x] La ruta ordena los servicios del día (con reordenación vía `reorderCleaningRoute`)
 - [ ] Drag & drop para reordenar servicios en la ruta
 - [ ] Vista "Mi ruta de hoy" en el TPV del trabajador
 - [ ] Link a Google Maps para navegación
-- [ ] Zonas visibles como filtro en el calendario (SVC-05)
+- [ ] Zonas visibles como filtro en el calendario (SVC-05) — hay filtro de zona en `CleaningRoutes.tsx`, pero el calendario no existe
 
 ---
 
@@ -1190,12 +1194,12 @@ En la sección de Settings, para vertical limpieza:
 - Plantillas de tareas por tipo de limpieza (editar DEFAULT_TASKS)
 
 #### Criterios de aceptación
-- [ ] Todas las acciones de gestión funcionan correctamente
+- [ ] Todas las acciones de gestión funcionan correctamente — crear/editar/activar/pausar/cancelar/renovar/eliminar sí; faltan duplicar, generar servicios desde la UI, generar factura manual
 - [ ] Acciones masivas sobre contratos (activar, pausar, generar)
 - [ ] Exportación CSV/Excel funcional
 - [ ] Configuración de la vertical accesible desde Settings
-- [ ] Historial de actividad registrado para auditoría
-- [ ] Confirmación en acciones destructivas (cancelar, eliminar)
+- [x] Historial de actividad registrado para auditoría (`logAccountActivity` en todas las acciones de contrato)
+- [ ] Confirmación en acciones destructivas (cancelar, eliminar) — solo eliminar pide confirmación
 
 ---
 
@@ -1279,16 +1283,16 @@ Reutilizar la lógica de roles:
 - Ambas vistas comparten la misma API y datos
 
 #### Criterios de aceptación
-- [ ] El trabajador ve solo sus servicios asignados
-- [ ] Vista "Hoy" con servicios ordenados por hora
+- [ ] El trabajador ve solo sus servicios asignados — `WorkerTpvCleaning.tsx` no filtra por trabajador
+- [x] Vista "Hoy" con servicios ordenados por hora (`WorkerTpvCleaning.tsx`)
 - [ ] Vista "Esta semana" con servicios agrupados por día
-- [ ] Botones "Iniciar" y "Finalizar" funcionales con registro de check-in/out
-- [ ] Checklist de tareas con toggles
+- [x] Botones "Iniciar" y "Finalizar" funcionales con registro de check-in/out (`CleaningExecution.tsx`)
+- [x] Checklist de tareas con toggles (`CleaningChecklist.tsx`)
 - [ ] Campo de notas del empleado
-- [ ] Fotos antes/después funcionales
+- [x] Fotos antes/después funcionales (`CleaningExecution.tsx` + endpoints de foto)
 - [ ] Link a Google Maps
-- [ ] No ve precios, facturación ni servicios de otros
-- [ ] Responsive optimizado para móvil (uso principal)
+- [ ] No ve precios, facturación ni servicios de otros — el TPV muestra ingresos por servicio
+- [x] Responsive optimizado para móvil (uso principal)
 
 ---
 
