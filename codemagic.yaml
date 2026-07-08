@@ -1,0 +1,56 @@
+# Pipeline de build iOS en la nube (Codemagic) — compila, firma y sube a TestFlight
+# sin necesidad de un Mac local.
+#
+# Requisitos previos (una sola vez, ver instrucciones en el chat / readme):
+#   1. Cuenta Apple Developer de pago activa.
+#   2. API key de App Store Connect (archivo .p8) añadida en Codemagic como
+#      integración con el nombre "vertial-asc" (Teams > Integrations > Developer Portal).
+#   3. App creada en App Store Connect con bundle ID com.vertial.app.
+#   4. Repo conectado en Codemagic (login con GitHub).
+
+workflows:
+  ios-release:
+    name: iOS Release (TestFlight)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      app_store_connect: vertial-asc
+    environment:
+      node: 22
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.vertial.app
+      vars:
+        # El WebView nativo no comparte origen con el backend: URL absoluta del API
+        VITE_NATIVE_API_ORIGIN: "https://vertialapp.com"
+    scripts:
+      - name: Instalar dependencias
+        script: npm ci
+      - name: Build web de producción
+        script: npm run build
+      - name: Sincronizar Capacitor iOS
+        script: npx cap sync ios
+      - name: Instalar pods
+        script: |
+          cd ios/App
+          pod install
+      - name: Número de build incremental
+        script: |
+          cd ios/App
+          agvtool new-version -all $BUILD_NUMBER
+      - name: Aplicar perfiles de firma
+        script: xcode-project use-profiles
+      - name: Compilar IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace ios/App/App.xcworkspace \
+            --scheme App
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integrations
+        submit_to_testflight: true
