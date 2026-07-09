@@ -320,7 +320,8 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
           </div>
         )}
         <main className={`overflow-x-auto ${noPadding ? 'pb-16 md:pb-0' : 'py-4 pb-16 md:pb-0 px-3 md:px-4'}`}>
-          <ErrorBoundary>
+          {/* key por ruta: un error en una página no debe dejar bloqueada la navegación al resto */}
+          <ErrorBoundary key={location.pathname}>
             <DeliveryOpsReturnStrip />
             <WorkerProfileCompletionBanner />
             <ActivationPageCoach />

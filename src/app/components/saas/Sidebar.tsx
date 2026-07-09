@@ -1679,7 +1679,7 @@ function SidebarInner({
     const narrow = !isMobile && collapsed;
     return (
     <aside
-      className={`bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col h-svh max-h-svh overflow-hidden ${
+      className={`bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col h-svh max-h-svh overflow-hidden safe-area-top ${
         isMobile
           ? 'w-72'
           : `fixed inset-y-0 left-0 z-40 transition-[width] duration-300 ${collapsed ? 'w-20' : 'w-60'}`

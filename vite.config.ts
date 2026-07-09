@@ -80,6 +80,9 @@ export default defineConfig(({ mode }) => {
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.ts',
+      // Registro manual en main.tsx: en la app nativa (Capacitor) el SW no debe
+      // registrarse o serviría un bundle antiguo tras actualizar por TestFlight.
+      injectRegister: false,
 
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],

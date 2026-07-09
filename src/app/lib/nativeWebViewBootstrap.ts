@@ -20,3 +20,17 @@ export async function prepareNativeWebView(): Promise<void> {
     // Algunos WebViews bloquean cache/SW; el bundle empaquetado sigue cargando.
   }
 }
+
+/**
+ * Registra el service worker de la PWA solo en web: en la app nativa el bundle
+ * ya viene dentro del binario y un SW cachearía una versión antigua.
+ */
+export function registerPwaServiceWorker(): void {
+  if (Capacitor.isNativePlatform()) return;
+  if (!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {
+      /* la PWA es opcional; la web funciona igual sin SW */
+    });
+  });
+}

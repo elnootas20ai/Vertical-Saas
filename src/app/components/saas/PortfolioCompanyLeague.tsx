@@ -5,6 +5,7 @@ import {
   buildCompanyLeague,
   getLeagueMetrics,
   type CompanyLeagueEntry,
+  type LeagueMetricDef,
   type LeagueMetricId,
 } from '../../lib/portfolioLeague';
 import { BUSINESS_TYPE_COLORS, BUSINESS_TYPE_LABELS } from './BusinessCarousel';
@@ -43,7 +44,7 @@ export function PortfolioCompanyLeague({ rows, onEnter }: Props) {
     if (!solo) return null;
     return (
       <section className="rounded-2xl border border-indigo-200/80 dark:border-indigo-800/60 bg-gradient-to-br from-indigo-50 via-white to-violet-50 dark:from-indigo-950/40 dark:via-gray-900 dark:to-violet-950/30 p-4 sm:p-5 overflow-hidden">
-        <LeagueHeader metric={metric} onMetric={setMetric} subtitle="Tu empresa vs el mes anterior" />
+        <LeagueHeader metrics={leagueMetrics} metric={metric} onMetric={setMetric} subtitle="Tu empresa vs el mes anterior" />
         <SingleCompanyBoard entry={solo} row={rows[0]} onEnter={() => onEnter(solo.businessId)} />
       </section>
     );
@@ -52,6 +53,7 @@ export function PortfolioCompanyLeague({ rows, onEnter }: Props) {
   return (
     <section className="rounded-2xl border border-indigo-200/80 dark:border-indigo-800/60 bg-gradient-to-br from-indigo-50 via-white to-violet-50 dark:from-indigo-950/40 dark:via-gray-900 dark:to-violet-950/30 p-4 sm:p-5 overflow-hidden shadow-sm">
       <LeagueHeader
+        metrics={leagueMetrics}
         metric={metric}
         onMetric={setMetric}
         subtitle={`${metricDef.label} · media del grupo ${groupAvgMom >= 0 ? '+' : ''}${groupAvgMom}% vs mes ant.`}
@@ -77,10 +79,12 @@ export function PortfolioCompanyLeague({ rows, onEnter }: Props) {
 }
 
 function LeagueHeader({
+  metrics,
   metric,
   onMetric,
   subtitle,
 }: {
+  metrics: LeagueMetricDef[];
   metric: LeagueMetricId;
   onMetric: (m: LeagueMetricId) => void;
   subtitle: string;
@@ -101,7 +105,7 @@ function LeagueHeader({
         </div>
       </div>
       <div className="flex flex-wrap gap-1 p-1 rounded-xl bg-white/80 dark:bg-gray-900/60 border border-indigo-100 dark:border-indigo-900/50">
-        {leagueMetrics.map((m) => (
+        {metrics.map((m) => (
           <button
             key={m.id}
             type="button"

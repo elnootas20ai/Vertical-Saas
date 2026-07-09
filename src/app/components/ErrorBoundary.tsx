@@ -62,11 +62,9 @@ export class ErrorBoundary extends Component<Props, State> {
           Ha ocurrido un problema. Puedes reintentar o volver al inicio.
           El detalle técnico queda registrado en Caja → Incidencias TPV.
         </p>
-        {import.meta.env.DEV && (
-          <pre className="mb-6 max-w-lg text-left text-xs bg-gray-100 dark:bg-gray-800 text-red-600 dark:text-red-400 rounded-xl p-4 overflow-auto">
-            {error.message}
-          </pre>
-        )}
+        <pre className="mb-6 max-w-lg max-h-32 text-left text-[11px] bg-gray-100 dark:bg-gray-800 text-red-600 dark:text-red-400 rounded-xl p-3 overflow-auto whitespace-pre-wrap break-words">
+          {error.message}
+        </pre>
         <div className="flex gap-3">
           <button
             onClick={this.reset}

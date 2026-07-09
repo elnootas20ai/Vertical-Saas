@@ -1,31 +1,81 @@
 import { useLocation, useNavigate } from 'react-router';
+import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
-  ShoppingCart,
   Car,
   TrendingUp,
   Users,
   Bell,
+  ClipboardList,
+  Calculator,
+  Armchair,
+  Wrench,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuthOptional } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
+import { useBusiness } from '../../context/BusinessContext';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { isDeliveryBusinessType } from '../../lib/deliverySetup';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
 
-const BASE_ITEMS = [
-  { id: 'dashboard', path: '/saas/dashboard', icon: LayoutDashboard, label: 'Inicio' },
-  { id: 'vehicles', path: '/saas/vehicles', icon: Car, label: 'Vehículos' },
-  { id: 'sales', path: '/saas/sales', icon: TrendingUp, label: 'Ventas' },
-  { id: 'clients', path: '/saas/clients', icon: Users, label: 'Clientes' },
-] as const;
+type BottomNavItem = {
+  id: string;
+  path: string;
+  icon: LucideIcon;
+  label: string;
+  /** Rutas con guard RequireBusinessOwner: ocultas para cuentas de trabajador */
+  ownerOnly?: boolean;
+};
 
-const ALERTS_ITEM = {
+const HOME_ITEM: BottomNavItem = { id: 'dashboard', path: '/saas/dashboard', icon: LayoutDashboard, label: 'Inicio' };
+const CLIENTS_ITEM: BottomNavItem = { id: 'clients', path: '/saas/clients', icon: Users, label: 'Clientes' };
+const SALES_ITEM: BottomNavItem = { id: 'sales', path: '/saas/sales', icon: TrendingUp, label: 'Ventas' };
+
+/** Pestañas por vertical: la barra de compraventa (Vehículos/Ventas) no aplica a delivery, restaurante… */
+function navItemsForVertical(businessType?: string | null): BottomNavItem[] {
+  if (isRestaurantBusinessType(businessType)) {
+    return [
+      HOME_ITEM,
+      { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
+      { id: 'caja', path: '/saas/caja', icon: Calculator, label: 'Caja', ownerOnly: true },
+      CLIENTS_ITEM,
+    ];
+  }
+  if (isDeliveryBusinessType(businessType)) {
+    return [
+      HOME_ITEM,
+      { id: 'ops', path: '/saas/delivery-ops', icon: ClipboardList, label: 'Operativa', ownerOnly: true },
+      { id: 'caja', path: '/saas/vertical/delivery/caja', icon: Calculator, label: 'Caja', ownerOnly: true },
+      CLIENTS_ITEM,
+    ];
+  }
+  if (businessType === 'workshop') {
+    return [
+      HOME_ITEM,
+      { id: 'workshop', path: '/saas/workshop', icon: Wrench, label: 'Taller' },
+      CLIENTS_ITEM,
+    ];
+  }
+  if (businessType === 'carDealership') {
+    return [
+      HOME_ITEM,
+      { id: 'vehicles', path: '/saas/vehicles', icon: Car, label: 'Vehículos' },
+      SALES_ITEM,
+      CLIENTS_ITEM,
+    ];
+  }
+  // Resto de verticales: pestañas genéricas del core
+  return [HOME_ITEM, SALES_ITEM, CLIENTS_ITEM];
+}
+
+const ALERTS_ITEM: BottomNavItem = {
   id: 'alertas',
   path: '/saas/alerts',
   icon: Bell,
   label: 'Alertas',
-} as const;
+};
 
 export function BottomNav() {
   const location = useLocation();
@@ -33,6 +83,7 @@ export function BottomNav() {
   const auth = useAuthOptional();
   const isWorker = Boolean(auth?.user && isWorkerAccount(auth.user));
   const { notifications } = useApp();
+  const { currentBusiness } = useBusiness();
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved, summary } = useAlertCenterSummary(
     !isWorker ? alertCenterBusinessId : undefined,
@@ -46,7 +97,10 @@ export function BottomNav() {
   const badgeCount = isWorker ? workerUnread : alertCenterUnresolved;
   const highPriority = (summary?.byPriority?.high ?? 0) > 0;
 
-  const navItems = isWorker ? [...BASE_ITEMS] : [...BASE_ITEMS, ALERTS_ITEM];
+  const verticalItems = navItemsForVertical(currentBusiness?.businessType).filter(
+    (item) => !isWorker || !item.ownerOnly,
+  );
+  const navItems = isWorker ? verticalItems : [...verticalItems, ALERTS_ITEM];
 
   return (
     <nav
@@ -57,6 +111,7 @@ export function BottomNav() {
         {navItems.map(({ id, path, icon: Icon, label }) => {
           const isActive =
             location.pathname === path
+            || location.pathname.startsWith(`${path}/`)
             || (id === 'alertas' && location.pathname.startsWith('/saas/alerts'));
           const showBadge = id === 'alertas' && badgeCount > 0;
 
