@@ -77,3 +77,6 @@ deploy/local-values.env
 # Backups locales CouchDB (no versionar volúmenes de datos)
 backups/*.json.gz
 backups/_extract_tmp/
+
+# Script local de repro iOS (credenciales de dev)
+scripts/repro-native-ios.mjs
