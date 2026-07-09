@@ -15,6 +15,19 @@ export const LEAGUE_METRICS: LeagueMetricDef[] = [
   { id: 'clients', label: 'Clientes nuevos', shortLabel: 'Clientes' },
 ];
 
+const RESTAURANT_LEAGUE_METRICS: LeagueMetricDef[] = [
+  { id: 'revenue', label: 'Ventas sala', shortLabel: 'Sala' },
+  { id: 'income', label: 'Ingresos finanzas', shortLabel: 'Finanzas' },
+  { id: 'clients', label: 'Clientes nuevos', shortLabel: 'Clientes' },
+];
+
+export function getLeagueMetrics(rows: Array<{ isRestaurant?: boolean }>): LeagueMetricDef[] {
+  if (rows.length > 0 && rows.every((row) => row.isRestaurant)) {
+    return RESTAURANT_LEAGUE_METRICS;
+  }
+  return LEAGUE_METRICS;
+}
+
 export type CompanyLeagueEntry = {
   businessId: string;
   name: string;

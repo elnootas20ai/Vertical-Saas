@@ -3639,7 +3639,9 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
     },
     accessToken,
     refreshToken,
-    redirectTo: '/saas/worker/tpv/delivery',
+    redirectTo: tpvVertical === 'restaurant'
+      ? '/saas/worker/tpv/restaurant'
+      : '/saas/worker/tpv/delivery',
     needsClockIn: true,
   });
 }

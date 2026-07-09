@@ -9,13 +9,14 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
   readTpvTabletBinding,
   writeTpvTabletBinding,
   clearTpvTabletBinding,
-  TPV_TABLET_DELIVERY_PATH,
+  resolveTpvTabletWorkerPath,
 } from '../../lib/tpvTabletSession';
 
 export function TpvTabletLogin() {
@@ -25,6 +26,9 @@ export function TpvTabletLogin() {
   const { tpvTabletLogin } = useAuth();
   const businessCtx = useBusinessOptional();
   const binding = readTpvTabletBinding();
+  const tabletCopy = getRetailOpsUiCopy(
+    binding?.tpvVertical === 'restaurant' ? 'restaurant' : null,
+  );
 
   const [terminalCode, setTerminalCode] = useState(() => {
     const fromQuery = searchParams.get('code') || searchParams.get('terminalCode');
@@ -48,7 +52,7 @@ export function TpvTabletLogin() {
     e?.preventDefault();
     const code = terminalCode.trim().toUpperCase();
     const nextErrors: typeof errors = {};
-    if (!code) nextErrors.terminalCode = 'Introduce el código de la tienda';
+    if (!code) nextErrors.terminalCode = `Introduce el ${tabletCopy.tabletCodeLabel.toLowerCase()}`;
 
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -98,6 +102,11 @@ export function TpvTabletLogin() {
         pointOfSale: pdv,
         workCenterId: terminalBinding?.workCenterId,
         business,
+        businesses: businessCtx?.businesses?.length
+          ? businessCtx.businesses
+          : business
+            ? [business]
+            : [],
       });
     }
 
@@ -124,7 +133,7 @@ export function TpvTabletLogin() {
       // El binding tablet ya fija empresa; seguir al TPV aunque falle el refresco global.
     }
 
-    navigate(TPV_TABLET_DELIVERY_PATH, { replace: true });
+    navigate(resolveTpvTabletWorkerPath(), { replace: true });
   };
 
   const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -160,7 +169,7 @@ export function TpvTabletLogin() {
                   ? storeLabel
                   : binding
                     ? 'Introduce el código para entrar al TPV'
-                    : 'Activa la tablet con el código de tu tienda'}
+                    : `Activa la tablet con el código de tu ${tabletCopy.storeCountLabel}`}
               </p>
             </div>
           </div>
@@ -182,7 +191,7 @@ export function TpvTabletLogin() {
             )}
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                Código de tienda
+                {tabletCopy.tabletCodeLabel}
               </label>
               <ACCESO__Input
                 ref={terminalRef}

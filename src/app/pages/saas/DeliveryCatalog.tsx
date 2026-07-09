@@ -5,6 +5,7 @@ import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBra
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion } from '../../lib/catalogBusinessScope';
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
 import { resolveCatalogProductImage, resolveCatalogProductPlaceholderUrl } from '../../lib/catalogProductPlaceholders';
@@ -3001,6 +3002,7 @@ export function CatalogPage() {
   }, []);
 
   const handleDownloadSampleZip = useCallback(async () => {
+    const zipCopy = getRetailOpsUiCopy(isRestaurantCatalog ? 'restaurant' : 'delivery');
     try {
       const zip = new JSZip();
       zip.file('PIZ-001.png', SAMPLE_PNG_BASE64, { base64: true });
@@ -3008,7 +3010,7 @@ export function CatalogPage() {
       zip.file(
         'LEEME.txt',
         [
-          'Ejemplo de ZIP de imagenes para Delivery Catalogo',
+          zipCopy.catalogZipReadmeTitle,
           '',
           '1) Nombra cada foto por código (recomendado) o por nombre del producto.',
           '2) Formatos soportados: .jpg, .jpeg, .png, .webp',
@@ -3019,14 +3021,14 @@ export function CatalogPage() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'ejemplo_zip_delivery_catalogo.zip';
+      link.download = zipCopy.catalogZipFilename;
       link.click();
       URL.revokeObjectURL(url);
       toast.success('ZIP de ejemplo descargado');
     } catch {
       toast.error('No se pudo generar el ZIP de ejemplo');
     }
-  }, []);
+  }, [isRestaurantCatalog]);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 

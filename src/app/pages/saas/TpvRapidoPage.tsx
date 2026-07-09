@@ -66,7 +66,8 @@ import {
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import { resolveTpvRegisterScope, shouldAutoSwitchToDeliveryBusiness, resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
-import { isRestaurantBusinessType, resolveRestaurantVerticalFromContext } from '../../lib/deliveryOpsTypes';
+import { isRestaurantBusinessType, isDeliveryOpsBusinessType, resolveRestaurantVerticalFromContext } from '../../lib/deliveryOpsTypes';
+import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 import { changeTableStatusRequest, type DiningOrder } from '../../lib/salaApi';
 import { tableStatusOnOpen, tableStatusOnPaid, tableStatusOnRelease, tableStatusOnOrderAdded } from '../../lib/restaurantTableStatus';
 import {
@@ -105,6 +106,10 @@ import { TpvChromeScope, useTpvOrderFlowChrome } from '../../context/TpvChromeCo
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../lib/tpvStockReview';
 import { consumeSalaTpvPdvLaunch } from '../../lib/salaTpvLaunch';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import {
+  bootstrapCeoTpvStores,
+  needsCeoTpvStoreBootstrap,
+} from '../../lib/ceoTpvStoreBootstrap';
 import {
   DELIVERY_ACTIVE_STORE_CHANGED,
   coerceSelectedPdvId,
@@ -344,15 +349,6 @@ function isPrimaryClientAddress(addr: ClientAddress, all: ClientAddress[]): bool
   return !all.some((a) => a.isPrimary) && all[0]?.id === addr.id;
 }
 
-function resolveTpvExitPath(
-  pathname: string,
-  businessType?: string | null,
-): string {
-  if (pathname.startsWith('/saas/caja')) return '/saas/caja';
-  if (isRestaurantBusinessType(businessType)) return '/saas/caja';
-  return '/saas/delivery-ops';
-}
-
 function TpvRapidoCeoBoard() {
   const { user } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled, switchBusiness } = useBusiness();
@@ -362,10 +358,11 @@ function TpvRapidoCeoBoard() {
     activeSalesPointId,
     setActiveSalesPoint,
     loading: storesLoading,
+    refresh: refreshStores,
   } = useActiveStoreScope();
   const navigate = useNavigate();
   const location = useLocation();
-  const tpvExitPath = resolveTpvExitPath(location.pathname, currentBusiness?.businessType);
+  const tpvExitPath = resolveTpvCeoExitPath(location.pathname, currentBusiness?.businessType);
   const businessId = resolveBusinessScopeId(currentBusiness);
   const tpvCatalogBusinessId = useMemo(
     () => resolveTpvCatalogBusinessId(businessId, businesses),
@@ -394,9 +391,86 @@ function TpvRapidoCeoBoard() {
 
   const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
   const [forceStorePicker, setForceStorePicker] = useState(false);
+  const [ceoBootstrapLoading, setCeoBootstrapLoading] = useState(false);
+  const ceoBootstrapDoneRef = useRef(false);
+  const ceoBootstrapInflightRef = useRef(false);
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
   const lastSyncedStorePdvRef = useRef<string | null>(null);
   const salaPdvLaunchRef = useRef(consumeSalaTpvPdvLaunch());
+
+  useEffect(() => {
+    ceoBootstrapDoneRef.current = false;
+    ceoBootstrapInflightRef.current = false;
+  }, [businessId]);
+
+  const storeRows = useMemo(
+    () => buildCeoTpvStoreRows(retailWorkCenters, pointsOfSale, businessId, {
+      business: currentBusiness,
+      businesses,
+    }),
+    [retailWorkCenters, pointsOfSale, businessId, currentBusiness, businesses],
+  );
+
+  const shouldBootstrapCeoStores = useMemo(() => {
+    if (!businessesFetchSettled || !businessId || !dataUserId || !user || !currentBusiness) {
+      return false;
+    }
+    if (!isRestaurantVertical && !isDeliveryOpsBusinessType(currentBusiness.businessType)) {
+      return false;
+    }
+    return needsCeoTpvStoreBootstrap(retailWorkCenters, pointsOfSale, storeRows);
+  }, [
+    businessesFetchSettled,
+    businessId,
+    dataUserId,
+    user,
+    currentBusiness,
+    isRestaurantVertical,
+    retailWorkCenters,
+    pointsOfSale,
+    storeRows,
+  ]);
+
+  useEffect(() => {
+    if (!shouldBootstrapCeoStores || ceoBootstrapDoneRef.current || ceoBootstrapInflightRef.current) {
+      return;
+    }
+    if (!user || !currentBusiness) return;
+
+    let cancelled = false;
+    ceoBootstrapInflightRef.current = true;
+    setCeoBootstrapLoading(true);
+
+    void (async () => {
+      try {
+        await bootstrapCeoTpvStores(user, currentBusiness, businesses, {
+          accountBusinessCount: businesses.length,
+        });
+        if (cancelled) return;
+        ceoBootstrapDoneRef.current = true;
+        window.dispatchEvent(new Event('work-centers:changed'));
+        await refreshStores();
+      } catch {
+        /* conservar selector manual / reintento */
+      } finally {
+        ceoBootstrapInflightRef.current = false;
+        if (!cancelled) setCeoBootstrapLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ceoBootstrapInflightRef.current = false;
+    };
+  }, [
+    shouldBootstrapCeoStores,
+    user,
+    currentBusiness,
+    businesses,
+    refreshStores,
+  ]);
+
+  const effectiveStoresLoading = storesLoading || ceoBootstrapLoading;
 
   const activePdvs = useMemo(
     () => pointsOfSale.filter((p) => p.active !== false),
@@ -418,16 +492,17 @@ function TpvRapidoCeoBoard() {
     !forceStorePicker
     && !effectivePdvId
     && activePdvs.length === 0
-    && (storesLoading || !businessesFetchSettled || !businessId || !dataUserId);
+    && (effectiveStoresLoading || !businessesFetchSettled || !businessId || !dataUserId);
 
   const noStoresConfigured =
     !forceStorePicker
     && !effectivePdvId
-    && !storesLoading
+    && !effectiveStoresLoading
     && businessesFetchSettled
     && Boolean(businessId)
     && Boolean(dataUserId)
-    && activePdvs.length === 0;
+    && activePdvs.length === 0
+    && !shouldBootstrapCeoStores;
 
   const [pdvWaitTimedOut, setPdvWaitTimedOut] = useState(false);
 
@@ -504,11 +579,6 @@ function TpvRapidoCeoBoard() {
       accountBusinessCount: businesses.length,
     });
   }, [effectivePdvId, tpvCatalogBusinessId, dataUserId, businesses.length]);
-
-  const storeRows = useMemo(
-    () => buildCeoTpvStoreRows(retailWorkCenters, pointsOfSale, businessId),
-    [retailWorkCenters, pointsOfSale, businessId],
-  );
 
   const selectedPdvName = useMemo(() => {
     if (!effectivePdvId) return '';
@@ -606,7 +676,8 @@ function TpvRapidoCeoBoard() {
         storeName={currentBusiness?.name}
         storeRows={storeRows}
         pointsOfSale={activePdvs}
-        loading={storesLoading}
+        loading={effectiveStoresLoading}
+        restaurantMode={isRestaurantVertical}
         onSelect={handleSelectStore}
         onBack={() => navigate(tpvExitPath)}
       />
@@ -614,8 +685,14 @@ function TpvRapidoCeoBoard() {
   }
 
   return (
-    <TpvChromeScope bottomBar={!stockOpen ? <WorkerTpvBottomBar ceoMode /> : null}>
-      <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
+    <TpvChromeScope bottomBar={!stockOpen && !isRestaurantVertical ? <WorkerTpvBottomBar ceoMode onExitCeo={() => navigate(tpvExitPath)} /> : null}>
+      <div
+        className={`flex flex-col overflow-hidden bg-stone-100 dark:bg-stone-950 ${
+          isRestaurantVertical
+            ? 'fixed inset-0 z-30'
+            : 'h-[100svh] min-h-[100svh] bg-gray-50 dark:bg-gray-950'
+        }`}
+      >
         <TpvOfflineBanner />
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <TpvRegisterGate
@@ -703,7 +780,7 @@ export function TpvRapidoOrderFlow({
   const { currentBusiness, businesses } = useBusiness();
   const navigate = useNavigate();
   const location = useLocation();
-  const tpvExitPath = resolveTpvExitPath(location.pathname, currentBusiness?.businessType);
+  const tpvExitPath = resolveTpvCeoExitPath(location.pathname, currentBusiness?.businessType);
   const goBack = onBack ?? (() => navigate(tpvExitPath));
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedClientIdFromUrl = useRef<string | null>(null);

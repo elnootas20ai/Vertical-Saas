@@ -13,6 +13,7 @@ import {
 } from '../../lib/catalogBusinessScope';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import {
   listCatalogItemsRequest,
   createCatalogItemRequest,
@@ -68,8 +69,11 @@ const DEFAULT_SALES_CHANNELS = [
 ];
 
 function salesChannelsForBusinessType(businessType: string) {
+  const copy = getRetailOpsUiCopy(businessType);
   if (isRestaurantBusinessType(businessType)) {
-    return DEFAULT_SALES_CHANNELS.filter((ch) => ch.id !== 'web');
+    return DEFAULT_SALES_CHANNELS
+      .filter((ch) => ch.id !== 'web' && !['glovo', 'ubereats', 'justeat', 'deliveroo'].includes(ch.id))
+      .map((ch) => (ch.id === 'delivery' ? { ...ch, name: copy.salesChannelDelivery } : ch));
   }
   return DEFAULT_SALES_CHANNELS;
 }

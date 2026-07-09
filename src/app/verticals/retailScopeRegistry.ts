@@ -235,8 +235,12 @@ export function shouldLoadRetailStoresForBusiness(
     if (hints?.hasDisplayedStores) return false;
     const bid = normalizeBusinessScopeId(ctx.business.business_id);
     const cached = readRestaurantRetailCache(bid, ctx.business, ctx.businesses);
-    if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
-      return false;
+    if (cached) {
+      const openableRows = (cached.rows || []).some(
+        (r) => r.pdvId && !r.needsPdv && !r.inactive,
+      );
+      const activePdvs = cached.allPointsOfSale.some((p) => p.active !== false);
+      if (openableRows || activePdvs) return false;
     }
     return true;
   }

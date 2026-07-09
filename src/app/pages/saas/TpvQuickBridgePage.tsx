@@ -25,11 +25,12 @@ import {
   writeDeliveryOpsSelectedPdvId,
 } from '../../lib/deliveryOpsPdvSelection';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { resolveRetailCeoTpvPath } from '../../lib/retailOpsPaths';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
+import { bootstrapCeoTpvStores } from '../../lib/ceoTpvStoreBootstrap';
 import type { Business } from '../../lib/businessApi';
-import type { WorkCenter } from '../../lib/workCentersApi';
 
 type BridgeStoreRow = {
   business: Business;
@@ -73,6 +74,12 @@ export function TpvQuickBridgePage() {
     () => businesses.filter((b) => isDeliveryOpsBusinessType(b.businessType)),
     [businesses],
   );
+  const bridgeCopy = useMemo(
+    () => getRetailOpsUiCopy(
+      isRestaurantBusinessType(currentBusiness?.businessType) ? 'restaurant' : currentBusiness?.businessType,
+    ),
+    [currentBusiness?.businessType],
+  );
 
   const tabletActivationUrl = typeof window !== 'undefined'
     ? `${window.location.origin}${AUTH_PATHS.tpvTabletLogin}`
@@ -100,22 +107,21 @@ export function TpvQuickBridgePage() {
             const businessId = resolveBusinessScopeId(business);
             if (!businessId) return [] as BridgeStoreRow[];
 
-            const state = await loadRetailStoresForBusiness(
+            const state = await bootstrapCeoTpvStores(
               user,
               business,
               businesses,
-              { accountBusinessCount, includeInactivePdvs: true, tpvBootstrap: false },
+              { accountBusinessCount },
             ).catch(() => null);
 
             if (!state) return [] as BridgeStoreRow[];
 
-            const retail = (state.workCenters || []).filter(
-              (wc: WorkCenter) =>
-                !wc.deletedAt
-                && (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-            );
+            const retail = state.workCenters || [];
             const pdvs = (state.pointsOfSale || []).filter((p) => p.active !== false);
-            const storeRows = buildCeoTpvStoreRows(retail, pdvs, businessId);
+            const storeRows = buildCeoTpvStoreRows(retail, pdvs, businessId, {
+              business,
+              businesses,
+            });
 
             return storeRows
               .filter((row) => row.pdvId && !row.needsPdv && !row.inactive)
@@ -162,9 +168,7 @@ export function TpvQuickBridgePage() {
           writeDeliveryOpsSelectedPdvId(row.businessId, dataUserId, pdvId);
           notifyDeliveryActiveStoreChanged();
         }
-        const path = isRestaurantBusinessType(row.business.businessType)
-          ? '/saas/caja/tpv'
-          : '/saas/vertical/delivery/tpv';
+        const path = resolveRetailCeoTpvPath(row.business.businessType);
         navigate(path);
       } finally {
         setOpeningPdvId(null);
@@ -176,7 +180,7 @@ export function TpvQuickBridgePage() {
   const openTabletLoginWithCode = useCallback((code?: string) => {
     const normalized = String(code ?? manualCode).trim().toUpperCase();
     if (!normalized) {
-      toast.error('Introduce un código de tienda');
+      toast.error(`Introduce un ${bridgeCopy.storeCountLabel} válido`);
       return;
     }
     navigate(AUTH_PATHS.tpvTabletLogin, { state: { terminalCode: normalized } });
@@ -211,7 +215,7 @@ export function TpvQuickBridgePage() {
               Activar tablet con cualquier código
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Pega el código de la tienda o ábrelo directamente en la pantalla de activación.
+              Pega el código del {bridgeCopy.storeCountLabel} o ábrelo directamente en la pantalla de activación.
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-2">
@@ -238,7 +242,7 @@ export function TpvQuickBridgePage() {
             </button>
             <button
               type="button"
-              onClick={() => navigate('/saas/vertical/delivery/tpv')}
+              onClick={() => navigate(resolveRetailCeoTpvPath(currentBusiness?.businessType))}
               className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 px-3 py-2 text-xs font-semibold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
             >
               <Zap className="w-3.5 h-3.5" />
@@ -250,11 +254,11 @@ export function TpvQuickBridgePage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">
-              Tus tiendas
+              {bridgeCopy.storesSectionTitle}
             </h2>
             {!loading && (
               <span className="text-xs text-gray-400">
-                {rows.length} tienda{rows.length !== 1 ? 's' : ''}
+                {rows.length} {bridgeCopy.storeCountLabel}{rows.length !== 1 ? 's' : ''}
               </span>
             )}
           </div>
@@ -262,7 +266,7 @@ export function TpvQuickBridgePage() {
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-500">
               <Loader2 className="w-7 h-7 animate-spin mb-3" />
-              <p className="text-sm">Cargando tiendas…</p>
+              <p className="text-sm">{bridgeCopy.loadingStoresLabel}</p>
             </div>
           ) : opsBusinesses.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 p-10 text-center">
@@ -270,7 +274,7 @@ export function TpvQuickBridgePage() {
                 Sin negocios con TPV
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 max-w-md mx-auto">
-                El puente TPV está pensado para delivery y bar/restaurante. Cambia a una empresa
+                El puente TPV está pensado para bar/restaurante y reparto a domicilio. Cambia a una empresa
                 operativa o créala en Configuración.
               </p>
             </div>
@@ -278,7 +282,7 @@ export function TpvQuickBridgePage() {
             <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 p-10 text-center">
               <Store className="w-8 h-8 mx-auto mb-3 text-gray-400" />
               <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                Aún no hay tiendas activas
+                Aún no hay {bridgeCopy.storeCountLabel}s activos
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-5">
                 Crea un centro de venta en Ajustes para obtener códigos y abrir caja.

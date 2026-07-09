@@ -39,42 +39,44 @@ export function RestaurantTpvShiftStrip({
       ? `+${formatOccupiedTime(busiest[1].occupiedMinutes)}`
       : undefined;
 
+  const metrics = [
+    {
+      icon: TrendingUp,
+      label: 'Ventas',
+      value: shiftSales > 0 ? `${shiftSales.toFixed(2)} €` : '—',
+      highlight: false,
+    },
+    {
+      icon: Receipt,
+      label: 'Abiertas',
+      value: openAccounts.length > 0 ? `${openAccounts.length} · ${openTotal.toFixed(2)} €` : '0',
+      highlight: openAccounts.length > 0,
+    },
+    {
+      icon: Clock,
+      label: 'Media',
+      value: avgMinutes != null ? formatOccupiedTime(avgMinutes) ?? '—' : '—',
+      highlight: false,
+    },
+    {
+      icon: Users,
+      label: 'Sala',
+      value: `${summary.availableCount} lib · ${summary.occupiedCount} oc.`,
+      sub: busiestLabel ? `Máx. ${busiestLabel}` : undefined,
+      highlight: false,
+    },
+  ];
+
   return (
     <div
-      className={`shrink-0 border-t border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-950 pb-[max(0.25rem,env(safe-area-inset-bottom))] ${
-        compact ? 'px-2 py-2' : 'px-3 py-3'
+      className={`shrink-0 border-t border-stone-200 bg-white/95 backdrop-blur-sm dark:border-stone-700 dark:bg-stone-950/95 pb-[max(0.25rem,env(safe-area-inset-bottom))] ${
+        compact ? 'px-2 py-1.5' : 'px-3 py-2'
       }`}
     >
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-stone-400 dark:text-stone-500">
-        Resumen del turno
-      </p>
-      <div className={`grid gap-2 ${compact ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-4'}`}>
-        <ShiftMetric
-          icon={TrendingUp}
-          label="Ventas caja"
-          value={shiftSales > 0 ? `${shiftSales.toFixed(2)} €` : '—'}
-          compact={compact}
-        />
-        <ShiftMetric
-          icon={Receipt}
-          label="Cuentas abiertas"
-          value={openAccounts.length > 0 ? `${openAccounts.length} · ${openTotal.toFixed(2)} €` : '0'}
-          highlight={openAccounts.length > 0}
-          compact={compact}
-        />
-        <ShiftMetric
-          icon={Clock}
-          label="Media ocupación"
-          value={avgMinutes != null ? formatOccupiedTime(avgMinutes) ?? '—' : '—'}
-          compact={compact}
-        />
-        <ShiftMetric
-          icon={Users}
-          label="Sala ahora"
-          value={`${summary.availableCount} lib · ${summary.occupiedCount} oc.`}
-          sub={busiestLabel ? `Máx. ${busiestLabel}` : undefined}
-          compact={compact}
-        />
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide">
+        {metrics.map((metric) => (
+          <ShiftMetric key={metric.label} compact={compact} {...metric} />
+        ))}
       </div>
     </div>
   );
@@ -97,24 +99,34 @@ function ShiftMetric({
 }) {
   return (
     <div
-      className={`rounded-lg border px-2.5 py-2 min-h-[52px] ${
+      className={`shrink-0 flex min-w-[7.5rem] max-w-[11rem] flex-1 items-center gap-2 rounded-lg border px-2.5 py-1.5 ${
         highlight
-          ? 'border-violet-200 bg-violet-50/80 dark:border-violet-800 dark:bg-violet-950/30'
-          : 'border-stone-200 bg-stone-50/80 dark:border-stone-700 dark:bg-stone-900/50'
+          ? 'border-violet-200 bg-violet-50/90 dark:border-violet-800 dark:bg-violet-950/40'
+          : 'border-stone-200 bg-stone-50/90 dark:border-stone-700 dark:bg-stone-900/60'
       }`}
     >
-      <div className="flex items-center gap-1 text-[10px] text-stone-500 dark:text-stone-400">
-        <Icon className="h-3 w-3 shrink-0" />
-        <span className="truncate">{label}</span>
-      </div>
-      <p
-        className={`mt-0.5 font-bold tabular-nums truncate ${
-          highlight ? 'text-violet-700 dark:text-violet-300' : 'text-stone-900 dark:text-stone-100'
-        } ${compact ? 'text-sm' : 'text-base'}`}
+      <div
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${
+          highlight
+            ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300'
+            : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
+        }`}
       >
-        {value}
-      </p>
-      {sub ? <p className="text-[9px] text-stone-400 truncate mt-0.5">{sub}</p> : null}
+        <Icon className="h-3.5 w-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[9px] font-semibold uppercase tracking-wide text-stone-500 dark:text-stone-400">
+          {label}
+        </p>
+        <p
+          className={`truncate font-bold tabular-nums ${
+            highlight ? 'text-violet-700 dark:text-violet-300' : 'text-stone-900 dark:text-stone-100'
+          } ${compact ? 'text-xs' : 'text-sm'}`}
+        >
+          {value}
+        </p>
+        {sub ? <p className="truncate text-[9px] text-stone-400">{sub}</p> : null}
+      </div>
     </div>
   );
 }

@@ -102,10 +102,19 @@ import {
   mergeRoleCatalog,
   upsertCustomRole,
 } from '../../lib/roleCatalog';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { fetchTeamAlerts, type TeamAlert } from '../../lib/teamAlertsApi';
 
 type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'staff-consumptions' | 'payroll';
 type MemberStatus = 'active' | 'pending' | 'inactive';
+
+const RESTAURANT_FUNCTION_ROLES: RoleDefinition[] = [
+  { id: 'Administrador', description: 'Responsable del negocio o del local.', permissions: [], users: 0 },
+  { id: 'Encargado', description: 'Coordina la operativa diaria.', permissions: [], users: 0 },
+  { id: 'Mostrador / Atención', description: 'Atiende clientes, mostrador y sala.', permissions: [], users: 0 },
+  { id: 'Cocina', description: 'Prepara comandas y cocina.', permissions: [], users: 0 },
+];
 
 const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
   { id: 'Administrador', description: 'Responsable del negocio o del local.', permissions: [], users: 0 },
@@ -875,6 +884,22 @@ const PERMISSION_MODULES = [
   { key: 'reports', label: 'Informes', icon: <FileText className="w-3.5 h-3.5" /> },
 ] as const;
 
+function resolvePermissionModuleLabel(
+  module: (typeof PERMISSION_MODULES)[number],
+  businessType?: string | null,
+): string {
+  if (module.key === 'delivery') {
+    return getRetailOpsUiCopy(businessType).permissionDeliveryModule;
+  }
+  return module.label;
+}
+
+function getFunctionRolesForBusiness(businessType?: string | null): RoleDefinition[] {
+  if (businessType === 'events') return EVENTS_FUNCTION_ROLES;
+  if (isRestaurantBusinessType(businessType)) return RESTAURANT_FUNCTION_ROLES;
+  return DELIVERY_FUNCTION_ROLES;
+}
+
 function getRoleToken(role?: string, skinId?: string) {
   if (skinId) {
     const skin = getSkinById(skinId);
@@ -1190,6 +1215,7 @@ function MemberDrawer({
   member,
   members,
   roles,
+  businessType,
   currentUserId,
   onClose,
   onMemberUpdated,
@@ -1198,6 +1224,7 @@ function MemberDrawer({
   member: AuthUser;
   members?: AuthUser[];
   roles: RoleDefinition[];
+  businessType?: string | null;
   currentUserId?: string;
   onClose: () => void;
   onMemberUpdated: (member: AuthUser) => void;
@@ -2451,7 +2478,7 @@ function MemberDrawer({
                   <div key={module.key} className={`grid grid-cols-[1fr_56px_56px] items-center px-3 py-2.5 ${index < PERMISSION_MODULES.length - 1 ? 'border-t border-gray-100 dark:border-gray-700/50' : ''}`}>
                     <div className="flex items-center gap-2">
                       <span className="text-gray-400 dark:text-gray-500">{module.icon}</span>
-                      <span className={`text-xs font-medium ${current.view ? 'text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'}`}>{module.label}</span>
+                      <span className={`text-xs font-medium ${current.view ? 'text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'}`}>{resolvePermissionModuleLabel(module, businessType)}</span>
                     </div>
                     <div className="flex justify-center">
                       <PermissionIconButton active={current.view} disabled={permissionSavingKey === `${module.key}:view`} onClick={() => void handlePermissionToggle(module.key, 'view')} />
@@ -2908,7 +2935,7 @@ export function Team() {
     });
   }, [members, user?.user_id]);
   const roles = useMemo(() => {
-    const base = currentBusiness?.businessType === 'events' ? EVENTS_FUNCTION_ROLES : DELIVERY_FUNCTION_ROLES;
+    const base = getFunctionRolesForBusiness(currentBusiness?.businessType);
     return mergeRoleCatalog(base, customRoles, members);
   }, [customRoles, members, currentBusiness?.businessType]);
 
@@ -3615,7 +3642,7 @@ export function Team() {
                     <span className="text-xs text-gray-400 dark:text-gray-500">{role.users} usuario{role.users !== 1 ? 's' : ''}</span>
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">{role.description}</p>
-                  <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">Permisos base: {formatRolePermissions(role.permissions)}</p>
+                  <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">Permisos base: {formatRolePermissions(role.permissions, currentBusiness?.businessType)}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
                     {roleMembers.length === 0 && <span className="text-xs italic text-gray-300 dark:text-gray-600">Sin trabajadores con esta funcion</span>}
                     {roleMembers.map((member) => (
@@ -3671,6 +3698,7 @@ export function Team() {
           member={selectedMember}
           members={orderedMembers}
           roles={roles}
+          businessType={currentBusiness?.businessType}
           currentUserId={user?.user_id}
           onClose={() => setSelectedMemberId(null)}
           onMemberUpdated={handleMemberUpdated}
@@ -3696,6 +3724,7 @@ export function Team() {
         onClose={() => setShowCreateRole(false)}
         onCreate={handleCreateRole}
         existingRoleIds={roles.map((role) => role.id)}
+        businessType={currentBusiness?.businessType}
       />
 
       <OrgChartModal

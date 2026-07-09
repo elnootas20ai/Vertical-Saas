@@ -5,13 +5,16 @@ import { toast } from 'sonner';
 import { toastActionError } from '../../../lib/userFacingError';
 import {
   ArrowLeft,
+  ClipboardCheck,
   LayoutGrid,
+  LogOut,
   RefreshCw,
   Store,
   UtensilsCrossed,
 } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
+import { useVerticalCatalog } from '../../../hooks/useVerticalCatalog';
 import { useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
 import { RestaurantTableGrid, RESTAURANT_COUNTER_TABLE_ID } from '../../../components/saas/restaurant/RestaurantTableGrid';
 import { RestaurantTpvZoneTabs } from '../../../components/saas/restaurant/RestaurantTpvZoneTabs';
@@ -31,11 +34,12 @@ import { useTodayReservationsPoll } from '../../../hooks/useTodayReservationsPol
 import type { RestaurantReservation } from '../../../lib/restaurantReservationTypes';
 import type { SalaTpvOpenTablePayload } from '../../../lib/salaTpvLaunch';
 import type { ExtendedDiningTable, SalaRoom } from '../../../lib/salaStudioTypes';
-import { SALA_ROOM_TYPE_LABELS } from '../../../lib/salaStudioTypes';
 import { resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
 import { consumeSalaTpvOpenTable } from '../../../lib/salaTpvLaunch';
 import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
+import { requestTpvStockReviewOpen } from '../../../lib/tpvStockReview';
 import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
+import { resolveRetailOpsHomePath } from '../../../lib/retailOpsPaths';
 import { resolveRestaurantTpvPermissions } from '../../../lib/restaurantTpvPermissions';
 import { WorkerTpvStaffConsumption } from '../worker/WorkerTpvStaffConsumption';
 
@@ -104,6 +108,7 @@ function RestaurantTpvFloorPanel({
 }) {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
+  const { config } = useVerticalCatalog();
   const register = useTpvRegisterIfOpen();
   const navigate = useNavigate();
   const location = useLocation();
@@ -127,8 +132,14 @@ function RestaurantTpvFloorPanel({
 
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const floorScrollRef = useRef<HTMLDivElement>(null);
   const staleTablesCleanedRef = useRef(false);
   const pendingOpenHandledRef = useRef(false);
+
+  useEffect(() => {
+    floorScrollRef.current?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
+  }, []);
 
   useEffect(() => {
     if (!userId || loading || staleTablesCleanedRef.current) return;
@@ -236,64 +247,101 @@ function RestaurantTpvFloorPanel({
     } catch {
       /* ignore */
     }
-    navigate(isRestaurantBusinessType(currentBusiness?.businessType) ? '/saas/caja' : '/saas/delivery-ops');
+    navigate(resolveRetailOpsHomePath(currentBusiness?.businessType));
   }, [tabletBinding, location.pathname, navigate, currentBusiness?.businessType]);
 
+  const handleExitCeo = useCallback(() => {
+    navigate('/saas/caja', { replace: true });
+  }, [navigate]);
+
+  const showStockAction = config.features?.stock !== false;
+  const toolbarBtn =
+    'inline-flex shrink-0 min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-700 touch-manipulation transition-colors hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700';
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-stone-100 dark:bg-stone-950">
-      {/* Cabecera de sección — compacta, sin duplicar la barra de caja */}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-stone-100 dark:bg-stone-950">
       <div
-        className={`shrink-0 flex items-center gap-2 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 ${
-          tabletMode ? 'px-2 py-2' : 'px-3 py-2.5'
+        className={`shrink-0 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 ${
+          tabletMode ? 'px-2 py-2' : 'px-3 py-2'
         }`}
       >
-        <button
-          type="button"
-          onClick={handleGoBack}
-          title="Volver"
-          aria-label="Volver"
-          className="inline-flex shrink-0 min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-stone-200 bg-stone-50 text-stone-700 touch-manipulation hover:bg-stone-100 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className={`truncate font-bold text-stone-900 dark:text-stone-50 ${tabletMode ? 'text-sm' : 'text-base'}`}>
-            Mesas · {storeLabel}
-          </h1>
-          <p className="truncate text-[11px] text-stone-500 dark:text-stone-400 tabular-nums">
-            {summary.availableCount} libres · {summary.occupiedCount} ocupadas
-            {openAccountsCount > 0 ? ` · ${openAccountsCount} para cobrar` : ''}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {staffConsumptionEnabled ? (
-            <button
-              type="button"
-              onClick={onOpenStaffConsumption}
-              title="Consumo equipo"
-              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-stone-200 bg-stone-50 text-stone-700 touch-manipulation hover:bg-stone-100 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
-            >
-              <UtensilsCrossed className="h-4 w-4" />
-            </button>
-          ) : null}
-          {ceoMode && onChangeStore ? (
-            <button
-              type="button"
-              onClick={onChangeStore}
-              title="Cambiar tienda"
-              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-stone-200 bg-stone-50 text-stone-700 touch-manipulation hover:bg-stone-100 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
-            >
-              <Store className="h-4 w-4" />
-            </button>
-          ) : null}
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void handleRefresh()}
-            title="Actualizar mesas"
-            className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg border border-stone-200 bg-stone-50 text-stone-700 touch-manipulation hover:bg-stone-100 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
+            onClick={handleGoBack}
+            title="Volver"
+            aria-label="Volver"
+            className={toolbarBtn}
           >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <ArrowLeft className="h-4 w-4" />
           </button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <LayoutGrid className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <h1 className={`truncate font-bold text-stone-900 dark:text-stone-50 ${tabletMode ? 'text-sm' : 'text-base'}`}>
+                {activeRoom?.name || 'Sala'} · {storeLabel}
+              </h1>
+            </div>
+            <p className="truncate text-[11px] text-stone-500 dark:text-stone-400 tabular-nums">
+              {summary.availableCount} libres · {summary.occupiedCount} ocupadas
+              {openAccountsCount > 0 ? ` · ${openAccountsCount} para cobrar` : ''}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {staffConsumptionEnabled ? (
+              <button
+                type="button"
+                onClick={onOpenStaffConsumption}
+                title="Consumo equipo"
+                aria-label="Consumo equipo"
+                className={toolbarBtn}
+              >
+                <UtensilsCrossed className="h-4 w-4" />
+              </button>
+            ) : null}
+            {showStockAction ? (
+              <button
+                type="button"
+                onClick={() => requestTpvStockReviewOpen()}
+                title="Revisión de stock"
+                aria-label="Revisión de stock"
+                className={toolbarBtn}
+              >
+                <ClipboardCheck className="h-4 w-4" />
+              </button>
+            ) : null}
+            {ceoMode && onChangeStore ? (
+              <button
+                type="button"
+                onClick={onChangeStore}
+                title="Cambiar tienda"
+                aria-label="Cambiar tienda"
+                className={toolbarBtn}
+              >
+                <Store className="h-4 w-4" />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void handleRefresh()}
+              title="Actualizar mesas"
+              aria-label="Actualizar mesas"
+              className={toolbarBtn}
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+            {ceoMode ? (
+              <button
+                type="button"
+                onClick={handleExitCeo}
+                title="Salir del TPV"
+                aria-label="Salir del TPV"
+                className={`${toolbarBtn} border-red-200 text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40`}
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -310,21 +358,13 @@ function RestaurantTpvFloorPanel({
         seatingId={seatingReservationId}
         onSeat={(reservation) => onSeatFromReservation?.(reservation)}
         compact={tabletMode}
+        defaultOpen={false}
       />
 
-      {rooms.length <= 1 && activeRoom ? (
-        <div className="shrink-0 border-b border-stone-200 bg-white px-3 py-2 dark:border-stone-700 dark:bg-stone-900">
-          <div className="flex items-center gap-2 text-sm font-semibold text-stone-800 dark:text-stone-100">
-            <LayoutGrid className="h-4 w-4 text-stone-500" />
-            {activeRoom.name}
-            <span className="text-xs font-normal text-stone-500">
-              {SALA_ROOM_TYPE_LABELS[activeRoom.roomType]}
-            </span>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 sm:p-3">
+      <div
+        ref={floorScrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 sm:p-3"
+      >
         {loading ? (
           <div className="flex h-40 items-center justify-center text-sm text-stone-500">
             Cargando mesas…

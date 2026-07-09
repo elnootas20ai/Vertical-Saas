@@ -17,9 +17,10 @@ export const RESTAURANT_MODULE: VerticalModuleDefinition = {
     '/saas/reservations',
     '/saas/lista-espera',
     '/saas/caja',
+    '/saas/caja/tpv',
     '/saas/cocina',
     '/saas/vertical/restaurant',
-    '/saas/worker/tpv/delivery',
+    '/saas/worker/tpv/restaurant',
   ],
   codeRoots: [
     'src/app/verticals/restaurant',

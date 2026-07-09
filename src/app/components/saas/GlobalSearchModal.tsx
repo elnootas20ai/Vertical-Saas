@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useDebounce } from '../../hooks/useDebounce';
 import {
   Search, X, Sparkles, UserRound, Car, FileText, MapPin, Users, TrendingUp, Command, Truck, Package,
-  LayoutDashboard, ClipboardList, CalendarDays, Clock, BookmarkCheck,
+  LayoutDashboard, ClipboardList, CalendarDays, Clock, BookmarkCheck, Banknote, UtensilsCrossed, ChefHat,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -14,6 +14,8 @@ import { hydrateParkingZonesWithVehicles } from '../../lib/parkingZones';
 import { SALE_STAGE_TOKEN } from './DesignTokens';
 import { listDocumentsRequest, type DocumentRecord } from '../../lib/documentsApi';
 import { listDeliveryOrdersRequest, type DeliveryOrder } from '../../lib/deliveryApi';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { resolveRetailOpsHomePath } from '../../lib/retailOpsPaths';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,6 +74,13 @@ const QUICK_ACTIONS_DEFAULT = [
   { label: 'Ir a Pipeline', shortcut: 'G P', route: '/saas/pipeline', icon: <Sparkles className="w-4 h-4" /> },
 ];
 
+const QUICK_ACTIONS_RESTAURANT = [
+  { label: 'Ir a Sala', shortcut: 'G S', route: '/saas/sala', icon: <UtensilsCrossed className="w-4 h-4" /> },
+  { label: 'Ir a Caja', shortcut: 'G J', route: '/saas/caja', icon: <Banknote className="w-4 h-4" /> },
+  { label: 'Ir a Cocina', shortcut: 'G K', route: '/saas/cocina', icon: <ChefHat className="w-4 h-4" /> },
+  { label: 'Ir a Catálogo', shortcut: 'G A', route: '/saas/catalog', icon: <Package className="w-4 h-4" /> },
+];
+
 const QUICK_ACTIONS_DELIVERY = [
   { label: 'Ir a Pedidos', shortcut: 'G D', route: '/saas/delivery-ops', icon: <Truck className="w-4 h-4" /> },
   { label: 'Ir a Clientes', shortcut: 'G C', route: '/saas/clients', icon: <UserRound className="w-4 h-4" /> },
@@ -98,6 +107,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
   const { t } = useTranslation();
   const { currentBusiness } = useBusiness();
   const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
+  const isRestaurant = isRestaurantBusinessType(vertical);
   const isDelivery = vertical === 'delivery';
   const [workerMode, setWorkerMode] = useState(false);
 
@@ -112,7 +122,13 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
     order: 'Pedidos',
   };
   const CATEGORY_ORDER = workerMode ? CATEGORY_ORDER_WORKER : isDelivery ? CATEGORY_ORDER_DELIVERY : CATEGORY_ORDER_DEFAULT;
-  const QUICK_ACTIONS = workerMode ? QUICK_ACTIONS_WORKER : isDelivery ? QUICK_ACTIONS_DELIVERY : QUICK_ACTIONS_DEFAULT;
+  const QUICK_ACTIONS = workerMode
+    ? QUICK_ACTIONS_WORKER
+    : isRestaurant
+      ? QUICK_ACTIONS_RESTAURANT
+      : isDelivery
+        ? QUICK_ACTIONS_DELIVERY
+        : QUICK_ACTIONS_DEFAULT;
 
   const { leads, clients, vehicles, parkingZones, sales } = useApp();
   const { listUsers, user: authUser } = useAuth();
@@ -192,7 +208,9 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
       return results;
     }
 
-    if (!isDelivery) {
+    if (isRestaurant) {
+      /* Sala/cocina no indexan pedidos delivery en búsqueda global */
+    } else if (!isDelivery) {
       results.push(
         ...vehicles.map(v => ({
           id: `vehicle-${v.id}`,
@@ -226,7 +244,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
           title: `#${o.orderNumber} · ${o.customerName}`,
           subtitle: [STATUS_LABELS[o.status] || o.status, `${(o.totalAmount || 0).toLocaleString('es-ES')}€`, o.customerPhone].filter(Boolean).join(' · '),
           category: 'order' as const,
-          route: '/saas/delivery-ops',
+          route: resolveRetailOpsHomePath(vertical),
           searchText: `${o.orderNumber} ${o.customerName} ${o.customerPhone} ${o.customerAddress} ${o.status}`,
         })),
       );

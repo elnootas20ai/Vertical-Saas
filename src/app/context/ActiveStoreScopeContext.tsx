@@ -27,7 +27,7 @@ import {
   pointOfSaleDisplayLabel,
   type PointOfSale,
 } from '../lib/deliveryApi';
-import { filterStoresForWorkerAssignment, isInvitedWorkerUser } from '../lib/pdvScope';
+import { shouldForceRetailStoreReload } from '../lib/retailOpsPaths';
 import type { AuthUser } from '../lib/authApi';
 import type { Business } from '../lib/businessApi';
 import { shouldSkipEmptyStoreApply } from '../lib/retailScopeApply';
@@ -467,7 +467,7 @@ function ActiveStoreScopeProviderImpl({
     if (authInitializing || !businessId || !businessesFetchSettled) return;
     const uid = String(user?.user_id || user?.id || '').trim();
     if (!uid) return;
-    void load({ force: location.pathname.includes('/delivery-ops') });
+    void load({ force: shouldForceRetailStoreReload(location.pathname) });
   }, [authInitializing, businessId, businessesFetchSettled, user?.user_id, user?.id, load, location.pathname]);
 
   /** Un solo reintento si la lista sigue vacía tras F5 (evita bucle infinito de loading en topbar). */

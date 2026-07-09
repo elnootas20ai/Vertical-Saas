@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useModalClose } from '../../hooks/useModalClose';
 import { AlertTriangle, Check, Shield, Trash2, X } from 'lucide-react';
-import { ROLE_PERMISSION_OPTIONS, type CreateRoleInput } from '../../lib/roleCatalog';
+import { getRolePermissionOptions, type CreateRoleInput } from '../../lib/roleCatalog';
 
 interface CreateRoleModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreate: (data: CreateRoleInput) => void;
   existingRoleIds: string[];
+  businessType?: string | null;
   mode?: 'create' | 'edit';
   initialRole?: CreateRoleInput | null;
   onDelete?: (roleId: string) => void;
@@ -19,6 +20,7 @@ export function CreateRoleModal({
   onClose,
   onCreate,
   existingRoleIds,
+  businessType,
   mode = 'create',
   initialRole = null,
   onDelete,
@@ -34,6 +36,10 @@ export function CreateRoleModal({
   const normalizedExisting = useMemo(
     () => existingRoleIds.map((roleId) => roleId.trim().toLowerCase()),
     [existingRoleIds],
+  );
+  const rolePermissionOptions = useMemo(
+    () => getRolePermissionOptions(businessType),
+    [businessType],
   );
 
   useEffect(() => {
@@ -180,7 +186,7 @@ export function CreateRoleModal({
               <span className="text-xs text-gray-400 dark:text-gray-500">{permissions.length} modulo{permissions.length !== 1 ? 's' : ''} seleccionado{permissions.length !== 1 ? 's' : ''}</span>
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {ROLE_PERMISSION_OPTIONS.map((option) => {
+              {rolePermissionOptions.map((option) => {
                 const active = permissions.includes(option.key);
                 return (
                   <button

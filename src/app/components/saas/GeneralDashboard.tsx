@@ -38,6 +38,7 @@ import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { PortfolioBrandStoreBilling } from './PortfolioBrandStoreBilling';
 import { PortfolioCompanyLeague } from './PortfolioCompanyLeague';
 import { PortfolioAlertsPanel } from './PortfolioAlertsPanel';
+import { getRetailOpsUiCopyForRows, getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
@@ -204,6 +205,10 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   }, [reload]);
 
   const showGroupSections = businessFilter === 'all' && !search.trim();
+  const opsCopy = useMemo(
+    () => getRetailOpsUiCopyForRows(filteredRows),
+    [filteredRows],
+  );
 
   return (
     <Layout
@@ -234,9 +239,9 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
             <StatCard label="Empresas" value={String(filteredTotals.businesses)} icon={<Building2 className="w-4 h-4" />} tone="blue" sub={`${filteredTotals.brands} marcas · ${filteredTotals.stores} tiendas`} />
             <StatCard label="Clientes totales" value={String(filteredTotals.totalClients)} icon={<Users className="w-4 h-4" />} tone="violet" sub="Base CRM activa" />
             <StatCard label="Clientes nuevos" value={String(filteredTotals.newClientsMonth)} icon={<Users className="w-4 h-4" />} tone="emerald" sub={<MomBadge pct={newClientsMomPct} prev={filteredTotals.newClientsPrevMonth} suffix=" vs mes ant." />} />
-            <StatCard label="Ventas delivery" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={<MomBadge pct={revenueMomPct} prevLabel={fmtEuro(filteredTotals.revenuePrevMonth)} />} />
+            <StatCard label={opsCopy.ventasOperativa} value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={<MomBadge pct={revenueMomPct} prevLabel={fmtEuro(filteredTotals.revenuePrevMonth)} />} />
             <StatCard label="Ingresos finanzas" value={fmtEuro(displayFinance.incomeMonth)} icon={<Wallet className="w-4 h-4" />} tone="blue" sub={<MomBadge pct={incomeMomPct} prevLabel={fmtEuro(displayFinance.incomePrevMonth)} />} />
-            <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="amber" sub={`Mes ant.: ${filteredTotals.ordersPrevMonth}`} />
+            <StatCard label={opsCopy.ordersMonthLabel} value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="amber" sub={`Mes ant.: ${filteredTotals.ordersPrevMonth}`} />
           </div>
         </section>
         )}
@@ -298,13 +303,13 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
         {/* Operativa delivery + RRHH (suma de empresas visibles) */}
         <div>
           <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 px-0.5">
-            Operativa delivery y equipo
+            {opsCopy.operativaSectionTitle}
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
           <StatCard label="Ingresos mes" value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={<span>Hoy: {fmtEuro(filteredTotals.revenueToday)} · <MomBadge pct={revenueMomPct} inline prevLabel={fmtEuro(filteredTotals.revenuePrevMonth)} /></span>} />
-          <StatCard label="Entregados mes" value={String(filteredTotals.deliveredMonth)} icon={<CheckCircle2 className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${filteredTotals.deliveredToday}`} />
-          <StatCard label="Pedidos mes" value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="blue" sub="Creados este mes" />
-          <StatCard label="En curso" value={String(filteredTotals.activeOrders)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Pedidos activos" />
+          <StatCard label={opsCopy.deliveredMonthLabel} value={String(filteredTotals.deliveredMonth)} icon={<CheckCircle2 className="w-4 h-4" />} tone="emerald" sub={`Hoy: ${filteredTotals.deliveredToday}`} />
+          <StatCard label={opsCopy.ordersMonthLabel} value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="blue" sub="Creados este mes" />
+          <StatCard label={opsCopy.activeOrdersLabel} value={String(filteredTotals.activeOrders)} icon={<Package className="w-4 h-4" />} tone="amber" sub={opsCopy.activeOrdersSub} />
           <StatCard label="Fichados ahora" value={String(filteredTotals.clockedInNow)} icon={<Clock className="w-4 h-4" />} tone="violet" sub="Equipo en turno" />
           <StatCard label="Vac. pendientes" value={String(filteredTotals.pendingVacations)} icon={<Users className="w-4 h-4" />} tone="rose" sub="Por revisar" />
           <StatCard label="Nóminas mes" value={String(filteredTotals.payslipsThisMonth)} icon={<FileText className="w-4 h-4" />} tone="slate" sub="Subidas este mes" />
@@ -334,10 +339,10 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
                   ) : (
                     <th className="pb-2 pr-3 text-right">Resultado</th>
                   )}
-                  <th className="pb-2 pr-3 text-right">Ventas delivery</th>
-                  <th className="pb-2 pr-3 text-right">Δ delivery</th>
-                  <th className="pb-2 pr-3 text-right">Entregados</th>
-                  <th className="pb-2 text-right">En curso</th>
+                  <th className="pb-2 pr-3 text-right">{opsCopy.ventasOperativa}</th>
+                  <th className="pb-2 pr-3 text-right">{opsCopy.ventasOperativaDelta}</th>
+                  <th className="pb-2 pr-3 text-right">{opsCopy.deliveredTableLabel}</th>
+                  <th className="pb-2 text-right">{opsCopy.activeTableLabel}</th>
                 </tr>
               </thead>
               <tbody>
@@ -672,6 +677,7 @@ function BusinessCard({
   const revenue = m.revenueMonth;
   const channels = Object.entries(m.revenueByChannel).sort((a, b) => b[1] - a[1]);
   const topBrand = row.brands.find((b) => b.revenueMonth > 0) ?? row.brands[0];
+  const rowCopy = getRetailOpsUiCopy(row.isRestaurant ? 'restaurant' : b.businessType);
 
   return (
     <article className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
@@ -706,7 +712,7 @@ function BusinessCard({
               )}
             </div>
             <div className="flex flex-wrap gap-3 mt-2 text-xs text-gray-600 dark:text-gray-400">
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtEuro(m.revenueMonth)} delivery</span>
+              <span className="font-semibold text-emerald-600 dark:text-emerald-400">{fmtEuro(m.revenueMonth)} {row.isRestaurant ? rowCopy.revenueInlineSuffix : 'delivery'}</span>
               <span className="text-gray-300">·</span>
               <span>{fmtEuro(f.incomeMonth)} ing. fin. · {fmtEuro(f.expensesMonth)} gastos</span>
               {canViewEbitda ? (
@@ -718,7 +724,7 @@ function BusinessCard({
                 </>
               ) : null}
               <span className="text-gray-300">·</span>
-              <span>{m.ordersMonth} pedidos · {m.deliveredMonth} entregados</span>
+              <span>{m.ordersMonth} {rowCopy.ordersInlineLabel} · {m.deliveredMonth} {row.isRestaurant ? 'cobradas' : 'entregados'}</span>
               <span className="text-gray-300">·</span>
               <span>{row.clients.totalClients} clientes · {row.clients.newClientsMonth} nuevos</span>
               <span className="text-gray-300">·</span>
@@ -774,8 +780,8 @@ function BusinessCard({
 
             {row.isDelivery ? (
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-                <MetricPill label="Ingresos delivery" value={fmtEuro(revenue)} highlight />
-                <MetricPill label="Entregados mes" value={String(m.deliveredMonth)} highlight />
+                <MetricPill label={rowCopy.ingresosOperativa} value={fmtEuro(revenue)} highlight />
+                <MetricPill label={rowCopy.deliveredMonthLabel} value={String(m.deliveredMonth)} highlight />
                 <MetricPill label="Entregados hoy" value={String(m.deliveredToday)} />
                 <MetricPill label="Ticket medio" value={fmtEuro(m.avgTicketMonth)} />
                 <MetricPill label="Activos" value={String(m.activeOrders)} />

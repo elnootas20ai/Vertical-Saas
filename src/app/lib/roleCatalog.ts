@@ -1,4 +1,6 @@
 import type { AccountPermissionMatrix, AuthUser, RoleDefinition } from './authApi';
+import { isRestaurantBusinessType } from './deliveryOpsTypes';
+import { getRetailOpsUiCopy, RESTAURANT_DELIVERY_PERMISSION_LABELS } from './retailUiCopy';
 
 /** Roles predefinidos (mismo criterio que Team.tsx / ROLE_TOKEN). */
 const BUILTIN_ROLE_IDS = new Set(['Admin', 'Gerente', 'Comercial', 'Administración', 'Taller', 'Usuario']);
@@ -36,6 +38,29 @@ export const DELIVERY_PERMISSION_OPTIONS = [
   { key: 'delivery.operate', label: 'Operar pedidos', description: 'Avanzar estado del pedido' },
   { key: 'delivery.payment', label: 'Registrar cobros', description: 'Registrar cobros en pedidos' },
 ] as const;
+
+export function getRolePermissionOptions(businessType?: string | null) {
+  const copy = getRetailOpsUiCopy(businessType);
+  return ROLE_PERMISSION_OPTIONS.map((option) =>
+    option.key === 'delivery'
+      ? {
+          ...option,
+          label: copy.roleDeliveryPermission,
+          description: copy.roleDeliveryPermissionDescription,
+        }
+      : option,
+  );
+}
+
+export function getDeliveryPermissionOptions(businessType?: string | null) {
+  if (!isRestaurantBusinessType(businessType)) {
+    return DELIVERY_PERMISSION_OPTIONS;
+  }
+  return DELIVERY_PERMISSION_OPTIONS.map((option) => {
+    const override = RESTAURANT_DELIVERY_PERMISSION_LABELS[option.key];
+    return override ? { ...option, ...override } : option;
+  });
+}
 
 export interface CreateRoleInput {
   id: string;
@@ -133,7 +158,7 @@ export function mergeRoleCatalog(
   return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id, 'es'));
 }
 
-export function formatRolePermissions(permissions: string[]) {
+export function formatRolePermissions(permissions: string[], businessType?: string | null) {
   if (!permissions.length) {
     return 'Sin permisos base';
   }
@@ -142,8 +167,9 @@ export function formatRolePermissions(permissions: string[]) {
     return 'Acceso completo';
   }
 
+  const options = getRolePermissionOptions(businessType);
   return permissions
-    .map((permission) => ROLE_PERMISSION_OPTIONS.find((option) => option.key === permission)?.label || permission)
+    .map((permission) => options.find((option) => option.key === permission)?.label || permission)
     .join(', ');
 }
 

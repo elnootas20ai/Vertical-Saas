@@ -23,6 +23,8 @@ import { ErrorBoundary } from '../ErrorBoundary';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
 import { useBusiness } from '../../context/BusinessContext';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { resolveRetailOpsHomePath } from '../../lib/retailOpsPaths';
 import { Mail, X, ArrowLeft } from 'lucide-react';
 import {
   dismissBannerForRestOfLocalDay,
@@ -68,6 +70,8 @@ export function Layout({
 function DeliveryOpsReturnStrip() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { currentBusiness } = useBusiness();
+  if (isRestaurantBusinessType(currentBusiness?.businessType)) return null;
   const fromOps = Boolean((location.state as { returnToOps?: boolean } | null)?.returnToOps);
   if (!fromOps || location.pathname === '/saas/delivery-ops') return null;
 
@@ -75,7 +79,7 @@ function DeliveryOpsReturnStrip() {
     <div className="mb-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 flex flex-wrap items-center gap-2 shadow-sm">
       <button
         type="button"
-        onClick={() => navigate('/saas/delivery-ops')}
+        onClick={() => navigate(resolveRetailOpsHomePath(currentBusiness?.businessType))}
         className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold hover:opacity-90 transition-opacity"
       >
         <ArrowLeft className="w-4 h-4 shrink-0" />

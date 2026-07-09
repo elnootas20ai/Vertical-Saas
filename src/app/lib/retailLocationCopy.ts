@@ -5,6 +5,7 @@ export type PdvWizardVariant = 'delivery' | 'compraventa' | 'restaurant';
 
 export type RetailLocationCopy = {
   previewFallback: string;
+  previewVisibilityLabel: string;
   createCta: string;
   quickAdd: string;
   quickAddDesc: string;
@@ -109,6 +110,7 @@ export function getRetailLocationCopy(variant: PdvWizardVariant): RetailLocation
   if (variant === 'compraventa') {
     return {
       previewFallback: 'Tu exposición',
+      previewVisibilityLabel: 'Cómo se verá en TPV y ventas de vehículos',
       createCta: 'Crear exposición / PDV',
       quickAdd: 'Nueva exposición / PDV',
       quickAddDesc: 'Formulario compacto + TPV de vehículos',
@@ -141,6 +143,7 @@ export function getRetailLocationCopy(variant: PdvWizardVariant): RetailLocation
   if (variant === 'restaurant') {
     return {
       previewFallback: 'Tu bar/restaurante',
+      previewVisibilityLabel: 'Cómo se verá en caja, sala y menús',
       createCta: 'Crear bar/restaurante / PDV',
       quickAdd: 'Nuevo bar/restaurante / PDV',
       quickAddDesc: 'Formulario compacto + TPV de caja',
@@ -172,6 +175,7 @@ export function getRetailLocationCopy(variant: PdvWizardVariant): RetailLocation
 
   return {
     previewFallback: 'Tu tienda',
+    previewVisibilityLabel: 'Cómo se verá en caja, delivery y menús',
     createCta: 'Crear tienda / PDV',
     quickAdd: 'Nueva tienda / PDV',
     quickAddDesc: 'Formulario compacto + TPV de caja',

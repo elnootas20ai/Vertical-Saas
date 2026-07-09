@@ -15,7 +15,7 @@ import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection
 import { seedRetailScopeCacheFromTabletLogin } from '../../lib/tabletLoginStoreSeed';
 import {
   writeTpvTabletBinding,
-  TPV_TABLET_DELIVERY_PATH,
+  resolveTpvTabletWorkerPath,
 } from '../../lib/tpvTabletSession';
 import { useBusiness } from '../../context/BusinessContext';
 
@@ -119,7 +119,7 @@ export function Login() {
         // El binding tablet ya fija empresa; seguir al TPV aunque falle el refresco global.
       }
 
-      navigate(result.redirectTo || TPV_TABLET_DELIVERY_PATH, { replace: true });
+      navigate(resolveTpvTabletWorkerPath(), { replace: true });
     },
     [navigate, reloadBusinesses, switchBusiness],
   );

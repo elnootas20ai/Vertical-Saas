@@ -48,6 +48,7 @@ import {
 } from '../../lib/deliverySetup';
 import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { resolveRetailCeoTpvPath } from '../../lib/retailOpsPaths';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import {
   getModulesConfig,
@@ -133,6 +134,7 @@ const VERTICAL_LABELS: Record<BusinessType, string> = {
   events: 'Eventos',
   carDealership: 'Compraventa de vehículos',
   workshop: 'Taller mecánico',
+  restaurant: 'Bar/restaurante',
   delivery: 'Delivery / Montajes',
   cleaning: 'Limpieza',
   hairSalon: 'Peluquería / Estética',
@@ -375,13 +377,16 @@ export function ConfiguracionGeneral() {
     ? 'plantilla_catalogo_restaurante_tpv.xlsx'
     : 'plantilla_catalogo_delivery_tpv.xlsx';
   const isCarDealershipBiz = biz?.businessType === 'carDealership';
+  const retailCeoTpvPath = resolveRetailCeoTpvPath(biz?.businessType);
   const visibleConnections = useMemo(
     () => CONNECTIONS.filter((conn) => {
       if (conn.id === 'tpv') return isDeliveryOpsBiz;
       if (conn.id === 'stock' && isCarDealershipBiz) return false;
       return true;
-    }),
-    [isDeliveryOpsBiz, isCarDealershipBiz],
+    }).map((conn) => (
+      conn.id === 'tpv' ? { ...conn, path: retailCeoTpvPath } : conn
+    )),
+    [isDeliveryOpsBiz, isCarDealershipBiz, retailCeoTpvPath],
   );
   const resolvedImportStatus = importData || biz?.initialImportStatus || null;
   const catalogImportDone =
@@ -1421,7 +1426,7 @@ export function ConfiguracionGeneral() {
                 </p>
               </div>
               <button
-                onClick={() => navigate('/saas/vertical/delivery/tpv')}
+                onClick={() => navigate(retailCeoTpvPath)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
               >
                 Ir al TPV

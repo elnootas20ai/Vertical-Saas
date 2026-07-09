@@ -14,12 +14,17 @@ import {
   filterPointsOfSaleForWorkCenters,
   workCentersStrictlyForBusiness,
 } from '../../lib/deliverySetup';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
+import { filterRestaurantRetailWorkCenters } from '../../verticals/restaurant/retailScope';
+import type { Business } from '../../lib/businessApi';
 
 interface CeoTpvStorePickerProps {
   storeName?: string;
   storeRows: DeliverySidebarStoreRow[];
   pointsOfSale: PointOfSale[];
   loading?: boolean;
+  restaurantMode?: boolean;
   onSelect: (pdvId: string) => void;
   onBack: () => void;
 }
@@ -29,10 +34,12 @@ export function CeoTpvStorePicker({
   storeRows,
   pointsOfSale,
   loading = false,
+  restaurantMode = false,
   onSelect,
   onBack,
 }: CeoTpvStorePickerProps) {
   const navigate = useNavigate();
+  const copy = getRetailOpsUiCopy(restaurantMode ? 'restaurant' : null);
   const rows = useMemo(() => {
     if (storeRows.length > 0) return storeRows.filter((r) => !r.inactive);
     return pointsOfSale
@@ -66,9 +73,9 @@ export function CeoTpvStorePicker({
             <p className="text-[10px] font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400 mb-1">
               TPV Rápido · modo operativo
             </p>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Elige la tienda</h1>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{copy.tpvPickTitle}</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Misma experiencia que la tablet por código. Después abrirás caja en la tienda elegida.
+              {copy.tpvPickSubtitle}
             </p>
           </div>
         </div>
@@ -79,7 +86,7 @@ export function CeoTpvStorePicker({
           {loading && openable.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-500">
               <Loader2 className="w-8 h-8 animate-spin mb-3" />
-              <p className="text-sm">Cargando tiendas…</p>
+              <p className="text-sm">Cargando {restaurantMode ? 'locales' : 'tiendas'}…</p>
             </div>
           ) : openable.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 p-10 text-center">
@@ -87,18 +94,17 @@ export function CeoTpvStorePicker({
                 <Store className="w-7 h-7 text-indigo-600 dark:text-indigo-400 opacity-80" />
               </div>
               <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                Aún no tienes tiendas
+                {copy.tpvEmptyStoresTitle}
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 mb-6 max-w-md mx-auto leading-relaxed">
-                Para usar el TPV necesitas al menos un centro de venta con caja. Créalo en Ajustes y
-                vuelve aquí para abrir turno.
+                {copy.tpvEmptyStoresBody}
               </p>
               <ACCESO__Button
                 variant="primary"
                 onClick={() => navigate(DELIVERY_TIENDA_SETTINGS_PATH)}
               >
                 <Plus className="w-4 h-4" />
-                Crear primera tienda
+                {copy.tpvCreateFirstStore}
               </ACCESO__Button>
             </div>
           ) : (
@@ -160,19 +166,32 @@ export function buildCeoTpvStoreRows(
   workCenters: WorkCenter[],
   pointsOfSale: PointOfSale[],
   businessId?: string,
+  scope?: {
+    business?: Pick<Business, 'business_id' | 'businessType' | 'createdAt' | 'name'> | null;
+    businesses?: Pick<Business, 'business_id' | 'businessType' | 'createdAt' | 'name'>[];
+  },
 ): DeliverySidebarStoreRow[] {
-  let retail = workCenters.filter(
+  const retailBase = workCenters.filter(
     (wc) =>
       !wc.deletedAt &&
       (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
   );
-  if (businessId) {
+
+  let retail = retailBase;
+  if (scope?.business && isRestaurantBusinessType(scope.business.businessType)) {
+    retail = filterRestaurantRetailWorkCenters(
+      retailBase,
+      scope.business,
+      scope.businesses || [scope.business],
+    );
+  } else if (businessId) {
     retail = workCentersStrictlyForBusiness(workCenters, businessId).filter(
       (wc) =>
         !wc.deletedAt &&
         (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
     );
   }
+
   const scopedPdvs = filterPointsOfSaleForWorkCenters(pointsOfSale, retail);
   return buildDeliverySidebarStoreRows(retail, scopedPdvs).filter(
     (r) => !r.inactive && !r.needsPdv && Boolean(r.pdvId),

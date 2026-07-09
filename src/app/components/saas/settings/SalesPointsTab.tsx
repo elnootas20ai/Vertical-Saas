@@ -874,9 +874,7 @@ function WorkCenterModal({
               {pdvLabelPreview && !simplifyPdvCreate && (
                 <div className="rounded-xl border-2 border-indigo-100 bg-indigo-50/90 p-4 dark:border-indigo-900/50 dark:bg-indigo-950/35">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300">
-                    {isCompraventaWizard
-                      ? 'Cómo se verá en TPV y ventas de vehículos'
-                      : 'Cómo se verá en caja, delivery y menús'}
+                    {retailCopy.previewVisibilityLabel}
                   </p>
                   <div className="mt-2 flex items-start gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white dark:border-indigo-800 dark:bg-gray-900">
@@ -1093,7 +1091,7 @@ function WorkCenterModal({
                     {pdvLabelPreview && (
                       <div className="rounded-lg border border-indigo-200 bg-indigo-50/80 p-2.5 dark:border-indigo-800 dark:bg-indigo-950/30">
                         <p className="text-[10px] font-bold uppercase text-indigo-700 dark:text-indigo-300">
-                          Vista en caja, delivery y menús
+                          {retailCopy.previewVisibilityLabel}
                         </p>
                         <p className="mt-1 text-xs font-semibold text-gray-700 dark:text-gray-300">
                           {pdvLabelPreview.needsName

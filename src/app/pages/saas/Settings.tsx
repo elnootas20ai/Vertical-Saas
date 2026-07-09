@@ -4431,7 +4431,7 @@ export function Settings() {
                           </span>
                         </div>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{role.description}</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Permisos: {formatRolePermissions(role.permissions)}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Permisos: {formatRolePermissions(role.permissions, currentBusiness?.businessType)}</p>
                       </div>
                     </div>
                     <Edit2 className="w-4 h-4 text-gray-400 dark:text-gray-500" />

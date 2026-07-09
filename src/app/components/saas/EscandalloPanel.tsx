@@ -11,7 +11,8 @@ import {
 } from './SaasTabWorkspace';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveBusinessScope } from '../../hooks/useActiveBusinessScope';
-import { isDeliveryOpsBusinessType } from '../../lib/deliveryOpsTypes';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import {
   dedupeCatalogItemsForDisplay,
   filterCatalogItemsForBusinessScope,
@@ -560,10 +561,13 @@ export function EscandalloPanel() {
   }, [businessId, dataUserId, load, regeneratingEscandallo, user?.id]);
 
   if (!isDeliveryOpsBusinessType(businessType)) {
+    const escandalloCopy = getRetailOpsUiCopy(
+      isRestaurantBusinessType(businessType) ? 'restaurant' : businessType,
+    );
     return (
       <SaasTabEmpty
         title="Escandallo no disponible"
-        description="El escandallo automático está disponible en empresas de delivery y bar/restaurante."
+        description={escandalloCopy.escandalloUnavailable}
       />
     );
   }

@@ -885,6 +885,7 @@ export const router = createBrowserRouter([
           { path: 'worker/complete-payroll', Component: WorkerPayrollSetup },
           { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },
           { path: 'worker/tpv/delivery', element: <RequireTpvTabletEntry requireForAll><WorkerTpvDeliveryRoute /></RequireTpvTabletEntry> },
+          { path: 'worker/tpv/restaurant', element: <RequireTpvTabletEntry requireForAll><WorkerTpvDeliveryRoute /></RequireTpvTabletEntry> },
           { path: 'worker/tpv', element: <RequireTpvTabletEntry><WorkerTpvEntry /></RequireTpvTabletEntry> },
           { path: 'worker/tasks', Component: WorkerTasks },
           { path: 'worker/stock-review', Component: WorkerStockReviewPage },

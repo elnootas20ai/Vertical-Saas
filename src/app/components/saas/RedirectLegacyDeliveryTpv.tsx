@@ -1,12 +1,18 @@
 import { Navigate } from 'react-router-dom';
-import { isTpvTabletBound, TPV_TABLET_DELIVERY_PATH } from '../../lib/tpvTabletSession';
+import { useBusiness } from '../../context/BusinessContext';
+import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../lib/tpvTabletSession';
+import { resolveRetailCeoTpvPath } from '../../lib/retailOpsPaths';
 
-const DESKTOP_TPV_RAPIDO_PATH = '/saas/vertical/delivery/tpv';
-
-/** Atajos legacy `/saas/tpv*` → TPV rápido escritorio o tablero tablet según binding. */
+/** Atajos legacy `/saas/tpv*` → TPV según vertical (restaurante o delivery). */
 export function RedirectLegacyDeliveryTpv() {
+  const { currentBusiness } = useBusiness();
   if (isTpvTabletBound()) {
-    return <Navigate to={TPV_TABLET_DELIVERY_PATH} replace />;
+    return <Navigate to={resolveTpvTabletWorkerPath()} replace />;
   }
-  return <Navigate to={DESKTOP_TPV_RAPIDO_PATH} replace />;
+  return (
+    <Navigate
+      to={resolveRetailCeoTpvPath(currentBusiness?.businessType)}
+      replace
+    />
+  );
 }

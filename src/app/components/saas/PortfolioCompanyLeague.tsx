@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, BarChart3, Minus } from 'lucide-react';
 import type { PortfolioBusiness } from '../../hooks/usePortfolioOverview';
 import {
   buildCompanyLeague,
-  LEAGUE_METRICS,
+  getLeagueMetrics,
   type CompanyLeagueEntry,
   type LeagueMetricId,
 } from '../../lib/portfolioLeague';
@@ -24,8 +24,9 @@ const RANK_BAR: Record<number, { bg: string; text: string }> = {
 export function PortfolioCompanyLeague({ rows, onEnter }: Props) {
   const [metric, setMetric] = useState<LeagueMetricId>('revenue');
 
+  const leagueMetrics = useMemo(() => getLeagueMetrics(rows), [rows]);
   const league = useMemo(() => buildCompanyLeague(rows, metric), [rows, metric]);
-  const metricDef = LEAGUE_METRICS.find((m) => m.id === metric)!;
+  const metricDef = leagueMetrics.find((m) => m.id === metric)!;
   const podium = league.slice(0, 3);
   const rest = league.slice(3);
   const groupAvgMom =
@@ -100,7 +101,7 @@ function LeagueHeader({
         </div>
       </div>
       <div className="flex flex-wrap gap-1 p-1 rounded-xl bg-white/80 dark:bg-gray-900/60 border border-indigo-100 dark:border-indigo-900/50">
-        {LEAGUE_METRICS.map((m) => (
+        {leagueMetrics.map((m) => (
           <button
             key={m.id}
             type="button"
@@ -253,7 +254,7 @@ function SingleCompanyBoard({
         </div>
         <div className="text-right text-[11px] text-gray-500 space-y-1">
           <p>{row.clients.newClientsMonth} clientes nuevos</p>
-          <p>{row.metrics.deliveredMonth} entregados</p>
+          <p>{row.metrics.deliveredMonth} {row.isRestaurant ? 'cobradas' : 'entregados'}</p>
           <p className="text-indigo-600 font-semibold">Entrar →</p>
         </div>
       </div>

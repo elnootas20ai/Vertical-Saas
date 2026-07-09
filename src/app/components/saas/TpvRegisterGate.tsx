@@ -334,7 +334,7 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, onRequestPrinter }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, onRequestPrinter, restaurantOpening = false }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
@@ -353,6 +353,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
   onRequestPrinter?: (ctx: { pdvId: string; terminalId?: string }) => void;
+  /** Bar/restaurante: tienda fijada arriba, sin auto-scroll al bloque terminal. */
+  restaurantOpening?: boolean;
 }) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -717,8 +719,15 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   useEffect(() => {
     if (!selectedPdvId || selectedTerminalId) return;
+    if (restaurantOpening && restrictedToPdvId) return;
     terminalSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [selectedPdvId, selectedTerminalId]);
+  }, [selectedPdvId, selectedTerminalId, restaurantOpening, restrictedToPdvId]);
+
+  useEffect(() => {
+    if (!restaurantOpening) return;
+    bodyScrollRef.current?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
+  }, [restaurantOpening, selectedPdvId]);
 
   const displayStoreName = selectedPdv
     ? pointOfSaleDisplayLabel(selectedPdv)
@@ -2278,7 +2287,8 @@ export function TpvRegisterGate({
 
   const isTabletSession = registerScope.isTabletSession;
   const orderFlowActive = useTpvOrderFlowActive();
-  const compactRegisterChrome = isTabletSession && orderFlowActive;
+  const isRestaurantVerticalChrome = isRestaurantBusinessType(currentBusiness?.businessType);
+  const compactRegisterChrome = (isTabletSession && orderFlowActive) || isRestaurantVerticalChrome;
   const scopeBusinessId = registerScope.scopeBusinessId;
   const dataUserId = registerScope.effectiveDataUserId;
 
@@ -3634,6 +3644,7 @@ export function TpvRegisterGate({
         isTabletMode={isTabletSession}
         tabletStoreLabel={tabletBinding?.pdvName}
         restrictedToPdvId={openingRestrictedPdvId}
+        restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}
         onRequestPrinter={(ctx) => {
           setOpeningPrinterCtx(ctx);
@@ -3690,7 +3701,9 @@ export function TpvRegisterGate({
             </button>
           </div>
         )}
-        {!compactRegisterChrome && <RegisterCashOpsStrip session={activeSession} />}
+        {!compactRegisterChrome && !isRestaurantVerticalChrome && (
+          <RegisterCashOpsStrip session={activeSession} />
+        )}
         <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
           {!clockInGate.allowed && !showClockIn && (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950/55 backdrop-blur-[2px] p-4">

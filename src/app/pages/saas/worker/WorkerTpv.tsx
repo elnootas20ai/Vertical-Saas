@@ -3,10 +3,11 @@ import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
+import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 import { TpvRegisterGate } from '../../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
 import { WorkerTpvBottomBar } from '../../../components/saas/WorkerTpvBottomBar';
-import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
+import { isTpvTabletBound, readTpvTabletBinding, resolveTpvTabletWorkerPath, TPV_TABLET_VERTICAL_RESTAURANT } from '../../../lib/tpvTabletSession';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../../lib/tpvStockReview';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
@@ -104,7 +105,7 @@ const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.R
   butcherShop: { label: 'Carnicería', icon: <Beef className="w-6 h-6" /> },
 };
 
-function WorkerTpvShell({ children }: { children: ReactNode }) {
+function WorkerTpvShell({ children, restaurantMode = false }: { children: ReactNode; restaurantMode?: boolean }) {
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
 
   useEffect(() => {
@@ -114,8 +115,14 @@ function WorkerTpvShell({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <TpvChromeScope bottomBar={!stockOpen ? <WorkerTpvBottomBar /> : null}>
-      <div className="flex flex-col h-[100svh] min-h-[100svh] overflow-hidden bg-gray-50 dark:bg-gray-950">
+    <TpvChromeScope bottomBar={!stockOpen && !restaurantMode ? <WorkerTpvBottomBar /> : null}>
+      <div
+        className={`flex flex-col overflow-hidden ${
+          restaurantMode
+            ? 'fixed inset-0 z-30 bg-stone-100 dark:bg-stone-950'
+            : 'h-[100svh] min-h-[100svh] bg-gray-50 dark:bg-gray-950'
+        }`}
+      >
         <TpvOfflineBanner />
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <TpvRegisterGate fillParent>
@@ -132,8 +139,13 @@ function WorkerTpvShell({ children }: { children: ReactNode }) {
 }
 
 export function WorkerTpvDeliveryRoute() {
+  const { currentBusiness } = useBusiness();
+  const binding = readTpvTabletBinding();
+  const restaurantMode =
+    binding?.tpvVertical === TPV_TABLET_VERTICAL_RESTAURANT
+    || isRestaurantBusinessType(currentBusiness?.businessType);
   return (
-    <WorkerTpvShell>
+    <WorkerTpvShell restaurantMode={restaurantMode}>
       <WorkerTpvDelivery />
     </WorkerTpvShell>
   );
@@ -176,8 +188,10 @@ export function WorkerTpv() {
     );
   }
 
+  const restaurantMode = isRestaurantBusinessType(vertical);
+
   return (
-    <WorkerTpvShell>
+    <WorkerTpvShell restaurantMode={restaurantMode}>
       <Module />
     </WorkerTpvShell>
   );

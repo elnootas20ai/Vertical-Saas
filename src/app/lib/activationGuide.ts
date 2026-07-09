@@ -180,6 +180,12 @@ const RESTAURANT_ACTIVATION_FIELD_GUIDES: Partial<Record<string, ActivationField
     bannerDetail:
       'Se abrirá el local en el paso «Horarios» del asistente. Guarda al terminar.',
   },
+  'open-tpv': {
+    fieldKey: 'open-tpv',
+    label: 'Abrir TPV',
+    bannerTitle: 'Abre el TPV de sala',
+    bannerDetail: 'Caja → TPV o el acceso rápido desde Sala cuando el local esté listo.',
+  },
 };
 
 const RESTAURANT_ACTIVATION_SUBSTEP_GUIDES: Partial<Record<string, ActivationSubStepGuide>> = {
@@ -203,6 +209,11 @@ const RESTAURANT_ACTIVATION_SUBSTEP_GUIDES: Partial<Record<string, ActivationSub
     fieldKey: 'create-store',
     route: '/saas/settings/tienda',
     clickHint: 'Ajustes → Bar/restaurante o centros de trabajo',
+  },
+  tpv_ready: {
+    fieldKey: 'open-tpv',
+    route: '/saas/caja/tpv',
+    clickHint: 'Caja → TPV (o abre caja desde Sala cuando todo esté listo)',
   },
 };
 

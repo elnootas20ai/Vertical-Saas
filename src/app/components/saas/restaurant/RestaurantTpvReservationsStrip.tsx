@@ -8,6 +8,7 @@ type Props = {
   seatingId?: string | null;
   onSeat: (reservation: RestaurantReservation) => void;
   compact?: boolean;
+  defaultOpen?: boolean;
 };
 
 function urgencyClass(minutes: number): string {
@@ -21,8 +22,9 @@ export function RestaurantTpvReservationsStrip({
   seatingId = null,
   onSeat,
   compact = false,
+  defaultOpen = false,
 }: Props) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
 
   const dueCount = useMemo(
     () => reservations.filter((r) => reservationMinutesUntil(r) <= 15).length,

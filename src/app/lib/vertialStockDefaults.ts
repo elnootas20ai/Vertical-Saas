@@ -60,7 +60,7 @@ export const VERTIAL_DELIVERY_STOCK_TEMPLATES: VertialStockTemplate[] = [
   },
   {
     templateId: 'bag-delivery',
-    name: 'Bolsa delivery',
+    name: 'Bolsa para llevar',
     stockCategory: 'packaging',
     unit: 'ud',
     minStock: 24,

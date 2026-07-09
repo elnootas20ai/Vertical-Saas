@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useBusinessOptional } from '../../context/BusinessContext';
-import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
+import { isRestaurantBusinessType, isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
+import { RESTAURANT_OPS_HOME_PATH } from '../../lib/retailOpsPaths';
 import { AuthRouteLoading } from '../AuthRouteLoading';
 
-/** Bloquea rutas de delivery en negocios que no son delivery (p. ej. restaurante → sala). */
+/** Bloquea rutas de delivery en negocios que no son delivery (p. ej. restaurante → caja). */
 export function RequireDeliveryVertical({ children }: { children: React.ReactNode }) {
   const businessCtx = useBusinessOptional();
   const navigate = useNavigate();
@@ -15,9 +16,12 @@ export function RequireDeliveryVertical({ children }: { children: React.ReactNod
   useEffect(() => {
     if (pending) return;
     if (!allowed) {
-      navigate('/saas/sala', { replace: true });
+      navigate(
+        isRestaurantBusinessType(businessType) ? RESTAURANT_OPS_HOME_PATH : '/saas/sala',
+        { replace: true },
+      );
     }
-  }, [allowed, pending, navigate]);
+  }, [allowed, pending, navigate, businessType]);
 
   if (pending) {
     return <AuthRouteLoading label="Preparando acceso…" />;

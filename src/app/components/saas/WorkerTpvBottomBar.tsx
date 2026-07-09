@@ -1,8 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { ClipboardCheck, LogOut } from 'lucide-react';
+import { useBusiness } from '../../context/BusinessContext';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
 import { exitTpvTabletSessionPath, isTpvTabletBound } from '../../lib/tpvTabletSession';
 import { requestTpvStockReviewOpen } from '../../lib/tpvStockReview';
+import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 
 /** Barra inferior del TPV: revisión de stock + salir (tablet o modo CEO). */
 export function WorkerTpvBottomBar({
@@ -14,6 +16,7 @@ export function WorkerTpvBottomBar({
   onExitCeo?: () => void;
 } = {}) {
   const navigate = useNavigate();
+  const { currentBusiness } = useBusiness();
   const { config } = useVerticalCatalog();
   const tabletBound = isTpvTabletBound();
   const showStock = config.features?.stock !== false;
@@ -30,7 +33,7 @@ export function WorkerTpvBottomBar({
       onExitCeo();
       return;
     }
-    navigate('/saas/delivery-ops', { replace: true });
+    navigate(resolveTpvCeoExitPath(window.location.pathname, currentBusiness?.businessType), { replace: true });
   };
 
   return (

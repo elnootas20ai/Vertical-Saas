@@ -22,8 +22,9 @@ import type { PointOfSale } from '../../lib/deliveryApi';
 import {
   Banknote, CreditCard, Phone as PhoneIcon, Wifi, User,
   Store, Clock, BarChart3, AlertTriangle, CheckCircle2,
-  ChevronDown, ChevronUp,
+  ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   ShieldCheck, ArrowLeft, UtensilsCrossed, Radio, Receipt,
+  Calendar, History,
 } from 'lucide-react';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 import { RestaurantLiveDashboardPanel } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
@@ -37,6 +38,7 @@ import {
   localCalendarDayKey,
   localDayBoundsForKey,
   sessionActiveOnCalendarDay,
+  sortRegisterSessionsForDisplay,
 } from '../../lib/tpvCajaScope';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -59,6 +61,103 @@ const TPV_TX_LABELS: Record<string, string> = {
 
 function todayIsoDate(): string {
   return localCalendarDayKey();
+}
+
+function addDaysIso(isoDate: string, delta: number): string {
+  const d = new Date(`${isoDate}T12:00:00`);
+  d.setDate(d.getDate() + delta);
+  return localCalendarDayKey(d);
+}
+
+function formatDayHeading(isoDate: string): string {
+  const today = todayIsoDate();
+  if (isoDate === today) return 'Hoy';
+  if (isoDate === addDaysIso(today, -1)) return 'Ayer';
+  return new Date(`${isoDate}T12:00:00`).toLocaleDateString('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
+
+function last7Days(): string[] {
+  const today = todayIsoDate();
+  return Array.from({ length: 7 }, (_, i) => addDaysIso(today, -6 + i));
+}
+
+function sessionStatusLabel(session: TpvRegisterSession): { text: string; className: string } {
+  if (session.status === 'open') {
+    return { text: 'Abierta', className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300' };
+  }
+  if (session.closingValidationStatus === 'pending') {
+    return { text: 'Pendiente', className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' };
+  }
+  if (session.closingValidationStatus === 'validated') {
+    return { text: 'Validada', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300' };
+  }
+  if (session.closingValidationStatus === 'rejected') {
+    return { text: 'Rechazada', className: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300' };
+  }
+  return { text: 'Cerrada', className: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' };
+}
+
+interface StoreDayGroup {
+  pdvId: string;
+  storeName: string;
+  sessions: TpvRegisterSession[];
+  openCount: number;
+  totalSales: number;
+}
+
+function groupSessionsByStore(
+  daySessions: TpvRegisterSession[],
+  pointsOfSale: PointOfSale[],
+  selectedDate: string,
+  options?: { excludeOpen?: boolean },
+): StoreDayGroup[] {
+  const filtered = options?.excludeOpen
+    ? daySessions.filter((s) => s.status !== 'open')
+    : daySessions;
+
+  const byPdv = new Map<string, TpvRegisterSession[]>();
+  for (const s of filtered) {
+    const id = String(s.pointOfSaleId || '_sin_tienda').trim();
+    const list = byPdv.get(id) || [];
+    list.push(s);
+    byPdv.set(id, list);
+  }
+
+  const groups: StoreDayGroup[] = [];
+  for (const [pdvId, rawSessions] of byPdv) {
+    const pdv = pointsOfSale.find((p) => p._id === pdvId);
+    const storeName = pdv?.name || rawSessions[0]?.pointOfSaleName || 'Tienda';
+    const sessions = sortRegisterSessionsForDisplay(rawSessions);
+    const openCount = sessions.filter((s) => s.status === 'open').length;
+    const totalSales = sessions.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
+    groups.push({ pdvId, storeName, sessions, openCount, totalSales });
+  }
+
+  return groups.sort((a, b) => {
+    if (a.openCount !== b.openCount) return b.openCount - a.openCount;
+    if (a.totalSales !== b.totalSales) return b.totalSales - a.totalSales;
+    return a.storeName.localeCompare(b.storeName, 'es');
+  });
+}
+
+function turnAccentClass(session: TpvRegisterSession): string {
+  if (session.status === 'open') return 'border-l-emerald-500';
+  if (session.closingValidationStatus === 'pending') return 'border-l-amber-500';
+  if (session.closingValidationStatus === 'rejected') return 'border-l-red-500';
+  if (session.closingValidationStatus === 'validated') return 'border-l-blue-500';
+  return 'border-l-gray-300 dark:border-l-gray-600';
+}
+
+function turnBadgeClass(session: TpvRegisterSession): string {
+  if (session.status === 'open') return 'bg-emerald-600 text-white ring-emerald-200 dark:ring-emerald-900';
+  if (session.closingValidationStatus === 'pending') return 'bg-amber-500 text-white ring-amber-200 dark:ring-amber-900';
+  if (session.closingValidationStatus === 'rejected') return 'bg-red-500 text-white ring-red-200 dark:ring-red-900';
+  if (session.closingValidationStatus === 'validated') return 'bg-blue-600 text-white ring-blue-200 dark:ring-blue-900';
+  return 'bg-gray-600 text-white ring-gray-200 dark:ring-gray-700';
 }
 
 function sessionOnDate(session: TpvRegisterSession, isoDate: string): boolean {
@@ -170,6 +269,178 @@ function OpenRegisterHero({
         })}
       </div>
     </section>
+  );
+}
+
+function StoreDayBlock({
+  group,
+  selectedDate,
+  expandedSessionId,
+  onToggleSession,
+  onViewClosing,
+  onValidate,
+}: {
+  group: StoreDayGroup;
+  selectedDate: string;
+  expandedSessionId: string | null;
+  onToggleSession: (id: string) => void;
+  onViewClosing: (session: TpvRegisterSession) => void;
+  onValidate: (session: TpvRegisterSession) => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
+      <div className="px-4 py-3 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-gray-900 dark:bg-gray-100 flex items-center justify-center shrink-0">
+            <Store className="w-4 h-4 text-white dark:text-gray-900" />
+          </div>
+          <div>
+            <h3 className="font-bold text-gray-900 dark:text-gray-100">{group.storeName}</h3>
+            <p className="text-[11px] text-gray-500">
+              {group.sessions.length === 0
+                ? 'Sin turnos este día'
+                : `${group.sessions.length} turno${group.sessions.length > 1 ? 's' : ''}`}
+              {group.totalSales > 0 ? ` · ${group.totalSales.toFixed(2)}€` : ''}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {group.sessions.length === 0 ? null : (
+        <div className="p-3 space-y-3 bg-gray-50/80 dark:bg-gray-900/30">
+          {group.sessions.map((session, turnIndex) => {
+            const summary = buildTpvRegisterSummaryForDay(session, selectedDate);
+            const status = sessionStatusLabel(session);
+            const expanded = expandedSessionId === session._id;
+            const turnNumber = turnIndex + 1;
+            const emptyAuto = isAutoValidatedEmptyTurn(session);
+            const timeRange = `${new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}${session.closedAt ? ` – ${new Date(session.closedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}` : ' – …'}`;
+            const diffLabel = session.status === 'closed'
+              ? `${session.difference >= 0 ? '+' : ''}${session.difference.toFixed(2)}€`
+              : `${calcTpvExpectedCash(session).toFixed(2)}€ ef.`;
+            const isSiblingCollapsed = Boolean(expandedSessionId && !expanded);
+
+            return (
+              <div
+                key={session._id}
+                data-caja-turn={session._id}
+                className={`transition-all duration-300 ease-out ${turnAccentClass(session)} ${
+                  expanded
+                    ? 'rounded-xl border-2 border-indigo-600 dark:border-indigo-500 bg-white dark:bg-gray-800 shadow-xl shadow-indigo-200/40 dark:shadow-none scale-100 opacity-100'
+                    : `rounded-lg border-2 border-dashed bg-white dark:bg-gray-800 shadow-none scale-[0.98] ${
+                        isSiblingCollapsed
+                          ? 'border-gray-200 dark:border-gray-700 opacity-45 hover:opacity-70'
+                          : 'border-gray-300 dark:border-gray-600 opacity-100 hover:border-gray-400 hover:shadow-sm'
+                      }`
+                }`}
+              >
+                {expanded ? (
+                  <>
+                    <div className="sticky top-0 z-20 flex items-center justify-between gap-3 px-3 py-2.5 sm:px-4 bg-indigo-600 dark:bg-indigo-700 text-white border-b border-indigo-700 dark:border-indigo-600">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="shrink-0 w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-sm font-bold tabular-nums">
+                          {turnNumber}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold uppercase tracking-wide truncate">
+                            Turno {turnNumber} · desplegado
+                          </p>
+                          <p className="text-[11px] text-indigo-100 truncate font-mono tabular-nums">
+                            {timeRange} · {session.workerName}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onToggleSession(session._id)}
+                        className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white text-indigo-700 text-xs font-bold uppercase tracking-wide hover:bg-indigo-50 transition-colors shadow-sm"
+                      >
+                        <ChevronUp className="w-4 h-4" />
+                        Plegar
+                      </button>
+                    </div>
+                    <div className="border-l-[4px] border-indigo-400 dark:border-indigo-500 bg-indigo-50/30 dark:bg-indigo-950/20">
+                      <div className="px-4 py-3 flex flex-wrap items-center gap-2 border-b border-indigo-100 dark:border-indigo-900/50 bg-white/70 dark:bg-gray-800/70">
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${status.className}`}>
+                          {status.text}
+                        </span>
+                        <span className="text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                          {summary.totalSales.toFixed(2)}€
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {summary.totalTransactions} movimientos · {session.terminalName}
+                        </span>
+                      </div>
+                      <div className="p-4">
+                        <RegisterCard session={session} onViewClosing={onViewClosing} detailOnly />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onToggleSession(session._id)}
+                    aria-expanded={false}
+                    className="w-full text-left px-3 py-2.5 sm:px-4 sm:py-3 hover:bg-gray-50 dark:hover:bg-gray-900/40 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`shrink-0 w-9 h-9 rounded-lg flex flex-col items-center justify-center ring-2 ${turnBadgeClass(session)} group-hover:scale-105 transition-transform`}
+                        aria-hidden
+                      >
+                        <span className="text-[8px] font-bold uppercase leading-none opacity-80">T</span>
+                        <span className="text-sm font-bold leading-none tabular-nums">{turnNumber}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                          <span className="text-[11px] font-mono tabular-nums text-gray-500">{timeRange}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${status.className}`}>
+                            {status.text}
+                          </span>
+                          {emptyAuto && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-gray-100 text-gray-500">
+                              Sin ventas
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                          {session.workerName}
+                          <span className="text-gray-400 font-normal"> · {session.terminalName}</span>
+                        </p>
+                        <p className="text-[10px] text-gray-400">{summary.totalTransactions} movimientos</p>
+                      </div>
+                      <div className="hidden sm:block text-right shrink-0 mr-1">
+                        <div className="text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                          {summary.totalSales.toFixed(2)}€
+                        </div>
+                        <div className={`text-[10px] tabular-nums ${session.status === 'closed' && session.difference !== 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                          {session.status === 'closed' ? `Dif. ${diffLabel}` : diffLabel}
+                        </div>
+                      </div>
+                      <div className="shrink-0 flex flex-col items-end gap-1">
+                        {session.status === 'closed' && session.closingValidationStatus === 'pending' && isMeaningfulPendingClose(session) && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); onValidate(session); }}
+                            className="px-2 py-1 text-[9px] font-bold rounded-md bg-blue-600 text-white"
+                          >
+                            Revisar
+                          </button>
+                        )}
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border-2 border-gray-800 dark:border-gray-200 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-[10px] font-bold uppercase tracking-wide group-hover:bg-gray-900 group-hover:text-white dark:group-hover:bg-gray-100 dark:group-hover:text-gray-900 transition-colors">
+                          <ChevronDown className="w-3.5 h-3.5" />
+                          Desplegar
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -439,6 +710,7 @@ export function RestaurantCajaPage() {
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(() => todayIsoDate());
   const [filterPdv, setFilterPdv] = useState('');
+  const [onlyOpenNow, setOnlyOpenNow] = useState(false);
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [showExtras, setShowExtras] = useState(false);
   const [validatingSession, setValidatingSession] = useState<TpvRegisterSession | null>(null);
@@ -455,7 +727,10 @@ export function RestaurantCajaPage() {
   }, []);
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
-    if (!dataUserId) return;
+    if (!dataUserId) {
+      setLoading(false);
+      return;
+    }
     const silent = options?.silent ?? hasLoadedOnceRef.current;
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -530,6 +805,16 @@ export function RestaurantCajaPage() {
     ? activeStoreScope.allPointsOfSale
     : activeStoreScope.pointsOfSale;
 
+  const todayStr = todayIsoDate();
+  const weekDays = useMemo(() => last7Days(), [todayStr]);
+
+  const daySessions = useMemo(() => {
+    let list = sessions.filter((s) => sessionOnDate(s, selectedDate));
+    if (onlyOpenNow) list = list.filter((s) => s.status === 'open');
+    if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
+    return list;
+  }, [sessions, selectedDate, onlyOpenNow, filterPdv]);
+
   const loadSalaOrders = useCallback(async () => {
     if (!dataUserId) return;
     setLoadingOrders(true);
@@ -562,6 +847,28 @@ export function RestaurantCajaPage() {
   }, [sessions, selectedDate, filterPdv]);
 
   const openSessions = openSessionsNow;
+  const storeGroups = useMemo(() => {
+    const groups = groupSessionsByStore(daySessions, pointsOfSale, selectedDate, {
+      excludeOpen: openOnSelectedDay.length > 0 && !onlyOpenNow,
+    });
+    if (filterPdv) return groups.filter((g) => g.pdvId === filterPdv);
+    return groups;
+  }, [daySessions, pointsOfSale, filterPdv, selectedDate, openOnSelectedDay.length, onlyOpenNow]);
+
+  const dayStats = useMemo(() => {
+    const allDay = sessions.filter((s) => sessionOnDate(s, selectedDate));
+    const scopedDay = filterPdv ? allDay.filter((s) => s.pointOfSaleId === filterPdv) : allDay;
+    const storesWithActivity = new Set(scopedDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
+    const openNow = dedupeOpenRegisterSessions(scopedDay.filter((s) => s.status === 'open')).length;
+    const sales = scopedDay.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
+    return {
+      stores: storesWithActivity,
+      turns: scopedDay.length,
+      openNow,
+      sales,
+    };
+  }, [sessions, selectedDate, filterPdv]);
+
   const pendingValidation = useMemo(() => sessions.filter(isMeaningfulPendingClose), [sessions]);
   const emptyPendingClosures = useMemo(() => sessions.filter(isEmptyTestClose), [sessions]);
 
@@ -735,7 +1042,7 @@ export function RestaurantCajaPage() {
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Caja</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              Turnos de caja TPV conectados a Sala · sin pedidos delivery
+              Arriba la caja activa; abajo el historial de turnos del día que elijas
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -770,7 +1077,85 @@ export function RestaurantCajaPage() {
             businessId={String(currentBusiness?.business_id || '').replace(/^business:/, '')}
             pdvId={filterPdv || activeStoreScope.activeSalesPointId || undefined}
           />
-        ) : null}
+        ) : (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            No se pudo identificar la cuenta de datos. Recarga la página o vuelve a iniciar sesión.
+          </div>
+        )}
+
+        {/* ── Día ── */}
+        <section className="rounded-2xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 p-4 sm:p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-indigo-600" />
+            <h2 className="text-sm font-bold text-indigo-900 dark:text-indigo-100 uppercase tracking-wide">Día</h2>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5">
+            {weekDays.map((d) => {
+              const active = d === selectedDate;
+              const label = d === todayStr ? 'Hoy' : new Date(`${d}T12:00:00`).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric' });
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => { setSelectedDate(d); setExpandedSessionId(null); }}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                    active
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:border-indigo-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setSelectedDate((d) => addDaysIso(d, -1))} className="p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600">
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <p className="text-lg font-bold text-gray-900 dark:text-gray-100 capitalize min-w-[160px] text-center">
+                {formatDayHeading(selectedDate)}
+              </p>
+              <button
+                type="button"
+                onClick={() => setSelectedDate((d) => addDaysIso(d, 1))}
+                disabled={selectedDate >= todayStr}
+                className="p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 disabled:opacity-40"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+            <input
+              type="date"
+              value={selectedDate}
+              max={todayStr}
+              onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+              className="text-sm px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{dayStats.stores}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Tiendas</div>
+            </div>
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{dayStats.turns}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Turnos</div>
+            </div>
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-emerald-600">{dayStats.openNow}</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Abiertas hoy</div>
+            </div>
+            <div className="rounded-xl bg-white/80 dark:bg-gray-900/50 py-3 px-2 border border-indigo-100 dark:border-indigo-900">
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">{dayStats.sales.toFixed(0)}€</div>
+              <div className="text-[10px] uppercase tracking-wide text-gray-500 mt-0.5">Ventas caja</div>
+            </div>
+          </div>
+        </section>
 
         {openOnSelectedDay.length > 0 ? (
           <OpenRegisterHero
@@ -780,20 +1165,7 @@ export function RestaurantCajaPage() {
             onToggleSession={handleToggleSession}
             onViewClosing={handleViewClosing}
           />
-        ) : (
-          <div className="rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-6 py-14 text-center">
-            <Store className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">No hay caja abierta ahora</p>
-            <p className="mt-1 text-xs text-gray-400">Abre turno desde el TPV o entra a mesas para operar.</p>
-            <button
-              type="button"
-              onClick={handleOpenTpv}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
-            >
-              <Receipt className="h-4 w-4" /> Ir al TPV
-            </button>
-          </div>
-        )}
+        ) : null}
 
         {pendingValidation.length > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
@@ -820,6 +1192,94 @@ export function RestaurantCajaPage() {
           </div>
         )}
 
+        {/* ── Historial del día ── */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <History className="w-5 h-5 text-gray-700 dark:text-gray-300" />
+              <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-wide">
+                {onlyOpenNow ? 'Solo abiertas' : 'Historial del día'}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {pointsOfSale.length > 0 && (
+                <select
+                  value={filterPdv}
+                  onChange={(e) => setFilterPdv(e.target.value)}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
+                >
+                  <option value="">Todas las tiendas ({pointsOfSale.length})</option>
+                  {pointsOfSale.map((p) => (
+                    <option key={p._id} value={p._id}>{p.name}</option>
+                  ))}
+                </select>
+              )}
+              <button
+                type="button"
+                onClick={() => setOnlyOpenNow((v) => !v)}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${
+                  onlyOpenNow
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600'
+                }`}
+              >
+                Solo abiertas ahora
+              </button>
+            </div>
+          </div>
+
+          {!onlyOpenNow && openOnSelectedDay.length > 0 && storeGroups.length > 0 && (
+            <p className="text-xs text-gray-500 -mt-1">
+              Turnos cerrados o pendientes de validación. La caja activa está arriba.
+            </p>
+          )}
+
+          {onlyOpenNow && openOnSelectedDay.length === 0 ? (
+            <div className="text-center py-16 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 text-gray-400">
+              <Store className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">Ninguna caja abierta este día</p>
+              <button
+                type="button"
+                onClick={handleOpenTpv}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+              >
+                <Receipt className="h-4 w-4" /> Ir al TPV
+              </button>
+            </div>
+          ) : onlyOpenNow ? null : storeGroups.length === 0 ? (
+            <div className="text-center py-16 rounded-2xl border border-dashed border-gray-300 dark:border-gray-600 text-gray-400">
+              <Store className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">
+                {openOnSelectedDay.length > 0
+                  ? 'Solo hay caja abierta hoy — mírala arriba'
+                  : 'Ningún turno de caja este día'}
+              </p>
+              {openOnSelectedDay.length === 0 && (
+                <button
+                  type="button"
+                  onClick={handleOpenTpv}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white dark:bg-gray-100 dark:text-gray-900"
+                >
+                  <Receipt className="h-4 w-4" /> Abrir TPV
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {storeGroups.map((group) => (
+                <StoreDayBlock
+                  key={group.pdvId}
+                  group={group}
+                  selectedDate={selectedDate}
+                  expandedSessionId={expandedSessionId}
+                  onToggleSession={handleToggleSession}
+                  onViewClosing={handleViewClosing}
+                  onValidate={setValidatingSession}
+                />
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* ── Cuentas de sala (opcional) ── */}
         <section>
