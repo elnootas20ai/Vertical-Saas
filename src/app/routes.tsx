@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet, useParams } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useAuth } from './context/AuthContext';
 import { useBusinessOptional } from './context/BusinessContext';
@@ -6,6 +7,8 @@ import { isWorkerAccount } from './lib/authApi';
 import { resolveWorkerSessionEntryPath, userOwnsAnyBusiness } from './lib/workerProfileCompletion';
 import { RootLayout } from './components/RootLayout';
 import { LandingNew } from './pages/LandingNew';
+import { NativeOnboarding } from './pages/native/NativeOnboarding';
+import { hasSeenNativeOnboarding } from './lib/nativeOnboardingStorage';
 import { Entry } from './pages/auth/Entry';
 import { Login } from './pages/auth/Login';
 import { TeamLogin } from './pages/auth/TeamLogin';
@@ -356,6 +359,27 @@ function CatchAll() {
   return <Navigate to="/saas/dashboard" replace />;
 }
 
+/**
+ * En la app nativa (iOS/Android) la ruta `/` no muestra la landing web:
+ * primera apertura → onboarding de 4 páginas; después → acceso o su sesión.
+ */
+function HomeEntry() {
+  const { isAuthenticated, isInitializing } = useAuth();
+  if (!Capacitor.isNativePlatform()) {
+    return <LandingNew />;
+  }
+  if (isInitializing) {
+    return <AuthRouteLoading label="Abriendo Vertial…" />;
+  }
+  if (isAuthenticated) {
+    return <Navigate to="/saas" replace />;
+  }
+  if (!hasSeenNativeOnboarding()) {
+    return <NativeOnboarding />;
+  }
+  return <Navigate to="/auth/entry" replace />;
+}
+
 /** /saas y /saas/ no tenían hijo index → Outlet vacío (pantalla en blanco). */
 function SaasIndexRedirect() {
   const { user } = useAuth();
@@ -385,7 +409,7 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        Component: LandingNew,
+        Component: HomeEntry,
       },
       {
         path: 'demos',

@@ -16,22 +16,37 @@ import { sendEposTestTicket, sendEposTicket, shouldUseEposPrint } from './eposPr
 
 export type PrintDeliveryTicketResult = {
   method: 'epos' | 'native' | 'bridge' | 'browser';
+  ok: boolean;
 };
+
+/**
+ * Config efectiva para imprimir un pedido: primero el scope activo (sesión TPV /
+ * dispositivo) y, si en la app nativa no hay impresora WiFi lista, la impresora
+ * guardada del PDV del pedido (sincronizada desde el servidor al cargar tiendas).
+ */
+function resolvePrinterConfigForOrder(options: DeliveryTicketPrintOptions) {
+  const config = resolveEffectivePrinterConfig();
+  if (!isVertialNativeApp() || isNativeWifiPrinterReady(config)) return config;
+  const orderPdvId = String(options.order?.salesPointId || '').trim();
+  if (!orderPdvId) return config;
+  const byOrderPdv = resolveEffectivePrinterConfig({ pdvId: orderPdvId });
+  return isNativeWifiPrinterReady(byOrderPdv) ? byOrderPdv : config;
+}
 
 export async function printDeliveryTicket(
   options: DeliveryTicketPrintOptions,
 ): Promise<PrintDeliveryTicketResult> {
-  const config = resolveEffectivePrinterConfig();
+  const config = resolvePrinterConfigForOrder(options);
   const doc = buildTicketDocument(options);
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
   if (isVertialNativeApp()) {
     if (!isNativeWifiPrinterReady(config)) {
       toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
-      return { method: 'native' };
+      return { method: 'native', ok: false };
     }
     const result = await sendNativeEscpos(escpos, config);
-    if (result.ok) return { method: 'native' };
+    if (result.ok) return { method: 'native', ok: true };
     toast.error(result.error || 'No se pudo imprimir en la impresora WiFi', {
       duration: 12000,
       action: {
@@ -51,7 +66,7 @@ export async function printDeliveryTicket(
         },
       },
     });
-    return { method: 'native' };
+    return { method: 'native', ok: false };
   }
 
   if (shouldUseEposPrint(config)) {
@@ -60,27 +75,27 @@ export async function printDeliveryTicket(
       const health = await fetchBridgeHealth(1400, config);
       if (health.ok) {
         const bridgeResult = await sendEscposToBridge(escpos, config);
-        if (bridgeResult.ok) return { method: 'bridge' };
+        if (bridgeResult.ok) return { method: 'bridge', ok: true };
       }
     }
     const result = await sendEposTicket(doc, config);
-    if (result.ok) return { method: 'epos' };
+    if (result.ok) return { method: 'epos', ok: true };
     if (config.preferBridge && config.connectionType !== 'browser') {
       const health = await fetchBridgeHealth(1400, config);
       if (health.ok) {
         const bridgeResult = await sendEscposToBridge(escpos, config);
-        if (bridgeResult.ok) return { method: 'bridge' };
+        if (bridgeResult.ok) return { method: 'bridge', ok: true };
       }
     }
     toast.error(result.error || 'No se pudo imprimir en la impresora Epson', { duration: 10000 });
-    return { method: 'browser' };
+    return { method: 'epos', ok: false };
   }
 
   if (config.preferBridge && config.connectionType !== 'browser' && !isVertialNativeApp()) {
     const health = await fetchBridgeHealth(1400, config);
     if (health.ok) {
       const result = await sendEscposToBridge(escpos, config);
-      if (result.ok) return { method: 'bridge' };
+      if (result.ok) return { method: 'bridge', ok: true };
       toast.warning(result.error || 'Impresión directa fallida. Usando navegador…');
     } else if (config.connectionType === 'network') {
       toast.warning('Inicia Vertial Print en este PC (npm run print-bridge) y vuelve a probar.');
@@ -91,11 +106,11 @@ export async function printDeliveryTicket(
 
   if (shouldBlockBrowserPrintOnNative()) {
     toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
-    return { method: 'native' };
+    return { method: 'native', ok: false };
   }
 
   printDeliveryTicketBrowser(options, doc);
-  return { method: 'browser' };
+  return { method: 'browser', ok: true };
 }
 
 export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
@@ -106,15 +121,15 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
   if (isVertialNativeApp()) {
     if (!isNativeWifiPrinterReady(config)) {
       toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
-      return { method: 'native' };
+      return { method: 'native', ok: false };
     }
     const result = await sendNativeEscpos(escpos, config);
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
-      return { method: 'native' };
+      return { method: 'native', ok: true };
     }
     toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 8000 });
-    return { method: 'native' };
+    return { method: 'native', ok: false };
   }
 
   if (shouldUseEposPrint(config)) {
@@ -125,14 +140,14 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
         const bridgeResult = await sendEscposToBridge(escpos, config);
         if (bridgeResult.ok) {
           toast.success('Ticket de prueba enviado a la impresora (vía PC del mostrador)');
-          return { method: 'bridge' };
+          return { method: 'bridge', ok: true };
         }
       }
     }
     const result = await sendEposTestTicket(config);
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
-      return { method: 'epos' };
+      return { method: 'epos', ok: true };
     }
     if (config.preferBridge && config.connectionType !== 'browser') {
       const health = await fetchBridgeHealth(1400, config);
@@ -140,12 +155,12 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
         const bridgeResult = await sendEscposToBridge(escpos, config);
         if (bridgeResult.ok) {
           toast.success('Ticket de prueba enviado a la impresora (vía PC del mostrador)');
-          return { method: 'bridge' };
+          return { method: 'bridge', ok: true };
         }
       }
     }
     toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 10000 });
-    return { method: 'browser' };
+    return { method: 'epos', ok: false };
   }
 
   if (config.preferBridge && config.connectionType !== 'browser' && !isVertialNativeApp()) {
@@ -154,25 +169,25 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
       const result = await sendEscposToBridge(escpos, config);
       if (result.ok) {
         toast.success('Ticket de prueba enviado a la impresora');
-        return { method: 'bridge' };
+        return { method: 'bridge', ok: true };
       }
       toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 8000 });
-      return { method: 'browser' };
+      return { method: 'bridge', ok: false };
     }
     if (config.connectionType === 'network') {
       toast.error('Inicia Vertial Print en este PC: npm run print-bridge (misma red que la impresora).');
     } else {
       toast.error('No se detectó el servicio de impresión en este dispositivo o PC del mostrador');
     }
-    return { method: 'browser' };
+    return { method: 'bridge', ok: false };
   }
 
   if (shouldBlockBrowserPrintOnNative()) {
     toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
-    return { method: 'native' };
+    return { method: 'native', ok: false };
   }
 
   printTestTicketBrowser(config.paperWidthMm);
   toast.info('Se abrirá la ventana de imprimir de tu dispositivo');
-  return { method: 'browser' };
+  return { method: 'browser', ok: true };
 }

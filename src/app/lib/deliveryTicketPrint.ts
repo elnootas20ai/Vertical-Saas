@@ -13,7 +13,8 @@ export async function printDeliveryTicket(
     const { printDeliveryTicket: printUnified } = await import('./vertialPrint/printDeliveryTicket');
     const result = await printUnified(options);
     // Confirmación visible de que el click funcionó cuando la impresión es silenciosa (sin ventana).
-    if (result.method === 'bridge' || result.method === 'native' || result.method === 'epos') {
+    // Solo si de verdad se envió: en fallos el flujo ya muestra su propio error con detalle.
+    if (result.ok && (result.method === 'bridge' || result.method === 'native' || result.method === 'epos')) {
       toast.success('Ticket enviado a la impresora');
     }
   } catch {

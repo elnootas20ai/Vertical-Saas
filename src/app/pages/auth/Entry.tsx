@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
+import { Capacitor } from '@capacitor/core';
 import {
   Building2,
   User,
@@ -299,11 +300,14 @@ export function Entry() {
           </button>
         </p>
 
-        <div className="mt-6 text-center">
-          <WEB__Button variant="ghost" onClick={() => navigate('/')}>
-            ← Volver a la web
-          </WEB__Button>
-        </div>
+        {/* En la app nativa no hay landing web a la que volver */}
+        {!Capacitor.isNativePlatform() && (
+          <div className="mt-6 text-center">
+            <WEB__Button variant="ghost" onClick={() => navigate('/')}>
+              ← Volver a la web
+            </WEB__Button>
+          </div>
+        )}
       </div>
       </div>
     </AccesoSplitLayout>

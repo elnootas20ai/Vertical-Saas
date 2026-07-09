@@ -13,6 +13,8 @@ export interface DeliveryOrderLike {
   _id: string;
   orderNumber?: string;
   ticketNumber?: string;
+  /** PDV del pedido: permite resolver su impresora aunque no haya sesión TPV activa. */
+  salesPointId?: string;
   customerName?: string;
   customerPhone?: string;
   customerAddress?: string;

@@ -9,6 +9,7 @@ const LOCAL_PREFIXES = ['vertial_', 'vertial.'];
 const KEEP_ON_ACCOUNT_SWITCH = new Set([
   'vertial_saved_worker_login',
   'vertial_cookie_consent',
+  'vertial_native_onboarding_seen',
 ]);
 
 /**

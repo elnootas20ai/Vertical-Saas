@@ -30,6 +30,7 @@ import {
   savePrinterConfig,
   type VertialPrinterConfig,
 } from '../../lib/vertialPrint';
+import { withNativeCallTimeout } from '../../lib/vertialPrint/nativeCallTimeout';
 import { savePrinterConfigToPdv, type PrinterConfigTarget } from '../../lib/vertialPrint/printerPdvSync';
 import { isVertialPrinterConfigConfigured, normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
 import {
@@ -117,6 +118,7 @@ export function TpvPrinterSetupPanel({
   const [scanningNetwork, setScanningNetwork] = useState(false);
   const [scanDone, setScanDone] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<{ checked: number; total: number } | null>(null);
   const [identifyingHost, setIdentifyingHost] = useState<string | null>(null);
   const [identifyResults, setIdentifyResults] = useState<Record<string, 'ok' | 'error'>>({});
   const [testing, setTesting] = useState(false);
@@ -252,8 +254,15 @@ export function TpvPrinterSetupPanel({
     if (canPersistToStore) await persistToStore(config, saveTarget);
     setTesting(true);
     try {
-      await printTestTicket();
+      await withNativeCallTimeout(
+        printTestTicket(),
+        isNativeApp ? 14_000 : 45_000,
+        'Impresión de prueba',
+      );
       await refreshStatus();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo imprimir la prueba';
+      toast.error(message, { duration: 8000 });
     } finally {
       setTesting(false);
     }
@@ -265,13 +274,19 @@ export function TpvPrinterSetupPanel({
     setScanningNetwork(true);
     setScanDone(false);
     setScanError(null);
+    setScanProgress(null);
     setNetworkPrinters([]);
     setIdentifyResults({});
     try {
       if (isNativeApp) {
-        const result = await discoverNativeNetworkPrinters({
-          timeoutMs: 8000,
-        });
+        const result = await withNativeCallTimeout(
+          discoverNativeNetworkPrinters({
+            timeoutMs: 5000,
+            onProgress: (checked, total) => setScanProgress({ checked, total }),
+          }),
+          14_000,
+          'Búsqueda de impresoras',
+        );
         if (!result.ok) {
           setScanError(result.error || 'No se pudo buscar impresoras');
           toast.error(result.error || 'No se pudo buscar impresoras');
@@ -279,10 +294,18 @@ export function TpvPrinterSetupPanel({
         }
         setNetworkPrinters(result.printers);
         setScanDone(true);
+        if (result.printers.length === 0) {
+          const hint =
+            result.error ||
+            'No se encontró ninguna impresora. Activa el permiso de «red local» para Vertial o escribe la IP manualmente.';
+          setScanError(hint);
+          toast.message(hint, { duration: 7000 });
+          return;
+        }
         if (result.printers.length === 1) {
           patch({ networkHost: result.printers[0].host, networkPort: result.printers[0].port || 9100 });
           toast.success(`Impresora detectada: ${result.printers[0].host}`);
-        } else if (result.printers.length > 1) {
+        } else {
           toast.success(`${result.printers.length} impresoras encontradas. Pulsa «¿Cuál es?» para identificar la tuya.`);
         }
         return;
@@ -318,8 +341,13 @@ export function TpvPrinterSetupPanel({
       } else {
         toast.success(`${result.printers.length} impresoras encontradas. Elige la tuya.`);
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo buscar impresoras';
+      setScanError(message);
+      toast.error(message, { duration: 8000 });
     } finally {
       setScanningNetwork(false);
+      setScanProgress(null);
     }
   }, [config, isNativeApp]);
 
@@ -596,7 +624,11 @@ export function TpvPrinterSetupPanel({
                       <Loader2 className="w-4 h-4 animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-indigo-900 dark:text-indigo-200">Buscando impresoras en la WiFi…</p>
-                        <p className="text-xs text-indigo-700/80 dark:text-indigo-300/80 mt-0.5">Unos segundos. No cierres esta pantalla.</p>
+                        <p className="text-xs text-indigo-700/80 dark:text-indigo-300/80 mt-0.5">
+                          {scanProgress && scanProgress.total > 0
+                            ? `Escaneando red… ${Math.min(100, Math.round((scanProgress.checked / scanProgress.total) * 100))}%`
+                            : 'Unos segundos (máx. 14 s). No cierres esta pantalla.'}
+                        </p>
                       </div>
                     </div>
                   )}

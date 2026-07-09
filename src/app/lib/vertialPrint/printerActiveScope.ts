@@ -38,13 +38,15 @@ export function getActivePrinterScope(): ActivePrinterScope {
 
 export function resolveEffectivePrinterConfig(options?: {
   pdv?: PointOfSale | null;
+  /** Permite resolver por caché de PDV sin tener el documento completo (p. ej. el PDV del pedido). */
+  pdvId?: string | null;
   terminalId?: string | null;
   localFallback?: VertialPrinterConfig;
 }): VertialPrinterConfig {
   const scope = options ?? {};
   const pdv = scope.pdv ?? activeScope.pdv ?? null;
   const terminalId = String(scope.terminalId ?? activeScope.terminalId ?? '').trim();
-  const pdvId = String(pdv?._id || activeScope.pdvId || '').trim();
+  const pdvId = String(scope.pdvId || pdv?._id || activeScope.pdvId || '').trim();
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
 
   const terminal = terminalId

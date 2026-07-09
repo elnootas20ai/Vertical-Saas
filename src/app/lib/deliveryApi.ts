@@ -3,7 +3,7 @@ import { getApiBase } from './apiBase';
 import { toast } from 'sonner';
 import { listWorkCentersForDelivery, type WorkCenter } from './workCentersApi';
 import type { StoreIngredient, TpvBrandIngredientSelection, TpvBrandSupplements, TpvCategoryTemplates } from './catalogCustomization';
-import type { VertialPrinterConfig } from './vertialPrint/printerConfig';
+import { cacheServerPdvPrinterConfigs, type VertialPrinterConfig } from './vertialPrint/printerConfig';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -1165,6 +1165,8 @@ export async function listPointsOfSaleRequest(
       );
       const pdvs = payload.pointsOfSale || [];
       pdvListCache.set(cacheKey, { pdvs, savedAt: Date.now() });
+      // Impresora de cada tienda disponible offline/por pedido en este dispositivo.
+      cacheServerPdvPrinterConfigs(pdvs);
       return pdvs;
     } finally {
       pdvListInflight.delete(cacheKey);

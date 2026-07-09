@@ -78,3 +78,33 @@ export function loadPdvPrinterCache(pdvId: string): VertialPrinterConfig | null 
 export function cachePdvPrinterConfig(pdvId: string, config: VertialPrinterConfig): void {
   localStorage.setItem(pdvPrinterCacheKey(pdvId), JSON.stringify(config));
 }
+
+/**
+ * Refresca la caché local por PDV con la impresora guardada en el servidor.
+ * Así la app iOS/Android puede imprimir el ticket de un pedido aunque la
+ * impresora se configurase desde otro dispositivo. Solo se cachea config de
+ * red (IP): es la única que sirve para impresión directa desde el móvil.
+ */
+export function cacheServerPdvPrinterConfigs(
+  pdvs: Array<{ _id: string; printerConfig?: Partial<VertialPrinterConfig> | null }>,
+): void {
+  for (const pdv of pdvs) {
+    const cfg = pdv?.printerConfig;
+    const pdvId = String(pdv?._id || '').trim();
+    if (!pdvId || !cfg || cfg.connectionType !== 'network') continue;
+    const host = String(cfg.networkHost || '').trim();
+    if (!host) continue;
+    try {
+      cachePdvPrinterConfig(pdvId, {
+        ...DEFAULT_PRINTER_CONFIG,
+        ...cfg,
+        connectionType: 'network',
+        networkHost: host,
+        networkPort: Number(cfg.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
+        paperWidthMm: cfg.paperWidthMm === 58 ? 58 : 80,
+      });
+    } catch {
+      /* almacenamiento no disponible: seguimos sin caché */
+    }
+  }
+}
