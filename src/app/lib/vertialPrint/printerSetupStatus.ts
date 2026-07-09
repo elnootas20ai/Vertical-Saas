@@ -1,5 +1,6 @@
 import { fetchBridgeHealth } from './printBridgeClient';
-import { isVertialNativeApp } from './isNativeApp';import { pingNativePrinter } from './nativePrintClient';
+import { isVertialNativeApp } from './isNativeApp';
+import { pingNativePrinter } from './nativePrintClient';
 import { checkEposConnection, shouldUseEposPrint } from './eposPrintClient';
 import type { VertialPrinterConfig, VertialPrinterConnectionType } from './printerConfig';
 
@@ -61,7 +62,7 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
       tone: 'warn',
       label: 'Falta el número de la impresora',
       detail: isVertialNativeApp()
-        ? 'Pon la IP de la impresora o pulsa «Buscar impresora».'
+        ? 'Pulsa «Buscar impresora» o espera: la app escanea la WiFi automáticamente.'
         : 'Pon la IP de la impresora Epson (ej. 192.168.1.200). Sale en el ticket de configuración.',
       bridgeOk: false,
       configured: false,

@@ -42,6 +42,7 @@ import {
   revokeSessionEndpoint,
   saveOnboarding,
   saveBillingCard,
+  activateOnboardingTrialWithoutCard,
   searchBusinesses,
   setUserPosPin,
   teamLogin,
@@ -72,6 +73,7 @@ import {
   registerSchema,
   resetPasswordSchema,
   saveBillingCardSchema,
+  activateOnboardingTrialSchema,
   setPosPinSchema,
   teamLoginSchema,
   tpvTabletLoginSchema,
@@ -121,6 +123,13 @@ authRouter.put('/profile/:userId/reset-password', requireAuthAndEmailVerified, v
 authRouter.post('/profile/:userId/resend-invite', requireAuthAndEmailVerified, validateParams(userIdParamSchema), resendInvite);
 authRouter.get('/profile/:userId/card', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getBillingCard);
 authRouter.put('/profile/:userId/card', requireAuthAndEmailVerified, validateParams(userIdParamSchema), validate(saveBillingCardSchema), saveBillingCard);
+authRouter.put(
+  '/profile/:userId/onboarding/activate-trial',
+  requireAuthAndEmailVerified,
+  validateParams(userIdParamSchema),
+  validate(activateOnboardingTrialSchema),
+  activateOnboardingTrialWithoutCard,
+);
 authRouter.get('/profile/:userId/activity', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getUserActivity);
 authRouter.get('/profile/:userId/onboarding', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getOnboarding);
 authRouter.put('/profile/:userId/onboarding', requireAuthAndEmailVerified, validateParams(userIdParamSchema), saveOnboarding);

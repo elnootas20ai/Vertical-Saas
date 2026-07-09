@@ -13,3 +13,14 @@ export function throwIfAborted(signal?: AbortSignal) {
 export function isImportAbortError(err: unknown): boolean {
   return err instanceof ImportAbortError || (err as Error)?.name === 'ImportAbortError';
 }
+
+/** Cede el hilo para que la UI (progreso, cancelar) siga respondiendo en bucles largos. */
+export function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}

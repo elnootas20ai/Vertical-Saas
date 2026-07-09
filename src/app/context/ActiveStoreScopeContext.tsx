@@ -36,7 +36,6 @@ import {
   resolveBusinessScopeId,
   knownBusinessIdsFromList,
   filterPointsOfSaleForWorkCenters,
-  repairMissingRetailDeliveryPdvs,
 } from '../lib/deliverySetup';
 import {
   filterRetailWorkCentersForScope,
@@ -413,7 +412,9 @@ function ActiveStoreScopeProviderImpl({
       };
 
       try {
-        let state = await loadRetailStoresForBusiness(
+        // Solo lectura: el sidebar nunca crea/repara PDVs. Las reparaciones
+        // viven en Ajustes → Tienda y en la apertura del TPV.
+        const state = await loadRetailStoresForBusiness(
           authUser,
           biz as Business,
           businessesRef.current,
@@ -421,21 +422,10 @@ function ActiveStoreScopeProviderImpl({
             ...loadOpts,
             includeInactivePdvs: true,
             tpvBootstrap: false,
-            skipPdvMerge: false,
+            skipPdvMerge: true,
             ensureTabletCodes: false,
           },
         );
-        if (state.dataUserId) {
-          state = {
-            ...state,
-            pointsOfSale: await repairMissingRetailDeliveryPdvs(
-              state.dataUserId,
-              state.workCenters,
-              state.pointsOfSale,
-              biz as Business,
-            ),
-          };
-        }
 
         if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
 

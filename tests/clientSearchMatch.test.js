@@ -37,6 +37,16 @@ describe('scorePhoneDigitsMatch', () => {
   it('encuentra móvil sin prefijo internacional', () => {
     expect(scorePhoneDigitsMatch('666123456', '666')).toBeGreaterThan(0);
   });
+
+  it('encuentra por prefijo desde el primer dígito', () => {
+    expect(scorePhoneDigitsMatch('666123456', '6')).toBeGreaterThan(0);
+    expect(scorePhoneDigitsMatch('34666123456', '66')).toBeGreaterThan(0);
+  });
+
+  it('con 1-2 dígitos no hace match suelto por sufijo', () => {
+    expect(scorePhoneDigitsMatch('666123459', '9')).toBe(0);
+    expect(scorePhoneDigitsMatch('666123459', '59')).toBe(0);
+  });
 });
 
 describe('scoreClientSearchMatch', () => {
@@ -48,5 +58,17 @@ describe('scoreClientSearchMatch', () => {
   it('encuentra por teléfono parcial con +34 almacenado', () => {
     const doc = { name: 'Cliente', phone: '+34 666 123 456' };
     expect(scoreClientSearchMatch(doc, '666', '666', '666', true)).toBeGreaterThan(0);
+  });
+
+  it('encuentra por teléfono desde el primer dígito', () => {
+    const doc = { name: 'Cliente', phone: '+34 666 123 456' };
+    expect(scoreClientSearchMatch(doc, '6', '6', '6', true)).toBeGreaterThan(0);
+    expect(scoreClientSearchMatch(doc, '66', '66', '66', true)).toBeGreaterThan(0);
+  });
+
+  it('encuentra por primera letra del nombre', () => {
+    const doc = { name: 'María García', phone: '666123456' };
+    expect(scoreClientSearchMatch(doc, 'm', 'm', '', false)).toBeGreaterThan(0);
+    expect(scoreClientSearchMatch(doc, 'z', 'z', '', false)).toBe(0);
   });
 });

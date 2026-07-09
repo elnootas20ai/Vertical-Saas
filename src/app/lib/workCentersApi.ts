@@ -111,20 +111,58 @@ async function fetchWorkCenterDocs(dbName: string): Promise<unknown[]> {
   }
 }
 
-async function listAllWorkCenterDocs(): Promise<unknown[]> {
+/**
+ * Micro-caché de la lista completa de centros: al entrar al SaaS varios
+ * consumidores (sidebar, checklist, página activa) piden lo mismo a la vez.
+ * Se comparte la petición en vuelo y el resultado durante un TTL corto;
+ * cualquier escritura de centros invalida la caché al momento.
+ */
+const WORK_CENTER_DOCS_TTL_MS = 15_000;
+let workCenterDocsCache: { docs: unknown[]; savedAt: number } | null = null;
+let workCenterDocsInflight: Promise<unknown[]> | null = null;
+
+export function invalidateWorkCenterDocsCache(): void {
+  workCenterDocsCache = null;
+  workCenterDocsInflight = null;
+}
+
+async function fetchAllWorkCenterDocsUncached(): Promise<unknown[]> {
   await ensureDb();
   const merged = new Map<string, unknown>();
-  for (const doc of await fetchWorkCenterDocs(WORK_CENTERS_DB)) {
+  const [primaryDocs, ...legacyResults] = await Promise.all([
+    fetchWorkCenterDocs(WORK_CENTERS_DB),
+    ...legacyWorkCenterDbNames().map((db) => fetchWorkCenterDocs(db)),
+  ]);
+  for (const doc of primaryDocs) {
     const id = String((doc as { _id?: string })._id || '').trim();
     if (id) merged.set(id, doc);
   }
-  for (const legacyDb of legacyWorkCenterDbNames()) {
-    for (const doc of await fetchWorkCenterDocs(legacyDb)) {
+  for (const legacyDocs of legacyResults) {
+    for (const doc of legacyDocs) {
       const id = String((doc as { _id?: string })._id || '').trim();
       if (id && !merged.has(id)) merged.set(id, doc);
     }
   }
   return [...merged.values()];
+}
+
+async function listAllWorkCenterDocs(): Promise<unknown[]> {
+  if (workCenterDocsCache && Date.now() - workCenterDocsCache.savedAt < WORK_CENTER_DOCS_TTL_MS) {
+    return workCenterDocsCache.docs;
+  }
+  if (workCenterDocsInflight) return workCenterDocsInflight;
+
+  const promise = (async () => {
+    try {
+      const docs = await fetchAllWorkCenterDocsUncached();
+      workCenterDocsCache = { docs, savedAt: Date.now() };
+      return docs;
+    } finally {
+      workCenterDocsInflight = null;
+    }
+  })();
+  workCenterDocsInflight = promise;
+  return promise;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -278,6 +316,7 @@ export async function createWorkCenter(
     `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(id)}`,
     { method: 'PUT', body: JSON.stringify(wc) },
   );
+  invalidateWorkCenterDocsCache();
   return { ...wc, _rev: result.rev };
 }
 
@@ -293,6 +332,7 @@ export async function updateWorkCenter(wc: WorkCenter): Promise<WorkCenter> {
     `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(wc._id)}`,
     { method: 'PUT', body: JSON.stringify(updated) },
   );
+  invalidateWorkCenterDocsCache();
   return { ...updated, _rev: result.rev };
 }
 
@@ -307,6 +347,7 @@ export async function deleteWorkCenter(wcId: string): Promise<void> {
         `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(wcId)}?rev=${doc._rev}`,
         { method: 'DELETE' },
       );
+      invalidateWorkCenterDocsCache();
       return;
     } catch {
       // fallback to soft-delete when rev mismatches
@@ -324,6 +365,7 @@ export async function deleteWorkCenter(wcId: string): Promise<void> {
       }),
     },
   );
+  invalidateWorkCenterDocsCache();
 }
 
 // ── Re-exports for backward compatibility ─────────────────────────────────────

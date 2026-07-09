@@ -90,10 +90,14 @@ export function clientPhoneDigitHaystacks(doc) {
 
 /** Puntuación de coincidencia por teléfono (0 = sin match). */
 export function scorePhoneDigitsMatch(hayDigits, qDigits) {
-  if (!hayDigits || !qDigits || qDigits.length < 3) return 0;
+  if (!hayDigits || !qDigits || qDigits.length < 1) return 0;
+
+  // Con 1-2 dígitos solo prefijo: al teclear un teléfono desde el principio,
+  // endsWith/includes darían coincidencias aleatorias y ruidosas.
+  const allowLoose = qDigits.length >= 3;
 
   if (hayDigits === qDigits) return 200;
-  if (hayDigits.endsWith(qDigits)) return 170;
+  if (allowLoose && hayDigits.endsWith(qDigits)) return 170;
   if (hayDigits.startsWith(qDigits)) return 150;
   if (qDigits.length >= 6 && hayDigits.includes(qDigits)) return 130;
 
@@ -102,7 +106,7 @@ export function scorePhoneDigitsMatch(hayDigits, qDigits) {
   if (!hayLocal || !qLocal) return 0;
 
   if (hayLocal === qLocal) return 200;
-  if (hayLocal.endsWith(qLocal)) return 170;
+  if (allowLoose && hayLocal.endsWith(qLocal)) return 170;
   if (hayLocal.startsWith(qLocal)) return 150;
   if (qLocal.length >= 3 && hayLocal.includes(qLocal)) return 140;
 
@@ -121,6 +125,9 @@ export function scoreClientSearchMatch(doc, raw, qFold, qDigits, _preferPhone) {
   let score = 0;
   const nameHay = clientNameSearchHaystack(doc);
   const words = nameHay.split(/[^a-z0-9]+/).filter(Boolean);
+  // Con 1 solo carácter: prefijo de nombre sí (primera letra), pero no
+  // `includes` (una letra suelta dentro del nombre no significa nada).
+  const qHasDigits = qDigits.length > 0;
 
   if (qFold.length >= 2) {
     if (nameHay === qFold) score += 200;
@@ -128,9 +135,11 @@ export function scoreClientSearchMatch(doc, raw, qFold, qDigits, _preferPhone) {
     else if (words.some((w) => w.startsWith(qFold))) score += 160;
     else if (foldedNameQueryMatches(qFold, nameHay)) score += 120;
     else if (nameHay.includes(qFold)) score += 80;
+  } else if (qFold.length === 1 && !qHasDigits) {
+    if (words.some((w) => w.startsWith(qFold))) score += 160;
   }
 
-  if (qDigits.length >= 3) {
+  if (qDigits.length >= 1) {
     let phoneScore = 0;
     for (const h of clientPhoneDigitHaystacks(doc)) {
       phoneScore = Math.max(phoneScore, scorePhoneDigitsMatch(h, qDigits));

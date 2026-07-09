@@ -34,9 +34,9 @@ export function SaasTabWorkspace({
   const hasStats = (stats && stats.length > 0) || statsTrailing;
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
       {hasStats ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 text-xs text-gray-600 dark:text-gray-400">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 text-xs text-gray-600 dark:text-gray-400 rounded-t-xl">
           {stats?.map((s) => (
             <span key={s.label}>
               <strong className={`tabular-nums ${statToneClass[s.tone || 'default']}`}>{s.value}</strong>{' '}
@@ -50,9 +50,11 @@ export function SaasTabWorkspace({
         <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-700 text-xs">{banner}</div>
       ) : null}
       {toolbar ? (
-        <div className="p-2 border-b border-gray-100 dark:border-gray-700 space-y-2">{toolbar}</div>
+        <div className="relative z-20 p-2 border-b border-gray-100 dark:border-gray-700 space-y-2 overflow-visible">
+          {toolbar}
+        </div>
       ) : null}
-      {children}
+      <div className="overflow-hidden rounded-b-xl">{children}</div>
     </div>
   );
 }
@@ -83,9 +85,9 @@ export function SaasTabSearch({
 
 export function SaasTabToolbarRow({ left, right }: { left?: ReactNode; right?: ReactNode }) {
   return (
-    <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-      <div className="flex flex-wrap items-center gap-1.5 min-w-0">{left}</div>
-      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">{right}</div>
+    <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-wrap items-center gap-1.5 min-w-0 flex-1">{left}</div>
+      <div className="flex flex-wrap items-center gap-1.5 lg:justify-end shrink-0">{right}</div>
     </div>
   );
 }

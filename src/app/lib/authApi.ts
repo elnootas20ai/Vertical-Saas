@@ -542,14 +542,17 @@ async function request<T>(
 
   if (response.status === 401) {
     const authErr = extractApiErrorMessage(payload as Record<string, unknown>);
-    if (authErr) {
-      throw new Error(authErr);
-    }
-    if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
+    const isExpired =
+      payload.code === 'TOKEN_EXPIRED' ||
+      /token expirado|sesión expirada|session expired/i.test(authErr);
+    if (isExpired && !_retried) {
       const refreshed = await tryRefreshToken();
       if (refreshed) {
         return request<T>(path, init, true, _networkAttempt);
       }
+    }
+    if (authErr) {
+      throw new Error(authErr);
     }
     _onUnauthorized?.();
     throw new Error('Sesión expirada. Por favor, inicia sesión de nuevo.');
@@ -794,6 +797,19 @@ export async function saveBillingCardRequest(
   },
 ) {
   return request<AuthUser>(`/api/auth/profile/${encodeURIComponent(userId)}/card`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function activateOnboardingTrialRequest(
+  userId: string,
+  data: {
+    billingMode: string;
+    selectedPlanId: string;
+  },
+) {
+  return request<AuthUser>(`/api/auth/profile/${encodeURIComponent(userId)}/onboarding/activate-trial`, {
     method: 'PUT',
     body: JSON.stringify(data),
   });

@@ -121,6 +121,7 @@ export function TpvPrinterSetupPanel({
   const [statusLoading, setStatusLoading] = useState(true);
   const saveTimerRef = useRef<number | null>(null);
   const pendingConfigRef = useRef<VertialPrinterConfig | null>(null);
+  const autoScanAttemptedRef = useRef(false);
 
   const canPersistToStore = Boolean(scope?.userId && scope?.pdvId && pdv?._id);
   const terminalLabel = scope?.terminalLabel?.trim() || 'este TPV';
@@ -211,6 +212,7 @@ export function TpvPrinterSetupPanel({
 
   const selectKind = (next: PrinterSetupKind) => {
     setKind(next);
+    if (next !== 'wifi') autoScanAttemptedRef.current = false;
     patch({ connectionType: setupKindToConnection(next) });
     setShowSetup(true);
   };
@@ -241,8 +243,7 @@ export function TpvPrinterSetupPanel({
     try {
       if (isNativeApp) {
         const result = await discoverNativeNetworkPrinters({
-          port: config.networkPort || 9100,
-          timeoutMs: 20000,
+          timeoutMs: 25000,
         });
         if (!result.ok) {
           toast.error(result.error || 'No se pudo buscar impresoras');
@@ -250,7 +251,10 @@ export function TpvPrinterSetupPanel({
         }
         setNetworkPrinters(result.printers);
         if (result.printers.length === 0) {
-          toast.message('No se encontró ninguna impresora térmica en la WiFi del local.');
+          toast.message(
+            'No se encontró ninguna impresora térmica en la WiFi. Comprueba que está encendida, en la misma red y que Vertial tiene permiso de red local.',
+            { duration: 6000 },
+          );
         } else if (result.printers.length === 1) {
           patch({ networkHost: result.printers[0].host, networkPort: result.printers[0].port || 9100 });
           toast.success(`Impresora detectada: ${result.printers[0].host}`);
@@ -292,6 +296,14 @@ export function TpvPrinterSetupPanel({
       setScanningNetwork(false);
     }
   }, [config, isNativeApp]);
+
+  useEffect(() => {
+    if (!isNativeApp || kind !== 'wifi' || !showSetup) return;
+    if (config.networkHost) return;
+    if (autoScanAttemptedRef.current || scanningNetwork) return;
+    autoScanAttemptedRef.current = true;
+    void handleScanNetworkPrinters();
+  }, [isNativeApp, kind, showSetup, config.networkHost, scanningNetwork, handleScanNetworkPrinters]);
 
   return (
     <div className={variant === 'page' ? 'space-y-6 max-w-2xl' : 'flex flex-col min-h-0'}>
@@ -437,7 +449,7 @@ export function TpvPrinterSetupPanel({
 
         {isNativeApp && kind === 'wifi' && (
           <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-            En la app Vertial la tablet habla directo con la impresora: pon la IP o pulsa «Buscar impresora».
+            La app busca impresoras térmicas en la WiFi del local (Bonjour y escaneo de red). Pulsa «Buscar impresora» o espera unos segundos al abrir esta sección.
           </p>
         )}
 
@@ -519,11 +531,13 @@ export function TpvPrinterSetupPanel({
 
                   {networkPrinters.length > 0 && (
                     <div className="space-y-2">
-                      <p className="text-xs text-gray-500 dark:text-gray-400">Impresoras detectadas (térmica puerto 9100):</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Impresoras detectadas en la WiFi (puertos 9100–9102):
+                      </p>
                       <div className="grid gap-2">
                         {networkPrinters.map((item) => (
                           <button
-                            key={item.host}
+                            key={`${item.host}:${item.port}`}
                             type="button"
                             onClick={() => patch({
                               networkHost: item.host,
@@ -533,7 +547,7 @@ export function TpvPrinterSetupPanel({
                           >
                             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.host}</p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                              {item.label || 'Impresora térmica WiFi'}
+                              {item.label || `Impresora térmica · puerto ${item.port || 9100}`}
                             </p>
                           </button>
                         ))}
@@ -553,7 +567,7 @@ export function TpvPrinterSetupPanel({
                     />
                   </label>
                   <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                    Pulsa <strong>Buscar impresora</strong> para que Vertial la detecte en la red, o imprime un ticket de prueba desde la Epson y copia la IP (ej. <strong>192.168.1.200</strong>).
+                    Pulsa <strong>Buscar impresora</strong> para detectarla en la WiFi, o escribe la IP manualmente (sale en el ticket de configuración de la Epson).
                   </p>
                 </div>
               )}

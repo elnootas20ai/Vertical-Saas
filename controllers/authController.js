@@ -115,6 +115,7 @@ import { sendAdminAlert } from '../services/adminAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
 import { buildSubscriptionFromOnboarding } from '../shared/billing/onboardingSubscription.js';
+import { isSkipMoneiSubscription } from '../shared/billing/skipMonei.js';
 import {
   provisionBusinessFromOnboarding,
   resolveBusinessNameFromOnboarding,
@@ -1265,6 +1266,56 @@ export async function updatePassword(req, res) {
   }
 }
 
+async function provisionAccountFromOnboardingSelection(req, account, { billingMode, selectedPlanId }) {
+  const onboardingData = account.onboardingData || {};
+  const dataForProvision = {
+    ...onboardingData,
+    subscriptionSelection: {
+      ...(onboardingData.subscriptionSelection || {}),
+      recommendedPlanId:
+        selectedPlanId || onboardingData.subscriptionSelection?.recommendedPlanId || 'basic',
+      billingMode: billingMode || onboardingData.subscriptionSelection?.billingMode || 'monthly',
+    },
+  };
+  const nextSubscription = preserveAdminLockedPlan(
+    buildSubscriptionFromOnboarding(
+      dataForProvision,
+      account.subscription || {},
+      { selectedPlanId, billingMode },
+    ),
+    account.subscription || {},
+  );
+
+  let savedAccount = await saveAccount(req, {
+    ...account,
+    subscription: nextSubscription,
+    updatedAt: new Date().toISOString(),
+  });
+
+  if (!account.onboardingCompleted) {
+    try {
+      const provision = await provisionBusinessFromOnboarding(req, savedAccount);
+      if (provision.ok && provision.businessId) {
+        const resolvedName = resolveBusinessNameFromOnboarding(savedAccount);
+        savedAccount = await saveAccount(req, {
+          ...savedAccount,
+          companyName: resolvedName || savedAccount.companyName,
+          onboardingData: {
+            ...(savedAccount.onboardingData || {}),
+            businessId: provision.businessId,
+            suppressAutoProvision: false,
+          },
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    } catch (provisionErr) {
+      console.error('[AUTH] Error provisionando empresa desde onboarding:', provisionErr?.message);
+    }
+  }
+
+  return savedAccount;
+}
+
 export async function saveBillingCard(req, res) {
   try {
     const userId = req.params.userId;
@@ -1294,27 +1345,13 @@ export async function saveBillingCard(req, res) {
 
     const savedCard = await saveCard(req, existingCard ? { ...existingCard, ...baseCard, updatedAt: new Date().toISOString() } : baseCard);
 
-    const onboardingData = account.onboardingData || {};
-    const dataForProvision = {
-      ...onboardingData,
-      subscriptionSelection: {
-        ...(onboardingData.subscriptionSelection || {}),
-        recommendedPlanId:
-          selectedPlanId || onboardingData.subscriptionSelection?.recommendedPlanId || 'basic',
-        billingMode: billingMode || onboardingData.subscriptionSelection?.billingMode || 'monthly',
-      },
-    };
-    const nextSubscription = preserveAdminLockedPlan(
-      buildSubscriptionFromOnboarding(
-        dataForProvision,
-        account.subscription || {},
-        { selectedPlanId, billingMode },
-      ),
-      account.subscription || {},
-    );
+    const accountAfterProvision = await provisionAccountFromOnboardingSelection(req, account, {
+      billingMode,
+      selectedPlanId,
+    });
 
     const savedAccount = await saveAccount(req, {
-      ...account,
+      ...accountAfterProvision,
       paymentSummary: {
         cardId: savedCard._id,
         lastFourDigits: savedCard.lastFourDigits,
@@ -1323,41 +1360,54 @@ export async function saveBillingCard(req, res) {
         billingMode: savedCard.billingMode,
         selectedPlanId: savedCard.selectedPlanId,
       },
-      subscription: nextSubscription,
       updatedAt: new Date().toISOString(),
     });
 
-    let accountAfterProvision = savedAccount;
-    if (!account.onboardingCompleted) {
-      try {
-        const provision = await provisionBusinessFromOnboarding(req, savedAccount);
-        if (provision.ok && provision.businessId) {
-          const resolvedName = resolveBusinessNameFromOnboarding(savedAccount);
-          accountAfterProvision = await saveAccount(req, {
-            ...savedAccount,
-            companyName: resolvedName || savedAccount.companyName,
-            onboardingData: {
-              ...(savedAccount.onboardingData || {}),
-              businessId: provision.businessId,
-              suppressAutoProvision: false,
-            },
-            updatedAt: new Date().toISOString(),
-          });
-        }
-      } catch (provisionErr) {
-        console.error('[AUTH] Error provisionando empresa desde onboarding (tarjeta):', provisionErr?.message);
-      }
-    }
-
     return res.json({
       ok: true,
-      user: sanitizeAccount(accountAfterProvision),
+      user: sanitizeAccount(savedAccount),
       card: sanitizeCard(savedCard),
     });
   } catch (error) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al guardar la tarjeta',
+    });
+  }
+}
+
+/** Activa la prueba del onboarding sin tarjeta cuando SKIP_MONEI_SUBSCRIPTION está activo. */
+export async function activateOnboardingTrialWithoutCard(req, res) {
+  try {
+    if (!isSkipMoneiSubscription()) {
+      return res.status(403).json({
+        ok: false,
+        error: 'No se pudo iniciar la prueba en este momento. Inténtalo de nuevo más tarde.',
+      });
+    }
+
+    const userId = req.params.userId;
+    const account = await findAccountByUserId(req, userId);
+
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const { billingMode, selectedPlanId } = req.body || {};
+    const savedAccount = await provisionAccountFromOnboardingSelection(req, account, {
+      billingMode,
+      selectedPlanId,
+    });
+
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      skippedMonei: true,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al activar la prueba',
     });
   }
 }

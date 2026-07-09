@@ -783,7 +783,8 @@ export function TpvRapidoOrderFlow({
       businessId: clientSearchBusinessId,
       enabled: !showCreateForm,
       matchByName: true,
-      minQueryLength: 2,
+      minQueryLength: 1,
+      debounceMs: 250,
     });
 
   // Step 2 - Delivery
@@ -2618,7 +2619,7 @@ export function TpvRapidoOrderFlow({
     );
   }
 
-  const clientSearchReady = phoneInput.trim().length >= 2;
+  const clientSearchReady = phoneInput.trim().length >= 1;
 
   const needsOpenRegister =
     currentStep === 'products' || currentStep === 'payment';

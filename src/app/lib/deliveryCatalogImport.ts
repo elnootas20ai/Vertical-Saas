@@ -198,6 +198,7 @@ export async function syncTpvOrganizersAfterCatalogImport(
   const categoryMap = buildBrandCategoryMapFromItems(items);
   let updatedBrands = 0;
 
+  const updates: Promise<unknown>[] = [];
   for (const brand of brands) {
     if (!isCommercialLineBrand(brand)) continue;
     const importedCats = categoryMap.get(brand._id);
@@ -209,8 +210,12 @@ export async function syncTpvOrganizersAfterCatalogImport(
       merged.length === prev.length && merged.every((cat, idx) => cat === prev[idx]);
     if (unchanged) continue;
 
-    await updateBrandRequest(bid, { ...brand, catalogCategories: merged });
+    updates.push(updateBrandRequest(bid, { ...brand, catalogCategories: merged }));
     updatedBrands += 1;
+  }
+
+  if (updates.length > 0) {
+    await Promise.allSettled(updates);
   }
 
   return { updatedBrands };
@@ -298,6 +303,7 @@ export async function syncAutoCostingAfterCatalogImport(
   userId: string,
   businessId: string,
   catalogItems: CatalogItem[],
+  options?: { fullCatalog?: CatalogItem[] },
 ): Promise<{ updated: number; recipe: number; fixed: number; skipped: number; failed: number }> {
   const uid = String(userId || '').trim();
   const bid = String(businessId || '').trim();
@@ -328,6 +334,7 @@ export async function syncAutoCostingAfterCatalogImport(
     businessId: bid,
     storeIngredients: withBases,
     brands,
+    catalogItems: options?.fullCatalog,
     costingTargets: catalogItems,
     upgradeAutoFixedFood: true,
     mode: 'costing',

@@ -47,6 +47,7 @@ import {
   revokeOtherSessionsRequest,
   registerRequest,
   saveBillingCardRequest,
+  activateOnboardingTrialRequest,
   setAuthTokens,
   setOnUnauthorized,
   teamLoginRequest,
@@ -119,6 +120,10 @@ export interface AuthContextType {
     cardHolderName: string;
     expiryDate: string;
     cvv: string;
+    billingMode: string;
+    selectedPlanId: string;
+  }) => Promise<{ success: boolean; error?: string }>;
+  activateOnboardingTrialWithoutCard: (data: {
     billingMode: string;
     selectedPlanId: string;
   }) => Promise<{ success: boolean; error?: string }>;
@@ -578,6 +583,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const me = await fetchCurrentUserRequest();
           if (me.user) setSessionUser(me.user);
           response = await attemptSave();
+        } else if (/token expirado|sesión expirada|session expired/i.test(msg)) {
+          const refreshed = await refreshCurrentUser();
+          if (!refreshed.ok) throw error;
+          response = await attemptSave();
         } else {
           throw error;
         }
@@ -590,6 +599,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Error al guardar la tarjeta',
+      };
+    }
+  };
+
+  const activateOnboardingTrialWithoutCard = async (data: {
+    billingMode: string;
+    selectedPlanId: string;
+  }): Promise<{ success: boolean; error?: string }> => {
+    if (!user) {
+      return { success: false, error: 'No hay usuario autenticado' };
+    }
+
+    const attemptActivate = async () => activateOnboardingTrialRequest(user.user_id, data);
+
+    try {
+      let response;
+      try {
+        response = await attemptActivate();
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : '';
+        if (/token expirado|sesión expirada|session expired/i.test(msg)) {
+          const refreshed = await refreshCurrentUser();
+          if (!refreshed.ok) throw error;
+          response = await attemptActivate();
+        } else {
+          throw error;
+        }
+      }
+      if (response.user) {
+        setSessionUser(response.user);
+      }
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Error al activar la prueba',
       };
     }
   };
@@ -1097,6 +1142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         resetPassword,
         acceptInvite,
         saveBillingCard,
+        activateOnboardingTrialWithoutCard,
         getBillingCard,
         listUsers,
         listRoles,

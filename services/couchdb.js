@@ -3717,7 +3717,7 @@ function foldSearchText(s) {
 /** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
 export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, options = {}) {
   const raw = String(phoneQuery || '').trim();
-  if (raw.length < 2) return [];
+  if (raw.length < 1) return [];
 
   const docs = await getClientDocumentsForUser(req, userId);
   const qFold = foldSearchText(raw);

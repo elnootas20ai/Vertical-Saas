@@ -401,12 +401,14 @@ export function resolveCatalogImportBrandIds(
   brands: ImportBrandLike[],
   productName = '',
 ): string[] {
+  // El Excel manda: la columna «linea» explícita siempre gana sobre cualquier
+  // heurística. Las inferencias por nombre/categoría son solo para filas sin línea.
+  if (explicitBrandIds.length > 0) return explicitBrandIds;
+
   if (shouldClearBrandForCategory(category)) return [];
 
   const fromProductName = inferCommercialLineBrandIdFromProductName(productName, brands);
   if (fromProductName) return [fromProductName];
-
-  if (explicitBrandIds.length > 0) return explicitBrandIds;
 
   const inferred = inferCommercialLineBrandId(category, brands, productName);
   if (inferred) return [inferred];

@@ -25,6 +25,8 @@ interface AddButtonDropdownProps {
   quickAddDesc?: string;
   aiAddLabel?: string;
   aiAddDesc?: string;
+  importAddLabel?: string;
+  importAddDesc?: string;
 }
 
 export function AddButtonDropdown({
@@ -36,6 +38,8 @@ export function AddButtonDropdown({
   quickAddDesc = 'Formulario del módulo',
   aiAddLabel = 'Crear con IA',
   aiAddDesc = 'Describe en texto libre y la IA lo organiza',
+  importAddLabel = 'Importar',
+  importAddDesc = 'Carga datos desde archivo CSV/Excel',
 }: AddButtonDropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -69,8 +73,8 @@ export function AddButtonDropdown({
   if (onImport) {
     options.push({
       id: 'import',
-      label: 'Importar',
-      description: 'Carga datos desde archivo CSV/Excel',
+      label: importAddLabel,
+      description: importAddDesc,
       icon: <Upload className="w-4 h-4 text-blue-500" />,
       action: () => { onImport(); setOpen(false); },
     });
@@ -103,7 +107,7 @@ export function AddButtonDropdown({
       {open && !onlyQuick && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-2 w-64 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden z-20">
+          <div className="absolute right-0 top-full mt-2 w-72 max-w-[min(18rem,calc(100vw-2rem))] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden z-50">
             {options.map((opt, i) => (
               <div key={opt.id}>
                 <button

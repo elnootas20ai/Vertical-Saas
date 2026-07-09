@@ -64,13 +64,16 @@ import { toast } from 'sonner';
 import { CrmImportWizard } from '../../components/saas/CrmImportWizard';
 import { ImportStockWizard } from '../../components/saas/ImportStockWizard';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
-import { bulkCreateCatalogItemsRequest, bulkUpdateCatalogStockRequest } from '../../lib/deliveryApi';
+import { bulkCreateCatalogItemsRequest, bulkUpdateCatalogStockRequest, type CatalogItem } from '../../lib/deliveryApi';
 import { listBrandsRequest } from '../../lib/brandsApi';
 import {
   mapImportEntryToCatalogItem,
   normalizeImportCategory,
   formatUnmatchedCommercialBrandWarning,
   activateCommercialLinesAfterCatalogImport,
+  resolveImportedCatalogItemsForCosting,
+  syncAutoCostingAfterCatalogImport,
+  syncStoreIngredientsFromCatalogImport,
   syncTpvOrganizersAfterCatalogImport,
 } from '../../lib/deliveryCatalogImport';
 import { organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
@@ -92,6 +95,8 @@ import {
 } from '../../lib/deliveryStockExcelTemplate';
 import { notifyDeliveryCatalogChanged, resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { throwIfAborted, yieldToUi } from '../../lib/importAbort';
+import type { CatalogImportProgressReporter } from '../../lib/catalogImportReport';
 import {
   getSupplierInvoiceEmailConfig,
   saveSupplierInvoiceEmailConfig,
@@ -407,8 +412,19 @@ export function ConfiguracionGeneral() {
     toast.success('Plantilla catálogo');
   }, [bizId, catalogImportTemplateFilename]);
 
-  const handleCatalogImport = useCallback(async (entries: Record<string, string>[]) => {
+  const handleCatalogImport = useCallback(async (
+    entries: Record<string, string>[],
+    onProgress?: CatalogImportProgressReporter,
+    signal?: AbortSignal,
+  ) => {
     if (!dataUserId) return 0;
+    const progress = (phase: string, opts?: { detail?: string; current?: number; total?: number; percent?: number }) => {
+      throwIfAborted(signal);
+      onProgress?.({ phase, ...opts });
+    };
+
+    progress('Validando filas…', { percent: 8, detail: `${entries.length} fila(s)` });
+
     const businessType = biz?.businessType || 'delivery';
     const usesTpvCatalogImport = isDeliveryOpsBusinessType(businessType);
     const catalogVertical = isRestaurantBusinessType(businessType) ? 'restaurant' : businessType;
@@ -437,7 +453,18 @@ export function ConfiguracionGeneral() {
     const unmatchedCommercialBrands: string[] = [];
     const items: Record<string, unknown>[] = [];
 
-    for (const entry of importRows) {
+    for (let index = 0; index < importRows.length; index += 1) {
+      throwIfAborted(signal);
+      const entry = importRows[index];
+      if (index === 0 || index === importRows.length - 1 || index % 8 === 0) {
+        progress('Preparando productos…', {
+          current: index + 1,
+          total: importRows.length,
+          percent: 12 + Math.round(((index + 1) / importRows.length) * 28),
+        });
+        await yieldToUi();
+      }
+
       if (usesTpvCatalogImport && bizId) {
         const mapped = await mapImportEntryToCatalogItem(entry, {
           businessId: bizId,
@@ -487,19 +514,55 @@ export function ConfiguracionGeneral() {
       return 0;
     }
 
-    const result = await bulkCreateCatalogItemsRequest(dataUserId, items as any);
+    progress('Guardando catálogo…', {
+      percent: 48,
+      current: items.length,
+      total: items.length,
+    });
 
-    // Marcar como completado si se creó al menos 1.
-    if (bizId && result.created > 0) {
+    const result = await bulkCreateCatalogItemsRequest(dataUserId, items as any, signal);
+    throwIfAborted(signal);
+    const totalOk = (result.created || 0) + (result.updated ?? 0);
+    const savedItems = Array.isArray(result.items) ? result.items : [];
+
+    if (bizId && totalOk > 0) {
       if (usesTpvCatalogImport) {
-        await syncTpvOrganizersAfterCatalogImport(
-          bizId,
-          items as Array<{ brandIds?: string[]; category?: string }>,
-        ).catch(() => {});
-        await activateCommercialLinesAfterCatalogImport(
-          bizId,
-          items as Array<{ brandIds?: string[] }>,
-        ).catch(() => {});
+        // Mismo post-proceso que Catálogo → Importar: organizadores TPV,
+        // activación de líneas, ingredientes maestros y escandallo/costes.
+        const runPostImport = async () => {
+          try {
+            await syncTpvOrganizersAfterCatalogImport(
+              bizId,
+              items as Array<{ brandIds?: string[]; category?: string }>,
+            );
+            await activateCommercialLinesAfterCatalogImport(
+              bizId,
+              items as Array<{ brandIds?: string[] }>,
+            );
+            const withIngredients = items.filter(
+              (i) => String((i.customFields as Record<string, unknown> | undefined)?.ingredients || '').trim(),
+            ).length;
+            if (withIngredients > 0) {
+              await syncStoreIngredientsFromCatalogImport(
+                dataUserId,
+                bizId,
+                items as Array<{ customFields?: Record<string, unknown>; brandIds?: string[] }>,
+              );
+            }
+            const costingTargets = resolveImportedCatalogItemsForCosting(
+              items as unknown as Array<Pick<CatalogItem, '_id' | 'sku' | 'name' | 'category'>>,
+              savedItems,
+            );
+            if (costingTargets.length > 0) {
+              await syncAutoCostingAfterCatalogImport(dataUserId, bizId, costingTargets, {
+                fullCatalog: savedItems,
+              });
+            }
+          } catch (err) {
+            console.warn('[onboarding-import] post-proceso en segundo plano:', err);
+          }
+        };
+        void runPostImport();
       }
       notifyDeliveryCatalogChanged();
       const nextStatus = {
@@ -511,7 +574,8 @@ export function ConfiguracionGeneral() {
       setImportData((prev) => prev ? { ...prev, ...nextStatus } : ({ ...nextStatus, onboardingImportPending: true } as InitialImportData));
     }
 
-    return result.created;
+    progress('Importación completada', { percent: 100, detail: `${totalOk} producto(s)` });
+    return totalOk;
   }, [dataUserId, biz?.businessType, bizId, resolvedImportStatus?.stock, resolvedImportStatus?.clients]);
 
   const handleStockImport = useCallback(async (entries: Record<string, string>[]) => {

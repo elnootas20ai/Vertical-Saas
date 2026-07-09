@@ -112,7 +112,8 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
     businessId: clientSearchBusinessId,
     enabled: step === 1 && phoneEditing,
     matchByName: true,
-    minQueryLength: 2,
+    minQueryLength: 1,
+    debounceMs: 250,
   });
 
   const activePdvs = useMemo(() => pointsOfSale.filter((p) => p.active), [pointsOfSale]);

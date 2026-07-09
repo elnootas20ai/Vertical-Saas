@@ -11,10 +11,10 @@ import { filterCatalogItemsForBusinessScope } from '../lib/catalogBusinessScope'
 import {
   DELIVERY_BRANDS_CHANGED,
   DELIVERY_CATALOG_CHANGED,
-  loadTpvPointsOfSaleForBusiness,
   snapshotDeliveryStoreActivation,
   resolveBusinessScopeId,
 } from '../lib/deliverySetup';
+import { loadRetailStoresForBusiness } from '../verticals/retailScopeRegistry';
 import {
   buildCompraventaActivationStepDefs,
   EMPTY_COMPRAVENTA_ACTIVATION_FLAGS,
@@ -241,8 +241,12 @@ function buildStepDefsForBusiness(
 
 export function ActivationChecklistProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
-  const businessesCount = useBusinessOptional()?.businesses?.length ?? 0;
+  const businessCtx = useBusinessOptional();
+  const currentBusiness = businessCtx?.currentBusiness ?? null;
+  const businesses = businessCtx?.businesses ?? [];
+  const businessesCount = businesses.length;
+  const businessesRef = useRef(businesses);
+  businessesRef.current = businesses;
   const [isLoadingSample, setIsLoadingSample] = useState(false);
   const [activationFlags, setActivationFlags] = useState<ActivationFlagsBundle | null>(null);
   const activationFlagsRef = useRef<ActivationFlagsBundle | null>(null);
@@ -301,6 +305,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     }
 
     let cancelled = false;
+    let lastLoadAt = 0;
 
     const companyFlags = {
       hasCompanyName: Boolean(bizName.trim()),
@@ -310,13 +315,18 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     };
 
     const load = async () => {
+      lastLoadAt = Date.now();
       try {
         if (isDeliveryOpsBusinessType(businessType)) {
+          // Solo lectura: el checklist observa el estado, nunca crea/repara PDVs.
           const [storeState, brands, catalog] = await Promise.all([
-            loadTpvPointsOfSaleForBusiness(user, currentBusiness, {
-              includeInactivePdvs: true,
-              accountBusinessCount: businessesCount,
-            }),
+            currentBusiness
+              ? loadRetailStoresForBusiness(user, currentBusiness, businessesRef.current, {
+                  includeInactivePdvs: true,
+                  accountBusinessCount: businessesCount,
+                  tpvBootstrap: false,
+                }).catch(() => ({ dataUserId: '', workCenters: [], pointsOfSale: [] }))
+              : Promise.resolve({ dataUserId: '', workCenters: [], pointsOfSale: [] }),
             businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
             listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []),
           ]);
@@ -527,18 +537,24 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     const scheduleLoad = () => {
       void load();
     };
+    // Al recuperar foco no hay datos nuevos casi nunca: throttle para no
+    // relanzar tiendas + marcas + catálogo en cada cambio de pestaña.
+    const onFocus = () => {
+      if (Date.now() - lastLoadAt < 30_000) return;
+      void load();
+    };
     window.addEventListener('work-centers:changed', scheduleLoad);
     window.addEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
     window.addEventListener(DELIVERY_BRANDS_CHANGED, scheduleLoad);
     window.addEventListener(WORKSHOP_DATA_CHANGED, scheduleLoad);
-    window.addEventListener('focus', scheduleLoad);
+    window.addEventListener('focus', onFocus);
     return () => {
       cancelled = true;
       window.removeEventListener('work-centers:changed', scheduleLoad);
       window.removeEventListener(DELIVERY_CATALOG_CHANGED, scheduleLoad);
       window.removeEventListener(DELIVERY_BRANDS_CHANGED, scheduleLoad);
       window.removeEventListener(WORKSHOP_DATA_CHANGED, scheduleLoad);
-      window.removeEventListener('focus', scheduleLoad);
+      window.removeEventListener('focus', onFocus);
     };
   }, [
     usesGuidedActivation,

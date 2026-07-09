@@ -132,6 +132,19 @@ export function Recommendation() {
     [billingMode, metrics, selectedPlan],
   );
 
+  const annualPricing = useMemo(
+    () =>
+      calculateOnboardingPricing({
+        plan: selectedPlan,
+        billingMode: 'annual',
+        userCount: metrics.userCount,
+        locationCount: metrics.locationCount,
+        businessCount: metrics.businessCount,
+        commercialBrandCount: metrics.commercialBrandCount,
+      }),
+    [metrics, selectedPlan],
+  );
+
   const pricingBreakdown = formatPricingBreakdown(selectedPlan, pricing, billingMode);
 
   const planPricingById = useMemo(() => {
@@ -218,9 +231,9 @@ export function Recommendation() {
         </p>
       ) : null}
 
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 flex flex-col">
         <div
-          className={`flex-1 min-h-0 bg-white dark:bg-gray-800 border-2 rounded-xl p-4 sm:p-5 shadow-lg flex flex-col overflow-hidden ${
+          className={`flex-1 min-h-0 bg-white dark:bg-gray-800 border-2 rounded-xl p-4 sm:p-5 shadow-lg flex flex-col min-h-0 ${
             isRecommendedSelection ? 'border-amber-500' : 'border-gray-900 dark:border-gray-100'
           }`}
         >
@@ -283,44 +296,66 @@ export function Recommendation() {
             </p>
           ) : null}
 
-          <div className="shrink-0 flex items-center gap-2 mb-2">
-            <button
-              type="button"
-              onClick={() => setBillingMode('monthly')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
-                billingMode === 'monthly' ? 'bg-gray-900 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700'
-              }`}
-            >
-              Mensual
-            </button>
-            <button
-              type="button"
-              onClick={() => setBillingMode('annual')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
-                billingMode === 'annual' ? 'bg-gray-900 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-700'
-              }`}
-            >
-              Anual <span className="text-green-600 font-bold">-20%</span>
-            </button>
-            <div className="ml-auto text-right">
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                {pricing.total}€<span className="text-sm font-normal text-gray-500">/mes</span>
-              </p>
-              {billingMode === 'annual' ? (
-                <p className="mt-0.5 text-xs font-medium text-green-700 dark:text-green-400">
-                  {pricing.total * 12}€ al año · -20% aplicado
+          <div className="shrink-0 mb-3 rounded-xl border border-gray-200 bg-gray-50/90 p-3 sm:p-4 dark:border-gray-700 dark:bg-gray-900/50">
+            <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
+              <button
+                type="button"
+                onClick={() => setBillingMode('monthly')}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  billingMode === 'monthly'
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                    : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                Mensual
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingMode('annual')}
+                className={`flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  billingMode === 'annual'
+                    ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                    : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                Anual
+                <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                  −20%
+                </span>
+              </button>
+            </div>
+
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Tu cuota estimada
+                </p>
+                <p className="mt-0.5 flex flex-wrap items-baseline gap-x-1 tabular-nums">
+                  <span className="text-3xl font-bold leading-none text-gray-900 dark:text-gray-100 sm:text-4xl">
+                    {pricing.total}
+                  </span>
+                  <span className="text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">€</span>
+                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">/mes</span>
+                </p>
+                {billingMode === 'annual' ? (
+                  <p className="mt-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                    {pricing.total * 12}€ al año · descuento del 20% aplicado
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    O {annualPricing.total * 12}€ al año con plan anual
+                  </p>
+                )}
+              </div>
+              {pricingBreakdown ? (
+                <p className="text-[11px] leading-snug text-gray-600 dark:text-gray-400 sm:max-w-[52%] sm:text-right">
+                  {pricingBreakdown}
                 </p>
               ) : null}
             </div>
           </div>
 
-          {pricingBreakdown ? (
-            <p className="shrink-0 text-xs text-gray-600 dark:text-gray-400 mb-2 leading-relaxed">
-              {pricingBreakdown}
-            </p>
-          ) : null}
-
-          <ul className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 content-start text-xs sm:text-sm text-gray-700 dark:text-gray-300 overflow-hidden">
+          <ul className="flex-1 min-h-0 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 content-start overflow-y-auto overscroll-contain text-xs sm:text-sm text-gray-700 dark:text-gray-300">
             {selectedPlan.features.map((feature) => (
               <li key={feature} className="flex items-start gap-1.5">
                 <Check className="w-4 h-4 text-green-600 shrink-0 mt-0.5" />
@@ -394,11 +429,14 @@ export function Recommendation() {
 
                 <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">{plan.name}</h3>
                 <div className="mb-2">
-                  <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">{planPricing.total}€</span>
-                  <span className="text-gray-600 dark:text-gray-400 text-sm">/mes</span>
+                  <p className="flex items-baseline gap-1 tabular-nums">
+                    <span className="text-3xl font-bold text-gray-900 dark:text-gray-100">{planPricing.total}</span>
+                    <span className="text-lg font-bold text-gray-900 dark:text-gray-100">€</span>
+                    <span className="text-sm font-medium text-gray-500 dark:text-gray-400">/mes</span>
+                  </p>
                   {billingMode === 'annual' ? (
-                    <p className="mt-0.5 text-xs text-green-700 dark:text-green-400">
-                      {planPricing.total * 12}€ al año · -20%
+                    <p className="mt-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                      {planPricing.total * 12}€ al año · −20%
                     </p>
                   ) : null}
                 </div>

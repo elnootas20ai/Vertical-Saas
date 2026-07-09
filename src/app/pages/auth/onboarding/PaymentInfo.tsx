@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { CreditCard, Lock, Shield, AlertCircle } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
@@ -14,6 +14,7 @@ import {
   getPlansForBusinessType,
   clampOnboardingPlanId,
 } from '../../../lib/onboardingPlanRecommendation';
+import { getBillingCapabilities } from '../../../lib/subscriptionApi';
 
 const inputClass = (hasError: boolean) =>
   `w-full px-3 py-2 text-sm border-2 rounded-xl outline-none transition-colors ${
@@ -26,8 +27,16 @@ const STEP_INDEX = 5;
 
 export function PaymentInfo() {
   const navigate = useNavigate();
-  const { user, isInitializing, refreshCurrentUser, saveBillingCard } = useAuth();
+  const { user, isInitializing, refreshCurrentUser, saveBillingCard, activateOnboardingTrialWithoutCard } =
+    useAuth();
   const { data, updateData, initializeTrial, advanceStep } = useOnboarding();
+  const [skipMonei, setSkipMonei] = useState(false);
+
+  useEffect(() => {
+    getBillingCapabilities()
+      .then((res) => setSkipMonei(Boolean(res.skipMonei)))
+      .catch(() => setSkipMonei(false));
+  }, []);
 
   useEffect(() => {
     if (isInitializing) return;
@@ -65,6 +74,12 @@ export function PaymentInfo() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const finishPaymentStep = useCallback(() => {
+    initializeTrial();
+    advanceStep(STEP_INDEX);
+    navigate('/auth/onboarding/confirmation');
+  }, [advanceStep, initializeTrial, navigate]);
 
   const orderSummary = useMemo(() => {
     const billingMode = data.subscriptionSelection.billingMode;
@@ -172,41 +187,55 @@ export function PaymentInfo() {
     e.preventDefault();
 
     if (!user?.user_id) {
-      setSubmitError('Tu sesión ha caducado. Inicia sesión de nuevo para guardar la tarjeta.');
+      setSubmitError('Tu sesión ha caducado. Inicia sesión de nuevo para continuar.');
       navigate('/auth/login', { replace: true, state: { from: '/auth/onboarding/payment-info' } });
       return;
     }
 
-    if (validateForm()) {
+    if (skipMonei) {
       setIsSubmitting(true);
       setSubmitError('');
-
-      updateData('paymentDetails', formData);
-      const result = await saveBillingCard({
-        cardNumber: formData.cardNumber,
-        cardHolderName: formData.cardHolderName,
-        expiryDate: formData.expiryDate,
-        cvv: formData.cvv,
+      const result = await activateOnboardingTrialWithoutCard({
         billingMode: data.subscriptionSelection.billingMode,
-        selectedPlanId: data.subscriptionSelection.recommendedPlanId,
+        selectedPlanId: orderSummary.selectedPlanId,
       });
-
       setIsSubmitting(false);
-
       if (!result.success) {
-        const msg = result.error || 'No se pudo guardar la tarjeta';
-        if (/verificar tu email/i.test(msg)) {
-          setSubmitError(msg);
-        } else {
-          setErrors((prev) => ({ ...prev, cardNumber: msg }));
-        }
+        setSubmitError(result.error || 'No se pudo iniciar la prueba. Inténtalo de nuevo.');
         return;
       }
-
-      initializeTrial();
-      advanceStep(STEP_INDEX);
-      navigate('/auth/onboarding/confirmation');
+      finishPaymentStep();
+      return;
     }
+
+    if (!validateForm()) return;
+
+    setIsSubmitting(true);
+    setSubmitError('');
+
+    updateData('paymentDetails', formData);
+    const result = await saveBillingCard({
+      cardNumber: formData.cardNumber,
+      cardHolderName: formData.cardHolderName,
+      expiryDate: formData.expiryDate,
+      cvv: formData.cvv,
+      billingMode: data.subscriptionSelection.billingMode,
+      selectedPlanId: data.subscriptionSelection.recommendedPlanId,
+    });
+
+    setIsSubmitting(false);
+
+    if (!result.success) {
+      const msg = result.error || 'No se pudo guardar la tarjeta';
+      if (/verificar tu email/i.test(msg) || /sesión|session|token/i.test(msg)) {
+        setSubmitError(msg);
+      } else {
+        setErrors((prev) => ({ ...prev, cardNumber: msg }));
+      }
+      return;
+    }
+
+    finishPaymentStep();
   };
 
   const handleBack = () => {
@@ -235,6 +264,7 @@ export function PaymentInfo() {
       maxWidth="max-w-2xl"
       footer={
         <div className="space-y-2.5">
+          {!skipMonei ? (
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100">
             <Shield className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
             <span className="flex items-center gap-1.5">
@@ -242,6 +272,7 @@ export function PaymentInfo() {
               Pago seguro · cifrado de nivel bancario
             </span>
           </div>
+          ) : null}
           <div className="flex gap-3">
             <ACCESO__Button type="button" onClick={handleBack} variant="outline" fullWidth>
               ← Atrás
@@ -253,7 +284,7 @@ export function PaymentInfo() {
               fullWidth
               disabled={isSubmitting}
             >
-              {isSubmitting ? 'Guardando...' : 'Continuar'}
+              {isSubmitting ? 'Procesando...' : 'Continuar'}
             </ACCESO__Button>
           </div>
         </div>
@@ -262,8 +293,12 @@ export function PaymentInfo() {
       <OnboardingStepHeading
         compact
         stepLabel="Paso 6 · Pago"
-        title="Información de pago"
-        subtitle="Datos de tarjeta. Trámite seguro y cifrado."
+        title={skipMonei ? 'Inicia tu prueba gratuita' : 'Información de pago'}
+        subtitle={
+          skipMonei
+            ? 'Revisa tu plan y continúa para activar los 14 días de prueba.'
+            : 'Datos de tarjeta. Trámite seguro y cifrado.'
+        }
       />
 
       <form id="payment-form" onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-hidden">
@@ -280,33 +315,48 @@ export function PaymentInfo() {
         <div className="shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-[11px] leading-snug text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100">
           <p className="font-semibold">14 días de prueba gratuita</p>
           <p className="mt-0.5 text-blue-800/90 dark:text-blue-200/90">
-            Guardamos tu tarjeta para el cobro automático al terminar la prueba. Hoy no se realiza ningún cargo.
+            {skipMonei
+              ? 'Empieza hoy sin coste. Al terminar la prueba podrás activar el cobro del plan.'
+              : 'Guardamos tu tarjeta para el cobro automático al terminar la prueba. Hoy no se realiza ningún cargo.'}
           </p>
         </div>
 
-        <OnboardingContentCard className="!p-3 sm:!p-4 space-y-2">
-          <div className="flex items-start justify-between gap-3">
+        <OnboardingContentCard className="!p-3 sm:!p-4 space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Resumen de tu suscripción</p>
               <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
                 Plan {orderSummary.plan.name} ·{' '}
-                {orderSummary.billingMode === 'monthly' ? 'mensual' : 'anual (-20%)'}
+                {orderSummary.billingMode === 'monthly' ? 'cobro mensual' : 'cobro anual (−20%)'}
               </p>
             </div>
-            <div className="text-right shrink-0">
-              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                {orderSummary.pricing.total}€
-                <span className="text-[11px] font-normal text-gray-500">/mes</span>
+            <div className="shrink-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-left sm:text-right dark:border-gray-700 dark:bg-gray-900/50">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Cuota estimada
+              </p>
+              <p className="mt-0.5 flex items-baseline gap-1 tabular-nums">
+                <span className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {orderSummary.pricing.total}
+                </span>
+                <span className="text-base font-bold text-gray-900 dark:text-gray-100">€</span>
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400">/mes</span>
               </p>
               {orderSummary.billingMode === 'annual' ? (
-                <p className="text-[10px] font-medium text-green-700 dark:text-green-400">
+                <p className="mt-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
                   {orderSummary.pricing.total * 12}€ al año
                 </p>
               ) : null}
             </div>
           </div>
           {summaryLines.length > 0 ? (
-            <p className="text-[11px] leading-snug text-gray-600 dark:text-gray-400">{summaryLines.join(' · ')}</p>
+            <ul className="space-y-1 text-[11px] leading-snug text-gray-600 dark:text-gray-400">
+              {summaryLines.map((line) => (
+                <li key={line} className="flex items-start gap-1.5">
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-gray-400 dark:bg-gray-500" />
+                  <span>{line}</span>
+                </li>
+              ))}
+            </ul>
           ) : null}
           <p className="text-[10px] text-gray-500 dark:text-gray-500 leading-snug">
             {data.businessMetrics.businessCount ?? 1} empresa · {data.businessMetrics.locationCount} PDV ·{' '}
@@ -317,6 +367,7 @@ export function PaymentInfo() {
           </p>
         </OnboardingContentCard>
 
+        {!skipMonei ? (
         <OnboardingContentCard className="!p-3 sm:!p-4 space-y-2.5">
           <div className="flex items-center gap-2 border-b border-gray-100 pb-2 dark:border-gray-700">
             <CreditCard className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -425,6 +476,7 @@ export function PaymentInfo() {
             ) : null}
           </div>
         </OnboardingContentCard>
+        ) : null}
       </form>
     </OnboardingStepShell>
   );

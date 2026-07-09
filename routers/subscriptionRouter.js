@@ -3,6 +3,7 @@ import { requireAuthAndEmailVerified } from '../middleware/auth.js';
 import {
   createAndActivate,
   getStatus,
+  getBillingCapabilities,
   cancelUserSubscription,
   confirmSubscription,
   webhookSubscriptionStatus,
@@ -11,6 +12,8 @@ import {
 } from '../controllers/subscriptionController.js';
 
 const subscriptionRouter = Router();
+
+subscriptionRouter.get('/capabilities', getBillingCapabilities);
 
 // Rutas protegidas (requieren JWT)
 subscriptionRouter.post('/create', requireAuthAndEmailVerified, createAndActivate);

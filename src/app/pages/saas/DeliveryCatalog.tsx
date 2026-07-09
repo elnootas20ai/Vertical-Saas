@@ -114,6 +114,7 @@ import {
   ChevronRight,
   Zap,
   Archive,
+  Sparkles,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -127,7 +128,7 @@ import {
   type CatalogImportReport,
   type CatalogImportRunResult,
 } from '../../lib/catalogImportReport';
-import { throwIfAborted } from '../../lib/importAbort';
+import { throwIfAborted, yieldToUi, isImportAbortError } from '../../lib/importAbort';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { CatalogMoveModal } from '../../components/saas/CatalogMoveModal';
 import { useActivationFocus } from '../../hooks/useActivationFocus';
@@ -193,6 +194,57 @@ const ALLERGEN_OPTIONS = [
 ];
 
 const CREATE_STEP_LABELS = ['Marca y producto', 'Precios e inventario', 'Publicación'];
+
+function CatalogEmptyActions({
+  onManualAdd,
+  onImport,
+  onAiAdd,
+}: {
+  onManualAdd: () => void;
+  onImport: () => void;
+  onAiAdd: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center px-4 py-14 text-center">
+      <div className="mb-4 opacity-35">
+        <Package className="w-12 h-12 text-gray-400" />
+      </div>
+      <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Tu catálogo está vacío</h3>
+      <p className="mt-1.5 max-w-md text-sm text-gray-500 dark:text-gray-400">
+        Empieza con productos y precios para el TPV. Puedes añadirlos uno a uno, importar un Excel o describirlos con IA.
+      </p>
+      <div className="mt-6 grid w-full max-w-lg grid-cols-1 gap-2 sm:grid-cols-3">
+        <button
+          type="button"
+          onClick={onManualAdd}
+          className="flex flex-col items-center gap-2 rounded-xl border-2 border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100 px-4 py-4 text-white dark:text-gray-900 hover:bg-black dark:hover:bg-white transition-colors"
+        >
+          <Plus className="w-5 h-5" />
+          <span className="text-sm font-bold">Añadir manualmente</span>
+          <span className="text-[11px] font-normal opacity-80">Marca, categoría y precio</span>
+        </button>
+        <button
+          type="button"
+          onClick={onImport}
+          className="flex flex-col items-center gap-2 rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 px-4 py-4 text-blue-900 dark:text-blue-100 hover:bg-blue-100 dark:hover:bg-blue-950/50 transition-colors"
+        >
+          <Upload className="w-5 h-5" />
+          <span className="text-sm font-bold">Importar Excel</span>
+          <span className="text-[11px] font-normal opacity-80">Plantilla con muchos productos</span>
+        </button>
+        <button
+          type="button"
+          onClick={onAiAdd}
+          className="flex flex-col items-center gap-2 rounded-xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 px-4 py-4 text-violet-900 dark:text-violet-100 hover:bg-violet-100 dark:hover:bg-violet-950/50 transition-colors"
+        >
+          <Sparkles className="w-5 h-5" />
+          <span className="text-sm font-bold">Crear con IA</span>
+          <span className="text-[11px] font-normal opacity-80">Describe la carta en texto</span>
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function defaultBrandIdForCatalog(brands: Brand[]): string {
   const sorted = sortBrandsForDisplay(brands.filter((b) => b.active !== false));
@@ -551,6 +603,11 @@ function CreateCatalogItemModal({
       if (!isEditMode) setStep(1);
       return;
     }
+    if (!normalizedCategory.trim()) {
+      toast.error('Indica la categoría del producto');
+      if (!isEditMode) setStep(1);
+      return;
+    }
     if (requiresCommercialBrand && form.selectedBrandIds.length === 0) {
       toast.error('Selecciona la línea comercial (marca) del producto');
       if (!isEditMode) setStep(1);
@@ -701,8 +758,8 @@ function CreateCatalogItemModal({
         setStep(1);
         toast.success(`«${savedName}» guardado. Añade otro artículo a «${category}».`);
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo guardar el artículo');
+    } catch {
+      // onCreate ya muestra el error al usuario
     } finally {
       setSubmitting(false);
     }
@@ -711,6 +768,7 @@ function CreateCatalogItemModal({
   const canNext = () => {
     if (step === 1) {
       if (!form.name.trim()) return false;
+      if (!normalizedCategory.trim()) return false;
       if (requiresCommercialBrand && form.selectedBrandIds.length === 0) return false;
       if (form.halfHalf && isHalfHalfFlavorSelectionInvalid(form.halfHalfAllowedProductIds)) return false;
       if (
@@ -731,6 +789,10 @@ function CreateCatalogItemModal({
     if (step === 1) {
       if (!form.name.trim()) {
         toast.error('Indica el nombre del producto para continuar');
+        return;
+      }
+      if (!normalizedCategory.trim()) {
+        toast.error('Indica la categoría del producto para continuar');
         return;
       }
       if (requiresCommercialBrand && form.selectedBrandIds.length === 0) {
@@ -2737,13 +2799,14 @@ export function CatalogPage() {
     for (let index = 0; index < importRows.length; index += 1) {
       throwIfAborted(signal);
       const entry = importRows[index];
-      if (index === 0 || index === importRows.length - 1 || index % 4 === 0) {
+      if (index === 0 || index === importRows.length - 1 || index % 8 === 0) {
         progress('Preparando productos…', {
           current: index + 1,
           total: importRows.length,
           percent: 10 + Math.round(((index + 1) / importRows.length) * 28),
           detail: entry.name ? String(entry.name).trim().slice(0, 48) : undefined,
         });
+        await yieldToUi();
       }
       const mapped = await mapImportEntryToCatalogItem(entry, {
         businessId: businessId || '',
@@ -2796,45 +2859,15 @@ export function CatalogPage() {
     let result = await bulkCreateCatalogItemsRequest(dataUserId, items, signal);
     throwIfAborted(signal);
     const totalOk = (result.created || 0) + (result.updated ?? 0);
-    if (totalOk > 0) {
-      progress('Sincronizando marcas y TPV…', { percent: 58 });
-      if (businessId) {
-        const sync = await syncTpvOrganizersAfterCatalogImport(businessId, items);
-        const activation = await activateCommercialLinesAfterCatalogImport(businessId, items);
-        if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
-      }
-      const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
-      if (withIngredients > 0 && businessId) {
-        progress('Configurando ingredientes TPV…', {
-          percent: 72,
-          detail: `${withIngredients} producto(s) con ingredientes`,
-        });
-        const ingSync = await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, items);
-        if (ingSync.added > 0 || ingSync.promoted > 0) {
-          const parts = [];
-          if (ingSync.added > 0) parts.push(`${ingSync.added} nuevo(s)`);
-          if (ingSync.promoted > 0) parts.push(`${ingSync.promoted} como extra de pago`);
-          toast.message(`Ingredientes TPV: ${parts.join(' · ')}. Revisa el precio del extra si hace falta.`, {
-            duration: 8000,
-          });
-        }
-      }
-      if (businessId) {
-        progress('Generando escandallos…', { percent: 86 });
-        const fresh = await listCatalogItemsRequest(dataUserId).catch(() => [] as CatalogItem[]);
-        const costingTargets = resolveImportedCatalogItemsForCosting(items, fresh);
-        if (costingTargets.length > 0) {
-          const costing = await syncAutoCostingAfterCatalogImport(dataUserId, businessId, costingTargets);
-          if (costing.updated > 0) {
-            toast.message(
-              `Costes Vertial (aprox.): ${costing.updated} producto(s) · ${costing.recipe} escandallo · ${costing.fixed} coste fijo`,
-              { duration: 9000 },
-            );
-          }
-        }
-      }
-      progress('Actualizando listado…', { percent: 95 });
-      await loadCatalog();
+    const savedItems = Array.isArray(result.items) ? result.items : [];
+    const withIngredients = items.filter((i) => String(i.customFields?.ingredients || '').trim()).length;
+
+    if (totalOk > 0 && savedItems.length > 0) {
+      setAllCatalogItems((prev) => {
+        const byId = new Map(prev.map((row) => [row._id, row]));
+        for (const row of savedItems) byId.set(row._id, row);
+        return Array.from(byId.values());
+      });
       notifyDeliveryCatalogChanged(dataUserId, businessId);
       setCatalogSectionsOpen((prev) => {
         const next = new Set(prev);
@@ -2844,6 +2877,34 @@ export function CatalogPage() {
         }
         return next;
       });
+    }
+
+    const runPostImport = async () => {
+      if (!businessId || totalOk <= 0) return;
+      try {
+        throwIfAborted(signal);
+        await syncTpvOrganizersAfterCatalogImport(businessId, items);
+        await activateCommercialLinesAfterCatalogImport(businessId, items);
+        await loadBrands();
+        if (withIngredients > 0) {
+          await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, items);
+        }
+        const costingTargets = resolveImportedCatalogItemsForCosting(items, savedItems);
+        if (costingTargets.length > 0) {
+          await syncAutoCostingAfterCatalogImport(dataUserId, businessId, costingTargets, {
+            fullCatalog: savedItems,
+          });
+        }
+      } catch (err) {
+        if (!isImportAbortError(err)) {
+          console.warn('[catalog-import] post-proceso en segundo plano:', err);
+        }
+      } finally {
+        void loadCatalog();
+      }
+    };
+
+    if (totalOk > 0) {
       const importedWithImage = items.filter((i) => Boolean(i.image)).length;
       const parts = [];
       if (result.created > 0) parts.push(`${result.created} nuevo(s)`);
@@ -2853,6 +2914,7 @@ export function CatalogPage() {
           (importedWithImage > 0 ? ` · ${importedWithImage} con imagen` : '') +
           (withIngredients > 0 ? ` · ${withIngredients} fila(s) con ingredientes en Excel` : ''),
       );
+      void runPostImport();
     }
 
     progress('Importación completada', { percent: 100, detail: `${totalOk} producto(s) procesados` });
@@ -3222,9 +3284,13 @@ export function CatalogPage() {
           toast.success('Artículo creado');
         }
         if (isDeliveryOps && businessId) {
-          const sync = await syncTpvOrganizersAfterCatalogImport(businessId, [created]);
-          const activation = await activateCommercialLinesAfterCatalogImport(businessId, [created]);
-          if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
+          try {
+            const sync = await syncTpvOrganizersAfterCatalogImport(businessId, [created]);
+            const activation = await activateCommercialLinesAfterCatalogImport(businessId, [created]);
+            if (sync.updatedBrands > 0 || activation.activated > 0) await loadBrands();
+          } catch {
+            // El artículo ya está guardado; no bloquear el alta por sincronización TPV.
+          }
         }
       }
       if (!options?.keepOpen) {
@@ -3559,20 +3625,37 @@ export function CatalogPage() {
   }, [catalogItems]);
 
   const openNewCatalogItemManual = useCallback(() => {
+    if (!dataUserId) {
+      toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
+      return;
+    }
     setEditingItem(null);
     setShowCreateItem(true);
-  }, []);
+  }, [dataUserId]);
+
+  const openCatalogImport = useCallback(() => {
+    if (!dataUserId) {
+      toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
+      return;
+    }
+    setShowImportModal(true);
+  }, [dataUserId]);
+
+  const openCatalogAiAdd = useCallback(() => {
+    if (!dataUserId) {
+      toast.error('Sesión no válida. Recarga la página e inicia sesión de nuevo.');
+      return;
+    }
+    setShowAIModal(true);
+  }, [dataUserId]);
 
   useEffect(() => {
-    if (!activationFocus) return;
-    if (activationFocus === 'catalog-add') {
-      openNewCatalogItemManual();
-      clearActivationFocus();
-    } else if (activationFocus === 'catalog-import') {
-      setShowImportModal(true);
+    if (!activationFocus || !pageReady) return;
+    if (activationFocus === 'catalog-import') {
+      openCatalogImport();
       clearActivationFocus();
     }
-  }, [activationFocus, openNewCatalogItemManual, clearActivationFocus]);
+  }, [activationFocus, pageReady, openCatalogImport, clearActivationFocus]);
 
   const filteredCatalog = useMemo(() => {
     return catalogMenuItems.filter((item) => {
@@ -3784,6 +3867,10 @@ export function CatalogPage() {
 
   // ── Tab: Catálogo ───────────────────────────────────────────────────────────
 
+  const isCatalogEmpty = !loading && catalogMenuItems.length === 0;
+  const isSearchEmpty =
+    !loading && catalogMenuItems.length > 0 && filteredCatalog.length === 0 && Boolean(searchCatalog.trim());
+
   const renderCatalogTab = () => (
     <SaasTabWorkspace
       stats={[
@@ -3807,35 +3894,39 @@ export function CatalogPage() {
           }
           right={
             <>
-              <SaasTabSecondaryButton
-                onClick={() => setShowImportModal(true)}
-                className="!border-blue-200 !text-blue-800 !bg-blue-50 dark:!bg-blue-950/30 dark:!text-blue-200"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                Importar
-              </SaasTabSecondaryButton>
-              {!catalogSelectMode ? (
-                <SaasTabSecondaryButton
-                  onClick={startCatalogMoveMode}
-                  disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
-                  className="!border-indigo-300 !text-indigo-700 dark:!text-indigo-300"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5" />
-                  Mover producto
-                </SaasTabSecondaryButton>
-              ) : null}
-              {!catalogSelectMode && emptyCommercialLines.length > 0 ? (
-                <SaasTabSecondaryButton
-                  onClick={openEmptyOrganizersModal}
-                  disabled={bulkDeletingCatalog || bulkMovingCatalog}
-                  className="!border-amber-300 !text-amber-800 dark:!text-amber-200"
-                  title="Eliminar líneas TPV sin productos"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Organizadores vacíos ({emptyCommercialLines.length})
-                </SaasTabSecondaryButton>
-              ) : null}
-              {catalogSelectMode ? (
+              {!isCatalogEmpty && !catalogSelectMode ? (
+                <>
+                  <SaasTabSecondaryButton
+                    onClick={startCatalogMoveMode}
+                    disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
+                    className="!border-indigo-300 !text-indigo-700 dark:!text-indigo-300"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    Mover
+                  </SaasTabSecondaryButton>
+                  {emptyCommercialLines.length > 0 ? (
+                    <SaasTabSecondaryButton
+                      onClick={openEmptyOrganizersModal}
+                      disabled={bulkDeletingCatalog || bulkMovingCatalog}
+                      className="!border-amber-300 !text-amber-800 dark:!text-amber-200"
+                      title="Eliminar líneas TPV sin productos"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Vacíos ({emptyCommercialLines.length})
+                    </SaasTabSecondaryButton>
+                  ) : null}
+                  <SaasTabSecondaryButton
+                    onClick={handleDeleteAllFilteredCatalog}
+                    disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
+                    className="!border-red-300 !text-red-700"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    {searchCatalog.trim()
+                      ? `Eliminar (${filteredCatalog.length})`
+                      : `Eliminar todo (${filteredCatalog.length})`}
+                  </SaasTabSecondaryButton>
+                </>
+              ) : !isCatalogEmpty && catalogSelectMode ? (
                 <>
                   <SaasTabSecondaryButton
                     onClick={exitCatalogSelectMode}
@@ -3868,37 +3959,30 @@ export function CatalogPage() {
                         : `Eliminar (${selectedCatalogCount})`}
                   </SaasTabSecondaryButton>
                 </>
-              ) : (
-                <SaasTabSecondaryButton
-                  onClick={handleDeleteAllFilteredCatalog}
-                  disabled={bulkDeletingCatalog || bulkMovingCatalog || filteredCatalog.length === 0}
-                  className="!border-red-300 !text-red-700"
+              ) : null}
+              {!isCatalogEmpty ? (
+                <ActivationFieldWrap
+                  fieldKey="catalog-import"
+                  activeKey={
+                    activationFocus === 'catalog-import' || activationFocus === 'catalog-add'
+                      ? activationFocus
+                      : null
+                  }
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  {searchCatalog.trim()
-                    ? `Eliminar visibles (${filteredCatalog.length})`
-                    : `Eliminar todo (${filteredCatalog.length})`}
-                </SaasTabSecondaryButton>
-              )}
-              <ActivationFieldWrap
-                fieldKey="catalog-import"
-                activeKey={
-                  activationFocus === 'catalog-import' || activationFocus === 'catalog-add'
-                    ? activationFocus
-                    : null
-                }
-              >
-                <AddButtonDropdown
-                  label="Nuevo artículo"
-                  onQuickAdd={openNewCatalogItemManual}
-                  onAIAdd={() => setShowAIModal(true)}
-                  onImport={() => setShowImportModal(true)}
-                  quickAddLabel="Añadir manualmente"
-                  quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
-                  aiAddLabel="Crear con IA"
-                  aiAddDesc="Describe productos en texto y se importan al catálogo"
-                />
-              </ActivationFieldWrap>
+                  <AddButtonDropdown
+                    label="Nuevo artículo"
+                    onQuickAdd={openNewCatalogItemManual}
+                    onAIAdd={openCatalogAiAdd}
+                    onImport={openCatalogImport}
+                    quickAddLabel="Añadir manualmente"
+                    quickAddDesc="Marca, categoría, precios y stock en 3 pasos"
+                    aiAddLabel="Crear con IA"
+                    aiAddDesc="Describe productos en texto y se importan al catálogo"
+                    importAddLabel="Importar Excel"
+                    importAddDesc="Plantilla con productos, precios e imágenes opcionales"
+                  />
+                </ActivationFieldWrap>
+              ) : null}
             </>
           }
         />
@@ -3936,16 +4020,30 @@ export function CatalogPage() {
           Actualizando catálogo…
         </div>
       )}
-      {!loading && filteredCatalog.length === 0 ? (
+      {!loading && isCatalogEmpty ? (
+        <ActivationFieldWrap
+          fieldKey="catalog-import"
+          activeKey={
+            activationFocus === 'catalog-import' || activationFocus === 'catalog-add'
+              ? activationFocus
+              : null
+          }
+        >
+          <CatalogEmptyActions
+            onManualAdd={openNewCatalogItemManual}
+            onImport={openCatalogImport}
+            onAiAdd={openCatalogAiAdd}
+          />
+        </ActivationFieldWrap>
+      ) : !loading && isSearchEmpty ? (
         <SaasTabEmpty
-          icon={<Package className="w-10 h-10" />}
-          title="No hay artículos en el catálogo"
-          description="Añade el primer artículo"
+          icon={<Search className="w-10 h-10" />}
+          title="Sin resultados"
+          description={`No hay artículos que coincidan con «${searchCatalog.trim()}»`}
           action={
-            <SaasTabPrimaryButton onClick={openNewCatalogItemManual}>
-              <Plus className="w-3.5 h-3.5" />
-              Añadir manualmente
-            </SaasTabPrimaryButton>
+            <SaasTabSecondaryButton onClick={() => setSearchCatalog('')}>
+              Limpiar búsqueda
+            </SaasTabSecondaryButton>
           }
         />
       ) : !loading ? (

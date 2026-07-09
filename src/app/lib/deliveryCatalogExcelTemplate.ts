@@ -485,7 +485,8 @@ function collectDeliveryCatalogImportRowIssues(
         severity: 'warning',
       });
     }
-    // Complementos, postres, bebidas…: la linea se ignora al importar (pestaña TPV compartida).
+    // Si la linea existe en Ajustes → Marca, se respeta tal cual (el Excel manda),
+    // incluso en categorías compartidas (Bebidas, Complementos…).
   } else if (isImportComboCategory(category)) {
     issues.push({
       row,

@@ -127,3 +127,7 @@ export async function purchaseSubscriptionAddon(
     body: JSON.stringify({ addonId, billingMode, quantity }),
   });
 }
+
+export async function getBillingCapabilities() {
+  return request<{ ok: boolean; skipMonei: boolean }>('/api/subscriptions/capabilities');
+}

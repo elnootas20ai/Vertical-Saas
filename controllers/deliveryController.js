@@ -1412,16 +1412,15 @@ export async function bulkCreateCatalogItems(req, res) {
     const db = getCatalogDbName();
     await ensureDatabase(req, db);
 
-    const docs = items
-      .filter(item => item && typeof item === 'object' && item.name)
-      .map(item => {
-        const prepared = { ...item };
-        if (!String(prepared.sku || '').trim()) {
-          const stableSku = buildStableImportCatalogSku(prepared);
-          if (stableSku) prepared.sku = stableSku;
-        }
-        return buildCatalogItemDocument(userId, prepared);
-      });
+    const rawItems = items.filter(item => item && typeof item === 'object' && item.name);
+    const docs = rawItems.map(item => {
+      const prepared = { ...item };
+      if (!String(prepared.sku || '').trim()) {
+        const stableSku = buildStableImportCatalogSku(prepared);
+        if (stableSku) prepared.sku = stableSku;
+      }
+      return buildCatalogItemDocument(userId, prepared);
+    });
 
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
 
@@ -1486,8 +1485,12 @@ export async function bulkCreateCatalogItems(req, res) {
       }
     });
 
+    const updateDocs = [];
     for (const { existing, doc, index } of docsToUpdate) {
       try {
+        // Si el import envía brandIds (aunque sea []), manda el Excel: corrige la
+        // línea/organizador TPV en re-imports. Si no viene el campo, se conserva.
+        const incomingBrandIds = rawItems[index]?.brandIds;
         const mergedDoc = buildCatalogItemDocument(
           userId,
           {
@@ -1495,7 +1498,7 @@ export async function bulkCreateCatalogItems(req, res) {
             category: doc.category || existing.category,
             unitPrice: doc.unitPrice ?? existing.unitPrice,
             costPrice: doc.costPrice ?? existing.costPrice,
-            brandIds: Array.isArray(doc.brandIds) && doc.brandIds.length > 0 ? doc.brandIds : existing.brandIds,
+            brandIds: Array.isArray(incomingBrandIds) ? doc.brandIds : existing.brandIds,
             description: doc.description || existing.description,
             business_id:
               String(doc.business_id || doc.businessId || '').trim() ||
@@ -1514,15 +1517,36 @@ export async function bulkCreateCatalogItems(req, res) {
           },
           existing,
         );
-        const saved = await putDocument(req, db, mergedDoc._id, mergedDoc);
-        updated.push(sanitizeCatalogItem({ ...mergedDoc, _rev: saved.rev }));
+        updateDocs.push({ mergedDoc, index, doc });
       } catch (error) {
         errors.push({
           index,
           name: doc?.name,
-          error: error.message || 'Error al actualizar artículo importado',
+          error: error.message || 'Error al preparar artículo importado',
         });
       }
+    }
+
+    const updateChunkSize = 100;
+    for (let i = 0; i < updateDocs.length; i += updateChunkSize) {
+      const chunk = updateDocs.slice(i, i + updateChunkSize);
+      const bulkResults = await bulkPutDocuments(
+        req,
+        db,
+        chunk.map(({ mergedDoc }) => mergedDoc),
+      );
+      bulkResults.forEach((result, chunkIdx) => {
+        const { mergedDoc, index, doc } = chunk[chunkIdx];
+        if (result.ok) {
+          updated.push(sanitizeCatalogItem({ ...mergedDoc, _rev: result.rev }));
+        } else {
+          errors.push({
+            index,
+            name: doc?.name,
+            error: result.error || result.reason || 'Error al actualizar artículo importado',
+          });
+        }
+      });
     }
 
     if (duplicateErrors.length > 0) errors.push(...duplicateErrors);

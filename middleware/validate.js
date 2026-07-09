@@ -117,6 +117,11 @@ export const saveBillingCardSchema = z.object({
   selectedPlanId: z.string().max(100).optional().default(''),
 });
 
+export const activateOnboardingTrialSchema = z.object({
+  billingMode: z.enum(['monthly', 'annual']).optional().default('monthly'),
+  selectedPlanId: z.string().max(100).optional().default('basic'),
+});
+
 export const googleLoginSchema = z.object({
   credential: z.string().min(1, 'Token de Google obligatorio').max(4096),
 });

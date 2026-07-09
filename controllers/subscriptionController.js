@@ -51,6 +51,13 @@ const PLAN_CATALOG = {
 
 export { PLAN_CATALOG, PLAN_ADDON_CATALOG };
 
+export async function getBillingCapabilities(_req, res) {
+  return res.json({
+    ok: true,
+    skipMonei: isSkipMoneiSubscription(),
+  });
+}
+
 /** Alinea plan en cuenta con metadata de MONEI (createSubscription guarda planId / billingMode). */
 function subscriptionPlanFieldsFromMoneiMetadata(metadata) {
   const raw = metadata && typeof metadata === 'object' ? metadata : {};
@@ -60,10 +67,7 @@ function subscriptionPlanFieldsFromMoneiMetadata(metadata) {
   return { selectedPlanId: planId, planName: row.name };
 }
 
-function isSkipMoneiSubscription() {
-  const v = String(process.env.SKIP_MONEI_SUBSCRIPTION || '').trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
-}
+import { isSkipMoneiSubscription } from '../shared/billing/skipMonei.js';
 
 function isSubscriptionReactivation(previousStatus) {
   return isBlockingSubscriptionStatus(previousStatus);

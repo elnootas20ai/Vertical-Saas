@@ -51,8 +51,8 @@ export function OnboardingStepShell({
           className="mx-4 mt-3 shrink-0 sm:mx-6 2xl:hidden"
         />
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 sm:px-6 sm:py-4">
-          <div className={`mx-auto flex w-full ${maxWidth} min-h-0 flex-1 flex-col gap-3 overflow-hidden`}>
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-3 sm:px-6 sm:py-4">
+          <div className={`mx-auto flex w-full ${maxWidth} min-h-0 flex-1 flex-col gap-3`}>
             {children}
           </div>
         </main>

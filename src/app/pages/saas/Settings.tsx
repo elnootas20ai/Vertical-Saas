@@ -152,7 +152,7 @@ import {
   cancelMoneiSubscription,
   purchaseSubscriptionAddon,
 } from '../../lib/subscriptionApi';
-import { isBlockingSubscriptionStatus } from '../../lib/billingRecovery';
+import { isBlockingSubscriptionStatus, shouldBlockSaasAccess } from '../../lib/billingRecovery';
 import { PUBLIC_PAYMENT_UNAVAILABLE, isIgnorableSessionError, sanitizePaymentError } from '../../lib/paymentErrors';
 import {
   getPlanPricingConfig,
@@ -3949,9 +3949,10 @@ export function Settings() {
   }, [activeTab, currentBusiness?.businessType, navigate]);
 
   useEffect(() => {
+    if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (activeTab === 'billing') return;
     navigate('/saas/settings/facturacion', { replace: true });
-  }, [subscription.status, activeTab, navigate]);
+  }, [subscription, subscription.status, activeTab, navigate]);
 
   const teamStats = useMemo(() => {
     const members = currentBusiness?.members;

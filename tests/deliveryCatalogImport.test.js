@@ -114,6 +114,31 @@ describe('deliveryCatalogImport', () => {
     expect(msg).toContain('no crea líneas nuevas');
   });
 
+  it('la columna linea explícita del Excel gana a la heurística por nombre', () => {
+    const brands = [
+      { _id: 'mod', name: 'modomio', active: true, deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] },
+      { _id: 'bb', name: 'blackburger', active: true, deliveryLineKind: 'burger_fastfood', catalogCategories: ['Burgers'] },
+    ];
+    // El nombre contiene "burger", pero el Excel dice linea=modomio → modomio.
+    expect(
+      resolveCatalogImportBrandIds(['mod'], 'Principales', brands, 'Hamburguesa de la casa'),
+    ).toEqual(['mod']);
+    // El nombre contiene el nombre de otra línea (BlackBurger) → sigue mandando el Excel.
+    expect(
+      resolveCatalogImportBrandIds(['mod'], 'Principales', brands, 'Avocado BlackBurger'),
+    ).toEqual(['mod']);
+  });
+
+  it('la columna linea explícita también gana en categorías compartidas', () => {
+    const brands = [
+      { _id: 'mod', name: 'modomio', active: true, deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] },
+    ];
+    // Bebidas sin linea → pestaña compartida.
+    expect(resolveCatalogImportBrandIds([], 'Bebidas', brands, 'Agua 50cl')).toEqual([]);
+    // Bebidas con linea=modomio explícita → se respeta lo que puso el usuario.
+    expect(resolveCatalogImportBrandIds(['mod'], 'Bebidas', brands, 'Limoncello')).toEqual(['mod']);
+  });
+
   it('assigns BlackBurger products to blackburger line even when inactive', () => {
     const brands = [
       {

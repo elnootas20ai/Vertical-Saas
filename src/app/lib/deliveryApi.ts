@@ -1129,16 +1129,49 @@ export {
   validateStoreDisplayName,
 };
 
+/**
+ * Micro-caché de PDVs: sidebar, checklist y páginas piden la misma lista al
+ * entrar al SaaS. Comparte petición en vuelo y resultado durante un TTL corto;
+ * cualquier escritura de PDV invalida la caché al momento.
+ */
+const PDV_LIST_TTL_MS = 15_000;
+const pdvListCache = new Map<string, { pdvs: PointOfSale[]; savedAt: number }>();
+const pdvListInflight = new Map<string, Promise<PointOfSale[]>>();
+
+export function invalidatePointsOfSaleCache(): void {
+  pdvListCache.clear();
+  pdvListInflight.clear();
+}
+
 export async function listPointsOfSaleRequest(
   userId: string,
   options?: { includeInactive?: boolean },
 ): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
   const query = options?.includeInactive ? '?includeInactive=1' : '';
-  const payload = await request<{ ok: boolean; pointsOfSale: PointOfSale[] }>(
-    `/api/delivery/points-of-sale/${encodeURIComponent(id)}${query}`,
-  );
-  return payload.pointsOfSale || [];
+  const cacheKey = `${id}${query}`;
+
+  const cached = pdvListCache.get(cacheKey);
+  if (cached && Date.now() - cached.savedAt < PDV_LIST_TTL_MS) {
+    return cached.pdvs;
+  }
+  const inflight = pdvListInflight.get(cacheKey);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    try {
+      const payload = await request<{ ok: boolean; pointsOfSale: PointOfSale[] }>(
+        `/api/delivery/points-of-sale/${encodeURIComponent(id)}${query}`,
+      );
+      const pdvs = payload.pointsOfSale || [];
+      pdvListCache.set(cacheKey, { pdvs, savedAt: Date.now() });
+      return pdvs;
+    } finally {
+      pdvListInflight.delete(cacheKey);
+    }
+  })();
+  pdvListInflight.set(cacheKey, promise);
+  return promise;
 }
 
 /** Un PDV activo por `workCenterId` y por nombre (evita duplicados tras crear centro + PDV). */
@@ -1246,6 +1279,7 @@ async function ensurePdvHasTabletCode(userId: string, pdv: PointOfSale): Promise
       { method: 'POST' },
     );
     if (!result.pointOfSale) return pdv;
+    invalidatePointsOfSaleCache();
     return result.pointOfSale;
   } catch {
     return pdv;
@@ -1476,6 +1510,7 @@ export async function createPointOfSaleRequest(userId: string, data: Partial<Poi
     { method: 'POST', body: JSON.stringify({ pointOfSale: data }) },
   );
   if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
+  invalidatePointsOfSaleCache();
   return result.pointOfSale;
 }
 
@@ -1486,6 +1521,7 @@ export async function updatePointOfSaleRequest(userId: string, pdv: PointOfSale)
     { method: 'PUT', body: JSON.stringify({ pointOfSale: pdv }) },
   );
   if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
+  invalidatePointsOfSaleCache();
   return result.pointOfSale;
 }
 
@@ -1496,6 +1532,7 @@ export async function regenerateTerminalCodeRequest(userId: string, pdvId: strin
     { method: 'POST' },
   );
   if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
+  invalidatePointsOfSaleCache();
   return result.pointOfSale;
 }
 
@@ -1505,6 +1542,7 @@ export async function deletePointOfSaleRequest(userId: string, pdvId: string): P
     `/api/delivery/points-of-sale/${encodeURIComponent(id)}/${encodeURIComponent(pdvId)}`,
     { method: 'DELETE' },
   );
+  invalidatePointsOfSaleCache();
 }
 
 // ─── Scale Devices ───────────────────────────────────────────────────────────
@@ -1649,6 +1687,7 @@ export async function assignScaleToTerminalRequest(
     { method: 'PUT', body: JSON.stringify({ scaleDeviceId }) },
   );
   if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
+  invalidatePointsOfSaleCache();
   return result.pointOfSale;
 }
 
