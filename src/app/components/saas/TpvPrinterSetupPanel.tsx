@@ -177,6 +177,12 @@ export function TpvPrinterSetupPanel({
     setKind('wifi');
   }, [isNativeApp, config.connectionType]);
 
+  useEffect(() => {
+    if (status && !status.configured && !showSetup) {
+      setShowSetup(true);
+    }
+  }, [status, showSetup]);
+
   const persistToStore = useCallback(async (next: VertialPrinterConfig, target: PrinterConfigTarget) => {
     if (!scope?.userId || !pdv?._id) return;
     setSaving(true);
