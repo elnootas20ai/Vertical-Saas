@@ -6,8 +6,9 @@ import { withNativeCallTimeout } from './nativeCallTimeout';
 export const NATIVE_RAW_PRINT_PORTS = [9100, 9101, 9102] as const;
 
 const NATIVE_PRINT_TIMEOUT_MS = 12_000;
-const NATIVE_DISCOVER_TIMEOUT_MS = 12_000;
-const NATIVE_PING_TIMEOUT_MS = 5_000;
+const NATIVE_DISCOVER_TIMEOUT_MS = 8_000;
+// En LAN una impresora responde en <100 ms; 3,5 s ya es margen de sobra y la UI no se eterniza.
+const NATIVE_PING_TIMEOUT_MS = 3_500;
 
 function withNativeTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return withNativeCallTimeout(promise, timeoutMs, label);

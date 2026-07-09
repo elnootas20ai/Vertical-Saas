@@ -184,8 +184,15 @@ export function TpvPrinterSetupPanel({
       );
       setPdv(saved);
       scope.onPdvUpdated?.(saved);
-    } catch {
-      toast.error('No se pudo guardar la impresora en la tienda');
+    } catch (error) {
+      const detail = error instanceof Error && error.message ? ` (${error.message})` : '';
+      toast.error(`No se pudo guardar la impresora en la tienda${detail}`, {
+        duration: 9000,
+        action: {
+          label: 'Reintentar',
+          onClick: () => void persistToStore(next, target),
+        },
+      });
     } finally {
       setSaving(false);
     }
@@ -251,7 +258,7 @@ export function TpvPrinterSetupPanel({
     try {
       if (isNativeApp) {
         const result = await discoverNativeNetworkPrinters({
-          timeoutMs: 12000,
+          timeoutMs: 8000,
         });
         if (!result.ok) {
           setScanError(result.error || 'No se pudo buscar impresoras');
@@ -573,7 +580,7 @@ export function TpvPrinterSetupPanel({
                       <Loader2 className="w-4 h-4 animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-indigo-900 dark:text-indigo-200">Buscando impresoras en la WiFi…</p>
-                        <p className="text-xs text-indigo-700/80 dark:text-indigo-300/80 mt-0.5">Tarda unos 10 segundos. No cierres esta pantalla.</p>
+                        <p className="text-xs text-indigo-700/80 dark:text-indigo-300/80 mt-0.5">Unos segundos. No cierres esta pantalla.</p>
                       </div>
                     </div>
                   )}
