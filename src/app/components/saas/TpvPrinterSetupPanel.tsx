@@ -116,6 +116,7 @@ export function TpvPrinterSetupPanel({
   const [networkPrinters, setNetworkPrinters] = useState<Array<{ host: string; port: number; label?: string }>>([]);
   const [scanningNetwork, setScanningNetwork] = useState(false);
   const [scanDone, setScanDone] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [identifyingHost, setIdentifyingHost] = useState<string | null>(null);
   const [identifyResults, setIdentifyResults] = useState<Record<string, 'ok' | 'error'>>({});
   const [testing, setTesting] = useState(false);
@@ -244,6 +245,7 @@ export function TpvPrinterSetupPanel({
   const handleScanNetworkPrinters = useCallback(async () => {
     setScanningNetwork(true);
     setScanDone(false);
+    setScanError(null);
     setNetworkPrinters([]);
     setIdentifyResults({});
     try {
@@ -252,6 +254,7 @@ export function TpvPrinterSetupPanel({
           timeoutMs: 12000,
         });
         if (!result.ok) {
+          setScanError(result.error || 'No se pudo buscar impresoras');
           toast.error(result.error || 'No se pudo buscar impresoras');
           return;
         }
@@ -282,6 +285,7 @@ export function TpvPrinterSetupPanel({
       }
       const result = await fetchBridgeNetworkPrinters(config, { port: config.networkPort || 9100 });
       if (!result.ok) {
+        setScanError(result.error || 'No se pudo buscar impresoras');
         toast.error(result.error || 'No se pudo buscar impresoras');
         return;
       }
@@ -574,6 +578,24 @@ export function TpvPrinterSetupPanel({
                     </div>
                   )}
 
+                  {!scanningNetwork && scanError && (
+                    <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50/70 dark:bg-red-950/20 px-4 py-3 space-y-2">
+                      <p className="text-sm font-semibold text-red-900 dark:text-red-200 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        No se pudo buscar impresoras
+                      </p>
+                      <p className="text-xs text-red-800 dark:text-red-300 leading-relaxed">{scanError}</p>
+                      <button
+                        type="button"
+                        onClick={() => void handleScanNetworkPrinters()}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700"
+                      >
+                        <Radar className="w-3.5 h-3.5" />
+                        Reintentar búsqueda
+                      </button>
+                    </div>
+                  )}
+
                   {!scanningNetwork && scanDone && networkPrinters.length === 0 && (
                     <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/20 px-4 py-3 space-y-1.5">
                       <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-2">
@@ -626,6 +648,20 @@ export function TpvPrinterSetupPanel({
                                   </span>
                                 )}
                               </div>
+                              {identified === 'ok' && (
+                                <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                  {selected
+                                    ? 'Ticket de prueba impreso. Esta impresora funciona.'
+                                    : 'Ticket de prueba impreso. Si salió aquí, pulsa «Usar esta».'}
+                                </p>
+                              )}
+                              {identified === 'error' && (
+                                <p className="mt-2 text-xs text-red-700 dark:text-red-300 flex items-center gap-1.5">
+                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                  No ha respondido. Comprueba que está encendida y prueba otra vez.
+                                </p>
+                              )}
                               <div className="flex gap-2 mt-3">
                                 {!selected && (
                                   <button

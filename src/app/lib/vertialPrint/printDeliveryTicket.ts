@@ -23,7 +23,25 @@ export async function printDeliveryTicket(
   if (isVertialNativeApp() && config.connectionType === 'network') {
     const result = await sendNativeEscpos(escpos, config);
     if (result.ok) return { method: 'native' };
-    toast.error(result.error || 'No se pudo imprimir en la impresora WiFi');
+    toast.error(result.error || 'No se pudo imprimir en la impresora WiFi', {
+      duration: 12000,
+      action: {
+        label: 'Reintentar',
+        onClick: () => {
+          toast.loading('Reintentando impresión…', { id: 'native-print-retry' });
+          void sendNativeEscpos(escpos, config).then((retry) => {
+            toast.dismiss('native-print-retry');
+            if (retry.ok) {
+              toast.success('Ticket impreso');
+            } else {
+              toast.error(retry.error || 'La impresora sigue sin responder. Revisa Ajustes → Impresora de tickets.', {
+                duration: 10000,
+              });
+            }
+          });
+        },
+      },
+    });
     return { method: 'browser' };
   }
 
