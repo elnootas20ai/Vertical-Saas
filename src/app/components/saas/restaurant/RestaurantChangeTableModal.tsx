@@ -13,9 +13,10 @@ type Props = {
   currentTableId: string;
   onSelect: (table: DiningTable) => void;
   onClose: () => void;
+  title?: string;
 };
 
-export function RestaurantChangeTableModal({ userId, currentTableId, onSelect, onClose }: Props) {
+export function RestaurantChangeTableModal({ userId, currentTableId, onSelect, onClose, title = 'Cambiar mesa' }: Props) {
   const [tables, setTables] = useState<DiningTable[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -68,7 +69,7 @@ export function RestaurantChangeTableModal({ userId, currentTableId, onSelect, o
     <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/50">
       <div className="w-full sm:max-w-md bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[85vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800">
-          <h3 className="font-bold text-gray-900 dark:text-gray-100">Cambiar mesa</h3>
+          <h3 className="font-bold text-gray-900 dark:text-gray-100">{title}</h3>
           <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">
             <X className="w-5 h-5" />
           </button>

@@ -686,14 +686,18 @@ export async function splitOrder(req, res) {
       if (splitCount < 2) return badRequest(res, 'Mínimo 2 partes');
       const perPart = Math.round(existing.total / splitCount * 100) / 100;
       const remainder = Math.round((existing.total - perPart * splitCount) * 100) / 100;
+      const splitAmounts = Array.from({ length: splitCount }, (_, i) => i === 0
+        ? Math.round((perPart + remainder) * 100) / 100
+        : perPart);
 
       const doc = buildDiningOrderDocument(userId, {
         splitMode: 'equal',
         splitCount,
+        splitAmounts,
       }, existing);
       const saved = await putDocument(req, db, doc._id, doc);
       const sanitized = sanitizeDiningOrder({ ...doc, _rev: saved.rev });
-      return res.json({ ok: true, order: sanitized, splitAmounts: Array.from({ length: splitCount }, (_, i) => i === 0 ? perPart + remainder : perPart) });
+      return res.json({ ok: true, order: sanitized, splitAmounts });
     }
 
     if (mode === 'by_item') {
@@ -709,17 +713,20 @@ export async function splitOrder(req, res) {
 
     if (mode === 'custom') {
       if (!Array.isArray(parts)) return badRequest(res, 'Se esperan importes personalizados');
-      const sum = parts.reduce((s, p) => s + Number(p || 0), 0);
+      const splitAmounts = parts.map((p) => Math.round(Number(p || 0) * 100) / 100);
+      if (splitAmounts.length < 2) return badRequest(res, 'Mínimo 2 partes');
+      const sum = splitAmounts.reduce((s, p) => s + p, 0);
       if (Math.abs(sum - existing.total) > 0.02) {
         return badRequest(res, `La suma (${sum.toFixed(2)}€) no coincide con el total (${existing.total.toFixed(2)}€)`);
       }
       const doc = buildDiningOrderDocument(userId, {
         splitMode: 'custom',
-        splitCount: parts.length,
+        splitCount: splitAmounts.length,
+        splitAmounts,
       }, existing);
       const saved = await putDocument(req, db, doc._id, doc);
       const sanitized = sanitizeDiningOrder({ ...doc, _rev: saved.rev });
-      return res.json({ ok: true, order: sanitized, splitAmounts: parts });
+      return res.json({ ok: true, order: sanitized, splitAmounts });
     }
 
     return badRequest(res, 'Modo de división no válido (equal, by_item, custom)');

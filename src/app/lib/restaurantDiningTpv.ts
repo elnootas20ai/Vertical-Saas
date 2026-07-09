@@ -3,6 +3,7 @@ import type { CatalogItem, DeliveryOrderItem } from './deliveryApi';
 import type { DiningComanda, DiningOrder, DiningOrderItem } from './salaApi';
 import {
   addComandaRequest,
+  cancelComandaRequest,
   changeTableStatusRequest,
   closeDiningOrderRequest,
   createDiningOrderRequest,
@@ -11,6 +12,7 @@ import {
   payDiningOrderRequest,
   sendComandaToKitchenRequest,
   splitDiningOrderRequest,
+  updateComandaRequest,
   updateDiningOrderRequest,
   type DiningTable,
 } from './salaApi';
@@ -142,6 +144,7 @@ export async function payAndCloseDiningOrder(params: {
     amount: number;
     amountReceived?: number;
     changeGiven?: number;
+    tip?: number;
     paidBy: string;
     paidByName: string;
     splitLabel?: string;
@@ -171,6 +174,8 @@ export function countDiningOrderItems(order: DiningOrder): number {
 
 export type DiningAccountLineView = {
   key: string;
+  comandaId: string;
+  itemId: string;
   comandaNumber: number;
   name: string;
   quantity: number;
@@ -190,6 +195,8 @@ export function flattenDiningAccountLines(order: DiningOrder): DiningAccountLine
       const unitPrice = Number(item.price || 0);
       out.push({
         key: `${comanda.id}:${item.id}`,
+        comandaId: comanda.id,
+        itemId: item.id,
         comandaNumber: Number(comanda.orderNumber || 0),
         name: String(item.name || 'Producto'),
         quantity,
@@ -200,6 +207,37 @@ export function flattenDiningAccountLines(order: DiningOrder): DiningAccountLine
     }
   }
   return out;
+}
+
+/**
+ * Anula una línea de la cuenta. Si es la última línea activa de su comanda,
+ * cancela la comanda entera (así cocina la ve cancelada); si no, marca solo
+ * ese artículo como cancelado y el total se recalcula en servidor.
+ */
+export async function voidDiningAccountLine(params: {
+  userId: string;
+  order: DiningOrder;
+  comandaId: string;
+  itemId: string;
+  reason: string;
+  cancelledBy: string;
+}): Promise<DiningOrder> {
+  const { userId, order, comandaId, itemId, reason, cancelledBy } = params;
+  const comanda = (order.comandas || []).find((c) => c.id === comandaId);
+  if (!comanda) throw new Error('Comanda no encontrada');
+
+  const activeItems = (comanda.items || []).filter((i) => i.status !== 'cancelled');
+  const isLastActive = activeItems.length <= 1
+    && activeItems.every((i) => i.id === itemId);
+
+  if (isLastActive) {
+    return cancelComandaRequest(userId, order._id, comandaId, reason);
+  }
+
+  const items = (comanda.items || []).map((i) => (i.id === itemId
+    ? { ...i, status: 'cancelled' as const, cancelledReason: reason, cancelledBy }
+    : i));
+  return updateComandaRequest(userId, order._id, comandaId, { items });
 }
 
 export function computeEqualSplitAmounts(total: number, parts: number): number[] {
@@ -220,7 +258,11 @@ export function buildSplitPartViews(order: DiningOrder): SplitPartView[] {
   if (!order.splitMode || order.splitMode === 'none' || Number(order.splitCount || 0) < 2) {
     return [];
   }
-  const amounts = computeEqualSplitAmounts(Number(order.total || 0), order.splitCount);
+  const persisted = Array.isArray(order.splitAmounts) ? order.splitAmounts : [];
+  const amounts = persisted.length === Number(order.splitCount)
+    && persisted.some((a) => Number(a) > 0)
+    ? persisted.map((a) => Number(a) || 0)
+    : computeEqualSplitAmounts(Number(order.total || 0), order.splitCount);
   const payments = order.payments || [];
   return amounts.map((amount, index) => {
     const label = `Parte ${index + 1}/${order.splitCount}`;
@@ -240,6 +282,37 @@ export async function splitDiningOrderEqual(
   const splitAmounts = result.splitAmounts
     || computeEqualSplitAmounts(Number(result.order.total || 0), parts);
   return { order: result.order, splitAmounts };
+}
+
+/**
+ * Reescala importes para que sumen exactamente `total` (en céntimos).
+ * Se usa al dividir por artículo/importe libre: el servidor exige que la
+ * suma de las partes coincida con el total de la cuenta.
+ */
+export function scaleAmountsToTotal(amounts: number[], total: number): number[] {
+  const clean = amounts.map((a) => Math.max(0, Number(a) || 0));
+  const sum = clean.reduce((s, a) => s + a, 0);
+  const target = Math.round(Number(total || 0) * 100) / 100;
+  if (clean.length === 0 || sum <= 0 || target <= 0) return clean;
+
+  const scaled = clean.map((a) => Math.round((a / sum) * target * 100) / 100);
+  const scaledSum = Math.round(scaled.reduce((s, a) => s + a, 0) * 100) / 100;
+  const remainder = Math.round((target - scaledSum) * 100) / 100;
+  if (remainder !== 0) {
+    // El redondeo cae en la parte mayor para no dejar importes negativos.
+    const maxIndex = scaled.reduce((best, a, i) => (a > scaled[best] ? i : best), 0);
+    scaled[maxIndex] = Math.round((scaled[maxIndex] + remainder) * 100) / 100;
+  }
+  return scaled;
+}
+
+export async function splitDiningOrderCustom(
+  userId: string,
+  orderId: string,
+  amounts: number[],
+): Promise<{ order: DiningOrder; splitAmounts: number[] }> {
+  const result = await splitDiningOrderRequest(userId, orderId, 'custom', { parts: amounts });
+  return { order: result.order, splitAmounts: result.splitAmounts || amounts };
 }
 
 export async function applyDiningOrderDiscount(params: {

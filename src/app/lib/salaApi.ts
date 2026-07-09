@@ -244,6 +244,8 @@ export interface DiningOrder {
   payments: DiningPayment[];
   splitMode: string;
   splitCount: number;
+  /** Importes por parte cuando la división es personalizada o por artículo. */
+  splitAmounts?: number[];
   clientId: string;
   clientName: string;
   invoiceGenerated: boolean;

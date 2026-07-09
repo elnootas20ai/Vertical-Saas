@@ -309,6 +309,13 @@ function sanitizeComanda(comanda) {
   };
 }
 
+function sanitizeSplitAmounts(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((n) => Math.round(Number(n || 0) * 100) / 100)
+    .filter((n) => Number.isFinite(n) && n >= 0);
+}
+
 function sanitizePayment(payment) {
   return {
     id: payment.id || uuidv4(),
@@ -392,6 +399,7 @@ export function buildDiningOrderDocument(userId, data = {}, existing = null) {
     payments,
     splitMode: String(data.splitMode ?? existing?.splitMode ?? 'none'),
     splitCount: Number(data.splitCount ?? existing?.splitCount ?? 0),
+    splitAmounts: sanitizeSplitAmounts(data.splitAmounts ?? existing?.splitAmounts),
 
     clientId: String(data.clientId ?? existing?.clientId ?? ''),
     clientName: String(data.clientName ?? existing?.clientName ?? ''),
@@ -435,6 +443,7 @@ export function sanitizeDiningOrder(doc) {
     payments: (doc.payments || []).map(sanitizePayment),
     splitMode: doc.splitMode || 'none',
     splitCount: doc.splitCount || 0,
+    splitAmounts: sanitizeSplitAmounts(doc.splitAmounts),
     clientId: doc.clientId || '',
     clientName: doc.clientName || '',
     invoiceGenerated: doc.invoiceGenerated || false,

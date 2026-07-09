@@ -77,10 +77,14 @@ import {
   flattenDiningAccountLines,
   moveDiningOrderToTable,
   payAndCloseDiningOrder,
+  scaleAmountsToTotal,
+  splitDiningOrderCustom,
   splitDiningOrderEqual,
+  voidDiningAccountLine,
+  type DiningAccountLineView,
 } from '../../lib/restaurantDiningTpv';
 import { RestaurantChangeTableModal } from '../../components/saas/restaurant/RestaurantChangeTableModal';
-import { RestaurantSplitBillModal } from '../../components/saas/restaurant/RestaurantSplitBillModal';
+import { RestaurantSplitBillModal, type SplitBillResult } from '../../components/saas/restaurant/RestaurantSplitBillModal';
 import { RestaurantAccountDiscountModal } from '../../components/saas/restaurant/RestaurantAccountDiscountModal';
 import type { DiningTable } from '../../lib/salaApi';
 import type { RestaurantTpvPermissions } from '../../lib/restaurantTpvPermissions';
@@ -848,6 +852,8 @@ export function TpvRapidoOrderFlow({
   // Step 4 - Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [cashGiven, setCashGiven] = useState('');
+  // Propina (solo cobro de cuenta de mesa en restaurante/bar)
+  const [tipInput, setTipInput] = useState('');
   const [orderNotes, setOrderNotes] = useState('');
   const [initialStatus, setInitialStatus] = useState<'nuevo' | 'cocina'>('nuevo');
   const [promoCodeInput, setPromoCodeInput] = useState('');
@@ -1532,6 +1538,7 @@ export function TpvRapidoOrderFlow({
     }
     setPaymentMethod(null);
     setCashGiven('');
+    setTipInput('');
     setOrderNotes('');
     setInitialStatus('nuevo');
     setPromoCodeInput('');
@@ -2212,6 +2219,7 @@ export function TpvRapidoOrderFlow({
       }
 
       const amount = payAmount != null ? Math.min(payAmount, due) : due;
+      const tipValue = Math.max(0, Number(String(tipInput).replace(',', '.')) || 0);
       const pdvId = String(register.session.pointOfSaleId || '').trim();
       const pdvName = String(register.session.pointOfSaleName || '').trim();
       const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
@@ -2250,19 +2258,45 @@ export function TpvRapidoOrderFlow({
         ...(restaurantTable ? { tableNumber: restaurantTable.number, tableId: restaurantTable.id } : {}),
       };
 
-      await createDeliveryOrderWithCajaStatus(userId, orderData);
+      const { order: cajaOrder } = await createDeliveryOrderWithCajaStatus(userId, orderData);
       const closedOrder = await payAndCloseDiningOrder({
         userId,
         order: diningOrder,
         payment: {
           method: normalizeTpvPaymentMethod(method),
           amount,
+          tip: tipValue,
           paidBy: effectiveOrderTakerId || userId,
           paidByName: takerName,
           splitLabel: splitLabel || '',
         },
       });
       onRestaurantDiningOrderUpdated?.(closedOrder);
+      setTipInput('');
+
+      // Ticket de cliente al cobrar la mesa; con las líneas reales de la
+      // cuenta al cobro completo o la línea de la parte en cobro dividido.
+      if (currentBusiness) {
+        try {
+          const ticketItems = splitLabel
+            ? cajaOrder.items
+            : flattenDiningAccountLines(closedOrder).map((line) => ({
+                quantity: line.quantity,
+                name: line.name,
+                total: line.lineTotal,
+                notes: line.notes,
+              }));
+          void printDeliveryTicket({
+            order: { ...cajaOrder, items: ticketItems as DeliveryOrder['items'] },
+            business: businessTicketInfoFrom(currentBusiness),
+            salesPointName: cajaOrder.salesPointName || pdvName,
+            cashierName: takerName,
+            variant: 'customer',
+          });
+        } catch {
+          /* el ticket es opcional; no bloquear el cobro */
+        }
+      }
 
       const stillDue = diningOrderDueAmount(closedOrder);
       if (stillDue <= 0.02 || closedOrder.status === 'closed') {
@@ -2301,6 +2335,8 @@ export function TpvRapidoOrderFlow({
     saleClient,
     onRestaurantOrderComplete,
     showTpvError,
+    tipInput,
+    currentBusiness,
   ]);
 
   const handlePayFullAccount = useCallback(async () => {
@@ -2369,7 +2405,7 @@ export function TpvRapidoOrderFlow({
     showTpvError,
   ]);
 
-  const handleConfirmSplitBill = useCallback(async (parts: number) => {
+  const handleConfirmSplitBill = useCallback(async (result: SplitBillResult) => {
     if (actionBusyRef.current) return;
     if (!restaurantDiningOrder?._id || !userId) return;
     setSubmitting(true);
@@ -2389,10 +2425,21 @@ export function TpvRapidoOrderFlow({
         onRestaurantDiningOrderUpdated?.(order);
         setCart([]);
       }
-      const { order: splitOrder } = await splitDiningOrderEqual(userId, order._id, parts);
+      let splitOrder: DiningOrder;
+      let partsCount: number;
+      if (result.mode === 'equal') {
+        partsCount = result.parts;
+        splitOrder = (await splitDiningOrderEqual(userId, order._id, result.parts)).order;
+      } else {
+        // El servidor exige que la suma coincida con el total; se reescala
+        // porque el total puede haber cambiado al volcar el carrito.
+        const amounts = scaleAmountsToTotal(result.amounts, Number(order.total || 0));
+        partsCount = amounts.length;
+        splitOrder = (await splitDiningOrderCustom(userId, order._id, amounts)).order;
+      }
       onRestaurantDiningOrderUpdated?.(splitOrder);
       setSplitBillOpen(false);
-      toast.success(`Cuenta dividida en ${parts} partes`);
+      toast.success(`Cuenta dividida en ${partsCount} partes`);
     } catch (err: unknown) {
       showTpvError(err, 'dividir_cuenta', 'No se pudo dividir la cuenta');
     } finally {
@@ -2455,6 +2502,47 @@ export function TpvRapidoOrderFlow({
     }
   }, [restaurantDiningOrder, userId, onRestaurantDiningOrderUpdated, showTpvError]);
 
+  const handleVoidAccountLine = useCallback(async (line: DiningAccountLineView) => {
+    if (actionBusyRef.current) return;
+    if (!restaurantDiningOrder?._id || !userId) return;
+    if (restaurantPermissions && !restaurantPermissions.canVoidComanda) {
+      toast.error('Solo un encargado puede anular artículos de la cuenta');
+      return;
+    }
+    const reason = window.prompt(
+      `Anular ${line.quantity}× ${line.name} · Motivo:`,
+      'Error de comanda',
+    );
+    if (reason == null) return;
+    setSubmitting(true);
+    actionBusyRef.current = true;
+    try {
+      const order = await voidDiningAccountLine({
+        userId,
+        order: restaurantDiningOrder,
+        comandaId: line.comandaId,
+        itemId: line.itemId,
+        reason: reason.trim() || 'Anulado desde TPV',
+        cancelledBy: selectedOrderTaker?.name || user?.fullName || 'TPV',
+      });
+      onRestaurantDiningOrderUpdated?.(order);
+      toast.success(`Anulado: ${line.name}`);
+    } catch (err: unknown) {
+      showTpvError(err, 'anular_linea', 'No se pudo anular el artículo');
+    } finally {
+      actionBusyRef.current = false;
+      setSubmitting(false);
+    }
+  }, [
+    restaurantDiningOrder,
+    userId,
+    restaurantPermissions,
+    selectedOrderTaker?.name,
+    user?.fullName,
+    onRestaurantDiningOrderUpdated,
+    showTpvError,
+  ]);
+
   const resetRestaurantTicket = useCallback(() => {
     setCart([]);
     setExpandedCartNotes(new Set());
@@ -2465,6 +2553,7 @@ export function TpvRapidoOrderFlow({
     }
     setPaymentMethod(null);
     setCashGiven('');
+    setTipInput('');
     setOrderNotes('');
     setPromoCodeInput('');
     setAppliedPromo(null);
@@ -2505,6 +2594,7 @@ export function TpvRapidoOrderFlow({
     }
     setPaymentMethod(null);
     setCashGiven('');
+    setTipInput('');
     setOrderNotes('');
     setInitialStatus('nuevo');
     setPromoCodeInput('');
@@ -2599,8 +2689,9 @@ export function TpvRapidoOrderFlow({
       {splitBillOpen && restaurantDiningOrder ? (
         <RestaurantSplitBillModal
           total={accountDue > 0 ? accountDue : Number(restaurantDiningOrder.total || 0)}
+          lines={accountLines}
           submitting={submitting}
-          onConfirm={(parts) => void handleConfirmSplitBill(parts)}
+          onConfirm={(result) => void handleConfirmSplitBill(result)}
           onClose={() => setSplitBillOpen(false)}
         />
       ) : null}
@@ -3380,9 +3471,22 @@ export function TpvRapidoOrderFlow({
                                       </p>
                                     ) : null}
                                   </div>
-                                  <span className="font-semibold text-violet-700 dark:text-violet-300 tabular-nums text-xs shrink-0">
-                                    {formatPrice(line.lineTotal)}
-                                  </span>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <span className="font-semibold text-violet-700 dark:text-violet-300 tabular-nums text-xs">
+                                      {formatPrice(line.lineTotal)}
+                                    </span>
+                                    {restaurantPermissions?.canVoidComanda !== false ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleVoidAccountLine(line)}
+                                        disabled={submitting}
+                                        className="p-1 rounded-lg text-violet-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors touch-manipulation disabled:opacity-40"
+                                        title={`Anular ${line.name}`}
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    ) : null}
+                                  </div>
                                 </div>
                               </div>
                             ))}
@@ -3704,6 +3808,42 @@ export function TpvRapidoOrderFlow({
               </div>
             )}
 
+            {restaurantAccountMode ? (
+              <div className="mt-4 p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20">
+                <label className={LABEL_CLASS}>Propina (opcional)</label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {['1', '2', '5'].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => setTipInput((prev) => (prev === v ? '' : v))}
+                      className={`min-w-[52px] min-h-[40px] rounded-xl border-2 text-sm font-bold touch-manipulation ${
+                        tipInput === v
+                          ? 'border-amber-500 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200'
+                          : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300'
+                      }`}
+                    >
+                      {v} €
+                    </button>
+                  ))}
+                  <div className="relative flex-1 min-w-[110px]">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={tipInput}
+                      onChange={(e) => setTipInput(e.target.value)}
+                      placeholder="Otra cantidad"
+                      className={`${INPUT_CLASS} pr-8 text-sm font-semibold`}
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">
+                  Se registra con el cobro de la mesa y suma al informe de propinas.
+                </p>
+              </div>
+            ) : null}
+
             <div className="mt-3">
               <label className={LABEL_CLASS}>Notas / Observaciones</label>
               <textarea
@@ -3794,6 +3934,34 @@ export function TpvRapidoOrderFlow({
           }
         />
       )}
+      {changeTableOpen && userId && restaurantTable && !restaurantTable.isCounter ? (
+        <RestaurantChangeTableModal
+          userId={userId}
+          currentTableId={restaurantTable.id}
+          onSelect={(table) => void handleConfirmChangeTable(table)}
+          onClose={() => setChangeTableOpen(false)}
+        />
+      ) : null}
+      {splitBillOpen && restaurantDiningOrder ? (
+        <RestaurantSplitBillModal
+          total={accountDue > 0 ? accountDue : Number(restaurantDiningOrder.total || 0)}
+          lines={accountLines}
+          submitting={submitting}
+          onConfirm={(result) => void handleConfirmSplitBill(result)}
+          onClose={() => setSplitBillOpen(false)}
+        />
+      ) : null}
+      {discountOpen && restaurantDiningOrder ? (
+        <RestaurantAccountDiscountModal
+          subtotal={Number(restaurantDiningOrder.subtotal || 0)}
+          currentDiscount={Number(restaurantDiningOrder.discount || 0)}
+          currentDiscountPercent={Number(restaurantDiningOrder.discountPercent || 0)}
+          submitting={submitting}
+          onApply={(payload) => void handleApplyAccountDiscount(payload)}
+          onClear={() => void handleClearAccountDiscount()}
+          onClose={() => setDiscountOpen(false)}
+        />
+      ) : null}
     </TpvFullscreenShell>
   );
 }

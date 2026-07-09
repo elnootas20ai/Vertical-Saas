@@ -15,6 +15,8 @@ import {
   type DiningOrder,
 } from '../../lib/salaApi';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
+import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
+import { businessTicketInfoFrom } from '../../lib/deliveryTicketHelpers';
 import {
   buildKitchenTickets,
   kitchenTicketMinutes,
@@ -28,6 +30,7 @@ import {
   Flame,
   Loader2,
   MessageSquare,
+  Printer,
   RefreshCw,
   Timer,
   UtensilsCrossed,
@@ -75,11 +78,13 @@ function KitchenTicketCard({
   ticket,
   now,
   onAdvance,
+  onPrint,
   acting,
 }: {
   ticket: KitchenTicket;
   now: number;
   onAdvance: (ticket: KitchenTicket, next: ComandaStatus) => void;
+  onPrint: (ticket: KitchenTicket) => void;
   acting: boolean;
 }) {
   const mins = kitchenTicketMinutes(ticket, now);
@@ -157,19 +162,29 @@ function KitchenTicketCard({
       )}
 
       {/* Acción */}
-      <div className="flex items-center justify-between pt-2 border-t border-gray-200/60 dark:border-gray-600/30">
+      <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-200/60 dark:border-gray-600/30">
         <span className="text-xs text-gray-500">{totalUnits} uds</span>
-        {next && action && (
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => onAdvance(ticket, next)}
-            disabled={acting}
-            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-50 shadow-sm ${action.color}`}
+            onClick={() => onPrint(ticket)}
+            className="p-2 rounded-xl border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            title="Imprimir comanda"
           >
-            {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-            {action.label}
+            <Printer className="w-4 h-4" />
           </button>
-        )}
+          {next && action && (
+            <button
+              type="button"
+              onClick={() => onAdvance(ticket, next)}
+              disabled={acting}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-semibold transition-all disabled:opacity-50 shadow-sm ${action.color}`}
+            >
+              {acting ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {action.label}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -184,6 +199,7 @@ function KitchenColumn({
   tickets,
   now,
   onAdvance,
+  onPrint,
   actingKey,
   emptyLabel,
 }: {
@@ -193,6 +209,7 @@ function KitchenColumn({
   tickets: KitchenTicket[];
   now: number;
   onAdvance: (ticket: KitchenTicket, next: ComandaStatus) => void;
+  onPrint: (ticket: KitchenTicket) => void;
   actingKey: string | null;
   emptyLabel: string;
 }) {
@@ -218,6 +235,7 @@ function KitchenColumn({
               ticket={t}
               now={now}
               onAdvance={onAdvance}
+              onPrint={onPrint}
               acting={actingKey === t.key}
             />
           ))
@@ -347,6 +365,32 @@ export function RestaurantKitchenPage() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [loadOrders]);
 
+  const printComanda = useCallback((ticket: KitchenTicket) => {
+    if (!currentBusiness) {
+      toast.error('No hay empresa activa para imprimir');
+      return;
+    }
+    void printDeliveryTicket({
+      order: {
+        _id: ticket.orderId,
+        orderNumber: ticket.comandaNumber ? String(ticket.comandaNumber) : '',
+        customerName: ticketTableLabel(ticket),
+        items: ticket.items.map((item) => ({
+          quantity: item.quantity,
+          name: item.name,
+          total: 0,
+          notes: item.notes,
+        })),
+        notes: ticket.notes,
+        createdAt: ticket.sentToKitchenAt || new Date().toISOString(),
+        takenByName: ticket.createdByName,
+      },
+      business: businessTicketInfoFrom(currentBusiness),
+      cashierName: ticket.createdByName,
+      variant: 'kitchen',
+    });
+  }, [currentBusiness]);
+
   const advanceComanda = useCallback(async (ticket: KitchenTicket, next: ComandaStatus) => {
     if (!userId) return;
     setActingKey(ticket.key);
@@ -470,6 +514,7 @@ export function RestaurantKitchenPage() {
                 tickets={colNew}
                 now={now}
                 onAdvance={advanceComanda}
+                onPrint={printComanda}
                 actingKey={actingKey}
                 emptyLabel="Sin comandas nuevas"
               />
@@ -480,6 +525,7 @@ export function RestaurantKitchenPage() {
                 tickets={colPrep}
                 now={now}
                 onAdvance={advanceComanda}
+                onPrint={printComanda}
                 actingKey={actingKey}
                 emptyLabel="Nada en los fogones"
               />
@@ -490,6 +536,7 @@ export function RestaurantKitchenPage() {
                 tickets={colReady}
                 now={now}
                 onAdvance={advanceComanda}
+                onPrint={printComanda}
                 actingKey={actingKey}
                 emptyLabel="Sin comandas listas"
               />
@@ -510,6 +557,7 @@ export function RestaurantKitchenPage() {
                       ticket={t}
                       now={now}
                       onAdvance={advanceComanda}
+                      onPrint={printComanda}
                       acting={actingKey === t.key}
                     />
                   ))}

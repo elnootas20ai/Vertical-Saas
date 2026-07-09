@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -8,6 +8,15 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import {
+  changeTableStatusRequest,
+  createDiningOrderRequest,
+  type DiningTable,
+} from '../../lib/salaApi';
+import { findOpenDiningOrderForTable } from '../../lib/restaurantDiningTpv';
+import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
+import { RestaurantChangeTableModal } from '../../components/saas/restaurant/RestaurantChangeTableModal';
 import type { Client } from '../../context/AppContext';
 import {
   Search,
@@ -73,10 +82,13 @@ function formatClientPhone(client: Client): string {
 }
 
 export function RestaurantWaitlistPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const api = useMemo(() => createVerticalApi<WaitlistEntry>('restaurant', 'waitlist'), []);
   const userId = user?.user_id || user?.id || '';
+  // Los datos de sala (mesas/cuentas) viven bajo el usuario de datos del negocio.
+  const salaUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
   const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessScopeId);
 
@@ -89,6 +101,8 @@ export function RestaurantWaitlistPage() {
   const [form, setForm] = useState<WaitlistForm>(EMPTY_FORM);
   const [clientLookup, setClientLookup] = useState('');
   const [clientEditing, setClientEditing] = useState(true);
+  const [seating, setSeating] = useState<WaitlistEntry | null>(null);
+  const [seatingBusy, setSeatingBusy] = useState(false);
 
   const {
     results: clientResults,
@@ -251,6 +265,48 @@ export function RestaurantWaitlistPage() {
     }
   };
 
+  /** Sentar: crea la cuenta de mesa, ocupa la mesa y abre el TPV en ella. */
+  const handleSeatAtTable = async (item: WaitlistEntry, table: DiningTable) => {
+    if (!userId || !salaUserId || seatingBusy) return;
+    setSeatingBusy(true);
+    try {
+      const open = await findOpenDiningOrderForTable(salaUserId, table._id);
+      if (open) throw new Error(`Mesa ${table.number} ya tiene cuenta abierta`);
+
+      const guests = parseInt(item.partySize, 10) || 2;
+      const order = await createDiningOrderRequest(salaUserId, {
+        businessId: businessScopeId,
+        tableId: table._id,
+        tableNumber: table.number,
+        tableName: table.name,
+        zone: table.zone,
+        guests,
+        createdBy: userId,
+        createdByName: user?.fullName || 'Sala',
+        clientId: item.clientId || '',
+        clientName: item.guestName,
+        notes: item.notes || '',
+        comandas: [],
+        status: 'open',
+      });
+      await changeTableStatusRequest(salaUserId, table._id, 'occupied', {
+        currentGuests: guests,
+        occupiedBy: item.guestName,
+      });
+      await api.update(userId, item._id, { status: 'sentado' });
+
+      setSeating(null);
+      toast.success(`${item.guestName} · Mesa ${table.number} · Abriendo TPV`);
+      writeSalaTpvOpenTable({ tableId: table._id, orderId: order._id });
+      navigate('/saas/caja/tpv');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo sentar al cliente');
+      await loadData();
+    } finally {
+      setSeatingBusy(false);
+    }
+  };
+
   const handleDelete = async (item: WaitlistEntry) => {
     if (!userId) return;
     if (!window.confirm(`¿Quitar a ${item.guestName} de la lista?`)) return;
@@ -388,9 +444,9 @@ export function RestaurantWaitlistPage() {
                       {(item.status === 'esperando' || item.status === 'avisado') ? (
                         <button
                           type="button"
-                          onClick={() => void handleStatusChange(item, 'sentado')}
+                          onClick={() => setSeating(item)}
                           className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
-                          title="Marcar como sentado"
+                          title="Elegir mesa, abrir cuenta y TPV"
                         >
                           <UserCheck className="h-3.5 w-3.5" />
                           Sentar
@@ -420,6 +476,16 @@ export function RestaurantWaitlistPage() {
           )}
         </div>
       </div>
+
+      {seating && salaUserId ? (
+        <RestaurantChangeTableModal
+          userId={salaUserId}
+          currentTableId=""
+          title={`Sentar a ${seating.guestName}`}
+          onSelect={(table) => void handleSeatAtTable(seating, table)}
+          onClose={() => setSeating(null)}
+        />
+      ) : null}
 
       {showModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
