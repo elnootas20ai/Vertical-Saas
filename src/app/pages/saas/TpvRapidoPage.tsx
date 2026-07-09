@@ -102,7 +102,7 @@ import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/C
 import { WorkerTpvDelivery } from './worker/WorkerTpvDelivery';
 import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
 import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
-import { TpvChromeScope, useTpvOrderFlowChrome } from '../../context/TpvChromeContext';
+import { TpvChromeScope, useTpvOrderFlowChrome, useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../lib/tpvStockReview';
 import { consumeSalaTpvPdvLaunch } from '../../lib/salaTpvLaunch';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
@@ -771,7 +771,8 @@ export function TpvRapidoOrderFlow({
   restaurantPermissions,
   registerOverride,
 }: TpvRapidoOrderFlowProps = {}) {
-  useTpvOrderFlowChrome(tabletMode);
+  useTpvOrderFlowChrome(true);
+  const orderFlowChrome = useTpvOrderFlowActive();
   const { user } = useAuth();
   const registerFromGate = useTpvRegisterIfOpen();
   const register = registerOverride ?? registerFromGate;
@@ -2882,21 +2883,6 @@ export function TpvRapidoOrderFlow({
         </div>
       );
     }
-    if (register && isTpvRegisterSessionOpen(register.session) && !tabletMode) {
-      return (
-        <button
-          type="button"
-          onClick={() => navigate('/saas/caja')}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors max-w-[55vw]"
-          title={`Caja: ${register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}${register.session.terminalName} · ${register.session.workerName}`}
-        >
-          <span className="inline-flex w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-          <span className="truncate">
-            Caja: {register.session.pointOfSaleName ? `${register.session.pointOfSaleName} / ` : ''}{register.session.terminalName}
-          </span>
-        </button>
-      );
-    }
     return null;
   })();
 
@@ -3053,9 +3039,10 @@ export function TpvRapidoOrderFlow({
       topSlot={tpvTopActions}
       footerSlot={stickyFooter}
       hideBack={!embeddedInRestaurantTpv}
+      compactTop={!tabletMode && orderFlowChrome}
     >
-      <div className={`w-full min-w-0 ${tabletMode ? 'flex-1 min-h-0 flex flex-col pb-0 px-1' : isProductsFocus ? 'max-w-[1320px] mx-auto pb-4 px-2 md:px-4' : 'max-w-[920px] mx-auto pb-4 px-2 md:px-4'}`}>
-        {!tabletMode && register && register.clockedInWorkers.length > 0 && (
+      <div className={`w-full min-w-0 ${tabletMode ? 'flex-1 min-h-0 flex flex-col pb-0 px-1' : isProductsFocus ? 'max-w-[1320px] mx-auto pb-4 px-2 md:px-4' : 'max-w-[920px] mx-auto pb-3 px-2 sm:px-3 md:px-4'}`}>
+        {!tabletMode && !orderFlowChrome && register && register.clockedInWorkers.length > 0 && (
           <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
             <ClockedInWorkerBubbles
               workers={register.clockedInWorkers}
@@ -3075,12 +3062,12 @@ export function TpvRapidoOrderFlow({
                 Teléfono o nombre del cliente
               </label>
               <form
-                className="flex gap-2"
+                className="flex flex-col sm:flex-row gap-2"
                 autoComplete="off"
                 onSubmit={(e) => e.preventDefault()}
                 role="search"
               >
-                <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact />
+                <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact className="sm:shrink-0" />
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                   <input
@@ -4066,6 +4053,8 @@ function TpvFullscreenShell({
   tabletMode = false,
   contentFill = false,
   hideBack = false,
+  /** En móvil dentro del gate: la barra de caja ya ocupa la parte superior. */
+  compactTop = false,
 }: {
   children: ReactNode;
   onBack: () => void;
@@ -4078,11 +4067,12 @@ function TpvFullscreenShell({
   contentFill?: boolean;
   /** Oculta «Volver» arriba; la salida va en el footer (Cancelar pedido). */
   hideBack?: boolean;
+  compactTop?: boolean;
 }) {
   const minimalHeader = tabletMode && embedded;
-  const showHeader = !hideBack || !!topSlot;
+  const showHeader = (!hideBack || !!topSlot) && !(compactTop && !topSlot);
   const header = showHeader ? (
-    <div className="shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800 pt-[max(0px,env(safe-area-inset-top))]">
+    <div className={`shrink-0 z-10 bg-white/95 dark:bg-gray-900/95 backdrop-blur border-b border-gray-200 dark:border-gray-800 ${compactTop ? '' : 'pt-[max(0px,env(safe-area-inset-top))]'}`}>
       <div className={`mx-auto flex items-center gap-1.5 ${minimalHeader ? 'px-1.5 py-0.5' : `max-w-[1320px] px-3 ${tabletMode ? 'py-1.5' : 'py-2.5'}`}`}>
         {!hideBack ? (
           <button

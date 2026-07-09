@@ -55,13 +55,17 @@ export function useTpvSuppressBottomBar(active: boolean) {
   }, [active, ctx]);
 }
 
-/** Modo pedido activo: barra de caja mínima y más espacio para el catálogo. */
+/** Modo pedido activo: barra de caja mínima, más espacio al catálogo y sin barra inferior duplicada. */
 export function useTpvOrderFlowChrome(active: boolean) {
   const ctx = useContext(TpvChromeContext);
   useEffect(() => {
     if (!ctx) return;
     ctx.setOrderFlowActive(active);
-    return () => ctx.setOrderFlowActive(false);
+    ctx.setSuppressBottomBar(active);
+    return () => {
+      ctx.setOrderFlowActive(false);
+      ctx.setSuppressBottomBar(false);
+    };
   }, [active, ctx]);
 }
 

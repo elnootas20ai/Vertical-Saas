@@ -1910,7 +1910,7 @@ function RegisterStatusBar({
 
   if (minimal) {
     return (
-      <div className="relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 px-2 py-1.5 flex items-center gap-2 text-[11px] min-h-[52px]">
+      <div className="relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 px-2 py-1.5 flex items-center gap-2 text-[11px] min-h-[44px] pt-[max(0.375rem,env(safe-area-inset-top))]">
         <span className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
           <CheckCircle2 className="w-3.5 h-3.5" />
           <span className="hidden xs:inline">Caja</span>
@@ -1960,7 +1960,7 @@ function RegisterStatusBar({
   }
 
   return (
-    <div className={`relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 flex flex-col gap-2 text-xs ${isTabletMode ? 'px-2 py-2' : 'px-3 sm:px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3'}`}>
+    <div className={`relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 flex flex-col gap-2 text-xs pt-[max(0px,env(safe-area-inset-top))] ${isTabletMode ? 'px-2 py-2' : 'px-3 sm:px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3'}`}>
       <div className={`flex items-center gap-2 sm:gap-3 flex-wrap min-w-0 ${isTabletMode ? 'text-[11px]' : ''}`}>
         <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
           <CheckCircle2 className="w-3.5 h-3.5" /> Caja abierta
@@ -2288,7 +2288,7 @@ export function TpvRegisterGate({
   const isTabletSession = registerScope.isTabletSession;
   const orderFlowActive = useTpvOrderFlowActive();
   const isRestaurantVerticalChrome = isRestaurantBusinessType(currentBusiness?.businessType);
-  const compactRegisterChrome = (isTabletSession && orderFlowActive) || isRestaurantVerticalChrome;
+  const compactRegisterChrome = orderFlowActive || isRestaurantVerticalChrome;
   const scopeBusinessId = registerScope.scopeBusinessId;
   const dataUserId = registerScope.effectiveDataUserId;
 
