@@ -59,15 +59,16 @@ function uploadAssetsDirectory(target, identity) {
 }
 
 function verifyRemoteMainBundle({ user, host, remotePath, identity, expectedFileName, minBytes }) {
+  // OJO: no llamar PATH a la variable — sobrescribiría el PATH del shell remoto y rompe stat/ls.
   const verifyScript = `set -e
 DIST=${shellQuote(remotePath.replace(/\/+$/, ''))}
 FILE=${shellQuote(`assets/${expectedFileName}`)}
-PATH="$DIST/$FILE"
-if [ ! -f "$PATH" ]; then
-  echo "[verify] FALTA $PATH"
+TARGET_FILE="$DIST/$FILE"
+if [ ! -f "$TARGET_FILE" ]; then
+  echo "[verify] FALTA $TARGET_FILE"
   exit 2
 fi
-BYTES=$(stat -c%s "$PATH" 2>/dev/null || stat -f%z "$PATH")
+BYTES=$(stat -c%s "$TARGET_FILE" 2>/dev/null || stat -f%z "$TARGET_FILE")
 echo "[verify] $FILE -> $BYTES bytes"
 if [ "$BYTES" -lt ${minBytes} ]; then
   echo "[verify] bundle demasiado pequeño (¿subida incompleta?)"
