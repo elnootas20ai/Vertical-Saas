@@ -12,7 +12,7 @@
  * Las variables VITE_* en local-values.env se inyectan al proceso de build.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import {
@@ -21,6 +21,70 @@ import {
   loadLocalValues,
   mergedEnvForChild,
 } from './deploy-env.mjs';
+
+const MIN_MAIN_BUNDLE_BYTES = 500_000;
+
+function shellQuote(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
+
+function readMainBundleFromDist(distDir) {
+  const htmlPath = resolve(distDir, 'index.html');
+  const html = readFileSync(htmlPath, 'utf8');
+  const match = html.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/);
+  if (!match) return null;
+  const fileName = match[1];
+  const filePath = resolve(distDir, 'assets', fileName);
+  if (!existsSync(filePath)) return null;
+  return { fileName, bytes: statSync(filePath).size, filePath };
+}
+
+function uploadAssetsDirectory(target, identity) {
+  const assetsDir = resolve(REPO_ROOT, 'dist', 'assets');
+  if (!existsSync(assetsDir)) return { ok: false, reason: 'dist/assets no existe' };
+
+  const assetsTarget = `${target}assets/`;
+  const assetsScp = ['-r'];
+  if (identity) assetsScp.push('-i', identity);
+  assetsScp.push('dist/assets/.', assetsTarget);
+  const assetsUpload = spawnSync('scp', assetsScp, {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (assetsUpload.status !== 0) {
+    return { ok: false, reason: 'subida de dist/assets/ falló' };
+  }
+  return { ok: true };
+}
+
+function verifyRemoteMainBundle({ user, host, remotePath, identity, expectedFileName, minBytes }) {
+  const verifyScript = `set -e
+DIST=${shellQuote(remotePath.replace(/\/+$/, ''))}
+FILE=${shellQuote(`assets/${expectedFileName}`)}
+PATH="$DIST/$FILE"
+if [ ! -f "$PATH" ]; then
+  echo "[verify] FALTA $PATH"
+  exit 2
+fi
+BYTES=$(stat -c%s "$PATH" 2>/dev/null || stat -f%z "$PATH")
+echo "[verify] $FILE -> $BYTES bytes"
+if [ "$BYTES" -lt ${minBytes} ]; then
+  echo "[verify] bundle demasiado pequeño (¿subida incompleta?)"
+  exit 3
+fi
+`;
+
+  const sshArgs = ['-o', 'BatchMode=yes'];
+  if (identity) sshArgs.push('-i', identity);
+  sshArgs.push(`${user}@${host}`, 'bash -s');
+
+  const result = spawnSync('ssh', sshArgs, {
+    stdio: ['pipe', 'inherit', 'inherit'],
+    input: verifyScript.replace(/\r/g, ''),
+  });
+  return result.status === 0;
+}
 
 const values = loadLocalValues();
 if (!values) {
@@ -69,6 +133,17 @@ if (!existsSync(distDir)) {
   process.exit(1);
 }
 
+const mainBundle = readMainBundleFromDist(distDir);
+if (!mainBundle || mainBundle.bytes < MIN_MAIN_BUNDLE_BYTES) {
+  console.error(
+    '[deploy:frontend] Build inválido: no se encontró el bundle principal index-*.js en dist/assets/.',
+  );
+  process.exit(1);
+}
+console.log(
+  `[deploy:frontend] Bundle principal: ${mainBundle.fileName} (${Math.round(mainBundle.bytes / 1024 / 1024)} MB)`,
+);
+
 const target = `${user}@${host}:${remotePath.replace(/\/+$/, '')}/`;
 
 const identity = values.SSH_IDENTITY_FILE?.trim();
@@ -108,26 +183,23 @@ if (upload.status !== 0) {
   }
 
   // scp en Windows a veces deja index.html nuevo sin los JS grandes; reintento assets/.
-  const assetsDir = resolve(REPO_ROOT, 'dist', 'assets');
-  if (existsSync(assetsDir)) {
-    console.log('[deploy:frontend] Verificando subida de dist/assets/ ...');
-    const assetsTarget = `${target}assets/`;
-    const assetsScp = ['-r'];
-    if (identity) assetsScp.push('-i', identity);
-    assetsScp.push('dist/assets/.', assetsTarget);
-    const assetsUpload = spawnSync('scp', assetsScp, {
-      cwd: REPO_ROOT,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
-    if (assetsUpload.status !== 0) {
-      console.warn('[deploy:frontend] Reintento de assets/ falló; comprueba el bundle JS en el VPS.');
-    }
+  const assetsRetry = uploadAssetsDirectory(target, identity);
+  if (!assetsRetry.ok) {
+    console.error(`[deploy:frontend] ${assetsRetry.reason}`);
+    process.exit(1);
   }
 
   console.warn(
     '[deploy:frontend] Subido con scp. Si algo "viejo" sigue en el servidor, borra archivos huérfanos en el VPS o usa rsync --delete.',
   );
+} else {
+  // Tras rsync, forzar assets/ por si algún .js grande quedó a medias (Windows / red inestable).
+  console.log('[deploy:frontend] Refuerzo de dist/assets/ ...');
+  const assetsRetry = uploadAssetsDirectory(target, identity);
+  if (!assetsRetry.ok) {
+    console.error(`[deploy:frontend] ${assetsRetry.reason}`);
+    process.exit(1);
+  }
 }
 
 // scp/rsync deja los archivos con el dueño del usuario SSH (root) y, si el
@@ -166,9 +238,22 @@ if (fix.status !== 0) {
   );
 }
 
+console.log('[deploy:frontend] Verificando bundle JS en el servidor...');
+const verified = verifyRemoteMainBundle({
+  user,
+  host,
+  remotePath,
+  identity,
+  expectedFileName: mainBundle.fileName,
+  minBytes: MIN_MAIN_BUNDLE_BYTES,
+});
+if (!verified) {
+  console.error(
+    '[deploy:frontend] DEPLOY INCOMPLETO: el bundle JS principal no está en el VPS.\n' +
+      'La web quedará en blanco. Vuelve a lanzar deploy:frontend (idealmente con rsync) o sube dist/assets/ a mano.',
+  );
+  process.exit(1);
+}
+
 console.log('[deploy:frontend] Listo. Prueba: https://vertialapp.com/');
 process.exit(0);
-
-function shellQuote(s) {
-  return `'${String(s).replace(/'/g, `'\\''`)}'`;
-}

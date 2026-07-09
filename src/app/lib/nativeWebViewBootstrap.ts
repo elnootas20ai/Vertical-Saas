@@ -1,13 +1,25 @@
 import { Capacitor } from '@capacitor/core';
 
+const NATIVE_BOOTSTRAP_TIMEOUT_MS = 2_500;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+  return Promise.race([
+    promise,
+    new Promise<undefined>((resolve) => {
+      globalThis.setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+}
+
 /**
  * En Capacitor el bundle va dentro del IPA/APK, pero el service worker PWA puede
  * seguir sirviendo JS/CSS de una instalación anterior tras actualizar TestFlight.
+ * Nunca debe bloquear el arranque: en iOS getRegistrations() a veces no responde.
  */
 export async function prepareNativeWebView(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
 
-  try {
+  const cleanup = async () => {
     if ('serviceWorker' in navigator) {
       const registrations = await navigator.serviceWorker.getRegistrations();
       await Promise.all(registrations.map((registration) => registration.unregister()));
@@ -16,6 +28,10 @@ export async function prepareNativeWebView(): Promise<void> {
       const names = await caches.keys();
       await Promise.all(names.map((name) => caches.delete(name)));
     }
+  };
+
+  try {
+    await withTimeout(cleanup(), NATIVE_BOOTSTRAP_TIMEOUT_MS);
   } catch {
     // Algunos WebViews bloquean cache/SW; el bundle empaquetado sigue cargando.
   }

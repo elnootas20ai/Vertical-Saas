@@ -49,7 +49,8 @@
     "postinstall": "patch-package",
     "check:native-print": "vitest run tests/nativePrintClient.test.ts",
     "repro:ios": "node scripts/repro-native-ios.mjs",
-    "repro:ios:setup": "node -e \"const fs=require('fs');const s='scripts/repro-native-ios.example.mjs';const d='scripts/repro-native-ios.mjs';if(!fs.existsSync(d)){fs.copyFileSync(s,d);console.log('Creado scripts/repro-native-ios.mjs — edita email/clave y ejecuta npm run repro:ios');}else{console.log('Ya existe scripts/repro-native-ios.mjs');}\""
+    "repro:ios:setup": "node -e \"const fs=require('fs');const s='scripts/repro-native-ios.example.mjs';const d='scripts/repro-native-ios.mjs';if(!fs.existsSync(d)){fs.copyFileSync(s,d);console.log('Creado scripts/repro-native-ios.mjs — edita email/clave y ejecuta npm run repro:ios');}else{console.log('Ya existe scripts/repro-native-ios.mjs');}\"",
+    "verify:production": "node scripts/verify-production-frontend.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",

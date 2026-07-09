@@ -298,10 +298,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return false;
       };
 
+      const hydrateWithTimeout = () =>
+        Promise.race([
+          hydrate(),
+          new Promise<boolean>((resolve) => {
+            globalThis.setTimeout(() => resolve(false), 12_000);
+          }),
+        ]);
+
       try {
         for (let attempt = 0; attempt < 3 && !cancelled; attempt += 1) {
           try {
-            if (await hydrate()) return;
+            if (await hydrateWithTimeout()) return;
           } catch {
             if (attempt < 2) {
               await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));

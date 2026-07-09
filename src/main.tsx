@@ -6,6 +6,10 @@ import { prepareNativeWebView, registerPwaServiceWorker } from "./app/lib/native
 
 registerPwaServiceWorker();
 
-void prepareNativeWebView().then(() => {
-  createRoot(document.getElementById("root")!).render(<App />);
-});
+// Arranque inmediato: en iPhone la limpieza de SW/cache puede colgar y dejaba pantalla en blanco.
+void prepareNativeWebView();
+
+const rootEl = document.getElementById("root");
+if (rootEl) {
+  createRoot(rootEl).render(<App />);
+}
