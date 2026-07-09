@@ -7,6 +7,11 @@ import { fetchBridgeHealth, sendEscposToBridge } from './printBridgeClient';
 import { printDeliveryTicketBrowser, printTestTicketBrowser } from './printBrowser';
 import { isVertialNativeApp } from './isNativeApp';
 import { sendNativeEscpos } from './nativePrintClient';
+import {
+  isNativeWifiPrinterReady,
+  NATIVE_WIFI_PRINTER_SETUP_MESSAGE,
+  shouldBlockBrowserPrintOnNative,
+} from './nativePrintRouting';
 import { sendEposTestTicket, sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
 
 export type PrintDeliveryTicketResult = {
@@ -20,7 +25,11 @@ export async function printDeliveryTicket(
   const doc = buildTicketDocument(options);
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
-  if (isVertialNativeApp() && config.connectionType === 'network') {
+  if (isVertialNativeApp()) {
+    if (!isNativeWifiPrinterReady(config)) {
+      toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+      return { method: 'native' };
+    }
     const result = await sendNativeEscpos(escpos, config);
     if (result.ok) return { method: 'native' };
     toast.error(result.error || 'No se pudo imprimir en la impresora WiFi', {
@@ -34,7 +43,7 @@ export async function printDeliveryTicket(
             if (retry.ok) {
               toast.success('Ticket impreso');
             } else {
-              toast.error(retry.error || 'La impresora sigue sin responder. Revisa Ajustes → Impresora de tickets.', {
+              toast.error(retry.error || 'La impresora sigue sin responder. Revisa Ajustes → Tickets.', {
                 duration: 10000,
               });
             }
@@ -42,7 +51,7 @@ export async function printDeliveryTicket(
         },
       },
     });
-    return { method: 'browser' };
+    return { method: 'native' };
   }
 
   if (shouldUseEposPrint(config)) {
@@ -80,6 +89,11 @@ export async function printDeliveryTicket(
     }
   }
 
+  if (shouldBlockBrowserPrintOnNative()) {
+    toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+    return { method: 'native' };
+  }
+
   printDeliveryTicketBrowser(options, doc);
   return { method: 'browser' };
 }
@@ -89,14 +103,18 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
   const { encodeTestTicketEscpos } = await import('./escposEncode');
   const escpos = encodeTestTicketEscpos(config.paperWidthMm);
 
-  if (isVertialNativeApp() && config.connectionType === 'network') {
+  if (isVertialNativeApp()) {
+    if (!isNativeWifiPrinterReady(config)) {
+      toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+      return { method: 'native' };
+    }
     const result = await sendNativeEscpos(escpos, config);
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
       return { method: 'native' };
     }
     toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 8000 });
-    return { method: 'browser' };
+    return { method: 'native' };
   }
 
   if (shouldUseEposPrint(config)) {
@@ -147,6 +165,11 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
       toast.error('No se detectó el servicio de impresión en este dispositivo o PC del mostrador');
     }
     return { method: 'browser' };
+  }
+
+  if (shouldBlockBrowserPrintOnNative()) {
+    toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+    return { method: 'native' };
   }
 
   printTestTicketBrowser(config.paperWidthMm);

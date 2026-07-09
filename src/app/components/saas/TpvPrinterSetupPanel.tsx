@@ -134,6 +134,11 @@ export function TpvPrinterSetupPanel({
   const hasTerminalScope = Boolean(scope?.terminalId);
   const isNativeApp = isVertialNativeApp();
   const usesDirectWifi = isNativeApp || shouldUseEposPrint(config);
+  const visibleSetupOptions = useMemo(
+    () => (isNativeApp ? SETUP_OPTIONS.filter((option) => option.id === 'wifi') : SETUP_OPTIONS),
+    [isNativeApp],
+  );
+  const activeKind: PrinterSetupKind = isNativeApp ? 'wifi' : kind;
 
   const terminalHasOverride = useMemo(() => {
     if (!scope?.terminalId || !pdv) return false;
@@ -166,10 +171,11 @@ export function TpvPrinterSetupPanel({
   }, [refreshStatus]);
 
   useEffect(() => {
-    if (status && !status.configured && !showSetup) {
-      setShowSetup(true);
-    }
-  }, [status, showSetup]);
+    if (!isNativeApp) return;
+    if (config.connectionType === 'network') return;
+    patch({ connectionType: 'network' });
+    setKind('wifi');
+  }, [isNativeApp, config.connectionType]);
 
   const persistToStore = useCallback(async (next: VertialPrinterConfig, target: PrinterConfigTarget) => {
     if (!scope?.userId || !pdv?._id) return;
@@ -540,23 +546,27 @@ export function TpvPrinterSetupPanel({
               )}
 
               <div className="grid gap-2">
-                {SETUP_OPTIONS.map(({ id, label, hint, icon: Icon }) => (
+                {visibleSetupOptions.map(({ id, label, hint, icon: Icon }) => (
                   <button
                     key={id}
                     type="button"
                     onClick={() => selectKind(id)}
-                    className={`${settingsChoiceCardClass(kind === id)} flex gap-3 items-start text-left w-full`}
+                    className={`${settingsChoiceCardClass(activeKind === id)} flex gap-3 items-start text-left w-full`}
                   >
                     <Icon className="w-5 h-5 text-gray-600 dark:text-gray-400 shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{label}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">{hint}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
+                        {isNativeApp
+                          ? 'La app envía el ticket directo a la térmica WiFi, sin ventana de imprimir.'
+                          : hint}
+                      </p>
                     </div>
                   </button>
                 ))}
               </div>
 
-              {kind === 'wifi' && (
+              {activeKind === 'wifi' && (
                 <div className={`${settingsListCardClass()} space-y-4`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className={settingsLabelClass}>Impresora en la WiFi del local</p>

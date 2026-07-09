@@ -1,5 +1,6 @@
 import type { VertialPrinterConfig } from './printerConfig';
 import { DEFAULT_PRINTER_CONFIG } from './printerConfig';
+import { isVertialNativeApp } from './isNativeApp';
 import { isValidIpv4 } from './printerSetupStatus';
 
 export function normalizeVertialPrinterConfig(
@@ -22,6 +23,9 @@ export function normalizeVertialPrinterConfig(
 }
 
 export function isVertialPrinterConfigConfigured(config: VertialPrinterConfig): boolean {
+  if (isVertialNativeApp()) {
+    return config.connectionType === 'network' && isValidIpv4(config.networkHost);
+  }
   if (config.connectionType === 'browser') return true;
   if (config.connectionType === 'network') return isValidIpv4(config.networkHost);
   return Boolean(String(config.systemPrinterName || '').trim());
