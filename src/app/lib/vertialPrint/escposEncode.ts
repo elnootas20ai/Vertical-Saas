@@ -163,6 +163,33 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
   return concat(chunks);
 }
 
+/** Ticket corto para identificar una impresora concreta durante la búsqueda WiFi. */
+export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidthMm: 58 | 80 = 80): Uint8Array {
+  const width = paperWidthMm === 58 ? 32 : 42;
+  const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+  return concat([
+    command([ESC, 0x40]),
+    command([ESC, 0x61, 1]),
+    command([ESC, 0x45, 1]),
+    textLine('VERTIAL', width),
+    command([ESC, 0x45, 0]),
+    textLine('', width),
+    command([GS, 0x21, 0x11]),
+    textLine('ESTA ES TU', width === 32 ? 16 : 21),
+    textLine('IMPRESORA', width === 32 ? 16 : 21),
+    command([GS, 0x21, 0x00]),
+    textLine('', width),
+    textLine(`${host}:${port}`, width),
+    textLine(now, width),
+    textLine('', width),
+    textLine('Vuelve a la app y pulsa', width),
+    textLine('"Usar esta impresora"', width),
+    textLine('', width),
+    textLine('', width),
+    command([GS, 0x56, 0]),
+  ]);
+}
+
 export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
   const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   return encodeTicketEscpos({

@@ -21,6 +21,7 @@ import {
   discoverNativeNetworkPrinters,
   fetchBridgePrinters,
   fetchBridgeNetworkPrinters,
+  identifyNativePrinter,
   isVertialNativeApp,
   shouldUseEposPrint,
   loadLegacyPrinterConfig,
@@ -114,6 +115,9 @@ export function TpvPrinterSetupPanel({
   const [printers, setPrinters] = useState<Array<{ name: string }>>([]);
   const [networkPrinters, setNetworkPrinters] = useState<Array<{ host: string; port: number; label?: string }>>([]);
   const [scanningNetwork, setScanningNetwork] = useState(false);
+  const [scanDone, setScanDone] = useState(false);
+  const [identifyingHost, setIdentifyingHost] = useState<string | null>(null);
+  const [identifyResults, setIdentifyResults] = useState<Record<string, 'ok' | 'error'>>({});
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
@@ -239,7 +243,9 @@ export function TpvPrinterSetupPanel({
 
   const handleScanNetworkPrinters = useCallback(async () => {
     setScanningNetwork(true);
+    setScanDone(false);
     setNetworkPrinters([]);
+    setIdentifyResults({});
     try {
       if (isNativeApp) {
         const result = await discoverNativeNetworkPrinters({
@@ -250,16 +256,12 @@ export function TpvPrinterSetupPanel({
           return;
         }
         setNetworkPrinters(result.printers);
-        if (result.printers.length === 0) {
-          toast.message(
-            'No se encontró ninguna impresora térmica en la WiFi. Comprueba que está encendida, en la misma red y que Vertial tiene permiso de red local.',
-            { duration: 6000 },
-          );
-        } else if (result.printers.length === 1) {
+        setScanDone(true);
+        if (result.printers.length === 1) {
           patch({ networkHost: result.printers[0].host, networkPort: result.printers[0].port || 9100 });
           toast.success(`Impresora detectada: ${result.printers[0].host}`);
-        } else {
-          toast.success(`${result.printers.length} impresoras encontradas. Elige la tuya.`);
+        } else if (result.printers.length > 1) {
+          toast.success(`${result.printers.length} impresoras encontradas. Pulsa «¿Cuál es?» para identificar la tuya.`);
         }
         return;
       }
@@ -284,6 +286,7 @@ export function TpvPrinterSetupPanel({
         return;
       }
       setNetworkPrinters(result.printers);
+      setScanDone(true);
       if (result.printers.length === 0) {
         toast.message('No se encontró ninguna impresora térmica en la WiFi del local.');
       } else if (result.printers.length === 1) {
@@ -296,6 +299,30 @@ export function TpvPrinterSetupPanel({
       setScanningNetwork(false);
     }
   }, [config, isNativeApp]);
+
+  // En la app nativa, al abrir la sección WiFi buscamos impresoras sin que el usuario tenga que hacer nada.
+  useEffect(() => {
+    if (!isNativeApp || kind !== 'wifi' || !showSetup) return;
+    if (autoScanAttemptedRef.current) return;
+    autoScanAttemptedRef.current = true;
+    void handleScanNetworkPrinters();
+  }, [isNativeApp, kind, showSetup, handleScanNetworkPrinters]);
+
+  const handleIdentifyPrinter = useCallback(async (host: string, port: number) => {
+    const key = `${host}:${port}`;
+    setIdentifyingHost(key);
+    try {
+      const result = await identifyNativePrinter(host, port, config.paperWidthMm);
+      setIdentifyResults((prev) => ({ ...prev, [key]: result.ok ? 'ok' : 'error' }));
+      if (result.ok) {
+        toast.success('Mira qué impresora ha sacado el ticket «ESTA ES TU IMPRESORA» y pulsa «Usar esta».');
+      } else {
+        toast.error(result.error || `La impresora ${host} no ha respondido`);
+      }
+    } finally {
+      setIdentifyingHost(null);
+    }
+  }, [config.paperWidthMm]);
 
   return (
     <div className={variant === 'page' ? 'space-y-6 max-w-2xl' : 'flex flex-col min-h-0'}>
@@ -373,15 +400,31 @@ export function TpvPrinterSetupPanel({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => void handleTest()}
-            disabled={testing || saving}
-            className={`${settingsPrimaryBtnClass} w-full`}
-          >
-            {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
-            {testing ? 'Imprimiendo…' : 'Probar impresión'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void handleTest()}
+              disabled={testing || saving}
+              className={`${settingsPrimaryBtnClass} flex-1`}
+            >
+              {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+              {testing ? 'Imprimiendo…' : 'Probar impresión'}
+            </button>
+            {isNativeApp && kind === 'wifi' && status?.tone === 'warn' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSetup(true);
+                  void handleScanNetworkPrinters();
+                }}
+                disabled={scanningNetwork}
+                className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+              >
+                {scanningNetwork ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radar className="w-4 h-4" />}
+                Buscar de nuevo
+              </button>
+            )}
+          </div>
         </section>
 
         {!statusLoading && !usesDirectWifi && kind !== 'browser' && !status?.bridgeOk && (
@@ -441,7 +484,7 @@ export function TpvPrinterSetupPanel({
 
         {isNativeApp && kind === 'wifi' && (
           <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-            La app busca impresoras térmicas en la WiFi del local (Bonjour y escaneo de red). Pulsa «Buscar impresora» o espera unos segundos al abrir esta sección.
+            La app busca impresoras térmicas en la WiFi del local automáticamente al abrir la configuración. Si no aparece la tuya, pulsa «Buscar de nuevo».
           </p>
         )}
 
@@ -517,32 +560,101 @@ export function TpvPrinterSetupPanel({
                       ) : (
                         <Radar className="w-3.5 h-3.5" />
                       )}
-                      {scanningNetwork ? 'Buscando…' : 'Buscar impresora'}
+                      {scanningNetwork ? 'Buscando…' : scanDone || networkPrinters.length > 0 ? 'Buscar de nuevo' : 'Buscar impresora'}
                     </button>
                   </div>
+
+                  {scanningNetwork && (
+                    <div className="flex items-center gap-3 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/20 px-4 py-3">
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-600 dark:text-indigo-400 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-indigo-900 dark:text-indigo-200">Buscando impresoras en la WiFi…</p>
+                        <p className="text-xs text-indigo-700/80 dark:text-indigo-300/80 mt-0.5">Tarda unos 10 segundos. No cierres esta pantalla.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {!scanningNetwork && scanDone && networkPrinters.length === 0 && (
+                    <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/20 px-4 py-3 space-y-1.5">
+                      <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        No se encontró ninguna impresora
+                      </p>
+                      <ul className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed list-disc list-inside space-y-0.5">
+                        <li>Comprueba que la impresora está encendida y con papel.</li>
+                        <li>Tiene que estar en la misma WiFi que este dispositivo.</li>
+                        {isNativeApp && <li>Ajustes del dispositivo → Vertial → activa «Red local».</li>}
+                        <li>Si tienes su IP, escríbela abajo a mano.</li>
+                      </ul>
+                    </div>
+                  )}
 
                   {networkPrinters.length > 0 && (
                     <div className="space-y-2">
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Impresoras detectadas en la WiFi (puertos 9100–9102):
+                        {networkPrinters.length === 1
+                          ? 'Impresora detectada en la WiFi:'
+                          : `${networkPrinters.length} impresoras detectadas. Si no sabes cuál es la tuya, pulsa «¿Cuál es?»: sacará un ticket que dice «ESTA ES TU IMPRESORA».`}
                       </p>
                       <div className="grid gap-2">
-                        {networkPrinters.map((item) => (
-                          <button
-                            key={`${item.host}:${item.port}`}
-                            type="button"
-                            onClick={() => patch({
-                              networkHost: item.host,
-                              networkPort: item.port || 9100,
-                            })}
-                            className={settingsChoiceCardClass(config.networkHost === item.host) + ' text-left px-4 py-3 w-full'}
-                          >
-                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{item.host}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                              {item.label || `Impresora térmica · puerto ${item.port || 9100}`}
-                            </p>
-                          </button>
-                        ))}
+                        {networkPrinters.map((item) => {
+                          const key = `${item.host}:${item.port || 9100}`;
+                          const selected = config.networkHost === item.host;
+                          const identifying = identifyingHost === key;
+                          const identified = identifyResults[key];
+                          return (
+                            <div
+                              key={key}
+                              className={settingsChoiceCardClass(selected) + ' px-4 py-3 w-full'}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${selected ? 'bg-indigo-100 dark:bg-indigo-900/50' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                                  <Printer className={`w-4 h-4 ${selected ? 'text-indigo-600 dark:text-indigo-300' : 'text-gray-500 dark:text-gray-400'}`} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                                    {item.host}
+                                    {identified === 'ok' && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                                    {item.label || `Impresora térmica · puerto ${item.port || 9100}`}
+                                  </p>
+                                </div>
+                                {selected && (
+                                  <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-lg bg-indigo-600 text-white">
+                                    En uso
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex gap-2 mt-3">
+                                {!selected && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      patch({ networkHost: item.host, networkPort: item.port || 9100 });
+                                      toast.success(`Impresora guardada: ${item.host}`);
+                                    }}
+                                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    Usar esta
+                                  </button>
+                                )}
+                                {isNativeApp && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleIdentifyPrinter(item.host, item.port || 9100)}
+                                    disabled={identifyingHost !== null}
+                                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+                                  >
+                                    {identifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Receipt className="w-3.5 h-3.5" />}
+                                    {identifying ? 'Imprimiendo…' : selected ? 'Imprimir prueba' : '¿Cuál es?'}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -559,7 +671,9 @@ export function TpvPrinterSetupPanel({
                     />
                   </label>
                   <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                    Pulsa <strong>Buscar impresora</strong> para detectarla en la WiFi, o escribe la IP manualmente (sale en el ticket de configuración de la Epson).
+                    {isNativeApp
+                      ? 'Se rellena sola al elegir una impresora detectada. También puedes escribirla a mano (sale en el ticket de configuración de la Epson).'
+                      : 'Pulsa «Buscar impresora» para detectarla en la WiFi, o escribe la IP manualmente (sale en el ticket de configuración de la Epson).'}
                   </p>
                 </div>
               )}

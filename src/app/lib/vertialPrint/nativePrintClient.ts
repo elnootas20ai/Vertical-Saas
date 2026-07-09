@@ -78,18 +78,11 @@ function dedupeNativePrinters(printers: NativeNetworkPrinterInfo[]): NativeNetwo
   return Array.from(byHost.values()).sort((a, b) => a.host.localeCompare(b.host, 'es'));
 }
 
-export async function sendNativeEscpos(
+async function sendEscposToHost(
+  host: string,
+  port: number,
   bytes: Uint8Array,
-  config: VertialPrinterConfig,
 ): Promise<{ ok: boolean; error?: string }> {
-  if (!isVertialNativeApp()) {
-    return { ok: false, error: 'Impresión nativa solo disponible en la app Vertial' };
-  }
-  const host = String(config.networkHost || '').trim();
-  if (!host) {
-    return { ok: false, error: 'Indica la IP de la impresora' };
-  }
-  const port = Number(config.networkPort || 9100) || 9100;
   try {
     const ESCPOSProxy = await escposProxy();
     await withNativeTimeout(
@@ -102,6 +95,51 @@ export async function sendNativeEscpos(
     const message = error instanceof Error ? error.message : 'No se pudo conectar con la impresora';
     return { ok: false, error: message };
   }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function sendNativeEscpos(
+  bytes: Uint8Array,
+  config: VertialPrinterConfig,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isVertialNativeApp()) {
+    return { ok: false, error: 'Impresión nativa solo disponible en la app Vertial' };
+  }
+  const host = String(config.networkHost || '').trim();
+  if (!host) {
+    return { ok: false, error: 'Indica la IP de la impresora' };
+  }
+  const port = Number(config.networkPort || 9100) || 9100;
+
+  const first = await sendEscposToHost(host, port, bytes);
+  if (first.ok) return first;
+
+  // Un microcorte de WiFi no debe perder el ticket: un reintento antes de dar error.
+  await wait(900);
+  const second = await sendEscposToHost(host, port, bytes);
+  if (second.ok) return second;
+
+  return {
+    ok: false,
+    error: `La impresora ${host} no responde. Comprueba que está encendida y en la misma WiFi, o usa «Buscar impresora» en Ajustes por si cambió de dirección.`,
+  };
+}
+
+/** Imprime un ticket corto de identificación en una impresora detectada (sin guardarla aún). */
+export async function identifyNativePrinter(
+  host: string,
+  port: number,
+  paperWidthMm: 58 | 80 = 80,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!isVertialNativeApp()) {
+    return { ok: false, error: 'Solo disponible en la app Vertial' };
+  }
+  const { encodeIdentifyTicketEscpos } = await import('./escposEncode');
+  const bytes = encodeIdentifyTicketEscpos(host, port, paperWidthMm);
+  return sendEscposToHost(String(host || '').trim(), Number(port) || 9100, bytes);
 }
 
 export async function pingNativePrinter(

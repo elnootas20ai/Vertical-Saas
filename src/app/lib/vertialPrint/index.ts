@@ -41,7 +41,12 @@ export {
   resolveVertialPrintDownloadUrl,
 } from './vertialPrintInstaller';
 export { isVertialNativeApp } from './isNativeApp';
-export { sendNativeEscpos, pingNativePrinter, discoverNativeNetworkPrinters } from './nativePrintClient';
+export {
+  sendNativeEscpos,
+  pingNativePrinter,
+  discoverNativeNetworkPrinters,
+  identifyNativePrinter,
+} from './nativePrintClient';
 export type { NativeNetworkPrinterInfo } from './nativePrintClient';
 export {
   shouldUseEposPrint,
