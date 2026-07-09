@@ -243,7 +243,7 @@ export function TpvPrinterSetupPanel({
     try {
       if (isNativeApp) {
         const result = await discoverNativeNetworkPrinters({
-          timeoutMs: 25000,
+          timeoutMs: 12000,
         });
         if (!result.ok) {
           toast.error(result.error || 'No se pudo buscar impresoras');

@@ -62,7 +62,7 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
       tone: 'warn',
       label: 'Falta el número de la impresora',
       detail: isVertialNativeApp()
-        ? 'Pulsa «Buscar impresora» o espera: la app escanea la WiFi automáticamente.'
+        ? 'Pulsa «Buscar impresora» o escribe la IP manualmente (sale en el ticket de configuración de la Epson).'
         : 'Pon la IP de la impresora Epson (ej. 192.168.1.200). Sale en el ticket de configuración.',
       bridgeOk: false,
       configured: false,

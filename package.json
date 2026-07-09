@@ -45,7 +45,11 @@
     "test:verticals": "vitest run tests/verticalModuleBoundaries.test.js",
     "smoke:saas": "node scripts/smoke-saas.mjs",
     "check:saas": "npm run build && node scripts/smoke-saas.mjs",
-    "monei:preflight": "node scripts/monei-preflight.mjs"
+    "monei:preflight": "node scripts/monei-preflight.mjs",
+    "postinstall": "patch-package",
+    "check:native-print": "vitest run tests/nativePrintClient.test.ts",
+    "repro:ios": "node scripts/repro-native-ios.mjs",
+    "repro:ios:setup": "node -e \"const fs=require('fs');const s='scripts/repro-native-ios.example.mjs';const d='scripts/repro-native-ios.mjs';if(!fs.existsSync(d)){fs.copyFileSync(s,d);console.log('Creado scripts/repro-native-ios.mjs — edita email/clave y ejecuta npm run repro:ios');}else{console.log('Ya existe scripts/repro-native-ios.mjs');}\""
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
@@ -153,6 +157,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "cross-env": "^10.1.0",
     "jsdom": "^26.1.0",
+    "patch-package": "^8.0.1",
     "sharp": "^0.35.2",
     "tailwindcss": "4.1.12",
     "vite": "6.3.5",

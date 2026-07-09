@@ -1,8 +1,17 @@
 import type { VertialPrinterConfig } from './printerConfig';
 import { isVertialNativeApp } from './isNativeApp';
+import { withNativeCallTimeout } from './nativeCallTimeout';
 
 /** Puertos habituales de impresoras térmicas ESC/POS por red. */
 export const NATIVE_RAW_PRINT_PORTS = [9100, 9101, 9102] as const;
+
+const NATIVE_PRINT_TIMEOUT_MS = 12_000;
+const NATIVE_DISCOVER_TIMEOUT_MS = 12_000;
+const NATIVE_PING_TIMEOUT_MS = 5_000;
+
+function withNativeTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return withNativeCallTimeout(promise, timeoutMs, label);
+}
 
 export interface NativeNetworkPrinterInfo {
   host: string;
@@ -83,7 +92,11 @@ export async function sendNativeEscpos(
   const port = Number(config.networkPort || 9100) || 9100;
   try {
     const ESCPOSProxy = await escposProxy();
-    await ESCPOSProxy.print({ ip: host, port, message: bytesToBase64(bytes) });
+    await withNativeTimeout(
+      ESCPOSProxy.print({ ip: host, port, message: bytesToBase64(bytes) }),
+      NATIVE_PRINT_TIMEOUT_MS,
+      'Impresión',
+    );
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo conectar con la impresora';
@@ -100,7 +113,11 @@ export async function pingNativePrinter(
   const port = Number(config.networkPort || 9100) || 9100;
   try {
     const ESCPOSProxy = await escposProxy();
-    const { online, rtt } = await ESCPOSProxy.ping({ ip: host, port });
+    const { online, rtt } = await withNativeTimeout(
+      ESCPOSProxy.ping({ ip: host, port }),
+      NATIVE_PING_TIMEOUT_MS,
+      'Comprobación de impresora',
+    );
     return { ok: Boolean(online), rtt };
   } catch {
     return { ok: false };
@@ -117,13 +134,17 @@ export async function discoverNativeNetworkPrinters(options?: {
   const ports = (options?.ports?.length ? options.ports : [...NATIVE_RAW_PRINT_PORTS])
     .map((port) => Number(port) || 0)
     .filter((port) => port > 0);
-  const timeout = Math.max(5000, Number(options?.timeoutMs || 20000));
+  const timeout = Math.min(15_000, Math.max(5000, Number(options?.timeoutMs || NATIVE_DISCOVER_TIMEOUT_MS)));
   try {
     const ESCPOSProxy = await escposProxy();
-    const { printers } = await ESCPOSProxy.discover({
-      ports: ports.length > 0 ? ports : [...NATIVE_RAW_PRINT_PORTS],
-      timeout,
-    });
+    const { printers } = await withNativeTimeout(
+      ESCPOSProxy.discover({
+        ports: ports.length > 0 ? ports : [...NATIVE_RAW_PRINT_PORTS],
+        timeout,
+      }),
+      timeout + 3_000,
+      'Búsqueda de impresoras',
+    );
     const normalized = (printers || [])
       .map((item) => normalizeDiscoveredPrinter(item))
       .filter((item): item is NativeNetworkPrinterInfo => Boolean(item));

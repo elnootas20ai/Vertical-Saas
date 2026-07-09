@@ -1,0 +1,211 @@
+diff --git a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift
+index 6501e68..00128c5 100644
+--- a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift
++++ b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift
+@@ -7,6 +7,17 @@ import Darwin
+ 
+     @objc public func sendEscPosCommand(ip: String, port: Int, message: Data, completion: @escaping (Bool) -> Void) {
+         let connection = NWConnection(host: NWEndpoint.Host(ip), port: NWEndpoint.Port(integerLiteral: NWEndpoint.Port.IntegerLiteralType(port)), using: .tcp)
++        let queue = DispatchQueue(label: "escpos-proxy")
++        var finished = false
++
++        let finish: (Bool) -> Void = { success in
++            if finished {
++                return
++            }
++            finished = true
++            completion(success)
++            connection.cancel()
++        }
+ 
+         connection.stateUpdateHandler = { (newState) in
+             switch (newState) {
+@@ -15,24 +26,26 @@ import Darwin
+                 connection.send(content: message, completion: .contentProcessed({ (error) in
+                     if let error = error {
+                         print("Failed to send message: \(error)")
+-                        completion(false)
++                        finish(false)
+                     } else {
+                         print("Message sent successfully")
+-                        completion(true)
++                        finish(true)
+                     }
+-                    connection.cancel()
+                 }))
+             case .failed(let error):
+                 print("Failed to connect: \(error)")
+-                completion(false)
+-                connection.cancel()
++                finish(false)
++            case .cancelled:
++                finish(false)
+             default:
+                 break
+             }
+         }
+ 
+-        let queue = DispatchQueue(label: "escpos-proxy")
+         connection.start(queue: queue)
++        queue.asyncAfter(deadline: .now() + .seconds(10)) {
++            finish(false)
++        }
+     }
+ 
+     @objc public func ping(ip: String, port: Int, completion: @escaping (Bool, NSNumber?) -> Void) {
+@@ -70,41 +83,62 @@ import Darwin
+ 
+     @objc public func discoverPrinters(ports: [Int], timeout: Int, completion: @escaping ([[String: Any]]) -> Void) {
+         let targetPorts = ports.isEmpty ? [9100, 9101, 9102] : ports
++        let timeoutMs = max(3000, timeout)
+         var collected = [[String: Any]]()
+         var seen = Set<String>()
+         let group = DispatchGroup()
++        var completed = false
++        let lock = NSLock()
++
++        let safeComplete: () -> Void = {
++            lock.lock()
++            defer { lock.unlock() }
++            if completed {
++                return
++            }
++            completed = true
++            let deduped = collected.filter { item in
++                guard let ip = item["ip"] as? String, let port = item["port"] as? Int, let source = item["source"] as? String else {
++                    return false
++                }
++                let key = "\(ip):\(port):\(source)"
++                if seen.contains(key) {
++                    return false
++                }
++                seen.insert(key)
++                return true
++            }
++            completion(deduped)
++        }
+ 
+         group.enter()
+         mdnsHelper = MdnsCollector(resolver: { [weak self] data in
+             return self?.ipv4String(from: data)
+         }, completion: { [weak self] found in
++            lock.lock()
+             collected.append(contentsOf: found)
++            lock.unlock()
+             self?.mdnsHelper = nil
+             group.leave()
+         })
+-        mdnsHelper?.start(types: ["_pdl-datastream._tcp.", "_printer._tcp."], timeoutMs: timeout)
++        mdnsHelper?.start(types: ["_pdl-datastream._tcp.", "_printer._tcp."], timeoutMs: timeoutMs)
+ 
+         group.enter()
+         DispatchQueue.global(qos: .utility).async { [weak self] in
+-            if let scanResults = self?.scanSubnet(ports: targetPorts, timeoutMs: timeout) {
++            if let scanResults = self?.scanSubnet(ports: targetPorts, timeoutMs: timeoutMs) {
++                lock.lock()
+                 collected.append(contentsOf: scanResults)
++                lock.unlock()
+             }
+             group.leave()
+         }
+ 
+         group.notify(queue: DispatchQueue.main) {
+-            let deduped = collected.filter { item in
+-                guard let ip = item["ip"] as? String, let port = item["port"] as? Int, let source = item["source"] as? String else {
+-                    return false
+-                }
+-                let key = "\(ip):\(port):\(source)"
+-                if seen.contains(key) {
+-                    return false
+-                }
+-                seen.insert(key)
+-                return true
+-            }
+-            completion(deduped)
++            safeComplete()
++        }
++
++        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(timeoutMs + 1500)) {
++            safeComplete()
+         }
+     }
+ 
+@@ -117,7 +151,7 @@ import Darwin
+         let group = DispatchGroup()
+         var results = [[String: Any]]()
+         let lock = NSLock()
+-        let perHostTimeout = max(200, min(1000, timeoutMs / 4))
++        let perHostTimeout = max(200, min(800, timeoutMs / 6))
+ 
+         for host in 1...254 {
+             let ip = "\(prefix).\(host)"
+@@ -139,7 +173,7 @@ import Darwin
+             }
+         }
+ 
+-        group.wait()
++        _ = group.wait(timeout: .now() + .milliseconds(timeoutMs))
+         return results
+     }
+ 
+@@ -174,7 +208,7 @@ import Darwin
+ 
+         connection.start(queue: queue)
+         queue.asyncAfter(deadline: .now() + .milliseconds(timeoutMs)) {
+-            finish(reachable)
++            finish(false)
+         }
+ 
+         group.wait()
+@@ -237,6 +271,7 @@ import Darwin
+         private var browsers: [NetServiceBrowser] = []
+         private var services: [NetService] = []
+         private let resolver: (Data) -> String?
++        private var completed = false
+ 
+         init(resolver: @escaping (Data) -> String?, completion: @escaping ([[String: Any]]) -> Void) {
+             self.resolver = resolver
+@@ -250,8 +285,12 @@ import Darwin
+                 browser.delegate = self
+                 browsers.append(browser)
+                 browser.searchForServices(ofType: type, inDomain: "local.")
+-                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(timeoutMs)) { [weak browser] in
+-                    browser?.stop()
++            }
++            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(timeoutMs)) { [weak self] in
++                guard let self = self else { return }
++                self.browsers.forEach { $0.stop() }
++                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(400)) { [weak self] in
++                    self?.forceComplete()
+                 }
+             }
+         }
+@@ -282,13 +321,26 @@ import Darwin
+         }
+ 
+         private func finishSearch() {
++            if completed {
++                return
++            }
+             if pendingSearches > 0 {
+                 pendingSearches -= 1
+             }
+             if pendingSearches == 0 {
+-                completion?(results)
+-                completion = nil
++                forceComplete()
++            }
++        }
++
++        private func forceComplete() {
++            if completed {
++                return
+             }
++            completed = true
++            pendingSearches = 0
++            browsers.forEach { $0.stop() }
++            completion?(results)
++            completion = nil
+         }
+     }
+ }

@@ -39,7 +39,7 @@ export function resolveTpvCeoExitPath(
   return resolveRetailOpsHomePath(businessType);
 }
 
-/** Recarga agresiva de tiendas en pantallas operativas retail. */
+/** Recarga agresiva de tiendas en pantallas operativas retail y ajustes de tickets. */
 export function shouldForceRetailStoreReload(pathname: string): boolean {
   return (
     pathname.includes('/delivery-ops')
@@ -48,6 +48,7 @@ export function shouldForceRetailStoreReload(pathname: string): boolean {
     || pathname.startsWith('/saas/cocina')
     || pathname.startsWith('/saas/lista-espera')
     || pathname.startsWith('/saas/reservations')
+    || pathname.startsWith('/saas/settings')
   );
 }
 
