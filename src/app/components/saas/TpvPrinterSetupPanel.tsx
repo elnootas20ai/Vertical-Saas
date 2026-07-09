@@ -297,14 +297,6 @@ export function TpvPrinterSetupPanel({
     }
   }, [config, isNativeApp]);
 
-  useEffect(() => {
-    if (!isNativeApp || kind !== 'wifi' || !showSetup) return;
-    if (config.networkHost) return;
-    if (autoScanAttemptedRef.current || scanningNetwork) return;
-    autoScanAttemptedRef.current = true;
-    void handleScanNetworkPrinters();
-  }, [isNativeApp, kind, showSetup, config.networkHost, scanningNetwork, handleScanNetworkPrinters]);
-
   return (
     <div className={variant === 'page' ? 'space-y-6 max-w-2xl' : 'flex flex-col min-h-0'}>
       {variant === 'modal' && (

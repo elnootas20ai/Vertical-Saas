@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { enforceNativeProductionApiOrigin } from './nativeProductionGuard';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -8,7 +9,7 @@ function trimTrailingSlash(url: string): string {
 
 function nativeApiOrigin(): string {
   const configured = (env.VITE_NATIVE_API_ORIGIN ?? 'https://vertialapp.com').trim();
-  return trimTrailingSlash(configured || 'https://vertialapp.com');
+  return trimTrailingSlash(enforceNativeProductionApiOrigin(configured || 'https://vertialapp.com'));
 }
 
 /**
@@ -30,13 +31,21 @@ export function getApiBase(): string {
   if (raw.startsWith('http://') || raw.startsWith('https://')) {
     try {
       const u = new URL(raw.replace(/\/+$/, ''));
+      let origin = u.origin;
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        origin = enforceNativeProductionApiOrigin(origin);
+      }
       const pathname = u.pathname.replace(/\/+$/, '');
       if (!pathname || pathname === '/') {
-        return trimTrailingSlash(u.origin);
+        return trimTrailingSlash(origin);
       }
-      return trimTrailingSlash(`${u.origin}${u.pathname}`);
+      return trimTrailingSlash(`${origin}${pathname}`);
     } catch {
-      return trimTrailingSlash(raw);
+      const fallback = trimTrailingSlash(raw);
+      if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
+        return enforceNativeProductionApiOrigin(fallback);
+      }
+      return fallback;
     }
   }
 

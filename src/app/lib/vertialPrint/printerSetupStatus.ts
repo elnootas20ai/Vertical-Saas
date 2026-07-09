@@ -122,11 +122,31 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
     };
   }
 
+  if (kind === 'pc' && isVertialNativeApp()) {
+    return {
+      tone: 'warn',
+      label: 'Impresora en PC del mostrador',
+      detail: 'En el móvil elige «Impresora por WiFi» (Epson en la misma WiFi) o «Sin térmica».',
+      bridgeOk: false,
+      configured: false,
+    };
+  }
+
   if (kind === 'pc' && !String(config.systemPrinterName || '').trim()) {
     return {
       tone: 'warn',
       label: 'Elige la impresora del PC',
       detail: 'Selecciona la impresora instalada en el ordenador del mostrador.',
+      bridgeOk: false,
+      configured: false,
+    };
+  }
+
+  if (isVertialNativeApp()) {
+    return {
+      tone: 'warn',
+      label: 'Configura impresora WiFi',
+      detail: 'Pulsa «Buscar impresora» cuando quieras escanear la red del local.',
       bridgeOk: false,
       configured: false,
     };

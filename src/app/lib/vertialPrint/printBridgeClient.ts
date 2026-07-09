@@ -3,6 +3,12 @@ import {
   type VertialPrinterConfig,
 } from './printerConfig';
 import { resolveEffectivePrinterConfig } from './printerActiveScope';
+import { isVertialNativeApp } from './isNativeApp';
+
+/** Vertial Print (127.0.0.1 / PC del mostrador) no existe dentro del propio iPhone/Android. */
+function bridgeAvailableOnDevice(): boolean {
+  return !isVertialNativeApp();
+}
 
 export interface BridgeHealth {
   ok: boolean;
@@ -52,6 +58,7 @@ function bridgeUrl(config?: VertialPrinterConfig): string {
 }
 
 export async function fetchBridgeHealth(timeoutMs = 1200, config?: VertialPrinterConfig): Promise<BridgeHealth> {
+  if (!bridgeAvailableOnDevice()) return { ok: false };
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -66,6 +73,7 @@ export async function fetchBridgeHealth(timeoutMs = 1200, config?: VertialPrinte
 }
 
 export async function fetchBridgePrinters(config?: VertialPrinterConfig): Promise<BridgePrinterInfo[]> {
+  if (!bridgeAvailableOnDevice()) return [];
   try {
     const res = await fetch(`${bridgeUrl(config)}/v1/printers`);
     if (!res.ok) return [];
@@ -81,6 +89,9 @@ export async function fetchBridgeNetworkPrinters(
   config?: VertialPrinterConfig,
   options?: { port?: number; timeoutMs?: number },
 ): Promise<{ ok: boolean; printers: BridgeNetworkPrinterInfo[]; error?: string }> {
+  if (!bridgeAvailableOnDevice()) {
+    return { ok: false, printers: [], error: 'Búsqueda vía PC solo en navegador o tablet con Vertial Print' };
+  }
   const port = Number(options?.port || 9100) || 9100;
   try {
     const controller = new AbortController();
@@ -118,6 +129,9 @@ export async function sendEscposToBridge(
   bytes: Uint8Array,
   config: VertialPrinterConfig,
 ): Promise<{ ok: boolean; error?: string }> {
+  if (!bridgeAvailableOnDevice()) {
+    return { ok: false, error: 'Impresión vía PC del mostrador no disponible en la app del móvil' };
+  }
   const connection = buildBridgeConnection(config);
   if (!connection) {
     return { ok: false, error: 'Configura la impresora en el TPV (icono de impresora arriba)' };

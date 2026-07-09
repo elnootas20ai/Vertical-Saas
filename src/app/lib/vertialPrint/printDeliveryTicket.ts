@@ -49,13 +49,13 @@ export async function printDeliveryTicket(
     return { method: 'browser' };
   }
 
-  if (config.preferBridge && config.connectionType !== 'browser') {
+  if (config.preferBridge && config.connectionType !== 'browser' && !isVertialNativeApp()) {
     const health = await fetchBridgeHealth(1400, config);
     if (health.ok) {
       const result = await sendEscposToBridge(escpos, config);
       if (result.ok) return { method: 'bridge' };
       toast.warning(result.error || 'Impresión directa fallida. Usando navegador…');
-    } else if (config.connectionType === 'network' && !isVertialNativeApp()) {
+    } else if (config.connectionType === 'network') {
       toast.warning('Inicia Vertial Print en este PC (npm run print-bridge) y vuelve a probar.');
     } else if (config.connectionType !== 'browser') {
       toast.warning('No se detectó el servicio de impresión. Usando ventana del dispositivo…');
@@ -112,7 +112,7 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
     return { method: 'browser' };
   }
 
-  if (config.preferBridge && config.connectionType !== 'browser') {
+  if (config.preferBridge && config.connectionType !== 'browser' && !isVertialNativeApp()) {
     const health = await fetchBridgeHealth(1400, config);
     if (health.ok) {
       const result = await sendEscposToBridge(escpos, config);
@@ -123,7 +123,7 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
       toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 8000 });
       return { method: 'browser' };
     }
-    if (config.connectionType === 'network' && !isVertialNativeApp()) {
+    if (config.connectionType === 'network') {
       toast.error('Inicia Vertial Print en este PC: npm run print-bridge (misma red que la impresora).');
     } else {
       toast.error('No se detectó el servicio de impresión en este dispositivo o PC del mostrador');
