@@ -12,7 +12,7 @@
  * Las variables VITE_* en local-values.env se inyectan al proceso de build.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import {
@@ -207,12 +207,23 @@ if (upload.status !== 0) {
 // directorio padre no tiene permisos de "search" para www-data, nginx devuelve
 // 403 Forbidden en /. Reajustamos dueño y permisos automáticamente para evitar
 // tener que ejecutar `npm run deploy:fix-dist` a mano tras cada deploy.
+// Limpieza segura de huérfanos: borrar SOLO lo que no existe en el dist/ local.
+// (El "quedarse con el más nuevo por fecha" borraba chunks legítimos: un build
+// genera varios index-*.js y scp no garantiza el orden de subida.)
+const localAssetNames = readdirSync(resolve(REPO_ROOT, 'dist', 'assets'));
+const keepList = ` ${localAssetNames.join(' ')} `;
+
 const permsScript = `set -e
 DIST=${shellQuote(remotePath.replace(/\/+$/, ''))}
-# Sin rsync --delete quedan JS viejos; el SW/PWA puede seguir sirviendo el bundle anterior.
+KEEP=${shellQuote(keepList)}
 if [ -d "$DIST/assets" ]; then
-  for pattern in 'index-*.js' 'index.es-*.js'; do
-    ls -t "$DIST/assets"/$pattern 2>/dev/null | tail -n +2 | xargs -r rm -f
+  for f in "$DIST/assets"/*; do
+    [ -f "$f" ] || continue
+    base=$(basename "$f")
+    case "$KEEP" in
+      *" $base "*) ;;
+      *) rm -f "$f" ;;
+    esac
   done
 fi
 chown -R www-data:www-data "$DIST"
