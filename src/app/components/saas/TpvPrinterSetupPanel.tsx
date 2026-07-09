@@ -610,6 +610,12 @@ export function TpvPrinterSetupPanel({
                         No se encontró ninguna impresora
                       </p>
                       <ul className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed list-disc list-inside space-y-0.5">
+                        {isNativeApp && (
+                          <li>
+                            <strong>¿Te acaba de salir el aviso de «red local»?</strong> Acéptalo y pulsa «Buscar de nuevo»:
+                            la primera búsqueda se hace antes de que des el permiso.
+                          </li>
+                        )}
                         <li>Comprueba que la impresora está encendida y con papel.</li>
                         <li>Tiene que estar en la misma WiFi que este dispositivo.</li>
                         {isNativeApp && <li>Ajustes del dispositivo → Vertial → activa «Red local».</li>}
