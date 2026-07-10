@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -11,6 +11,7 @@ import {
   MapPin,
   Monitor,
   Package,
+  Printer,
   Shield,
   Users,
   type LucideIcon,
@@ -82,15 +83,39 @@ const SLIDES: Slide[] = [
       { icon: Shield, title: 'RGPD y Europa', desc: 'Cifrado, backups diarios y datos en Europa.' },
     ],
   },
+  {
+    icon: Printer,
+    eyebrow: 'Impresora WiFi',
+    title: 'Imprime tickets como en Revo',
+    subtitle:
+      'Vertial busca la impresora térmica en la WiFi de tu local. iOS pedirá permiso de red local: pulsa Permitir para detectar e imprimir.',
+    features: [
+      { icon: Printer, title: 'Buscar impresoras', desc: 'Detecta Epson y otras térmicas en la WiFi.' },
+      { icon: Monitor, title: 'TPV en tablet', desc: 'Tickets de pedidos y cierre desde el mostrador.' },
+      { icon: Check, title: 'Sin cables', desc: 'Solo WiFi del local; sin PC obligatorio en iPhone/iPad.' },
+    ],
+  },
 ];
 
-const SWIPE_THRESHOLD_PX = 50;
+const SWIPE_THRESHOLD_PX = 48;
+const DRAG_LOCK_PX = 10;
 
 export function NativeOnboarding() {
   const navigate = useNavigate();
   const [index, setIndex] = useState(0);
-  const touchStartX = useRef<number | null>(null);
+  const [dragX, setDragX] = useState(0);
+  const [isSnapping, setIsSnapping] = useState(false);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+  const dragLocked = useRef(false);
+  const dragXRef = useRef(0);
+  const indexRef = useRef(index);
   const isLast = index === SLIDES.length - 1;
+
+  useEffect(() => {
+    indexRef.current = index;
+  }, [index]);
 
   const finish = useCallback(
     (destination: string) => {
@@ -100,92 +125,153 @@ export function NativeOnboarding() {
     [navigate],
   );
 
-  const goTo = (next: number) => {
+  const goTo = useCallback((next: number) => {
     setIndex(Math.max(0, Math.min(SLIDES.length - 1, next)));
-  };
+  }, []);
 
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
+  const applyEdgeResistance = useCallback((delta: number, currentIndex: number) => {
+    if (
+      (currentIndex === 0 && delta > 0) ||
+      (currentIndex === SLIDES.length - 1 && delta < 0)
+    ) {
+      return delta * 0.28;
+    }
+    return delta;
+  }, []);
 
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return;
-    const delta = e.changedTouches[0].clientX - touchStartX.current;
-    touchStartX.current = null;
-    if (delta < -SWIPE_THRESHOLD_PX) goTo(index + 1);
-    else if (delta > SWIPE_THRESHOLD_PX) goTo(index - 1);
-  };
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartX.current = e.touches[0].clientX;
+      touchStartY.current = e.touches[0].clientY;
+      dragLocked.current = false;
+      dragXRef.current = 0;
+      setIsSnapping(false);
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      const dx = e.touches[0].clientX - touchStartX.current;
+      const dy = e.touches[0].clientY - touchStartY.current;
+
+      if (!dragLocked.current) {
+        if (Math.abs(dx) < DRAG_LOCK_PX && Math.abs(dy) < DRAG_LOCK_PX) return;
+        if (Math.abs(dy) > Math.abs(dx)) return;
+        dragLocked.current = true;
+      }
+
+      e.preventDefault();
+      const offset = applyEdgeResistance(dx, indexRef.current);
+      dragXRef.current = offset;
+      setDragX(offset);
+    };
+
+    const onTouchEnd = () => {
+      if (!dragLocked.current) return;
+
+      const delta = dragXRef.current;
+      dragLocked.current = false;
+      dragXRef.current = 0;
+      setDragX(0);
+      setIsSnapping(true);
+
+      if (delta < -SWIPE_THRESHOLD_PX) goTo(indexRef.current + 1);
+      else if (delta > SWIPE_THRESHOLD_PX) goTo(indexRef.current - 1);
+    };
+
+    track.addEventListener('touchstart', onTouchStart, { passive: true });
+    track.addEventListener('touchmove', onTouchMove, { passive: false });
+    track.addEventListener('touchend', onTouchEnd, { passive: true });
+    track.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
+    return () => {
+      track.removeEventListener('touchstart', onTouchStart);
+      track.removeEventListener('touchmove', onTouchMove);
+      track.removeEventListener('touchend', onTouchEnd);
+      track.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [applyEdgeResistance, goTo]);
+
+  const trackTransform = `translate3d(calc(-${index * 100}% + ${dragX}px), 0, 0)`;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-zinc-950 text-white overflow-hidden"
+      className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-zinc-950 text-white"
       style={{
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
     >
-      {/* Glow de fondo estilo landing */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -top-32 left-1/2 h-96 w-[130%] -translate-x-1/2 rounded-full opacity-25 blur-3xl"
-        style={{ background: 'radial-gradient(closest-side, #10b981, transparent)' }}
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(ellipse 90% 55% at 50% -5%, rgba(16,185,129,0.22), transparent 70%), radial-gradient(ellipse 60% 40% at 85% 100%, rgba(16,185,129,0.08), transparent 65%)',
+        }}
       />
 
-      {/* Header: logo + saltar */}
       <div className="relative flex items-center justify-between px-6 pt-4">
         <VertialLogo size="md" className="brightness-0 invert" />
         {!isLast && (
           <button
             type="button"
             onClick={() => finish(AUTH_PATHS.entry)}
-            className="text-sm font-medium text-zinc-400 hover:text-white transition-colors px-2 py-1"
+            className="rounded-full px-3 py-1.5 text-sm font-medium text-zinc-400 transition-colors hover:bg-white/5 hover:text-white"
           >
             Saltar
           </button>
         )}
       </div>
 
-      {/* Carrusel */}
-      <div className="relative flex-1 overflow-hidden">
+      <div
+        ref={trackRef}
+        className="relative min-h-0 flex-1 touch-pan-y overflow-hidden"
+        style={{ touchAction: 'pan-y' }}
+      >
         <div
-          className="flex h-full transition-transform duration-300 ease-out"
-          style={{ transform: `translateX(-${index * 100}%)` }}
+          className="flex h-full will-change-transform"
+          style={{
+            transform: trackTransform,
+            transition: dragX !== 0 || !isSnapping ? 'none' : 'transform 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
         >
           {SLIDES.map((slide) => {
             const SlideIcon = slide.icon;
             return (
               <div
                 key={slide.eyebrow}
-                className="flex h-full w-full shrink-0 flex-col justify-center px-7 py-4 overflow-y-auto"
+                className="flex h-full w-full shrink-0 flex-col justify-center overflow-y-auto overscroll-contain px-6 py-3"
               >
                 <div className="mx-auto w-full max-w-md">
-                  <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10">
-                    <SlideIcon className="h-8 w-8 text-emerald-400" />
+                  <div className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 ring-1 ring-emerald-400/25">
+                    <SlideIcon className="h-7 w-7 text-emerald-400" />
                   </div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-emerald-400">
+
+                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-400/90">
                     {slide.eyebrow}
                   </p>
-                  <h1 className="mb-3 text-3xl font-extrabold leading-tight tracking-tight">
+                  <h1 className="mb-3 text-[1.65rem] font-bold leading-[1.15] tracking-tight text-white sm:text-3xl">
                     {slide.title}
                   </h1>
-                  <p className="mb-7 text-base leading-relaxed text-zinc-400">{slide.subtitle}</p>
+                  <p className="mb-6 text-[15px] leading-relaxed text-zinc-400">{slide.subtitle}</p>
 
-                  <div className="space-y-3">
-                    {slide.features.map((feature) => {
+                  <div className="overflow-hidden rounded-2xl bg-white/[0.04] ring-1 ring-white/10 backdrop-blur-sm">
+                    {slide.features.map((feature, featureIndex) => {
                       const FeatureIcon = feature.icon;
+                      const isLastFeature = featureIndex === slide.features.length - 1;
                       return (
                         <div
                           key={feature.title}
-                          className="flex items-start gap-3 rounded-xl border border-zinc-800 bg-zinc-900/70 p-3.5"
+                          className={`flex items-start gap-3.5 px-4 py-3.5 ${isLastFeature ? '' : 'border-b border-white/[0.06]'}`}
                         >
-                          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10">
-                            <FeatureIcon className="h-4.5 w-4.5 text-emerald-400" />
+                          <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10">
+                            <FeatureIcon className="h-4 w-4 text-emerald-400" />
                           </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white">{feature.title}</p>
-                            <p className="text-sm leading-snug text-zinc-400">{feature.desc}</p>
+                          <div className="min-w-0 pt-0.5">
+                            <p className="text-sm font-semibold text-zinc-100">{feature.title}</p>
+                            <p className="mt-0.5 text-sm leading-snug text-zinc-400">{feature.desc}</p>
                           </div>
                         </div>
                       );
@@ -198,30 +284,32 @@ export function NativeOnboarding() {
         </div>
       </div>
 
-      {/* Footer: dots + CTA */}
-      <div className="relative px-7 pb-6 pt-2">
+      <div className="relative px-6 pb-6 pt-2">
         <div className="mb-5 flex items-center justify-center gap-2">
           {SLIDES.map((slide, i) => (
             <button
               key={slide.eyebrow}
               type="button"
               aria-label={`Ir a la página ${i + 1}`}
-              onClick={() => goTo(i)}
-              className={`h-2 rounded-full transition-all duration-300 ${
-                i === index ? 'w-7 bg-emerald-400' : 'w-2 bg-zinc-700'
+              aria-current={i === index ? 'step' : undefined}
+              onClick={() => {
+                setDragX(0);
+                setIsSnapping(true);
+                goTo(i);
+              }}
+              className={`h-1.5 rounded-full transition-all duration-200 ${
+                i === index ? 'w-6 bg-emerald-400' : 'w-1.5 bg-zinc-600'
               }`}
             />
           ))}
         </div>
 
         {isLast ? (
-          <div className="mx-auto w-full max-w-md space-y-3">
+          <div className="mx-auto w-full max-w-md space-y-2.5">
             <button
               type="button"
-              onClick={() =>
-                finish(AUTH_PATHS.register)
-              }
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-zinc-950 transition-colors hover:bg-emerald-400"
+              onClick={() => finish(AUTH_PATHS.register)}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-zinc-950 shadow-lg shadow-emerald-500/20 transition-colors active:bg-emerald-400"
             >
               Crear mi cuenta gratis
               <ArrowRight className="h-5 w-5" />
@@ -229,7 +317,7 @@ export function NativeOnboarding() {
             <button
               type="button"
               onClick={() => finish(AUTH_PATHS.entry)}
-              className="w-full rounded-xl border border-zinc-700 px-6 py-3.5 text-base font-medium text-zinc-200 transition-colors hover:bg-zinc-900"
+              className="w-full rounded-2xl border border-zinc-700/80 bg-zinc-900/40 px-6 py-3.5 text-base font-medium text-zinc-200 transition-colors active:bg-zinc-800/80"
             >
               Ya tengo cuenta
             </button>
@@ -238,8 +326,11 @@ export function NativeOnboarding() {
           <div className="mx-auto w-full max-w-md">
             <button
               type="button"
-              onClick={() => goTo(index + 1)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-zinc-950 transition-colors hover:bg-emerald-400"
+              onClick={() => {
+                setIsSnapping(true);
+                goTo(index + 1);
+              }}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-zinc-950 shadow-lg shadow-emerald-500/20 transition-colors active:bg-emerald-400"
             >
               Siguiente
               <ArrowRight className="h-5 w-5" />

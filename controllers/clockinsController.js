@@ -24,11 +24,13 @@ import {
   computeClockinMinutes,
   deriveClockinStatus,
   normalizeClockinUserId,
+  resolveVisibleMemberIds,
   salesPointRefsSameStore,
   isMemberAssignedToSalesPoint,
   memberEmploymentSalesPointRef,
 } from '../services/clockinsAccess.js';
 import { isBusinessTeamMember } from '../services/businessAccess.js';
+import { isManagerRole } from '../services/managerRoles.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -38,8 +40,6 @@ function getSchedulesDbName() {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const ADMIN_ROLES = new Set(['Admin', 'Gerente']);
 
 function getAuthUserId(req) {
   return normalizeClockinUserId(req.authUser?.userId || req.authUser?.user_id || '');
@@ -58,61 +58,6 @@ function allBusinessMemberIds(business) {
   const ownerId = normalizeClockinUserId(business.owner_user_id);
   if (ownerId) ids.add(ownerId);
   return Array.from(ids);
-}
-
-function getSubordinateIds(business, orgchart, userId) {
-  if (!orgchart?.nodes?.length || !orgchart?.edges?.length) return null;
-
-  const userNode = orgchart.nodes.find(
-    (n) => n.data?.user_id === userId,
-  );
-  if (!userNode) return null;
-
-  const collected = new Set();
-  const queue = [userNode.id];
-
-  while (queue.length) {
-    const current = queue.shift();
-    const children = orgchart.edges
-      .filter((e) => e.source === current)
-      .map((e) => e.target);
-    for (const childId of children) {
-      if (!collected.has(childId)) {
-        collected.add(childId);
-        queue.push(childId);
-      }
-    }
-  }
-
-  return orgchart.nodes
-    .filter((n) => collected.has(n.id) && n.data?.user_id)
-    .map((n) => n.data.user_id);
-}
-
-async function resolveVisibleMemberIds(req, business, orgchart, requesterId) {
-  const requester = normalizeClockinUserId(requesterId);
-  if (!requester) return [];
-
-  const member = getMember(business, requester);
-  const ownerId = normalizeClockinUserId(business.owner_user_id);
-  const authRole = String(req.authUser?.role || '').trim();
-  const isManager =
-    (member && ADMIN_ROLES.has(member.role))
-    || (ownerId && ownerId === requester)
-    || (authRole === 'Admin' && ownerId === requester);
-
-  if (isManager) {
-    return allBusinessMemberIds(business);
-  }
-
-  if (!member) return [];
-
-  const subordinateIds = getSubordinateIds(business, orgchart, requester);
-  if (subordinateIds && subordinateIds.length > 0) {
-    return [requester, ...subordinateIds.map((id) => normalizeClockinUserId(id)).filter(Boolean)];
-  }
-
-  return [requester];
 }
 
 async function loadOrgChart(req, businessId) {
@@ -164,9 +109,14 @@ function resolveMemberLabel(memberMap, memberId, storedName = '') {
   return info.fullName || info.email || 'Sin nombre';
 }
 
-async function enrichMemberMap(req, business) {
+async function enrichMemberMap(req, business, extraUserIds = []) {
   const map = buildMemberMap(business);
-  const ids = allBusinessMemberIds(business);
+  const ids = [
+    ...new Set([
+      ...allBusinessMemberIds(business),
+      ...extraUserIds.map((id) => normalizeClockinUserId(id)).filter(Boolean),
+    ]),
+  ];
   await Promise.all(
     ids.map(async (userId) => {
       if (map[userId]?.fullName?.trim()) return;
@@ -215,6 +165,12 @@ function listRealTeamMemberIds(business, visibleIds, memberMap) {
   const ownerId = String(business.owner_user_id || '').trim();
   if (ownerId && visibleIds.includes(ownerId) && !isDemoTeamMember(memberMap, ownerId)) {
     ids.add(ownerId);
+  }
+  for (const uid of visibleIds) {
+    const normalized = normalizeClockinUserId(uid);
+    if (!normalized || ids.has(normalized)) continue;
+    if (isDemoTeamMember(memberMap, normalized)) continue;
+    ids.add(normalized);
   }
   return Array.from(ids);
 }
@@ -403,7 +359,7 @@ export async function listClockins(req, res) {
     }
     records = dedupeClockinDocumentsById(records);
 
-    const memberMap = await enrichMemberMap(req, business);
+    const memberMap = await enrichMemberMap(req, business, visibleIds);
     const enrichRecord = (r) => ({
       ...r,
       member_role: memberMap[r.member_id]?.role || r.member_role || 'Usuario',
@@ -618,7 +574,7 @@ export async function getPerformance(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     const member = getMember(business, requesterId);
-    if (!member || !ADMIN_ROLES.has(member.role)) {
+    if (!member || !isManagerRole(member.role)) {
       return res.status(403).json({ ok: false, error: 'Solo gerentes y administradores pueden ver rendimiento' });
     }
 
@@ -701,7 +657,7 @@ export async function adjustClockinEntry(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     const member = getMember(business, requesterId);
-    if (!member || !ADMIN_ROLES.has(member.role)) {
+    if (!member || !isManagerRole(member.role)) {
       return res.status(403).json({ ok: false, error: 'Solo gerentes y administradores pueden ajustar fichajes' });
     }
 
@@ -1070,7 +1026,7 @@ export async function getAbsenteeism(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     const member = getMember(business, requesterId);
-    if (!member || !ADMIN_ROLES.has(member.role)) {
+    if (!member || !isManagerRole(member.role)) {
       return res.status(403).json({ ok: false, error: 'Solo gerentes y administradores pueden ver absentismo' });
     }
 
@@ -1282,7 +1238,7 @@ export async function getPayrollSummary(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     const member = getMember(business, requesterId);
-    if (!member || !ADMIN_ROLES.has(member.role)) {
+    if (!member || !isManagerRole(member.role)) {
       return res.status(403).json({ ok: false, error: 'Solo gerentes y administradores pueden ver resumen de nóminas' });
     }
 
@@ -1470,7 +1426,7 @@ export async function crossCheck(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     const member = getMember(business, requesterId);
-    if (!member || !ADMIN_ROLES.has(member.role)) {
+    if (!member || !isManagerRole(member.role)) {
       return res.status(403).json({ ok: false, error: 'Solo Admin/Gerente puede ver cross-check' });
     }
 
@@ -1840,7 +1796,7 @@ function resolveClockinNotificationRecipients(business, memberId) {
   }
   for (const m of business?.members || []) {
     if (!m.user_id || m.user_id === memberId) continue;
-    if (ADMIN_ROLES.has(m.role)) recipients.add(m.user_id);
+    if (isManagerRole(m.role)) recipients.add(m.user_id);
   }
   return Array.from(recipients);
 }

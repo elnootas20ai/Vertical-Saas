@@ -28,6 +28,8 @@ import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { toast } from 'sonner';
 import { bulkCreateVerticalEntries, entryStr, entryNum } from '../../lib/bulkVerticalImport';
+import { authFetch } from '../../lib/authApi';
+import { getApiBase } from '../../lib/apiBase';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1204,7 +1206,10 @@ function ImportCrmModal({ userId, onClose, onImported }: { userId: string; onClo
     if (!searchQ.trim() || searchQ.length < 2) return;
     setLoading(true);
     try {
-      const r = await fetch(`/api/clients/${encodeURIComponent(userId)}?q=${encodeURIComponent(searchQ)}&limit=20`, { headers: { 'Content-Type': 'application/json' } });
+      const r = await authFetch(
+        `${getApiBase()}/api/clients/${encodeURIComponent(userId)}?q=${encodeURIComponent(searchQ)}&limit=20`,
+        { headers: { 'Content-Type': 'application/json' } },
+      );
       const data = await r.json();
       setResults(data.clients || []);
     } catch { setResults([]); }

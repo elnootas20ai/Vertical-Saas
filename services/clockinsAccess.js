@@ -2,9 +2,9 @@ import {
   BUSINESSES_DB,
   ensureDatabase,
   getDocument,
+  listAccounts,
 } from './couchdb.js';
-
-const ADMIN_ROLES = new Set(['Admin', 'Gerente']);
+import { isManagerRole } from './managerRoles.js';
 
 export function normalizeClockinUserId(id) {
   return String(id || '').trim().replace(/^account:/, '');
@@ -28,7 +28,7 @@ export function canMutateClockinForMember(business, requesterId, targetMemberId)
   const ownerId = normalizeClockinUserId(business?.owner_user_id);
   if (ownerId && ownerId === req) return true;
   const member = getMember(business, req);
-  return Boolean(member && ADMIN_ROLES.has(member.role));
+  return Boolean(member && isManagerRole(member.role));
 }
 
 /** TPV tablet / gerente en tienda: fichar al equipo en un PDV concreto. */
@@ -46,7 +46,7 @@ export function canAccessStoreClockins(business, requesterId) {
   const ownerId = normalizeClockinUserId(business?.owner_user_id);
   if (ownerId && ownerId === req) return true;
   const member = getMember(business, req);
-  if (member && ADMIN_ROLES.has(member.role)) return true;
+  if (member && isManagerRole(member.role)) return true;
   for (const m of business?.members || []) {
     if (normalizeClockinUserId(m.user_id) === req && m.status !== 'inactive' && !m.deletedAt) {
       return true;
@@ -63,6 +63,25 @@ function allBusinessMemberIds(business) {
   );
   const ownerId = normalizeClockinUserId(business.owner_user_id);
   if (ownerId) ids.add(ownerId);
+  return Array.from(ids);
+}
+
+/** Miembros del negocio + cuentas vinculadas (linkedBusinessId) aunque falten en business.members. */
+export async function collectExtendedBusinessTeamIds(req, business) {
+  const ids = new Set(allBusinessMemberIds(business));
+  const bid = String(business?.business_id || business?.id || '').trim();
+  if (!bid) return Array.from(ids);
+  try {
+    const accounts = await listAccounts(req);
+    for (const account of accounts) {
+      if (String(account?.linkedBusinessId || '').trim() !== bid) continue;
+      const uid = normalizeClockinUserId(account.user_id);
+      if (!uid || account.status === 'inactive') continue;
+      ids.add(uid);
+    }
+  } catch {
+    /* listAccounts opcional en tests */
+  }
   return Array.from(ids);
 }
 
@@ -101,12 +120,12 @@ export async function resolveVisibleMemberIds(expressReq, business, orgchart, re
   const ownerId = normalizeClockinUserId(business.owner_user_id);
   const authRole = String(expressReq?.authUser?.role || '').trim();
   const isManager =
-    (member && ADMIN_ROLES.has(member.role))
-    || (ownerId && ownerId === requester)
-    || (authRole === 'Admin' && ownerId === requester);
+    isManagerRole(member?.role)
+    || isManagerRole(authRole)
+    || (ownerId && ownerId === requester);
 
   if (isManager) {
-    return allBusinessMemberIds(business);
+    return collectExtendedBusinessTeamIds(expressReq, business);
   }
 
   if (!member) return [];
@@ -146,7 +165,7 @@ export function isMemberAssignedToSalesPoint(
 
   const role = String(memberRole || '').trim();
   const ref = String(assignmentRef || '').trim();
-  if (ADMIN_ROLES.has(role) && !ref) return true;
+  if (isManagerRole(role) && !ref) return true;
   if (!ref) return false;
 
   const wc = String(workCenterId || '').trim();

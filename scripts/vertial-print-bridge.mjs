@@ -85,8 +85,8 @@ function sendNetwork(host, port, buffer) {
         resolve(true);
       });
     });
-    socket.setTimeout(12000, () => {
-      socket.destroy(new Error('Timeout conectando con la impresora de red'));
+    socket.setTimeout(4500, () => {
+      socket.destroy(new Error('La impresora no responde (timeout)'));
     });
     socket.on('error', reject);
   });
@@ -246,6 +246,24 @@ app.get('/v1/printers', (_req, res) => {
     ok: true,
     printers: names.map((name, index) => ({ name, isDefault: index === 0 })),
   });
+});
+
+app.get('/v1/ping', async (req, res) => {
+  try {
+    const host = String(req.query.host || '').trim();
+    const port = Number(req.query.port || 9100) || 9100;
+    const timeoutMs = Math.min(5000, Math.max(500, Number(req.query.timeoutMs || 2000) || 2000));
+    if (!host) {
+      return res.status(400).json({ ok: false, error: 'Falta host' });
+    }
+    const hit = await probeNetworkHost(host, port, timeoutMs);
+    return res.json({ ok: Boolean(hit), host, port });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'No se pudo comprobar la impresora',
+    });
+  }
 });
 
 app.get('/v1/network-printers', async (req, res) => {

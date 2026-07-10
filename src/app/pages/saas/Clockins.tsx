@@ -95,6 +95,9 @@ import { ClockinsManagerTeamView } from '../../components/saas/clockins/Clockins
 import { ClockinHistoryPanel } from '../../components/saas/clockins/ClockinHistoryPanel';
 import { resolveClockinMemberName } from '../../lib/clockinsDisplay';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
+import { isManagerRole } from '../../lib/managerRoles';
+import { memberMatchesStoreFilter } from '../../lib/clockinsMemberStore';
+import { listUsersRequest, type AuthUser } from '../../lib/authApi';
 
 // ── Pestañas (3 nivel superior) + sub-pestañas dentro de Análisis ───────────
 type Tab = 'team' | 'analysis' | 'alerts';
@@ -118,7 +121,7 @@ export function Clockins() {
   );
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
   const myRole = myMember?.role || user?.role || 'Usuario';
-  const isAdmin = myRole === 'Admin' || myRole === 'Gerente';
+  const isAdmin = isManagerRole(myRole) || isManagerRole(user?.role);
 
   // Una sola jerarquía de 3 pestañas. El "mi fichaje" ya no es pestaña: vive
   // siempre en una barra superior compacta, así el CEO puede fichar sin perder
@@ -142,6 +145,7 @@ export function Clockins() {
   const [myClockExpanded, setMyClockExpanded] = useState(false);
   const [myClockBarVisible, setMyClockBarVisible] = useState(false);
   const [manualClockOpen, setManualClockOpen] = useState(false);
+  const [teamUsers, setTeamUsers] = useState<AuthUser[]>([]);
 
   // Vacaciones aprobadas, usadas para cruzar contra absentismo y marcar
   // ausencias justificadas en vez de ausencias "sin más".
@@ -492,35 +496,41 @@ export function Clockins() {
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
+  useEffect(() => {
+    if (!businessId || !isAdmin) {
+      setTeamUsers([]);
+      return;
+    }
+    void listUsersRequest(businessId)
+      .then((res) => setTeamUsers(res.users || []))
+      .catch(() => setTeamUsers([]));
+  }, [businessId, isAdmin]);
+
   const filteredTeamRecords = useMemo(() => {
     if (filterWorkCenter === 'all') return teamRecords;
-    return teamRecords.filter((r) => {
-      const wc =
-        (r as { workCenterId?: string }).workCenterId ??
-        (currentBusiness?.members?.find((m) => m.user_id === r.member_id) as { workCenterId?: string } | undefined)?.workCenterId;
-      return wc === filterWorkCenter;
-    });
-  }, [teamRecords, filterWorkCenter, currentBusiness?.members]);
+    return teamRecords.filter((r) =>
+      memberMatchesStoreFilter(
+        r.member_id,
+        filterWorkCenter,
+        teamUsers,
+        r.sales_point_id,
+      ),
+    );
+  }, [teamRecords, filterWorkCenter, teamUsers]);
 
   const filteredActiveNow = useMemo(() => {
     if (filterWorkCenter === 'all') return activeNow;
-    return activeNow.filter((a) => {
-      const wc =
-        (a as { workCenterId?: string }).workCenterId ??
-        (currentBusiness?.members?.find((m) => m.user_id === a.member_id) as { workCenterId?: string } | undefined)?.workCenterId;
-      return wc === filterWorkCenter;
-    });
-  }, [activeNow, filterWorkCenter, currentBusiness?.members]);
+    return activeNow.filter((a) =>
+      memberMatchesStoreFilter(a.member_id, filterWorkCenter, teamUsers),
+    );
+  }, [activeNow, filterWorkCenter, teamUsers]);
 
   const filteredOrgNodes = useMemo(() => {
     if (filterWorkCenter === 'all') return orgNodes;
-    return orgNodes.filter((n) => {
-      const wc =
-        (n as { workCenterId?: string }).workCenterId ??
-        (currentBusiness?.members?.find((m) => m.user_id === n.user_id) as { workCenterId?: string } | undefined)?.workCenterId;
-      return wc === filterWorkCenter;
-    });
-  }, [orgNodes, filterWorkCenter, currentBusiness?.members]);
+    return orgNodes.filter((n) =>
+      memberMatchesStoreFilter(n.user_id, filterWorkCenter, teamUsers),
+    );
+  }, [orgNodes, filterWorkCenter, teamUsers]);
 
   const filteredOrgEdges = useMemo(() => {
     if (filterWorkCenter === 'all') return orgEdges;
@@ -530,17 +540,16 @@ export function Clockins() {
 
   const filteredPerformance = useMemo(() => {
     if (filterWorkCenter === 'all') return performance;
-    return performance.filter((p) => {
-      const wc = (currentBusiness?.members?.find((m) => m.user_id === p.member_id) as { workCenterId?: string } | undefined)?.workCenterId;
-      return wc === filterWorkCenter;
-    });
-  }, [performance, filterWorkCenter, currentBusiness?.members]);
+    return performance.filter((p) =>
+      memberMatchesStoreFilter(p.member_id, filterWorkCenter, teamUsers),
+    );
+  }, [performance, filterWorkCenter, teamUsers]);
 
   const filteredStats = useMemo((): ClockinStats | null => {
     if (!stats) return null;
     if (filterWorkCenter === 'all') return stats;
     const wcMatch = (memberId: string) =>
-      (currentBusiness?.members?.find((m) => m.user_id === memberId) as { workCenterId?: string } | undefined)?.workCenterId === filterWorkCenter;
+      memberMatchesStoreFilter(memberId, filterWorkCenter, teamUsers);
     const byMember = stats.byMember.filter((m) => wcMatch(m.member_id));
     const totalMinutes = byMember.reduce((s, m) => s + m.totalMinutes, 0);
     const totalBreakMinutes = byMember.reduce((s, m) => s + m.breakMinutes, 0);
@@ -558,7 +567,7 @@ export function Clockins() {
       },
       byMember,
     };
-  }, [stats, filterWorkCenter, currentBusiness?.members]);
+  }, [stats, filterWorkCenter, teamUsers]);
 
   const todayTotalHours = useMemo(
     () => filteredTeamRecords.reduce((s, r) => s + r.totalMinutes, 0),
@@ -758,7 +767,7 @@ export function Clockins() {
               onOpenManualClockin={() => setManualClockOpen(true)}
               onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
               onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
-              businessMembers={(currentBusiness?.members || []).filter((m) => {
+              businessMembers={teamUsers.filter((m) => {
                 const email = String(m.email || '').toLowerCase();
                 const name = String(m.fullName || '').trim();
                 if (email.endsWith('@test.local')) return false;
@@ -805,7 +814,7 @@ export function Clockins() {
             onOpenManualClockin={() => setManualClockOpen(true)}
             onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
             onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
-            businessMembers={currentBusiness?.members}
+            businessMembers={teamUsers.length > 0 ? teamUsers : currentBusiness?.members}
             workCentersFilterAllLabel={hrCopy.clockinsFilterAllCenters}
           />
         ) : null}
@@ -844,7 +853,7 @@ export function Clockins() {
         {manualClockOpen && isAdmin && (
           <ManualClockinModal
             businessId={businessId}
-            members={(currentBusiness?.members || []).filter((m) => m.user_id !== user?.user_id)}
+            members={(teamUsers.length > 0 ? teamUsers : currentBusiness?.members || []).filter((m) => m.user_id !== user?.user_id)}
             actingUserName={user?.fullName || user?.email || 'Admin'}
             onClose={() => setManualClockOpen(false)}
             onCreated={() => { setManualClockOpen(false); loadTeamRecords(); loadActiveNow(); }}

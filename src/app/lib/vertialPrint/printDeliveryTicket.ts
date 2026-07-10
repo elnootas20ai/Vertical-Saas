@@ -3,7 +3,7 @@ import type { DeliveryTicketPrintOptions } from '../deliveryTicketTypes';
 import { buildTicketDocument } from './ticketDocument';
 import { encodeTicketEscpos } from './escposEncode';
 import { resolveEffectivePrinterConfig } from './printerActiveScope';
-import { fetchBridgeHealth, sendEscposToBridge } from './printBridgeClient';
+import { fetchBridgeHealth, fetchBridgePingPrinter, sendEscposToBridge } from './printBridgeClient';
 import { printDeliveryTicketBrowser, printTestTicketBrowser } from './printBrowser';
 import { isVertialNativeApp } from './isNativeApp';
 import { sendNativeEscpos } from './nativePrintClient';
@@ -13,6 +13,7 @@ import {
   shouldBlockBrowserPrintOnNative,
 } from './nativePrintRouting';
 import { sendEposTestTicket, sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
+import type { VertialPrinterConfig } from './printerConfig';
 
 export type PrintDeliveryTicketResult = {
   method: 'epos' | 'native' | 'bridge' | 'browser';
@@ -113,6 +114,35 @@ export async function printDeliveryTicket(
   return { method: 'browser', ok: true };
 }
 
+async function bridgeTestPrint(
+  escpos: Uint8Array,
+  config: VertialPrinterConfig,
+): Promise<{ ok: boolean; error?: string }> {
+  const health = await fetchBridgeHealth(1400, config);
+  if (!health.ok) {
+    return {
+      ok: false,
+      error: config.connectionType === 'network'
+        ? 'Inicia Vertial Print en este PC (npm run dev:local o VertialPrint.exe).'
+        : 'No se detectó el servicio de impresión en este PC.',
+    };
+  }
+  if (config.connectionType === 'network') {
+    const host = String(config.networkHost || '').trim();
+    const ping = await fetchBridgePingPrinter(host, config, {
+      port: config.networkPort || 9100,
+      timeoutMs: 1800,
+    });
+    if (!ping.ok) {
+      return {
+        ok: false,
+        error: ping.error || `La impresora ${host} no responde. Comprueba que está encendida y en la misma red.`,
+      };
+    }
+  }
+  return sendEscposToBridge(escpos, config, { timeoutMs: 5000 });
+}
+
 export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
   const config = resolveEffectivePrinterConfig();
   const { encodeTestTicketEscpos } = await import('./escposEncode');
@@ -123,7 +153,7 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
       toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
       return { method: 'native', ok: false };
     }
-    const result = await sendNativeEscpos(escpos, config);
+    const result = await sendNativeEscpos(escpos, config, { retry: false, timeoutMs: 3500 });
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
       return { method: 'native', ok: true };
@@ -164,21 +194,12 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
   }
 
   if (config.preferBridge && config.connectionType !== 'browser' && !isVertialNativeApp()) {
-    const health = await fetchBridgeHealth(1400, config);
-    if (health.ok) {
-      const result = await sendEscposToBridge(escpos, config);
-      if (result.ok) {
-        toast.success('Ticket de prueba enviado a la impresora');
-        return { method: 'bridge', ok: true };
-      }
-      toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 8000 });
-      return { method: 'bridge', ok: false };
+    const result = await bridgeTestPrint(escpos, config);
+    if (result.ok) {
+      toast.success('Ticket de prueba enviado a la impresora');
+      return { method: 'bridge', ok: true };
     }
-    if (config.connectionType === 'network') {
-      toast.error('Inicia Vertial Print en este PC: npm run print-bridge (misma red que la impresora).');
-    } else {
-      toast.error('No se detectó el servicio de impresión en este dispositivo o PC del mostrador');
-    }
+    toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 8000 });
     return { method: 'bridge', ok: false };
   }
 

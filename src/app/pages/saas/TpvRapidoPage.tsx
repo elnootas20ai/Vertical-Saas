@@ -685,12 +685,15 @@ function TpvRapidoCeoBoard() {
   }
 
   return (
-    <TpvChromeScope bottomBar={!stockOpen && !isRestaurantVertical ? <WorkerTpvBottomBar ceoMode onExitCeo={() => navigate(tpvExitPath)} /> : null}>
+    <TpvChromeScope
+      insetBottomBar
+      bottomBar={!stockOpen && !isRestaurantVertical ? <WorkerTpvBottomBar ceoMode onExitCeo={() => navigate(tpvExitPath)} /> : null}
+    >
       <div
-        className={`flex flex-col overflow-hidden bg-stone-100 dark:bg-stone-950 ${
+        className={`flex flex-col overflow-hidden h-full min-h-0 bg-stone-100 dark:bg-stone-950 ${
           isRestaurantVertical
             ? 'fixed inset-0 z-30'
-            : 'h-[100svh] min-h-[100svh] bg-gray-50 dark:bg-gray-950'
+            : 'bg-gray-50 dark:bg-gray-950'
         }`}
       >
         <TpvOfflineBanner />

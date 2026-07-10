@@ -1,5 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { withNativeCallTimeout } from '../src/app/lib/vertialPrint/nativeCallTimeout';
+import { buildOrderedLanPrefixes } from '../src/app/lib/vertialPrint/nativePrintClient';
+
+describe('buildOrderedLanPrefixes', () => {
+  it('prioriza la subred de la IP indicada', () => {
+    expect(buildOrderedLanPrefixes('192.168.50.42')[0]).toBe('192.168.50');
+    expect(buildOrderedLanPrefixes('192.168.50.42').includes('192.168.1')).toBe(true);
+  });
+
+  it('usa el orden habitual sin hint', () => {
+    expect(buildOrderedLanPrefixes()[0]).toBe('192.168.1');
+  });
+});
 
 describe('withNativeCallTimeout', () => {
   beforeEach(() => {

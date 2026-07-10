@@ -20,9 +20,12 @@ const TpvChromeContext = createContext<TpvChromeContextValue | null>(null);
 export function TpvChromeScope({
   children,
   bottomBar,
+  /** Si true, la barra inferior va dentro del viewport (100svh) y no empuja el scroll de la página. */
+  insetBottomBar = false,
 }: {
   children: ReactNode;
   bottomBar?: ReactNode | null;
+  insetBottomBar?: boolean;
 }) {
   const [suppressBottomBar, setSuppressBottomBarState] = useState(false);
   const [orderFlowActive, setOrderFlowActiveState] = useState(false);
@@ -39,8 +42,17 @@ export function TpvChromeScope({
 
   return (
     <TpvChromeContext.Provider value={value}>
-      {children}
-      {!suppressBottomBar && bottomBar}
+      {insetBottomBar ? (
+        <div className="flex flex-col h-[100svh] min-h-[100svh] max-h-[100svh] overflow-hidden w-full">
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">{children}</div>
+          {!suppressBottomBar && bottomBar}
+        </div>
+      ) : (
+        <>
+          {children}
+          {!suppressBottomBar && bottomBar}
+        </>
+      )}
     </TpvChromeContext.Provider>
   );
 }

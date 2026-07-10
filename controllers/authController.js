@@ -848,6 +848,12 @@ export async function listUsers(req, res) {
           business.owner_user_id,
           ...memberById.keys(),
         ].filter(Boolean));
+        const scopedBusinessId = String(business.business_id || businessId || '').trim();
+        for (const account of accounts) {
+          if (String(account?.linkedBusinessId || '').trim() !== scopedBusinessId) continue;
+          const uid = String(account?.user_id || '').trim();
+          if (uid) memberIds.add(uid);
+        }
         accounts = accounts.filter((a) => memberIds.has(a.user_id));
       } else {
         accounts = [];
@@ -882,6 +888,9 @@ export async function listUsers(req, res) {
       }
       if (member?.email?.trim() && !String(sanitized.email || '').trim()) {
         sanitized.email = member.email.trim();
+      }
+      if (member?.role?.trim() && (!sanitized.role || sanitized.role === 'Usuario')) {
+        sanitized.role = member.role.trim();
       }
       users.push(sanitized);
     }

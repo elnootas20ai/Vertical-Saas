@@ -84,6 +84,37 @@ export async function fetchBridgePrinters(config?: VertialPrinterConfig): Promis
   }
 }
 
+/** Comprueba si la impresora responde en la red (vía Vertial Print en el PC). */
+export async function fetchBridgePingPrinter(
+  host: string,
+  config?: VertialPrinterConfig,
+  options?: { port?: number; timeoutMs?: number },
+): Promise<{ ok: boolean; error?: string }> {
+  if (!bridgeAvailableOnDevice()) {
+    return { ok: false, error: 'Comprobación vía PC solo en navegador' };
+  }
+  const trimmedHost = String(host || '').trim();
+  if (!trimmedHost) return { ok: false, error: 'Falta IP de la impresora' };
+  const port = Number(options?.port || 9100) || 9100;
+  const timeoutMs = Math.min(5000, Math.max(800, Number(options?.timeoutMs || 2000) || 2000));
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs + 400);
+    const res = await fetch(
+      `${bridgeUrl(config)}/v1/ping?host=${encodeURIComponent(trimmedHost)}&port=${port}&timeoutMs=${timeoutMs}`,
+      { signal: controller.signal },
+    );
+    clearTimeout(timer);
+    const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.error || 'La impresora no responde en esa IP' };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'No se pudo comprobar la impresora. ¿Vertial Print está abierto?' };
+  }
+}
+
 /** Busca impresoras térmicas WiFi (puerto 9100) en la red local via Vertial Print. */
 export async function fetchBridgeNetworkPrinters(
   config?: VertialPrinterConfig,
@@ -128,6 +159,7 @@ export async function fetchBridgeNetworkPrinters(
 export async function sendEscposToBridge(
   bytes: Uint8Array,
   config: VertialPrinterConfig,
+  options?: { timeoutMs?: number },
 ): Promise<{ ok: boolean; error?: string }> {
   if (!bridgeAvailableOnDevice()) {
     return { ok: false, error: 'Impresión vía PC del mostrador no disponible en la app del móvil' };
@@ -137,7 +169,10 @@ export async function sendEscposToBridge(
     return { ok: false, error: 'Configura la impresora en el TPV (icono de impresora arriba)' };
   }
 
+  const timeoutMs = Math.min(8000, Math.max(2500, Number(options?.timeoutMs || 5500) || 5500));
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(`${bridgeUrl(config)}/v1/print`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -145,13 +180,21 @@ export async function sendEscposToBridge(
         connection,
         data: toBase64(bytes),
       }),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     const payload = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
     if (!res.ok || !payload.ok) {
       return { ok: false, error: payload.error || 'No se pudo imprimir via Vertial Print' };
     }
     return { ok: true };
-  } catch {
-    return { ok: false, error: 'No se detectó el servicio de impresión. Comprueba el PC del mostrador.' };
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === 'AbortError';
+    return {
+      ok: false,
+      error: aborted
+        ? 'La impresora no respondió a tiempo. Comprueba que está encendida y en la misma red.'
+        : 'No se detectó el servicio de impresión. Comprueba el PC del mostrador.',
+    };
   }
 }

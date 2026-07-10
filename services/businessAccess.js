@@ -1,7 +1,6 @@
 import { findBusinessById, listBusinessesByUser } from './couchdb.js';
 import { getAuthUserId, getMember } from './clockinsAccess.js';
-
-const ADMIN_ROLES = new Set(['Admin', 'Gerente', 'GerenteGrupo', 'Administrador', 'Encargado']);
+import { isManagerRole } from './managerRoles.js';
 
 function normalizeBusinessId(value) {
   return String(value || '').replace(/^business:/, '').trim();
@@ -23,7 +22,7 @@ export function canManageBusinessTeam(business, userId) {
   if (!uid || !business) return false;
   if (normalizeBusinessId(business.owner_user_id) === uid) return true;
   const member = getMember(business, uid);
-  return Boolean(member && ADMIN_ROLES.has(member.role));
+  return Boolean(member && isManagerRole(member.role));
 }
 
 export async function assertBusinessTeamAccess(req, businessId) {

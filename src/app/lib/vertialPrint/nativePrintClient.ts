@@ -5,14 +5,34 @@ import { withNativeCallTimeout } from './nativeCallTimeout';
 /** Puertos habituales de impresoras térmicas ESC/POS por red. */
 export const NATIVE_RAW_PRINT_PORTS = [9100, 9101, 9102] as const;
 
-const NATIVE_PRINT_TIMEOUT_MS = 7_000;
-const NATIVE_PRINT_RETRY_TIMEOUT_MS = 5_000;
+const NATIVE_PRINT_TIMEOUT_MS = 3_500;
+const NATIVE_PRINT_RETRY_TIMEOUT_MS = 2_500;
+const NATIVE_PRINT_RETRY_DELAY_MS = 300;
 const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 5_000;
-const NATIVE_DISCOVER_PING_SWEEP_MS = 8_000;
+const NATIVE_DISCOVER_PING_SWEEP_MS = 10_000;
 const NATIVE_PING_TIMEOUT_MS = 350;
 
 /** Prefijos habituales en WiFi de locales (España/Europa). */
-const COMMON_LAN_PREFIXES = ['192.168.1', '192.168.0', '192.168.4', '10.0.0'] as const;
+export const COMMON_LAN_PREFIXES = [
+  '192.168.1',
+  '192.168.0',
+  '192.168.2',
+  '192.168.4',
+  '192.168.50',
+  '10.0.0',
+  '172.16.0',
+] as const;
+
+/** Ordena subredes poniendo primero la del dispositivo/impresora conocida (mejor cobertura en iOS). */
+export function buildOrderedLanPrefixes(hintHost?: string): string[] {
+  const hint = String(hintHost || '').trim();
+  const match = hint.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$/);
+  const hintPrefix = match?.[1];
+  const ordered = hintPrefix
+    ? [hintPrefix, ...COMMON_LAN_PREFIXES.filter((prefix) => prefix !== hintPrefix)]
+    : [...COMMON_LAN_PREFIXES];
+  return ordered;
+}
 
 function withNativeTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return withNativeCallTimeout(promise, timeoutMs, label);
@@ -100,14 +120,14 @@ async function discoverByPingSweep(
   ports: number[],
   timeoutMs: number,
   onProgress?: (checked: number, total: number) => void,
+  subnetHintHost?: string,
 ): Promise<NativeNetworkPrinterInfo[]> {
   const targetPorts = ports.length > 0 ? ports : [...NATIVE_RAW_PRINT_PORTS];
-  const primaryPort = targetPorts[0] || 9100;
   const deadline = Date.now() + timeoutMs;
   const found: NativeNetworkPrinterInfo[] = [];
   const batchSize = 20;
 
-  const prefixes = [...COMMON_LAN_PREFIXES];
+  const prefixes = buildOrderedLanPrefixes(subnetHintHost);
   const allHosts = prefixes.flatMap((prefix) =>
     Array.from({ length: 254 }, (_, index) => `${prefix}.${index + 1}`),
   );
@@ -191,6 +211,7 @@ function wait(ms: number): Promise<void> {
 export async function sendNativeEscpos(
   bytes: Uint8Array,
   config: VertialPrinterConfig,
+  options?: { retry?: boolean; timeoutMs?: number },
 ): Promise<{ ok: boolean; error?: string }> {
   if (!isVertialNativeApp()) {
     return { ok: false, error: 'Impresión nativa solo disponible en la app Vertial' };
@@ -200,11 +221,19 @@ export async function sendNativeEscpos(
     return { ok: false, error: 'Indica la IP de la impresora' };
   }
   const port = Number(config.networkPort || 9100) || 9100;
+  const timeoutMs = Math.max(1500, Number(options?.timeoutMs || NATIVE_PRINT_TIMEOUT_MS));
+  const allowRetry = options?.retry !== false;
 
-  const first = await sendEscposToHost(host, port, bytes, NATIVE_PRINT_TIMEOUT_MS);
+  const first = await sendEscposToHost(host, port, bytes, timeoutMs);
   if (first.ok) return first;
+  if (!allowRetry) {
+    return {
+      ok: false,
+      error: first.error || `La impresora ${host} no responde. Comprueba que está encendida y en la misma WiFi.`,
+    };
+  }
 
-  await wait(600);
+  await wait(NATIVE_PRINT_RETRY_DELAY_MS);
   const second = await sendEscposToHost(host, port, bytes, NATIVE_PRINT_RETRY_TIMEOUT_MS);
   if (second.ok) return second;
 
@@ -255,6 +284,8 @@ export async function discoverNativeNetworkPrinters(options?: {
   ports?: number[];
   timeoutMs?: number;
   onProgress?: (checked: number, total: number) => void;
+  /** IP guardada o del router: prioriza esa subred en el barrido (iPad/iPhone). */
+  subnetHintHost?: string;
 }): Promise<{ ok: boolean; printers: NativeNetworkPrinterInfo[]; error?: string }> {
   if (!isVertialNativeApp()) {
     return { ok: false, printers: [], error: 'Búsqueda en red solo en la app Vertial' };
@@ -284,6 +315,7 @@ export async function discoverNativeNetworkPrinters(options?: {
       ports,
       NATIVE_DISCOVER_PING_SWEEP_MS,
       options?.onProgress,
+      options?.subnetHintHost,
     );
     if (swept.length > 0) {
       return { ok: true, printers: swept };

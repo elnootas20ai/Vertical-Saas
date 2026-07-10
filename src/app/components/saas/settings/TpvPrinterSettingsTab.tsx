@@ -84,8 +84,9 @@ export function TpvPrinterSettingsTab() {
       return;
     }
     setActivePrinterScope({ pdvId: pdv._id, pdv });
-    return () => setActivePrinterScope({});
   }, [pdv?._id, pdv?._rev]);
+
+  useEffect(() => () => setActivePrinterScope({}), []);
 
   const handlePdvUpdated = useCallback(() => {
     void refresh();

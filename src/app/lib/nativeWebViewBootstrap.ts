@@ -38,10 +38,36 @@ export async function prepareNativeWebView(): Promise<void> {
 }
 
 /**
- * Registra el service worker de la PWA solo en web: en la app nativa el bundle
+ * En desarrollo el SW de la PWA puede dejar el HTML inicial («Cargando Vertial…»)
+ * sin cargar el JS nuevo tras cambios en Vite. Nunca bloquea el arranque.
+ */
+export async function clearStaleWebCachesInDev(): Promise<void> {
+  if (!import.meta.env.DEV) return;
+
+  const cleanup = async () => {
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+    if ('caches' in window) {
+      const names = await caches.keys();
+      await Promise.all(names.map((name) => caches.delete(name)));
+    }
+  };
+
+  try {
+    await withTimeout(cleanup(), NATIVE_BOOTSTRAP_TIMEOUT_MS);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Registra el service worker de la PWA solo en web producción: en la app nativa el bundle
  * ya viene dentro del binario y un SW cachearía una versión antigua.
  */
 export function registerPwaServiceWorker(): void {
+  if (import.meta.env.DEV) return;
   if (Capacitor.isNativePlatform()) return;
   if (!('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {

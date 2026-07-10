@@ -8,10 +8,11 @@ import {
   putDocument,
   BUSINESSES_DB,
 } from '../services/couchdb.js';
+import { resolveVisibleMemberIds, loadOrgChartForAccess } from '../services/clockinsAccess.js';
+import { isManagerRole } from '../services/managerRoles.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ADMIN_ROLES = new Set(['Admin', 'Gerente']);
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 const DEFAULT_CONFIG = {
@@ -39,43 +40,6 @@ function getMember(business, userId) {
 
 function getAuthUserId(req) {
   return String(req.authUser?.userId || req.authUser?.user_id || '').trim();
-}
-
-function getSubordinateIds(business, orgchart, userId) {
-  if (!orgchart?.nodes?.length || !orgchart?.edges?.length) return null;
-  const userNode = orgchart.nodes.find((n) => n.data?.user_id === userId);
-  if (!userNode) return null;
-  const collected = new Set();
-  const queue = [userNode.id];
-  while (queue.length) {
-    const current = queue.shift();
-    const children = orgchart.edges.filter((e) => e.source === current).map((e) => e.target);
-    for (const childId of children) {
-      if (!collected.has(childId)) {
-        collected.add(childId);
-        queue.push(childId);
-      }
-    }
-  }
-  return orgchart.nodes
-    .filter((n) => collected.has(n.id) && n.data?.user_id)
-    .map((n) => n.data.user_id);
-}
-
-async function resolveVisibleMemberIds(req, business, orgchart, requesterId) {
-  const member = getMember(business, requesterId);
-  if (!member) return [];
-  if (ADMIN_ROLES.has(member.role)) return business.members.map((m) => m.user_id);
-  const subordinateIds = getSubordinateIds(business, orgchart, requesterId);
-  if (subordinateIds && subordinateIds.length > 0) return [requesterId, ...subordinateIds];
-  return [requesterId];
-}
-
-async function loadOrgChart(req, businessId) {
-  try {
-    await ensureDatabase(req, BUSINESSES_DB);
-    return await getDocument(req, BUSINESSES_DB, `orgchart:${businessId}`);
-  } catch { return null; }
 }
 
 function todayStr() {
@@ -139,7 +103,7 @@ export async function generateAlerts(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     const member = getMember(business, requesterId);
-    if (!member || !ADMIN_ROLES.has(member.role)) {
+    if (!member || !isManagerRole(member.role)) {
       return res.status(403).json({ ok: false, error: 'Solo administradores y gerentes pueden generar alertas' });
     }
 
@@ -338,7 +302,7 @@ export async function listAlerts(req, res) {
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
-    const orgchart = await loadOrgChart(req, businessId);
+    const orgchart = await loadOrgChartForAccess(req, businessId);
     const visibleIds = await resolveVisibleMemberIds(req, business, orgchart, requesterId);
 
     const alertsDb = getAlertsDbName();
@@ -384,7 +348,7 @@ export async function getAlertsSummary(req, res) {
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
-    const orgchart = await loadOrgChart(req, businessId);
+    const orgchart = await loadOrgChartForAccess(req, businessId);
     const visibleIds = await resolveVisibleMemberIds(req, business, orgchart, requesterId);
 
     const alertsDb = getAlertsDbName();
@@ -432,7 +396,7 @@ export async function acknowledgeAlert(req, res) {
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
     const member = getMember(business, requesterId);
-    if (!member || !ADMIN_ROLES.has(member.role)) {
+    if (!member || !isManagerRole(member.role)) {
       return res.status(403).json({ ok: false, error: 'Solo administradores y gerentes pueden gestionar alertas' });
     }
 

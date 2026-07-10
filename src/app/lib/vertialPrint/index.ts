@@ -26,13 +26,14 @@ export {
   isVertialPrinterConfigConfigured,
   printerLabelFromConfig,
 } from './printerConfigNormalize';
-export { fetchBridgeHealth, fetchBridgePrinters, fetchBridgeNetworkPrinters } from './printBridgeClient';
+export { fetchBridgeHealth, fetchBridgePrinters, fetchBridgeNetworkPrinters, fetchBridgePingPrinter } from './printBridgeClient';
 export type { BridgeNetworkPrinterInfo } from './printBridgeClient';
 export {
   connectionToSetupKind,
   setupKindToConnection,
   evaluatePrinterStatus,
   isAppleMobileDevice,
+  isAppleMobileWebBrowser,
 } from './printerSetupStatus';
 export type { PrinterSetupKind, PrinterStatusSnapshot } from './printerSetupStatus';
 export {
@@ -48,6 +49,19 @@ export {
   identifyNativePrinter,
 } from './nativePrintClient';
 export type { NativeNetworkPrinterInfo } from './nativePrintClient';
+export {
+  hasAcknowledgedLocalNetworkPermission,
+  acknowledgeLocalNetworkPermission,
+  resetLocalNetworkPermissionAck,
+  rerequestNativeLocalNetworkPermission,
+  requestNativeLocalNetworkAccess,
+  completeLocalNetworkPermissionFlow,
+  dispatchNativeLocalNetworkPermissionPrompt,
+  dispatchLocalNetworkPermissionAttempted,
+  openNativeAppSettings,
+  LAN_PERMISSION_ATTEMPTED_EVENT,
+  LAN_PERMISSION_MODAL_EVENT,
+} from './localNetworkPermission';
 export {
   shouldUseEposPrint,
   checkEposConnection,

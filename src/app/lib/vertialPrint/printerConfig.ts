@@ -29,10 +29,16 @@ export const DEFAULT_PRINTER_CONFIG: VertialPrinterConfig = {
 
 export function resolveBridgeUrl(config?: Pick<VertialPrinterConfig, 'bridgeHost'>): string {
   const raw = String(config?.bridgeHost || '').trim();
-  if (!raw) return VERTIAL_PRINT_BRIDGE_URL;
-  const normalized = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-  if (normalized.includes(':')) return `http://${normalized}`;
-  return `http://${normalized}:${VERTIAL_PRINT_BRIDGE_PORT}`;
+  if (raw) {
+    const normalized = raw.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    if (normalized.includes(':')) return `http://${normalized}`;
+    return `http://${normalized}:${VERTIAL_PRINT_BRIDGE_PORT}`;
+  }
+  // Dev: proxy Vite /local-print → 127.0.0.1:39201 (mismo origen, sin CORS ni IP del PC).
+  if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
+    return '/local-print';
+  }
+  return VERTIAL_PRINT_BRIDGE_URL;
 }
 
 export function pdvPrinterCacheKey(pdvId: string): string {

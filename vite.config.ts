@@ -68,6 +68,13 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        // Vertial Print local (puerto 39201): mismo origen en dev → funciona también en emulación móvil.
+        '/local-print': {
+          target: 'http://127.0.0.1:39201',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/local-print/, ''),
+        },
       },
     },
 

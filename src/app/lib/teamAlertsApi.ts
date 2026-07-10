@@ -1,3 +1,6 @@
+import { authFetch } from './authApi';
+import { getApiBase } from './apiBase';
+
 export interface TeamAlert {
   id: string;
   type: 'document_expired' | 'document_expiring' | 'no_assignment' | 'cost_review_pending' | 'profile_incomplete';
@@ -23,32 +26,21 @@ export interface TeamAlertsSummary {
   };
 }
 
-function getToken(): string | null {
-  try {
-    const raw = localStorage.getItem('auth_user');
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed?.token || null;
-  } catch {
-    return null;
-  }
-}
+const API_BASE = getApiBase();
 
 export async function fetchTeamAlerts(businessId: string): Promise<TeamAlert[]> {
-  const token = getToken();
-  const res = await fetch(`/api/team-alerts/${encodeURIComponent(businessId)}`, {
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
+  const res = await authFetch(
+    `${API_BASE}/api/team-alerts/${encodeURIComponent(businessId)}`,
+  );
   if (!res.ok) return [];
   const data = await res.json();
   return data.alerts || [];
 }
 
 export async function fetchTeamAlertsSummary(businessId: string): Promise<TeamAlertsSummary | null> {
-  const token = getToken();
-  const res = await fetch(`/api/team-alerts/${encodeURIComponent(businessId)}/summary`, {
-    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-  });
+  const res = await authFetch(
+    `${API_BASE}/api/team-alerts/${encodeURIComponent(businessId)}/summary`,
+  );
   if (!res.ok) return null;
   return res.json();
 }

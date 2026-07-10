@@ -115,12 +115,15 @@ function WorkerTpvShell({ children, restaurantMode = false }: { children: ReactN
   }, []);
 
   return (
-    <TpvChromeScope bottomBar={!stockOpen && !restaurantMode ? <WorkerTpvBottomBar /> : null}>
+    <TpvChromeScope
+      insetBottomBar
+      bottomBar={!stockOpen && !restaurantMode ? <WorkerTpvBottomBar /> : null}
+    >
       <div
-        className={`flex flex-col overflow-hidden ${
+        className={`flex flex-col overflow-hidden h-full min-h-0 ${
           restaurantMode
             ? 'fixed inset-0 z-30 bg-stone-100 dark:bg-stone-950'
-            : 'h-[100svh] min-h-[100svh] bg-gray-50 dark:bg-gray-950'
+            : 'bg-gray-50 dark:bg-gray-950'
         }`}
       >
         <TpvOfflineBanner />

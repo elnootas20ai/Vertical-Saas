@@ -2621,8 +2621,9 @@ export function TpvRegisterGate({
       terminalId: printerModalScope?.terminalId,
       pdv,
     });
-    return () => setActivePrinterScope({});
   }, [printerModalScope?.pdv?._id, printerModalScope?.pdv?._rev, printerModalScope?.terminalId]);
+
+  useEffect(() => () => setActivePrinterScope({}), []);
 
   const handleOpeningPdvChange = useCallback((pdvId: string) => {
     const id = String(pdvId || '').trim();

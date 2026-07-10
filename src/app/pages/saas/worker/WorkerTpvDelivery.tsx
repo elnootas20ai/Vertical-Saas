@@ -1403,6 +1403,11 @@ export function WorkerTpvDelivery({
     }
   }, [isTabletUi, completedShiftOrders.length]);
 
+  useEffect(() => {
+    if (view !== 'board') return;
+    window.scrollTo(0, 0);
+  }, [view, boardReady, scopedPdvId]);
+
   const filterCounts = useMemo(() => ({
     all: scopedActive.length,
     recogida: scopedActive.filter((o) => o.deliveryType === 'recogida').length,

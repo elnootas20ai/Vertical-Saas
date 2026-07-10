@@ -6,9 +6,13 @@ import { isValidIpv4 } from './printerSetupStatus';
 export function normalizeVertialPrinterConfig(
   raw?: Partial<VertialPrinterConfig> | null,
 ): VertialPrinterConfig {
-  const connectionType = raw?.connectionType === 'network' || raw?.connectionType === 'system' || raw?.connectionType === 'browser'
+  let connectionType = raw?.connectionType === 'network' || raw?.connectionType === 'system' || raw?.connectionType === 'browser'
     ? raw.connectionType
     : DEFAULT_PRINTER_CONFIG.connectionType;
+  // En app nativa no existe impresión por ventana del navegador: forzar WiFi.
+  if (isVertialNativeApp() && connectionType === 'browser') {
+    connectionType = 'network';
+  }
   return {
     ...DEFAULT_PRINTER_CONFIG,
     ...raw,

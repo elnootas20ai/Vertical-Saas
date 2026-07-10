@@ -17,6 +17,7 @@ export function markNativeOnboardingSeen(): void {
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(NATIVE_ONBOARDING_SEEN_KEY, '1');
+    window.dispatchEvent(new CustomEvent('vertial-native-onboarding-seen'));
   } catch {
     // ignore
   }
