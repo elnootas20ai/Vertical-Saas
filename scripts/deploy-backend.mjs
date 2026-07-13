@@ -14,7 +14,7 @@
  * Config en deploy/local-values.env:
  *   DEPLOY_USER  (alias: SSH_USER)
  *   DEPLOY_HOST  (alias: VPS_IP)
- *   REPO_PATH_ON_VPS   p.ej. /opt/vertial/Vertical-Saas
+ *   REPO_PATH_ON_VPS   p.ej. /opt/vertial/Vertial
  *   COMPOSE_FILE       (opcional) ruta relativa al repo del compose; por defecto
  *                       deploy/docker-compose.scaleway.yml
  *   COMPOSE_SERVICE    (opcional) servicio a recrear; por defecto "app"

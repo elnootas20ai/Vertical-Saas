@@ -11,6 +11,7 @@ import {
   getAbsenteeism,
   getOvertime,
   getPayrollSummary,
+  getLaborCost,
   exportClockins,
   crossCheck,
   notifyClockinEvent,
@@ -26,6 +27,7 @@ clockinsRouter.get('/:businessId/performance', getPerformance);
 clockinsRouter.get('/:businessId/org-status', getOrgClockStatus);
 clockinsRouter.get('/:businessId/absenteeism', getAbsenteeism);
 clockinsRouter.get('/:businessId/overtime', getOvertime);
+clockinsRouter.get('/:businessId/labor-cost', getLaborCost);
 clockinsRouter.get('/:businessId/payroll-summary', getPayrollSummary);
 clockinsRouter.get('/:businessId/export', exportClockins);
 clockinsRouter.get('/:businessId/cross-check', crossCheck);

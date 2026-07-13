@@ -31,6 +31,10 @@ import {
 } from '../services/clockinsAccess.js';
 import { isBusinessTeamMember } from '../services/businessAccess.js';
 import { isManagerRole } from '../services/managerRoles.js';
+import {
+  computeLaborCostBreakdown,
+  computePeriodLaborCost,
+} from '../services/laborCost.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -145,9 +149,8 @@ async function enrichMemberMap(req, business, extraUserIds = []) {
 
 function isDemoTeamMember(memberMap, memberId, memberRow = null) {
   const info = memberMap[memberId] || {};
-  const email = String(memberRow?.email || info.email || '').trim().toLowerCase();
   const name = String(memberRow?.fullName || info.fullName || '').trim();
-  if (email.endsWith('@test.local')) return true;
+  // Solo cuentas demo de nombre; @test.local puede ser trabajador real del local.
   if (/^demo(\s|$)/i.test(name)) return true;
   return false;
 }
@@ -640,6 +643,101 @@ export async function getPerformance(req, res) {
     return res.json({ ok: true, performance });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al calcular rendimiento' });
+  }
+}
+
+// ─── Labor cost (fichajes × coste hora empresa) ───────────────────────────────
+
+export async function getLaborCost(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const requesterId = getAuthUserId(req);
+    if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const member = getMember(business, requesterId);
+    if (!member || !isManagerRole(member.role)) {
+      return res.status(403).json({ ok: false, error: 'Solo gerentes y administradores pueden ver coste laboral' });
+    }
+
+    const { from, to } = req.query;
+    if (!from || !to) return badRequest(res, 'Se requieren parámetros from y to (YYYY-MM-DD)');
+
+    let clockinRecords = await listClockinsByBusiness(req, businessId);
+    clockinRecords = clockinRecords.filter((r) => r.date >= from && r.date <= to);
+
+    const memberMap = buildMemberMap(business);
+    const memberIds = business.members.map((m) => m.user_id);
+    const clockinsByMember = {};
+    for (const r of clockinRecords) {
+      if (!clockinsByMember[r.member_id]) clockinsByMember[r.member_id] = 0;
+      clockinsByMember[r.member_id] += r.totalMinutes || 0;
+    }
+
+    const members = [];
+    let teamActualEmployerCost = 0;
+    let teamActualGrossCost = 0;
+    let membersWithSalary = 0;
+
+    for (const mid of memberIds) {
+      const workedMinutes = clockinsByMember[mid] || 0;
+      let employment = {};
+      try {
+        const account = await findAccountByUserId(req, mid);
+        employment = account?.employment || {};
+      } catch {
+        employment = {};
+      }
+
+      const laborCost = computePeriodLaborCost(employment, workedMinutes);
+      const monthlyBreakdown = computeLaborCostBreakdown(employment);
+      if (monthlyBreakdown) membersWithSalary += 1;
+      if (laborCost) {
+        teamActualEmployerCost += laborCost.actualEmployerCost;
+        teamActualGrossCost += laborCost.actualGrossCost;
+      }
+
+      members.push({
+        member_id: mid,
+        member_name: memberMap[mid]?.fullName || mid,
+        role: memberMap[mid]?.role || 'Usuario',
+        worked_minutes: workedMinutes,
+        worked_hours: Math.round((workedMinutes / 60) * 100) / 100,
+        contract_type: employment.contractType || '',
+        workday: employment.workday || '',
+        salary_text: employment.salary || '',
+        gross_monthly: monthlyBreakdown?.grossMonthly ?? null,
+        social_security_monthly: monthlyBreakdown?.socialSecurityCost ?? null,
+        other_costs_monthly: monthlyBreakdown?.otherCosts ?? null,
+        total_monthly_employer: monthlyBreakdown?.totalMonthlyEmployerCost ?? null,
+        hourly_employer_cost: monthlyBreakdown?.hourlyEmployerCost ?? null,
+        actual_gross_cost: laborCost?.actualGrossCost ?? null,
+        actual_employer_cost: laborCost?.actualEmployerCost ?? null,
+        has_salary_data: Boolean(monthlyBreakdown),
+        cost_currency: monthlyBreakdown?.costCurrency || 'EUR',
+      });
+    }
+
+    members.sort((a, b) => (b.actual_employer_cost || 0) - (a.actual_employer_cost || 0));
+
+    return res.json({
+      ok: true,
+      period: { from, to },
+      summary: {
+        actual_employer_cost: Math.round(teamActualEmployerCost * 100) / 100,
+        actual_gross_cost: Math.round(teamActualGrossCost * 100) / 100,
+        members_with_salary: membersWithSalary,
+        members_total: memberIds.length,
+        cost_currency: 'EUR',
+      },
+      members,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al calcular coste laboral' });
   }
 }
 
@@ -1263,6 +1361,15 @@ export async function getPayrollSummary(req, res) {
     const memberIds = business.members.map((m) => m.user_id);
     const summaries = [];
 
+    async function loadMemberEmployment(memberId) {
+      try {
+        const account = await findAccountByUserId(req, memberId);
+        return account?.employment || {};
+      } catch {
+        return {};
+      }
+    }
+
     for (const mid of memberIds) {
       const memberClockins = clockins.filter((r) => r.member_id === mid);
       const schedule = schedulesByMember[mid];
@@ -1335,6 +1442,10 @@ export async function getPayrollSummary(req, res) {
         current.setDate(current.getDate() + 1);
       }
 
+      const employment = await loadMemberEmployment(mid);
+      const laborCost = computePeriodLaborCost(employment, totalWorked);
+      const monthlyBreakdown = computeLaborCostBreakdown(employment);
+
       summaries.push({
         member_id: mid,
         member_name: memberMap[mid]?.fullName || mid,
@@ -1349,10 +1460,44 @@ export async function getPayrollSummary(req, res) {
         late_count: lateCount,
         total_late_minutes: totalLateMinutes,
         daily_detail: dailyDetail,
+        labor_cost: laborCost ? {
+          gross_monthly: monthlyBreakdown?.grossMonthly ?? null,
+          social_security_monthly: monthlyBreakdown?.socialSecurityCost ?? null,
+          total_monthly_employer: monthlyBreakdown?.totalMonthlyEmployerCost ?? null,
+          hourly_employer_cost: monthlyBreakdown?.hourlyEmployerCost ?? null,
+          worked_hours: laborCost.workedHours,
+          actual_gross_cost: laborCost.actualGrossCost,
+          actual_employer_cost: laborCost.actualEmployerCost,
+          has_salary_data: Boolean(monthlyBreakdown),
+          cost_currency: monthlyBreakdown?.costCurrency || 'EUR',
+        } : {
+          gross_monthly: null,
+          social_security_monthly: null,
+          total_monthly_employer: null,
+          hourly_employer_cost: null,
+          worked_hours: Math.round((totalWorked / 60) * 100) / 100,
+          actual_gross_cost: null,
+          actual_employer_cost: null,
+          has_salary_data: false,
+          cost_currency: 'EUR',
+        },
       });
     }
 
-    return res.json({ ok: true, summaries });
+    const teamLaborTotal = summaries.reduce(
+      (sum, s) => sum + (s.labor_cost?.actual_employer_cost || 0),
+      0,
+    );
+
+    return res.json({
+      ok: true,
+      summaries,
+      team_labor_cost: {
+        actual_employer_cost: Math.round(teamLaborTotal * 100) / 100,
+        members_with_salary: summaries.filter((s) => s.labor_cost?.has_salary_data).length,
+        members_total: summaries.length,
+      },
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al generar resumen de nóminas' });
   }

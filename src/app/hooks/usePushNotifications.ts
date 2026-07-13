@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { getApiBase } from '../lib/apiBase';
+import { isVertialNativeApp } from '../lib/vertialPrint/isNativeApp';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -70,6 +71,7 @@ export function usePushNotifications({ userId, token }: UsePushNotificationsOpti
 
   const subscribe = useCallback(async () => {
     if (!userId || !token) return;
+    if (isVertialNativeApp()) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
     const permission = await Notification.requestPermission();

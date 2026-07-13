@@ -45,6 +45,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatIbanInput } from '../../lib/employmentBankUtils';
+import { computeTotalLaborCost, formatLaborCurrency, computeLaborCostBreakdown } from '../../lib/laborCost';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -157,6 +158,7 @@ function buildEmploymentInfo(emp?: EmploymentInfo): EmploymentInfo {
     contributionGroup: emp?.contributionGroup || '',
     mutualInsurance: emp?.mutualInsurance || '',
     grossSalary: emp?.grossSalary,
+    payPeriodsPerYear: emp?.payPeriodsPerYear,
     socialSecurityCost: emp?.socialSecurityCost,
     otherCosts: emp?.otherCosts,
     costCurrency: emp?.costCurrency || 'EUR',
@@ -175,13 +177,9 @@ const TERMINATION_LABELS: Record<string, string> = {
   mutual_agreement: 'Mutuo acuerdo',
 };
 
-function computeTotalLaborCost(emp: EmploymentInfo): number {
-  return (emp.grossSalary || 0) + (emp.socialSecurityCost || 0) + (emp.otherCosts || 0);
-}
-
 function formatCurrency(value: number | undefined, currency = 'EUR'): string {
   if (value == null) return '—';
-  return new Intl.NumberFormat('es-ES', { style: 'currency', currency }).format(value);
+  return formatLaborCurrency(value, currency);
 }
 
 const CONTRACT_TYPE_LABELS: Record<string, string> = {
@@ -783,6 +781,7 @@ export function TeamMemberDetail() {
   }
 
   const emp = buildEmploymentInfo(member.employment);
+  const laborBreakdown = computeLaborCostBreakdown(emp);
 
   return (
     <Layout title={member.fullName} subtitle={emp.position || member.role || 'Trabajador'}>
@@ -1235,24 +1234,34 @@ export function TeamMemberDetail() {
             {/* Cost summary cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Salario bruto</p>
+                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Bruto nómina</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{formatCurrency(emp.grossSalary)}</p>
-                <p className="text-xs text-gray-400 mt-1">{emp.costPeriod === 'annual' ? 'anual' : 'mensual'}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {laborBreakdown
+                    ? `${laborBreakdown.payPeriodsPerYear} pagas/año${laborBreakdown.extraPayCount > 0 ? ` (${laborBreakdown.extraPayCount} extras)` : ''}`
+                    : 'por nómina'}
+                </p>
               </div>
               <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Seg. Social empresa</p>
+                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Bruto medio/mes</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                  {formatCurrency(laborBreakdown?.monthlyAverageGross ?? emp.grossSalary)}
+                </p>
+                <p className="text-xs text-gray-400 mt-1">Con pagas extras repartidas</p>
+              </div>
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
+                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Seg. Social empresa/mes</p>
                 <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">{formatCurrency(emp.socialSecurityCost)}</p>
-                <p className="text-xs text-gray-400 mt-1">{emp.grossSalary ? `${((emp.socialSecurityCost || 0) / emp.grossSalary * 100).toFixed(1)}% del bruto` : ''}</p>
-              </div>
-              <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-                <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Otros costes</p>
-                <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">{formatCurrency(emp.otherCosts)}</p>
-                <p className="text-xs text-gray-400 mt-1">Formación, material, etc.</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {laborBreakdown ? `${(laborBreakdown.employerRate * 100).toFixed(1)}% sobre base (media con extras)` : ''}
+                </p>
               </div>
               <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 border-l-4 border-l-emerald-500 bg-white dark:bg-gray-800 p-5">
-                <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase">Coste total</p>
+                <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase">Coste total empresa/mes</p>
                 <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">{formatCurrency(computeTotalLaborCost(emp))}</p>
-                <p className="text-xs text-gray-400 mt-1">{emp.costPeriod === 'annual' ? 'anual' : 'mensual'}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {laborBreakdown ? `Anual bruto: ${formatCurrency(laborBreakdown.annualGross)}` : 'mensual'}
+                </p>
               </div>
             </div>
 
@@ -1276,8 +1285,8 @@ export function TeamMemberDetail() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <InfoField label="Salario bruto (texto)" value={emp.salary} />
                 <InfoField label="Tipo de contrato" value={emp.contractType ? CONTRACT_TYPE_LABELS[emp.contractType] || emp.contractType : undefined} />
-                <InfoField label="Jornada" value={emp.workday ? WORKDAY_LABELS[emp.workday] || emp.workday : undefined} />
-                <InfoField label="Última revisión" value={emp.lastCostReview ? new Date(emp.lastCostReview).toLocaleDateString('es-ES') : undefined} />
+                <InfoField label="Pagas al año" value={laborBreakdown ? String(laborBreakdown.payPeriodsPerYear) : undefined} />
+                <InfoField label="Bruto anual" value={laborBreakdown ? formatCurrency(laborBreakdown.annualGross) : undefined} />
                 <InfoField label="Próxima revisión" value={emp.nextCostReview ? new Date(emp.nextCostReview).toLocaleDateString('es-ES') : undefined} />
                 <InfoField label="Moneda" value={emp.costCurrency || 'EUR'} />
               </div>

@@ -39,8 +39,9 @@ Declarar según uso real:
 - `ios/App/App/PrivacyInfo.xcprivacy` incluido en el target Xcode
 
 ### Guideline 4.8 — Login
-- **Google oculto en app iOS** hasta integrar Sign in with Apple
+- **Google oculto en app iOS**; **Sign in with Apple** en login y registro (`@capacitor-community/apple-sign-in`)
 - Login con email/contraseña disponible
+- Backend: `POST /api/auth/apple-login`
 
 ### Guideline 5.1.1(v) — Eliminar cuenta
 - Ajustes → Seguridad → **Eliminar cuenta** (propietarios)

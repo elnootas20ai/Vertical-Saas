@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Ejecutar EN EL VPS como root (después de git pull):
-#   cd /opt/vertial/Vertical-Saas && bash scripts/server-fix-after-pull.sh
+#   cd /opt/vertial/Vertial && bash scripts/server-fix-after-pull.sh
 #
 # Arregla: puerto 3000 ocupado + levanta Docker + sincroniza dist a nginx.
 
 set -euo pipefail
 
-REPO="${REPO_PATH:-/opt/vertial/Vertical-Saas}"
+REPO="${REPO_PATH:-/opt/vertial/Vertial}"
 DIST_WEB="${DIST_WEB_PATH:-/var/www/vertial/dist}"
 COMPOSE_FILE="${COMPOSE_FILE:-deploy/docker-compose.scaleway.yml}"
 

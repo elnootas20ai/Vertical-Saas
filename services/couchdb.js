@@ -1160,6 +1160,7 @@ export function buildDefaultEmploymentInfo(overrides = {}) {
     terminationReason: String(base.terminationReason || '').trim(),
     terminationType: base.terminationType || undefined,
     grossSalary: base.grossSalary != null ? Number(base.grossSalary) : undefined,
+    payPeriodsPerYear: base.payPeriodsPerYear != null ? Number(base.payPeriodsPerYear) : undefined,
     socialSecurityCost: base.socialSecurityCost != null ? Number(base.socialSecurityCost) : undefined,
     otherCosts: base.otherCosts != null ? Number(base.otherCosts) : undefined,
     costCurrency: base.costCurrency || undefined,
@@ -1958,6 +1959,7 @@ export function sanitizeAccount(account) {
     googleId: account.googleId || null,
     googleScopes: account.googleScopes || null,
     googleProfile: account.googleProfile || null,
+    appleId: account.appleId || null,
     landingPage: account.landingPage || (accountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/saas/dashboard'),
     linkedBusinessId: account.linkedBusinessId || '',
     username: account.username || '',
@@ -2047,6 +2049,17 @@ export async function findAccountByEmail(req, email) {
     );
   }
   return pickPrimaryAccountByEmail(matches);
+}
+
+export async function findAccountByAppleId(req, appleId) {
+  const id = String(appleId || '').trim();
+  if (!id) {
+    return null;
+  }
+
+  await ensureDatabase(req, ACCOUNTS_DB);
+  const docs = await getAllDocuments(req, ACCOUNTS_DB);
+  return docs.find((doc) => doc.type === 'account' && doc.appleId === id) || null;
 }
 
 export async function findAccountByUserId(req, userId) {

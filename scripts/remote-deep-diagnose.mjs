@@ -7,7 +7,7 @@ if (!values) process.exit(1);
 
 const user = values.DEPLOY_USER || values.SSH_USER;
 const host = values.DEPLOY_HOST || values.VPS_IP;
-const repo = values.REPO_PATH_ON_VPS || '/opt/vertial/Vertical-Saas';
+const repo = values.REPO_PATH_ON_VPS || '/opt/vertial/Vertial';
 const identity = values.SSH_IDENTITY_FILE?.trim();
 
 if (!user || !host) process.exit(1);

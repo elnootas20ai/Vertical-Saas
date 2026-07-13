@@ -90,11 +90,11 @@ export function WorkerLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
-      <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm">
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center mb-6">
+    <div className="min-h-dvh bg-gray-50 dark:bg-gray-800 flex flex-col items-stretch px-4 py-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:items-center sm:justify-center sm:p-6">
+      <div className="w-full max-w-md my-auto">
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 sm:p-8 shadow-sm">
+          <div className="text-center mb-6 sm:mb-8">
+            <div className="flex items-center justify-center mb-4 sm:mb-6">
               <VertialLogo size="lg" />
             </div>
             <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -103,7 +103,7 @@ export function WorkerLogin() {
             <span className="inline-block mb-3 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
               Acceso trabajador
             </span>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               Iniciar sesión — Trabajador
             </h1>
             <p className="text-gray-600 dark:text-gray-400">

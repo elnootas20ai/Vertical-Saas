@@ -109,6 +109,8 @@ export function mergePersonalData(existing = {}, incoming = {}) {
   return buildDefaultPersonalData({ ...base, ...incoming });
 }
 
+import { applyLaborCostToEmployment } from './laborCost.js';
+
 export function mergeEmploymentInfo(existing = {}, incoming = {}) {
   const prev = existing && typeof existing === 'object' ? existing : {};
   const next = incoming && typeof incoming === 'object' ? incoming : {};
@@ -119,7 +121,12 @@ export function mergeEmploymentInfo(existing = {}, incoming = {}) {
   if (!Object.prototype.hasOwnProperty.call(next, 'baseProductivity') && prev.baseProductivity) {
     merged.baseProductivity = prev.baseProductivity;
   }
-  return {
+  const manualCostOverride =
+    Object.prototype.hasOwnProperty.call(next, 'socialSecurityCost')
+    && Object.prototype.hasOwnProperty.call(next, 'grossSalary')
+    && next.grossSalary != null
+    && next.socialSecurityCost != null;
+  const base = {
     department: String(merged.department || '').trim(),
     position: String(merged.position || '').trim(),
     schedule: String(merged.schedule || '').trim(),
@@ -146,6 +153,7 @@ export function mergeEmploymentInfo(existing = {}, incoming = {}) {
     terminationReason: String(merged.terminationReason || '').trim(),
     terminationType: merged.terminationType || undefined,
     grossSalary: merged.grossSalary != null ? Number(merged.grossSalary) : undefined,
+    payPeriodsPerYear: merged.payPeriodsPerYear != null ? Number(merged.payPeriodsPerYear) : undefined,
     socialSecurityCost: merged.socialSecurityCost != null ? Number(merged.socialSecurityCost) : undefined,
     otherCosts: merged.otherCosts != null ? Number(merged.otherCosts) : undefined,
     costCurrency: merged.costCurrency || undefined,
@@ -155,6 +163,8 @@ export function mergeEmploymentInfo(existing = {}, incoming = {}) {
     baseProductivity: merged.baseProductivity || undefined,
     assignments: Array.isArray(merged.assignments) ? merged.assignments : undefined,
   };
+  if (manualCostOverride) return base;
+  return applyLaborCostToEmployment(base);
 }
 
 export function computeWorkerProfileCompletion(account) {

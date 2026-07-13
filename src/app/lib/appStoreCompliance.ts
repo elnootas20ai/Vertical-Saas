@@ -11,10 +11,14 @@ export function isAndroidNativeApp(): boolean {
 }
 
 /**
- * Apple Guideline 4.8 — si ofrecemos login social de terceros en iOS,
- * también hace falta Sign in with Apple. Ocultamos Google hasta integrarlo.
+ * Apple Guideline 4.8 — en iOS nativo usamos Sign in with Apple (no Google).
  */
 export function shouldHideThirdPartyAuthOnIos(): boolean {
+  return isIosNativeApp();
+}
+
+/** Sign in with Apple disponible solo en app iOS nativa. */
+export function isAppleSignInAvailable(): boolean {
   return isIosNativeApp();
 }
 

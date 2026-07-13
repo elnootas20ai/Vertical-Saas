@@ -88,8 +88,8 @@ function LoginScreen({ onLogin }: { onLogin: (code: string) => void }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex items-center justify-center px-6">
-      <div className="w-full max-w-md">
+    <div className="min-h-dvh bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex flex-col items-stretch px-4 py-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:items-center sm:justify-center sm:px-6">
+      <div className="w-full max-w-md my-auto">
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-violet-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-blue-500/20">
             <Handshake className="w-8 h-8 text-white" />

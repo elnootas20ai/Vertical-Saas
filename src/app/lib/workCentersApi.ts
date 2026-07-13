@@ -90,7 +90,7 @@ function couchDbPrefix(): string {
 
 export const WORK_CENTERS_DB = `${couchDbPrefix()}-sales-points`;
 
-const LEGACY_WORK_CENTER_DB_PREFIXES = ['udar', 'vertial', 'uriellsaas', 'bbddsaas'];
+const LEGACY_WORK_CENTER_DB_PREFIXES = ['vertial', 'uriellsaas', 'bbddsaas'];
 
 function legacyWorkCenterDbNames(): string[] {
   const primary = String(env.VITE_COUCHDB_DB || 'vertial').trim().toLowerCase();

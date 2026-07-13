@@ -21,8 +21,8 @@ echo "=== dist listing ==="
 ls -la /var/www/vertial/dist/ 2>/dev/null | head -20
 
 echo "=== nginx dist (live) ==="
-head -15 /opt/vertial/Vertical-Saas/dist/index.html 2>/dev/null || true
-ls -la /opt/vertial/Vertical-Saas/dist/assets/index-*.js 2>/dev/null | tail -5
+head -15 /opt/vertial/Vertial/dist/index.html 2>/dev/null || true
+ls -la /opt/vertial/Vertial/dist/assets/index-*.js 2>/dev/null | tail -5
 
 echo "=== assets js files ==="
 ls -la /var/www/vertial/dist/assets/index-*.js 2>/dev/null

@@ -40,6 +40,7 @@ import {
   Plane,
   UserPlus,
   List as ListIcon,
+  Wallet,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -58,6 +59,8 @@ import type {
   AbsenteeismSummary,
   OvertimeMember,
   OvertimeSummary,
+  MemberLaborCost,
+  LaborCostSummary,
 } from '../../lib/clockinsApi';
 import {
   getTodayClockin,
@@ -78,6 +81,7 @@ import {
   adjustClockinViaApi,
   fetchAbsenteeism,
   fetchOvertime,
+  fetchLaborCost,
   exportClockinsCsv,
   fetchDailySummary,
 } from '../../lib/clockinsApi';
@@ -98,10 +102,11 @@ import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import { isManagerRole } from '../../lib/managerRoles';
 import { memberMatchesStoreFilter } from '../../lib/clockinsMemberStore';
 import { listUsersRequest, type AuthUser } from '../../lib/authApi';
+import { formatLaborCurrency } from '../../lib/laborCost';
 
 // ── Pestañas (3 nivel superior) + sub-pestañas dentro de Análisis ───────────
 type Tab = 'team' | 'analysis' | 'alerts';
-type AnalysisSubTab = 'stats' | 'performance' | 'absenteeism' | 'overtime';
+type AnalysisSubTab = 'stats' | 'performance' | 'absenteeism' | 'overtime' | 'labor-cost';
 type TodayView = 'list' | 'org';
 
 const SCHEDULES_PATH = '/saas/equipo/horarios-vacaciones';
@@ -180,6 +185,10 @@ export function Clockins() {
   const [overtimeReport, setOvertimeReport] = useState<OvertimeMember[]>([]);
   const [overtimeSummary, setOvertimeSummary] = useState<OvertimeSummary | null>(null);
   const [overtimeLoading, setOvertimeLoading] = useState(false);
+
+  const [laborCostMembers, setLaborCostMembers] = useState<MemberLaborCost[]>([]);
+  const [laborCostSummary, setLaborCostSummary] = useState<LaborCostSummary | null>(null);
+  const [laborCostLoading, setLaborCostLoading] = useState(false);
 
   /**
    * Resumen del día (scheduled, late, no-show, etc.) que muestra el hero card
@@ -316,6 +325,20 @@ export function Clockins() {
     }
   }, [businessId, statsFrom, statsTo]);
 
+  const loadLaborCost = useCallback(async () => {
+    if (!businessId) return;
+    setLaborCostLoading(true);
+    try {
+      const data = await fetchLaborCost(businessId, { from: statsFrom, to: statsTo });
+      setLaborCostMembers(data.members);
+      setLaborCostSummary(data.summary);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLaborCostLoading(false);
+    }
+  }, [businessId, statsFrom, statsTo]);
+
   const loadApprovedVacations = useCallback(async () => {
     if (!businessId) return;
     try {
@@ -400,6 +423,7 @@ export function Clockins() {
       loadApprovedVacations();
     }
     if (analysisSubTab === 'overtime') loadOvertime();
+    if (analysisSubTab === 'labor-cost' && isAdmin) loadLaborCost();
   }, [tab, analysisSubTab, statsFrom, statsTo, isAdmin]);
 
   useEffect(() => { if (tab === 'alerts' && isAdmin) loadAlerts(); }, [tab]);
@@ -544,6 +568,13 @@ export function Clockins() {
       memberMatchesStoreFilter(p.member_id, filterWorkCenter, teamUsers),
     );
   }, [performance, filterWorkCenter, teamUsers]);
+
+  const filteredLaborCost = useMemo(() => {
+    if (filterWorkCenter === 'all') return laborCostMembers;
+    return laborCostMembers.filter((m) =>
+      memberMatchesStoreFilter(m.member_id, filterWorkCenter, teamUsers),
+    );
+  }, [laborCostMembers, filterWorkCenter, teamUsers]);
 
   const filteredStats = useMemo((): ClockinStats | null => {
     if (!stats) return null;
@@ -768,9 +799,7 @@ export function Clockins() {
               onEditSchedule={(memberId) => navigate(`${SCHEDULES_PATH}?member=${encodeURIComponent(memberId)}`)}
               onViewMemberHistory={(memberId) => navigate(`/saas/team/${memberId}?tab=clockins`)}
               businessMembers={teamUsers.filter((m) => {
-                const email = String(m.email || '').toLowerCase();
                 const name = String(m.fullName || '').trim();
-                if (email.endsWith('@test.local')) return false;
                 if (/^demo(\s|$)/i.test(name)) return false;
                 return true;
               })}
@@ -780,6 +809,7 @@ export function Clockins() {
               businessId={businessId}
               memberId={user?.user_id || ''}
               managerView
+              onViewMember={(id) => navigate(`/saas/team/${id}?tab=clockins`)}
             />
           </div>
         ) : tab === 'team' ? (
@@ -839,6 +869,9 @@ export function Clockins() {
             overtimeReport={overtimeReport}
             overtimeSummary={overtimeSummary}
             overtimeLoading={overtimeLoading}
+            laborCostMembers={filteredLaborCost}
+            laborCostSummary={laborCostSummary}
+            laborCostLoading={laborCostLoading}
             isAdmin={isAdmin}
             onExport={handleExport}
           />
@@ -1827,6 +1860,106 @@ function PerformancePanel({ data, loading }: { data: MemberPerformance[]; loadin
   );
 }
 
+function LaborCostPanel({
+  members,
+  summary,
+  loading,
+}: {
+  members: MemberLaborCost[];
+  summary: LaborCostSummary | null;
+  loading: boolean;
+}) {
+  if (loading) {
+    return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>;
+  }
+
+  const withSalary = members.filter((m) => m.has_salary_data);
+  const hasWorked = members.some((m) => m.worked_hours > 0);
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20 p-4 text-xs text-emerald-800 dark:text-emerald-200">
+        Coste calculado con el bruto del contrato y las pagas al año (incluye Seguridad Social empresa ~31,5 %).
+        Si pones 1.200 € con 14 pagas, el coste mensual real para la empresa es ~1.841 €/mes (no 1.200 €).
+      </div>
+
+      {summary && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase">Coste empresa (periodo)</p>
+            <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">
+              {formatLaborCurrency(summary.actual_employer_cost)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase">Bruto imputado (periodo)</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+              {formatLaborCurrency(summary.actual_gross_cost)}
+            </p>
+          </div>
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase">Con salario configurado</p>
+            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+              {summary.members_with_salary}/{summary.members_total}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!hasWorked ? (
+        <div className="flex flex-col items-center py-20 text-gray-400">
+          <Wallet className="w-12 h-12 mb-3" />
+          <p className="text-sm">Sin fichajes en este periodo</p>
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-white">Coste laboral por persona</h4>
+            <p className="text-xs text-gray-500 mt-0.5">Horas fichadas × coste/hora empresa estimado</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px]">
+              <thead>
+                <tr className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+                  {['Miembro', 'Rol', 'Horas', 'Bruto/mes', 'SS/mes', '€/h empresa', 'Coste periodo'].map((h, i) => (
+                    <th key={h} className={`px-4 py-3 text-xs font-semibold text-gray-500 uppercase ${i >= 2 ? 'text-right' : 'text-left'}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                {members.map((m) => (
+                  <tr key={m.member_id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-white">{m.member_name}</td>
+                    <td className="px-4 py-3"><Badge role={m.role} /></td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-gray-300">{m.worked_hours.toFixed(1)}h</td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-gray-300">
+                      {m.has_salary_data ? formatLaborCurrency(m.gross_monthly) : <span className="text-amber-600 dark:text-amber-400">Sin salario</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-gray-300">
+                      {m.has_salary_data ? formatLaborCurrency(m.social_security_monthly) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right text-gray-700 dark:text-gray-300">
+                      {m.has_salary_data ? formatLaborCurrency(m.hourly_employer_cost) : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-right font-bold text-emerald-700 dark:text-emerald-300">
+                      {m.actual_employer_cost != null ? formatLaborCurrency(m.actual_employer_cost) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {withSalary.length < members.length && (
+            <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 text-xs text-amber-700 dark:text-amber-300 bg-amber-50/50 dark:bg-amber-950/20">
+              Algunos miembros no tienen salario en su ficha. Añádelo en Equipo → ficha del trabajador → Datos laborales.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════
    Alerts
    ═════════════════════════════════════════════════════════════════════════════ */
@@ -2200,6 +2333,9 @@ interface AnalysisPanelProps {
   overtimeReport: OvertimeMember[];
   overtimeSummary: OvertimeSummary | null;
   overtimeLoading: boolean;
+  laborCostMembers: MemberLaborCost[];
+  laborCostSummary: LaborCostSummary | null;
+  laborCostLoading: boolean;
   isAdmin: boolean;
   onExport: () => void;
 }
@@ -2210,6 +2346,7 @@ function AnalysisPanel(props: AnalysisPanelProps) {
     stats, statsLoading, performance, perfLoading,
     absentReport, absentSummary, absentLoading, approvedVacations,
     overtimeReport, overtimeSummary, overtimeLoading,
+    laborCostMembers, laborCostSummary, laborCostLoading,
     isAdmin, onExport,
   } = props;
 
@@ -2217,6 +2354,7 @@ function AnalysisPanel(props: AnalysisPanelProps) {
     [
       { id: 'stats' as AnalysisSubTab, label: 'Estadísticas', icon: <BarChart3 className="w-3.5 h-3.5" /> },
       { id: 'performance' as AnalysisSubTab, label: 'Rendimiento', icon: <TrendingUp className="w-3.5 h-3.5" />, adminOnly: true },
+      { id: 'labor-cost' as AnalysisSubTab, label: 'Coste laboral', icon: <Wallet className="w-3.5 h-3.5" />, adminOnly: true },
       { id: 'absenteeism' as AnalysisSubTab, label: 'Absentismo', icon: <UserMinus className="w-3.5 h-3.5" />, adminOnly: true },
       { id: 'overtime' as AnalysisSubTab, label: 'Horas extra', icon: <Hourglass className="w-3.5 h-3.5" /> },
     ]
@@ -2259,6 +2397,9 @@ function AnalysisPanel(props: AnalysisPanelProps) {
         <AbsenteeismPanel report={absentReport} summary={absentSummary} loading={absentLoading} approvedVacations={approvedVacations} />
       )}
       {subTab === 'overtime' && <OvertimePanel report={overtimeReport} summary={overtimeSummary} loading={overtimeLoading} />}
+      {subTab === 'labor-cost' && isAdmin && (
+        <LaborCostPanel members={laborCostMembers} summary={laborCostSummary} loading={laborCostLoading} />
+      )}
     </div>
   );
 }

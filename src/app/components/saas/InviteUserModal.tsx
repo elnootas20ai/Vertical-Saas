@@ -14,6 +14,11 @@ import { useInviteWorkCenters } from '../../hooks/useInviteWorkCenters';
 import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
 import { getHrOwnedLabels, getWorkerOwnedLabels } from '../../lib/workerProfileCompletion';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
+import {
+  computeLaborCostBreakdown,
+  formatLaborCurrency,
+  resolvePayPeriodsPerYear,
+} from '../../lib/laborCost';
 
 // --- Types ---
 
@@ -31,6 +36,7 @@ export interface InviteUserPayload {
   position: string;
   contractType: string;
   grossMonthlySalary: string;
+  payPeriodsPerYear?: number;
   workCenterId: string;
   businessId?: string;
 }
@@ -91,6 +97,11 @@ const COUNTRY_PREFIXES = [
   { code: 'BR', prefix: '+55', flag: '\u{1F1E7}\u{1F1F7}', name: 'Brasil' },
 ] as const;
 
+const PAY_PERIODS_OPTIONS = [
+  { id: '14', label: '14 pagas (12 mensuales + 2 extras)' },
+  { id: '12', label: '12 pagas (extras prorrateadas en nómina)' },
+] as const;
+
 const CONTRACT_TYPES = [
   { id: 'indefinido', label: 'Indefinido' },
   { id: 'temporal', label: 'Temporal' },
@@ -101,7 +112,7 @@ const CONTRACT_TYPES = [
   { id: 'fijo_discontinuo', label: 'Fijo discontinuo' },
 ] as const;
 
-/** Sueldo: solo dígitos → miles con punto (es-ES), p. ej. 12000 → "12.000". */
+/** Sueldo: solo dígitos → miles con punto (es-ES), p. ej. 1200 → "1.200". */
 function formatSalaryThousandsEs(digitsOnly: string): string {
   if (!digitsOnly) return '';
   const n = Number(digitsOnly);
@@ -425,6 +436,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   // Step 2
   const [contractType, setContractType] = useState<string | null>(null);
   const [grossSalary, setGrossSalary] = useState('');
+  const [payPeriodsPerYear, setPayPeriodsPerYear] = useState<string>('14');
   const [workCenterId, setWorkCenterId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
 
@@ -526,6 +538,9 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     const e: Record<string, string> = {};
     if (!contractType) e.contractType = 'Selecciona un tipo de contrato';
     if (!role) e.role = 'Selecciona una funcion';
+    const salaryDigits = salaryDigitsFromDisplay(grossSalary);
+    if (!salaryDigits) e.grossSalary = 'Indica el bruto mensual del contrato';
+    else if (Number(salaryDigits) < 200) e.grossSalary = 'El importe parece demasiado bajo';
     return e;
   }
 
@@ -560,7 +575,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     const errs = validateStep2();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
-      setTouched({ contractType: true, role: true });
+      setTouched({ contractType: true, role: true, grossSalary: true });
       return;
     }
     if (isSubmitting) return;
@@ -577,6 +592,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
         position: '',
         contractType: contractType!,
         grossMonthlySalary: salaryDigitsFromDisplay(grossSalary),
+        payPeriodsPerYear: Number(payPeriodsPerYear) || resolvePayPeriodsPerYear(contractType!),
         workCenterId: workCenterId || '',
         businessId: selectedBusinessId || undefined,
       });
@@ -593,9 +609,20 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const selectedRoleConfig = role ? getRoleConfig(roleOptions.find((r) => r.id === role) || { id: role, description: '', permissions: [], users: 0 }) : null;
   const selectedContract = contractType ? CONTRACT_TYPES.find((c) => c.id === contractType) : null;
 
+  const salaryPreview = useMemo(() => {
+    const digits = salaryDigitsFromDisplay(grossSalary);
+    if (!digits || !contractType) return null;
+    return computeLaborCostBreakdown({
+      salary: digits,
+      contractType,
+      workday: 'completa',
+      payPeriodsPerYear: Number(payPeriodsPerYear) || resolvePayPeriodsPerYear(contractType),
+    });
+  }, [grossSalary, contractType, payPeriodsPerYear]);
+
   function handleInviteAnother() {
     setName(''); setEmail(''); setPhonePrefix('+34'); setPhoneNumber('');
-    setContractType(null); setGrossSalary(''); setWorkCenterId(null);
+    setContractType(null); setGrossSalary(''); setPayPeriodsPerYear('14'); setWorkCenterId(null);
     setRole(null);
     setSelectedBusinessId(currentBusinessId || businesses?.[0]?.business_id || null);
     setErrors({}); setTouched({}); setSuccess(false); setSubmitError(null);
@@ -897,6 +924,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       value={contractType}
                       onChange={(v) => {
                         setContractType(v);
+                        setPayPeriodsPerYear(String(resolvePayPeriodsPerYear(v)));
                         setErrors((p) => {
                           const n = { ...p };
                           delete n.contractType;
@@ -910,10 +938,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     />
                   </div>
 
-                  {/* Sueldo bruto mensual */}
+                  {/* Sueldo bruto mensual (lo que pone el contrato en cada nómina) */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Sueldo bruto mensual
+                      Bruto mensual del contrato <span className="text-red-400">*</span>
                     </label>
                     <div className="relative">
                       <DollarSign className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
@@ -924,15 +952,71 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         onChange={(e) => {
                           const digits = salaryDigitsFromDisplay(e.target.value);
                           setGrossSalary(digits ? formatSalaryThousandsEs(digits) : '');
+                          setErrors((p) => {
+                            const n = { ...p };
+                            delete n.grossSalary;
+                            return n;
+                          });
                         }}
-                        placeholder="Ej: 12.000"
-                        className="w-full rounded-xl border-2 border-gray-200 bg-white py-2.5 pl-10 pr-14 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                        placeholder="Ej: 1.200"
+                        className={`w-full rounded-xl border-2 bg-white py-2.5 pl-10 pr-14 text-sm text-gray-900 outline-none transition-colors focus:border-blue-500 dark:bg-gray-800 dark:text-gray-100 ${
+                          errors.grossSalary ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'
+                        }`}
                       />
                       <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400">
                         &euro;/mes
                       </span>
                     </div>
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Lo que cobra en nómina cada mes, antes de IRPF. Con esto calculamos la Seguridad Social y el coste real para la empresa.
+                    </p>
+                    {errors.grossSalary && (
+                      <p className="mt-1 text-xs text-red-500">{errors.grossSalary}</p>
+                    )}
                   </div>
+
+                  {/* Pagas al año */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                      Pagas al año
+                    </label>
+                    <SelectDropdown
+                      value={payPeriodsPerYear}
+                      onChange={setPayPeriodsPerYear}
+                      options={PAY_PERIODS_OPTIONS.map((p) => ({ id: p.id, label: p.label }))}
+                      placeholder="Pagas al año"
+                      icon={<ClipboardList className="w-4 h-4" />}
+                    />
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      En España lo habitual son 14 pagas (junio y diciembre extras). Si tiene 2 pagas extras, el coste mensual real es mayor que el bruto de nómina.
+                    </p>
+                  </div>
+
+                  {salaryPreview && (
+                    <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/20 p-4 space-y-2">
+                      <p className="text-xs font-bold text-emerald-800 dark:text-emerald-200 uppercase tracking-wide">
+                        Coste calculado con estos datos
+                      </p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                        <span className="text-gray-600 dark:text-gray-400">Bruto nómina</span>
+                        <span className="text-right font-semibold text-gray-900 dark:text-white">{formatLaborCurrency(salaryPreview.grossMonthly)}</span>
+                        <span className="text-gray-600 dark:text-gray-400">
+                          Pagas extras ({salaryPreview.extraPayCount})
+                        </span>
+                        <span className="text-right text-gray-900 dark:text-white">
+                          {salaryPreview.extraPayCount > 0
+                            ? `${formatLaborCurrency(salaryPreview.grossMonthly)} × ${salaryPreview.extraPayCount}`
+                            : '—'}
+                        </span>
+                        <span className="text-gray-600 dark:text-gray-400">Bruto medio/mes (con extras)</span>
+                        <span className="text-right font-semibold text-gray-900 dark:text-white">{formatLaborCurrency(salaryPreview.monthlyAverageGross)}</span>
+                        <span className="text-gray-600 dark:text-gray-400">SS empresa/mes</span>
+                        <span className="text-right font-semibold text-blue-600 dark:text-blue-400">{formatLaborCurrency(salaryPreview.socialSecurityCost)}</span>
+                        <span className="text-gray-600 dark:text-gray-400 font-medium">Coste total empresa/mes</span>
+                        <span className="text-right font-bold text-emerald-700 dark:text-emerald-300">{formatLaborCurrency(salaryPreview.totalMonthlyEmployerCost)}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Empresa */}
                   {hasMultipleBusinesses && (

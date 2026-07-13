@@ -1,13 +1,17 @@
 /**
- * Push Service — Web Push (VAPID) para notificaciones cuando la app está cerrada.
+ * Push Service — Web Push (VAPID) + push nativo iOS (APNs).
  *
- * Las suscripciones push se almacenan en CouchDB en la colección `push_subscriptions`.
- * Cada documento tiene la forma:
- *   { _id: `push:${userId}:${endpointHash}`, type: 'push_subscription', userId, subscription, createdAt }
+ * CouchDB `push_subscriptions`:
+ *   Web:    { type: 'push_subscription', userId, subscription }
+ *   Nativo: { type: 'native_push_token', userId, platform, token }
  */
 import webPush from 'web-push';
 import { couchRequest, getCouchConfig } from './couchdb.js';
 import crypto from 'node:crypto';
+import { shouldSendMobilePush } from './pushAlertPolicy.js';
+import { sendNativePushToUser, saveNativeToken, deleteNativeToken } from './nativePushService.js';
+
+export { saveNativeToken, deleteNativeToken };
 
 const PUSH_DB = 'push_subscriptions';
 
@@ -124,15 +128,7 @@ async function getSubscriptionsForUser(req, userId) {
   }
 }
 
-/**
- * Envía una notificación push a todos los dispositivos suscritos de un usuario.
- * Llama sin await desde el controlador para no bloquear la respuesta HTTP.
- *
- * @param {object|null} req
- * @param {string} userId
- * @param {{ title: string; body: string; data?: Record<string, unknown> }} payload
- */
-export async function sendPushToUser(req, userId, payload) {
+async function sendWebPushToUser(req, userId, payload) {
   if (!vapidPublicKey || !vapidPrivateKey) return;
 
   const subscriptions = await getSubscriptionsForUser(req, userId);
@@ -150,7 +146,6 @@ export async function sendPushToUser(req, userId, payload) {
     subscriptions.map((sub) =>
       webPush.sendNotification(sub, notification).catch(async (err) => {
         if (err.statusCode === 410 || err.statusCode === 404) {
-          // Suscripción expirada — limpiar
           await deleteSubscription(req, userId, sub.endpoint).catch(() => {});
         }
         throw err;
@@ -160,7 +155,31 @@ export async function sendPushToUser(req, userId, payload) {
 
   const failed = results.filter((r) => r.status === 'rejected').length;
   if (failed > 0) {
-    console.warn(`[Push] ${failed}/${subscriptions.length} envíos fallaron para userId=${userId}`);
+    console.warn(`[Push] Web ${failed}/${subscriptions.length} fallaron para userId=${userId}`);
+  }
+}
+
+/**
+ * Envía push web y/o nativo según política de alertas.
+ *
+ * @param {object|null} req
+ * @param {string} userId
+ * @param {{ title: string; body: string; data?: Record<string, unknown> }} payload
+ * @param {{ ruleId?: string; category?: string; channels?: string[] }} [options]
+ */
+export async function sendPushToUser(req, userId, payload, options = {}) {
+  const { ruleId, category, channels = ['push'] } = options;
+  const hasRuleContext = Boolean(ruleId || category);
+
+  if (hasRuleContext) {
+    const allowed = await shouldSendMobilePush(req, { userId, ruleId, category, channels });
+    if (!allowed) return;
+  }
+
+  await sendWebPushToUser(req, userId, payload);
+
+  if (hasRuleContext) {
+    await sendNativePushToUser(req, userId, payload);
   }
 }
 

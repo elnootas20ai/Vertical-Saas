@@ -85,6 +85,7 @@ export async function loadClockedInStoreWorkers(
     salesPointId: pdvId,
     workCenterId: workCenterId || undefined,
     storeScope: true,
+    recordsOnly: true,
   });
   const bestRecordByMember = new Map<string, ClockinRecord>();
   for (const r of records) {

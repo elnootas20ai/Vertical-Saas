@@ -22,6 +22,8 @@ import {
   getBillingCardRequest,
   getUserActivityRequest,
   googleLoginRequest,
+  appleLoginRequest,
+  type AppleUserProfile,
   inviteUserRequest,
   lookupInviteEmailRequest,
   type InviteLookupResult,
@@ -102,6 +104,16 @@ export interface AuthContextType {
     code?: string;
     googleUser?: GoogleUserProfile;
   }>;
+  appleLogin: (
+    identityToken: string,
+    profile?: { givenName?: string; familyName?: string },
+  ) => Promise<{
+    success: boolean;
+    redirectTo?: string;
+    error?: string;
+    code?: string;
+    appleUser?: AppleUserProfile;
+  }>;
   updateProfile: (data: Partial<User>) => Promise<{ success: boolean; error?: string }>;
   updatePassword: (
     currentPassword: string,
@@ -146,6 +158,7 @@ export interface AuthContextType {
     position?: string;
     contractType?: string;
     grossMonthlySalary?: string;
+    payPeriodsPerYear?: number;
     workCenterId?: string;
     message?: string;
   }) => Promise<{
@@ -453,6 +466,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const appleLogin = async (
+    identityToken: string,
+    profile?: { givenName?: string; familyName?: string },
+  ): Promise<{
+    success: boolean;
+    redirectTo?: string;
+    error?: string;
+    code?: string;
+    appleUser?: AppleUserProfile;
+  }> => {
+    try {
+      clearVertialClientCaches();
+      const response = await appleLoginRequest(identityToken, profile);
+
+      if (response.code === 'APPLE_ACCOUNT_NOT_FOUND' && response.appleUser) {
+        return {
+          success: false,
+          code: 'APPLE_ACCOUNT_NOT_FOUND',
+          error: response.error,
+          appleUser: response.appleUser,
+        };
+      }
+
+      if (!response.ok || !response.user) {
+        return { success: false, error: response.error || 'No se recibió usuario desde Apple login' };
+      }
+
+      setSessionUser(response.user);
+      return { success: true, redirectTo: response.redirectTo || '/saas/dashboard' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Error al acceder con Apple',
+      };
+    }
+  };
+
   const logout = async () => {
     const { clearAllDeliveryPdvSessionFlags } = await import('../lib/deliverySetup');
     clearAllDeliveryPdvSessionFlags();
@@ -710,6 +760,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     position?: string;
     contractType?: string;
     grossMonthlySalary?: string;
+    payPeriodsPerYear?: number;
     workCenterId?: string;
     message?: string;
   }) => {
@@ -1142,6 +1193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionSyncedWithServer,
         resendVerificationEmail,
         googleLogin,
+        appleLogin,
         updateProfile,
         updatePassword,
         recoverPassword,

@@ -16,7 +16,6 @@ async function main() {
   const dbs = [
     'bbddsaas-sales-points',
     'urielsaas-sales-points',
-    'udar-sales-points',
     'vertial-sales-points',
   ];
 

@@ -79,7 +79,7 @@ function EntryRoleCard({
   const styles = ACCENT_STYLES[accent];
 
   return (
-    <div className="flex flex-col h-full p-5 sm:p-6 xl:p-7 bg-white dark:bg-gray-800 border border-gray-200/90 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+    <div className="flex flex-col h-full p-4 sm:p-6 xl:p-7 bg-white dark:bg-gray-800 border border-gray-200/90 dark:border-gray-700 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
       <div className="flex items-start gap-3 sm:gap-4 mb-3 sm:mb-4">
         <div
           className={`w-12 h-12 sm:w-14 sm:h-14 rounded-xl flex items-center justify-center shrink-0 ${styles.iconWrap}`}
@@ -122,7 +122,7 @@ export function Entry() {
   if (view === 'register') {
     return (
       <AccesoSplitLayout visualKey="register-company">
-        <div className="flex flex-1 flex-col items-center px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
+        <div className="flex flex-1 flex-col items-center px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8 lg:px-10 lg:py-10">
         <div className="w-full max-w-3xl">
           <div className="text-center mb-6 sm:mb-8 2xl:mb-10">
             <div className="hidden 2xl:flex items-center justify-center mb-5">
@@ -239,9 +239,9 @@ export function Entry() {
 
   return (
     <AccesoSplitLayout visualKey="entry">
-      <div className="flex flex-1 flex-col px-4 py-6 sm:px-6 sm:py-8 lg:px-10 lg:py-10">
+      <div className="flex flex-1 flex-col px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8 lg:px-10 lg:py-10">
       <div className="w-full max-w-6xl mx-auto">
-        <div className="text-center mb-6 sm:mb-8 2xl:mb-10">
+        <div className="text-center mb-5 sm:mb-8 2xl:mb-10">
           <div className="hidden 2xl:flex items-center justify-center mb-5">
             <VertialLogo size="xl" />
           </div>
@@ -253,7 +253,7 @@ export function Entry() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-2 gap-4 sm:gap-5 lg:gap-6 items-stretch [&>*:last-child]:md:col-span-2 [&>*:last-child]:md:max-w-lg [&>*:last-child]:md:mx-auto [&>*:last-child]:xl:col-span-1 [&>*:last-child]:xl:max-w-none [&>*:last-child]:xl:mx-0 [&>*:last-child]:2xl:col-span-2 [&>*:last-child]:2xl:max-w-xl [&>*:last-child]:2xl:mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-2 gap-3 sm:gap-5 lg:gap-6 items-stretch [&>*:last-child]:md:col-span-2 [&>*:last-child]:md:max-w-lg [&>*:last-child]:md:mx-auto [&>*:last-child]:xl:col-span-1 [&>*:last-child]:xl:max-w-none [&>*:last-child]:xl:mx-0 [&>*:last-child]:2xl:col-span-2 [&>*:last-child]:2xl:max-w-xl [&>*:last-child]:2xl:mx-auto">
           <EntryRoleCard
             accent="neutral"
             icon={Building2}
@@ -289,7 +289,7 @@ export function Entry() {
           />
         </div>
 
-        <p className="mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
+        <p className="mt-6 sm:mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
           ¿Primera vez y no tienes invitación?{' '}
           <button
             type="button"

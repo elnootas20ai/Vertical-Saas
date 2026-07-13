@@ -20,14 +20,16 @@ export function AccesoSplitLayout({
   showCompactHero = true,
 }: Props) {
   return (
-    <div className="min-h-dvh 2xl:h-dvh 2xl:max-h-dvh grid 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-dvh bg-gray-50 dark:bg-gray-900 2xl:grid 2xl:h-dvh 2xl:max-h-dvh 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] 2xl:overflow-hidden">
       <div
-        className={`flex flex-col min-h-0 ${
-          scrollable ? 'overflow-y-auto overscroll-contain scrollbar-visible' : 'overflow-hidden'
-        }`}
+        className={
+          scrollable
+            ? 'flex min-h-dvh flex-col touch-pan-y 2xl:min-h-0 2xl:overflow-y-auto 2xl:overscroll-contain 2xl:scrollbar-visible [-webkit-overflow-scrolling:touch]'
+            : 'flex min-h-dvh flex-col 2xl:min-h-0 2xl:overflow-hidden'
+        }
       >
         {showCompactHero ? (
-          <AccesoCompactHero visualKey={visualKey} className="mx-4 mt-4 sm:mx-6 sm:mt-6 2xl:hidden" />
+          <AccesoCompactHero visualKey={visualKey} className="mx-4 mt-4 shrink-0 sm:mx-6 sm:mt-6 2xl:hidden" />
         ) : null}
         {children}
       </div>

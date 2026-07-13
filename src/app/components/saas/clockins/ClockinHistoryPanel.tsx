@@ -10,15 +10,19 @@ import {
   Clock,
   CheckCircle2,
   PauseCircle,
+  ChevronRight as ChevronRightIcon,
 } from 'lucide-react';
 import {
   type ClockinRecord,
   type ActiveMember,
+  type EnrichedClockinRecord,
   listClockins,
+  fetchClockins,
   fetchActiveNow,
   formatMinutes,
   getDisplayTime,
 } from '../../../lib/clockinsApi';
+import { listUsersRequest, type AuthUser } from '../../../lib/authApi';
 import {
   dateDaysAgo,
   filterRecordsInMonth,
@@ -47,6 +51,8 @@ interface ClockinHistoryPanelProps {
   memberId: string;
   /** Si true, pestaña Equipo con detalle completo (gerente). */
   managerView?: boolean;
+  /** Al pulsar un miembro del equipo → historial completo. */
+  onViewMember?: (memberId: string) => void;
 }
 
 function RecordRow({
@@ -126,22 +132,33 @@ function TeamMemberCard({
   record,
   active,
   turnLabel,
+  onClick,
 }: {
   name: string;
   record?: ClockinRecord | null;
   active?: ActiveMember | null;
   turnLabel?: string | null;
+  onClick?: () => void;
 }) {
   const status = active?.status || record?.status;
   const isWorking = status === 'active';
   const isBreak = status === 'break';
+  const isOffline = !record || record.status === 'offline' || (record.entries?.length || 0) === 0;
   const ci = record?.entries.find((e) => e.type === 'clock_in');
   const ciTime = ci
     ? new Date(getDisplayTime(ci, record!)).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
     : null;
 
+  const Wrapper = onClick ? 'button' : 'div';
+
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <Wrapper
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 w-full text-left ${
+        onClick ? 'hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors' : ''
+      }`}
+    >
       <div
         className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold shrink-0 ${
           isWorking
@@ -165,7 +182,7 @@ function TeamMemberCard({
           ) : null}
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          {isWorking ? 'Trabajando ahora' : isBreak ? 'En descanso' : record?.status === 'completed' ? 'Jornada cerrada' : 'Sin fichar hoy'}
+          {isWorking ? 'Trabajando ahora' : isBreak ? 'En descanso' : record?.status === 'completed' ? 'Jornada cerrada' : isOffline ? 'Sin fichar hoy' : 'Sin fichar hoy'}
           {ciTime ? ` · entrada ${ciTime}` : ''}
         </p>
       </div>
@@ -175,21 +192,34 @@ function TeamMemberCard({
         <PauseCircle className="w-5 h-5 text-amber-500 shrink-0" />
       ) : record?.status === 'completed' ? (
         <span className="text-xs font-bold text-gray-700 dark:text-gray-300">{formatMinutes(record.totalMinutes)}</span>
+      ) : onClick ? (
+        <ChevronRightIcon className="w-4 h-4 text-gray-400 shrink-0" />
       ) : (
         <Clock className="w-4 h-4 text-gray-300 shrink-0" />
       )}
-    </div>
+    </Wrapper>
   );
 }
 
-export function ClockinHistoryPanel({ businessId, memberId, managerView = false }: ClockinHistoryPanelProps) {
+function isDemoTeamUser(user: AuthUser): boolean {
+  const name = String(user.fullName || '').trim();
+  return /^demo(\s|$)/i.test(name);
+}
+
+export function ClockinHistoryPanel({
+  businessId,
+  memberId,
+  managerView = false,
+  onViewMember,
+}: ClockinHistoryPanelProps) {
   const [mainTab, setMainTab] = useState<MainTab>(managerView ? 'team' : 'mine');
   const [rangeTab, setRangeTab] = useState<RangeTab>('week');
   const [teamRangeTab, setTeamRangeTab] = useState<TeamRangeTab>('today');
   const [monthOffset, setMonthOffset] = useState(0);
   const [myRecords, setMyRecords] = useState<ClockinRecord[]>([]);
-  const [teamToday, setTeamToday] = useState<ClockinRecord[]>([]);
+  const [teamToday, setTeamToday] = useState<EnrichedClockinRecord[]>([]);
   const [teamWeek, setTeamWeek] = useState<ClockinRecord[]>([]);
+  const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
   const [activeNow, setActiveNow] = useState<ActiveMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -198,25 +228,28 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
     if (!businessId) return;
     setLoading(true);
     try {
-      const [mine, todayAll, weekAll, active] = await Promise.all([
-        memberId ? listClockins(businessId, { memberId }) : Promise.resolve([]),
-        listClockins(businessId, { date: todayDateStr() }),
-        listClockins(businessId).then((all) =>
+      const today = todayDateStr();
+      const [mine, todayRoster, weekAll, active, usersRes] = await Promise.all([
+        memberId ? listClockins(businessId, { memberId, recordsOnly: true }) : Promise.resolve([]),
+        fetchClockins(businessId, { date: today }),
+        listClockins(businessId, { recordsOnly: true }).then((all) =>
           filterRecordsSince(
             all.filter((r) => r.status === 'completed'),
             dateDaysAgo(7),
           ),
         ),
         fetchActiveNow(businessId).catch(() => [] as ActiveMember[]),
+        managerView ? listUsersRequest(businessId).catch(() => ({ users: [] as AuthUser[] })) : Promise.resolve({ users: [] as AuthUser[] }),
       ]);
       setMyRecords(sortClockinsByClockIn(mine.filter((r) => r.status === 'completed')));
-      setTeamToday(sortClockinsByClockIn(todayAll.filter((r) => (r.entries?.length || 0) > 0)));
+      setTeamToday(sortClockinsByClockIn(todayRoster));
       setTeamWeek(weekAll);
       setActiveNow(active);
+      setTeamMembers((usersRes.users || []).filter((u) => u.status !== 'inactive' && !isDemoTeamUser(u)));
     } finally {
       setLoading(false);
     }
-  }, [businessId, memberId]);
+  }, [businessId, memberId, managerView]);
 
   useEffect(() => {
     void load();
@@ -253,18 +286,48 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
 
   const activeByMember = useMemo(() => new Map(activeNow.map((a) => [a.member_id, a])), [activeNow]);
 
+  const todayByMember = useMemo(() => {
+    const map = new Map<string, EnrichedClockinRecord>();
+    for (const record of teamToday) {
+      const prev = map.get(record.member_id);
+      if (!prev || (record.entries?.length || 0) >= (prev.entries?.length || 0)) {
+        map.set(record.member_id, record);
+      }
+    }
+    return map;
+  }, [teamToday]);
+
   const teamRows = useMemo(() => {
-    return teamToday
-      .map((record) => ({
-        id: record._id,
-        memberId: record.member_id,
-        name: record.member_name,
-        record,
-        active: activeByMember.get(record.member_id) || null,
-        turnLabel: sessionTurnLabel(record),
-      }))
+    const rosterSource = managerView && teamMembers.length > 0
+      ? teamMembers.map((m) => ({
+          memberId: m.user_id,
+          name: m.fullName || m.email || 'Sin nombre',
+        }))
+      : [...todayByMember.values()].map((record) => ({
+          memberId: record.member_id,
+          name: record.member_name || 'Sin nombre',
+        }));
+
+    const seen = new Set<string>();
+    return rosterSource
+      .filter((row) => {
+        if (!row.memberId || seen.has(row.memberId)) return false;
+        seen.add(row.memberId);
+        return true;
+      })
+      .map((row) => {
+        const record = todayByMember.get(row.memberId) || null;
+        return {
+          id: record?._id || `roster:${row.memberId}`,
+          memberId: row.memberId,
+          name: row.name,
+          record,
+          active: activeByMember.get(row.memberId) || null,
+          turnLabel: record ? sessionTurnLabel(record) : null,
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name, 'es') || a.id.localeCompare(b.id));
-  }, [teamToday, activeByMember]);
+  }, [teamMembers, todayByMember, activeByMember, managerView]);
 
   const teamWeekGrouped = useMemo(() => {
     const map = new Map<string, { name: string; minutes: number; dates: Set<string> }>();
@@ -275,10 +338,20 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
       if (r.date) prev.dates.add(r.date);
       map.set(id, prev);
     }
+    if (managerView) {
+      for (const member of teamMembers) {
+        if (!member.user_id || map.has(member.user_id)) continue;
+        map.set(member.user_id, {
+          name: member.fullName || member.email || 'Sin nombre',
+          minutes: 0,
+          dates: new Set<string>(),
+        });
+      }
+    }
     return [...map.entries()]
       .map(([id, data]) => ({ id, name: data.name, minutes: data.minutes, days: data.dates.size }))
-      .sort((a, b) => b.minutes - a.minutes);
-  }, [teamWeek]);
+      .sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name, 'es'));
+  }, [teamWeek, teamMembers, managerView]);
 
   const monthLabel = monthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
 
@@ -423,9 +496,13 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
                 <p className="py-10 text-center text-sm text-gray-400">Sin fichajes esta semana</p>
               ) : (
                 teamWeekGrouped.map((row) => (
-                  <div
+                  <button
                     key={row.id}
-                    className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+                    type="button"
+                    onClick={onViewMember ? () => onViewMember(row.id) : undefined}
+                    className={`flex items-center gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 w-full text-left ${
+                      onViewMember ? 'hover:border-blue-300 dark:hover:border-blue-700 transition-colors' : ''
+                    }`}
                   >
                     <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-sm font-bold text-blue-700 dark:text-blue-300 shrink-0">
                       {row.name.slice(0, 2).toUpperCase()}
@@ -435,17 +512,21 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
                       <p className="text-xs text-gray-500">{row.days} día{row.days !== 1 ? 's' : ''} fichados</p>
                     </div>
                     <span className="text-sm font-bold text-gray-900 dark:text-gray-100">{formatHoursShort(row.minutes)}</span>
-                  </div>
+                  </button>
                 ))
               )}
             </>
           ) : (
             <>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Estado del equipo hoy · {teamRows.length} fichaje{teamRows.length !== 1 ? 's' : ''}
+                {managerView
+                  ? `Todo el equipo · ${teamRows.length} persona${teamRows.length !== 1 ? 's' : ''}`
+                  : `Estado del equipo hoy · ${teamRows.length} fichaje${teamRows.length !== 1 ? 's' : ''}`}
               </p>
               {teamRows.length === 0 ? (
-                <p className="py-10 text-center text-sm text-gray-400">Nadie ha fichado hoy todavía</p>
+                <p className="py-10 text-center text-sm text-gray-400">
+                  {managerView ? 'No hay miembros en el equipo' : 'Nadie ha fichado hoy todavía'}
+                </p>
               ) : (
                 teamRows.map((row) => (
                   <TeamMemberCard
@@ -454,9 +535,15 @@ export function ClockinHistoryPanel({ businessId, memberId, managerView = false 
                     record={row.record}
                     active={row.active}
                     turnLabel={row.turnLabel}
+                    onClick={onViewMember ? () => onViewMember(row.memberId) : undefined}
                   />
                 ))
               )}
+              {managerView && onViewMember ? (
+                <p className="text-[11px] text-gray-400 text-center pt-1">
+                  Pulsa un nombre para ver su historial completo de fichajes
+                </p>
+              ) : null}
             </>
           )}
         </div>

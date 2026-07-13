@@ -28,7 +28,7 @@ if (!values) {
 
 const user = values.DEPLOY_USER || values.SSH_USER;
 const host = values.DEPLOY_HOST || values.VPS_IP;
-const repo = values.REPO_PATH_ON_VPS?.trim() || '/opt/vertial/Vertical-Saas';
+const repo = values.REPO_PATH_ON_VPS?.trim() || '/opt/vertial/Vertial';
 const composeFile = values.COMPOSE_FILE?.trim() || 'deploy/docker-compose.scaleway.yml';
 const identity = values.SSH_IDENTITY_FILE?.trim();
 

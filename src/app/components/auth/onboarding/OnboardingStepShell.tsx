@@ -25,8 +25,8 @@ export function OnboardingStepShell({
   const visualKey = getOnboardingVisualKeyForStep(stepIndex);
 
   return (
-    <div className="min-h-dvh 2xl:h-dvh 2xl:max-h-dvh min-h-0 grid 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] overflow-hidden bg-gray-50 dark:bg-gray-900">
-      <div className="flex min-h-0 flex-col overflow-hidden">
+    <div className="min-h-dvh bg-gray-50 dark:bg-gray-900 2xl:grid 2xl:h-dvh 2xl:max-h-dvh 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] 2xl:overflow-hidden">
+      <div className="flex flex-col 2xl:min-h-0 2xl:overflow-hidden">
         <header className="shrink-0 z-20 border-b border-gray-200/80 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 px-4 sm:px-6 pt-3 pb-2.5">
           <div className={`mx-auto flex w-full ${maxWidth} flex-col gap-3`}>
             <div className="flex items-center justify-between gap-3">
@@ -51,8 +51,8 @@ export function OnboardingStepShell({
           className="mx-4 mt-3 shrink-0 sm:mx-6 2xl:hidden"
         />
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 py-3 sm:px-6 sm:py-4">
-          <div className={`mx-auto flex w-full ${maxWidth} min-h-0 flex-1 flex-col gap-3`}>
+        <main className="flex flex-col px-4 py-3 sm:px-6 sm:py-4 touch-pan-y 2xl:min-h-0 2xl:flex-1 2xl:overflow-y-auto 2xl:overscroll-contain [-webkit-overflow-scrolling:touch]">
+          <div className={`mx-auto flex w-full ${maxWidth} flex-col gap-3 2xl:min-h-0 2xl:flex-1`}>
             {children}
           </div>
         </main>

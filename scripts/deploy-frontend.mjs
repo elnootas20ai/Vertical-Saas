@@ -98,7 +98,7 @@ if (!values) {
 
 const user = values.DEPLOY_USER || values.SSH_USER;
 const host = values.DEPLOY_HOST || values.VPS_IP;
-const remotePath = values.DEPLOY_DIST_PATH || values.DIST_PATH_ON_VPS || '/opt/vertial/Vertical-Saas/dist';
+const remotePath = values.DEPLOY_DIST_PATH || values.DIST_PATH_ON_VPS || '/opt/vertial/Vertial/dist';
 
 if (!user || !host) {
   console.error(

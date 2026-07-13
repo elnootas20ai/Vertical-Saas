@@ -10,8 +10,10 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
-import { shouldHideThirdPartyAuthOnIos } from '../../lib/appStoreCompliance';
-import type { GoogleUserProfile } from '../../lib/authApi';
+import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
+import { signInWithAppleNative } from '../../lib/appleSignInNative';
+import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
+import type { AppleUserProfile, GoogleUserProfile } from '../../lib/authApi';
 import { LegalAgreementsModal } from '../../components/legal/LegalAgreementsModal';
 import { clearLegacyOnboardingDraft, setPendingVerifyEmail } from '../../lib/onboardingLocalKeys';
 
@@ -20,6 +22,8 @@ type AccountType = 'user' | 'company';
 interface LocationState {
   googleUser?: GoogleUserProfile;
   googleCredential?: string;
+  appleUser?: AppleUserProfile;
+  appleCredential?: string;
   accountType?: AccountType;
 }
 
@@ -39,23 +43,26 @@ export function Register() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const { resolvedTheme } = useTheme();
-  const { register, googleLogin } = useAuth();
+  const { register, googleLogin, appleLogin } = useAuth();
 
   const locationState = (location.state || {}) as LocationState;
   const incomingGoogle = locationState.googleUser || null;
+  const incomingApple = locationState.appleUser || null;
   const incomingCredential = locationState.googleCredential || '';
+  const incomingAppleCredential = locationState.appleCredential || '';
   const accountType: AccountType = locationState.accountType || 'company';
   const isUserAccount = accountType === 'user';
 
   const [googleCredential, setGoogleCredential] = useState(incomingCredential);
+  const [appleCredential, setAppleCredential] = useState(incomingAppleCredential);
   const [googleAvatar, setGoogleAvatar] = useState(incomingGoogle?.avatar || '');
 
   const initialReferral = searchParams.get('ref') || '';
 
   const [formData, setFormData] = useState({
-    firstName: incomingGoogle?.firstName || '',
-    lastName: incomingGoogle?.lastName || '',
-    email: incomingGoogle?.email || '',
+    firstName: incomingGoogle?.firstName || incomingApple?.firstName || '',
+    lastName: incomingGoogle?.lastName || incomingApple?.lastName || '',
+    email: incomingGoogle?.email || incomingApple?.email || '',
     phone: '',
     password: '',
     confirmPassword: '',
@@ -98,6 +105,8 @@ export function Register() {
   }, []);
 
   const isGoogleFlow = Boolean(googleCredential);
+  const isAppleFlow = Boolean(appleCredential);
+  const isSocialFlow = isGoogleFlow || isAppleFlow;
 
   const handleGoogleCredential = useCallback(async (credential: string) => {
     setIsSubmitting(true);
@@ -132,9 +141,55 @@ export function Register() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [googleLogin, navigate]);
+  }, [googleLogin, navigate, isUserAccount]);
+
+  const handleAppleSignIn = useCallback(async () => {
+    setIsSubmitting(true);
+    setErrors({});
+    try {
+      const native = await signInWithAppleNative();
+      const result = await appleLogin(native.identityToken, {
+        givenName: native.givenName || undefined,
+        familyName: native.familyName || undefined,
+      });
+
+      if (result.success) {
+        navigate(
+          destinationAfterSignup({
+            emailVerified: true,
+            redirectTo: result.redirectTo,
+            isUserAccount,
+          }),
+        );
+        return;
+      }
+
+      if (result.code === 'APPLE_ACCOUNT_NOT_FOUND' && result.appleUser) {
+        setAppleCredential(native.identityToken);
+        setGoogleCredential('');
+        setGoogleAvatar('');
+        setFormData((prev) => ({
+          ...prev,
+          firstName: result.appleUser!.firstName || native.givenName || prev.firstName,
+          lastName: result.appleUser!.lastName || native.familyName || prev.lastName,
+          email: result.appleUser!.email || native.email || prev.email,
+        }));
+        return;
+      }
+
+      setErrors({ email: result.error || 'Error al registrarse con Apple' });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error al registrarse con Apple';
+      if (!msg.toLowerCase().includes('cancel')) {
+        setErrors({ email: msg });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [appleLogin, navigate, isUserAccount]);
 
   const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
+  const showAppleAuth = isAppleSignInAvailable();
   const showGoogleAuth = googleClientConfigured && !hideGoogleOnIos;
   const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
   const googleBtnRef = useRef<HTMLDivElement>(null);
@@ -162,10 +217,12 @@ export function Register() {
     if (!formData.lastName) newErrors.lastName = 'Los apellidos son requeridos';
     if (!formData.email) newErrors.email = 'El email es requerido';
     if (!isUserAccount && !formData.phone) newErrors.phone = 'El teléfono es requerido';
-    if (!formData.password) newErrors.password = 'La contraseña es requerida';
-    if (formData.password.length < 8) newErrors.password = 'Mínimo 8 caracteres';
-    if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Las contraseñas no coinciden';
+    if (!isSocialFlow) {
+      if (!formData.password) newErrors.password = 'La contraseña es requerida';
+      if (formData.password.length < 8) newErrors.password = 'Mínimo 8 caracteres';
+      if (formData.password !== formData.confirmPassword) {
+        newErrors.confirmPassword = 'Las contraseñas no coinciden';
+      }
     }
     if (!formData.acceptTerms) {
       newErrors.acceptTerms = 'Debes aceptar los acuerdos legales';
@@ -182,9 +239,10 @@ export function Register() {
       lastName: formData.lastName,
       email: formData.email,
       phone: formData.phone || undefined,
-      password: formData.password,
+      ...(isSocialFlow ? {} : { password: formData.password }),
       accountType,
       ...(googleCredential ? { googleCredential } : {}),
+      ...(appleCredential ? { appleCredential } : {}),
       ...(formData.referralCode.trim() ? { referralCode: formData.referralCode.trim().toUpperCase() } : {}),
     });
     setIsSubmitting(false);
@@ -213,8 +271,9 @@ export function Register() {
     }
   };
 
-  const handleCancelGoogle = () => {
+  const handleCancelSocial = () => {
     setGoogleCredential('');
+    setAppleCredential('');
     setGoogleAvatar('');
     setFormData((prev) => ({ ...prev, firstName: '', lastName: '', email: '' }));
   };
@@ -245,7 +304,7 @@ export function Register() {
             </div>
           </div>
 
-          {isGoogleFlow && (
+          {(isGoogleFlow || isAppleFlow) && (
             <div className="mb-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-3">
               <div className="flex items-center gap-3">
                 {googleAvatar ? (
@@ -257,7 +316,7 @@ export function Register() {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-blue-800 dark:text-blue-200">
-                    Cuenta de Google verificada
+                    {isAppleFlow ? 'Apple ID verificado' : 'Cuenta de Google verificada'}
                   </p>
                   <p className="text-xs text-blue-600 dark:text-blue-400 truncate">
                     {formData.email}
@@ -265,7 +324,7 @@ export function Register() {
                 </div>
                 <button
                   type="button"
-                  onClick={handleCancelGoogle}
+                  onClick={handleCancelSocial}
                   className="text-xs text-blue-500 hover:text-blue-700 font-medium"
                 >
                   Cambiar
@@ -312,16 +371,16 @@ export function Register() {
                 icon={<Mail className="w-4 h-4" />}
                 value={formData.email}
                 onChange={(e) => {
-                  if (!isGoogleFlow) {
+                  if (!isSocialFlow) {
                     setFormData({ ...formData, email: e.target.value });
                     setErrors({ ...errors, email: '' });
                   }
                 }}
                 error={errors.email}
-                disabled={isGoogleFlow}
-                className={isGoogleFlow ? '!pr-10' : ''}
+                disabled={isSocialFlow}
+                className={isSocialFlow ? '!pr-10' : ''}
               />
-              {isGoogleFlow && (
+              {isSocialFlow && (
                 <div className="pointer-events-none absolute right-3 top-8 flex items-center">
                   <CheckCircle className="w-4 h-4 text-green-500" />
                 </div>
@@ -341,6 +400,7 @@ export function Register() {
               error={errors.phone}
             />
 
+            {!isSocialFlow && (
             <div className="space-y-3 min-w-0">
               <ACCESO__Input
                 label="Contraseña"
@@ -392,6 +452,7 @@ export function Register() {
                 }
               />
             </div>
+            )}
 
             <details className="group rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2">
               <summary className="cursor-pointer list-none text-xs font-medium text-gray-600 dark:text-gray-400 flex items-center justify-between gap-2">
@@ -469,12 +530,14 @@ export function Register() {
             >
               {isSubmitting
                 ? 'Registrando...'
-                : isGoogleFlow
-                  ? 'Crear cuenta con Google'
-                  : 'Crear cuenta'}
+                : isAppleFlow
+                  ? 'Crear cuenta con Apple'
+                  : isGoogleFlow
+                    ? 'Crear cuenta con Google'
+                    : 'Crear cuenta'}
             </ACCESO__Button>
 
-            {!isGoogleFlow && !hideGoogleOnIos && (
+            {!isSocialFlow && !hideGoogleOnIos && (
               <>
                 <div className="relative my-2">
                   <div className="absolute inset-0 flex items-center">
@@ -504,6 +567,20 @@ export function Register() {
                     Google no disponible (revisa VITE_GOOGLE_CLIENT_ID en build).
                   </div>
                 )}
+              </>
+            )}
+
+            {!isSocialFlow && showAppleAuth && (
+              <>
+                <div className="relative my-2">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200 dark:border-gray-700" />
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="px-3 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">o</span>
+                  </div>
+                </div>
+                <AppleSignInButton label="Registrarse con Apple" disabled={isSubmitting} onPress={handleAppleSignIn} />
               </>
             )}
           </form>

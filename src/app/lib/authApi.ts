@@ -78,6 +78,7 @@ export interface AuthUser {
     picture?: string;
     name?: string;
   } | null;
+  appleId?: string | null;
   landingPage?: string;
   linkedBusinessId?: string;
   username?: string;
@@ -145,6 +146,7 @@ export interface EmploymentInfo {
   mutualInsurance?: string;
   // Labor cost
   grossSalary?: number;
+  payPeriodsPerYear?: number;
   socialSecurityCost?: number;
   otherCosts?: number;
   costCurrency?: string;
@@ -249,8 +251,9 @@ export interface RegisterPayload {
   lastName: string;
   email: string;
   phone?: string;
-  password: string;
+  password?: string;
   googleCredential?: string;
+  appleCredential?: string;
   accountType?: 'user' | 'company';
   referralCode?: string;
 }
@@ -308,6 +311,15 @@ export interface GoogleUserProfile {
   avatar: string;
   googleId: string;
   locale: string;
+  emailVerified: boolean;
+}
+
+export interface AppleUserProfile {
+  email: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  appleId: string;
   emailVerified: boolean;
 }
 
@@ -684,6 +696,93 @@ export async function googleLoginRequest(credential: string): Promise<GoogleLogi
   return payload;
 }
 
+export interface AppleLoginResult {
+  ok: boolean;
+  code?: string;
+  error?: string;
+  user?: AuthUser;
+  appleUser?: AppleUserProfile;
+  redirectTo?: string;
+  accessToken?: string;
+}
+
+export async function appleLoginRequest(
+  identityToken: string,
+  profile?: { givenName?: string; familyName?: string },
+): Promise<AppleLoginResult> {
+  const extraHeaders: Record<string, string> = {};
+  if (_inMemoryToken) {
+    extraHeaders['Authorization'] = `Bearer ${_inMemoryToken}`;
+  }
+
+  const url = `${API_BASE}/api/auth/apple-login`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...extraHeaders,
+      },
+      body: JSON.stringify({
+        identityToken,
+        givenName: profile?.givenName,
+        familyName: profile?.familyName,
+      }),
+      signal: AbortSignal.timeout(GOOGLE_LOGIN_FETCH_MS),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      return {
+        ok: false,
+        error: 'La API tardó demasiado en responder (Apple). Revisa conexión y que el backend esté en marcha.',
+      };
+    }
+    const hint = API_BASE
+      ? `No se pudo conectar con ${url}. Revisa red y que el backend esté en marcha.`
+      : `No se pudo conectar con ${url}. Revisa VITE_API_URL / mismo origen y el proxy.`;
+    return {
+      ok: false,
+      error: err instanceof Error ? `${hint} (${err.message})` : hint,
+    };
+  }
+
+  const rawText = await response.text();
+  let payload = {} as AppleLoginResult;
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText) as AppleLoginResult;
+    } catch {
+      payload = {
+        ok: false,
+        error: rawText.replace(/\s+/g, ' ').trim().slice(0, 240) || 'Respuesta no JSON del servidor',
+      };
+    }
+  }
+
+  if (response.status === 404 && payload.code === 'APPLE_ACCOUNT_NOT_FOUND') {
+    return payload;
+  }
+
+  if (!response.ok || payload.ok === false) {
+    return {
+      ok: false,
+      error:
+        (typeof payload.error === 'string' && payload.error.trim())
+        || `${response.status} ${response.statusText || ''}`.trim()
+        || 'Error al acceder con Apple',
+    };
+  }
+
+  if (payload.accessToken) {
+    cacheAccessToken(payload.accessToken);
+  }
+
+  return payload;
+}
+
 export interface TeamLoginResult extends ApiEnvelope<AuthUser> {
   business?: {
     business_id: string;
@@ -832,6 +931,7 @@ export async function inviteUserRequest(data: {
   position?: string;
   contractType?: string;
   grossMonthlySalary?: string;
+  payPeriodsPerYear?: number;
   workCenterId?: string;
   message?: string;
 }) {

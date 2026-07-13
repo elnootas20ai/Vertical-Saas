@@ -29,7 +29,7 @@ apt-get clean
 ## 4. Repo en el servidor
 
 ```bash
-cd ~/Vertical-Saas   # o tu ruta
+cd /opt/vertial/Vertial   # o tu ruta
 git gc --prune=now
 ```
 

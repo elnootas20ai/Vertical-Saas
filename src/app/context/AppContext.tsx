@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useMemo, useCallback } from 'react';
 import { useSSE } from '../hooks/useSSE';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useNativePushNotifications } from '../hooks/useNativePushNotifications';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
@@ -2448,8 +2449,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(authUser?.user_id),
   });
 
-  // RT-02: Web Push — suscripción a notificaciones cuando la app está cerrada
+  // RT-02: Web Push (PWA) + push nativo iOS/Android en app Capacitor
   usePushNotifications({
+    userId: authUser?.user_id ?? null,
+    token: sseToken,
+  });
+  useNativePushNotifications({
     userId: authUser?.user_id ?? null,
     token: sseToken,
   });

@@ -2,6 +2,7 @@ import { canManageBusinessTeam, assertBusinessTeamManage } from '../services/bus
 import crypto from 'node:crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { OAuth2Client } from 'google-auth-library';
+import { verifyAppleIdentityToken } from '../services/appleAuth.js';
 import {
   ACCOUNTS_DB,
   BUSINESSES_DB,
@@ -15,6 +16,7 @@ import {
   ensureDatabase,
   extractIp,
   findAccountByEmail,
+  findAccountByAppleId,
   findAccountByInviteToken,
   findAccountByRefreshToken,
   findAccountByResetToken,
@@ -216,18 +218,23 @@ function generateTemporaryPassword(length = 12) {
 
 export async function register(req, res) {
   try {
-    const { firstName, lastName, email, phone, password, googleCredential, accountType = 'company', referralCode } = req.body || {};
+    const { firstName, lastName, email, phone, password, googleCredential, appleCredential, accountType = 'company', referralCode } = req.body || {};
 
-    if (!firstName || !lastName || !email || !password) {
+    if (!firstName || !lastName || !email) {
       return badRequest(res, 'Faltan campos obligatorios');
+    }
+
+    const hasSocialCredential = Boolean(googleCredential || appleCredential);
+    const resolvedPassword = hasSocialCredential && !String(password || '').trim()
+      ? generateTemporaryPassword(16)
+      : password;
+
+    if (!resolvedPassword || String(resolvedPassword).length < 8) {
+      return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
     }
 
     if (accountType === 'company' && !phone) {
       return badRequest(res, 'El teléfono es obligatorio para cuentas de empresa');
-    }
-
-    if (String(password).length < 8) {
-      return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
     }
 
     let googleUser = null;
@@ -240,6 +247,23 @@ export async function register(req, res) {
       } catch (gErr) {
         console.error('[AUTH] Error verificando Google credential en registro:', gErr?.message);
         return badRequest(res, 'Token de Google inválido o expirado. Intenta de nuevo.');
+      }
+    }
+
+    let appleUser = null;
+    if (appleCredential) {
+      try {
+        const appleAuth = await verifyAppleIdentityToken(appleCredential);
+        appleUser = buildAppleUserProfile(appleAuth, firstName, lastName);
+        if (appleAuth.email && appleAuth.email !== String(email).trim().toLowerCase()) {
+          return badRequest(res, 'El email del formulario no coincide con la cuenta de Apple');
+        }
+        if (!appleAuth.email && !appleUser.email) {
+          appleUser.email = String(email).trim().toLowerCase();
+        }
+      } catch (aErr) {
+        console.error('[AUTH] Error verificando Apple credential en registro:', aErr?.message);
+        return badRequest(res, 'Token de Apple inválido o expirado. Intenta de nuevo.');
       }
     }
 
@@ -266,16 +290,18 @@ export async function register(req, res) {
 
     const isUserAccount = accountType === 'user';
 
+    const socialUser = googleUser || appleUser;
+
     const account = buildAccountDocument({
       firstName,
       lastName,
       email,
       phone: phone || '',
-      password,
+      password: resolvedPassword,
       accountType,
-      avatar: googleUser?.avatar || '',
-      provider: googleUser ? 'google' : 'email',
-      emailVerified: googleUser ? googleUser.emailVerified : false,
+      avatar: socialUser?.avatar || '',
+      provider: googleUser ? 'google' : appleUser ? 'apple' : 'email',
+      emailVerified: socialUser ? socialUser.emailVerified : false,
     });
 
     if (resolvedReferralCode) {
@@ -293,6 +319,10 @@ export async function register(req, res) {
       };
     }
 
+    if (appleUser) {
+      account.appleId = appleUser.appleId;
+    }
+
     let savedAccount = await saveAccount(req, account);
 
     try {
@@ -302,8 +332,8 @@ export async function register(req, res) {
       logger.warn({ tag: 'AUTH_REGISTER', linkErr }, 'No se pudo enlazar cuenta con afiliado');
     }
 
-    let verificationEmailSent = Boolean(googleUser);
-    if (!googleUser) {
+    let verificationEmailSent = Boolean(socialUser);
+    if (!socialUser) {
       try {
         savedAccount = await sendAccountVerificationEmail(req, savedAccount);
         verificationEmailSent = true;
@@ -320,12 +350,14 @@ export async function register(req, res) {
       actorName: savedAccount.fullName,
       targetUserId: savedAccount.user_id,
       type: 'team',
-      action: googleUser ? 'Cuenta creada con Google OAuth' : 'Cuenta creada',
+      action: googleUser ? 'Cuenta creada con Google OAuth' : appleUser ? 'Cuenta creada con Apple' : 'Cuenta creada',
       entityId: savedAccount.user_id,
       entityLabel: savedAccount.fullName,
       metadata: googleUser
         ? { googleId: googleUser.googleId, scopes: googleUser.scopes, accountType }
-        : { accountType },
+        : appleUser
+          ? { appleId: appleUser.appleId, accountType }
+          : { accountType },
     });
 
     const referralDisplay = String(resolvedReferralCode || referralCode || '').trim() || '—';
@@ -334,9 +366,11 @@ export async function register(req, res) {
     const providerLabel =
       savedAccount.provider === 'google'
         ? 'Google'
-        : savedAccount.provider === 'email'
-          ? 'Correo electrónico'
-          : escapeHtml(String(savedAccount.provider || '—'));
+        : savedAccount.provider === 'apple'
+          ? 'Apple'
+          : savedAccount.provider === 'email'
+            ? 'Correo electrónico'
+            : escapeHtml(String(savedAccount.provider || '—'));
 
     sendAdminAlert({
       key: `user_registered:${savedAccount.user_id}`,
@@ -564,6 +598,123 @@ export async function googleLogin(req, res) {
     return res.status(401).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al verificar las credenciales de Google',
+    });
+  }
+}
+
+function buildAppleUserProfile(appleAuth, givenName = '', familyName = '') {
+  const firstName = String(givenName || '').trim();
+  const lastName = String(familyName || '').trim();
+  return {
+    appleId: appleAuth.appleId,
+    email: appleAuth.email || '',
+    emailVerified: appleAuth.emailVerified || Boolean(appleAuth.email),
+    firstName,
+    lastName,
+    fullName: `${firstName} ${lastName}`.trim(),
+    avatar: '',
+  };
+}
+
+export async function appleLogin(req, res) {
+  try {
+    const { identityToken, givenName, familyName } = req.body || {};
+
+    if (!identityToken) {
+      return badRequest(res, 'Se requiere el token de Apple (identityToken)');
+    }
+
+    const appleAuth = await verifyAppleIdentityToken(identityToken);
+    const appleUser = buildAppleUserProfile(appleAuth, givenName, familyName);
+
+    await ensureDatabase(req, ACCOUNTS_DB);
+
+    let account = await findAccountByAppleId(req, appleAuth.appleId);
+    if (!account && appleAuth.email) {
+      account = await findAccountByEmail(req, appleAuth.email);
+    }
+
+    if (!account) {
+      return res.status(404).json({
+        ok: false,
+        code: 'APPLE_ACCOUNT_NOT_FOUND',
+        error: 'No existe una cuenta con este Apple ID. Debes registrarte primero.',
+        appleUser: {
+          email: appleUser.email,
+          firstName: appleUser.firstName,
+          lastName: appleUser.lastName,
+          fullName: appleUser.fullName,
+          appleId: appleUser.appleId,
+          emailVerified: appleUser.emailVerified,
+        },
+      });
+    }
+
+    const updatedAccount = {
+      ...account,
+      firstName: appleUser.firstName || account.firstName,
+      lastName: appleUser.lastName || account.lastName,
+      fullName: appleUser.fullName || account.fullName || `${appleUser.firstName} ${appleUser.lastName}`.trim(),
+      provider: 'apple',
+      emailVerified: appleUser.emailVerified || account.emailVerified,
+      appleId: appleAuth.appleId,
+      lastLoginAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const savedAccount = await saveAccount(req, updatedAccount);
+    const ip = getClientIp(req);
+
+    await logAccountActivity(req, {
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName,
+      targetUserId: savedAccount.user_id,
+      type: 'login',
+      action: 'Inicio de sesión con Apple',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName,
+      ip,
+      metadata: {
+        appleId: appleAuth.appleId,
+        ip,
+        userAgent: req.headers['user-agent'] || '',
+      },
+    });
+
+    void writeChangelog(req, {
+      entity: 'login',
+      entityId: savedAccount.user_id,
+      entityLabel: savedAccount.fullName || savedAccount.email,
+      action: 'login',
+      actorUserId: savedAccount.user_id,
+      actorName: savedAccount.fullName || savedAccount.email,
+      changes: {},
+      metadata: {
+        provider: 'apple',
+        email: savedAccount.email,
+        role: savedAccount.role,
+        ip,
+        userAgent: req.headers['user-agent'] || '',
+      },
+    });
+
+    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    let redirectTo = '/saas/dashboard';
+    if (!savedAccount.emailVerified) {
+      redirectTo = '/auth/verify-email-pending';
+    }
+    return res.json({
+      ok: true,
+      user: sanitizeAccount(savedAccount),
+      accessToken,
+      refreshToken,
+      redirectTo,
+    });
+  } catch (error) {
+    console.error('[AUTH] Apple login error:', error?.message || error);
+    return res.status(401).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al verificar las credenciales de Apple',
     });
   }
 }
@@ -1444,7 +1595,7 @@ export async function getBillingCard(req, res) {
 
 export async function inviteUser(req, res) {
   try {
-    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = WORKER_DEFAULT_LANDING_PATH, position = '', contractType = '', grossMonthlySalary = '', workCenterId = '', message = '' } = req.body || {};
+    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = WORKER_DEFAULT_LANDING_PATH, position = '', contractType = '', grossMonthlySalary = '', payPeriodsPerYear, workCenterId = '', message = '' } = req.body || {};
 
     if (!email) {
       return badRequest(res, 'El email es obligatorio');
@@ -1544,6 +1695,8 @@ export async function inviteUser(req, res) {
           position,
           contractType,
           salary: grossMonthlySalary,
+          workday: 'completa',
+          payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
           salesPointId: workCenterId,
         },
         invitedBy: actorUserId || String(invitedBy || '').trim(),
@@ -1569,6 +1722,8 @@ export async function inviteUser(req, res) {
         position,
         contractType,
         salary: grossMonthlySalary,
+        workday: 'completa',
+        payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
         salesPointId: workCenterId,
       };
       invitationDoc.message = String(message || existingInvitation.message || '').trim();

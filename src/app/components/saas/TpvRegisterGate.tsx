@@ -1514,6 +1514,7 @@ function ClockInModal({
           salesPointId: pdvId || undefined,
           workCenterId: workCenterId || undefined,
           storeScope: Boolean(pdvId),
+          recordsOnly: true,
         }),
       ]);
       const storeTeam = filterUsersForStoreClockin(

@@ -9,7 +9,9 @@ import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbo
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
-import { shouldHideThirdPartyAuthOnIos } from '../../lib/appStoreCompliance';
+import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
+import { signInWithAppleNative } from '../../lib/appleSignInNative';
+import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { seedRetailScopeCacheFromTabletLogin } from '../../lib/tabletLoginStoreSeed';
@@ -35,7 +37,7 @@ function loadSavedLogin(): { email: string } | null {
 export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login, googleLogin, requestLoginCode, verifyLoginCode, tpvTabletLogin } = useAuth();
+  const { login, googleLogin, appleLogin, requestLoginCode, verifyLoginCode, tpvTabletLogin } = useAuth();
   const { switchBusiness, reloadBusinesses } = useBusiness();
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
@@ -271,6 +273,44 @@ export function Login() {
     }
   }, [googleLogin, navigate, t]);
 
+  const showAppleAuth = isAppleSignInAvailable();
+
+  const handleAppleSignIn = useCallback(async () => {
+    setErrors({});
+    setIsSubmitting(true);
+    try {
+      const native = await signInWithAppleNative();
+      const result = await appleLogin(native.identityToken, {
+        givenName: native.givenName || undefined,
+        familyName: native.familyName || undefined,
+      });
+      if (result.success) {
+        navigate(result.redirectTo || '/saas/dashboard');
+        return;
+      }
+      if (result.code === 'APPLE_ACCOUNT_NOT_FOUND' && result.appleUser) {
+        navigate(AUTH_PATHS.register, {
+          state: {
+            accountType: 'company' as const,
+            appleUser: result.appleUser,
+            appleCredential: native.identityToken,
+          },
+        });
+        return;
+      }
+      const msg = (result.error || 'Error al acceder con Apple').trim();
+      if (msg) console.warn('[auth/apple-login]', msg);
+      setErrors({ email: msg });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error al acceder con Apple';
+      if (!msg.toLowerCase().includes('cancel')) {
+        setErrors({ email: msg });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [appleLogin, navigate]);
+
   const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
   const showGoogleAuth = googleClientConfigured && !hideGoogleOnIos;
   const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
@@ -294,7 +334,7 @@ export function Login() {
   }, [showGoogleAuth, googleReady]);
 
   return (
-    <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-800 flex items-start justify-center px-4 pt-4 pb-5 sm:pt-6">
+    <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-800 flex flex-col items-stretch px-4 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pt-6 sm:items-start sm:justify-center sm:pb-5">
       <div className="w-full max-w-md">
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
           {/* Header */}
@@ -560,6 +600,20 @@ export function Login() {
               </div>
             )}
             </>
+            )}
+
+            {showAppleAuth && (
+              <>
+                <div className="relative my-3">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200 dark:border-gray-700" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">{t('common.or')}</span>
+                  </div>
+                </div>
+                <AppleSignInButton disabled={isSubmitting} onPress={handleAppleSignIn} />
+              </>
             )}
 
             <button

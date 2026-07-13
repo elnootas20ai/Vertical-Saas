@@ -325,7 +325,7 @@ export async function emitGlobalAlert({
           title: sanitized.title,
           body: sanitized.message,
           data: { route: sanitized.route || '/saas/alerts', notificationId: sanitized.id },
-        }).catch(() => null);
+        }, { ruleId, category, channels }).catch(() => null);
       }
 
       if ((!quiet || bypassQuiet) && channels.includes('email')) {

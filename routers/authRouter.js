@@ -13,6 +13,7 @@ import {
   getMe,
   getUserActivity,
   googleLogin,
+  appleLogin,
   inviteUser,
   lookupInviteEmail,
   listAllActivities,
@@ -61,6 +62,7 @@ import {
   acceptInviteSchema,
   businessIdParamSchema,
   googleLoginSchema,
+  appleLoginSchema,
   inviteUserSchema,
   invitationIdParamSchema,
   joinRequestSchema,
@@ -87,6 +89,7 @@ const authRouter = Router();
 authRouter.post('/register', registerLimiter, validate(registerSchema), register);
 authRouter.post('/login', loginLimiter, validate(loginSchema), login);
 authRouter.post('/google-login', loginLimiter, validate(googleLoginSchema), googleLogin);
+authRouter.post('/apple-login', loginLimiter, validate(appleLoginSchema), appleLogin);
 authRouter.post('/logout', authSessionLimiter, logout);
 authRouter.post('/login-code/request', loginCodeLimiter, validate(recoverSchema), requestLoginCode);
 authRouter.post('/login-code/verify', loginCodeLimiter, validate(loginCodeVerifySchema), verifyLoginCode);

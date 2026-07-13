@@ -71,7 +71,7 @@ Estos dominios son **normales**: APIs de OpenAI, Google (`accounts.google.com`, 
 | `.env*` | Orígenes, URLs, IPs (no commitear secretos reales). |
 | `vite.config.ts` | `allowedHosts`, proxy `/api`. |
 | `index.js` | Comentarios y lógica de `ALLOWED_ORIGINS`. |
-| `package.json` | Scripts; nombre del paquete puede seguir siendo plantilla (`@figma/...`) sin afectar al deploy. |
+| `package.json` | Scripts; nombre del paquete npm: `vertial`. |
 | `ecosystem.config.cjs` | PM2 (p. ej. `vertial-frontend`, `vertial-backend`). |
 | `readme/copy/*`, `docs/tickets/*` | Documentación histórica; puede mencionar URLs de ejemplo. |
 

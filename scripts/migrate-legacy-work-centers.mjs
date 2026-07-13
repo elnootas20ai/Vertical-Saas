@@ -1,11 +1,11 @@
 /**
- * Migra centros de trabajo desde DBs legacy (udar, vertial…) a la DB activa.
+ * Migra centros de trabajo desde DBs legacy (vertial, urielsaas…) a la DB activa.
  * Uso en VPS: node scripts/migrate-legacy-work-centers.mjs --apply
  */
 const COUCH = 'http://127.0.0.1:5984';
 const AUTH = 'Basic ' + Buffer.from('vertialadmin:uriel12345').toString('base64');
 const TARGET = 'bbddsaas-sales-points';
-const LEGACY = ['udar-sales-points', 'vertial-sales-points', 'urielsaas-sales-points'];
+const LEGACY = ['vertial-sales-points', 'urielsaas-sales-points'];
 const APPLY = process.argv.includes('--apply');
 const USER_FILTER = process.argv.find((a) => a.startsWith('--user='))?.slice('--user='.length) || '';
 

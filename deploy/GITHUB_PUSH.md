@@ -1,11 +1,11 @@
 # Push a GitHub sin error 403 (cuenta equivocada)
 
-Si ves `Permission to … denied to UdarEdge` (u otro usuario), Git está usando **credenciales de una cuenta** que **no tiene permiso** de escritura en el repo.
+Si ves `Permission to … denied to tu-usuario-de-GitHub` (u otro usuario), Git está usando **credenciales de una cuenta** que **no tiene permiso** de escritura en el repo.
 
 ## Opción A — Remoto SSH (necesitas clave pública en GitHub)
 
 ```bash
-git remote set-url origin git@github.com:elnootas20ai/Vertical-Saas.git
+git remote set-url origin git@github.com:elnootas20ai/Vertial.git
 ssh -T git@github.com
 git push origin main
 ```
@@ -35,4 +35,4 @@ git push origin main
 
 ## Opción C — Que te den acceso
 
-El dueño del repo (`elnootas20ai`) debe añadir tu usuario **UdarEdge** como **Collaborator** (Settings → Collaborators) con rol que permita push.
+El dueño del repo (`elnootas20ai`) debe añadir **tu usuario de GitHub** como **Collaborator** (Settings → Collaborators) con rol que permita push.

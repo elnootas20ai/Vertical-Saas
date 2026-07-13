@@ -11,7 +11,7 @@ if (!values) {
 
 const user = values.DEPLOY_USER || values.SSH_USER;
 const host = values.DEPLOY_HOST || values.VPS_IP;
-const dist = values.DEPLOY_DIST_PATH || '/opt/vertial/Vertical-Saas/dist';
+const dist = values.DEPLOY_DIST_PATH || '/opt/vertial/Vertial/dist';
 const identity = values.SSH_IDENTITY_FILE?.trim();
 
 const bash = `set -e

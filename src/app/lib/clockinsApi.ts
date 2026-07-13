@@ -152,6 +152,8 @@ export async function listClockins(
     workCenterId?: string;
     /** TPV: ver fichajes del PDV/tienda para operar caja (sin filtrar por rol). */
     storeScope?: boolean;
+    /** Solo fichajes reales (sin filas «sin fichar» del roster del día). */
+    recordsOnly?: boolean;
   },
 ): Promise<ClockinRecord[]> {
   try {
@@ -161,7 +163,7 @@ export async function listClockins(
     if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
     if (filters?.workCenterId) params.set('workCenterId', filters.workCenterId);
     if (filters?.storeScope) params.set('storeScope', '1');
-    params.set('recordsOnly', '1');
+    if (filters?.recordsOnly) params.set('recordsOnly', '1');
     const qs = params.toString() ? `?${params}` : '';
     const data = await req<{ clockins: ClockinRecord[] }>(
       `/api/clockins/${encodeURIComponent(businessId)}${qs}`,
@@ -677,16 +679,88 @@ export interface PayrollClockinSummary {
     is_late: boolean;
     late_minutes: number;
   }[];
+  labor_cost?: PayrollLaborCostFields;
 }
 
 export async function fetchPayrollSummary(
   businessId: string,
   period: string,
-): Promise<PayrollClockinSummary[]> {
-  const data = await req<{ summaries: PayrollClockinSummary[] }>(
+): Promise<{ summaries: PayrollClockinSummary[]; teamLaborCost: PayrollTeamLaborCost | null }> {
+  const data = await req<{
+    summaries: PayrollClockinSummary[];
+    team_labor_cost?: PayrollTeamLaborCost;
+  }>(
     `/api/clockins/${encodeURIComponent(businessId)}/payroll-summary?period=${period}`,
   );
-  return data.summaries || [];
+  return {
+    summaries: data.summaries || [],
+    teamLaborCost: data.team_labor_cost || null,
+  };
+}
+
+// ─── Labor cost ──────────────────────────────────────────────────────────────
+
+export interface MemberLaborCost {
+  member_id: string;
+  member_name: string;
+  role: string;
+  worked_minutes: number;
+  worked_hours: number;
+  contract_type: string;
+  workday: string;
+  salary_text: string;
+  gross_monthly: number | null;
+  social_security_monthly: number | null;
+  other_costs_monthly: number | null;
+  total_monthly_employer: number | null;
+  hourly_employer_cost: number | null;
+  actual_gross_cost: number | null;
+  actual_employer_cost: number | null;
+  has_salary_data: boolean;
+  cost_currency: string;
+}
+
+export interface LaborCostSummary {
+  actual_employer_cost: number;
+  actual_gross_cost: number;
+  members_with_salary: number;
+  members_total: number;
+  cost_currency: string;
+}
+
+export interface PayrollTeamLaborCost {
+  actual_employer_cost: number;
+  members_with_salary: number;
+  members_total: number;
+}
+
+export interface PayrollLaborCostFields {
+  gross_monthly: number | null;
+  social_security_monthly: number | null;
+  total_monthly_employer: number | null;
+  hourly_employer_cost: number | null;
+  worked_hours: number;
+  actual_gross_cost: number | null;
+  actual_employer_cost: number | null;
+  has_salary_data: boolean;
+  cost_currency: string;
+}
+
+export async function fetchLaborCost(
+  businessId: string,
+  filters: { from: string; to: string },
+): Promise<{ members: MemberLaborCost[]; summary: LaborCostSummary; period: { from: string; to: string } }> {
+  const params = new URLSearchParams({ from: filters.from, to: filters.to });
+  const data = await req<{
+    members: MemberLaborCost[];
+    summary: LaborCostSummary;
+    period: { from: string; to: string };
+  }>(`/api/clockins/${encodeURIComponent(businessId)}/labor-cost?${params}`);
+  return {
+    members: data.members || [],
+    summary: data.summary,
+    period: data.period,
+  };
 }
 
 // ─── Export ──────────────────────────────────────────────────────────────────

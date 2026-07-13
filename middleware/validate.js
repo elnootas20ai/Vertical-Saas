@@ -51,10 +51,20 @@ export const registerSchema = z.object({
   lastName: z.string().min(1, 'El apellido es obligatorio').max(100).trim(),
   email: z.string().email('Email inválido').max(254).trim().toLowerCase(),
   phone: z.string().max(30).trim().optional().default(''),
-  password: z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(128),
+  password: z.string().max(128).optional().default(''),
   googleCredential: z.string().max(4096).optional(),
+  appleCredential: z.string().max(8192).optional(),
   accountType: z.enum(['user', 'company']).optional().default('company'),
   referralCode: z.string().max(20).trim().optional(),
+}).superRefine((data, ctx) => {
+  const social = Boolean(data.googleCredential || data.appleCredential);
+  if (!social && (!data.password || data.password.length < 8)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'La contraseña debe tener al menos 8 caracteres',
+      path: ['password'],
+    });
+  }
 });
 
 export const loginSchema = z.object({
@@ -101,6 +111,7 @@ export const inviteUserSchema = z.object({
   position: z.string().max(200).trim().optional().default(''),
   contractType: z.string().max(100).trim().optional().default(''),
   grossMonthlySalary: z.string().max(50).trim().optional().default(''),
+  payPeriodsPerYear: z.coerce.number().int().min(12).max(16).optional(),
   workCenterId: z.string().max(100).trim().optional().default(''),
   message: z.string().max(500).trim().optional().default(''),
 });
@@ -124,6 +135,12 @@ export const activateOnboardingTrialSchema = z.object({
 
 export const googleLoginSchema = z.object({
   credential: z.string().min(1, 'Token de Google obligatorio').max(4096),
+});
+
+export const appleLoginSchema = z.object({
+  identityToken: z.string().min(1, 'Token de Apple obligatorio').max(8192),
+  givenName: z.string().max(100).trim().optional(),
+  familyName: z.string().max(100).trim().optional(),
 });
 
 export const userIdParamSchema = z.object({

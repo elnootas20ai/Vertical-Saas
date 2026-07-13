@@ -3051,12 +3051,12 @@ export function Team() {
   };
 
   const handleInvite = async (payload: InviteUserPayload) => {
-    const { name, email, role, landingPage, phone, position, contractType, grossMonthlySalary, workCenterId, businessId } = payload;
+    const { name, email, role, landingPage, phone, position, contractType, grossMonthlySalary, payPeriodsPerYear, workCenterId, businessId } = payload;
     const permissions = getInvitePermissionsForUser(role, roles);
     const result = await inviteUser({
       name, email, role, phone, permissions,
       businessId: businessId || currentBusiness?.business_id,
-      landingPage, position, contractType, grossMonthlySalary, workCenterId,
+      landingPage, position, contractType, grossMonthlySalary, payPeriodsPerYear, workCenterId,
     });
     if (!result.success) {
       throw new Error(result.error || 'No se pudo invitar al usuario.');
