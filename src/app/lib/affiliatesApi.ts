@@ -1,5 +1,6 @@
 import { authFetch } from './authApi';
 import { getApiBase } from './apiBase';
+import type { AffiliateKycData, AffiliateKycPortalSnapshot } from './affiliateKyc';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,16 @@ export interface Affiliate {
   contractAcceptedAt?: string | null;
   contractVersion?: string | null;
   needsContractAcceptance?: boolean;
+  kyc?: AffiliateKycData | null;
+  kycStatus?: AffiliateKycPortalSnapshot['status'];
+  kycSubmittedAt?: string | null;
+  kycNeedsReview?: boolean;
+  kycDni?: string | null;
+  kycLegalName?: string | null;
+  kycRejectionReason?: string | null;
+  needsKycSubmission?: boolean;
+  needsKycApproval?: boolean;
+  kycApproved?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -350,6 +361,41 @@ export async function portalAcceptContract(
     body: JSON.stringify({ accepted: true, version }),
   });
   return res.json();
+}
+
+export async function portalSubmitKyc(
+  code: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; affiliate?: Record<string, unknown>; error?: string }> {
+  const res = await fetch(`${BASE}/portal/${code}/kyc`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+export async function fetchAffiliateKycAdmin(userId: string, affiliateId: string) {
+  const data = await apiRequest<{ kyc: AffiliateKycData | null; affiliateName: string; affiliateEmail: string }>(
+    `${BASE}/admin/${userId}/affiliates/${affiliateId}/kyc`,
+  );
+  return data;
+}
+
+export async function updateAffiliateKycStatus(
+  userId: string,
+  affiliateId: string,
+  status: 'approved' | 'rejected',
+  rejectionReason?: string,
+): Promise<Affiliate> {
+  const data = await apiRequest<{ affiliate: Affiliate }>(
+    `${BASE}/admin/${userId}/affiliates/${affiliateId}/kyc`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ status, rejectionReason }),
+    },
+  );
+  return data.affiliate;
 }
 
 // ── Public: validate referral code ────────────────────────────────────────────

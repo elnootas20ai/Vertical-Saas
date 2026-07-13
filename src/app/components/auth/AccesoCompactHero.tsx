@@ -6,7 +6,7 @@ import {
   type OnboardingVisualKey,
 } from '../../lib/onboardingVisuals';
 
-/** Banda visual en tablet / portátil cuando el panel lateral solo aparece en pantallas muy anchas. */
+/** Banda visual en móvil/tablet cuando el panel lateral solo aparece desde lg. */
 export function AccesoCompactHero({
   visualKey,
   className = '',

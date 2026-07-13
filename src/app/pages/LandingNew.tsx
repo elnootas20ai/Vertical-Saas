@@ -665,6 +665,21 @@ export function LandingNew() {
                     <p className="text-xs text-zinc-500">Respuesta en menos de 24h</p>
                   </div>
                 </a>
+                <button
+                  type="button"
+                  onClick={() => navigate('/reuniones')}
+                  className="vertial-bento-card vertial-card-lift flex items-center gap-4 rounded-2xl p-5 group text-left"
+                >
+                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
+                    <Clock className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Agenda</p>
+                    <p className="font-bold text-white text-lg">Reservar una demo</p>
+                    <p className="text-xs text-zinc-500">Elige hueco y recibes invitación por email</p>
+                  </div>
+                  <ArrowRight className="w-5 h-5 text-zinc-600 group-hover:text-emerald-400 transition-colors" />
+                </button>
               </div>
             </div>
 

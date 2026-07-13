@@ -12,7 +12,7 @@ type Props = {
   showCompactHero?: boolean;
 };
 
-/** Layout de acceso/registro: formulario + panel visual Vertial (solo pantallas muy anchas). */
+/** Layout de acceso/registro: formulario + panel visual Vertial (split desde lg / ~1024px). */
 export function AccesoSplitLayout({
   children,
   visualKey,
@@ -20,16 +20,16 @@ export function AccesoSplitLayout({
   showCompactHero = true,
 }: Props) {
   return (
-    <div className="min-h-dvh bg-gray-50 dark:bg-gray-900 2xl:grid 2xl:h-dvh 2xl:max-h-dvh 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] 2xl:overflow-hidden">
+    <div className="min-h-dvh bg-gray-50 dark:bg-gray-900 lg:grid lg:h-dvh lg:max-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(320px,42%)] lg:overflow-hidden">
       <div
         className={
           scrollable
-            ? 'flex min-h-dvh flex-col touch-pan-y 2xl:min-h-0 2xl:overflow-y-auto 2xl:overscroll-contain 2xl:scrollbar-visible [-webkit-overflow-scrolling:touch]'
-            : 'flex min-h-dvh flex-col 2xl:min-h-0 2xl:overflow-hidden'
+            ? 'flex min-h-dvh flex-col touch-pan-y lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:scrollbar-visible [-webkit-overflow-scrolling:touch]'
+            : 'flex min-h-dvh flex-col lg:min-h-0 lg:overflow-hidden'
         }
       >
         {showCompactHero ? (
-          <AccesoCompactHero visualKey={visualKey} className="mx-4 mt-4 shrink-0 sm:mx-6 sm:mt-6 2xl:hidden" />
+          <AccesoCompactHero visualKey={visualKey} className="mx-4 mt-4 shrink-0 sm:mx-6 sm:mt-6 lg:hidden" />
         ) : null}
         {children}
       </div>

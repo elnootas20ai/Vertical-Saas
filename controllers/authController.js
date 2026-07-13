@@ -1010,20 +1010,23 @@ export async function listUsers(req, res) {
         accounts = [];
       }
     } else {
-      const actorUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
-      if (actorUserId) {
-        const businesses = await listBusinessesByUser(req, actorUserId);
-        const memberIds = new Set();
-        for (const business of businesses) {
-          if (business.owner_user_id) memberIds.add(business.owner_user_id);
-          for (const member of business.members || []) {
-            const uid = String(member?.user_id || '').trim();
-            if (uid) memberIds.add(uid);
+      const actorEmail = String(req.authUser?.email || '').trim();
+      if (!isVertialSuperAdminEmail(actorEmail)) {
+        const actorUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+        if (actorUserId) {
+          const businesses = await listBusinessesByUser(req, actorUserId);
+          const memberIds = new Set();
+          for (const business of businesses) {
+            if (business.owner_user_id) memberIds.add(business.owner_user_id);
+            for (const member of business.members || []) {
+              const uid = String(member?.user_id || '').trim();
+              if (uid) memberIds.add(uid);
+            }
           }
+          accounts = accounts.filter((a) => memberIds.has(a.user_id));
+        } else {
+          accounts = [];
         }
-        accounts = accounts.filter((a) => memberIds.has(a.user_id));
-      } else {
-        accounts = [];
       }
     }
 

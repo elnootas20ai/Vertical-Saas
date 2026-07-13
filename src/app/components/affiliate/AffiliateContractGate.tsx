@@ -39,7 +39,7 @@ export function AffiliateContractGate({
               <FileSignature className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-blue-200/80">Paso obligatorio</p>
+              <p className="text-xs font-semibold uppercase tracking-wider text-blue-200/80">Paso 2 · Contrato</p>
               <h1 className="text-xl font-black mt-1">{AFFILIATE_AGREEMENT.title}</h1>
               <p className="text-sm text-blue-100/80 mt-1">
                 Hola, {affiliateName}. Debes aceptar este contrato para acceder al panel de afiliado.

@@ -7,6 +7,7 @@ import {
   portalLogin,
   portalLoginWithAccount,
   portalAcceptContract,
+  portalSubmitKyc,
   portalDashboard,
   portalRegisterClient,
   portalReferredAccounts,
@@ -15,6 +16,8 @@ import {
   createAffiliateAdmin,
   updateAffiliateAdmin,
   updateAffiliateStatusAdmin,
+  getAffiliateKycAdmin,
+  updateAffiliateKycStatusAdmin,
   linkAffiliateAccountAdmin,
   deleteAffiliateAdmin,
   clearAffiliateRequestsAdmin,
@@ -45,6 +48,7 @@ affiliateRouter.get('/referral/:code/validate', validateReferralCode);
 affiliateRouter.post('/portal/login', apiLimiter, portalLogin);
 affiliateRouter.post('/portal/login-account', apiLimiter, portalLoginWithAccount);
 affiliateRouter.post('/portal/:code/accept-contract', apiLimiter, portalAcceptContract);
+affiliateRouter.post('/portal/:code/kyc', apiLimiter, portalSubmitKyc);
 affiliateRouter.get('/portal/:code/dashboard', portalDashboard);
 affiliateRouter.post('/portal/:code/clients', apiLimiter, portalRegisterClient);
 affiliateRouter.get('/portal/:code/referred', portalReferredAccounts);
@@ -56,6 +60,8 @@ affiliateRouter.post('/admin/:userId/affiliates/clear-requests', requireAuthAndE
 affiliateRouter.post('/admin/:userId/affiliates', requireAuthAndEmailVerified, createAffiliateAdmin);
 affiliateRouter.put('/admin/:userId/affiliates/:affiliateId', requireAuthAndEmailVerified, updateAffiliateAdmin);
 affiliateRouter.put('/admin/:userId/affiliates/:affiliateId/status', requireAuthAndEmailVerified, updateAffiliateStatusAdmin);
+affiliateRouter.get('/admin/:userId/affiliates/:affiliateId/kyc', requireAuthAndEmailVerified, getAffiliateKycAdmin);
+affiliateRouter.put('/admin/:userId/affiliates/:affiliateId/kyc', requireAuthAndEmailVerified, updateAffiliateKycStatusAdmin);
 affiliateRouter.post('/admin/:userId/affiliates/:affiliateId/link-account', requireAuthAndEmailVerified, linkAffiliateAccountAdmin);
 affiliateRouter.delete('/admin/:userId/affiliates/:affiliateId', requireAuthAndEmailVerified, deleteAffiliateAdmin);
 

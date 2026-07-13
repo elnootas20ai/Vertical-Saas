@@ -14,10 +14,12 @@ import {
   portalRegisterClient,
   portalReferredAccounts,
   portalAcceptContract,
+  portalSubmitKyc,
   type ReferredAccount,
 } from '../../lib/affiliatesApi';
 import { AFFILIATE_AGREEMENT_VERSION } from '../../content/legal/affiliateAgreement';
 import { AffiliateContractGate } from '../../components/affiliate/AffiliateContractGate';
+import { AffiliateKycGate, AffiliateKycPendingGate } from '../../components/affiliate/AffiliateKycGate';
 import { AffiliateResourcesSection } from '../../components/affiliate/AffiliateResourcesSection';
 import {
   AffiliateBackofficeLayout,
@@ -329,6 +331,8 @@ export function AffiliatePortal() {
   const [referredAccounts, setReferredAccounts] = useState<ReferredAccount[]>([]);
   const [acceptingContract, setAcceptingContract] = useState(false);
   const [contractError, setContractError] = useState('');
+  const [submittingKyc, setSubmittingKyc] = useState(false);
+  const [kycError, setKycError] = useState('');
 
   useEffect(() => {
     listAffiliateVerticals()
@@ -404,6 +408,25 @@ export function AffiliatePortal() {
     }
   };
 
+  const handleSubmitKyc = async (payload: Record<string, unknown>) => {
+    if (!affiliateCode) return;
+    setSubmittingKyc(true);
+    setKycError('');
+    try {
+      const result = await portalSubmitKyc(affiliateCode, payload);
+      if (result.ok && result.affiliate) {
+        setAffiliate(result.affiliate as PortalAffiliate);
+        await loadData(affiliateCode);
+      } else {
+        setKycError(result.error || 'No se pudo enviar la verificación');
+      }
+    } catch {
+      setKycError('Error de conexión');
+    } finally {
+      setSubmittingKyc(false);
+    }
+  };
+
   const navItems = useMemo((): AffiliateNavItem[] => [
     { id: 'dashboard', label: 'Inicio', description: 'Resumen y acciones rápidas', icon: LayoutDashboard },
     { id: 'clients', label: 'Mis clientes', description: 'Leads y seguimiento comercial', icon: Users, badge: clients.length },
@@ -439,6 +462,27 @@ export function AffiliatePortal() {
           </button>
         </div>
       </div>
+    );
+  }
+
+  if (affiliate.needsKycSubmission) {
+    return (
+      <AffiliateKycGate
+        affiliateName={affiliate.name}
+        rejectionReason={affiliate.kyc?.rejectionReason}
+        loading={submittingKyc}
+        error={kycError}
+        onSubmit={handleSubmitKyc}
+      />
+    );
+  }
+
+  if (affiliate.needsKycApproval) {
+    return (
+      <AffiliateKycPendingGate
+        affiliateName={affiliate.name}
+        submittedAt={affiliate.kyc?.submittedAt}
+      />
     );
   }
 

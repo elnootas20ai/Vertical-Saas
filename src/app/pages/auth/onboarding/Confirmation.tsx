@@ -120,9 +120,9 @@ export function Confirmation() {
   }, [currentStep]);
 
   return (
-    <div className="min-h-dvh 2xl:h-dvh 2xl:max-h-dvh min-h-0 grid 2xl:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] overflow-hidden bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-dvh lg:h-dvh lg:max-h-dvh min-h-0 grid lg:grid-cols-[minmax(0,1fr)_minmax(320px,42%)] overflow-hidden bg-gray-50 dark:bg-gray-900">
       <div className="flex min-h-0 flex-col overflow-y-auto overscroll-contain scrollbar-visible p-6 pb-28">
-      <AccesoCompactHero visualKey="confirmation" className="mb-6 shrink-0 2xl:hidden" />
+      <AccesoCompactHero visualKey="confirmation" className="mb-6 shrink-0 lg:hidden" />
       <div className="flex flex-1 flex-col items-center justify-center min-h-0">
       <div className="w-full max-w-3xl">
         <div className="mb-8 text-center">
@@ -200,7 +200,7 @@ export function Confirmation() {
       </div>
 
       {currentStep >= steps.length ? (
-        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white/95 p-4 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 pb-[max(1rem,env(safe-area-inset-bottom))] 2xl:left-0 2xl:right-[38%]">
+        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white/95 p-4 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 pb-[max(1rem,env(safe-area-inset-bottom))] lg:left-0 lg:right-[42%]">
           <ACCESO__Button
             variant="primary"
             size="lg"

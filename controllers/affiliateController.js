@@ -186,6 +186,12 @@ async function enrichAffiliateWithAccountMeta(req, affiliate) {
     vertialAccountName,
     vertialAccountCompany,
     canLinkAccount: affiliate.status === 'accepted' && vertialAccountExists && !accountLinked,
+    kycStatus: affiliate.kyc?.status || null,
+    kycSubmittedAt: affiliate.kyc?.submittedAt || null,
+    kycNeedsReview: affiliate.kyc?.status === 'pending' && Boolean(affiliate.kyc?.submittedAt),
+    kycDni: affiliate.kyc?.dni || null,
+    kycLegalName: affiliate.kyc?.legalName || null,
+    kycRejectionReason: affiliate.kyc?.rejectionReason || null,
   };
 }
 
@@ -626,6 +632,9 @@ export async function portalRegisterClient(req, res) {
     if (!affiliate || affiliate.status !== 'accepted') {
       return res.status(404).json({ ok: false, error: 'Afiliado no encontrado o no activo' });
     }
+    if (!isAffiliateKycApproved(affiliate)) {
+      return res.status(403).json({ ok: false, error: 'Debes completar la verificación de identidad antes de registrar clientes' });
+    }
 
     const safeVerticals = Array.isArray(verticals)
       ? verticals.filter((v) => VERTICALS.includes(v))
@@ -663,9 +672,59 @@ export async function portalRegisterClient(req, res) {
 /** Versión del contrato — mantener alineada con AFFILIATE_AGREEMENT_VERSION (frontend). */
 export const AFFILIATE_AGREEMENT_VERSION_EXPORT = '2026-07-06-v1';
 
+const DNI_LETTERS = 'TRWAGMYFPDXBNJZSQVHLCKE';
+const AFFILIATE_KYC_MAX_BYTES = 2 * 1024 * 1024;
+const AFFILIATE_KYC_DOC_KINDS = ['dni_front', 'dni_back'];
+
+function validateDniOrNie(value) {
+  const v = String(value || '').trim().toUpperCase();
+  const dni = v.match(/^(\d{8})([A-Z])$/);
+  if (dni) return DNI_LETTERS[parseInt(dni[1], 10) % 23] === dni[2];
+  const nie = v.match(/^([XYZ])(\d{7})([A-Z])$/);
+  if (nie) {
+    const prefix = { X: '0', Y: '1', Z: '2' }[nie[1]];
+    const num = parseInt(prefix + nie[2], 10);
+    return DNI_LETTERS[num % 23] === nie[3];
+  }
+  return false;
+}
+
+function validateSpanishIban(value) {
+  const iban = String(value || '').replace(/\s+/g, '').toUpperCase();
+  return /^ES\d{22}$/.test(iban);
+}
+
+function getAffiliateKycSnapshot(kyc) {
+  if (!kyc?.submittedAt) {
+    return {
+      status: null,
+      needsKycSubmission: true,
+      needsKycApproval: false,
+      kycApproved: false,
+    };
+  }
+  const status = kyc.status || 'pending';
+  return {
+    status,
+    needsKycSubmission: status === 'rejected',
+    needsKycApproval: status === 'pending',
+    kycApproved: status === 'approved',
+    submittedAt: kyc.submittedAt,
+    reviewedAt: kyc.reviewedAt || null,
+    rejectionReason: status === 'rejected' ? (kyc.rejectionReason || '') : '',
+    dni: status === 'approved' ? kyc.dni : undefined,
+    legalName: status === 'approved' ? kyc.legalName : undefined,
+  };
+}
+
+function isAffiliateKycApproved(affiliate) {
+  return affiliate?.kyc?.status === 'approved' && Boolean(affiliate?.kyc?.submittedAt);
+}
+
 function sanitizeAffiliate(aff) {
   const contractVersion = String(aff.contractVersion || '').trim();
   const contractAcceptedAt = aff.contractAcceptedAt || null;
+  const kycSnapshot = getAffiliateKycSnapshot(aff.kyc);
   const needsContractAcceptance = !contractAcceptedAt
     || contractVersion !== AFFILIATE_AGREEMENT_VERSION_EXPORT;
 
@@ -684,7 +743,132 @@ function sanitizeAffiliate(aff) {
     contractAcceptedAt,
     contractVersion: contractVersion || null,
     needsContractAcceptance,
+    kyc: kycSnapshot,
+    needsKycSubmission: kycSnapshot.needsKycSubmission,
+    needsKycApproval: kycSnapshot.needsKycApproval,
+    kycApproved: kycSnapshot.kycApproved,
   };
+}
+
+export async function portalSubmitKyc(req, res) {
+  const { code } = req.params;
+  const {
+    dni,
+    legalName,
+    address,
+    city,
+    postalCode,
+    country,
+    iban,
+    billingTaxId,
+    documents,
+  } = req.body || {};
+
+  if (!code) return badRequest(res, 'Código requerido');
+
+  const dniNorm = String(dni || '').trim().toUpperCase();
+  const legalNameNorm = String(legalName || '').trim();
+  const addressNorm = String(address || '').trim();
+  const cityNorm = String(city || '').trim();
+  const postalCodeNorm = String(postalCode || '').trim();
+  const countryNorm = String(country || 'España').trim();
+  const ibanNorm = String(iban || '').replace(/\s+/g, '').toUpperCase();
+  const billingTaxIdNorm = String(billingTaxId || '').trim().toUpperCase();
+
+  if (!legalNameNorm) return badRequest(res, 'El nombre legal es obligatorio');
+  if (!validateDniOrNie(dniNorm)) return badRequest(res, 'DNI/NIE no válido');
+  if (!addressNorm) return badRequest(res, 'La dirección es obligatoria');
+  if (!cityNorm) return badRequest(res, 'La ciudad es obligatoria');
+  if (!postalCodeNorm) return badRequest(res, 'El código postal es obligatorio');
+  if (!validateSpanishIban(ibanNorm)) return badRequest(res, 'IBAN español no válido (formato ES + 22 dígitos)');
+  if (!Array.isArray(documents) || documents.length < 2) {
+    return badRequest(res, 'Debes subir el anverso y el reverso del DNI/NIE');
+  }
+
+  const parsedDocs = [];
+  for (const doc of documents) {
+    const kind = String(doc?.kind || '').trim();
+    if (!AFFILIATE_KYC_DOC_KINDS.includes(kind)) {
+      return badRequest(res, 'Tipo de documento no válido');
+    }
+    const fileName = String(doc?.fileName || '').trim();
+    const mimeType = String(doc?.mimeType || '').trim();
+    const dataUrl = String(doc?.dataUrl || '').trim();
+    const size = Number(doc?.size) || 0;
+    if (!fileName || !dataUrl.startsWith('data:')) {
+      return badRequest(res, 'Documento incompleto o corrupto');
+    }
+    if (size > AFFILIATE_KYC_MAX_BYTES) {
+      return badRequest(res, `Cada archivo debe pesar menos de ${AFFILIATE_KYC_MAX_BYTES / (1024 * 1024)} MB`);
+    }
+    if (!mimeType.startsWith('image/') && mimeType !== 'application/pdf') {
+      return badRequest(res, 'Solo se permiten imágenes o PDF');
+    }
+    parsedDocs.push({
+      id: String(doc?.id || `kyc-${uuidv4()}`),
+      kind,
+      fileName,
+      mimeType,
+      size,
+      uploadedAt: new Date().toISOString(),
+      dataUrl,
+    });
+  }
+
+  const kinds = new Set(parsedDocs.map((d) => d.kind));
+  if (!kinds.has('dni_front') || !kinds.has('dni_back')) {
+    return badRequest(res, 'Faltan el anverso o el reverso del DNI/NIE');
+  }
+
+  try {
+    const affiliate = await findAffiliateByCode(req, code.toUpperCase());
+    if (!affiliate || affiliate.status !== 'accepted') {
+      return res.status(404).json({ ok: false, error: 'Afiliado no encontrado o no activo' });
+    }
+    if (affiliate.kyc?.status === 'pending' && affiliate.kyc?.submittedAt) {
+      return badRequest(res, 'Tu verificación ya está en revisión. Te avisaremos por email.');
+    }
+    if (affiliate.kyc?.status === 'approved') {
+      return badRequest(res, 'Tu identidad ya está verificada');
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...affiliate,
+      kyc: {
+        dni: dniNorm,
+        legalName: legalNameNorm,
+        address: addressNorm,
+        city: cityNorm,
+        postalCode: postalCodeNorm,
+        country: countryNorm,
+        iban: ibanNorm,
+        billingTaxId: billingTaxIdNorm || undefined,
+        documents: parsedDocs,
+        submittedAt: now,
+        status: 'pending',
+        reviewedAt: undefined,
+        reviewedBy: undefined,
+        rejectionReason: undefined,
+      },
+      updatedAt: now,
+    };
+
+    await putDocument(req, AFFILIATES_DB, affiliate._id, updated);
+
+    logger.info(
+      { tag: 'AFFILIATE_KYC', affiliateId: affiliate._id, dni: `${dniNorm.slice(0, 3)}***` },
+      'KYC de afiliado enviado',
+    );
+
+    return res.json({
+      ok: true,
+      affiliate: sanitizeAffiliate(updated),
+    });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_KYC', err }, 'Error al enviar KYC de afiliado');
+    return res.status(500).json({ ok: false, error: 'No se pudo enviar la verificación' });
+  }
 }
 
 export async function portalAcceptContract(req, res) {
@@ -701,6 +885,9 @@ export async function portalAcceptContract(req, res) {
     const affiliate = await findAffiliateByCode(req, code.toUpperCase());
     if (!affiliate || affiliate.status !== 'accepted') {
       return res.status(404).json({ ok: false, error: 'Afiliado no encontrado o no activo' });
+    }
+    if (!isAffiliateKycApproved(affiliate)) {
+      return res.status(403).json({ ok: false, error: 'Debes completar y obtener la aprobación de tu verificación de identidad' });
     }
 
     const now = new Date().toISOString();
@@ -1018,6 +1205,82 @@ export async function updateAffiliateStatusAdmin(req, res) {
     }
     logger.error({ tag: 'AFFILIATE_ADMIN', err }, 'Error al actualizar estado de afiliado');
     return res.status(500).json({ ok: false, error: err.message || 'Error al actualizar estado' });
+  }
+}
+
+export async function getAffiliateKycAdmin(req, res) {
+  try {
+    const { userId, affiliateId } = req.params;
+    if (!userId || !affiliateId) return badRequest(res, 'Faltan parámetros');
+
+    await ensureAffiliatesDb(req);
+    const affiliate = await getDocument(req, AFFILIATES_DB, affiliateId);
+    if (!affiliate || affiliate.type !== 'affiliate' || affiliate.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Afiliado no encontrado' });
+    }
+
+    const kyc = affiliate.kyc || null;
+    return res.json({
+      ok: true,
+      affiliateId,
+      affiliateName: affiliate.name,
+      affiliateEmail: affiliate.email,
+      kyc,
+    });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_KYC', err }, 'Error al cargar KYC de afiliado');
+    return res.status(500).json({ ok: false, error: err.message || 'Error al cargar KYC' });
+  }
+}
+
+export async function updateAffiliateKycStatusAdmin(req, res) {
+  try {
+    const { userId, affiliateId } = req.params;
+    const { status, rejectionReason } = req.body || {};
+    const validStatuses = ['approved', 'rejected'];
+
+    if (!userId || !affiliateId) return badRequest(res, 'Faltan parámetros');
+    if (!status || !validStatuses.includes(status)) {
+      return badRequest(res, 'Estado KYC no válido (approved o rejected)');
+    }
+    if (status === 'rejected' && !String(rejectionReason || '').trim()) {
+      return badRequest(res, 'Indica el motivo del rechazo');
+    }
+
+    await ensureAffiliatesDb(req);
+    const affiliate = await getDocument(req, AFFILIATES_DB, affiliateId);
+    if (!affiliate || affiliate.type !== 'affiliate' || affiliate.deletedAt) {
+      return res.status(404).json({ ok: false, error: 'Afiliado no encontrado' });
+    }
+    if (!affiliate.kyc?.submittedAt) {
+      return badRequest(res, 'Este afiliado aún no ha enviado documentación KYC');
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...affiliate,
+      kyc: {
+        ...affiliate.kyc,
+        status,
+        reviewedAt: now,
+        reviewedBy: userId,
+        rejectionReason: status === 'rejected' ? String(rejectionReason).trim() : undefined,
+      },
+      updatedAt: now,
+    };
+
+    await putDocument(req, AFFILIATES_DB, affiliateId, updated);
+
+    logger.info(
+      { tag: 'AFFILIATE_KYC', userId, affiliateId, status },
+      'Estado KYC de afiliado actualizado',
+    );
+
+    const enriched = await enrichAffiliateWithAccountMeta(req, updated);
+    return res.json({ ok: true, affiliate: enriched });
+  } catch (err) {
+    logger.error({ tag: 'AFFILIATE_KYC', err }, 'Error al actualizar estado KYC');
+    return res.status(500).json({ ok: false, error: err.message || 'Error al actualizar KYC' });
   }
 }
 

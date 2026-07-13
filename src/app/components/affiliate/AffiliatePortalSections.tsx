@@ -22,6 +22,15 @@ export interface PortalAffiliate {
   contractAcceptedAt?: string | null;
   contractVersion?: string | null;
   needsContractAcceptance?: boolean;
+  needsKycSubmission?: boolean;
+  needsKycApproval?: boolean;
+  kycApproved?: boolean;
+  kyc?: {
+    status?: string | null;
+    submittedAt?: string;
+    reviewedAt?: string;
+    rejectionReason?: string;
+  };
 }
 
 export interface PortalClient {
@@ -556,6 +565,17 @@ export function AffiliateAccountSection({ affiliate }: { affiliate: PortalAffili
       <div className="rounded-2xl bg-violet-50 border border-violet-100 p-5">
         <p className="text-sm font-semibold text-violet-900">Comisión acordada: {affiliate.commissionRate}%</p>
         <p className="text-xs text-violet-700/70 mt-1">Si necesitas cambiar tus datos, contacta con el equipo de afiliados.</p>
+      </div>
+
+      <div className={`rounded-2xl border p-5 ${affiliate.kycApproved ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>
+        <p className="text-sm font-semibold text-slate-900">Verificación de identidad (KYC)</p>
+        <p className="text-xs text-slate-600 mt-1">
+          {affiliate.kycApproved
+            ? `Identidad verificada${affiliate.kyc?.reviewedAt ? ` el ${fmt(affiliate.kyc.reviewedAt)}` : ''}.`
+            : affiliate.needsKycApproval
+              ? 'Documentación enviada. Estamos revisando tu DNI y datos de cobro.'
+              : 'Pendiente de completar en el acceso al panel.'}
+        </p>
       </div>
 
       <div className={`rounded-2xl border p-5 ${affiliate.contractAcceptedAt ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'}`}>

@@ -126,6 +126,7 @@ import { workerPerformanceRouter } from './routers/workerPerformanceRouter.js';
 import { scrapyardSalesRouter } from './routers/scrapyardSalesRouter.js';
 import scrapyardAlertRouter from './routers/scrapyardAlertRouter.js';
 import { adminMoneiRouter } from './routers/adminMoneiRouter.js';
+import { adminClientsRouter } from './routers/adminClientsRouter.js';
 import {
   canEmitCatalogStockAlerts,
   filterStockTrackedCatalogItems,
@@ -1074,6 +1075,8 @@ app.use('/api/monei-connect', moneiConnectRouter);
 // Admin MONEI — panel de gestión de pagos (solo Admin)
 app.use('/api/admin/monei', adminMoneiRouter);
 app.use('/api/v2/admin/monei', adminMoneiRouter);
+app.use('/api/admin', adminClientsRouter);
+app.use('/api/v2/admin', adminClientsRouter);
 
 // API-01: Documentación interactiva Swagger/OpenAPI (pública, sin auth)
 app.use('/api/docs', docsRouter);

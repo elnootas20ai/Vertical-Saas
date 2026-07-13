@@ -63,6 +63,7 @@ import {
   MessageSquare,
   Timer,
   Hourglass,
+  IdCard,
 } from 'lucide-react';
 import { TpvIncidentsPanel } from '../../components/saas/restaurant/TpvIncidentsPanel';
 import { Layout } from '../../components/saas/Layout';
@@ -87,6 +88,11 @@ import {
   getVerificationBadgeLabel,
 } from '../../lib/onboardingCompanyVerification';
 import { AdminCompanyVerificationPanel } from '../../components/saas/admin/AdminCompanyVerificationPanel';
+import { AdminClientUsagePanel } from '../../components/saas/admin/AdminClientUsagePanel';
+import {
+  computeClientHealthFromLogin,
+  healthBadgeClasses,
+} from '../../lib/adminClientsApi';
 import {
   getPlanPricingConfig,
   savePlanPricingConfig,
@@ -104,9 +110,13 @@ import {
   updateAffiliateStatus,
   deleteAffiliate,
   clearAffiliateRequests,
+  fetchAffiliateKycAdmin,
+  updateAffiliateKycStatus,
   type Affiliate,
   type AffiliateStatus,
 } from '../../lib/affiliatesApi';
+import type { AffiliateKycData } from '../../lib/affiliateKyc';
+import { labelForKycDocKind } from '../../lib/affiliateKyc';
 import { VertialAccountBadge } from '../../components/saas/affiliates/VertialAccountBadge';
 import { toast } from 'sonner';
 
@@ -260,6 +270,10 @@ function getAccountVerification(account: AuthUser) {
   return getCompanyVerificationSnapshot(account.onboardingData);
 }
 
+function getClientHealthBadge(account: AuthUser) {
+  return computeClientHealthFromLogin(account.lastLoginAt, account.createdAt);
+}
+
 interface EditModalProps {
   account: AuthUser;
   onClose: () => void;
@@ -269,6 +283,7 @@ interface EditModalProps {
 function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const { updateUser, resetUserPassword, user: adminUser } = useAuth();
   const adminLabel = adminUser?.email || adminUser?.fullName || 'admin';
+  const [modalTab, setModalTab] = useState<'manage' | 'usage'>('manage');
 
   const [companyName, setCompanyName] = useState(account.companyName || '');
   const [email, setEmail] = useState(account.email || '');
@@ -522,8 +537,9 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-800 rounded-t-2xl px-6 py-4 flex items-center justify-between z-10">
+      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-800 rounded-t-2xl px-6 py-4 z-10">
+          <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 overflow-hidden flex items-center justify-center shrink-0">
               {account.avatar ? (
@@ -544,7 +560,38 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400">
             <X className="w-5 h-5" />
           </button>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setModalTab('manage')}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                modalTab === 'manage'
+                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
+            >
+              Gestión
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalTab('usage')}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                modalTab === 'usage'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+              }`}
+            >
+              <Activity className="w-4 h-4" />
+              Uso y actividad
+            </button>
+          </div>
         </div>
+        {modalTab === 'usage' ? (
+          <div className="p-6">
+            <AdminClientUsagePanel account={account} />
+          </div>
+        ) : (
         <div className="p-6 space-y-5">
           <AdminCompanyVerificationPanel
             account={account}
@@ -974,6 +1021,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
             {saving ? 'Guardando...' : 'Guardar cambios'}
           </button>
         </div>
+        )}
       </div>
     </div>
   );
@@ -995,7 +1043,8 @@ type SortField =
   | 'pixel'
   | 'import'
   | 'ancover'
-  | 'verification';
+  | 'verification'
+  | 'health';
 type SortDir = 'asc' | 'desc';
 
 function SortableHeader({
@@ -1082,6 +1131,11 @@ function getAccountSortValue(account: AuthUser, field: SortField): string | numb
       if (v.review?.status === 'approved') return 1;
       if (v.hasDocuments) return 0;
       return -1;
+    }
+    case 'health': {
+      const h = getClientHealthBadge(account);
+      const rank = h.status === 'active' ? 0 : h.status === 'at_risk' ? 1 : 2;
+      return rank * 1000 + (h.daysSince ?? 9999);
     }
     default: return '';
   }
@@ -1457,6 +1511,7 @@ function ClientsTab({
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Avatar</th>
                   <SortableHeader label="Cliente" field="fullName" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
+                  <SortableHeader label="Salud" field="health" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Empresa" field="companyName" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <SortableHeader label="Email" field="email" currentField={sortField} currentDir={sortDir} onSort={handleSort} />
                   <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Contraseña</th>
@@ -1476,7 +1531,7 @@ function ClientsTab({
               <tbody className="divide-y divide-gray-100">
                 {filteredAndSorted.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={16} className="px-4 py-12 text-center">
+                    <td colSpan={17} className="px-4 py-12 text-center">
                       <Search className="w-10 h-10 text-gray-200 mx-auto mb-3" />
                       <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">No se encontraron clientes</p>
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
@@ -1506,6 +1561,19 @@ function ClientsTab({
                           {isInactive && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700"><Lock className="w-3 h-3" />Bloqueado</span>}
                         </div>
                         <p className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-1">{account.user_id}</p>
+                      </td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const health = getClientHealthBadge(account);
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${healthBadgeClasses(health.status)}`}
+                            >
+                              <Activity className="w-3 h-3" />
+                              {health.label}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3"><div className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><Building2 className="w-4 h-4 text-gray-400 dark:text-gray-500" />{account.companyName || 'Sin empresa'}</div></td>
                       <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{account.email}</td>
@@ -2959,6 +3027,154 @@ const REQUEST_STATUS_CFG: Record<AffiliateStatus, { label: string; bg: string; t
   rejected: { label: 'Rechazado', bg: 'bg-red-50',     text: 'text-red-700',     dot: 'bg-red-500' },
 };
 
+const KYC_STATUS_CFG = {
+  pending: { label: 'KYC pendiente', bg: 'bg-amber-50', text: 'text-amber-700' },
+  approved: { label: 'KYC aprobado', bg: 'bg-emerald-50', text: 'text-emerald-700' },
+  rejected: { label: 'KYC rechazado', bg: 'bg-red-50', text: 'text-red-700' },
+  missing: { label: 'Sin KYC', bg: 'bg-slate-100', text: 'text-slate-600' },
+} as const;
+
+function AffiliateKycReviewModal({
+  open,
+  affiliate,
+  userId,
+  onClose,
+  onUpdated,
+}: {
+  open: boolean;
+  affiliate: Affiliate | null;
+  userId: string;
+  onClose: () => void;
+  onUpdated: () => void;
+}) {
+  const [kyc, setKyc] = useState<AffiliateKycData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const affiliateId = affiliate?._id || affiliate?.id || '';
+
+  useModalClose(open, onClose);
+
+  useEffect(() => {
+    if (!open || !affiliateId || !userId) return;
+    setLoading(true);
+    setKyc(null);
+    setRejectReason('');
+    fetchAffiliateKycAdmin(userId, affiliateId)
+      .then((data) => setKyc(data.kyc))
+      .catch(() => toast.error('No se pudo cargar la documentación KYC'))
+      .finally(() => setLoading(false));
+  }, [open, affiliateId, userId]);
+
+  const handleReview = async (status: 'approved' | 'rejected') => {
+    if (!affiliateId) return;
+    if (status === 'rejected' && !rejectReason.trim()) {
+      toast.error('Indica el motivo del rechazo');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateAffiliateKycStatus(userId, affiliateId, status, rejectReason.trim() || undefined);
+      toast.success(status === 'approved' ? 'Identidad aprobada' : 'Verificación rechazada');
+      onUpdated();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo actualizar el KYC');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open || !affiliate) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-3xl bg-white dark:bg-gray-800 rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+              <IdCard className="w-5 h-5 text-blue-600" />
+              Verificación KYC · {affiliate.name}
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">{affiliate.email}</p>
+          </div>
+          <button type="button" onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-5 overflow-y-auto space-y-4">
+          {loading ? (
+            <div className="py-12 text-center text-gray-500">
+              <LoaderCircle className="w-8 h-8 animate-spin mx-auto mb-2" />
+              Cargando documentación…
+            </div>
+          ) : !kyc?.submittedAt ? (
+            <p className="text-sm text-gray-500">Este afiliado aún no ha enviado documentación.</p>
+          ) : (
+            <>
+              <div className="grid sm:grid-cols-2 gap-3 text-sm">
+                <div><span className="text-gray-500">DNI/NIE:</span> <strong>{kyc.dni}</strong></div>
+                <div><span className="text-gray-500">Nombre legal:</span> <strong>{kyc.legalName}</strong></div>
+                <div className="sm:col-span-2"><span className="text-gray-500">Dirección:</span> {kyc.address}, {kyc.postalCode} {kyc.city}</div>
+                <div><span className="text-gray-500">IBAN:</span> <span className="font-mono text-xs">{kyc.iban}</span></div>
+                {kyc.billingTaxId && <div><span className="text-gray-500">CIF:</span> {kyc.billingTaxId}</div>}
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                {(kyc.documents || []).map((doc) => (
+                  <div key={doc.id} className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900 text-xs font-semibold text-gray-600 dark:text-gray-300">
+                      {labelForKycDocKind(doc.kind)}
+                    </div>
+                    {doc.mimeType?.startsWith('image/') ? (
+                      <img src={doc.dataUrl} alt={doc.fileName} className="w-full max-h-64 object-contain bg-gray-100" />
+                    ) : (
+                      <a href={doc.dataUrl} target="_blank" rel="noopener noreferrer" className="block p-4 text-sm text-blue-600 hover:underline">
+                        Abrir PDF: {doc.fileName}
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {kyc.status === 'pending' && (
+                <div className="space-y-3 pt-2 border-t border-gray-100 dark:border-gray-700">
+                  <textarea
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    placeholder="Motivo del rechazo (solo si rechazas)…"
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-900"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => void handleReview('rejected')}
+                      className="px-4 py-2 rounded-xl bg-red-50 text-red-700 text-sm font-semibold hover:bg-red-100 disabled:opacity-50"
+                    >
+                      Rechazar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => void handleReview('approved')}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      Aprobar identidad
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AffiliateRequestsTab({ userId }: { userId: string }) {
   const [requests, setRequests] = useState<Affiliate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -2967,6 +3183,7 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [search, setSearch] = useState('');
+  const [kycReviewAffiliate, setKycReviewAffiliate] = useState<Affiliate | null>(null);
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -3094,6 +3311,22 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
         </p>
       </div>
 
+      <div className="rounded-2xl border border-violet-100 bg-violet-50/80 dark:bg-violet-950/20 dark:border-violet-900 px-4 py-3 text-sm text-violet-900 dark:text-violet-100">
+        <p className="font-semibold">Verificación KYC de afiliados</p>
+        <p className="text-violet-800/80 dark:text-violet-200/80 mt-1 text-xs leading-relaxed">
+          Tras aceptar un afiliado, al entrar en <strong>/panel-afiliado</strong> debe subir DNI/NIE y datos de cobro.
+          Revisa la documentación aquí antes de que pueda firmar el contrato y usar el panel.
+        </p>
+      </div>
+
+      <AffiliateKycReviewModal
+        open={!!kycReviewAffiliate}
+        affiliate={kycReviewAffiliate}
+        userId={userId}
+        onClose={() => setKycReviewAffiliate(null)}
+        onUpdated={() => void load()}
+      />
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-[200px]">
@@ -3156,6 +3389,8 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
             const isProcessing = processingId === id;
             const isPublicRequest = req.user_id === 'public_request';
             const requestMessage = String(req.message || req.notes || '').trim();
+            const kycKey = (req.kycStatus || (req.kycNeedsReview ? 'pending' : req.kycSubmittedAt ? 'approved' : 'missing')) as keyof typeof KYC_STATUS_CFG;
+            const kycCfg = KYC_STATUS_CFG[kycKey in KYC_STATUS_CFG ? kycKey : 'missing'];
 
             return (
               <div key={id} className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -3179,6 +3414,11 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                         {req.affiliateCode && (
                           <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono text-gray-600 dark:text-gray-400">
                             {req.affiliateCode}
+                          </span>
+                        )}
+                        {req.status === 'accepted' && (
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${kycCfg.bg} ${kycCfg.text}`}>
+                            {kycCfg.label}
                           </span>
                         )}
                       </div>
@@ -3221,6 +3461,35 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
                         <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 flex gap-2">
                           <FileText className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" />
                           <span>{requestMessage}</span>
+                        </div>
+                      )}
+
+                      {req.status === 'accepted' && req.kycNeedsReview && (
+                        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs text-amber-900">
+                            <strong>Documentación KYC pendiente de revisión</strong>
+                            {req.kycDni && <span className="ml-2 font-mono">{req.kycDni}</span>}
+                            {req.kycLegalName && <span className="ml-2">· {req.kycLegalName}</span>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setKycReviewAffiliate(req)}
+                            className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold"
+                          >
+                            Revisar DNI
+                          </button>
+                        </div>
+                      )}
+
+                      {req.status === 'accepted' && req.kycStatus === 'approved' && (
+                        <div className="mt-2">
+                          <button
+                            type="button"
+                            onClick={() => setKycReviewAffiliate(req)}
+                            className="text-xs text-blue-600 hover:text-blue-800 font-semibold"
+                          >
+                            Ver documentación KYC
+                          </button>
                         </div>
                       )}
 

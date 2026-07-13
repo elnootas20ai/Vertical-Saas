@@ -12,6 +12,7 @@ import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSi
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
 import { signInWithAppleNative } from '../../lib/appleSignInNative';
 import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
+import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import { seedRetailScopeCacheFromTabletLogin } from '../../lib/tabletLoginStoreSeed';
@@ -334,8 +335,9 @@ export function Login() {
   }, [showGoogleAuth, googleReady]);
 
   return (
-    <div className="min-h-[100dvh] bg-gray-50 dark:bg-gray-800 flex flex-col items-stretch px-4 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:pt-6 sm:items-start sm:justify-center sm:pb-5">
-      <div className="w-full max-w-md">
+    <AccesoSplitLayout visualKey="register-company" scrollable>
+      <div className="flex min-h-dvh flex-col items-center justify-center p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6 lg:min-h-0 lg:flex-1 lg:px-8">
+      <div className="w-full max-w-md shrink-0">
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
           {/* Header */}
           <div className="text-center mb-5">
@@ -661,6 +663,7 @@ export function Login() {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </AccesoSplitLayout>
   );
 }

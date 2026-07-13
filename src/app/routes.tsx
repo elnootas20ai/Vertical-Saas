@@ -91,6 +91,7 @@ import { EmbedLeadForm } from './pages/public/EmbedLeadForm';
 import { AffiliatePage } from './pages/public/AffiliatePage';
 import { AffiliatePortal } from './pages/public/AffiliatePortal';
 import { BookingPage } from './pages/public/BookingPage';
+import { MeetingsPage } from './pages/public/MeetingsPage';
 import { GdprPanel } from './pages/saas/GdprPanel';
 import { VehiclePublic } from './pages/public/VehiclePublic';
 import { SignaturePublic } from './pages/public/SignaturePublic';
@@ -999,6 +1000,10 @@ export const router = createBrowserRouter([
       {
         path: 'booking/:userId',
         Component: BookingPage,
+      },
+      {
+        path: 'reuniones',
+        Component: MeetingsPage,
       },
       {
         path: 'wo/:workOrderId',

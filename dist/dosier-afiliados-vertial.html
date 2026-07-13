@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dosier Comercial · Programa de Afiliados Vertial</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+    :root {
+      --bg: #09090b;
+      --bg-card: #18181b;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --emerald: #10b981;
+      --emerald-light: #34d399;
+      --teal: #14b8a6;
+      --blue: #2563eb;
+      --border: rgba(255, 255, 255, 0.1);
+      --gradient: linear-gradient(135deg, #22c55e 0%, #14b8a6 55%, #2563eb 100%);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+      background: #e4e4e7;
+      color: var(--text);
+      line-height: 1.55;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      margin: 16px auto;
+      background: var(--bg);
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+    }
+
+    .page-inner {
+      padding: 18mm 20mm 22mm;
+      position: relative;
+      z-index: 1;
+      min-height: 297mm;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .mesh {
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -5%, rgba(16, 185, 129, 0.2), transparent 55%),
+        radial-gradient(ellipse 45% 35% at 100% 15%, rgba(37, 99, 235, 0.1), transparent 50%),
+        var(--bg);
+      pointer-events: none;
+    }
+
+    .grid-lines {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      background-size: 40px 40px;
+      mask-image: radial-gradient(ellipse 70% 55% at 50% 35%, black 15%, transparent 75%);
+      pointer-events: none;
+    }
+
+    .page-footer {
+      margin-top: auto;
+      padding-top: 12mm;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 9px;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+    }
+
+    .page-num { font-weight: 700; color: var(--emerald-light); }
+
+    /* ── Cover ── */
+    .cover {
+      justify-content: center;
+      text-align: center;
+    }
+
+    .logo {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 28px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--emerald-light);
+      margin-bottom: 14px;
+    }
+
+    h1 {
+      font-size: 38px;
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+    }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #34d399, #10b981, #6ee7b7);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .cover-sub {
+      font-size: 16px;
+      color: var(--text-muted);
+      max-width: 420px;
+      margin: 0 auto 36px;
+      line-height: 1.65;
+    }
+
+    .cover-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 24px;
+      border-radius: 16px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--emerald-light);
+      margin-bottom: 40px;
+    }
+
+    .cover-meta {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .cover-meta-item {
+      padding: 14px 10px;
+      border-radius: 12px;
+      background: rgba(24, 24, 27, 0.8);
+      border: 1px solid var(--border);
+    }
+
+    .cover-meta-item strong {
+      display: block;
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+
+    .cover-meta-item span {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    /* ── Content pages ── */
+    .section-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--emerald);
+      margin-bottom: 6px;
+    }
+
+    h2 {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 14px;
+      line-height: 1.15;
+    }
+
+    h3 {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+
+    p.lead {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 18px;
+      line-height: 1.7;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .card-grid-3 {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .card {
+      padding: 14px;
+      border-radius: 12px;
+      background: rgba(24, 24, 27, 0.85);
+      border: 1px solid var(--border);
+    }
+
+    .card-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+
+    .card p {
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+
+    .highlight-box {
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(37, 99, 235, 0.08));
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      margin-bottom: 16px;
+    }
+
+    .highlight-box strong {
+      color: var(--emerald-light);
+      font-size: 28px;
+      font-weight: 800;
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .highlight-box p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .commission-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .commission-card {
+      padding: 18px;
+      border-radius: 14px;
+      text-align: center;
+      border: 1px solid var(--border);
+      background: rgba(24, 24, 27, 0.9);
+    }
+
+    .commission-card.primary {
+      border-color: rgba(16, 185, 129, 0.4);
+      background: linear-gradient(180deg, rgba(6, 78, 59, 0.35), rgba(24, 24, 27, 0.9));
+    }
+
+    .commission-card .pct {
+      font-size: 42px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+
+    .commission-card.primary .pct { color: var(--emerald-light); }
+    .commission-card.secondary .pct { color: #94a3b8; }
+
+    .commission-card .label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+
+    .commission-card .desc {
+      font-size: 10px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .steps {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .step {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: rgba(24, 24, 27, 0.85);
+      border: 1px solid var(--border);
+    }
+
+    .step-num {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: var(--gradient);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .step h4 {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 3px;
+    }
+
+    .step p {
+      font-size: 10px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .pricing-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10px;
+      margin-bottom: 14px;
+    }
+
+    .pricing-table th,
+    .pricing-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .pricing-table th {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      font-weight: 700;
+      background: rgba(24, 24, 27, 0.6);
+    }
+
+    .pricing-table td { color: #e4e4e7; }
+    .pricing-table tr.popular td:first-child {
+      color: var(--emerald-light);
+      font-weight: 700;
+    }
+
+    .tag {
+      display: inline-block;
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(16, 185, 129, 0.2);
+      color: var(--emerald-light);
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    .tag.live { background: rgba(16, 185, 129, 0.2); color: var(--emerald-light); }
+    .tag.soon { background: rgba(113, 113, 122, 0.2); color: #a1a1aa; }
+
+    ul.checklist {
+      list-style: none;
+      margin-bottom: 14px;
+    }
+
+    ul.checklist li {
+      font-size: 11px;
+      color: #d4d4d8;
+      padding: 5px 0 5px 22px;
+      position: relative;
+    }
+
+    ul.checklist li::before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: var(--emerald);
+      font-weight: 800;
+      font-size: 11px;
+    }
+
+    .cta-box {
+      padding: 20px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(5, 150, 105, 0.25), rgba(37, 99, 235, 0.12));
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      text-align: center;
+      margin-top: 8px;
+    }
+
+    .cta-box h3 {
+      font-size: 18px;
+      margin-bottom: 8px;
+    }
+
+    .cta-box p {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+    }
+
+    .cta-contact {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .cta-contact a {
+      color: var(--emerald-light);
+      text-decoration: none;
+    }
+
+    .note {
+      font-size: 9px;
+      color: #71717a;
+      line-height: 1.5;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .example-earn {
+      padding: 14px;
+      border-radius: 12px;
+      background: rgba(24, 24, 27, 0.85);
+      border: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    .example-earn .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      padding: 5px 0;
+      border-bottom: 1px dashed rgba(255,255,255,0.06);
+    }
+
+    .example-earn .row:last-child {
+      border-bottom: none;
+      font-weight: 800;
+      color: var(--emerald-light);
+      padding-top: 8px;
+      font-size: 13px;
+    }
+
+    .print-hint {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: #18181b;
+      color: #fff;
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-family: system-ui, sans-serif;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 999;
+      border: 1px solid rgba(16,185,129,0.4);
+    }
+
+    .print-hint button {
+      margin-left: 12px;
+      padding: 6px 14px;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #059669, #10b981);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    @media print {
+      body { background: white; }
+      .page {
+        margin: 0;
+        box-shadow: none;
+        page-break-after: always;
+      }
+      .page:last-child { page-break-after: auto; }
+      .print-hint { display: none !important; }
+    }
+
+    @page {
+      size: A4;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="print-hint">
+    Guardar como PDF: Ctrl+P → «Guardar como PDF»
+    <button type="button" onclick="window.print()">Imprimir / PDF</button>
+  </div>
+
+  <!-- PÁGINA 1 · PORTADA -->
+  <section class="page">
+    <div class="mesh"></div>
+    <div class="grid-lines"></div>
+    <div class="page-inner cover">
+      <svg class="logo" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" aria-label="Vertial">
+        <defs>
+          <linearGradient id="v_grad" x1="12" y1="10" x2="116" y2="118" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#22C55E"/>
+            <stop offset="0.55" stop-color="#14B8A6"/>
+            <stop offset="1" stop-color="#2563EB"/>
+          </linearGradient>
+        </defs>
+        <path fill="url(#v_grad)" d="M16 26c0-5.523 4.477-10 10-10h12c4.12 0 7.84 2.52 9.34 6.35L64 64.2l16.66-41.85C82.16 18.52 85.88 16 90 16h12c5.523 0 10 4.477 10 10 0 1.305-.256 2.598-.755 3.804L76.6 112.4c-1.55 3.72-5.18 6.15-9.1 6.15s-7.55-2.43-9.1-6.15L16.755 29.804A10.01 10.01 0 0 1 16 26z"/>
+      </svg>
+
+      <p class="eyebrow">Programa de Afiliados</p>
+      <h1>
+        Gana con <span class="gradient-text">Vertial</span><br />
+        cada mes
+      </h1>
+      <p class="cover-sub">
+        Dosier comercial para partners que gestionan una o varias empresas y quieren generar ingresos recurrentes recomendando la plataforma de gestión multi-vertical.
+      </p>
+
+      <div class="cover-badge">20% por venta · Comisiones recurrentes</div>
+
+      <div class="cover-meta">
+        <div class="cover-meta-item">
+          <strong>Producto</strong>
+          <span>Vertial SaaS</span>
+        </div>
+        <div class="cover-meta-item">
+          <strong>Web</strong>
+          <span>vertialapp.com</span>
+        </div>
+        <div class="cover-meta-item">
+          <strong>Dirigido a</strong>
+          <span>Multi-empresa</span>
+        </div>
+      </div>
+
+      <div class="page-footer" style="border:none; padding-top:48px;">
+        <span>Vertial S.L. · B22653737 · Zaragoza, España</span>
+        <span class="page-num">01</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PÁGINA 2 · QUÉ ES VERTIAL -->
+  <section class="page">
+    <div class="mesh"></div>
+    <div class="page-inner">
+      <p class="section-label">El producto</p>
+      <h2>¿Qué es <span class="gradient-text">Vertial</span>?</h2>
+      <p class="lead">
+        Vertial es el sistema operativo de tu negocio: una plataforma SaaS multi-vertical que centraliza stock, operaciones, clientes, TPV, finanzas y documentos en un solo panel profesional. Sin caos, sin papeles perdidos, sin herramientas sueltas.
+      </p>
+
+      <div class="highlight-box">
+        <strong>Un motor, muchas verticales</strong>
+        <p>Misma plataforma, distinta operativa. Compraventa, restauración, delivery, taller y retail comparten un core potente con configuración por sector.</p>
+      </div>
+
+      <div class="card-grid card-grid-3">
+        <div class="card">
+          <div class="card-icon">🚗</div>
+          <h3>Compraventa</h3>
+          <p>Stock, operaciones, documentos y márgenes en tiempo real.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🍽️</div>
+          <h3>Restauración</h3>
+          <p>Bar, restaurante, TPV en tablet, cocina y comandas.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🛵</div>
+          <h3>Delivery</h3>
+          <p>Pedidos a domicilio, reparto, cocina y fidelización.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔧</div>
+          <h3>Taller</h3>
+          <p>Órdenes de trabajo, recambios y seguimiento.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🛒</div>
+          <h3>Retail</h3>
+          <p>Puntos de venta y catálogo para comercio minorista.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">📊</div>
+          <h3>Core compartido</h3>
+          <p>CRM, alertas, roles, multi-sede, informes y API.</p>
+        </div>
+      </div>
+
+      <p class="section-label" style="margin-top:8px;">Por qué vende</p>
+      <ul class="checklist">
+        <li>Prueba gratuita 30 días, sin tarjeta y sin permanencia</li>
+        <li>Datos alojados en Europa con cumplimiento RGPD</li>
+        <li>Dashboard en vivo: KPIs, alertas y actividad del día</li>
+        <li>Multi-ubicación, permisos granulares y centro de alertas</li>
+        <li>Plataforma profesional — no un Excel con login</li>
+      </ul>
+
+      <div class="page-footer">
+        <span>vertialapp.com · Dosier Afiliados 2026</span>
+        <span class="page-num">02</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PÁGINA 3 · COMISIONES -->
+  <section class="page">
+    <div class="mesh"></div>
+    <div class="page-inner">
+      <p class="section-label">Tu beneficio</p>
+      <h2>Comisiones del programa</h2>
+      <p class="lead">
+        Ganas un porcentaje sobre el importe neto recurrente mensual de cada cliente que refieras y mantenga una suscripción activa. Sin límite de ingresos: cuantos más clientes activos, más cobras cada mes.
+      </p>
+
+      <div class="commission-row">
+        <div class="commission-card primary">
+          <div class="label">Comisión estándar</div>
+          <div class="pct">20%</div>
+          <div class="desc">Por cada venta activa. Se aplica sobre la cuota mensual del plan contratado por el cliente referido.</div>
+        </div>
+        <div class="commission-card secondary">
+          <div class="label">Sin actividad 2 meses</div>
+          <div class="pct">10%</div>
+          <div class="desc">Si en 2 meses consecutivos no se registra ninguna venta nueva, la comisión baja al 10% hasta recuperar actividad comercial.</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <h3 style="margin-bottom:10px;">Ejemplo de ingresos mensuales (20%)</h3>
+          <div class="example-earn">
+            <div class="row"><span>3 clientes plan Normal (150€/mes)</span><span>90€/mes</span></div>
+            <div class="row"><span>2 clientes plan Básico (50€/mes)</span><span>20€/mes</span></div>
+            <div class="row"><span>1 cliente plan Pro (350€/mes)</span><span>70€/mes</span></div>
+            <div class="row"><span>Total recurrente estimado</span><span>180€/mes</span></div>
+          </div>
+          <p class="note">Cálculo orientativo. Las comisiones se liquidan mensualmente tras verificar el pago del cliente.</p>
+        </div>
+        <div>
+          <h3 style="margin-bottom:10px;">Condiciones clave</h3>
+          <ul class="checklist">
+            <li>Comisión recurrente mientras el cliente siga activo</li>
+            <li>Liquidación mensual en el panel de afiliado</li>
+            <li>Código de referido único (REF-XXXXXX)</li>
+            <li>Sin comisión por autoconsumo o clientes ya existentes</li>
+            <li>Datos de facturación válidos para cobrar</li>
+            <li>Relación de colaborador independiente</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="highlight-box" style="margin-top:14px;">
+        <strong style="font-size:16px;">Público ideal del afiliado</strong>
+        <p style="margin-top:6px;">Personas con <strong style="color:#fff;">1 o más empresas</strong> en su red: consultores, comerciales freelance, agencias digitales, asesores sectoriales o grupos multi-negocio que conocen dueños de compraventas, hostelería, talleres o retail.</p>
+      </div>
+
+      <div class="page-footer">
+        <span>Comisión base: 20% · Revisión a 10% tras 2 meses sin ventas</span>
+        <span class="page-num">03</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PÁGINA 4 · PLANES Y CÓMO FUNCIONA -->
+  <section class="page">
+    <div class="mesh"></div>
+    <div class="page-inner">
+      <p class="section-label">Qué vendes</p>
+      <h2>Planes Vertial</h2>
+      <p class="lead">Referencia de precios para orientar a tus contactos. Todos incluyen prueba gratuita de 30 días.</p>
+
+      <table class="pricing-table">
+        <thead>
+          <tr>
+            <th>Plan</th>
+            <th>Precio / mes</th>
+            <th>Ideal para</th>
+            <th>Lo principal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Básico</td>
+            <td>50€ <span style="color:#71717a;font-size:9px;">(40€ anual)</span></td>
+            <td>Empezar con orden</td>
+            <td>1 ubicación, 2 usuarios, stock, CRM, documentos</td>
+          </tr>
+          <tr class="popular">
+            <td>Normal <span class="tag">Más popular</span></td>
+            <td>150€ <span style="color:#71717a;font-size:9px;">(120€ anual)</span></td>
+            <td>Equipos en crecimiento</td>
+            <td>5 usuarios, firma digital, gestoría, KPIs avanzados</td>
+          </tr>
+          <tr>
+            <td>Pro</td>
+            <td>350€ <span style="color:#71717a;font-size:9px;">(280€ anual)</span></td>
+            <td>Multi-sede y API</td>
+            <td>Ubicaciones ilimitadas, API, webhooks, soporte prioritario</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="section-label">Proceso</p>
+      <h2>Cómo funciona el programa</h2>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div>
+            <h4>Solicita tu acceso</h4>
+            <p>Rellena el formulario en vertialapp.com/affiliados. En menos de 48h recibes tu código de afiliado.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div>
+            <h4>Comparte tu código</h4>
+            <p>Usa tu código único con negocios de tu red. Ellos se registran en Vertial vinculados a ti.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div>
+            <h4>Registra y haz seguimiento</h4>
+            <p>Desde el panel de afiliado das de alta clientes, ves su estado y el progreso de cada referido.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div>
+            <h4>Cobra cada mes</h4>
+            <p>Cuando el cliente activa su plan de pago, generas comisión recurrente. Consulta pagos pendientes y cobrados en tiempo real.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card-grid">
+        <div class="card">
+          <div class="card-icon">📈</div>
+          <h3>Panel en tiempo real</h3>
+          <p>Clientes, ganancias, estado de pagos y tu tasa de comisión actual.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🤝</div>
+          <h3>Soporte dedicado</h3>
+          <p>Equipo exclusivo para afiliados que te ayuda a cerrar ventas.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">📦</div>
+          <h3>Kit comercial</h3>
+          <p>Demos, presentaciones y recursos para vender sin esfuerzo.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🎓</div>
+          <h3>Formación continua</h3>
+          <p>Guías y sesiones para dominar el producto y multiplicar ventas.</p>
+        </div>
+      </div>
+
+      <div class="page-footer">
+        <span>Planes sin permanencia · Descuento -20% en facturación anual</span>
+        <span class="page-num">04</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- PÁGINA 5 · CTA -->
+  <section class="page">
+    <div class="mesh"></div>
+    <div class="page-inner">
+      <p class="section-label">Empieza hoy</p>
+      <h2>Únete al programa</h2>
+      <p class="lead">
+        Si gestionas una o varias empresas, o tienes una red de contactos en sectores como automoción, hostelería, talleres o retail, Vertial es una oportunidad clara de ingresos recurrentes sin dar soporte técnico: refieres, nosotros operamos la plataforma, tú cobras.
+      </p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>✓ No necesitas ser técnico</h3>
+          <p>Te damos materiales, formación y soporte comercial. Tú conectas negocios con Vertial.</p>
+        </div>
+        <div class="card">
+          <h3>✓ Sin límite de ingresos</h3>
+          <p>Cuantos más clientes activos refieras, más comisiones mensuales acumulas.</p>
+        </div>
+        <div class="card">
+          <h3>✓ Programa internacional</h3>
+          <p>Abierto a nivel internacional. Solo necesitas poder facturar legalmente.</p>
+        </div>
+        <div class="card">
+          <h3>✓ Contrato claro</h3>
+          <p>Aceptación electrónica del contrato de afiliados al acceder al panel. Condiciones transparentes.</p>
+        </div>
+      </div>
+
+      <div class="cta-box">
+        <h3>Solicita tu código de afiliado</h3>
+        <p>Regístrate en el programa y empieza a generar ingresos recurrentes con Vertial.</p>
+        <div class="cta-contact">
+          <span>🌐 <a href="https://vertialapp.com/affiliados">vertialapp.com/affiliados</a></span>
+          <span>✉️ <a href="mailto:hola@vertialapp.com">hola@vertialapp.com</a></span>
+          <span>📞 +34 647 77 98 12</span>
+        </div>
+      </div>
+
+      <p class="note" style="margin-top:20px;">
+        <strong>Vertial S.L.</strong> · NIF B22653737 · Calle Coso 67-75, 3ºC, 50001 Zaragoza, España<br />
+        soporte@vertialapp.com · vertialapp.com · Documento comercial — Julio 2026<br />
+        Las condiciones definitivas del programa se rigen por el Contrato del Programa de Afiliados Vertial aceptado en el registro.
+      </p>
+
+      <div class="page-footer">
+        <span>Vertial · El sistema operativo de tu negocio</span>
+        <span class="page-num">05</span>
+      </div>
+    </div>
+  </section>
+
+</body>
+</html>

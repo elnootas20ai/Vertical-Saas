@@ -6,6 +6,7 @@ import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
 import { VertialLogo } from '../../components/VertialLogo';
+import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
@@ -90,8 +91,9 @@ export function WorkerLogin() {
   };
 
   return (
-    <div className="min-h-dvh bg-gray-50 dark:bg-gray-800 flex flex-col items-stretch px-4 py-6 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:items-center sm:justify-center sm:p-6">
-      <div className="w-full max-w-md my-auto">
+    <AccesoSplitLayout visualKey="register-user" scrollable>
+      <div className="flex min-h-dvh flex-col items-center justify-center p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6 lg:min-h-0 lg:flex-1 lg:px-8">
+      <div className="w-full max-w-md shrink-0 my-auto">
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 sm:p-8 shadow-sm">
           <div className="text-center mb-6 sm:mb-8">
             <div className="flex items-center justify-center mb-4 sm:mb-6">
@@ -227,6 +229,7 @@ export function WorkerLogin() {
           </ACCESO__Button>
         </div>
       </div>
-    </div>
+      </div>
+    </AccesoSplitLayout>
   );
 }
