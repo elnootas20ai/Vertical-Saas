@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Vertial — Estudio completo del producto</title>
+  <style>
+    @page { size: A4; margin: 22mm 18mm 24mm 18mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+      color: #1a1a1a;
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1, h2, h3 { color: #0b1220; page-break-after: avoid; }
+    h1 {
+      font-size: 26pt;
+      font-weight: 800;
+      margin: 0 0 6px;
+      background: linear-gradient(135deg, #22C55E 0%, #14B8A6 55%, #2563EB 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .subtitle { font-size: 13pt; color: #475569; margin: 0 0 4px; font-weight: 600; }
+    .meta { font-size: 9pt; color: #64748b; margin-bottom: 28px; border-bottom: 2px solid #e2e8f0; padding-bottom: 16px; }
+    h2 { font-size: 14pt; margin: 28px 0 10px; padding-bottom: 4px; border-bottom: 2px solid #22C55E; }
+    h3 { font-size: 11.5pt; margin: 18px 0 8px; color: #059669; }
+    p { margin: 0 0 10px; }
+    ul, ol { margin: 0 0 12px; padding-left: 20px; }
+    li { margin-bottom: 4px; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 9.5pt; }
+    th, td { border: 1px solid #cbd5e1; padding: 7px 9px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; font-weight: 700; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    .cover-box {
+      background: linear-gradient(135deg, rgba(34,197,94,.08), rgba(37,99,235,.06));
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      padding: 20px 22px;
+      margin: 20px 0 24px;
+    }
+    .tag { display: inline-block; background: #ecfdf5; color: #047857; font-size: 8pt; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-right: 6px; }
+    .timeline-item { margin-bottom: 14px; padding-left: 14px; border-left: 3px solid #14B8A6; }
+    .timeline-item strong { color: #0f172a; }
+    .footer-note { margin-top: 32px; padding-top: 12px; border-top: 1px solid #e2e8f0; font-size: 8.5pt; color: #64748b; }
+    .page-break { page-break-before: always; }
+    code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 9pt; }
+  </style>
+</head>
+<body>
+
+<h1>Vertial</h1>
+<p class="subtitle">Estudio completo del producto, arquitectura y evolución del proyecto</p>
+<p class="meta">
+  Documento generado: 14 de julio de 2026 · Vertial S.L. · NIF B22653737<br />
+  Producción: <strong>https://vertialapp.com</strong> · API: <strong>https://api.vertialapp.com</strong>
+</p>
+
+<div class="cover-box">
+  <p><strong>Resumen ejecutivo.</strong> Vertial es una plataforma SaaS multi-vertical diseñada en España para digitalizar la operativa diaria de pymes y negocios con varios locales: compraventa de vehículos, delivery, restauración, taller, limpieza, construcción, eventos y más de veinte tipos de negocio adicionales. Un mismo motor central (cuentas, permisos, CRM, finanzas, documentos, equipo, TPV, alertas) se adapta a cada vertical sin duplicar sistemas. El producto está desplegado en producción, cuenta con app nativa iOS/Android (Capacitor), landing comercial, programa de afiliados y facturación de suscripción integrada con MONEI.</p>
+</div>
+
+<h2>1. ¿Qué es Vertial?</h2>
+<p>Vertial se define como <strong>«el sistema operativo de tu negocio»</strong>: stock, operaciones, clientes, TPV en tablet y finanzas en una sola plataforma profesional, sin caos de hojas de cálculo, WhatsApp y herramientas sueltas.</p>
+<h3>Propuesta de valor</h3>
+<ul>
+  <li><strong>Un motor, muchas verticales</strong> — misma plataforma, distinta operativa según el sector.</li>
+  <li><strong>Datos en tiempo real</strong> — dashboard, KPIs, alertas y actividad del día conectados a la base de datos.</li>
+  <li><strong>CRM unificado</strong> — clientes, historial y segmentación centralizados.</li>
+  <li><strong>TPV en tablet</strong> — caja, consumo de equipo y turnos listos para mostrador o sala.</li>
+  <li><strong>Seguridad europea</strong> — RGPD, permisos granulares, backups automáticos de CouchDB.</li>
+  <li><strong>Centro de alertas</strong> — push, email e in-app configurables por rol.</li>
+</ul>
+<h3>Público objetivo</h3>
+<p>Propietarios, gerentes y administradores de negocios en España y Europa; equipos operativos (trabajadores, repartidores, cocina, técnicos); partners del programa de afiliados; y operadores de TPV en tablet dedicada.</p>
+<h3>Entidad legal</h3>
+<table>
+  <tr><th>Campo</th><th>Dato</th></tr>
+  <tr><td>Razón social</td><td>Vertial S.L.</td></tr>
+  <tr><td>NIF</td><td>B22653737</td></tr>
+  <tr><td>Domicilio</td><td>Calle Coso 67-75, 3ºC, 50001 Zaragoza, España</td></tr>
+  <tr><td>Contacto</td><td>soporte@vertialapp.com · +34 647 77 98 12</td></tr>
+  <tr><td>Privacidad / DPO</td><td>privacidad@vertialapp.com</td></tr>
+</table>
+
+<h2>2. Verticales de negocio</h2>
+<p>En el alta (onboarding) el usuario elige entre más de <strong>24 tipos de negocio</strong>. Tres verticales tienen módulos formales aislados en código; el resto reutiliza el núcleo con rutas y menús específicos.</p>
+
+<h3>2.1 Verticales con módulo dedicado (prioridad arquitectónica)</h3>
+<table>
+  <tr><th>Vertical</th><th>Tipo</th><th>Funcionalidades principales</th></tr>
+  <tr><td><strong>Delivery</strong></td><td><code>delivery</code></td><td>Centro de operaciones, cocina (KDS), reparto, montaje, TPV rápido, caja, sala, pedidos web, integraciones, sesiones TPV tablet.</td></tr>
+  <tr><td><strong>Restauración</strong></td><td><code>restaurant</code></td><td>Bar, restaurante o bar+comedor; TPV, sala, reservas, lista de espera, cocina, caja, informes; división de cuenta y cambio de mesa.</td></tr>
+  <tr><td><strong>Compraventa</strong></td><td><code>carDealership</code></td><td>Stock de vehículos, operaciones, compras/ventas, tasaciones, entregas, gastos de preparación, calculadora fiscal, CRM, integración ANCOVE, ficha pública <code>/v/:id</code>.</td></tr>
+</table>
+
+<h3>2.2 Otras verticales activas en plataforma</h3>
+<p>Taller (<code>workshop</code>), limpieza (<code>cleaning</code>), construcción (<code>construction</code>), eventos (<code>events</code>), desguace (<code>scrapyard</code>), gimnasio, clínica, hotel, academia, inmobiliaria, abogados, discoteca, taxi, farmacia, veterinario, estanco, carnicería, peluquería, recambios y más — cada una con hub propio, checklist de activación y reutilización de CRM, calendario, documentos y equipo.</p>
+
+<h3>2.3 Estado comercial en landing</h3>
+<ul>
+  <li><span class="tag">Activo</span> Compraventa, Restauración, Delivery, Taller</li>
+  <li><span class="tag">Próximamente</span> Retail (minorista genérico)</li>
+</ul>
+
+<h2 class="page-break">3. Módulos del núcleo SaaS</h2>
+<p>Todos los negocios comparten una base común accesible desde el panel <code>/saas</code>:</p>
+<table>
+  <tr><th>Módulo</th><th>Descripción</th><th>Plan típico</th></tr>
+  <tr><td>Dashboard</td><td>KPIs, widgets personalizables, vista por vertical</td><td>Básico</td></tr>
+  <tr><td>CRM / Clientes</td><td>Fichas, pipeline, presupuestos, promociones</td><td>Básico / Mediano</td></tr>
+  <tr><td>Catálogo e inventario</td><td>Artículos, escandallo, proveedores</td><td>Básico / Mediano</td></tr>
+  <tr><td>Finanzas</td><td>Ingresos/gastos, EBITDA, impuestos, facturación</td><td>Mediano</td></tr>
+  <tr><td>Conciliación bancaria</td><td>Matching movimientos</td><td>Pro</td></tr>
+  <tr><td>Documentos</td><td>Contratos, licencias, docs por vertical, firma digital</td><td>Básico+</td></tr>
+  <tr><td>Equipo / RRHH</td><td>Usuarios, invitaciones, fichajes, horarios, vacaciones, nóminas, comisiones</td><td>Básico+</td></tr>
+  <tr><td>TPV / Caja</td><td>Tablet, kiosco fichaje, tickets térmicos</td><td>Básico</td></tr>
+  <tr><td>Alertas</td><td>Centro configurable (caja, delivery, documentos…)</td><td>Básico</td></tr>
+  <tr><td>Calendario y chat</td><td>Agenda interna y mensajería</td><td>Básico</td></tr>
+  <tr><td>Informes</td><td>Reporting transversal</td><td>Mediano</td></tr>
+  <tr><td>Multi-empresa / grupos</td><td>Varias marcas y PDV desde una cuenta</td><td>Pro (oferta lanzamiento: 2 marcas/PDV/empresas)</td></tr>
+  <tr><td>Panel admin</td><td>Super-admin: clientes, uso, verificación</td><td>Interno</td></tr>
+  <tr><td>Panel RGPD</td><td>Ejercicio de derechos, exportación</td><td>—</td></tr>
+  <tr><td>Afiliados (in-app)</td><td>Gestión de partners y comisiones</td><td>Mediano</td></tr>
+  <tr><td>API REST + Webhooks</td><td>Integración programática</td><td>Pro</td></tr>
+</table>
+
+<h2>4. Planes y precios</h2>
+<table>
+  <tr><th>Plan</th><th>Mensual</th><th>Anual (−20%)</th><th>Usuarios</th><th>Locales</th><th>Empresas / Marcas</th></tr>
+  <tr><td><strong>Básico</strong></td><td>49 €</td><td>39 €/mes eq.</td><td>2</td><td>1</td><td>1 / 1</td></tr>
+  <tr><td><strong>Mediano</strong></td><td>149 €</td><td>119 €/mes eq.</td><td>6</td><td>1</td><td>1 / 1</td></tr>
+  <tr><td><strong>Pro</strong></td><td>349 €</td><td>279 €/mes eq.</td><td>12</td><td>2</td><td>2 / 2 (oferta lanzamiento)</td></tr>
+</table>
+<p>La landing muestra precios redondeados (50 € / 150 € / 350 €). Prueba gratuita: <strong>30 días sin tarjeta</strong> en marketing; el backend de suscripción MONEI puede usar ventana de 14 días — conviene unificar el mensaje comercial.</p>
+<p>Facturación SaaS vía <strong>MONEI</strong> (pagos, webhooks, alta de comercio). Modo desarrollo permite omitir cobro con flags de entorno.</p>
+
+<h2>5. Stack tecnológico</h2>
+<h3>Frontend</h3>
+<ul>
+  <li>React 18 + TypeScript + Vite 6</li>
+  <li>Tailwind CSS 4, Radix UI, Lucide, Recharts, TipTap, i18next</li>
+  <li>PWA con service worker (desactivado en app nativa para evitar bundles obsoletos)</li>
+  <li>React Router 6 — más de 200 rutas en <code>routes.tsx</code></li>
+</ul>
+<h3>Backend</h3>
+<ul>
+  <li>Node.js + Express 5 — monolito modular (<code>index.js</code> + routers por dominio)</li>
+  <li>Autenticación JWT + refresh tokens</li>
+  <li>SSE (eventos en tiempo real), webhooks, jobs de backup</li>
+  <li>Logging estructurado con Pino</li>
+</ul>
+<h3>Base de datos</h3>
+<ul>
+  <li><strong>CouchDB 3.x</strong> — patrón multi-base con prefijo configurable (<code>vertial-*</code> / <code>urielsaas-*</code> en entornos de desarrollo)</li>
+  <li>Índices Mango + vistas MapReduce; backups automáticos diarios (retención 7 días)</li>
+</ul>
+<h3>Infraestructura y despliegue</h3>
+<ul>
+  <li>VPS Scaleway — Nginx sirve <code>/var/www/vertial/dist</code> y proxy <code>/api</code> → Node (puerto 3000)</li>
+  <li>Scripts: <code>npm run deploy:frontend</code>, <code>deploy:backend</code>, <code>deploy:all</code></li>
+  <li>Desarrollo local: <code>npm run dev:local</code> → front <strong>:3015</strong>, API <strong>:3001</strong>, print bridge <strong>:39201</strong></li>
+</ul>
+<h3>App móvil</h3>
+<ul>
+  <li><strong>Capacitor 8</strong> — iOS y Android (<code>com.vertial.app</code>)</li>
+  <li>Plugins: cámara, push (APNs/FCM), Apple Sign-In, impresión ESC/POS térmica</li>
+  <li>Onboarding nativo de 4 pantallas; suscripciones iOS redirigen a web (política App Store)</li>
+  <li>Build iOS vía Codemagic → TestFlight (pendiente ciclo del usuario)</li>
+</ul>
+
+<h2 class="page-break">6. Autenticación y accesos</h2>
+<table>
+  <tr><th>Método</th><th>Ruta / uso</th></tr>
+  <tr><td>Email + contraseña</td><td><code>/auth/login</code>, registro empresa o usuario</td></tr>
+  <tr><td>Código OTP por email</td><td>Modo alternativo en login</td></tr>
+  <tr><td>Google Sign-In</td><td>OAuth web — Client ID configurado en <code>.env</code></td></tr>
+  <tr><td>Sign in with Apple</td><td>iOS nativo + web; desplegado en producción (commit 03b3de4)</td></tr>
+  <tr><td>Login trabajador</td><td><code>/auth/worker-login</code></td></tr>
+  <tr><td>Login equipo</td><td><code>/auth/team-login</code></td></tr>
+  <tr><td>TPV tablet</td><td><code>/auth/tpv-tablet</code> — código de terminal, sin contraseña personal</td></tr>
+  <tr><td>Invitaciones</td><td><code>/auth/accept-invite</code></td></tr>
+  <tr><td>Recuperación</td><td><code>/auth/recover</code>, <code>/auth/reset-password</code></td></tr>
+  <tr><td>Verificación email</td><td>Gate antes de onboarding completo</td></tr>
+  <tr><td>Hub de acceso</td><td><code>/auth/entry</code> — empresa, trabajador, afiliado, TPV</td></tr>
+</table>
+<p>Onboarding guiado: tipo de negocio → empresa → estructura → necesidades → recomendación → pago → confirmación.</p>
+
+<h2>7. Web pública y marketing</h2>
+<table>
+  <tr><th>URL</th><th>Función</th></tr>
+  <tr><td><code>/</code></td><td>Landing comercial (<code>LandingNew.tsx</code>) — hero, verticales, módulos, planes, testimonios, FAQ</td></tr>
+  <tr><td><code>/reuniones</code></td><td>Agenda embebida (Calendly) — <code>VITE_MEETING_SCHEDULER_URL</code></td></tr>
+  <tr><td><code>/affiliados</code></td><td>Programa de afiliados — comisiones recurrentes</td></tr>
+  <tr><td><code>/panel-afiliado/:code</code></td><td>Portal del afiliado</td></tr>
+  <tr><td><code>/legal/*</code></td><td>Aviso legal, términos, privacidad, cookies</td></tr>
+  <tr><td><code>/v/:vehicleId</code></td><td>Ficha pública de vehículo (compraventa)</td></tr>
+  <tr><td><code>/web/:slug</code></td><td>Tienda web pública (delivery)</td></tr>
+  <tr><td><code>/embed/:dealerId</code></td><td>Formulario de leads embebible</td></tr>
+  <tr><td><code>/sign/:token</code></td><td>Firma documental pública</td></tr>
+</table>
+<p><strong>Sección contacto (landing, julio 2026):</strong> bloque «Agendar reunión con Vertial» + CTA a <code>/reuniones</code>; bloque afiliados a la derecha. Teléfono y email directos retirados del bloque principal.</p>
+
+<h2>8. Integraciones</h2>
+<ul>
+  <li><strong>MONEI</strong> — suscripciones SaaS y pagos</li>
+  <li><strong>ANCOVE</strong> — compraventa (opcional)</li>
+  <li><strong>Calendly / Cal.com</strong> — reuniones comerciales</li>
+  <li><strong>Google</strong> — OAuth + Maps</li>
+  <li><strong>Apple</strong> — Sign in with Apple</li>
+  <li><strong>Web Push (VAPID)</strong> y <strong>APNs</strong> — notificaciones</li>
+  <li><strong>Email</strong> — SMTP / Resend — verificación, alertas, transaccional</li>
+  <li><strong>OpenAI</strong> — asistente IA (opcional)</li>
+  <li><strong>Impresoras térmicas ESC/POS</strong> — LAN, WiFi (escaneo automático iOS), Vertial Print Bridge local</li>
+  <li><strong>SSE</strong> — actualizaciones en tiempo real en panel</li>
+</ul>
+
+<h2>9. Identidad visual</h2>
+<p>Logo: icono «V» con degradado lineal.</p>
+<table>
+  <tr><th>Color</th><th>HEX</th><th>Uso</th></tr>
+  <tr><td>Verde</td><td><code>#22C55E</code></td><td>Inicio degradado logo</td></tr>
+  <tr><td>Teal</td><td><code>#14B8A6</code></td><td>Centro degradado (55%)</td></tr>
+  <tr><td>Azul</td><td><code>#2563EB</code></td><td>Fin degradado</td></tr>
+  <tr><td>Sombra</td><td><code>#0B1220</code> @ 8%</td><td>Profundidad en SVG</td></tr>
+</table>
+<p>Fuente web: Plus Jakarta Sans. Landing en tema oscuro (<code>zinc-950</code>) con acentos emerald.</p>
+
+<h2 class="page-break">10. Cronología del trabajo realizado</h2>
+
+<h3>2026 — Evolución de producto (changelog oficial)</h3>
+<div class="timeline-item"><strong>Julio 2026</strong> — Restauración: panel y checklist propios; menú lateral diferenciado de Delivery; guía de alta para bar/restaurante.</div>
+<div class="timeline-item"><strong>Junio 2026</strong> — Formato de local (bar / restaurante / bar+comedor); selector multi-empresa y PDV más claro.</div>
+<div class="timeline-item"><strong>Mayo 2026</strong> — Delivery: cocina, TPV rápido, tickets, seguimiento de pedidos.</div>
+<div class="timeline-item"><strong>Abril 2026</strong> — Varias empresas desde una cuenta; onboarding guiado por tipo de negocio.</div>
+<div class="timeline-item"><strong>Febrero 2026</strong> — Taller y compraventa: vista técnico, estados de reparación, repuestos, firma digital.</div>
+
+<h3>Commits recientes (ingeniería)</h3>
+<ul>
+  <li><strong>Reuniones comerciales</strong> — página <code>/reuniones</code>, embed Calendly, CTA en landing (2ab5249).</li>
+  <li><strong>Sign in with Apple</strong> — backend + frontend + entitlements iOS; fixes scroll móvil; tooling rename VPS (03b3de4).</li>
+  <li><strong>Google Sign-In</strong> — Client ID configurado en local y producción; endpoint verificado (sin deploy adicional pendiente de autorización del usuario).</li>
+  <li><strong>Impresión TPV</strong> — búsqueda WiFi automática, timeouts nativos, permiso red local iOS, patch esc-pos-proxy, feedback UX en ajustes Tickets.</li>
+  <li><strong>Deploy</strong> — limpieza inteligente de assets en VPS, patch-package en prod, verificación de bundle, arranque sin bloqueo por SW/cache.</li>
+  <li><strong>App nativa</strong> — limpieza service worker en Capacitor, API producción blindada, navegación por vertical, TPV retail scope.</li>
+  <li><strong>Restaurante</strong> — división cuenta, cambio mesa, KDS, alertas sala, pausa motores por inactividad.</li>
+  <li><strong>Onboarding</strong> — activación sin MONEI obligatorio, importación catálogo más rápida.</li>
+</ul>
+
+<h3>Trabajo de sesión reciente (julio 2026, local)</h3>
+<ul>
+  <li>Sección contacto landing reajustada: agenda + afiliados en dos columnas.</li>
+  <li>Layout auth split (<code>AccesoSplitLayout</code>) desde breakpoint <code>lg</code>.</li>
+  <li>Fix import <code>AdminClientUsagePanel</code>.</li>
+  <li>Entorno dev local documentado: <code>npm run dev:local</code>.</li>
+</ul>
+
+<h2>11. Arquitectura de producto (principios)</h2>
+<ul>
+  <li><strong>Vertical modular</strong> — delivery, restaurant y compraventa tienen fronteras de código y tests de aislamiento (<code>test:verticals</code>).</li>
+  <li><strong>Features Pro conectadas</strong> — las funciones de plan superior deben leer datos reales, no solo desbloquear UI vacía.</li>
+  <li><strong>Multi-tenant</strong> — usuario → empresas → marcas → puntos de venta; scope URL sincronizado.</li>
+  <li><strong>Roles</strong> — propietario, manager, trabajador, super-admin; permisos granulares por módulo.</li>
+  <li><strong>Motores en background</strong> — desactivables en desarrollo (<code>BACKGROUND_ENGINES=off</code>) para no saturar CouchDB.</li>
+</ul>
+
+<h2>12. Entorno de desarrollo y operación</h2>
+<table>
+  <tr><th>Entorno</th><th>URL / comando</th></tr>
+  <tr><td>Producción web</td><td>https://vertialapp.com</td></tr>
+  <tr><td>API producción</td><td>https://api.vertialapp.com (también same-origin <code>/api</code>)</td></tr>
+  <tr><td>Dev frontend</td><td>http://localhost:3015</td></tr>
+  <tr><td>Dev backend</td><td>http://127.0.0.1:3001</td></tr>
+  <tr><td>CouchDB local</td><td><code>npm run couch:up</code> (Docker)</td></tr>
+  <tr><td>Smoke test SaaS</td><td><code>npm run smoke:saas</code></td></tr>
+  <tr><td>Deploy completo</td><td><code>npm run deploy:all</code> (requiere <code>deploy/local-values.env</code>)</td></tr>
+</table>
+
+<h2>13. Estado actual y pendientes</h2>
+<h3>Completado / en producción</h3>
+<ul>
+  <li>Plataforma SaaS multi-vertical operativa con clientes reales en VPS.</li>
+  <li>Apple Sign-In desplegado; smoke backend 10/10 PASS tras deploy.</li>
+  <li>Página de reuniones + Calendly conectado a Google Calendar/Meet.</li>
+  <li>Impresión térmica end-to-end (web + nativo + bridge).</li>
+  <li>App Capacitor iOS/Android con onboarding nativo.</li>
+</ul>
+<h3>Pendiente / en curso</h3>
+<ul>
+  <li>Build Codemagic iOS → TestFlight (usuario).</li>
+  <li>Google OAuth en modo Testing — añadir emails de prueba en Google Cloud para login real.</li>
+  <li>Deploy frontend con cambios recientes de landing contacto (cuando el usuario lo autorice).</li>
+  <li>Unificar mensaje trial 30 vs 14 días entre landing y billing.</li>
+  <li>Retail vertical — marcado «próximamente» en marketing.</li>
+  <li>Pulido final menú 100 % restauración (changelog julio 2026).</li>
+</ul>
+
+<h2>14. Conclusión</h2>
+<p>Vertial no es un TPV aislado ni un CRM genérico: es una <strong>plataforma operativa integral</strong> pensada para el tejido empresarial español, con profundidad real en delivery, restauración y compraventa, y extensibilidad hacia decenas de sectores. El proyecto combina producto comercial (landing, planes, afiliados, reuniones), ingeniería de producción (VPS, CouchDB, backups, deploy automatizado) y movilidad nativa (Capacitor, impresión, Apple/Google auth). La base está desplegada y en uso; el foco inmediato es cerrar la experiencia móvil iOS, pulir la capa comercial (contacto, reuniones, Google login) y continuar la especialización por vertical sin romper el núcleo compartido.</p>
+
+<div class="footer-note">
+  <p><strong>Vertial S.L.</strong> · Calle Coso 67-75, 3ºC · 50001 Zaragoza · soporte@vertialapp.com</p>
+  <p>Documento interno / comercial. Generado automáticamente desde el repositorio Vertial. Julio 2026.</p>
+</div>
+
+</body>
+</html>
