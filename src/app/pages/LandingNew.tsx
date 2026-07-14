@@ -636,49 +636,23 @@ export function LandingNew() {
       <section id="contacto" className="py-24 px-6 bg-zinc-900/40 border-t border-zinc-800">
         <div className="max-w-6xl mx-auto">
           <div className="grid lg:grid-cols-2 gap-10 items-start">
-            <div>
-              <SectionHeader
-                align="left"
-                className="!mb-8"
-                eyebrow="Contacto"
-                title="Habla con el equipo Vertial"
-                subtitle="Te ayudamos a elegir plan, vertical y la mejor forma de arrancar."
-              />
-              <div className="space-y-4">
-                <a href="tel:+34647779812" className="vertial-bento-card vertial-card-lift flex items-center gap-4 rounded-2xl p-5 group">
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
-                    <PhoneCall className="w-6 h-6 text-emerald-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Teléfono</p>
-                    <p className="font-bold text-white text-lg">+34 647 77 98 12</p>
-                    <p className="text-xs text-zinc-500">Lun–vie 9:00–18:00</p>
-                  </div>
-                </a>
-                <a href="mailto:hola@vertialapp.com" className="vertial-bento-card vertial-card-lift flex items-center gap-4 rounded-2xl p-5 group">
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
-                    <Mail className="w-6 h-6 text-emerald-400" />
-                  </div>
-                  <div className="text-left">
-                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Email</p>
-                    <p className="font-bold text-white text-lg">hola@vertialapp.com</p>
-                    <p className="text-xs text-zinc-500">Respuesta en menos de 24h</p>
-                  </div>
-                </a>
+            <div className="vertial-bento-card rounded-2xl p-8 lg:p-10 relative overflow-hidden">
+              <div className="absolute -top-20 -right-20 w-56 h-56 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-20 -left-16 w-56 h-56 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="relative">
+                <SectionHeader
+                  align="left"
+                  className="!mb-6"
+                  eyebrow="Contacto"
+                  title="Agendar reunión con Vertial"
+                />
                 <button
                   type="button"
                   onClick={() => navigate('/reuniones')}
-                  className="vertial-bento-card vertial-card-lift flex items-center gap-4 rounded-2xl p-5 group text-left"
+                  className="w-full py-4 rounded-2xl font-extrabold vertial-glow-btn text-white flex items-center justify-center gap-2 text-lg"
                 >
-                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/20 transition-colors">
-                    <Clock className="w-6 h-6 text-emerald-400" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Agenda</p>
-                    <p className="font-bold text-white text-lg">Reservar una demo</p>
-                    <p className="text-xs text-zinc-500">Elige hueco y recibes invitación por email</p>
-                  </div>
-                  <ArrowRight className="w-5 h-5 text-zinc-600 group-hover:text-emerald-400 transition-colors" />
+                  Agendar reunión
+                  <ArrowRight className="w-5 h-5" />
                 </button>
               </div>
             </div>
