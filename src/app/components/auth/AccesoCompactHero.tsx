@@ -34,16 +34,16 @@ export function AccesoCompactHero({
         }}
       />
 
-      <div className="relative z-10 flex flex-col gap-2.5 p-3 sm:gap-3 sm:p-5 md:flex-row md:items-center md:justify-between md:gap-6 lg:gap-8">
-        <div className="flex items-start gap-3 sm:gap-4 min-w-0">
-          <VertialLogo size="md" className="shrink-0 [&_img]:brightness-0 [&_img]:invert mt-0.5 sm:hidden" />
+      <div className="relative z-10 flex flex-col gap-2 p-2.5 sm:gap-3 sm:p-5 md:flex-row md:items-center md:justify-between md:gap-6 lg:gap-8">
+        <div className="flex items-start gap-2.5 sm:gap-4 min-w-0">
+          <VertialLogo size="sm" className="shrink-0 [&_img]:brightness-0 [&_img]:invert mt-0.5 sm:hidden" />
           <VertialLogo size="lg" className="shrink-0 [&_img]:brightness-0 [&_img]:invert mt-0.5 hidden sm:block" />
           <div className="min-w-0">
-            <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-100">
+            <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide text-blue-100">
               {content.badge}
             </span>
-            <h2 className="mt-1.5 sm:mt-2 text-base sm:text-xl md:text-2xl font-bold leading-tight text-white">{content.title}</h2>
-            <p className="mt-1 text-xs sm:text-sm text-blue-100/85 leading-snug max-w-xl line-clamp-2 md:line-clamp-none">{content.subtitle}</p>
+            <h2 className="mt-1 sm:mt-2 text-sm sm:text-xl md:text-2xl font-bold leading-tight text-white">{content.title}</h2>
+            <p className="mt-0.5 sm:mt-1 text-[11px] sm:text-sm text-blue-100/85 leading-snug max-w-xl line-clamp-2 md:line-clamp-none">{content.subtitle}</p>
           </div>
         </div>
 

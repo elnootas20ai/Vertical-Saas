@@ -442,9 +442,14 @@ const menuItemDefs = [
 
   // ── Vertical: Carnicería ───────────────────────────────────────────────────
   { id: 'butcher-hub',            navKey: 'butcherHub',           icon: <Gauge className="w-5 h-5" />,         path: '/saas/butcher-hub' },
+  { id: 'butcher-clients',        navKey: 'butcherClients',       icon: <Users className="w-5 h-5" />,         path: '/saas/butcher-clients' },
+  { id: 'butcher-orders',         navKey: 'butcherOrders',        icon: <ClipboardList className="w-5 h-5" />, path: '/saas/butcher-orders' },
+  { id: 'butcher-sales',          navKey: 'butcherSales',         icon: <Receipt className="w-5 h-5" />,       path: '/saas/butcher-sales' },
+  { id: 'butcher-tpv',            navKey: 'tpv',                  icon: <Monitor className="w-5 h-5" />,       path: '/saas/vertical/carniceria/tpv' },
   { id: 'butcher-products',      navKey: 'butcherProducts',      icon: <Beef className="w-5 h-5" />,          path: '/saas/butcher-products' },
   { id: 'butcher-traceability',  navKey: 'butcherTraceability',  icon: <ScanBarcode className="w-5 h-5" />,   path: '/saas/butcher-traceability' },
   { id: 'butcher-waste',         navKey: 'butcherWaste',         icon: <Recycle className="w-5 h-5" />,       path: '/saas/butcher-waste' },
+  { id: 'butcher-reports',       navKey: 'butcherReports',       icon: <BarChart3 className="w-5 h-5" />,     path: '/saas/vertical/carniceria/informes' },
 
   // ── Bottom ───────────────────────────────────────────────────────────────────
   { id: 'configuracion', navKey: 'configuracion', icon: <Cog className="w-5 h-5" />, path: '/saas/configuracion' },
@@ -514,7 +519,7 @@ const sidebarGroupDefs = [
   { id: 'carWash',          icon: <Droplets className="w-4 h-4 shrink-0" />,    itemIds: ['carwash-services', 'carwash-memberships'] },
   { id: 'vet',              icon: <PawPrint className="w-4 h-4 shrink-0" />,    itemIds: ['vet-patients', 'vet-history', 'vet-vaccinations'] },
   { id: 'tobaccoShop',      icon: <Cigarette className="w-4 h-4 shrink-0" />,  itemIds: ['tobacco-lottery', 'tobacco-regulatory'] },
-  { id: 'butcherShop',     icon: <Beef className="w-4 h-4 shrink-0" />,       itemIds: ['butcher-hub', 'butcher-products', 'butcher-traceability', 'butcher-waste'] },
+  { id: 'butcherShop',     icon: <Beef className="w-4 h-4 shrink-0" />,       itemIds: ['butcher-hub', 'butcher-clients', 'butcher-orders', 'butcher-sales', 'butcher-tpv', 'butcher-products', 'butcher-traceability', 'butcher-waste', 'butcher-reports'] },
 ] as const;
 
 const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
@@ -1110,6 +1115,7 @@ function SidebarInner({
     itemIds: [
       ...WORKER_HOME_GROUP.itemIds,
       ...(vertical === 'cleaning' ? ['worker-materials' as const] : []),
+      ...(vertical === 'butcherShop' ? ['worker-butcher-orders' as const] : []),
     ],
   };
 
@@ -1272,7 +1278,8 @@ function SidebarInner({
     'lawyer-cases', 'lawyer-deadlines',
     'nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-artists',
     'salon-services', 'salon-loyalty',
-    'butcher-hub', 'butcher-products', 'butcher-traceability',
+    'butcher-hub', 'butcher-clients', 'butcher-orders', 'butcher-sales', 'butcher-tpv',
+    'butcher-products', 'butcher-traceability', 'butcher-reports',
     'tobacco-regulatory',
     'taxi-fleet', 'taxi-trips', 'taxi-shifts',
     'pharmacy-guard',
@@ -1316,7 +1323,8 @@ function SidebarInner({
       item.id === 'tpv' ||
       item.id === 'tpv-rapido' ||
       item.id === 'tpv-locales' ||
-      item.id === 'caja';
+      item.id === 'caja' ||
+      item.id === 'butcher-tpv';
     const deliveryOperational =
       item.id === 'sala' || item.id === 'cocina' || item.id === 'reservas' || item.id === 'lista-espera';
     const permission = permissionMap[item.id]
@@ -1454,6 +1462,11 @@ function SidebarInner({
     (item.id.startsWith('pharmacy-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('carwash-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('vet-') && location.pathname.startsWith(item.path)) ||
+    (item.id.startsWith('butcher-') && (
+      location.pathname.startsWith(item.path)
+      || (item.id === 'butcher-tpv' && location.pathname.startsWith('/saas/butcher-tpv'))
+      || (item.id === 'butcher-reports' && location.pathname.startsWith('/saas/butcher-reports'))
+    )) ||
     (item.id.startsWith('sp-') && (() => {
       const rawId = item.id.slice('sp-'.length);
       if (!rawId) return false;
@@ -1679,33 +1692,31 @@ function SidebarInner({
     const narrow = !isMobile && collapsed;
     return (
     <aside
-      className={`bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col h-svh max-h-svh overflow-hidden safe-area-top ${
+      className={`bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden ${
         isMobile
-          ? 'w-72'
-          : `fixed inset-y-0 left-0 z-40 transition-[width] duration-300 ${collapsed ? 'w-20' : 'w-60'}`
+          ? 'w-72 h-full'
+          : `fixed inset-y-0 left-0 z-40 h-svh max-h-svh safe-area-top transition-[width] duration-300 ${collapsed ? 'w-20' : 'w-60'}`
       }`}
     >
       {/* Company selector + Mode toggle */}
       <div className="shrink-0 border-b border-gray-200 dark:border-gray-700">
-        {isMobile && (
-          <div className="flex items-center justify-end p-4 pb-0">
-            <button
-              onClick={onMobileClose}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-            </button>
-          </div>
-        )}
-
         {/* Company selector dropdown */}
-        <div ref={selectorRef} className={`relative ${narrow ? 'px-1 pb-1' : 'px-3 pb-1'}`}>
+        <div
+          ref={selectorRef}
+          className={`relative ${
+            narrow
+              ? 'px-1 pb-1'
+              : isMobile
+                ? 'px-3 pb-1 pt-[max(0.5rem,env(safe-area-inset-top,0px))]'
+                : 'px-3 pb-1'
+          }`}
+        >
           <div className="flex items-center gap-1.5 min-w-0">
             <button
               type="button"
               onClick={() => setShowCompanyDropdown((prev) => !prev)}
               className={`flex items-center gap-2 rounded-lg transition-all text-sm ${
-                narrow ? 'justify-center p-2 flex-1 min-w-0' : 'px-3 py-2 flex-1 min-w-0'
+                narrow ? 'justify-center p-2 flex-1 min-w-0' : isMobile ? 'px-2 py-1.5 flex-1 min-w-0' : 'px-3 py-2 flex-1 min-w-0'
               } hover:bg-gray-100 dark:hover:bg-gray-800`}
               title={narrow ? (currentBusiness?.name || t('topbar.myCompany')) : undefined}
             >
@@ -1737,6 +1748,16 @@ function SidebarInner({
               )}
             </button>
 
+            {isMobile && (
+              <button
+                type="button"
+                onClick={onMobileClose}
+                className="shrink-0 rounded-lg p-1.5 text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                aria-label={t('common.close', 'Cerrar')}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -2279,7 +2300,7 @@ function SidebarInner({
             onClick={onMobileClose}
           />
           {/* Drawer */}
-          <div className="relative z-10 flex flex-col">
+          <div className="relative z-10 flex h-full min-h-0 flex-col">
             {sidebarContent(true, mobileCompanySelectorRef)}
           </div>
         </div>

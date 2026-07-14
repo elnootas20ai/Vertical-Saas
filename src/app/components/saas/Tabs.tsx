@@ -13,7 +13,7 @@ interface TabsProps {
 export function Tabs({ tabs, activeTab, onChange }: TabsProps) {
   return (
     <div
-      className="flex bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+      className="flex flex-1 min-w-0 bg-white dark:bg-gray-800 rounded-xl md:rounded-2xl border border-gray-200 dark:border-gray-700 overflow-x-auto [&::-webkit-scrollbar]:hidden"
       style={{ scrollbarWidth: 'none' }}
     >
       {tabs.map((tab, i) => {
@@ -22,7 +22,7 @@ export function Tabs({ tabs, activeTab, onChange }: TabsProps) {
           <button
             key={tab.id}
             onClick={() => onChange(tab.id)}
-            className={`relative flex-shrink-0 flex items-center gap-2 px-5 py-3.5 text-sm font-semibold transition-colors whitespace-nowrap ${
+            className={`relative flex-shrink-0 flex items-center gap-1.5 px-3 py-2 text-xs font-semibold transition-colors whitespace-nowrap md:gap-2 md:px-5 md:py-3.5 md:text-sm ${
               isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500 hover:text-gray-600'
             } ${i !== 0 ? 'border-l border-gray-100 dark:border-gray-800' : ''}`}
           >

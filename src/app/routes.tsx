@@ -303,7 +303,11 @@ import { TobaccoRegulatory } from './pages/saas/TobaccoRegulatory';
 
 // ── Butcher Shop (Carnicería) ──
 import { ButcherHub } from './pages/saas/ButcherHub';
+import { ButcherClients } from './pages/saas/ButcherClients';
 import { ButcherProducts } from './pages/saas/ButcherProducts';
+import { ButcherOrders } from './pages/saas/ButcherOrders';
+import { ButcherSales } from './pages/saas/ButcherSales';
+import { ButcherReports } from './pages/saas/ButcherReports';
 import { ButcherTraceability } from './pages/saas/ButcherTraceability';
 import { ButcherWaste } from './pages/saas/ButcherWaste';
 import { ButcherTpvPage } from './pages/saas/ButcherTpvPage';
@@ -862,22 +866,28 @@ export const router = createBrowserRouter([
           { path: 'tobacco-regulatory', element: <RequireBusinessOwner><TobaccoRegulatory /></RequireBusinessOwner> },
 
           // Butcher Shop (Carnicería)
+          { path: 'vertical/carniceria', element: <Navigate to="/saas/butcher-hub" replace /> },
           { path: 'butcher-hub', element: <RequireBusinessOwner><ButcherHub /></RequireBusinessOwner> },
-          { path: 'butcher-clients', element: <Navigate to="/saas/clients" replace /> },
+          { path: 'butcher-clients', element: <RequireBusinessOwner><ButcherClients /></RequireBusinessOwner> },
           { path: 'butcher-products', element: <RequireBusinessOwner><ButcherProducts /></RequireBusinessOwner> },
-          { path: 'butcher-orders', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
+          { path: 'butcher-orders', element: <RequireBusinessOwner><ButcherOrders /></RequireBusinessOwner> },
           { path: 'butcher-inventory', element: <Navigate to="/saas/compras-stock" replace /> },
           { path: 'butcher-stock', element: <Navigate to="/saas/compras-stock" replace /> },
           { path: 'butcher-suppliers', element: <Navigate to="/saas/suppliers" replace /> },
           { path: 'butcher-traceability', element: <RequireBusinessOwner><ButcherTraceability /></RequireBusinessOwner> },
-          { path: 'butcher-sales', element: <Navigate to="/saas/sales" replace /> },
+          { path: 'butcher-sales', element: <RequireBusinessOwner><ButcherSales /></RequireBusinessOwner> },
           { path: 'butcher-purchases', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
           { path: 'vertical/carniceria/compras', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
           { path: 'butcher-waste', element: <RequireWorkerPermission permission="butcher_waste"><ButcherWaste /></RequireWorkerPermission> },
           { path: 'butcher-workers', element: <Navigate to="/saas/team" replace /> },
           { path: 'vertical/carniceria/trabajadores', element: <Navigate to="/saas/team" replace /> },
+          { path: 'vertical/carniceria/clientes', element: <RequireBusinessOwner><ButcherClients /></RequireBusinessOwner> },
+          { path: 'vertical/carniceria/pedidos', element: <RequireBusinessOwner><ButcherOrders /></RequireBusinessOwner> },
+          { path: 'vertical/carniceria/ventas', element: <RequireBusinessOwner><ButcherSales /></RequireBusinessOwner> },
+          { path: 'vertical/carniceria/clientes-pedidos', element: <Navigate to="/saas/butcher-orders" replace /> },
           { path: 'vertical/carniceria/tpv', Component: ButcherTpvPage },
-          { path: 'vertical/carniceria/informes', element: <Navigate to="/saas/reports" replace /> },
+          { path: 'vertical/carniceria/informes', Component: ButcherReports },
+          { path: 'butcher-reports', Component: ButcherReports },
           { path: 'butcher-tpv', Component: ButcherTpvPage },
 
           // Compraventa (car dealership)

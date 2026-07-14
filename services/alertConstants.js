@@ -200,6 +200,10 @@ export const CATEGORY_TO_SOURCE = {
   butcher_waste_repeated: 'carniceria',
   butcher_waste_expired_product: 'carniceria',
   butcher_waste_batch_loss: 'carniceria',
+  butcher_order_overdue_pickup: 'carniceria',
+  butcher_special_not_prepared: 'carniceria',
+  butcher_order_late: 'carniceria',
+  butcher_reservations_today: 'carniceria',
 
   // Compraventa
   cv_vehicle_missing_docs: 'compraventa',

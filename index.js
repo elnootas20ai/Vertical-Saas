@@ -116,6 +116,7 @@ import { compraventaRouter } from './routers/compraventaRouter.js';
 import { butcherClientsRouter } from './routers/butcherClientsRouter.js';
 import { butcherOrdersRouter } from './routers/butcherOrdersRouter.js';
 import { butcherSalesRouter } from './routers/butcherSalesRouter.js';
+import { butcherReportsRouter } from './routers/butcherReportsRouter.js';
 import {
   viewSignaturePublic,
   acceptSignaturePublic,
@@ -1033,6 +1034,10 @@ const internalRouters = [
   ['/api/warehouses',       requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, warehouseRouter],
   ['/api/alerts',          requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, alertRouter],
   ['/api/butcher',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherRouter],
+  ['/api/butcher-clients', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherClientsRouter],
+  ['/api/butcher-orders',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherOrdersRouter],
+  ['/api/butcher-sales',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherSalesRouter],
+  ['/api/butcher-reports', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherReportsRouter],
   ['/api/delivery/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryAlertRouter],
   ['/api/delivery-reports', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryReportsRouter],
   ['/api/recipes',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, recipeRouter],

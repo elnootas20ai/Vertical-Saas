@@ -59,6 +59,7 @@ export function getButcherAlertConfig(account) {
     butcherWasteBatchLossPct: Number(cfg.butcherWasteBatchLossPct || 15),
     butcherPurchaseNoInvoiceGraceHours: Number(cfg.butcherPurchaseNoInvoiceGraceHours || 48),
     butcherPurchaseCostAnomalyThreshold: Number(cfg.butcherPurchaseCostAnomalyThreshold || 0.20),
+    butcherOrderAlertEnabled: cfg.butcherOrderAlertEnabled !== false,
   };
 }
 
@@ -511,6 +512,77 @@ async function checkButcherPurchases(ctx, purchaseEntries, config) {
   return alerts.filter(Boolean);
 }
 
+// --- Rules 17-19: Orders (encargos / reservas) -----------------------------
+
+async function checkButcherOrders(ctx, orders, config) {
+  if (config.butcherOrderAlertEnabled === false) return [];
+  const alerts = [];
+  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+
+  for (const o of orders) {
+    if (o.status === 'cancelled' || o.status === 'picked_up') continue;
+
+    if (o.status === 'ready' && o.pickupDate && o.pickupDate < today) {
+      const daysLate = daysBetween(o.pickupDate, now);
+      alerts.push(await emit(ctx, {
+        dedupKey: `butcherorder-overdue-${o._id}`, level: 'warning',
+        category: 'butcher_order_overdue_pickup',
+        title: 'Pedido sin recoger',
+        message: `${o.orderNumber || 'Pedido'} de ${o.clientName || 'cliente'} listo desde el ${o.pickupDate} (${daysLate} día${daysLate !== 1 ? 's' : ''} de retraso).`,
+        entityId: o._id, entityType: 'butcher_order',
+        route: '/saas/butcher-orders',
+        metadata: { orderNumber: o.orderNumber, clientName: o.clientName, pickupDate: o.pickupDate, daysLate },
+        audience: ['manager', 'worker'],
+      }));
+    }
+
+    if (o.orderType === 'special' && o.status === 'pending' && o.pickupDate && o.pickupDate <= today) {
+      alerts.push(await emit(ctx, {
+        dedupKey: `butcherorder-special-${o._id}`, level: 'alert',
+        category: 'butcher_special_not_prepared',
+        title: 'Encargo especial sin preparar',
+        message: `Encargo ${o.orderNumber || ''} de ${o.clientName || 'cliente'} para hoy sigue pendiente.`,
+        entityId: o._id, entityType: 'butcher_order',
+        route: '/saas/butcher-orders',
+        metadata: { orderNumber: o.orderNumber, clientName: o.clientName, pickupDate: o.pickupDate },
+        audience: ['manager', 'worker'],
+      }));
+    }
+
+    if (['pending', 'preparing'].includes(o.status) && o.pickupDate && o.pickupDate < today) {
+      alerts.push(await emit(ctx, {
+        dedupKey: `butcherorder-late-${o._id}`, level: 'alert',
+        category: 'butcher_order_late',
+        title: 'Pedido atrasado',
+        message: `${o.orderNumber || 'Pedido'} de ${o.clientName || 'cliente'} debía recogerse el ${o.pickupDate}.`,
+        entityId: o._id, entityType: 'butcher_order',
+        route: '/saas/butcher-orders',
+        metadata: { orderNumber: o.orderNumber, clientName: o.clientName, pickupDate: o.pickupDate },
+        audience: ['manager', 'worker'],
+      }));
+    }
+  }
+
+  const todayReservations = orders.filter(
+    (o) => o.orderType === 'reservation' && o.pickupDate === today && !['cancelled', 'picked_up'].includes(o.status),
+  );
+  if (todayReservations.length > 0) {
+    const a = await emit(ctx, {
+      dedupKey: `butcherreservations-${ctx.userId}-${today}`, level: 'info',
+      category: 'butcher_reservations_today',
+      title: 'Reservas de hoy',
+      message: `${todayReservations.length} reserva${todayReservations.length !== 1 ? 's' : ''} programada${todayReservations.length !== 1 ? 's' : ''} para hoy.`,
+      route: '/saas/butcher-orders',
+      metadata: { count: todayReservations.length, orders: todayReservations.map((o) => o.orderNumber) },
+      audience: ['manager', 'worker'],
+    });
+    if (a) alerts.push(a);
+  }
+
+  return alerts.filter(Boolean);
+}
+
 // --- Main engine per business -----------------------------------------------
 
 async function runButcherAlertsForBusiness(business) {
@@ -527,7 +599,7 @@ async function runButcherAlertsForBusiness(business) {
   const bDb = getButcherDbName();
   const dDb = getDeliveryDbName();
 
-  const [products, batches, waste, scales, invCounts, tpvSessions, pointsOfSale, purchaseEntries] = await Promise.all([
+  const [products, batches, waste, scales, invCounts, tpvSessions, pointsOfSale, purchaseEntries, orders] = await Promise.all([
     fetchAllDocsOfType(bDb, 'butcher_product').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_batch').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_waste').then((d) => d.filter((i) => i.user_id === ownerId)),
@@ -538,9 +610,10 @@ async function runButcherAlertsForBusiness(business) {
     fetchAllDocsOfType(dDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(dDb, 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_purchase_entry').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)),
+    fetchAllDocsOfType(bDb, 'butcher_order').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)),
   ]);
 
-  if (products.length === 0 && batches.length === 0) return 0;
+  if (products.length === 0 && batches.length === 0 && orders.length === 0) return 0;
 
   results.push(...await checkButcherStock(ctx, products, config));
   results.push(...await checkButcherBatches(ctx, batches, products, config));
@@ -551,6 +624,7 @@ async function runButcherAlertsForBusiness(business) {
   results.push(...await checkButcherTickets(ctx, tpvSessions, config, pointsOfSale));
   results.push(...await checkButcherInventory(ctx, invCounts, config));
   results.push(...await checkButcherPurchases(ctx, purchaseEntries, config));
+  results.push(...await checkButcherOrders(ctx, orders, config));
 
   return results.length;
 }

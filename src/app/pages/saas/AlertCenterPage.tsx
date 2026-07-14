@@ -373,9 +373,9 @@ export default function AlertCenterPage() {
 
   return (
     <Layout title="Centro de alertas" subtitle={layoutSubtitle} noPadding>
-      <div className="flex flex-col gap-4 px-3 pb-4 pt-2 md:gap-5 md:px-0 md:pb-0 md:pt-0">
+      <div className="flex flex-col gap-2 px-2 pb-3 pt-1 md:gap-5 md:px-0 md:pb-0 md:pt-0">
         {/* Navegación principal — una sola fila */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
           <Tabs
             tabs={[
               { id: 'inbox', label: 'Bandeja', count: summary?.unresolved || undefined },
@@ -390,29 +390,31 @@ export default function AlertCenterPage() {
               type="button"
               onClick={() => void syncAlerts()}
               disabled={loading || syncing}
-              className="inline-flex items-center justify-center gap-2 self-start rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+              title="Actualizar"
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white p-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 md:px-4 md:py-2.5"
             >
               <RefreshCw className={`h-4 w-4 ${loading || syncing ? 'animate-spin' : ''}`} />
-              Actualizar
+              <span className="hidden md:inline">Actualizar</span>
             </button>
           )}
         </div>
 
         {/* KPIs — solo bandeja e historial */}
         {!isSettings && summary && (
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="grid grid-cols-4 gap-1.5 md:grid-cols-2 md:gap-3 lg:grid-cols-4">
             {[
-              { label: 'Pendientes', value: summary.unresolved ?? 0, icon: Bell, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
-              { label: 'Críticas', value: summary.byPriority?.high ?? 0, icon: AlertTriangle, bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-600 dark:text-red-400', border: 'border-red-200 dark:border-red-800' },
-              { label: 'Medias', value: summary.byPriority?.medium ?? 0, icon: Activity, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-200 dark:border-blue-800' },
-              { label: 'Nuevas', value: summary.byStatus?.new ?? 0, icon: Sparkles, bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-200 dark:border-emerald-800' },
+              { label: 'Pend.', fullLabel: 'Pendientes', value: summary.unresolved ?? 0, icon: Bell, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
+              { label: 'Crít.', fullLabel: 'Críticas', value: summary.byPriority?.high ?? 0, icon: AlertTriangle, bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-600 dark:text-red-400', border: 'border-red-200 dark:border-red-800' },
+              { label: 'Med.', fullLabel: 'Medias', value: summary.byPriority?.medium ?? 0, icon: Activity, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-200 dark:border-blue-800' },
+              { label: 'Nuev.', fullLabel: 'Nuevas', value: summary.byStatus?.new ?? 0, icon: Sparkles, bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-200 dark:border-emerald-800' },
             ].map((stat) => (
-              <div key={stat.label} className={`rounded-2xl border p-4 ${stat.bg} ${stat.border}`}>
-                <div className="mb-2 flex items-center gap-2">
+              <div key={stat.fullLabel} className={`rounded-xl border p-2 md:rounded-2xl md:p-4 ${stat.bg} ${stat.border}`}>
+                <div className="mb-1 hidden items-center gap-2 md:mb-2 md:flex">
                   <stat.icon className={`h-4 w-4 ${stat.text}`} />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{stat.label}</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{stat.fullLabel}</p>
                 </div>
-                <p className={`text-2xl font-black ${stat.text}`}>{stat.value}</p>
+                <p className={`text-lg font-black md:text-2xl ${stat.text}`}>{stat.value}</p>
+                <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 md:hidden">{stat.label}</p>
               </div>
             ))}
           </div>
@@ -425,10 +427,10 @@ export default function AlertCenterPage() {
             onSaved={() => void loadData()}
           />
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 md:rounded-2xl">
             {/* Barra de herramientas */}
-            <div className="space-y-3 border-b border-gray-100 p-4 dark:border-gray-700">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="space-y-2 border-b border-gray-100 p-3 dark:border-gray-700 md:space-y-3 md:p-4">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-3">
                 {!isHistory && (
                   <div className="flex items-center gap-2 lg:w-56 shrink-0">
                     <label htmlFor="alert-dept" className="sr-only">Área</label>
@@ -436,7 +438,7 @@ export default function AlertCenterPage() {
                       id="alert-dept"
                       value={activeDepartment}
                       onChange={(e) => selectDepartment(e.target.value)}
-                      className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                      className="w-full min-w-0 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-2 text-xs font-medium text-gray-800 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 md:rounded-xl md:px-3 md:py-2.5 md:text-sm"
                     >
                       {alertDepartments.map((dept) => (
                         <option key={dept.id} value={dept.id}>{dept.label}</option>
@@ -445,31 +447,34 @@ export default function AlertCenterPage() {
                   </div>
                 )}
 
-                <div className="relative min-w-0 flex-1">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder={isHistory ? 'Buscar en el historial…' : 'Buscar alertas…'}
-                    className="w-full rounded-xl border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
-                  />
-                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400 md:left-3 md:h-4 md:w-4" />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder={isHistory ? 'Buscar historial…' : 'Buscar alertas…'}
+                      className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-8 pr-3 text-xs text-gray-900 placeholder:text-gray-400 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-900 dark:text-white md:rounded-xl md:py-2.5 md:pl-10 md:pr-4 md:text-sm"
+                    />
+                  </div>
 
-                {!isHistory && (
-                  <button
-                    type="button"
-                    onClick={() => setShowFilters(!showFilters)}
-                    className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
-                      showFilters
-                        ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                        : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
-                    }`}
-                  >
-                    <Filter className="h-4 w-4" />
-                    Filtros
-                  </button>
-                )}
+                  {!isHistory && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFilters(!showFilters)}
+                      title="Filtros"
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-semibold transition md:rounded-xl md:px-4 md:py-2.5 md:text-sm ${
+                        showFilters
+                          ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                          : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
+                      }`}
+                    >
+                      <Filter className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                      <span className="hidden sm:inline">Filtros</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {isHistory && (
@@ -526,9 +531,9 @@ export default function AlertCenterPage() {
             </div>
 
             {/* Lista */}
-            <div className="space-y-3 p-4">
+            <div className="space-y-2 p-3 md:space-y-3 md:p-4">
               {!isHistory && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
+                <p className="hidden text-xs text-gray-500 dark:text-gray-400 sm:block">
                   Mostrando alertas de <span className="font-semibold text-gray-700 dark:text-gray-300">{deptLabel}</span>
                   {pagination.total > 0 && ` · ${pagination.total} en total`}
                 </p>
@@ -579,7 +584,7 @@ export default function AlertCenterPage() {
               ) : (
                 <>
                   {!isHistory && (
-                    <div className="flex items-center gap-2 px-1 text-xs text-gray-500">
+                    <div className="flex items-center gap-2 px-0.5 text-[11px] text-gray-500 md:px-1 md:text-xs">
                       <input
                         type="checkbox"
                         checked={selectedIds.size === alerts.length && alerts.length > 0}
@@ -602,6 +607,7 @@ export default function AlertCenterPage() {
                       onStatusChange={handleStatusChange}
                       onDelete={handleDelete}
                       onNavigate={(route) => navigate(route)}
+                      compactMobile
                     />
                   ))}
                 </>
@@ -666,6 +672,7 @@ function AlertPageRow({
   onStatusChange,
   onDelete,
   onNavigate,
+  compactMobile = false,
 }: {
   alert: AlertRecord;
   historyMode?: boolean;
@@ -676,6 +683,7 @@ function AlertPageRow({
   onStatusChange: (id: string, status: AlertStatus) => void;
   onDelete: (id: string) => void;
   onNavigate: (route: string) => void;
+  compactMobile?: boolean;
 }) {
   const pColors = PRIORITY_COLORS[alert.priority] || PRIORITY_COLORS.medium;
   const sStyles = STATUS_STYLES[alert.status] || STATUS_STYLES.new;
@@ -683,6 +691,8 @@ function AlertPageRow({
   const sourceColor = SOURCE_COLORS[alert.source as AlertSource] || '#71717a';
   const accent = PRIORITY_ACCENT[alert.priority] || PRIORITY_ACCENT.medium;
   const isDeleted = Boolean(alert.deletedAt);
+  const mobileCompact = compactMobile && !historyMode;
+  const isOpen = mobileCompact ? expanded : true;
 
   const closedAt = alert.resolvedAt || alert.deletedAt || alert.updatedAt;
   const closedLabel = (() => {
@@ -703,52 +713,61 @@ function AlertPageRow({
 
   return (
     <div
-      className={`rounded-xl border border-gray-200 bg-white transition-all dark:border-gray-700 dark:bg-gray-900/60 border-l-[3px] ${accent} ${
+      className={`rounded-lg border border-gray-200 bg-white transition-all dark:border-gray-700 dark:bg-gray-900/60 border-l-[3px] md:rounded-xl ${accent} ${
         historyMode ? '' : 'hover:border-gray-300 hover:shadow-sm dark:hover:border-gray-600'
       } ${alert.status === 'new' && !historyMode ? 'ring-1 ring-amber-500/20' : ''} ${
         isDeleted ? 'opacity-70' : ''
       }`}
     >
-      <div className="group flex items-start gap-3 p-4 pl-3.5">
+      <div
+        className={`group flex items-start gap-2 p-2.5 pl-2 md:gap-3 md:p-4 md:pl-3.5 ${mobileCompact ? 'cursor-pointer' : ''}`}
+        onClick={mobileCompact ? onToggleExpand : undefined}
+        onKeyDown={mobileCompact ? (e) => { if (e.key === 'Enter' || e.key === ' ') onToggleExpand?.(); } : undefined}
+        role={mobileCompact ? 'button' : undefined}
+        tabIndex={mobileCompact ? 0 : undefined}
+      >
         {!historyMode && (
           <input
             type="checkbox"
             checked={selected}
             onChange={onToggleSelect}
-            className="mt-1 h-4 w-4 rounded border-gray-300"
+            onClick={(e) => e.stopPropagation()}
+            className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300 md:mt-1 md:h-4 md:w-4"
           />
         )}
 
-        <div className="flex-shrink-0 rounded-lg p-2" style={{ backgroundColor: `${sourceColor}14` }}>
-          <SourceIcon className="h-4 w-4" style={{ color: sourceColor }} />
+        <div className="flex-shrink-0 rounded-md p-1.5 md:rounded-lg md:p-2" style={{ backgroundColor: `${sourceColor}14` }}>
+          <SourceIcon className="h-3.5 w-3.5 md:h-4 md:w-4" style={{ color: sourceColor }} />
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+              <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
+                <h3 className="truncate text-xs font-semibold text-gray-900 dark:text-gray-100 md:text-sm">
                   {alert.title}
                 </h3>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${pColors.bg} ${pColors.text}`}>
+                <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold md:px-2 md:text-[10px] ${pColors.bg} ${pColors.text}`}>
                   <span className={`h-1.5 w-1.5 rounded-full ${pColors.dot}`} />
                   {PRIORITY_LABELS[alert.priority]}
                 </span>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${sStyles.bg} ${sStyles.text}`}>
+                <span className={`hidden items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium sm:inline-flex ${sStyles.bg} ${sStyles.text}`}>
                   {alert.status === 'resolved' && <Check className="h-2.5 w-2.5" />}
                   {isDeleted ? 'Eliminada' : STATUS_LABELS[alert.status]}
                 </span>
-                <span className="text-[10px] font-medium text-gray-400">
+                <span className="hidden text-[10px] font-medium text-gray-400 md:inline">
                   {SOURCE_LABELS[alert.source as AlertSource] || alert.source}
                 </span>
               </div>
-              <p className="mt-0.5 line-clamp-2 text-sm text-gray-500 dark:text-gray-400">
-                {alert.message}
-              </p>
-              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-gray-400">
+              {isOpen && (
+                <p className="mt-0.5 line-clamp-2 text-xs text-gray-500 dark:text-gray-400 md:text-sm">
+                  {alert.message}
+                </p>
+              )}
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-gray-400 md:mt-1.5 md:gap-3 md:text-xs">
                 <span className="flex items-center gap-1">
                   <Clock className="h-3 w-3" />
-                  Creada {timeAgo}
+                  {timeAgo}
                 </span>
                 {historyMode && closedAt && (
                   <span>
@@ -760,6 +779,16 @@ function AlertPageRow({
             </div>
 
             <div className="flex flex-shrink-0 items-center gap-1">
+              {mobileCompact && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onToggleExpand?.(); }}
+                  className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 md:hidden"
+                  title={isOpen ? 'Contraer' : 'Expandir'}
+                >
+                  {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+              )}
               {historyMode ? (
                 <button
                   type="button"
@@ -775,40 +804,41 @@ function AlertPageRow({
         </div>
       </div>
 
-      {!historyMode && alert.status !== 'resolved' && (
-        <div className="flex flex-col gap-2 border-t border-gray-100 px-4 py-3 dark:border-gray-700 sm:flex-row sm:flex-wrap">
+      {!historyMode && alert.status !== 'resolved' && isOpen && (
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-gray-100 px-2.5 py-2 dark:border-gray-700 md:gap-2 md:px-4 md:py-3">
           {alertHasNavigateTarget(alert) && alert.route && (
             <button
               type="button"
               onClick={() => onNavigate(alert.route!)}
-              className="inline-flex w-full sm:flex-1 sm:min-w-[140px] items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2.5 text-xs font-semibold text-white hover:opacity-90 dark:bg-gray-100 dark:text-gray-900 touch-manipulation"
+              className="inline-flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg bg-gray-900 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:opacity-90 dark:bg-gray-100 dark:text-gray-900 touch-manipulation md:min-w-[140px] md:flex-none md:px-3 md:py-2.5 md:text-xs"
             >
-              <Eye className="h-3.5 w-3.5" />
-              {getAlertResolveLabel(alert)}
+              <Eye className="h-3 w-3 md:h-3.5 md:w-3.5" />
+              <span className="truncate">{getAlertResolveLabel(alert)}</span>
             </button>
           )}
           {alert.status === 'new' && (
             <button
               type="button"
               onClick={() => onStatusChange(alert.id, 'seen')}
-              className="inline-flex w-full sm:w-auto items-center justify-center gap-1 rounded-lg border border-gray-200 px-3 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 touch-manipulation"
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-gray-200 px-2.5 py-1.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800 touch-manipulation md:px-3 md:py-2.5 md:text-xs"
             >
-              <Eye className="h-3.5 w-3.5" />
-              Marcar vista
+              <Eye className="h-3 w-3 md:h-3.5 md:w-3.5" />
+              <span className="hidden sm:inline">Marcar vista</span>
+              <span className="sm:hidden">Vista</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => onStatusChange(alert.id, 'resolved')}
-            className="inline-flex w-full sm:w-auto items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 touch-manipulation"
+            className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 touch-manipulation md:px-3 md:py-2.5 md:text-xs"
           >
-            <CheckCircle className="h-3.5 w-3.5" />
+            <CheckCircle className="h-3 w-3 md:h-3.5 md:w-3.5" />
             Resolver
           </button>
           <button
             type="button"
             onClick={() => onDelete(alert.id)}
-            className="inline-flex items-center justify-center gap-1 rounded-lg px-3 py-2 text-xs font-medium text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30"
+            className="inline-flex items-center justify-center rounded-lg p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30 md:px-3 md:py-2"
             title="Eliminar del listado"
           >
             <Trash2 className="h-3.5 w-3.5" />

@@ -24,6 +24,11 @@ import { useBusiness } from '../../context/BusinessContext';
 
 const CREDENTIALS_KEY = 'vertial_saved_login';
 
+/** Enlaces secundarios del pie — mismo color y peso en toda la pantalla. */
+const AUTH_FOOTER_LINK =
+  'font-medium text-blue-600 dark:text-blue-400 underline-offset-2 hover:underline transition-colors';
+const AUTH_FOOTER_TEXT = 'text-sm text-gray-600 dark:text-gray-400 leading-snug';
+
 function loadSavedLogin(): { email: string } | null {
   try {
     const raw = localStorage.getItem(CREDENTIALS_KEY);
@@ -335,19 +340,19 @@ export function Login() {
   }, [showGoogleAuth, googleReady]);
 
   return (
-    <AccesoSplitLayout visualKey="register-company" scrollable>
-      <div className="flex min-h-dvh flex-col items-center justify-center p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6 lg:min-h-0 lg:flex-1 lg:px-8">
+    <AccesoSplitLayout visualKey="login-company" scrollable>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
       <div className="w-full max-w-md shrink-0">
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-5 sm:p-6 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-4 pb-3.5 sm:p-6 sm:pb-5 shadow-sm">
           {/* Header */}
-          <div className="text-center mb-5">
-            <div className="flex items-center justify-center mb-3">
+          <div className="text-center mb-4 sm:mb-5">
+            <div className="hidden sm:flex items-center justify-center mb-3">
               <VertialLogo size="md" />
             </div>
             <span className="inline-block mb-2 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
               Acceso empresa
             </span>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
               Iniciar sesión — Empresa
             </h1>
             <p className="text-sm text-gray-600 dark:text-gray-400 leading-snug">
@@ -500,7 +505,7 @@ export function Login() {
               </div>
             </form>
           ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3.5">
             <ACCESO__Input
               label={t('auth.email')}
               type="email"
@@ -539,7 +544,7 @@ export function Login() {
               }
             />
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <ACCESO__Checkbox
                 label={t('auth.rememberMe')}
                 checked={formData.remember}
@@ -548,7 +553,7 @@ export function Login() {
               <button
                 type="button"
                 onClick={() => navigate('/auth/recover')}
-                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 transition-colors"
+                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 transition-colors text-left sm:text-right shrink-0"
               >
                 {t('auth.forgotPassword')}
               </button>
@@ -567,7 +572,7 @@ export function Login() {
 
             {!hideGoogleOnIos && (
             <>
-            <div className="relative my-3">
+            <div className="relative my-2">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full border-t border-gray-200 dark:border-gray-700" />
               </div>
@@ -606,7 +611,7 @@ export function Login() {
 
             {showAppleAuth && (
               <>
-                <div className="relative my-3">
+                <div className="relative my-2">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-gray-200 dark:border-gray-700" />
                   </div>
@@ -617,50 +622,57 @@ export function Login() {
                 <AppleSignInButton disabled={isSubmitting} onPress={handleAppleSignIn} />
               </>
             )}
-
-            <button
-              type="button"
-              onClick={() => {
-                setLoginMode('tpvStore');
-                setErrors({});
-              }}
-              disabled={isSubmitting}
-              className="w-full text-xs text-center text-gray-600 dark:text-gray-400 hover:underline"
-            >
-              Código de tienda / tablet TPV
-            </button>
           </form>
           )}
 
-          <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-2 text-center text-sm text-gray-600 dark:text-gray-400">
-            <p>
+          <nav
+            className="mt-2 pt-2.5 border-t border-gray-100 dark:border-gray-700/80 flex flex-col items-center gap-1.5 text-center w-full"
+            aria-label="Otras opciones de acceso"
+          >
+            <p className={AUTH_FOOTER_TEXT}>
               {t('auth.noAccount')}{' '}
               <button
                 type="button"
                 onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
-                className="font-medium text-[#0f1419] hover:underline dark:text-gray-100"
+                className={AUTH_FOOTER_LINK}
               >
                 Crear cuenta de empresa
               </button>
             </p>
-            <p>
+            <p className={AUTH_FOOTER_TEXT}>
               ¿Eres trabajador?{' '}
               <button
                 type="button"
                 onClick={() => navigate(AUTH_PATHS.workerLogin)}
-                className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                className={AUTH_FOOTER_LINK}
               >
-                Accede por aquí
+                Accede aquí
               </button>
             </p>
+            {loginMode !== 'tpvStore' ? (
+              <p className={AUTH_FOOTER_TEXT}>
+                ¿TPV en tablet?{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMode('tpvStore');
+                    setErrors({});
+                  }}
+                  disabled={isSubmitting}
+                  className={AUTH_FOOTER_LINK}
+                >
+                  Código de tienda
+                </button>
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={() => navigate(AUTH_PATHS.entry)}
-              className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 pt-1"
+              className="mt-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             >
               ← Elegir tipo de acceso
             </button>
-          </div>
+          </nav>
         </div>
       </div>
       </div>

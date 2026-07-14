@@ -273,3 +273,55 @@ export async function updateButcherClientCounters(req, userId, clientId, saleTot
     await putDocument(req, db, doc._id, doc);
   } catch { /* non-blocking */ }
 }
+
+/** Analiza hábitos del cliente tras ventas (mín. 2 completadas). No lanza si falla. */
+export async function analyzeButcherClientHabitsAsync(req, userId, clientId) {
+  if (!clientId || !userId) return null;
+  const db = getButcherDbName();
+  try {
+    await ensureDatabase(req, db);
+    const client = await getDocument(req, db, clientId);
+    if (!client || client.type !== 'butcher_client' || client.user_id !== userId) return null;
+
+    const sales = await listButcherSalesByUser(req, userId);
+    const clientSales = sales.filter((s) => s.clientId === clientId && s.status === 'completed');
+    if (clientSales.length < 2) return null;
+
+    const productMap = {};
+    const dayCount = {};
+    for (const sale of clientSales) {
+      const dayOfWeek = new Date(sale.date || sale.createdAt).toLocaleDateString('es-ES', { weekday: 'long' });
+      dayCount[dayOfWeek] = (dayCount[dayOfWeek] || 0) + 1;
+      for (const item of (sale.items || [])) {
+        const key = (item.productName || '').toLowerCase();
+        if (!key) continue;
+        if (!productMap[key]) productMap[key] = { productName: item.productName, totalQty: 0, count: 0, unit: item.unit || 'kg' };
+        productMap[key].totalQty += Number(item.quantity || 0);
+        productMap[key].count += 1;
+      }
+    }
+
+    const usualProducts = Object.values(productMap)
+      .filter((p) => p.count >= 2)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10)
+      .map((p) => ({
+        productName: p.productName,
+        productId: null,
+        quantity: Math.round((p.totalQty / p.count) * 10) / 10,
+        unit: p.unit,
+        frequency: `${p.count} compras`,
+      }));
+
+    const preferredDay = Object.entries(dayCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+    client.preferences = client.preferences || {};
+    client.preferences.usualProducts = usualProducts;
+    client.preferences.preferredDay = preferredDay;
+    client.lastHabitAnalysis = new Date().toISOString();
+    client.updatedAt = new Date().toISOString();
+    await putDocument(req, db, client._id, client);
+    return sanitizeButcherClient(client);
+  } catch {
+    return null;
+  }
+}

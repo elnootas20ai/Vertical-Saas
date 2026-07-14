@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { StatusBar, Style } from '@capacitor/status-bar';
 
 const NATIVE_BOOTSTRAP_TIMEOUT_MS = 2_500;
 
@@ -9,6 +10,23 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | und
       globalThis.setTimeout(resolve, timeoutMs);
     }),
   ]);
+}
+
+/** Marca el documento y evita que la status bar nativa tape el header del SaaS. */
+export async function configureNativeSafeArea(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+
+  document.documentElement.classList.add('native-app');
+  if (Capacitor.getPlatform() === 'ios') {
+    document.documentElement.classList.add('native-ios');
+  }
+
+  try {
+    await StatusBar.setOverlaysWebView({ overlay: false });
+    await StatusBar.setStyle({ style: Style.Default });
+  } catch {
+    // Plugin opcional en algunos entornos de build.
+  }
 }
 
 /**

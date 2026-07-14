@@ -18,6 +18,7 @@ import {
   coerceSelectedPdvId,
   notifyDeliveryActiveStoreChanged,
   pickDefaultActivePdvId,
+  pickDefaultActiveStorePreference,
   readDeliveryOpsSelectedPdvId,
   resolvePreferenceToPdvId,
   writeDeliveryOpsSelectedPdvId,
@@ -611,26 +612,38 @@ function ActiveStoreScopeProviderImpl({
   useEffect(() => {
     if (!businessId || !dataUserId) return;
     const raw = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-    if (!raw) return;
-
     const active = pointsOfSale.filter((p) => p.active !== false);
-    if (active.length === 0) return;
+    const retail = retailWorkCenters.filter((wc) => !wc.deletedAt && wc.active !== false);
 
-    if (raw.startsWith('wc:')) {
-      const resolved = resolvePreferenceToPdvId(active, raw);
-      if (resolved && resolved !== raw) {
-        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, resolved);
-        bump();
+    if (raw) {
+      if (raw.startsWith('wc:')) {
+        const resolved = resolvePreferenceToPdvId(active, raw);
+        if (resolved && resolved !== raw) {
+          writeDeliveryOpsSelectedPdvId(businessId, dataUserId, resolved);
+          bump();
+        }
+        return;
+      }
+
+      if (!active.some((p) => p._id === raw)) {
+        const fallback = pickDefaultActiveStorePreference(active, retail);
+        if (fallback) {
+          writeDeliveryOpsSelectedPdvId(businessId, dataUserId, fallback);
+          notifyDeliveryActiveStoreChanged();
+          bump();
+        }
       }
       return;
     }
 
-    if (!active.some((p) => p._id === raw)) {
-      const fallback = pickDefaultActivePdvId(active);
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, fallback);
+    if (active.length === 0 && retail.length === 0) return;
+    const defaultPref = pickDefaultActiveStorePreference(active, retail);
+    if (defaultPref) {
+      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, defaultPref);
+      notifyDeliveryActiveStoreChanged();
       bump();
     }
-  }, [businessId, dataUserId, pointsOfSale, bump]);
+  }, [businessId, dataUserId, pointsOfSale, retailWorkCenters, bump]);
 
   const setActiveSalesPoint = useCallback(
     (pdvId: string) => {

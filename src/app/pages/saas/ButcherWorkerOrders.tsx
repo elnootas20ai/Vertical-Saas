@@ -1,4 +1,6 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Layout } from '../../components/saas/Layout';
 import { useApp } from '../../context/AppContext';
 import { toast } from 'sonner';
@@ -12,12 +14,14 @@ import {
 } from '../../lib/butcherApi';
 import {
   Clock, ClipboardList, CheckCircle2, PackageCheck, Phone,
-  ArrowRight, Ban,
+  ArrowRight, Ban, GripVertical, RefreshCw,
 } from 'lucide-react';
 
 const HOY = new Date().toISOString().slice(0, 10);
+const DND_ORDER_TYPE = 'butcher_order_card';
+const POLL_MS = 45_000;
 
-const KANBAN_COLUMNS: { status: OrderStatus; label: string; icon: any; color: string; headerBg: string }[] = [
+const KANBAN_COLUMNS: { status: OrderStatus; label: string; icon: typeof Clock; color: string; headerBg: string }[] = [
   { status: 'pending', label: 'Pendientes', icon: Clock, color: 'border-amber-400', headerBg: 'bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300' },
   { status: 'preparing', label: 'Preparando', icon: ClipboardList, color: 'border-blue-400', headerBg: 'bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300' },
   { status: 'ready', label: 'Listos', icon: CheckCircle2, color: 'border-emerald-400', headerBg: 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300' },
@@ -43,25 +47,212 @@ const PAGO_METHODS: { key: PaymentMethod; label: string }[] = [
   { key: 'bizum', label: 'Bizum' },
 ];
 
-export function ButcherWorkerOrders() {
+interface DragOrderItem {
+  orderId: string;
+  fromStatus: OrderStatus;
+}
+
+function canDropOnColumn(fromStatus: OrderStatus, toStatus: OrderStatus): boolean {
+  if (fromStatus === toStatus || fromStatus === 'picked_up' || fromStatus === 'cancelled') return false;
+  if (toStatus === 'picked_up') return fromStatus === 'ready';
+  return true;
+}
+
+function OrderCard({
+  order,
+  onAdvance,
+  onCancel,
+}: {
+  order: ButcherOrder;
+  onAdvance: (order: ButcherOrder) => void;
+  onCancel: (order: ButcherOrder) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dragHandleRef = useRef<HTMLDivElement>(null);
+  const draggable = order.status !== 'picked_up';
+
+  const [{ isDragging }, drag, preview] = useDrag({
+    type: DND_ORDER_TYPE,
+    item: (): DragOrderItem => ({ orderId: order._id, fromStatus: order.status }),
+    canDrag: draggable,
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  });
+
+  preview(ref);
+  drag(dragHandleRef);
+
+  return (
+    <div
+      ref={ref}
+      className={`rounded-lg border border-gray-100 dark:border-gray-700 p-3 bg-white dark:bg-gray-800/50 transition-all ${
+        order.priority === 'urgent' ? 'ring-2 ring-red-400 ring-offset-1' : ''
+      } ${isDragging ? 'opacity-40 scale-[0.98] shadow-lg' : ''}`}
+    >
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {draggable ? (
+            <div
+              ref={dragHandleRef}
+              className="cursor-grab active:cursor-grabbing text-gray-300 dark:text-gray-600 shrink-0 touch-none"
+              title="Arrastrar"
+            >
+              <GripVertical className="w-3.5 h-3.5" />
+            </div>
+          ) : null}
+          <span className="font-mono font-bold text-xs text-gray-900 dark:text-white">{order.orderNumber}</span>
+          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${TYPE_BADGE[order.orderType]}`}>{TYPE_LABEL[order.orderType]}</span>
+          {order.priority === 'urgent' && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">!</span>}
+        </div>
+        {order.pickupTime && (
+          <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-0.5">
+            <Clock className="w-3 h-3" />{order.pickupTime}
+          </span>
+        )}
+      </div>
+
+      <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{order.clientName || 'Anónimo'}</p>
+      {order.clientPhone && (
+        <a href={`tel:${order.clientPhone}`} className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 mt-0.5" onClick={(e) => e.stopPropagation()}>
+          <Phone className="w-3 h-3" />{order.clientPhone}
+        </a>
+      )}
+
+      <div className="mt-2 space-y-0.5">
+        {order.items.slice(0, 3).map((it, j) => (
+          <p key={j} className="text-xs text-gray-600 dark:text-gray-400 truncate">
+            {it.quantity}{it.unit} {it.productName}
+          </p>
+        ))}
+        {order.items.length > 3 && <p className="text-xs text-gray-400">+{order.items.length - 3} más</p>}
+      </div>
+
+      {order.notes && <p className="text-[11px] text-gray-400 italic mt-1.5 truncate">{order.notes}</p>}
+
+      <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-50 dark:border-gray-700/50">
+        <span className="text-sm font-bold text-gray-900 dark:text-white">{order.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}</span>
+        <div className="flex items-center gap-1">
+          {NEXT_STATUS[order.status] && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onAdvance(order); }}
+              className="px-2.5 py-1 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-md text-xs font-semibold hover:opacity-90 transition flex items-center gap-1"
+            >
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          )}
+          {order.status !== 'picked_up' && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onCancel(order); }}
+              className="p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-500"
+            >
+              <Ban className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KanbanColumn({
+  status,
+  label,
+  icon: Icon,
+  color,
+  headerBg,
+  items,
+  onDropOrder,
+  onAdvance,
+  onCancel,
+}: {
+  status: OrderStatus;
+  label: string;
+  icon: typeof Clock;
+  color: string;
+  headerBg: string;
+  items: ButcherOrder[];
+  onDropOrder: (orderId: string, fromStatus: OrderStatus, toStatus: OrderStatus) => void;
+  onAdvance: (order: ButcherOrder) => void;
+  onCancel: (order: ButcherOrder) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  const [{ isOver, canDropHere }, drop] = useDrop({
+    accept: DND_ORDER_TYPE,
+    canDrop: (item) => canDropOnColumn(item.fromStatus, status),
+    drop: (item: DragOrderItem) => onDropOrder(item.orderId, item.fromStatus, status),
+    collect: (monitor) => ({
+      isOver: monitor.isOver({ shallow: true }),
+      canDropHere: monitor.canDrop(),
+    }),
+  });
+
+  drop(ref);
+
+  return (
+    <div className={`rounded-xl border-t-4 ${color} bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col min-h-[280px]`}>
+      <div className={`px-4 py-3 ${headerBg} flex items-center justify-between shrink-0`}>
+        <div className="flex items-center gap-2">
+          <Icon className="w-4 h-4" />
+          <span className="text-sm font-bold">{label}</span>
+        </div>
+        <span className="text-sm font-bold">{items.length}</span>
+      </div>
+      <div
+        ref={ref}
+        className={`p-3 space-y-2.5 flex-1 max-h-[calc(100vh-250px)] overflow-y-auto transition-colors ${
+          isOver && canDropHere ? 'bg-blue-50/80 dark:bg-blue-950/30 ring-2 ring-inset ring-blue-300 dark:ring-blue-700' : ''
+        } ${isOver && !canDropHere ? 'bg-red-50/50 dark:bg-red-950/20' : ''}`}
+      >
+        {items.length === 0 ? (
+          <p className="text-center text-xs text-gray-400 py-6">
+            {status === 'picked_up' ? 'Arrastra aquí un pedido listo' : 'Sin pedidos'}
+          </p>
+        ) : items.map((o) => (
+          <OrderCard key={o._id} order={o} onAdvance={onAdvance} onCancel={onCancel} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ButcherWorkerOrdersBoard() {
   const { userId } = useApp();
   const [orders, setOrders] = useState<ButcherOrder[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [showOnlyToday, setShowOnlyToday] = useState(true);
   const [convertingOrder, setConvertingOrder] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
 
-  const fetchOrders = useCallback(async () => {
+  const fetchOrders = useCallback(async (silent = false) => {
     if (!userId) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     try {
       const res = await listButcherOrdersRequest(userId);
       if (res.ok) setOrders(res.orders || []);
     } catch { /* ignore */ }
     setLoading(false);
+    setRefreshing(false);
   }, [userId]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchOrders(true);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') fetchOrders(true);
+    }, POLL_MS);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(timer);
+    };
+  }, [fetchOrders]);
 
   const filteredOrders = useMemo(() => {
     let list = orders.filter((o) => o.status !== 'cancelled');
@@ -81,24 +272,43 @@ export function ButcherWorkerOrders() {
     }));
   }, [filteredOrders]);
 
-  const handleAdvance = async (order: ButcherOrder) => {
-    if (!userId) return;
-    const next = NEXT_STATUS[order.status];
-    if (!next) return;
+  const applyLocalStatus = useCallback((orderId: string, status: OrderStatus) => {
+    setOrders((prev) => prev.map((o) => (o._id === orderId ? { ...o, status } : o)));
+  }, []);
 
-    if (next === 'picked_up') {
-      setConvertingOrder(order._id);
+  const handleStatusChange = useCallback(async (orderId: string, fromStatus: OrderStatus, toStatus: OrderStatus) => {
+    if (!userId || fromStatus === toStatus) return;
+    if (!canDropOnColumn(fromStatus, toStatus)) {
+      if (toStatus === 'picked_up') toast.error('Solo puedes entregar pedidos en estado Listo');
+      return;
+    }
+
+    if (toStatus === 'picked_up') {
+      setConvertingOrder(orderId);
       setPaymentMethod('cash');
       return;
     }
 
+    const prev = orders.find((o) => o._id === orderId);
+    applyLocalStatus(orderId, toStatus);
     try {
-      const res = await updateButcherOrderStatusRequest(userId, order._id, next);
+      const res = await updateButcherOrderStatusRequest(userId, orderId, toStatus);
       if (res.ok) {
-        toast.success(`${order.orderNumber} → ${KANBAN_COLUMNS.find((c) => c.status === next)?.label}`);
-        fetchOrders();
+        toast.success(`Movido a ${KANBAN_COLUMNS.find((c) => c.status === toStatus)?.label}`);
+      } else {
+        if (prev) applyLocalStatus(orderId, prev.status);
+        toast.error(res.error || 'No se pudo actualizar');
       }
-    } catch { toast.error('Error de conexión'); }
+    } catch {
+      if (prev) applyLocalStatus(orderId, prev.status);
+      toast.error('Error de conexión');
+    }
+  }, [userId, orders, applyLocalStatus]);
+
+  const handleAdvance = async (order: ButcherOrder) => {
+    const next = NEXT_STATUS[order.status];
+    if (!next) return;
+    await handleStatusChange(order._id, order.status, next);
   };
 
   const handleConvertAndPickup = async () => {
@@ -108,7 +318,7 @@ export function ButcherWorkerOrders() {
       if (res.ok) {
         toast.success('Pedido entregado y venta registrada');
         setConvertingOrder(null);
-        fetchOrders();
+        fetchOrders(true);
       } else toast.error(res.error || 'Error');
     } catch { toast.error('Error de conexión'); }
   };
@@ -117,7 +327,10 @@ export function ButcherWorkerOrders() {
     if (!userId) return;
     try {
       const res = await updateButcherOrderStatusRequest(userId, order._id, 'cancelled');
-      if (res.ok) { toast.success('Pedido cancelado'); fetchOrders(); }
+      if (res.ok) {
+        toast.success('Pedido cancelado');
+        setOrders((prev) => prev.filter((o) => o._id !== order._id));
+      }
     } catch { toast.error('Error'); }
   };
 
@@ -127,9 +340,19 @@ export function ButcherWorkerOrders() {
         <div className="flex items-center gap-3">
           <button type="button" onClick={() => setShowOnlyToday(true)} className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${showOnlyToday ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>Hoy</button>
           <button type="button" onClick={() => setShowOnlyToday(false)} className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${!showOnlyToday ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}>Todos</button>
+          <button
+            type="button"
+            onClick={() => fetchOrders(true)}
+            disabled={refreshing}
+            className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 hover:bg-gray-50 dark:hover:bg-gray-800 disabled:opacity-50"
+            title="Actualizar"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
         </div>
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {filteredOrders.length} pedido{filteredOrders.length !== 1 ? 's' : ''}
+          <span className="hidden sm:inline text-gray-400"> · Arrastra entre columnas</span>
         </p>
       </div>
 
@@ -142,65 +365,18 @@ export function ButcherWorkerOrders() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
           {columns.map((col) => (
-            <div key={col.status} className={`rounded-xl border-t-4 ${col.color} bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 overflow-hidden`}>
-              <div className={`px-4 py-3 ${col.headerBg} flex items-center justify-between`}>
-                <div className="flex items-center gap-2">
-                  <col.icon className="w-4 h-4" />
-                  <span className="text-sm font-bold">{col.label}</span>
-                </div>
-                <span className="text-sm font-bold">{col.items.length}</span>
-              </div>
-              <div className="p-3 space-y-2.5 max-h-[calc(100vh-250px)] overflow-y-auto">
-                {col.items.length === 0 ? (
-                  <p className="text-center text-xs text-gray-400 py-6">Sin pedidos</p>
-                ) : col.items.map((o) => (
-                  <div key={o._id} className={`rounded-lg border border-gray-100 dark:border-gray-700 p-3 bg-white dark:bg-gray-800/50 ${o.priority === 'urgent' ? 'ring-2 ring-red-400 ring-offset-1' : ''}`}>
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-mono font-bold text-xs text-gray-900 dark:text-white">{o.orderNumber}</span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${TYPE_BADGE[o.orderType]}`}>{TYPE_LABEL[o.orderType]}</span>
-                        {o.priority === 'urgent' && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">!</span>}
-                      </div>
-                      {o.pickupTime && <span className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-0.5"><Clock className="w-3 h-3" />{o.pickupTime}</span>}
-                    </div>
-
-                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{o.clientName || 'Anónimo'}</p>
-                    {o.clientPhone && (
-                      <a href={`tel:${o.clientPhone}`} className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-600 mt-0.5" onClick={(e) => e.stopPropagation()}>
-                        <Phone className="w-3 h-3" />{o.clientPhone}
-                      </a>
-                    )}
-
-                    <div className="mt-2 space-y-0.5">
-                      {o.items.slice(0, 3).map((it, j) => (
-                        <p key={j} className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                          {it.quantity}{it.unit} {it.productName}
-                        </p>
-                      ))}
-                      {o.items.length > 3 && <p className="text-xs text-gray-400">+{o.items.length - 3} más</p>}
-                    </div>
-
-                    {o.notes && <p className="text-[11px] text-gray-400 italic mt-1.5 truncate">{o.notes}</p>}
-
-                    <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-50 dark:border-gray-700/50">
-                      <span className="text-sm font-bold text-gray-900 dark:text-white">{o.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}</span>
-                      <div className="flex items-center gap-1">
-                        {NEXT_STATUS[o.status] && (
-                          <button type="button" onClick={() => handleAdvance(o)} className="px-2.5 py-1 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-md text-xs font-semibold hover:opacity-90 transition flex items-center gap-1">
-                            <ArrowRight className="w-3 h-3" />
-                          </button>
-                        )}
-                        {o.status !== 'picked_up' && (
-                          <button type="button" onClick={() => handleCancel(o)} className="p-1 rounded-md hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-500">
-                            <Ban className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <KanbanColumn
+              key={col.status}
+              status={col.status}
+              label={col.label}
+              icon={col.icon}
+              color={col.color}
+              headerBg={col.headerBg}
+              items={col.items}
+              onDropOrder={handleStatusChange}
+              onAdvance={handleAdvance}
+              onCancel={handleCancel}
+            />
           ))}
         </div>
       )}
@@ -226,5 +402,13 @@ export function ButcherWorkerOrders() {
         </div>
       )}
     </Layout>
+  );
+}
+
+export function ButcherWorkerOrders() {
+  return (
+    <DndProvider backend={HTML5Backend}>
+      <ButcherWorkerOrdersBoard />
+    </DndProvider>
   );
 }

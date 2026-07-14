@@ -4,6 +4,7 @@ import "./styles/index.css";
 import "./app/lib/i18n";
 import {
   clearStaleWebCachesInDev,
+  configureNativeSafeArea,
   prepareNativeWebView,
   registerPwaServiceWorker,
 } from "./app/lib/nativeWebViewBootstrap";
@@ -29,6 +30,7 @@ function showBootstrapError(error: unknown) {
 void clearStaleWebCachesInDev();
 registerPwaServiceWorker();
 void prepareNativeWebView();
+void configureNativeSafeArea();
 
 const rootEl = document.getElementById("root");
 if (rootEl) {

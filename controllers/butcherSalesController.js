@@ -5,6 +5,7 @@ import {
   listButcherSalesByUser,
   getNextButcherTicketNumber,
   updateButcherClientCounters,
+  analyzeButcherClientHabitsAsync,
 } from '../services/butcherShop.js';
 import { ensureDatabase, getDocument, putDocument } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
@@ -41,6 +42,9 @@ export async function createButcherSale(req, res) {
     await putDocument(req, db, doc._id, doc);
 
     updateButcherClientCounters(req, userId, sale.clientId, total).catch(() => {});
+    if (sale.clientId) {
+      analyzeButcherClientHabitsAsync(req, userId, sale.clientId).catch(() => {});
+    }
 
     return res.json({ ok: true, sale: sanitizeButcherSale(doc) });
   } catch (e) {

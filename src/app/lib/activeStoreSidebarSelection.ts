@@ -31,7 +31,8 @@ export function resolveActiveOpsStoreRowId(
     if (fallback) return fallback.rowId;
   }
 
-  return null;
+  const firstActive = rows.find((r) => !r.inactive);
+  return (firstActive ?? rows[0])?.rowId ?? null;
 }
 
 /** Sidebar compraventa / legacy: solo un centro de trabajo activo. */
@@ -40,6 +41,6 @@ export function resolveActiveWorkCenterRowId(
   selectedWorkCenterId: string | null | undefined,
 ): string | null {
   const selected = String(selectedWorkCenterId || '').trim();
-  if (!selected) return null;
-  return workCenterIds.includes(selected) ? selected : null;
+  if (selected && workCenterIds.includes(selected)) return selected;
+  return workCenterIds[0] ?? null;
 }

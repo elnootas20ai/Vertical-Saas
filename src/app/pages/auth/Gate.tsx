@@ -440,7 +440,7 @@ export function Gate() {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <header className="border-b border-gray-200/80 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-6 py-4">
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
           <VertialLogo size="md" />
           <button
             type="button"
@@ -455,7 +455,7 @@ export function Gate() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-10">
+      <main className="mx-auto max-w-4xl px-4 py-5 sm:px-6 sm:py-6">
         {isBusinessesPending ? (
           <div className="space-y-4 animate-pulse">
             <div className="h-8 w-48 rounded-lg bg-gray-200 dark:bg-gray-700" />
@@ -521,18 +521,23 @@ export function Gate() {
             )}
           </div>
         ) : hasApiBusinesses && businesses.length > 1 ? (
-          <div className="space-y-6 pb-24">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+          <div className="space-y-4 pb-20">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
                   Elige empresa
                 </h1>
-                <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+                <p className="mt-0.5 text-sm text-gray-600 dark:text-gray-400">
                   Tienes {businesses.length} negocios. Pulsa el botón de la empresa o entra con la activa.
                 </p>
               </div>
-              <ACCESO__Button variant="outline" onClick={() => setShowCreateBusiness(true)}>
-                <Plus className="h-4 w-4" />
+              <ACCESO__Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 whitespace-nowrap !border !py-1.5 !px-3"
+                onClick={() => setShowCreateBusiness(true)}
+              >
+                <Plus className="h-3.5 w-3.5" />
                 Nueva empresa
               </ACCESO__Button>
             </div>
@@ -557,10 +562,10 @@ export function Gate() {
             />
 
             {currentBusiness ? (
-              <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white/95 p-4 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-gray-200 bg-white/95 p-3 shadow-[0_-8px_30px_rgba(0,0,0,0.08)] backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                 <ACCESO__Button
                   variant="primary"
-                  size="lg"
+                  size="md"
                   fullWidth
                   icon="next"
                   onClick={() => {

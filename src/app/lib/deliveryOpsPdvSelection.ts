@@ -78,6 +78,32 @@ export function pickDefaultActivePdvId(
   return sorted[0]._id;
 }
 
+/** Centro de trabajo por defecto (sin PDV): el más antiguo activo. */
+export function pickDefaultWorkCenterPreference(
+  workCenters: Array<{ _id: string; active?: boolean; deletedAt?: string | null; createdAt?: string }>,
+): string | null {
+  const active = workCenters.filter((wc) => !wc.deletedAt && wc.active !== false);
+  if (active.length === 0) return null;
+  const sorted = [...active].sort((a, b) => {
+    const ta = String(a.createdAt || '');
+    const tb = String(b.createdAt || '');
+    if (ta !== tb) return ta.localeCompare(tb);
+    return String(a._id).localeCompare(String(b._id));
+  });
+  const id = String(sorted[0]._id || '').trim();
+  return id ? `wc:${id}` : null;
+}
+
+/** Primera tienda del negocio: PDV activo más antiguo o, si no hay PDV, el primer centro. */
+export function pickDefaultActiveStorePreference(
+  pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean; createdAt?: string }>,
+  workCenters: Array<{ _id: string; active?: boolean; deletedAt?: string | null; createdAt?: string }>,
+): string | null {
+  const pdvId = pickDefaultActivePdvId(pointsOfSale);
+  if (pdvId) return pdvId;
+  return pickDefaultWorkCenterPreference(workCenters);
+}
+
 export interface DeliveryOrderPdvFilterOptions {
   /** PDV principal (el más antiguo). Pedidos legacy sin `salesPointId` solo cuentan aquí. */
   primaryPdvId?: string | null;

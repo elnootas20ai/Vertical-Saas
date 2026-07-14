@@ -6,6 +6,7 @@ export type OnboardingVisualKey =
   | 'recommendation'
   | 'payment'
   | 'register-company'
+  | 'login-company'
   | 'register-user'
   | 'entry'
   | 'confirmation';
@@ -126,6 +127,14 @@ export const ONBOARDING_VISUALS: Record<OnboardingVisualKey, OnboardingVisual> =
     title: 'Crea tu espacio en Vertial',
     subtitle: 'Stock, operaciones, clientes y documentos en un solo lugar.',
     highlights: ['Setup en minutos', 'Multi-vertical', 'Prueba sin compromiso'],
+  },
+  'login-company': {
+    image: HERO_PHOTOS.coworking,
+    gradientTheme: 'ocean',
+    badge: 'Acceso empresa',
+    title: 'Tu panel de gestión',
+    subtitle: 'Operaciones, clientes y equipo en un solo lugar.',
+    highlights: ['Acceso seguro', 'Multi-vertical', 'Desde cualquier dispositivo'],
   },
   'register-user': {
     image: HERO_PHOTOS.tabletOps,

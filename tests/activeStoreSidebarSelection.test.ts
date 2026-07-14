@@ -50,10 +50,15 @@ describe('activeStoreSidebarSelection', () => {
     expect(resolveActiveOpsStoreRowId(wcOnly, null, 'wc:wc-x')).toBe('wc-x');
   });
 
+  it('falls back to first active row when nothing is selected', () => {
+    expect(resolveActiveOpsStoreRowId(rows, null, null)).toBe('pdv-a');
+  });
+
   it('compraventa allows only one work center', () => {
     const ids = ['wc-1', 'wc-2'];
     expect(resolveActiveWorkCenterRowId(ids, 'wc-1')).toBe('wc-1');
     expect(resolveActiveWorkCenterRowId(ids, 'wc-2')).toBe('wc-2');
-    expect(resolveActiveWorkCenterRowId(ids, 'wc-3')).toBeNull();
+    expect(resolveActiveWorkCenterRowId(ids, 'wc-3')).toBe('wc-1');
+    expect(resolveActiveWorkCenterRowId(ids, null)).toBe('wc-1');
   });
 });

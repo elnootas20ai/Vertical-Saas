@@ -6,7 +6,7 @@ import {
   searchButcherClientsFn,
   listButcherOrdersByUser,
   listButcherSalesByUser,
-  updateButcherClientCounters,
+  analyzeButcherClientHabitsAsync,
 } from '../services/butcherShop.js';
 import { ensureDatabase, getDocument, putDocument } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
@@ -166,63 +166,24 @@ export async function analyzeButcherClientHabits(req, res) {
 
     const db = getButcherDbName();
     await ensureDatabase(req, db);
-    const client = await getDocument(req, db, clientId);
-    if (!client || client.type !== 'butcher_client' || client.user_id !== userId) {
+    const existing = await getDocument(req, db, clientId);
+    if (!existing || existing.type !== 'butcher_client' || existing.user_id !== userId) {
       return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
     }
 
-    const sales = await listButcherSalesByUser(req, userId);
-    const clientSales = sales.filter((s) => s.clientId === clientId && s.status === 'completed');
-    if (clientSales.length < 2) {
+    const client = await analyzeButcherClientHabitsAsync(req, userId, clientId);
+    if (!client) {
       return res.json({ ok: true, message: 'Insuficientes ventas para analizar hábitos', habits: null });
     }
-
-    const productMap = {};
-    const dayCount = {};
-    const dates = [];
-    for (const sale of clientSales) {
-      dates.push(new Date(sale.date || sale.createdAt));
-      const dayOfWeek = new Date(sale.date || sale.createdAt).toLocaleDateString('es-ES', { weekday: 'long' });
-      dayCount[dayOfWeek] = (dayCount[dayOfWeek] || 0) + 1;
-
-      for (const item of (sale.items || [])) {
-        const key = (item.productName || '').toLowerCase();
-        if (!key) continue;
-        if (!productMap[key]) productMap[key] = { productName: item.productName, totalQty: 0, count: 0, unit: item.unit || 'kg' };
-        productMap[key].totalQty += Number(item.quantity || 0);
-        productMap[key].count += 1;
-      }
-    }
-
-    const usualProducts = Object.values(productMap)
-      .filter((p) => p.count >= 2)
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10)
-      .map((p) => ({
-        productName: p.productName,
-        productId: null,
-        quantity: Math.round((p.totalQty / p.count) * 10) / 10,
-        unit: p.unit,
-        frequency: `${p.count} compras`,
-      }));
-
-    const preferredDay = Object.entries(dayCount).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-
-    client.preferences = client.preferences || {};
-    client.preferences.usualProducts = usualProducts;
-    client.preferences.preferredDay = preferredDay;
-    client.lastHabitAnalysis = new Date().toISOString();
-    client.updatedAt = new Date().toISOString();
-    await putDocument(req, db, client._id, client);
 
     return res.json({
       ok: true,
       habits: {
-        usualProducts,
-        preferredDay,
-        totalSalesAnalyzed: clientSales.length,
+        usualProducts: client.preferences?.usualProducts || [],
+        preferredDay: client.preferences?.preferredDay || null,
+        totalSalesAnalyzed: client.totalOrders,
       },
-      client: sanitizeButcherClient(client),
+      client,
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || 'Error al analizar hábitos' });

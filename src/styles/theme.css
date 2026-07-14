@@ -231,6 +231,18 @@
   padding-top: env(safe-area-inset-top, 0px);
 }
 
+/* Barra superior SaaS en móvil: respetar notch / Dynamic Island */
+@media (max-width: 767px) {
+  .saas-topbar {
+    padding-top: max(0.625rem, env(safe-area-inset-top, 0px));
+  }
+
+  /* Fallback Capacitor iOS si el WebView no expone env(safe-area-inset-top) */
+  html.native-ios .saas-topbar {
+    padding-top: max(2.75rem, env(safe-area-inset-top, 2.75rem));
+  }
+}
+
 /* ── Mobile touch improvements ────────────────────────────────── */
 @media (max-width: 767px) {
   /* Improve tap target sizes */

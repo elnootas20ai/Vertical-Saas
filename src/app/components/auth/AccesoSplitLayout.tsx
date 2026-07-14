@@ -29,7 +29,7 @@ export function AccesoSplitLayout({
         }
       >
         {showCompactHero ? (
-          <AccesoCompactHero visualKey={visualKey} className="mx-4 mt-4 shrink-0 sm:mx-6 sm:mt-6 lg:hidden" />
+          <AccesoCompactHero visualKey={visualKey} className="mx-3 mt-3 shrink-0 sm:mx-6 sm:mt-6 lg:hidden" />
         ) : null}
         {children}
       </div>

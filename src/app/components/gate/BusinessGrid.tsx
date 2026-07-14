@@ -392,11 +392,11 @@ export function BusinessGrid({
   const hasActiveFilters = search.trim() !== '' || filterType !== 'all' || sortBy !== 'name';
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Tus negocios</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Tus negocios</h3>
           <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs font-medium rounded-full">
             {businesses.length}
           </span>

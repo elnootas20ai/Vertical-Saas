@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
-import { createButcherSaleRequest } from '../../lib/butcherApi';
+import { createButcherSaleRequest, searchButcherClientsRequest, listButcherClientsRequest, type ButcherClient } from '../../lib/butcherApi';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import {
   ArrowLeft,
@@ -160,6 +160,7 @@ interface ParkedTicket {
   id: string;
   lines: TicketLine[];
   total: number;
+  clienteId: string | null;
   clienteNombre: string | null;
   parkedAt: Date;
   nota: string;
@@ -245,6 +246,9 @@ export function ButcherTpvPage() {
 
   const [showClient, setShowClient] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
+  const [clientResults, setClientResults] = useState<ButcherClient[]>([]);
+  const [clientSearchLoading, setClientSearchLoading] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<ButcherClient | null>(null);
 
   const [parkedTickets, setParkedTickets] = useState<ParkedTicket[]>([]);
   const [showParked, setShowParked] = useState(false);
@@ -310,6 +314,30 @@ export function ButcherTpvPage() {
   useEffect(() => {
     loadTickets();
   }, [loadTickets]);
+
+  useEffect(() => {
+    if (!showClient || !userId) return;
+    const q = clientSearch.trim();
+    const timer = window.setTimeout(async () => {
+      setClientSearchLoading(true);
+      try {
+        const res = q.length >= 2
+          ? await searchButcherClientsRequest(userId, q)
+          : await listButcherClientsRequest(userId);
+        if (res.ok) {
+          const list = (res.clients || []) as ButcherClient[];
+          setClientResults(q.length >= 2 ? list : list.slice(0, 12));
+        } else {
+          setClientResults([]);
+        }
+      } catch {
+        setClientResults([]);
+      } finally {
+        setClientSearchLoading(false);
+      }
+    }, q.length >= 2 ? 280 : 0);
+    return () => window.clearTimeout(timer);
+  }, [showClient, clientSearch, userId]);
 
   // ─── Computed ──────────────────────────────────────────────────
 
@@ -542,23 +570,19 @@ export function ButcherTpvPage() {
 
   // ─── Client ────────────────────────────────────────────────────
 
-  const filteredClients = useMemo(() => {
-    const q = clientSearch.toLowerCase().trim();
-    const empty: { id: string; nombre: string; telefono: string }[] = [];
-    if (!q) return empty;
-    return empty.filter(c => c.nombre.toLowerCase().includes(q) || c.telefono.includes(q));
-  }, [clientSearch]);
-
-  const selectClient = (id: string, nombre: string) => {
-    setClienteId(id);
-    setClienteNombre(nombre);
+  const selectClient = (client: ButcherClient) => {
+    setClienteId(client._id);
+    setClienteNombre(client.name);
+    setSelectedClient(client);
     setShowClient(false);
-    toast.success(`Cliente: ${nombre}`);
+    setClientSearch('');
+    toast.success(`Cliente: ${client.name}`);
   };
 
   const clearClient = () => {
     setClienteId(null);
     setClienteNombre(null);
+    setSelectedClient(null);
   };
 
   // ─── Park / Resume ticket ─────────────────────────────────────
@@ -569,6 +593,7 @@ export function ButcherTpvPage() {
       id: newLocalId(),
       lines: [...lines],
       total: ticketTotal,
+      clienteId,
       clienteNombre,
       parkedAt: new Date(),
       nota: parkNote,
@@ -576,6 +601,7 @@ export function ButcherTpvPage() {
     setLines([]);
     setClienteNombre(null);
     setClienteId(null);
+    setSelectedClient(null);
     setParkNote('');
     setShowParkDialog(false);
     addAlert('pending', 'info', 'Ticket aparcado pendiente de cobro');
@@ -591,6 +617,8 @@ export function ButcherTpvPage() {
     }
     setLines(parked.lines);
     if (parked.clienteNombre) setClienteNombre(parked.clienteNombre);
+    if (parked.clienteId) setClienteId(parked.clienteId);
+    setSelectedClient(null);
     setParkedTickets(prev => prev.filter(p => p.id !== parkedId));
     setShowParked(false);
     toast.success('Ticket recuperado');
@@ -665,6 +693,7 @@ export function ButcherTpvPage() {
       setEntregado('');
       setClienteNombre(null);
       setClienteId(null);
+      setSelectedClient(null);
       toast.success(`Venta registrada — ${ticketNo}`);
       setShowTicketPreview(true);
       const pmMap: Record<string, string> = { efectivo: 'cash', tarjeta: 'card', bizum: 'bizum' };
@@ -1103,6 +1132,18 @@ export function ButcherTpvPage() {
               </button>
             )}
           </div>
+          {selectedClient?.preferences?.usualProducts?.length ? (
+            <div className="shrink-0 px-3 pb-2 flex flex-wrap gap-1">
+              {selectedClient.preferences.usualProducts.slice(0, 4).map((p) => (
+                <span
+                  key={`${p.productName}-${p.quantity}`}
+                  className="px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-[10px] font-medium text-amber-800 dark:text-amber-300"
+                >
+                  {p.productName} · {p.quantity}{p.unit}
+                </span>
+              ))}
+            </div>
+          ) : null}
 
           {/* Ticket lines */}
           <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
@@ -1386,28 +1427,48 @@ export function ButcherTpvPage() {
               </div>
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
-              {filteredClients.map(c => (
+              {clientSearchLoading && (
+                <div className="flex items-center justify-center gap-2 py-8 text-sm text-gray-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Buscando...
+                </div>
+              )}
+              {!clientSearchLoading && clientResults.map(c => (
                 <button
-                  key={c.id}
+                  key={c._id}
                   type="button"
-                  onClick={() => selectClient(c.id, c.nombre)}
+                  onClick={() => selectClient(c)}
                   className="w-full flex items-center gap-3 p-3 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-950/30 hover:border-blue-300 dark:hover:border-blue-800 transition-colors text-left"
                 >
                   <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-900/40 flex items-center justify-center text-blue-600 dark:text-blue-400 text-sm font-bold shrink-0">
-                    {c.nombre.charAt(0)}
+                    {c.name.charAt(0)}
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{c.nombre}</p>
-                    <p className="text-xs text-gray-500">{c.telefono}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{c.name}</p>
+                    <p className="text-xs text-gray-500">{c.phone || 'Sin teléfono'}</p>
+                    {c.preferences?.usualProducts?.length ? (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 truncate">
+                        Habitual: {c.preferences.usualProducts.slice(0, 2).map((p) => p.productName).join(', ')}
+                      </p>
+                    ) : null}
                   </div>
                   <ChevronRight className="w-4 h-4 text-gray-300 ml-auto shrink-0" />
                 </button>
               ))}
-              {filteredClients.length === 0 && (
-                <p className="text-center text-sm text-gray-400 py-8">Sin resultados</p>
+              {!clientSearchLoading && clientResults.length === 0 && (
+                <p className="text-center text-sm text-gray-400 py-8">
+                  {clientSearch.trim().length >= 2 ? 'Sin resultados' : 'Sin clientes habituales todavía'}
+                </p>
               )}
             </div>
-            <div className="p-3 border-t border-gray-100 dark:border-gray-800">
+            <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
+              <button
+                type="button"
+                onClick={() => { clearClient(); setShowClient(false); toast.info('Venta anónima'); }}
+                className="w-full py-2.5 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800"
+              >
+                Continuar sin cliente
+              </button>
               <button
                 type="button"
                 onClick={() => setShowClient(false)}

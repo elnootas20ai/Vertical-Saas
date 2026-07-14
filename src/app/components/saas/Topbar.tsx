@@ -103,7 +103,7 @@ function TopbarInner({
 
   return (
     <>
-      <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-3 md:px-5 py-3 md:py-4 sticky top-0 z-30 safe-area-top">
+      <header className="saas-topbar bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-3 md:px-5 pb-3 md:py-4 sticky top-0 z-30">
         <div className="flex items-center justify-between gap-2 md:gap-3">
           <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
             <button

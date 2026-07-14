@@ -2,11 +2,13 @@ import {
   getButcherDbName,
   buildButcherOrderDocument,
   sanitizeButcherOrder,
+  sanitizeButcherSale,
   listButcherOrdersByUser,
   getNextButcherOrderNumber,
   buildButcherSaleDocument,
   getNextButcherTicketNumber,
   updateButcherClientCounters,
+  analyzeButcherClientHabitsAsync,
 } from '../services/butcherShop.js';
 import { ensureDatabase, getDocument, putDocument, getCatalogDbName } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
@@ -146,6 +148,13 @@ export async function updateButcherOrderStatus(req, res) {
     if (preparedBy) existing.preparedBy = preparedBy;
     existing.updatedAt = new Date().toISOString();
     await putDocument(req, db, existing._id, existing);
+
+    if (status === 'cancelled' && existing.stockReserved) {
+      releaseStockForOrder(req, userId, existing.items || []).catch(() => {});
+      existing.stockReserved = false;
+      await putDocument(req, db, existing._id, existing);
+    }
+
     return res.json({ ok: true, order: sanitizeButcherOrder(existing) });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || 'Error al cambiar estado' });
@@ -230,8 +239,11 @@ export async function convertOrderToSale(req, res) {
     await putDocument(req, db, order._id, order);
 
     updateButcherClientCounters(req, userId, order.clientId, order.total).catch(() => {});
+    if (order.clientId) {
+      analyzeButcherClientHabitsAsync(req, userId, order.clientId).catch(() => {});
+    }
 
-    return res.json({ ok: true, sale: sanitizeButcherOrder(saleDoc), order: sanitizeButcherOrder(order) });
+    return res.json({ ok: true, sale: sanitizeButcherSale(saleDoc), order: sanitizeButcherOrder(order) });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || 'Error al convertir pedido' });
   }

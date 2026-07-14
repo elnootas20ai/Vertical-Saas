@@ -10,10 +10,13 @@ import {
   Calculator,
   Armchair,
   Wrench,
+  Package,
+  ChefHat,
+  Truck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuthOptional } from '../../context/AuthContext';
-import { isWorkerAccount } from '../../lib/authApi';
+import { isWorkerAccount, type AccountPermissionMatrix } from '../../lib/authApi';
 import { useBusiness } from '../../context/BusinessContext';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { isDeliveryBusinessType } from '../../lib/deliverySetup';
@@ -25,50 +28,24 @@ type BottomNavItem = {
   path: string;
   icon: LucideIcon;
   label: string;
-  /** Rutas con guard RequireBusinessOwner: ocultas para cuentas de trabajador */
-  ownerOnly?: boolean;
+  /** Rutas adicionales que marcan la pestaña como activa */
+  matchPaths?: string[];
 };
 
-const HOME_ITEM: BottomNavItem = { id: 'dashboard', path: '/saas/dashboard', icon: LayoutDashboard, label: 'Inicio' };
-const CLIENTS_ITEM: BottomNavItem = { id: 'clients', path: '/saas/clients', icon: Users, label: 'Clientes' };
-const SALES_ITEM: BottomNavItem = { id: 'sales', path: '/saas/sales', icon: TrendingUp, label: 'Ventas' };
+const HOME_ITEM: BottomNavItem = {
+  id: 'dashboard',
+  path: '/saas/dashboard',
+  icon: LayoutDashboard,
+  label: 'Inicio',
+};
 
-/** Pestañas por vertical: la barra de compraventa (Vehículos/Ventas) no aplica a delivery, restaurante… */
-function navItemsForVertical(businessType?: string | null): BottomNavItem[] {
-  if (isRestaurantBusinessType(businessType)) {
-    return [
-      HOME_ITEM,
-      { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
-      { id: 'caja', path: '/saas/caja', icon: Calculator, label: 'Caja', ownerOnly: true },
-      CLIENTS_ITEM,
-    ];
-  }
-  if (isDeliveryBusinessType(businessType)) {
-    return [
-      HOME_ITEM,
-      { id: 'ops', path: '/saas/delivery-ops', icon: ClipboardList, label: 'Operativa', ownerOnly: true },
-      { id: 'caja', path: '/saas/vertical/delivery/caja', icon: Calculator, label: 'Caja', ownerOnly: true },
-      CLIENTS_ITEM,
-    ];
-  }
-  if (businessType === 'workshop') {
-    return [
-      HOME_ITEM,
-      { id: 'workshop', path: '/saas/workshop', icon: Wrench, label: 'Taller' },
-      CLIENTS_ITEM,
-    ];
-  }
-  if (businessType === 'carDealership') {
-    return [
-      HOME_ITEM,
-      { id: 'vehicles', path: '/saas/vehicles', icon: Car, label: 'Vehículos' },
-      SALES_ITEM,
-      CLIENTS_ITEM,
-    ];
-  }
-  // Resto de verticales: pestañas genéricas del core
-  return [HOME_ITEM, SALES_ITEM, CLIENTS_ITEM];
-}
+const CLIENTS_ITEM: BottomNavItem = {
+  id: 'clients',
+  path: '/saas/clients',
+  icon: Users,
+  label: 'Clientes',
+  matchPaths: ['/saas/crm/clientes'],
+};
 
 const ALERTS_ITEM: BottomNavItem = {
   id: 'alertas',
@@ -76,6 +53,187 @@ const ALERTS_ITEM: BottomNavItem = {
   icon: Bell,
   label: 'Alertas',
 };
+
+function hasWorkerPermission(permissions: AccountPermissionMatrix | undefined, key: string): boolean {
+  const value = permissions?.[key];
+  if (value === true) return true;
+  if (typeof value === 'string' && value.length > 0 && value !== 'none') return true;
+  if (typeof value === 'object' && value !== null) return true;
+  return false;
+}
+
+/** Dueño / admin: pestañas operativas del día según vertical. */
+function ownerNavItemsForVertical(businessType?: string | null): BottomNavItem[] {
+  if (isRestaurantBusinessType(businessType)) {
+    return [
+      HOME_ITEM,
+      { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
+      {
+        id: 'caja',
+        path: '/saas/caja',
+        icon: Calculator,
+        label: 'Caja',
+        matchPaths: ['/saas/caja/tpv'],
+      },
+      CLIENTS_ITEM,
+    ];
+  }
+
+  if (isDeliveryBusinessType(businessType)) {
+    return [
+      HOME_ITEM,
+      {
+        id: 'ops',
+        path: '/saas/delivery-ops',
+        icon: ClipboardList,
+        label: 'Operativa',
+        matchPaths: ['/saas/vertical/delivery/pedidos', '/saas/vertical/delivery'],
+      },
+      {
+        id: 'caja',
+        path: '/saas/vertical/delivery/caja',
+        icon: Calculator,
+        label: 'Caja',
+        matchPaths: ['/saas/vertical/delivery/tpv'],
+      },
+      CLIENTS_ITEM,
+    ];
+  }
+
+  if (businessType === 'workshop') {
+    return [
+      HOME_ITEM,
+      {
+        id: 'workshop',
+        path: '/saas/workshop',
+        icon: Wrench,
+        label: 'Taller',
+      },
+      {
+        id: 'parts',
+        path: '/saas/parts',
+        icon: Package,
+        label: 'Recambios',
+      },
+      CLIENTS_ITEM,
+    ];
+  }
+
+  if (businessType === 'carDealership') {
+    return [
+      HOME_ITEM,
+      {
+        id: 'vehicles',
+        path: '/saas/vehicles',
+        icon: Car,
+        label: 'Vehículos',
+      },
+      {
+        id: 'sales',
+        path: '/saas/vertical/compraventa/ventas',
+        icon: TrendingUp,
+        label: 'Ventas',
+        matchPaths: ['/saas/sales', '/saas/vertical/compraventa'],
+      },
+      CLIENTS_ITEM,
+    ];
+  }
+
+  return [
+    HOME_ITEM,
+    { id: 'sales', path: '/saas/sales', icon: TrendingUp, label: 'Ventas' },
+    CLIENTS_ITEM,
+  ];
+}
+
+/** Trabajador: mismas verticales, pero rutas que sí puede usar en el día a día. */
+function workerNavItemsForVertical(
+  businessType: string | null | undefined,
+  permissions: AccountPermissionMatrix | undefined,
+): BottomNavItem[] {
+  if (isRestaurantBusinessType(businessType)) {
+    const items: BottomNavItem[] = [HOME_ITEM, { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' }];
+    if (hasWorkerPermission(permissions, 'delivery')) {
+      items.push({ id: 'cocina', path: '/saas/cocina', icon: ChefHat, label: 'Cocina' });
+    }
+    items.push(CLIENTS_ITEM);
+    return items;
+  }
+
+  if (isDeliveryBusinessType(businessType)) {
+    const items: BottomNavItem[] = [HOME_ITEM];
+    if (hasWorkerPermission(permissions, 'delivery')) {
+      items.push(
+        { id: 'cocina', path: '/saas/cocina', icon: ChefHat, label: 'Cocina' },
+        {
+          id: 'reparto',
+          path: '/saas/vertical/delivery/reparto',
+          icon: Truck,
+          label: 'Reparto',
+          matchPaths: ['/saas/delivery-reparto'],
+        },
+      );
+    }
+    items.push(CLIENTS_ITEM);
+    return items;
+  }
+
+  if (businessType === 'workshop') {
+    return [
+      HOME_ITEM,
+      { id: 'workshop', path: '/saas/workshop', icon: Wrench, label: 'Taller' },
+      { id: 'parts', path: '/saas/parts', icon: Package, label: 'Recambios' },
+      CLIENTS_ITEM,
+    ];
+  }
+
+  if (businessType === 'carDealership') {
+    const items: BottomNavItem[] = [HOME_ITEM];
+    if (hasWorkerPermission(permissions, 'vehicles')) {
+      items.push({ id: 'vehicles', path: '/saas/vehicles', icon: Car, label: 'Vehículos' });
+    }
+    if (hasWorkerPermission(permissions, 'sales')) {
+      items.push({
+        id: 'sales',
+        path: '/saas/vertical/compraventa/ventas',
+        icon: TrendingUp,
+        label: 'Ventas',
+        matchPaths: ['/saas/sales'],
+      });
+    }
+    items.push(CLIENTS_ITEM);
+    return items;
+  }
+
+  const items: BottomNavItem[] = [HOME_ITEM];
+  if (hasWorkerPermission(permissions, 'sales')) {
+    items.push({ id: 'sales', path: '/saas/sales', icon: TrendingUp, label: 'Ventas' });
+  }
+  items.push(CLIENTS_ITEM);
+  return items;
+}
+
+function navItemsForVertical(
+  businessType: string | null | undefined,
+  isWorker: boolean,
+  permissions: AccountPermissionMatrix | undefined,
+): BottomNavItem[] {
+  if (isWorker) {
+    return workerNavItemsForVertical(businessType, permissions);
+  }
+  return ownerNavItemsForVertical(businessType);
+}
+
+function isNavItemActive(pathname: string, item: BottomNavItem): boolean {
+  if (item.id === 'alertas') {
+    return pathname.startsWith('/saas/alerts');
+  }
+
+  const candidates = [item.path, ...(item.matchPaths ?? [])];
+  return candidates.some(
+    (candidate) => pathname === candidate || pathname.startsWith(`${candidate}/`),
+  );
+}
 
 export function BottomNav() {
   const location = useLocation();
@@ -97,8 +255,10 @@ export function BottomNav() {
   const badgeCount = isWorker ? workerUnread : alertCenterUnresolved;
   const highPriority = (summary?.byPriority?.high ?? 0) > 0;
 
-  const verticalItems = navItemsForVertical(currentBusiness?.businessType).filter(
-    (item) => !isWorker || !item.ownerOnly,
+  const verticalItems = navItemsForVertical(
+    currentBusiness?.businessType,
+    isWorker,
+    auth?.user?.permissions,
   );
   const navItems = isWorker ? verticalItems : [...verticalItems, ALERTS_ITEM];
 
@@ -108,11 +268,8 @@ export function BottomNav() {
       aria-label="Navegación principal"
     >
       <div className="flex items-stretch">
-        {navItems.map(({ id, path, icon: Icon, label }) => {
-          const isActive =
-            location.pathname === path
-            || location.pathname.startsWith(`${path}/`)
-            || (id === 'alertas' && location.pathname.startsWith('/saas/alerts'));
+        {navItems.map(({ id, path, icon: Icon, label, matchPaths }) => {
+          const isActive = isNavItemActive(location.pathname, { id, path, icon: Icon, label, matchPaths });
           const showBadge = id === 'alertas' && badgeCount > 0;
 
           return (
