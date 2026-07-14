@@ -81,6 +81,15 @@ Texto sugerido en inglés o español:
 
 > Vertial is a B2B operations platform for restaurants, retail and workshops. The iOS app uses native Capacitor plugins for camera capture and LAN thermal printer connectivity (ESC/POS). Digital subscriptions are purchased on our website (vertialapp.com); the iOS app is for authenticated business users. Account deletion: Settings → Security → Delete account. Test account: [email] / [password].
 
+## Codemagic — error exit 65 al compilar IPA
+
+Si **Compilar IPA** falla con `Failed to archive` / exit code **65**, casi siempre es **firma**:
+
+1. El perfil de aprovisionamiento en Codemagic es **antiguo** (no incluye **Sign in with Apple**).
+2. Solución automática (ya en `codemagic.yaml`): paso **Refrescar certificados y perfiles App Store** con `--delete-stale-profiles`.
+3. Si sigue fallando, en Codemagic → **Code signing identities** → **iOS provisioning profiles** → **Fetch profiles** → descarga de nuevo `com.vertial.app` (App Store).
+4. Comprueba en [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list) que el App ID `com.vertial.app` tiene **Sign In with Apple** activo.
+
 ## Pendiente a futuro (no bloqueante si se mantiene política actual)
 
 - **Sign in with Apple** — necesario si volvéis a mostrar Google en iOS

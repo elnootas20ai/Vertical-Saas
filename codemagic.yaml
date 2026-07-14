@@ -40,13 +40,30 @@ workflows:
         script: |
           cd ios/App
           agvtool new-version -all $BUILD_NUMBER
+      - name: Refrescar certificados y perfiles App Store
+        script: |
+          set -e
+          keychain initialize
+          # Perfil antiguo sin entitlement Sign in with Apple → archive falla (exit 65)
+          app-store-connect fetch-signing-files com.vertial.app \
+            --type IOS_APP_STORE \
+            --create \
+            --delete-stale-profiles
+          keychain add-certificates
       - name: Aplicar perfiles de firma
         script: xcode-project use-profiles
       - name: Compilar IPA
         script: |
+          set -e
           xcode-project build-ipa \
             --workspace ios/App/App.xcworkspace \
-            --scheme App
+            --scheme App \
+            --archive-flags="-allowProvisioningUpdates" || {
+              echo "=== xcodebuild log (últimas 100 líneas) ==="
+              LOG=$(ls -t /tmp/xcodebuild_logs/*.log 2>/dev/null | head -1)
+              if [ -n "$LOG" ]; then tail -100 "$LOG"; fi
+              exit 65
+            }
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
