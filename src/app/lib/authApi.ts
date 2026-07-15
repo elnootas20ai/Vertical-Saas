@@ -417,9 +417,15 @@ export function triggerUnauthorized() {
 // S-01: El refresh se hace enviando la cookie automáticamente (no se necesita token en body)
 // Lock para evitar que múltiples peticiones simultáneas lancen varios refresh en paralelo,
 // lo que causaría que el token rotado invalide las demás solicitudes de refresh.
-let _refreshPromise: Promise<boolean> | null = null;
+//
+// 'refreshed'  → token renovado
+// 'rejected'   → el servidor rechazó el refresh: la sesión ya no es válida
+// 'network'    → no se pudo contactar con el servidor (red saturada/corte): NO cerrar sesión
+type RefreshOutcome = 'refreshed' | 'rejected' | 'network';
 
-async function tryRefreshToken(): Promise<boolean> {
+let _refreshPromise: Promise<RefreshOutcome> | null = null;
+
+async function tryRefreshToken(): Promise<RefreshOutcome> {
   if (_refreshPromise) return _refreshPromise;
 
   _refreshPromise = (async () => {
@@ -433,12 +439,15 @@ async function tryRefreshToken(): Promise<boolean> {
         },
       });
       const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<AuthUser>;
-      if (response.ok && payload.ok === true && payload.accessToken) {
-        cacheAccessToken(payload.accessToken);
+      if (response.ok && payload.ok === true) {
+        if (payload.accessToken) cacheAccessToken(payload.accessToken);
+        return 'refreshed' as const;
       }
-      return response.ok && payload.ok === true;
+      // 5xx / gateway caído: no concluyente, mantener la sesión.
+      if (response.status >= 500) return 'network' as const;
+      return 'rejected' as const;
     } catch {
-      return false;
+      return 'network' as const;
     } finally {
       _refreshPromise = null;
     }
@@ -482,10 +491,13 @@ export async function authFetch(
 
   if (response.status === 401 && !authRetried) {
     const refreshed = await tryRefreshToken();
-    if (refreshed) {
+    if (refreshed === 'refreshed') {
       return authFetch(input, init, attempt, true);
     }
-    _onUnauthorized?.();
+    // Solo cerrar sesión si el servidor rechazó el refresh; un fallo de red no invalida la sesión.
+    if (refreshed === 'rejected') {
+      _onUnauthorized?.();
+    }
   }
 
   return response;
@@ -559,8 +571,12 @@ async function request<T>(
       /token expirado|sesión expirada|session expired/i.test(authErr);
     if (isExpired && !_retried) {
       const refreshed = await tryRefreshToken();
-      if (refreshed) {
+      if (refreshed === 'refreshed') {
         return request<T>(path, init, true, _networkAttempt);
+      }
+      if (refreshed === 'network') {
+        // Sin conexión con el servidor: no cerrar sesión, dejar que el llamador reintente.
+        throw new Error('No hay conexión con el servidor. Inténtalo de nuevo en unos segundos.');
       }
     }
     if (authErr) {
@@ -1202,9 +1218,14 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
       }
       if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
         const refreshed = await tryRefreshToken();
-        if (refreshed) return run(true);
+        if (refreshed === 'refreshed') return run(true);
+        if (refreshed === 'network') {
+          // Sin red no se puede saber si la sesión sigue viva: lanzar para que el
+          // llamador reintente y NO borre la sesión en caché.
+          throw new Error('Sin conexión con el servidor; se mantiene la sesión en caché.');
+        }
       }
-      return { ok: false, error: 'No se pudo sincronizar el perfil; se mantiene la sesión en caché.' };
+      return { ok: false, error: 'No se pudo sincronizar el perfil; la sesión ya no es válida.' };
     }
 
     if (response.status === 404) {
