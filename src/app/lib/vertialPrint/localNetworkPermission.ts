@@ -1,6 +1,7 @@
 import { isVertialNativeApp } from './isNativeApp';
 import { getEscposPlugin, getNativeLocalNetworkInfo, type NativeLocalNetworkInfo } from './escposPlugin';
 import { COMMON_LAN_PREFIXES } from './nativePrintClient';
+import { withNativeCallTimeout } from './nativeCallTimeout';
 
 const LAN_PERMISSION_ACK_KEY = 'vertial_lan_permission_ack_v2';
 const LAN_USER_COMPLETED_KEY = 'vertial_lan_user_completed_v1';
@@ -94,49 +95,42 @@ export function buildLanProbeHosts(info?: NativeLocalNetworkInfo | null): string
 /**
  * Dispara el aviso de «red local» de iOS/Android.
  * Apple solo muestra el popup cuando la app intenta acceder a la LAN (Bonjour + TCP).
+ * Flujo corto: no escanea toda la subred (eso va en «Buscar impresoras»).
  */
 export async function requestNativeLocalNetworkAccess(): Promise<void> {
   if (!isVertialNativeApp()) return;
 
-  const plugin = await getEscposPlugin();
-  const networkInfo = await getNativeLocalNetworkInfo();
+  const activate = async () => {
+    const plugin = await getEscposPlugin();
+    const networkInfo = await getNativeLocalNetworkInfo();
 
-  // 1) Bonjour + escaneo nativo de la subred WiFi (dispara el popup de iOS).
-  try {
-    await Promise.race([
-      plugin.discover({ ports: [9100, 9101, 9102], timeout: 8000 }),
-      wait(8500),
-    ]);
-  } catch {
-    /* El aviso del sistema puede haber salido aunque falle el discover */
-  }
-
-  await wait(400);
-
-  // 2) Segunda pasada mDNS (iOS a veces aplica el permiso tras la primera conexión).
-  try {
-    await Promise.race([
-      plugin.discover({ ports: [9100, 9101, 9102], timeout: 4000 }),
-      wait(4500),
-    ]);
-  } catch {
-    /* ignore */
-  }
-
-  // 3) TCP a router/dispositivos de la subred del móvil (refuerzo del aviso iOS).
-  const probeHosts = buildLanProbeHosts(networkInfo);
-  for (const ip of probeHosts) {
     try {
       await Promise.race([
-        plugin.ping({ ip, port: 9100 }),
-        wait(600),
+        plugin.discover({ ports: [9100], timeout: 2500 }),
+        wait(3000),
       ]);
     } catch {
-      /* ping de activación del permiso iOS */
+      /* El aviso del sistema puede haber salido aunque falle el discover */
     }
-  }
 
-  await wait(1500);
+    await wait(250);
+
+    const probeHosts = buildLanProbeHosts(networkInfo).slice(0, 4);
+    await Promise.all(
+      probeHosts.map((ip) =>
+        Promise.race([
+          plugin.ping({ ip, port: 9100 }).catch(() => undefined),
+          wait(450),
+        ]),
+      ),
+    );
+  };
+
+  try {
+    await withNativeCallTimeout(activate(), 8000, 'Activación permiso red local');
+  } catch {
+    /* Cortamos si tarda demasiado; el usuario puede seguir con IP manual */
+  }
 }
 
 /** Reinicia el flujo de permiso y vuelve a disparar el aviso de iOS. */
@@ -179,7 +173,9 @@ export type LocalNetworkPermissionFlowResult = {
 export async function completeLocalNetworkPermissionFlow(): Promise<LocalNetworkPermissionFlowResult> {
   await requestNativeLocalNetworkAccess();
   markLanPermissionFlowCompleted();
-  const networkInfo = await getNativeLocalNetworkInfo();
+  const networkInfo = await withNativeCallTimeout(getNativeLocalNetworkInfo(), 3000, 'Lectura WiFi').catch(
+    () => null,
+  );
   if (networkInfo?.prefix) {
     acknowledgeLocalNetworkPermission();
   }

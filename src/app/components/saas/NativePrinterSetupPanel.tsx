@@ -245,14 +245,15 @@ export function NativePrinterSetupPanel({
       setShowLanPermissionModal(false);
       if (!result.onWifi) {
         toast.message('Conecta el dispositivo a la WiFi del local antes de buscar impresoras.', { duration: 9000 });
+      } else {
+        toast.message('Si salió el aviso de iOS, pulsa Permitir. Luego puedes buscar impresoras o poner la IP manual.', { duration: 7000 });
       }
     } catch {
-      toast.error('No se pudo pedir el permiso. Abre Ajustes → Vertial → Red local.', { duration: 9000 });
-      return;
+      setShowLanPermissionModal(false);
+      toast.message('Tardó demasiado. Cierra, pon la IP manual (192.168.1.20) o activa Red local en Ajustes → Vertial.', { duration: 10000 });
     } finally {
       setLanPermissionBusy(false);
     }
-    toast.message('Permiso listo. Pulsa «Buscar impresoras» para escanear la WiFi.', { duration: 6000 });
   }, []);
 
   const handleOpenAppSettings = useCallback(async () => {

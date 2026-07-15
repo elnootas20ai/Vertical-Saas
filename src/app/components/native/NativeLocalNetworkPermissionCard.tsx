@@ -15,10 +15,10 @@ export function NativeLocalNetworkPermissionCard() {
     setBusy(true);
     try {
       await rerequestNativeLocalNetworkPermission();
-      toast.success('Permiso solicitado de nuevo. Si sale el aviso de iOS, pulsa Permitir.', { duration: 9000 });
+      toast.success('Si sale el aviso de iOS, pulsa Permitir. Si no, usa IP manual o Ajustes → Vertial → Red local.', { duration: 9000 });
     } catch {
       dispatchNativeLocalNetworkPermissionPrompt();
-      toast.message('Pulsa «Continuar» y luego Permitir en el aviso de iOS.', { duration: 8000 });
+      toast.message('Tardó demasiado. Pon la IP manual o activa Red local en Ajustes → Vertial.', { duration: 9000 });
     } finally {
       setBusy(false);
     }
