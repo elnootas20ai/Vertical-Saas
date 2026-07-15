@@ -223,7 +223,7 @@ const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] 
   { id: 'misNotificaciones', slug: 'mis-notificaciones', label: 'Mis notificaciones' },
   { id: 'apariencia', slug: 'apariencia', label: 'Apariencia' },
   { id: 'salesPoints', slug: 'tienda', label: 'Tienda' },
-  { id: 'tpvPrinter', slug: 'impresion-tpv', label: 'Tickets' },
+  { id: 'tpvPrinter', slug: 'impresora', label: 'Impresora' },
 ];
 
 const SLUG_TO_TAB: Record<string, TabId> = {
@@ -233,6 +233,8 @@ const SLUG_TO_TAB: Record<string, TabId> = {
   tiendas: 'salesPoints',
   'impresora-tpv': 'tpvPrinter',
   'tpv-impresion': 'tpvPrinter',
+  'impresion-tpv': 'tpvPrinter',
+  tickets: 'tpvPrinter',
   empresas: 'businesses',
   resumen: 'businesses',
   identidad: 'brands',

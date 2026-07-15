@@ -95,7 +95,7 @@ import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
-import { TpvPrinterSetupModal, type TpvPrinterScope } from './TpvPrinterSetupPanel';
+import type { TpvPrinterScope } from './TpvPrinterSetupPanel';
 import { setActivePrinterScope } from '../../lib/vertialPrint';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
@@ -334,7 +334,7 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, onRequestPrinter, restaurantOpening = false }: {
+function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false }: {
   onOpen: (data: OpeningData) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
@@ -352,7 +352,6 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   tabletStoreLabel?: string;
   /** Sincroniza la tienda elegida en apertura para fichaje antes de abrir caja. */
   onOpeningPdvChange?: (pdvId: string) => void;
-  onRequestPrinter?: (ctx: { pdvId: string; terminalId?: string }) => void;
   /** Bar/restaurante: tienda fijada arriba, sin auto-scroll al bloque terminal. */
   restaurantOpening?: boolean;
 }) {
@@ -769,20 +768,6 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
             <span className="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
               Contado: {total.toFixed(2)}€
             </span>
-          )}
-          {onRequestPrinter && (
-            <button
-              type="button"
-              onClick={() => onRequestPrinter({
-                pdvId: selectedPdvId || restrictedToPdvId || '',
-                terminalId: selectedTerminalId || undefined,
-              })}
-              className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
-              aria-label="Impresora"
-              title="Impresora de tickets"
-            >
-              <Printer className="w-5 h-5 text-gray-500" />
-            </button>
           )}
           <button
             type="button"
@@ -1871,7 +1856,6 @@ function RegisterStatusBar({
   onRequestCashCount,
   onRequestIncident,
   onRequestCashOps,
-  onRequestPrinter,
   clockedInWorkers,
   clockedInWorkersLoading,
   selectedOrderTakerId,
@@ -1885,7 +1869,6 @@ function RegisterStatusBar({
   onRequestCashCount: () => void;
   onRequestIncident: () => void;
   onRequestCashOps: () => void;
-  onRequestPrinter: () => void;
   clockedInWorkers: TpvClockedInWorker[];
   clockedInWorkersLoading: boolean;
   selectedOrderTakerId: string | null;
@@ -1942,9 +1925,6 @@ function RegisterStatusBar({
           </button>
           <button type="button" onClick={onRequestCashOps} title="Movimiento de caja" className={actionBtn}>
             <Banknote className="w-4 h-4 shrink-0" />
-          </button>
-          <button type="button" onClick={onRequestPrinter} title="Impresora de tickets" className={actionBtn}>
-            <Printer className="w-4 h-4 shrink-0" />
           </button>
           <button type="button" onClick={onRequestCashCount} title="Arqueo" className={actionBtn}>
             <Calculator className="w-4 h-4 shrink-0" />
@@ -2007,9 +1987,6 @@ function RegisterStatusBar({
         </button>
         <button type="button" onClick={onRequestCashOps} className={actionBtn}>
           <Banknote className="w-4 h-4 shrink-0" /> Mov. caja
-        </button>
-        <button type="button" onClick={onRequestPrinter} className={actionBtn}>
-          <Printer className="w-4 h-4 shrink-0" /> Impresora
         </button>
         <button type="button" onClick={onRequestCashCount} className={actionBtn}>
           <Calculator className="w-4 h-4 shrink-0" /> Arqueo
@@ -2333,8 +2310,6 @@ export function TpvRegisterGate({
   const [showCashOps, setShowCashOps] = useState(false);
   const [showClockIn, setShowClockIn] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
-  const [showPrinter, setShowPrinter] = useState(false);
-  const [openingPrinterCtx, setOpeningPrinterCtx] = useState<{ pdvId: string; terminalId?: string } | null>(null);
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
   const [postCloseAggregatorRows, setPostCloseAggregatorRows] = useState<AggregatorCashRow[]>([]);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
@@ -2584,9 +2559,9 @@ export function TpvRegisterGate({
   const printerModalScope = useMemo((): TpvPrinterScope | undefined => {
     if (!dataUserId) return undefined;
     const pdvId = String(
-      activeSession?.pointOfSaleId || openingPrinterCtx?.pdvId || tabletRestrictedPdvId || managerPdvPickId || '',
+      activeSession?.pointOfSaleId || tabletRestrictedPdvId || managerPdvPickId || '',
     ).trim();
-    const terminalId = activeSession?.terminalId || openingPrinterCtx?.terminalId;
+    const terminalId = activeSession?.terminalId;
     const pdv = pointsOfSale.find((p) => p._id === pdvId);
     if (!pdvId || !pdv) return undefined;
     const terminal = terminalId ? pdv.terminals.find((t) => t.id === terminalId) : undefined;
@@ -2605,7 +2580,6 @@ export function TpvRegisterGate({
     dataUserId,
     activeSession?.pointOfSaleId,
     activeSession?.terminalId,
-    openingPrinterCtx,
     tabletRestrictedPdvId,
     managerPdvPickId,
     pointsOfSale,
@@ -3433,11 +3407,6 @@ export function TpvRegisterGate({
     <>
       {wrapRegisterContext(body)}
       {clockInModalEl}
-      {showPrinter && (
-        <TpvGatePortal>
-          <TpvPrinterSetupModal open onClose={() => setShowPrinter(false)} scope={printerModalScope} />
-        </TpvGatePortal>
-      )}
     </>
   );
 
@@ -3648,10 +3617,6 @@ export function TpvRegisterGate({
         restrictedToPdvId={openingRestrictedPdvId}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}
-        onRequestPrinter={(ctx) => {
-          setOpeningPrinterCtx(ctx);
-          setShowPrinter(true);
-        }}
         onClearStorePick={
           !isWorkerUser && !isTabletSession
             ? () => {
@@ -3679,7 +3644,6 @@ export function TpvRegisterGate({
           onRequestCashCount={() => setShowCashCount(true)}
           onRequestIncident={() => setShowIncident(true)}
           onRequestCashOps={() => setShowCashOps(true)}
-          onRequestPrinter={() => setShowPrinter(true)}
           clockedInWorkers={activeStaff}
           clockedInWorkersLoading={clockedInWorkersLoading}
           selectedOrderTakerId={selectedOrderTakerId}

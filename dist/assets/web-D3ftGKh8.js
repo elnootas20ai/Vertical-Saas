@@ -1,0 +1,1 @@
+import{W as r}from"./index-CLD92xxv.js";class o extends r{async print(n){return console.log("ECHO",n),{status:"printed"}}async ping(n){return{online:!1}}async discover(n){return{printers:[]}}}export{o as ESCPOSProxyWeb};

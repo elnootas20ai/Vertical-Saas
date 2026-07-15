@@ -102,5 +102,5 @@ export function TpvPrinterSettingsTab() {
       }
     : undefined;
 
-  return <TpvPrinterSetupPanel variant="page" scope={scope} />;
+  return <TpvPrinterSetupPanel scope={scope} />;
 }
