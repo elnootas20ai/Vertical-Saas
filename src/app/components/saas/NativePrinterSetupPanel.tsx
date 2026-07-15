@@ -24,6 +24,7 @@ import {
   pingNativeHost,
   hasUserCompletedLanPermissionFlow,
   LAN_PERMISSION_MODAL_EVENT,
+  LAN_PERMISSION_ATTEMPTED_EVENT,
   openNativeAppSettings,
   type NativeNetworkPrinterDiscoveryDiagnostics,
   type VertialPrinterConfig,
@@ -97,6 +98,7 @@ export function NativePrinterSetupPanel({
   const [devicePrefix, setDevicePrefix] = useState<string | null>(null);
   const [testingManualIp, setTestingManualIp] = useState(false);
   const scanInFlightRef = useRef(false);
+  const manualIpRef = useRef<HTMLDivElement>(null);
 
   const refreshStatus = useCallback(async (nextConfig = config) => {
     setStatusLoading(true);
@@ -140,6 +142,7 @@ export function NativePrinterSetupPanel({
   const handleScanNetworkPrinters = useCallback(async (options?: {
     skipPermissionGate?: boolean;
     deepScan?: boolean;
+    firstScan?: boolean;
   }) => {
     if (!options?.skipPermissionGate && !hasUserCompletedLanPermissionFlow()) {
       setShowLanPermissionModal(true);
@@ -172,10 +175,11 @@ export function NativePrinterSetupPanel({
         discoverNativeNetworkPrinters({
           timeoutMs: deepScan ? 8_000 : 6_000,
           deepScan,
+          firstScan: Boolean(options?.firstScan),
           subnetHintHost,
           onProgress: (checked, total) => setScanProgress({ checked, total }),
         }),
-        deepScan ? 38_000 : 28_000,
+        deepScan ? 65_000 : 28_000,
         'Búsqueda de impresoras',
       );
 
@@ -246,15 +250,16 @@ export function NativePrinterSetupPanel({
       if (!result.onWifi) {
         toast.message('Conecta el dispositivo a la WiFi del local antes de buscar impresoras.', { duration: 9000 });
       } else {
-        toast.message('Si salió el aviso de iOS, pulsa Permitir. Luego puedes buscar impresoras o poner la IP manual.', { duration: 7000 });
+        toast.message('Buscando impresoras en la WiFi…', { duration: 4000 });
+        void handleScanNetworkPrinters({ skipPermissionGate: true, firstScan: true });
       }
     } catch {
       setShowLanPermissionModal(false);
-      toast.message('Tardó demasiado. Cierra, pon la IP manual (192.168.1.20) o activa Red local en Ajustes → Vertial.', { duration: 10000 });
+      toast.message('Tardó demasiado. Pon la IP manual (192.168.1.20) o activa Red local en Ajustes → Vertial.', { duration: 10000 });
     } finally {
       setLanPermissionBusy(false);
     }
-  }, []);
+  }, [handleScanNetworkPrinters]);
 
   const handleOpenAppSettings = useCallback(async () => {
     const opened = await openNativeAppSettings();
@@ -265,11 +270,16 @@ export function NativePrinterSetupPanel({
 
   useEffect(() => {
     const onShowModal = () => setShowLanPermissionModal(true);
+    const onPermissionAttempted = () => {
+      void handleScanNetworkPrinters({ skipPermissionGate: true, firstScan: true });
+    };
     window.addEventListener(LAN_PERMISSION_MODAL_EVENT, onShowModal);
+    window.addEventListener(LAN_PERMISSION_ATTEMPTED_EVENT, onPermissionAttempted);
     return () => {
       window.removeEventListener(LAN_PERMISSION_MODAL_EVENT, onShowModal);
+      window.removeEventListener(LAN_PERMISSION_ATTEMPTED_EVENT, onPermissionAttempted);
     };
-  }, []);
+  }, [handleScanNetworkPrinters]);
 
   const handleIdentifyPrinter = useCallback(async (host: string, port: number) => {
     const key = `${host}:${port}`;
@@ -301,13 +311,22 @@ export function NativePrinterSetupPanel({
     }
   };
 
-  const patch = (partial: Partial<VertialPrinterConfig>) => {
+  const patch = (partial: Partial<VertialPrinterConfig>, options?: { refresh?: boolean }) => {
     const next = normalizeVertialPrinterConfig({ ...config, ...partial });
     onConfigChange(next);
     savePrinterConfig(next);
     if (canPersistToStore) void onPersist(next, saveTarget);
-    void refreshStatus(next);
+    if (options?.refresh !== false && !('networkHost' in partial)) {
+      void refreshStatus(next);
+    }
   };
+
+  const scrollToManualIp = useCallback(() => {
+    setActiveTab('wifi');
+    window.setTimeout(() => {
+      manualIpRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  }, []);
 
   const headerSubtitle = useMemo(
     () => (canPersistToStore ? `Se guarda en ${storeLabel}. Todos los TPV la heredan.` : 'Elige cómo conectar la impresora térmica.'),
@@ -487,7 +506,7 @@ export function NativePrinterSetupPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('wifi')}
+                  onClick={scrollToManualIp}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-red-300 dark:border-red-700 text-red-800 dark:text-red-200"
                 >
                   Poner IP manual
@@ -573,13 +592,14 @@ export function NativePrinterSetupPanel({
           )}
         </div>
 
-        <div className={`${settingsListCardClass()} space-y-3`}>
+        <div ref={manualIpRef} className={`${settingsListCardClass()} space-y-3`}>
           <label className="block space-y-2">
             <span className={settingsLabelClass}>IP de la impresora (WiFi)</span>
             <input
               className={settingsInputClass}
               value={config.networkHost}
-              onChange={(e) => patch({ networkHost: e.target.value.trim(), connectionType: 'network' })}
+              onChange={(e) => patch({ networkHost: e.target.value.trim(), connectionType: 'network' }, { refresh: false })}
+              onBlur={() => void refreshStatus()}
               placeholder="Ejemplo: 192.168.1.20"
               inputMode="decimal"
               autoComplete="off"

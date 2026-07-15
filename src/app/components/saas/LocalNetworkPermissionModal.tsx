@@ -35,7 +35,7 @@ export function LocalNetworkPermissionModal({
               Buscar impresoras en la WiFi
             </h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 leading-relaxed">
-              Vertial necesita acceder a la red local de tu local para encontrar la Epson.
+              Vertial necesita acceder a la red local de tu local para encontrar impresoras térmicas.
             </p>
           </div>
           {onClose && !blocking && (
@@ -53,8 +53,8 @@ export function LocalNetworkPermissionModal({
         <div className="px-5 py-4 space-y-4">
           <ol className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed list-decimal list-inside space-y-2">
             <li>Pulsa <strong>Continuar</strong> abajo.</li>
-            <li>Cuando salga el aviso del iPad/iPhone, pulsa <strong>Permitir</strong>.</li>
-            <li>Vertial buscará impresoras automáticamente.</li>
+            <li>Si sale el aviso del iPad/iPhone, pulsa <strong>Permitir</strong>.</li>
+            <li>Vertial buscará impresoras en la WiFi automáticamente.</li>
           </ol>
 
           <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/20 px-4 py-3">

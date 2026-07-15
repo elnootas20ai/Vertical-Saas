@@ -82,7 +82,7 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
       return {
         tone: 'warn',
         label: 'Impresora no responde',
-        detail: `Comprueba que la impresora está encendida y en la misma WiFi (${config.networkHost}).`,
+        detail: `Comprueba que la impresora está encendida y en la misma WiFi (${config.networkHost}). Si no responde, activa «Red local» en Ajustes → Vertial.`,
         bridgeOk: true,
         configured: true,
       };

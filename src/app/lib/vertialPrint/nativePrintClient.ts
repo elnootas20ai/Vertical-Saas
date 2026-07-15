@@ -145,6 +145,7 @@ async function discoverByPingSweep(
   onProgress?: (checked: number, total: number) => void,
   subnetHintHost?: string,
   subnetOnly = false,
+  options?: { priorityOnly?: boolean },
 ): Promise<NativeNetworkPrinterInfo[]> {
   const targetPorts = ports.length > 0 ? ports : [...NATIVE_RAW_PRINT_PORTS];
   const deadline = Date.now() + timeoutMs;
@@ -185,6 +186,10 @@ async function discoverByPingSweep(
       onProgress?.(checked, totalHosts);
       if (found.length > 0) return dedupeNativePrinters(found);
     }
+  }
+
+  if (options?.priorityOnly) {
+    return dedupeNativePrinters(found);
   }
 
   // 2) Barrido completo 1–254 por prefijo
@@ -397,54 +402,105 @@ export async function discoverNativeNetworkPrinters(options?: {
     .map((port) => Number(port) || 0)
     .filter((port) => port > 0);
   const deepScan = Boolean(options?.deepScan);
-  const pluginTimeout = Math.min(
-    8_000,
-    Math.max(4_000, Number(options?.timeoutMs || (deepScan ? 8_000 : NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS))),
-  );
+  const firstScan = Boolean(options?.firstScan);
   const subnetSweepMs = deepScan ? NATIVE_DISCOVER_SUBNET_SWEEP_MS : NATIVE_DISCOVER_PING_SWEEP_MS;
 
   try {
-    const pluginPromise = discoverViaPlugin(ports, pluginTimeout).catch(() => [] as NativeNetworkPrinterInfo[]);
-    const sweepPromise = discoverByPingSweep(
+    if (!deepScan) {
+      const quick = await discoverByPingSweep(
+        ports,
+        12_000,
+        options?.onProgress,
+        subnetHintHost,
+        true,
+        { priorityOnly: true },
+      );
+      if (quick.length > 0) {
+        return {
+          ok: true,
+          printers: quick,
+          diagnostics: {
+            deviceIp: deviceNetwork?.ip || '',
+            devicePrefix: deviceNetwork?.prefix || '',
+            scannedPrefix,
+            pluginFound: 0,
+            sweepFound: quick.length,
+            deepScan: false,
+          },
+        };
+      }
+
+      const pluginTimeout = firstScan ? 6_000 : 3_000;
+      const [pluginResult, swept] = await Promise.all([
+        discoverViaPlugin(ports, pluginTimeout).catch(() => [] as NativeNetworkPrinterInfo[]),
+        discoverByPingSweep(ports, subnetSweepMs, options?.onProgress, subnetHintHost, true),
+      ]);
+      const pluginPrinters = dedupeNativePrinters(pluginResult);
+      const merged = dedupeNativePrinters([...pluginPrinters, ...swept]);
+
+      const diagnostics: NativeNetworkPrinterDiscoveryDiagnostics = {
+        deviceIp: deviceNetwork?.ip || '',
+        devicePrefix: deviceNetwork?.prefix || '',
+        scannedPrefix,
+        pluginFound: pluginPrinters.length,
+        sweepFound: swept.length,
+        deepScan: false,
+      };
+
+      if (merged.length > 0) {
+        return { ok: true, printers: merged, diagnostics };
+      }
+
+      const prefixHint = scannedPrefix ? ` en ${scannedPrefix}.x` : '';
+      return {
+        ok: true,
+        printers: [],
+        diagnostics,
+        error: deviceNetwork?.prefix
+          ? `No hay ninguna impresora térmica${prefixHint}. Comprueba que está encendida, en la misma WiFi que este dispositivo (${deviceNetwork.ip || 'sin IP'}) y responde en el puerto 9100. Si conoces la IP, configúrala abajo.`
+          : 'No se detectó WiFi local. Conecta el iPhone/iPad a la red del local (no solo datos móviles).',
+      };
+    }
+
+    const swept = await discoverByPingSweep(
       ports,
       subnetSweepMs,
       options?.onProgress,
       subnetHintHost,
-      !deepScan,
+      true,
     );
+    if (swept.length > 0) {
+      return {
+        ok: true,
+        printers: swept,
+        diagnostics: {
+          deviceIp: deviceNetwork?.ip || '',
+          devicePrefix: deviceNetwork?.prefix || '',
+          scannedPrefix,
+          pluginFound: 0,
+          sweepFound: swept.length,
+          deepScan: true,
+        },
+      };
+    }
 
-    const [pluginResult, swept] = await Promise.all([pluginPromise, sweepPromise]);
-    const pluginPrinters = dedupeNativePrinters(pluginResult);
-    const merged = dedupeNativePrinters([...pluginPrinters, ...swept]);
-
+    const extraSwept = await discoverByPingSweep(
+      ports,
+      NATIVE_DISCOVER_PING_SWEEP_MS,
+      options?.onProgress,
+      subnetHintHost,
+      false,
+    );
     const diagnostics: NativeNetworkPrinterDiscoveryDiagnostics = {
       deviceIp: deviceNetwork?.ip || '',
       devicePrefix: deviceNetwork?.prefix || '',
       scannedPrefix,
-      pluginFound: pluginPrinters.length,
-      sweepFound: swept.length,
-      deepScan,
+      pluginFound: 0,
+      sweepFound: extraSwept.length,
+      deepScan: true,
     };
-
-    if (merged.length > 0) {
-      return { ok: true, printers: merged, diagnostics };
-    }
-
-    if (deepScan) {
-      const extraSwept = await discoverByPingSweep(
-        ports,
-        NATIVE_DISCOVER_PING_SWEEP_MS,
-        options?.onProgress,
-        subnetHintHost,
-        false,
-      );
-      if (extraSwept.length > 0) {
-        return {
-          ok: true,
-          printers: extraSwept,
-          diagnostics: { ...diagnostics, sweepFound: extraSwept.length },
-        };
-      }
+    if (extraSwept.length > 0) {
+      return { ok: true, printers: extraSwept, diagnostics };
     }
 
     const prefixHint = scannedPrefix ? ` en ${scannedPrefix}.x` : '';
