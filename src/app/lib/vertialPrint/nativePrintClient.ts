@@ -10,7 +10,7 @@ const NATIVE_PRINT_TIMEOUT_MS = 8_000;
 const NATIVE_PRINT_RETRY_TIMEOUT_MS = 6_000;
 const NATIVE_PRINT_RETRY_DELAY_MS = 400;
 const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 6_000;
-const NATIVE_DISCOVER_PING_SWEEP_MS = 22_000;
+const NATIVE_DISCOVER_PING_SWEEP_MS = 15_000;
 const NATIVE_DISCOVER_SUBNET_SWEEP_MS = 30_000;
 const NATIVE_PING_TIMEOUT_MS = 3_000;
 
@@ -157,7 +157,12 @@ async function discoverByPingSweep(
   let checked = 0;
 
   const tryHost = async (ip: string): Promise<NativeNetworkPrinterInfo | null> => {
+    if (Date.now() >= deadline) return null;
+    if (await pingHostReachable(ip, 9100, NATIVE_PING_TIMEOUT_MS)) {
+      return normalizeDiscoveredPrinter({ ip, port: 9100, source: 'scan' });
+    }
     for (const port of targetPorts) {
+      if (port === 9100) continue;
       if (Date.now() >= deadline) return null;
       if (await pingHostReachable(ip, port, NATIVE_PING_TIMEOUT_MS)) {
         return normalizeDiscoveredPrinter({ ip, port, source: 'scan' });
@@ -392,24 +397,20 @@ export async function discoverNativeNetworkPrinters(options?: {
   }
 
   const deviceNetwork = await getNativeLocalNetworkInfo();
-  const subnetHintHost =
-    options?.subnetHintHost ||
-    deviceNetwork?.ip ||
-    (deviceNetwork?.prefix ? `${deviceNetwork.prefix}.1` : undefined);
-  const scannedPrefix = buildSweepPrefixes(subnetHintHost, true)[0] || deviceNetwork?.prefix || '';
+  const subnetHintHost = deviceNetwork?.ip || undefined;
+  const scannedPrefix = deviceNetwork?.prefix || buildSweepPrefixes(subnetHintHost, true)[0] || '';
 
   const ports = (options?.ports?.length ? options.ports : [...NATIVE_RAW_PRINT_PORTS])
     .map((port) => Number(port) || 0)
     .filter((port) => port > 0);
   const deepScan = Boolean(options?.deepScan);
-  const firstScan = Boolean(options?.firstScan);
   const subnetSweepMs = deepScan ? NATIVE_DISCOVER_SUBNET_SWEEP_MS : NATIVE_DISCOVER_PING_SWEEP_MS;
 
   try {
     if (!deepScan) {
       const quick = await discoverByPingSweep(
         ports,
-        12_000,
+        8_000,
         options?.onProgress,
         subnetHintHost,
         true,
@@ -430,25 +431,24 @@ export async function discoverNativeNetworkPrinters(options?: {
         };
       }
 
-      const pluginTimeout = firstScan ? 6_000 : 3_000;
-      const [pluginResult, swept] = await Promise.all([
-        discoverViaPlugin(ports, pluginTimeout).catch(() => [] as NativeNetworkPrinterInfo[]),
-        discoverByPingSweep(ports, subnetSweepMs, options?.onProgress, subnetHintHost, true),
-      ]);
-      const pluginPrinters = dedupeNativePrinters(pluginResult);
-      const merged = dedupeNativePrinters([...pluginPrinters, ...swept]);
-
+      const swept = await discoverByPingSweep(
+        ports,
+        subnetSweepMs,
+        options?.onProgress,
+        subnetHintHost,
+        true,
+      );
       const diagnostics: NativeNetworkPrinterDiscoveryDiagnostics = {
         deviceIp: deviceNetwork?.ip || '',
         devicePrefix: deviceNetwork?.prefix || '',
         scannedPrefix,
-        pluginFound: pluginPrinters.length,
+        pluginFound: 0,
         sweepFound: swept.length,
         deepScan: false,
       };
 
-      if (merged.length > 0) {
-        return { ok: true, printers: merged, diagnostics };
+      if (swept.length > 0) {
+        return { ok: true, printers: swept, diagnostics };
       }
 
       const prefixHint = scannedPrefix ? ` en ${scannedPrefix}.x` : '';
@@ -457,7 +457,7 @@ export async function discoverNativeNetworkPrinters(options?: {
         printers: [],
         diagnostics,
         error: deviceNetwork?.prefix
-          ? `No hay ninguna impresora térmica${prefixHint}. Comprueba que está encendida, en la misma WiFi que este dispositivo (${deviceNetwork.ip || 'sin IP'}) y responde en el puerto 9100. Si conoces la IP, configúrala abajo.`
+          ? `No hay ninguna impresora térmica${prefixHint}. Comprueba que está encendida, en la misma WiFi, y que Vertial tiene «Red local» activado en Ajustes. Si conoces la IP, ponla abajo.`
           : 'No se detectó WiFi local. Conecta el iPhone/iPad a la red del local (no solo datos móviles).',
       };
     }
