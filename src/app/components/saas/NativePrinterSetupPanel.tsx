@@ -270,12 +270,6 @@ export function NativePrinterSetupPanel({
     };
   }, []);
 
-  useEffect(() => {
-    if (!hasUserCompletedLanPermissionFlow()) {
-      setShowLanPermissionModal(true);
-    }
-  }, []);
-
   const handleIdentifyPrinter = useCallback(async (host: string, port: number) => {
     const key = `${host}:${port}`;
     setIdentifyingHost(key);
@@ -684,7 +678,6 @@ export function NativePrinterSetupPanel({
       <LocalNetworkPermissionModal
         open={showLanPermissionModal}
         busy={lanPermissionBusy}
-        blocking={!hasUserCompletedLanPermissionFlow()}
         onContinue={() => void handleLanPermissionContinue()}
         onOpenSettings={() => void handleOpenAppSettings()}
         onClose={() => setShowLanPermissionModal(false)}
