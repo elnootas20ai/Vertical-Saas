@@ -86,9 +86,17 @@ Texto sugerido en inglés o español:
 Si **Compilar IPA** falla con `Failed to archive` / exit code **65**, casi siempre es **firma**:
 
 1. El perfil de aprovisionamiento en Codemagic es **antiguo** (no incluye **Sign in with Apple**).
-2. Solución automática (ya en `codemagic.yaml`): paso **Refrescar certificados y perfiles App Store** con `--delete-stale-profiles`.
-3. Si sigue fallando, en Codemagic → **Code signing identities** → **iOS provisioning profiles** → **Fetch profiles** → descarga de nuevo `com.vertial.app` (App Store).
-4. Comprueba en [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list) que el App ID `com.vertial.app` tiene **Sign In with Apple** activo.
+2. En Codemagic → **Team settings** → **Code signing identities** → pestaña **iOS provisioning profiles**.
+3. Borra el perfil viejo de `com.vertial.app` (App Store) si existe.
+4. Pulsa **Fetch profiles**, selecciona el perfil **App Store** de `com.vertial.app` y descárgalo.
+5. Comprueba que junto al perfil aparece **certificado en verde** (checkmark).
+6. Vuelve a lanzar el build en **`iOS Release (TestFlight)`**.
+
+Comprueba en [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list) que el App ID `com.vertial.app` tiene **Sign In with Apple** activo.
+
+### Error «Cannot save Signing Certificates without certificate private key»
+
+Ese paso falló porque Codemagic no tiene la variable **`CERTIFICATE_PRIVATE_KEY`**. No hace falta regenerar certificados desde el YAML: basta con **refrescar el provisioning profile** en la UI (pasos de arriba). El workflow ya usa `ios_signing` + `use-profiles`.
 
 ## Pendiente a futuro (no bloqueante si se mantiene política actual)
 
