@@ -334,7 +334,7 @@ index 6501e68..225ed09 100644
      }
  }
 diff --git a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift
-index d094fef..59351cc 100644
+index d094fef..3b698de 100644
 --- a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift
 +++ b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift
 @@ -8,7 +8,8 @@ public class ESCPOSProxyPlugin: CAPPlugin, CAPBridgedPlugin {
@@ -347,14 +347,14 @@ index d094fef..59351cc 100644
      ]
      private let implementation = ESCPOSProxy()
  
-@@ -64,3 +65,9 @@ public class ESCPOSProxyPlugin: CAPPlugin, CAPBridgedPlugin {
+@@ -63,4 +64,9 @@ public class ESCPOSProxyPlugin: CAPPlugin, CAPBridgedPlugin {
+             call.resolve(["printers": printers])
          }
      }
- }
-+
 +
 +    @objc func getLocalNetworkInfo(_ call: CAPPluginCall) {
 +        let info = implementation.getLocalNetworkInfo()
 +        call.resolve(info)
 +    }
+ }
 \ No newline at end of file
