@@ -11,6 +11,7 @@ import {
   savePrinterConfig,
   type VertialPrinterConfig,
 } from '../../lib/vertialPrint';
+import { withNativeCallTimeout } from '../../lib/vertialPrint/nativeCallTimeout';
 import { savePrinterConfigToPdv, type PrinterConfigTarget } from '../../lib/vertialPrint/printerPdvSync';
 import { normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
 
@@ -50,6 +51,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const [found, setFound] = useState<FoundPrinter[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [scanProgress, setScanProgress] = useState<{ checked: number; total: number } | null>(null);
   const [testing, setTesting] = useState(false);
   const scanRef = useRef(false);
 
@@ -91,10 +93,19 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     scanRef.current = true;
     setScanning(true);
     setScanMessage(null);
+    setScanProgress(null);
     setFound([]);
 
     try {
-      const result = await discoverNativeNetworkPrinters({});
+      // Tope duro: la búsqueda nunca puede dejar el botón girando indefinidamente.
+      const result = await withNativeCallTimeout(
+        discoverNativeNetworkPrinters({
+          subnetHintHost: selectedHost || undefined,
+          onProgress: (checked, total) => setScanProgress({ checked, total }),
+        }),
+        60_000,
+        'Búsqueda de impresoras',
+      );
       const printers = (result.printers || []).map((p) => ({ host: p.host, port: p.port || 9100 }));
       if (printers.length === 0) {
         setScanMessage(result.error || 'No se encontró ninguna impresora. Comprueba que está encendida y en la misma WiFi, y que Vertial tiene «Red local» activado en Ajustes del iPhone/iPad.');
@@ -107,8 +118,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     } finally {
       scanRef.current = false;
       setScanning(false);
+      setScanProgress(null);
     }
-  }, [selectPrinter]);
+  }, [selectPrinter, selectedHost]);
 
   const handleTest = useCallback(async () => {
     setTesting(true);
@@ -188,6 +200,14 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             {scanning ? <Loader2 className="w-5 h-5 animate-spin" /> : <Radar className="w-5 h-5" />}
             {scanning ? 'Buscando impresora WiFi…' : 'Buscar impresora WiFi'}
           </button>
+
+          {scanning && (
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
+              {scanProgress
+                ? `Comprobando la red… ${scanProgress.checked} de ${scanProgress.total}`
+                : 'Buscando en la WiFi del local… puede tardar hasta un minuto.'}
+            </p>
+          )}
 
           {found.length > 1 && (
             <div className="grid gap-2">

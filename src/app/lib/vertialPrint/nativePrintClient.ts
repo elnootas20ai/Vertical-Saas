@@ -9,10 +9,12 @@ export const NATIVE_RAW_PRINT_PORTS = [9100, 9101, 9102] as const;
 const NATIVE_PRINT_TIMEOUT_MS = 8_000;
 const NATIVE_PRINT_RETRY_TIMEOUT_MS = 6_000;
 const NATIVE_PRINT_RETRY_DELAY_MS = 400;
-const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 6_000;
-const NATIVE_DISCOVER_PING_SWEEP_MS = 15_000;
+const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 8_000;
+const NATIVE_DISCOVER_PLUGIN_RETRY_MS = 12_000;
 const NATIVE_DISCOVER_SUBNET_SWEEP_MS = 30_000;
 const NATIVE_PING_TIMEOUT_MS = 3_000;
+/** Ping corto para barridos: con 3 s por host el barrido no cubre la subred. */
+const NATIVE_SWEEP_PING_TIMEOUT_MS = 1_500;
 
 /** IPs habituales de impresoras térmicas en routers de locales. */
 const PRIORITY_LAST_OCTETS = [20, 50, 100, 200, 10, 1, 254, 2, 30, 40, 60, 80, 150, 22, 23, 24, 25];
@@ -138,84 +140,43 @@ async function pingHostReachable(ip: string, port: number, timeoutMs: number): P
   }
 }
 
-/** Barrido TCP por ping cuando discover del plugin no responde o no encuentra nada. */
+/** Barrido TCP por ping (solo puerto 9100) cuando discover del plugin no encuentra nada. */
 async function discoverByPingSweep(
-  ports: number[],
   timeoutMs: number,
   onProgress?: (checked: number, total: number) => void,
   subnetHintHost?: string,
-  subnetOnly = false,
-  options?: { priorityOnly?: boolean },
 ): Promise<NativeNetworkPrinterInfo[]> {
-  const targetPorts = ports.length > 0 ? ports : [...NATIVE_RAW_PRINT_PORTS];
   const deadline = Date.now() + timeoutMs;
   const found: NativeNetworkPrinterInfo[] = [];
-  const batchSize = 12;
+  const batchSize = 24;
 
-  const prefixes = buildSweepPrefixes(subnetHintHost, subnetOnly);
-  const totalHosts = prefixes.length * 254;
+  const prefix = buildSweepPrefixes(subnetHintHost, true)[0];
+  if (!prefix) return found;
+
+  const priority = PRIORITY_LAST_OCTETS.map((n) => `${prefix}.${n}`);
+  const rest = Array.from({ length: 254 }, (_, index) => `${prefix}.${index + 1}`)
+    .filter((ip) => !priority.includes(ip));
+  const hosts = [...priority, ...rest];
   let checked = 0;
 
   const tryHost = async (ip: string): Promise<NativeNetworkPrinterInfo | null> => {
     if (Date.now() >= deadline) return null;
-    if (await pingHostReachable(ip, 9100, NATIVE_PING_TIMEOUT_MS)) {
+    if (await pingHostReachable(ip, 9100, NATIVE_SWEEP_PING_TIMEOUT_MS)) {
       return normalizeDiscoveredPrinter({ ip, port: 9100, source: 'scan' });
-    }
-    for (const port of targetPorts) {
-      if (port === 9100) continue;
-      if (Date.now() >= deadline) return null;
-      if (await pingHostReachable(ip, port, NATIVE_PING_TIMEOUT_MS)) {
-        return normalizeDiscoveredPrinter({ ip, port, source: 'scan' });
-      }
     }
     return null;
   };
 
-  const pushHit = (hit: NativeNetworkPrinterInfo | null) => {
-    if (!hit) return;
-    if (!found.some((item) => item.host === hit.host && item.port === hit.port)) {
-      found.push(hit);
-    }
-  };
-
-  // 1) IPs frecuentes en la subred del dispositivo (muchas impresoras usan .20, .50, etc.)
-  const primaryPrefix = prefixes[0];
-  if (primaryPrefix) {
-    const priorityHosts = PRIORITY_LAST_OCTETS.map((n) => `${primaryPrefix}.${n}`);
-    for (let offset = 0; offset < priorityHosts.length; offset += batchSize) {
-      if (Date.now() >= deadline) break;
-      const batch = priorityHosts.slice(offset, offset + batchSize);
-      const hits = await Promise.all(batch.map((ip) => tryHost(ip)));
-      for (const hit of hits) pushHit(hit);
-      checked = Math.min(totalHosts, checked + batch.length);
-      onProgress?.(checked, totalHosts);
-      if (found.length > 0) return dedupeNativePrinters(found);
-    }
-  }
-
-  if (options?.priorityOnly) {
-    return dedupeNativePrinters(found);
-  }
-
-  // 2) Barrido completo 1–254 por prefijo
-  for (const prefix of prefixes) {
+  for (let offset = 0; offset < hosts.length; offset += batchSize) {
     if (Date.now() >= deadline) break;
-
-    const prefixHosts = Array.from({ length: 254 }, (_, index) => `${prefix}.${index + 1}`);
-    for (let offset = 0; offset < prefixHosts.length; offset += batchSize) {
-      if (Date.now() >= deadline) break;
-
-      const batch = prefixHosts.slice(offset, offset + batchSize);
-      const hits = await Promise.all(batch.map((ip) => tryHost(ip)));
-      for (const hit of hits) pushHit(hit);
-
-      checked = Math.min(totalHosts, checked + batch.length);
-      onProgress?.(checked, totalHosts);
-
-      if (found.length > 0 && !subnetOnly) break;
+    const batch = hosts.slice(offset, offset + batchSize);
+    const hits = await Promise.all(batch.map((ip) => tryHost(ip)));
+    for (const hit of hits) {
+      if (hit && !found.some((item) => item.host === hit.host)) found.push(hit);
     }
-
-    if (found.length > 0 && !subnetOnly) break;
+    checked = Math.min(hosts.length, checked + batch.length);
+    onProgress?.(checked, hosts.length);
+    if (found.length > 0) break;
   }
 
   return dedupeNativePrinters(found);
@@ -378,14 +339,9 @@ export async function pingNativeHost(
 
 export async function discoverNativeNetworkPrinters(options?: {
   ports?: number[];
-  timeoutMs?: number;
   onProgress?: (checked: number, total: number) => void;
   /** IP guardada o del router: prioriza esa subred en el barrido (iPad/iPhone). */
   subnetHintHost?: string;
-  /** Primera búsqueda tras conceder permiso: más tiempo para mDNS iOS. */
-  firstScan?: boolean;
-  /** Escaneo profundo: solo la subred WiFi del móvil, hasta ~45 s. */
-  deepScan?: boolean;
 }): Promise<{
   ok: boolean;
   printers: NativeNetworkPrinterInfo[];
@@ -396,121 +352,65 @@ export async function discoverNativeNetworkPrinters(options?: {
     return { ok: false, printers: [], error: 'Búsqueda en red solo en la app Vertial' };
   }
 
-  const deviceNetwork = await getNativeLocalNetworkInfo();
-  const subnetHintHost = deviceNetwork?.ip || undefined;
+  let deviceNetwork: Awaited<ReturnType<typeof getNativeLocalNetworkInfo>> = null;
+  try {
+    deviceNetwork = await withNativeTimeout(getNativeLocalNetworkInfo(), 3_000, 'Información de red');
+  } catch {
+    deviceNetwork = null;
+  }
+  const subnetHintHost = options?.subnetHintHost || deviceNetwork?.ip || undefined;
   const scannedPrefix = deviceNetwork?.prefix || buildSweepPrefixes(subnetHintHost, true)[0] || '';
 
   const ports = (options?.ports?.length ? options.ports : [...NATIVE_RAW_PRINT_PORTS])
     .map((port) => Number(port) || 0)
     .filter((port) => port > 0);
-  const deepScan = Boolean(options?.deepScan);
-  const subnetSweepMs = deepScan ? NATIVE_DISCOVER_SUBNET_SWEEP_MS : NATIVE_DISCOVER_PING_SWEEP_MS;
+
+  const buildDiagnostics = (pluginFound: number, sweepFound: number): NativeNetworkPrinterDiscoveryDiagnostics => ({
+    deviceIp: deviceNetwork?.ip || '',
+    devicePrefix: deviceNetwork?.prefix || '',
+    scannedPrefix,
+    pluginFound,
+    sweepFound,
+    deepScan: false,
+  });
 
   try {
-    if (!deepScan) {
-      const quick = await discoverByPingSweep(
-        ports,
-        8_000,
-        options?.onProgress,
-        subnetHintHost,
-        true,
-        { priorityOnly: true },
-      );
-      if (quick.length > 0) {
-        return {
-          ok: true,
-          printers: quick,
-          diagnostics: {
-            deviceIp: deviceNetwork?.ip || '',
-            devicePrefix: deviceNetwork?.prefix || '',
-            scannedPrefix,
-            pluginFound: 0,
-            sweepFound: quick.length,
-            deepScan: false,
-          },
-        };
-      }
-
-      const swept = await discoverByPingSweep(
-        ports,
-        subnetSweepMs,
-        options?.onProgress,
-        subnetHintHost,
-        true,
-      );
-      const diagnostics: NativeNetworkPrinterDiscoveryDiagnostics = {
-        deviceIp: deviceNetwork?.ip || '',
-        devicePrefix: deviceNetwork?.prefix || '',
-        scannedPrefix,
-        pluginFound: 0,
-        sweepFound: swept.length,
-        deepScan: false,
-      };
-
-      if (swept.length > 0) {
-        return { ok: true, printers: swept, diagnostics };
-      }
-
-      const prefixHint = scannedPrefix ? ` en ${scannedPrefix}.x` : '';
-      return {
-        ok: true,
-        printers: [],
-        diagnostics,
-        error: deviceNetwork?.prefix
-          ? `No hay ninguna impresora térmica${prefixHint}. Comprueba que está encendida, en la misma WiFi, y que Vertial tiene «Red local» activado en Ajustes. Si conoces la IP, ponla abajo.`
-          : 'No se detectó WiFi local. Conecta el iPhone/iPad a la red del local (no solo datos móviles).',
-      };
+    // 1) Descubrimiento nativo (mDNS + escaneo /24 con conexiones concurrentes): lo rápido.
+    //    En iOS este primer intento dispara el aviso de «Red local» si aún no se concedió.
+    const firstPass = await discoverViaPlugin(ports, NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS).catch(
+      () => [] as NativeNetworkPrinterInfo[],
+    );
+    if (firstPass.length > 0) {
+      return { ok: true, printers: firstPass, diagnostics: buildDiagnostics(firstPass.length, 0) };
     }
 
+    // 2) Segundo intento nativo con más tiempo: si el aviso de permiso acaba de aceptarse,
+    //    el primer escaneo falló con los sockets bloqueados y este ya funciona.
+    const secondPass = await discoverViaPlugin(ports, NATIVE_DISCOVER_PLUGIN_RETRY_MS).catch(
+      () => [] as NativeNetworkPrinterInfo[],
+    );
+    if (secondPass.length > 0) {
+      return { ok: true, printers: secondPass, diagnostics: buildDiagnostics(secondPass.length, 0) };
+    }
+
+    // 3) Último recurso: barrido por ping desde JS (solo puerto 9100, subred del dispositivo).
     const swept = await discoverByPingSweep(
-      ports,
-      subnetSweepMs,
+      NATIVE_DISCOVER_SUBNET_SWEEP_MS,
       options?.onProgress,
       subnetHintHost,
-      true,
     );
     if (swept.length > 0) {
-      return {
-        ok: true,
-        printers: swept,
-        diagnostics: {
-          deviceIp: deviceNetwork?.ip || '',
-          devicePrefix: deviceNetwork?.prefix || '',
-          scannedPrefix,
-          pluginFound: 0,
-          sweepFound: swept.length,
-          deepScan: true,
-        },
-      };
+      return { ok: true, printers: swept, diagnostics: buildDiagnostics(0, swept.length) };
     }
 
-    const extraSwept = await discoverByPingSweep(
-      ports,
-      NATIVE_DISCOVER_PING_SWEEP_MS,
-      options?.onProgress,
-      subnetHintHost,
-      false,
-    );
-    const diagnostics: NativeNetworkPrinterDiscoveryDiagnostics = {
-      deviceIp: deviceNetwork?.ip || '',
-      devicePrefix: deviceNetwork?.prefix || '',
-      scannedPrefix,
-      pluginFound: 0,
-      sweepFound: extraSwept.length,
-      deepScan: true,
-    };
-    if (extraSwept.length > 0) {
-      return { ok: true, printers: extraSwept, diagnostics };
-    }
-
-    const prefixHint = scannedPrefix ? ` en ${scannedPrefix}.x` : '';
+    const prefixHint = scannedPrefix ? ` en la red ${scannedPrefix}.x` : '';
     return {
       ok: true,
       printers: [],
-      diagnostics,
+      diagnostics: buildDiagnostics(0, 0),
       error: deviceNetwork?.prefix
-        ? `No hay ninguna impresora térmica${prefixHint}. Comprueba que está encendida, en la misma WiFi que este dispositivo (${deviceNetwork.ip || 'sin IP'}) y responde en el puerto 9100. Si conoces la IP, configúrala abajo.`
-        : 'No se detectó WiFi local. Conecta el iPhone/iPad a la red del local (no solo datos móviles).',
+        ? `No se encontró ninguna impresora${prefixHint}. Comprueba que está encendida y en la misma WiFi, y que Vertial tiene «Red local» activado en Ajustes de iOS (Ajustes → Vertial → Red local). Luego vuelve a buscar.`
+        : 'No se detectó WiFi local. Conecta el iPhone/iPad a la red WiFi del local (no solo datos móviles) y activa «Red local» para Vertial en Ajustes de iOS.',
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo buscar impresoras';
