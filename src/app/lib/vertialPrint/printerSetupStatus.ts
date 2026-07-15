@@ -82,7 +82,7 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
       return {
         tone: 'warn',
         label: 'Impresora no responde',
-        detail: `Comprueba que la Epson está encendida y en la misma WiFi (${config.networkHost}).`,
+        detail: `Comprueba que la impresora está encendida y en la misma WiFi (${config.networkHost}).`,
         bridgeOk: true,
         configured: true,
       };

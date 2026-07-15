@@ -17,6 +17,8 @@ import { NuevoClienteModal } from '../../components/saas/NuevoClienteModal';
 import type { AuthUser, RoleDefinition } from '../../lib/authApi';
 import type { Client } from '../../context/AppContext';
 import { getInvitePermissionsForUser, loadCustomRoles, mergeRoleCatalog } from '../../lib/roleCatalog';
+import { isVertialNativeApp, printTicketDocument } from '../../lib/vertialPrint';
+import { splitTicketVat, type TicketDocument } from '../../lib/vertialPrint/ticketDocument';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -199,7 +201,57 @@ function catalogToProducts(items: CatalogItem[]): TpvProduct[] {
     .map(i => ({ id: i._id || i.id, name: i.name, price: i.unitPrice, category: i.category }));
 }
 
-function printReceipt(order: TpvOrder, billedBy: string, method: string, received: number, change: number) {
+function tpvOrderToTicketDoc(
+  order: TpvOrder,
+  billedBy: string,
+  method: string,
+  received: number,
+  change: number,
+): TicketDocument {
+  const { base, vat } = splitTicketVat(order.total, 21);
+  const date = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+  return {
+    variant: 'customer',
+    title: 'TICKET',
+    ticketNo: `MESA-${order.tableNumber}`,
+    dateLabel: date,
+    issuer: 'TPV',
+    taxId: '',
+    addressLine: '',
+    phone: '',
+    salesPointName: order.section || '',
+    orderNumber: String(order.tableNumber),
+    customerName: `Mesa ${order.tableNumber}`,
+    customerPhone: '',
+    customerAddress: '',
+    deliveryTypeLabel: '',
+    cashierName: order.createdBy,
+    lines: order.items.map((i) => ({
+      qty: i.quantity,
+      name: i.name,
+      total: i.price * i.quantity,
+    })),
+    base,
+    vat,
+    vatRate: 21,
+    total: order.total,
+    paymentLabel: method,
+    paymentStatusLabel: 'Cobrado',
+    refundReason: '',
+    orderNotes:
+      received > 0
+        ? `Cobrado por ${billedBy} · Recibido ${received.toFixed(2)} EUR · Cambio ${change.toFixed(2)} EUR`
+        : `Cobrado por ${billedBy}`,
+    footer: 'Gracias por su visita',
+    isRefund: false,
+  };
+}
+
+async function printReceipt(order: TpvOrder, billedBy: string, method: string, received: number, change: number) {
+  if (isVertialNativeApp()) {
+    await printTicketDocument(tpvOrderToTicketDoc(order, billedBy, method, received, change));
+    return;
+  }
   const w = window.open('', '_blank', 'width=320,height=600');
   if (!w) { toast.error('No se pudo abrir la ventana de impresión'); return; }
   const date = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
@@ -962,7 +1014,7 @@ export function TpvTab({ userName, userId, view }: TpvTabProps) {
     setShowBillModal(false);
     toast.success(`Mesa ${activeOrder.tableNumber} cobrada — ${activeOrder.total.toFixed(2)}€ (${method})`);
     if (shouldPrint) {
-      printReceipt(updatedOrder, billedBy, method, received, change);
+      void printReceipt(updatedOrder, billedBy, method, received, change);
     }
   }, [activeOrder]);
 

@@ -6,6 +6,8 @@ import {
 import { toast } from 'sonner';
 import type { WeighUnit } from '../../lib/deliveryApi';
 import type { UseScaleReturn, ScaleStatus } from '../../hooks/useScale';
+import { DecimalNumpadField } from './DecimalNumpadField';
+import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
 
 export type ScaleWidgetMode = 'card' | 'inline' | 'compact';
 type CaptureMode = 'automatic' | 'manual';
@@ -69,7 +71,7 @@ export function ScaleWeightWidget({
 
   const handleAcceptWeight = useCallback(() => {
     if (useManual) {
-      const w = parseFloat(manualWeight.replace(',', '.'));
+      const w = parseDecimalPadValue(manualWeight);
       if (!Number.isFinite(w) || w <= 0) {
         toast.error('Introduce un peso válido');
         return;
@@ -91,13 +93,6 @@ export function ScaleWeightWidget({
     acceptedRef.current = true;
     onWeightAccepted?.(w, unit);
   }, [scale, useManual, manualWeight, unit, onWeightAccepted]);
-
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleAcceptWeight();
-    }
-  }, [handleAcceptWeight]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -132,14 +127,15 @@ export function ScaleWeightWidget({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <input
-            type="text"
-            inputMode="decimal"
+          <DecimalNumpadField
             value={manualWeight}
-            onChange={(e) => setManualWeight(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onChange={setManualWeight}
             placeholder={`0.${'0'.repeat(precision)}`}
-            className="w-28 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xl font-mono text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
+            showNumpad
+            compactNumpad
+            maxDecimals={precision}
+            className="flex-1"
+            inputClassName="w-full rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-xl font-mono text-right tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <span className="text-lg text-gray-500">{unit}</span>
           <button

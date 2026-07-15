@@ -5,14 +5,23 @@ import { settingsListCardClass, settingsPrimaryBtnClass } from '../saas/settings
 import {
   dispatchNativeLocalNetworkPermissionPrompt,
   openNativeAppSettings,
+  rerequestNativeLocalNetworkPermission,
 } from '../../lib/vertialPrint/localNetworkPermission';
 
 export function NativeLocalNetworkPermissionCard() {
   const [busy, setBusy] = useState(false);
 
-  const handleRetryPermission = () => {
-    dispatchNativeLocalNetworkPermissionPrompt();
-    toast.message('Pulsa «Continuar» y luego Permitir en el aviso de iOS.', { duration: 8000 });
+  const handleRetryPermission = async () => {
+    setBusy(true);
+    try {
+      await rerequestNativeLocalNetworkPermission();
+      toast.success('Permiso solicitado de nuevo. Si sale el aviso de iOS, pulsa Permitir.', { duration: 9000 });
+    } catch {
+      dispatchNativeLocalNetworkPermissionPrompt();
+      toast.message('Pulsa «Continuar» y luego Permitir en el aviso de iOS.', { duration: 8000 });
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleOpenSettings = async () => {
@@ -36,7 +45,7 @@ export function NativeLocalNetworkPermissionCard() {
         <div className="min-w-0">
           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Permiso de red local (iPhone/iPad)</p>
           <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">
-            Si no te salió el aviso al abrir la app, pulsa abajo. Sin este permiso iOS no deja buscar impresoras WiFi.
+            Sin este permiso iOS no deja buscar impresoras WiFi. Si no te salió el aviso, pulsa abajo para volver a pedirlo.
           </p>
         </div>
       </div>
@@ -45,11 +54,11 @@ export function NativeLocalNetworkPermissionCard() {
         <button
           type="button"
           disabled={busy}
-          onClick={handleRetryPermission}
+          onClick={() => { void handleRetryPermission(); }}
           className={`${settingsPrimaryBtnClass} w-full`}
         >
-          <ShieldCheck className="w-4 h-4" />
-          Volver a pedir permiso
+          {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+          {busy ? 'Pidiendo permiso…' : 'Volver a pedir permiso'}
         </button>
         <button
           type="button"

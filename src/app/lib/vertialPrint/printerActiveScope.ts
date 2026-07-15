@@ -67,9 +67,12 @@ export function resolveEffectivePrinterConfig(options?: {
   }
 
   if (pdvId) {
-    const cached = loadPdvPrinterCache(pdvId);
-    if (cached && isVertialPrinterConfigConfigured(cached)) {
-      return cached;
+    const cachedRaw = loadPdvPrinterCache(pdvId);
+    if (cachedRaw) {
+      const cached = normalizeVertialPrinterConfig(cachedRaw);
+      if (isVertialPrinterConfigConfigured(cached)) {
+        return cached;
+      }
     }
   }
 

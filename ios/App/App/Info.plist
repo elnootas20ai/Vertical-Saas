@@ -57,6 +57,8 @@
 	<array>
 		<string>_pdl-datastream._tcp</string>
 		<string>_printer._tcp</string>
+		<string>_epos._tcp</string>
+		<string>_jetdirect._tcp</string>
 		<string>_ipp._tcp</string>
 		<string>_ipps._tcp</string>
 		<string>_uscans._tcp</string>

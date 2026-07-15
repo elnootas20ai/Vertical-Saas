@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Printer,
@@ -9,17 +9,23 @@ import {
   AlertTriangle,
   X,
   Store,
+  Wifi,
+  Bluetooth,
+  Usb,
 } from 'lucide-react';
 import {
   discoverNativeNetworkPrinters,
   identifyNativePrinter,
   printTestTicket,
   savePrinterConfig,
-  hasAcknowledgedLocalNetworkPermission,
   completeLocalNetworkPermissionFlow,
-  LAN_PERMISSION_ATTEMPTED_EVENT,
+  buildPrinterDiscoveryHelpMessage,
+  getNativeLocalNetworkInfo,
+  pingNativeHost,
+  hasUserCompletedLanPermissionFlow,
   LAN_PERMISSION_MODAL_EVENT,
   openNativeAppSettings,
+  type NativeNetworkPrinterDiscoveryDiagnostics,
   type VertialPrinterConfig,
 } from '../../lib/vertialPrint';
 import { withNativeCallTimeout } from '../../lib/vertialPrint/nativeCallTimeout';
@@ -42,6 +48,14 @@ function statusToneClass(tone: PrinterStatusSnapshot['tone']): string {
   if (tone === 'warn') return 'bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800';
   return 'bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700';
 }
+
+type ConnectionTab = 'wifi' | 'bluetooth' | 'usb';
+
+const CONNECTION_TABS: Array<{ id: ConnectionTab; label: string; icon: typeof Wifi }> = [
+  { id: 'wifi', label: 'WiFi', icon: Wifi },
+  { id: 'bluetooth', label: 'Bluetooth', icon: Bluetooth },
+  { id: 'usb', label: 'USB', icon: Usb },
+];
 
 export function NativePrinterSetupPanel({
   variant = 'page',
@@ -77,6 +91,12 @@ export function NativePrinterSetupPanel({
   const [statusLoading, setStatusLoading] = useState(true);
   const [showLanPermissionModal, setShowLanPermissionModal] = useState(false);
   const [lanPermissionBusy, setLanPermissionBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState<ConnectionTab>('wifi');
+  const [scanDiagnostics, setScanDiagnostics] = useState<NativeNetworkPrinterDiscoveryDiagnostics | null>(null);
+  const [deviceIp, setDeviceIp] = useState<string | null>(null);
+  const [devicePrefix, setDevicePrefix] = useState<string | null>(null);
+  const [testingManualIp, setTestingManualIp] = useState(false);
+  const scanInFlightRef = useRef(false);
 
   const refreshStatus = useCallback(async (nextConfig = config) => {
     setStatusLoading(true);
@@ -90,6 +110,18 @@ export function NativePrinterSetupPanel({
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
+
+  useEffect(() => {
+    void getNativeLocalNetworkInfo().then((info) => {
+      if (info?.ip) {
+        setDeviceIp(info.ip);
+        setDevicePrefix(info.prefix || null);
+      } else {
+        setDeviceIp(null);
+        setDevicePrefix(null);
+      }
+    });
+  }, []);
 
   const selectNetworkPrinter = useCallback((host: string, port: number) => {
     const next = normalizeVertialPrinterConfig({
@@ -105,29 +137,49 @@ export function NativePrinterSetupPanel({
     toast.success(`Impresora seleccionada: ${host}`);
   }, [canPersistToStore, config, onConfigChange, onPersist, refreshStatus, saveTarget]);
 
-  const handleScanNetworkPrinters = useCallback(async (options?: { skipPermissionGate?: boolean }) => {
-    if (!options?.skipPermissionGate && !hasAcknowledgedLocalNetworkPermission()) {
+  const handleScanNetworkPrinters = useCallback(async (options?: {
+    skipPermissionGate?: boolean;
+    deepScan?: boolean;
+  }) => {
+    if (!options?.skipPermissionGate && !hasUserCompletedLanPermissionFlow()) {
       setShowLanPermissionModal(true);
       return;
     }
+    if (scanInFlightRef.current) return;
+    scanInFlightRef.current = true;
 
     setScanningNetwork(true);
     setScanDone(false);
     setScanError(null);
     setScanProgress(null);
+    setScanDiagnostics(null);
     setNetworkPrinters([]);
     setIdentifyResults({});
 
     try {
+      const deviceNetwork = await getNativeLocalNetworkInfo();
+      if (deviceNetwork?.ip) {
+        setDeviceIp(deviceNetwork.ip);
+        setDevicePrefix(deviceNetwork.prefix || null);
+      } else {
+        setDeviceIp(null);
+        setDevicePrefix(null);
+      }
+
+      const subnetHintHost = config.networkHost || deviceNetwork?.ip || undefined;
+      const deepScan = Boolean(options?.deepScan);
       const result = await withNativeCallTimeout(
         discoverNativeNetworkPrinters({
-          timeoutMs: 5000,
-          subnetHintHost: config.networkHost || undefined,
+          timeoutMs: deepScan ? 8_000 : 6_000,
+          deepScan,
+          subnetHintHost,
           onProgress: (checked, total) => setScanProgress({ checked, total }),
         }),
-        16_000,
+        deepScan ? 38_000 : 28_000,
         'Búsqueda de impresoras',
       );
+
+      setScanDiagnostics(result.diagnostics || null);
 
       if (!result.ok) {
         setScanError(result.error || 'No se pudo buscar impresoras');
@@ -139,11 +191,15 @@ export function NativePrinterSetupPanel({
       setScanDone(true);
 
       if (result.printers.length === 0) {
-        const hint = result.error || 'No se encontró ninguna impresora. Activa «Red local» para Vertial o busca de nuevo.';
+        const hint = result.error || buildPrinterDiscoveryHelpMessage({
+          onWifi: Boolean(deviceNetwork?.prefix),
+          wifiPrefix: deviceNetwork?.prefix,
+        });
         setScanError(hint);
         return;
       }
 
+      setScanError(null);
       if (result.printers.length === 1) {
         selectNetworkPrinter(result.printers[0].host, result.printers[0].port || 9100);
       } else {
@@ -154,23 +210,50 @@ export function NativePrinterSetupPanel({
       setScanError(message);
       toast.error(message, { duration: 8000 });
     } finally {
+      scanInFlightRef.current = false;
       setScanningNetwork(false);
       setScanProgress(null);
     }
-  }, [selectNetworkPrinter]);
+  }, [config.networkHost, selectNetworkPrinter]);
+
+  const handleTestManualIp = useCallback(async () => {
+    const host = String(config.networkHost || '').trim();
+    if (!isValidIpv4(host)) {
+      toast.error('Introduce una IP válida (ejemplo: 192.168.1.50)');
+      return;
+    }
+    setTestingManualIp(true);
+    try {
+      for (const port of [9100, 9101, 9102]) {
+        const probe = await pingNativeHost(host, port);
+        if (probe.ok) {
+          selectNetworkPrinter(host, port);
+          toast.success(`Impresora responde en ${host}:${port}`);
+          return;
+        }
+      }
+      toast.error(`La IP ${host} no responde. Comprueba: impresora encendida, misma WiFi, y en Ajustes → Vertial activa «Red local».`, { duration: 10000 });
+    } finally {
+      setTestingManualIp(false);
+    }
+  }, [config.networkHost, selectNetworkPrinter]);
 
   const handleLanPermissionContinue = useCallback(async () => {
     setLanPermissionBusy(true);
     try {
-      await completeLocalNetworkPermissionFlow();
+      const result = await completeLocalNetworkPermissionFlow();
       setShowLanPermissionModal(false);
+      if (!result.onWifi) {
+        toast.message('Conecta el dispositivo a la WiFi del local antes de buscar impresoras.', { duration: 9000 });
+      }
     } catch {
       toast.error('No se pudo pedir el permiso. Abre Ajustes → Vertial → Red local.', { duration: 9000 });
+      return;
     } finally {
       setLanPermissionBusy(false);
     }
-    void handleScanNetworkPrinters({ skipPermissionGate: true });
-  }, [handleScanNetworkPrinters]);
+    toast.message('Permiso listo. Pulsa «Buscar impresoras» para escanear la WiFi.', { duration: 6000 });
+  }, []);
 
   const handleOpenAppSettings = useCallback(async () => {
     const opened = await openNativeAppSettings();
@@ -180,21 +263,15 @@ export function NativePrinterSetupPanel({
   }, []);
 
   useEffect(() => {
-    const onPermissionAttempted = () => {
-      void handleScanNetworkPrinters({ skipPermissionGate: true });
-    };
     const onShowModal = () => setShowLanPermissionModal(true);
-    window.addEventListener(LAN_PERMISSION_ATTEMPTED_EVENT, onPermissionAttempted);
     window.addEventListener(LAN_PERMISSION_MODAL_EVENT, onShowModal);
     return () => {
-      window.removeEventListener(LAN_PERMISSION_ATTEMPTED_EVENT, onPermissionAttempted);
       window.removeEventListener(LAN_PERMISSION_MODAL_EVENT, onShowModal);
     };
-  }, [handleScanNetworkPrinters]);
+  }, []);
 
-  // Al abrir impresoras (TPV o Ajustes): pedir permiso si aún no se ha dado.
   useEffect(() => {
-    if (!hasAcknowledgedLocalNetworkPermission()) {
+    if (!hasUserCompletedLanPermissionFlow()) {
       setShowLanPermissionModal(true);
     }
   }, []);
@@ -220,7 +297,7 @@ export function NativePrinterSetupPanel({
     if (canPersistToStore) void onPersist(config, saveTarget);
     setTesting(true);
     try {
-      await withNativeCallTimeout(printTestTicket(), 6_000, 'Impresión de prueba');
+      await withNativeCallTimeout(printTestTicket(), 12_000, 'Impresión de prueba');
       await refreshStatus();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo imprimir la prueba', { duration: 8000 });
@@ -238,9 +315,24 @@ export function NativePrinterSetupPanel({
   };
 
   const headerSubtitle = useMemo(
-    () => (canPersistToStore ? `Se guarda en ${storeLabel}. Todos los TPV la heredan.` : 'Busca, elige y listo.'),
+    () => (canPersistToStore ? `Se guarda en ${storeLabel}. Todos los TPV la heredan.` : 'Elige cómo conectar la impresora térmica.'),
     [canPersistToStore, storeLabel],
   );
+
+  const networkSummary = useMemo(() => {
+    if (!deviceIp && !devicePrefix) {
+      return {
+        title: 'Sin WiFi del local',
+        detail: 'Conecta el iPhone o iPad a la misma WiFi que la impresora (no uses solo datos móviles).',
+        tone: 'warn' as const,
+      };
+    }
+    return {
+      title: `Tu dispositivo: ${deviceIp}`,
+      detail: `Red del local: ${devicePrefix}.x — La impresora debe estar en esta misma red (puerto 9100).`,
+      tone: 'ok' as const,
+    };
+  }, [deviceIp, devicePrefix]);
 
   return (
     <div className={variant === 'page' ? 'space-y-6 max-w-2xl' : 'flex flex-col min-h-0'}>
@@ -250,7 +342,7 @@ export function NativePrinterSetupPanel({
             <Receipt className="w-5 h-5 text-gray-700 dark:text-gray-300" />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Impresora WiFi</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Impresora térmica</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400">{headerSubtitle}</p>
           </div>
           {onClose && (
@@ -269,7 +361,7 @@ export function NativePrinterSetupPanel({
                 <Receipt className="w-5 h-5 text-gray-700 dark:text-gray-300" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Impresora WiFi</h2>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Impresora térmica</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">{headerSubtitle}</p>
               </div>
             </div>
@@ -288,7 +380,44 @@ export function NativePrinterSetupPanel({
           </div>
         )}
 
+        <div className={`${settingsListCardClass()} p-1.5`}>
+          <div className="grid grid-cols-3 gap-1">
+            {CONNECTION_TABS.map(({ id, label, icon: Icon }) => {
+              const selected = activeTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setActiveTab(id)}
+                  className={`flex flex-col items-center gap-1 rounded-xl px-2 py-2.5 text-xs font-semibold transition-colors touch-manipulation ${
+                    selected
+                      ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {activeTab === 'wifi' ? (
+          <>
         <NativeLocalNetworkPermissionCard />
+
+        <div className={`${settingsListCardClass()} space-y-2`}>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{networkSummary.title}</p>
+          <p className={`text-xs leading-relaxed ${networkSummary.tone === 'warn' ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-gray-400'}`}>
+            {networkSummary.detail}
+          </p>
+          {scanDiagnostics?.scannedPrefix && scanningNetwork && (
+            <p className="text-[11px] text-indigo-700 dark:text-indigo-300">
+              Buscando en {scanDiagnostics.scannedPrefix}.1–254 (puerto 9100)…
+            </p>
+          )}
+        </div>
 
         <section className={`${settingsListCardClass()} space-y-4`}>
           <div className="flex items-start gap-3">
@@ -311,12 +440,12 @@ export function NativePrinterSetupPanel({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => void handleScanNetworkPrinters()}
+              onClick={() => void handleScanNetworkPrinters({ deepScan: false })}
               disabled={scanningNetwork || saving}
               className={`${settingsPrimaryBtnClass} flex-1`}
             >
               {scanningNetwork ? <Loader2 className="w-4 h-4 animate-spin" /> : <Radar className="w-4 h-4" />}
-              {scanningNetwork ? 'Buscando…' : 'Buscar impresoras'}
+              {scanningNetwork ? 'Buscando…' : scanDone ? 'Buscar de nuevo' : 'Buscar impresoras'}
             </button>
             <button
               type="button"
@@ -355,11 +484,18 @@ export function NativePrinterSetupPanel({
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => void handleScanNetworkPrinters({ skipPermissionGate: true })}
+                  onClick={() => void handleScanNetworkPrinters({ skipPermissionGate: true, deepScan: true })}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-red-600 text-white hover:bg-red-700"
                 >
                   <Radar className="w-3.5 h-3.5" />
-                  Buscar de nuevo
+                  Búsqueda amplia
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('wifi')}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-red-300 dark:border-red-700 text-red-800 dark:text-red-200"
+                >
+                  Poner IP manual
                 </button>
                 <button
                   type="button"
@@ -437,26 +573,93 @@ export function NativePrinterSetupPanel({
 
           {!scanningNetwork && scanDone && networkPrinters.length === 0 && !scanError && (
             <p className="text-xs text-amber-800 dark:text-amber-300">
-              No se encontró ninguna impresora. Comprueba que la Epson está encendida y en la misma WiFi.
+              No se encontró ninguna impresora. Pon la IP manual (suele salir en el ticket de configuración de la impresora).
             </p>
           )}
         </div>
 
-        <label className={`${settingsListCardClass()} block space-y-2`}>
-          <span className={settingsLabelClass}>IP de la impresora (manual)</span>
-          <input
-            className={settingsInputClass}
-            value={config.networkHost}
-            onChange={(e) => patch({ networkHost: e.target.value.trim(), connectionType: 'network' })}
-            placeholder="Ejemplo: 192.168.0.50"
-            inputMode="decimal"
-            autoComplete="off"
-          />
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Si la búsqueda no la encuentra, mira la IP en el ticket de configuración de la Epson.
-          </p>
-        </label>
+        <div className={`${settingsListCardClass()} space-y-3`}>
+          <label className="block space-y-2">
+            <span className={settingsLabelClass}>IP de la impresora (WiFi)</span>
+            <input
+              className={settingsInputClass}
+              value={config.networkHost}
+              onChange={(e) => patch({ networkHost: e.target.value.trim(), connectionType: 'network' })}
+              placeholder="Ejemplo: 192.168.1.20"
+              inputMode="decimal"
+              autoComplete="off"
+            />
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Imprime el ticket de configuración de la impresora (botón Feed al encender) o mira su pantalla/menú de red.
+            </p>
+          </label>
+          <button
+            type="button"
+            onClick={() => void handleTestManualIp()}
+            disabled={testingManualIp || !config.networkHost}
+            className={`${settingsPrimaryBtnClass} w-full`}
+          >
+            {testingManualIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+            {testingManualIp ? 'Comprobando IP…' : 'Probar esta IP'}
+          </button>
+        </div>
+          </>
+        ) : null}
 
+        {activeTab === 'bluetooth' ? (
+          <div className={`${settingsListCardClass()} space-y-3`}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center">
+                <Bluetooth className="w-5 h-5 text-blue-600 dark:text-blue-300" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Bluetooth</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Próximamente en la app móvil</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+              Por ahora en iPhone/iPad usa <strong>WiFi</strong> con la IP de la impresora (puerto 9100).
+              La mayoría de impresoras térmicas de mostrador (Epson, HPRT, etc.) funcionan por red.
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab('wifi')}
+              className={`${settingsPrimaryBtnClass} w-full`}
+            >
+              <Wifi className="w-4 h-4" />
+              Configurar por WiFi
+            </button>
+          </div>
+        ) : null}
+
+        {activeTab === 'usb' ? (
+          <div className={`${settingsListCardClass()} space-y-3`}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-50 dark:bg-violet-950/40 flex items-center justify-center">
+                <Usb className="w-5 h-5 text-violet-600 dark:text-violet-300" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">USB / PC del mostrador</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Solo en ordenador con Vertial Print</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+              En iPhone/iPad no se puede imprimir por cable USB directamente.
+              Si tienes un PC en caja, instala <strong>Vertial Print</strong> y conecta la impresora al PC por USB.
+              Desde el móvil usa WiFi hacia la impresora en la misma red.
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveTab('wifi')}
+              className={`${settingsPrimaryBtnClass} w-full`}
+            >
+              <Wifi className="w-4 h-4" />
+              Usar impresora WiFi
+            </button>
+          </div>
+        ) : null}
+
+        {activeTab === 'wifi' ? (
         <div className={`${settingsListCardClass()} space-y-3`}>
           <p className={settingsLabelClass}>Ancho del ticket</p>
           <div className="flex flex-wrap gap-2">
@@ -468,11 +671,12 @@ export function NativePrinterSetupPanel({
             </button>
           </div>
         </div>
+        ) : null}
 
-        {status?.tone === 'ok' && (
+        {status?.tone === 'ok' && activeTab === 'wifi' && (
           <p className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5">
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-            Impresora lista · {config.networkHost}
+            Impresora lista · {config.networkHost}:{config.networkPort || 9100}
           </p>
         )}
       </div>
@@ -480,6 +684,7 @@ export function NativePrinterSetupPanel({
       <LocalNetworkPermissionModal
         open={showLanPermissionModal}
         busy={lanPermissionBusy}
+        blocking={!hasUserCompletedLanPermissionFlow()}
         onContinue={() => void handleLanPermissionContinue()}
         onOpenSettings={() => void handleOpenAppSettings()}
         onClose={() => setShowLanPermissionModal(false)}

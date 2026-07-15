@@ -19,6 +19,8 @@ import {
 import { VertialLogo } from '../../components/VertialLogo';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { markNativeOnboardingSeen } from '../../lib/nativeOnboardingStorage';
+import { requestNativeLocalNetworkAccess } from '../../lib/vertialPrint/localNetworkPermission';
+import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
 
 interface SlideFeature {
   icon: LucideIcon;
@@ -120,6 +122,11 @@ export function NativeOnboarding() {
   const finish = useCallback(
     (destination: string) => {
       markNativeOnboardingSeen();
+      if (isVertialNativeApp()) {
+        void requestNativeLocalNetworkAccess().catch(() => {
+          /* El popup de iOS puede salir aunque falle; el gate explica el resto */
+        });
+      }
       navigate(destination);
     },
     [navigate],

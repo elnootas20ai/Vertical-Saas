@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
 import { createButcherSaleRequest, searchButcherClientsRequest, listButcherClientsRequest, type ButcherClient } from '../../lib/butcherApi';
+import { DecimalNumpadField } from '../../components/saas/DecimalNumpadField';
+import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
+import { isVertialNativeApp, printTicketDocument } from '../../lib/vertialPrint';
+import { splitTicketVat, type TicketDocument } from '../../lib/vertialPrint/ticketDocument';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import {
   ArrowLeft,
@@ -356,7 +360,7 @@ export function ButcherTpvPage() {
   const ticketWeight = useMemo(() => lines.reduce((s, l) => s + l.cantidadKg, 0), [lines]);
 
   const cambio = useMemo(() => {
-    const e = parseFloat(entregado.replace(',', '.'));
+    const e = parseDecimalPadValue(entregado);
     if (!Number.isFinite(e)) return 0;
     return Math.max(0, e - ticketTotal);
   }, [entregado, ticketTotal]);
@@ -451,7 +455,7 @@ export function ButcherTpvPage() {
       return;
     }
 
-    const raw = parseFloat(quantityInput.replace(',', '.'));
+    const raw = parseDecimalPadValue(quantityInput);
     if (!Number.isFinite(raw) || raw <= 0) {
       toast.error('Indica una cantidad válida');
       addAlert('weight', 'error', 'Cantidad introducida no válida');
@@ -552,7 +556,7 @@ export function ButcherTpvPage() {
       toast.error('PIN de autorización incorrecto');
       return;
     }
-    const val = parseFloat(discountValue.replace(',', '.'));
+    const val = parseDecimalPadValue(discountValue);
     if (!Number.isFinite(val) || val <= 0) {
       toast.error('Indica un descuento válido');
       return;
@@ -643,7 +647,7 @@ export function ButcherTpvPage() {
   const processPayment = async () => {
     if (lines.length === 0) return;
     if (paymentMethod === 'efectivo') {
-      const e = parseFloat(entregado.replace(',', '.'));
+      const e = parseDecimalPadValue(entregado);
       if (!Number.isFinite(e) || e < ticketTotal) {
         toast.error('El importe entregado es insuficiente');
         return;
@@ -656,7 +660,7 @@ export function ButcherTpvPage() {
     }
 
     const ticketNo = nextTicketNoFromStored(salesHistory);
-    const ent = paymentMethod === 'efectivo' ? parseFloat(entregado.replace(',', '.')) || ticketTotal : ticketTotal;
+    const ent = paymentMethod === 'efectivo' ? parseDecimalPadValue(entregado) || ticketTotal : ticketTotal;
     const cambioVal = paymentMethod === 'efectivo' ? Math.max(0, ent - ticketTotal) : 0;
     const linesSnapshot = [...lines];
     const catalogSnapshot = [...catalog];
@@ -716,7 +720,53 @@ export function ButcherTpvPage() {
 
   // ─── Print ─────────────────────────────────────────────────────
 
-  const printTicket = (sale: CompletedSale) => {
+function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
+  const { base, vat } = splitTicketVat(sale.total, 21);
+  const pm: Record<PaymentMethod, string> = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', bizum: 'Bizum' };
+  return {
+    variant: 'customer',
+    title: 'CARNICERIA',
+    ticketNo: sale.ticketNo,
+    dateLabel: sale.time.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' }),
+    issuer: 'Carniceria',
+    taxId: '',
+    addressLine: '',
+    phone: '',
+    salesPointName: '',
+    orderNumber: sale.ticketNo,
+    customerName: sale.clienteNombre || 'Cliente',
+    customerPhone: '',
+    customerAddress: '',
+    deliveryTypeLabel: '',
+    cashierName: sale.workerName,
+    lines: sale.lines.map((l) => ({
+      qty: l.unidad === 'unidades' ? l.cantidad : Number(l.cantidadKg.toFixed(3)),
+      name: l.nombre,
+      total: l.total,
+      note: l.descuento > 0 ? `Dto -${l.descuento.toFixed(2)} EUR` : undefined,
+    })),
+    base,
+    vat,
+    vatRate: 21,
+    total: sale.total,
+    paymentLabel: pm[sale.method] || sale.method,
+    paymentStatusLabel: 'Cobrado',
+    refundReason: '',
+    orderNotes:
+      sale.method === 'efectivo'
+        ? `Entregado ${sale.entregado.toFixed(2)} EUR · Cambio ${sale.cambio.toFixed(2)} EUR`
+        : '',
+    footer: 'Gracias por su compra',
+    isRefund: false,
+  };
+}
+
+  const printTicket = async (sale: CompletedSale) => {
+    if (isVertialNativeApp()) {
+      await printTicketDocument(butcherSaleToTicketDoc(sale));
+      return;
+    }
+
     const w = window.open('', '_blank', 'width=320,height=600');
     if (!w) {
       toast.error('No se pudo abrir la ventana de impresión');
@@ -1061,19 +1111,20 @@ export function ButcherTpvPage() {
 
               {/* Quantity input */}
               <div className="flex-1 relative">
-                <input
-                  ref={quantityRef}
-                  type="number"
-                  step={unitMode === 'kg' ? '0.001' : unitMode === 'gramos' ? '1' : '1'}
-                  min={unitMode === 'unidades' ? '1' : '0.001'}
+                <DecimalNumpadField
+                  inputRef={quantityRef}
                   value={quantityInput}
-                  onChange={e => setQuantityInput(e.target.value)}
-                  className="w-full h-full px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-2xl font-black text-center text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-400 transition-shadow"
+                  onChange={setQuantityInput}
                   placeholder="0"
+                  showNumpad
+                  maxDecimals={unitMode === 'kg' ? 3 : unitMode === 'gramos' ? 0 : 0}
+                  inputClassName="w-full h-full px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-2xl font-black text-center text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-400 transition-shadow"
+                  suffix={
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">
+                      {unitMode === 'kg' ? 'kg' : unitMode === 'gramos' ? 'g' : 'ud'}
+                    </span>
+                  }
                 />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400">
-                  {unitMode === 'kg' ? 'kg' : unitMode === 'gramos' ? 'g' : 'ud'}
-                </span>
               </div>
 
               {/* Read scale button */}
@@ -1286,14 +1337,13 @@ export function ButcherTpvPage() {
               {paymentMethod === 'efectivo' && (
                 <div>
                   <label className="text-xs font-semibold text-gray-500 mb-1.5 block uppercase tracking-wider">Importe entregado</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <DecimalNumpadField
                     value={entregado}
-                    onChange={e => setEntregado(e.target.value)}
+                    onChange={setEntregado}
                     placeholder={ticketTotal.toFixed(2)}
-                    className="w-full px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xl font-bold text-center outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-400"
+                    showNumpad
                     autoFocus
+                    inputClassName="w-full px-4 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-xl font-bold text-center outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-400"
                   />
                   {cambio > 0 && (
                     <div className="mt-2 flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800">
@@ -1376,13 +1426,12 @@ export function ButcherTpvPage() {
                   Importe €
                 </button>
               </div>
-              <input
-                type="number"
-                step="0.01"
+              <DecimalNumpadField
                 value={discountValue}
-                onChange={e => setDiscountValue(e.target.value)}
+                onChange={setDiscountValue}
                 placeholder={discountType === 'percent' ? 'Ej: 10' : 'Ej: 2.50'}
-                className="w-full px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-center font-bold outline-none focus:border-amber-400"
+                showNumpad
+                inputClassName="w-full px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-center font-bold outline-none focus:border-amber-400"
               />
               <div>
                 <label className="text-xs font-semibold text-gray-500 mb-1 block">PIN gerente</label>
@@ -1640,7 +1689,7 @@ export function ButcherTpvPage() {
               </button>
               <button
                 type="button"
-                onClick={() => { printTicket(lastSale); setShowTicketPreview(false); }}
+                onClick={() => { void printTicket(lastSale); setShowTicketPreview(false); }}
                 className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold"
               >
                 <Printer className="w-4 h-4" />

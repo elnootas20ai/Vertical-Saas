@@ -1,5 +1,41 @@
+diff --git a/node_modules/esc-pos-proxy-capacitor-plugin/android/src/main/java/com/revagon/place/menu/app/plugins/escpos/ESCPOSProxyPlugin.java b/node_modules/esc-pos-proxy-capacitor-plugin/android/src/main/java/com/revagon/place/menu/app/plugins/escpos/ESCPOSProxyPlugin.java
+index 8b91a21..25e9d11 100644
+--- a/node_modules/esc-pos-proxy-capacitor-plugin/android/src/main/java/com/revagon/place/menu/app/plugins/escpos/ESCPOSProxyPlugin.java
++++ b/node_modules/esc-pos-proxy-capacitor-plugin/android/src/main/java/com/revagon/place/menu/app/plugins/escpos/ESCPOSProxyPlugin.java
+@@ -109,6 +109,22 @@ public class ESCPOSProxyPlugin extends Plugin {
+     });
+   }
+ 
++    @PluginMethod
++  public void getLocalNetworkInfo(PluginCall call) {
++    getBridge().execute(() -> {
++      String ip = getLocalIpv4();
++      JSObject ret = new JSObject();
++      if (ip != null && ip.contains(".")) {
++        ret.put("ip", ip);
++        ret.put("prefix", ip.substring(0, ip.lastIndexOf('.')));
++      } else {
++        ret.put("ip", "");
++        ret.put("prefix", "");
++      }
++      call.resolve(ret);
++    });
++  }
++
+   @PluginMethod
+   public void discover(PluginCall call) {
+     JSArray portArray = call.getArray("ports");
+@@ -184,7 +200,7 @@ public class ESCPOSProxyPlugin extends Plugin {
+       return;
+     }
+ 
+-    String[] services = {"_pdl-datastream._tcp.", "_printer._tcp."};
++    String[] services = {"_pdl-datastream._tcp.", "_printer._tcp.", "_epos._tcp.", "_ipp._tcp.", "_jetdirect._tcp."};
+     CountDownLatch latch = new CountDownLatch(services.length);
+     Handler mainHandler = new Handler(Looper.getMainLooper());
+ 
 diff --git a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift
-index 6501e68..34b9168 100644
+index 6501e68..225ed09 100644
 --- a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift
 +++ b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxy.swift
 @@ -7,6 +7,17 @@ import Darwin
@@ -96,7 +132,7 @@ index 6501e68..34b9168 100644
              group.leave()
          })
 -        mdnsHelper?.start(types: ["_pdl-datastream._tcp.", "_printer._tcp."], timeoutMs: timeout)
-+        mdnsHelper?.start(types: ["_pdl-datastream._tcp.", "_printer._tcp."], timeoutMs: timeoutMs)
++        mdnsHelper?.start(types: ["_pdl-datastream._tcp.", "_printer._tcp.", "_epos._tcp.", "_ipp._tcp.", "_jetdirect._tcp."], timeoutMs: timeoutMs)
  
          group.enter()
          DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -141,7 +177,7 @@ index 6501e68..34b9168 100644
          var results = [[String: Any]]()
          let lock = NSLock()
 -        let perHostTimeout = max(200, min(1000, timeoutMs / 4))
-+        let perHostTimeout = max(200, min(500, timeoutMs / 8))
++        let perHostTimeout = max(350, min(900, timeoutMs / 6))
  
          for host in 1...254 {
              let ip = "\(prefix).\(host)"
@@ -163,7 +199,7 @@ index 6501e68..34b9168 100644
          }
  
          group.wait()
-@@ -188,6 +223,10 @@ import Darwin
+@@ -188,6 +223,52 @@ import Darwin
          }
          defer { freeifaddrs(addressList) }
  
@@ -171,15 +207,16 @@ index 6501e68..34b9168 100644
 +        // datos moviles (pdp_ip*) y escanearia otra red donde nunca esta la impresora.
 +        var wifiPrefix: String? = nil
 +        var fallbackPrefix: String? = nil
-         var pointer = first
-         while true {
-             let interface = pointer.pointee
-@@ -198,8 +237,15 @@ import Darwin
-                     getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
-                     let ipString = String(cString: hostname)
-                     let components = ipString.split(separator: ".")
--                    if components.count == 4 {
--                        return components.dropLast().joined(separator: ".")
++        var pointer = first
++        while true {
++            let interface = pointer.pointee
++            if interface.ifa_addr.pointee.sa_family == UInt8(AF_INET) {
++                let name = String(cString: interface.ifa_name)
++                if name.hasPrefix("en") || name.hasPrefix("pdp_ip") || name.hasPrefix("wlan") {
++                    var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
++                    getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
++                    let ipString = String(cString: hostname)
++                    let components = ipString.split(separator: ".")
 +                    if components.count == 4 && !ipString.hasPrefix("169.254.") && !ipString.hasPrefix("127.") {
 +                        let prefix = components.dropLast().joined(separator: ".")
 +                        if name.hasPrefix("en") || name.hasPrefix("wlan") {
@@ -189,19 +226,62 @@ index 6501e68..34b9168 100644
 +                        } else if fallbackPrefix == nil {
 +                            fallbackPrefix = prefix
 +                        }
++                    }
++                }
++            }
++            if let next = interface.ifa_next {
++                pointer = next
++            } else {
++                break
++            }
++        }
++        return wifiPrefix ?? fallbackPrefix
++    }
++
++    @objc public func getLocalNetworkInfo() -> [String: Any] {
++        var addressList: UnsafeMutablePointer<ifaddrs>? = nil
++        guard getifaddrs(&addressList) == 0, let first = addressList else {
++            return ["ip": "", "prefix": ""]
++        }
++        defer { freeifaddrs(addressList) }
++
++        var wifiIp: String? = nil
++        var wifiPrefix: String? = nil
++        var fallbackIp: String? = nil
++        var fallbackPrefix: String? = nil
+         var pointer = first
+         while true {
+             let interface = pointer.pointee
+@@ -198,8 +279,17 @@ import Darwin
+                     getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len), &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
+                     let ipString = String(cString: hostname)
+                     let components = ipString.split(separator: ".")
+-                    if components.count == 4 {
+-                        return components.dropLast().joined(separator: ".")
++                    if components.count == 4 && !ipString.hasPrefix("169.254.") && !ipString.hasPrefix("127.") {
++                        let prefix = components.dropLast().joined(separator: ".")
++                        if name.hasPrefix("en") || name.hasPrefix("wlan") {
++                            if wifiIp == nil {
++                                wifiIp = ipString
++                                wifiPrefix = prefix
++                            }
++                        } else if fallbackIp == nil {
++                            fallbackIp = ipString
++                            fallbackPrefix = prefix
++                        }
                      }
                  }
              }
-@@ -209,7 +255,7 @@ import Darwin
+@@ -209,7 +299,7 @@ import Darwin
                  break
              }
          }
 -        return nil
-+        return wifiPrefix ?? fallbackPrefix
++        return ["ip": wifiIp ?? fallbackIp ?? "", "prefix": wifiPrefix ?? fallbackPrefix ?? ""]
      }
  
      private func ipv4String(from data: Data) -> String? {
-@@ -237,6 +283,7 @@ import Darwin
+@@ -237,6 +327,7 @@ import Darwin
          private var browsers: [NetServiceBrowser] = []
          private var services: [NetService] = []
          private let resolver: (Data) -> String?
@@ -209,7 +289,7 @@ index 6501e68..34b9168 100644
  
          init(resolver: @escaping (Data) -> String?, completion: @escaping ([[String: Any]]) -> Void) {
              self.resolver = resolver
-@@ -250,8 +297,12 @@ import Darwin
+@@ -250,8 +341,12 @@ import Darwin
                  browser.delegate = self
                  browsers.append(browser)
                  browser.searchForServices(ofType: type, inDomain: "local.")
@@ -224,7 +304,7 @@ index 6501e68..34b9168 100644
                  }
              }
          }
-@@ -282,13 +333,26 @@ import Darwin
+@@ -282,13 +377,26 @@ import Darwin
          }
  
          private func finishSearch() {
@@ -253,3 +333,28 @@ index 6501e68..34b9168 100644
          }
      }
  }
+diff --git a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift
+index d094fef..59351cc 100644
+--- a/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift
++++ b/node_modules/esc-pos-proxy-capacitor-plugin/ios/Sources/ESCPOSProxyPlugin/ESCPOSProxyPlugin.swift
+@@ -8,7 +8,8 @@ public class ESCPOSProxyPlugin: CAPPlugin, CAPBridgedPlugin {
+     public let pluginMethods: [CAPPluginMethod] = [
+         CAPPluginMethod(name: "print", returnType: CAPPluginReturnPromise),
+         CAPPluginMethod(name: "ping", returnType: CAPPluginReturnPromise),
+-        CAPPluginMethod(name: "discover", returnType: CAPPluginReturnPromise)
++        CAPPluginMethod(name: "discover", returnType: CAPPluginReturnPromise),
++        CAPPluginMethod(name: "getLocalNetworkInfo", returnType: CAPPluginReturnPromise)
+     ]
+     private let implementation = ESCPOSProxy()
+ 
+@@ -64,3 +65,9 @@ public class ESCPOSProxyPlugin: CAPPlugin, CAPBridgedPlugin {
+         }
+     }
+ }
++
++
++    @objc func getLocalNetworkInfo(_ call: CAPPluginCall) {
++        let info = implementation.getLocalNetworkInfo()
++        call.resolve(info)
++    }
+\ No newline at end of file

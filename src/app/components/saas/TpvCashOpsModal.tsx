@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Loader2, X, ArrowDownCircle, ArrowUpCircle, RotateCcw } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { TpvRegisterTransaction } from '../../lib/deliveryApi';
+import { DecimalNumpadField } from './DecimalNumpadField';
+import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
 
 const TPV_MODAL_Z = 'z-[100]';
 
@@ -42,7 +44,7 @@ export function TpvCashOpsModal({
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const parsed = Number(String(amount).replace(',', '.'));
+  const parsed = parseDecimalPadValue(amount);
   const valid = Number.isFinite(parsed) && parsed > 0 && description.trim().length >= 2;
 
   const handleSubmit = async () => {
@@ -105,14 +107,13 @@ export function TpvCashOpsModal({
         </div>
 
         <label className="block text-xs font-semibold text-gray-500 mb-1">Importe (€)</label>
-        <input
-          type="text"
-          inputMode="decimal"
+        <DecimalNumpadField
           value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="0,00"
+          onChange={setAmount}
+          placeholder="0.00"
           disabled={busy}
-          className="w-full mb-3 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-lg font-semibold tabular-nums"
+          showNumpad
+          inputClassName="w-full mb-3 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-lg font-semibold tabular-nums"
         />
 
         <label className="block text-xs font-semibold text-gray-500 mb-1">Motivo</label>

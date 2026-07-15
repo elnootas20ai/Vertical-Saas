@@ -7,12 +7,15 @@ export function LocalNetworkPermissionModal({
   onOpenSettings,
   onClose,
   busy = false,
+  blocking = false,
 }: {
   open: boolean;
   onContinue: () => void;
   onOpenSettings: () => void;
   onClose?: () => void;
   busy?: boolean;
+  /** Si true, no se puede cerrar sin Continuar o Ajustes (popup obligatorio). */
+  blocking?: boolean;
 }) {
   if (!open) return null;
 
@@ -35,7 +38,7 @@ export function LocalNetworkPermissionModal({
               Vertial necesita acceder a la red local de tu local para encontrar la Epson.
             </p>
           </div>
-          {onClose && (
+          {onClose && !blocking && (
             <button
               type="button"
               onClick={onClose}

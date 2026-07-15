@@ -1,4 +1,5 @@
 export { printDeliveryTicket, printTestTicket } from './printDeliveryTicket';
+export { printTicketDocument } from './printTicketDocument';
 export type { PrintDeliveryTicketResult } from './printDeliveryTicket';
 export {
   DEFAULT_PRINTER_CONFIG,
@@ -45,12 +46,15 @@ export { isVertialNativeApp } from './isNativeApp';
 export {
   sendNativeEscpos,
   pingNativePrinter,
+  pingNativeHost,
   discoverNativeNetworkPrinters,
   identifyNativePrinter,
 } from './nativePrintClient';
-export type { NativeNetworkPrinterInfo } from './nativePrintClient';
+export type { NativeNetworkPrinterInfo, NativeNetworkPrinterDiscoveryDiagnostics } from './nativePrintClient';
 export {
   hasAcknowledgedLocalNetworkPermission,
+  hasUserCompletedLanPermissionFlow,
+  markLanPermissionFlowCompleted,
   acknowledgeLocalNetworkPermission,
   resetLocalNetworkPermissionAck,
   rerequestNativeLocalNetworkPermission,
@@ -59,9 +63,14 @@ export {
   dispatchNativeLocalNetworkPermissionPrompt,
   dispatchLocalNetworkPermissionAttempted,
   openNativeAppSettings,
+  buildLanProbeHosts,
+  buildPrinterDiscoveryHelpMessage,
   LAN_PERMISSION_ATTEMPTED_EVENT,
   LAN_PERMISSION_MODAL_EVENT,
 } from './localNetworkPermission';
+export type { LocalNetworkPermissionFlowResult } from './localNetworkPermission';
+export { getNativeLocalNetworkInfo, getEscposPlugin } from './escposPlugin';
+export type { NativeLocalNetworkInfo } from './escposPlugin';
 export {
   shouldUseEposPrint,
   checkEposConnection,

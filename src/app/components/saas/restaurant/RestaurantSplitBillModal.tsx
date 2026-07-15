@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
+import { DecimalNumpadField } from '../DecimalNumpadField';
+import { parseDecimalPadValue } from '../../../lib/decimalNumpadInput';
 import {
   computeEqualSplitAmounts,
   scaleAmountsToTotal,
@@ -54,7 +56,7 @@ export function RestaurantSplitBillModal({ total, lines = [], onConfirm, onClose
 
   const customAmounts = useMemo(() => {
     const fixed = customInputs.map((v) => {
-      const n = Number(String(v).replace(',', '.'));
+      const n = parseDecimalPadValue(v);
       return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
     });
     const fixedSum = fixed.reduce((s, a) => s + a, 0);
@@ -239,13 +241,14 @@ export function RestaurantSplitBillModal({ total, lines = [], onConfirm, onClose
                   {customInputs.map((value, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <span className="text-xs font-semibold text-gray-500 w-14 shrink-0">Parte {i + 1}</span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                      <DecimalNumpadField
                         value={value}
-                        onChange={(e) => setCustomInputs((prev) => prev.map((v, j) => (j === i ? e.target.value : v)))}
-                        placeholder="0,00"
-                        className="flex-1 min-w-0 px-3 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm font-bold tabular-nums text-right outline-none focus:border-violet-400"
+                        onChange={(next) => setCustomInputs((prev) => prev.map((v, j) => (j === i ? next : v)))}
+                        placeholder="0.00"
+                        showNumpad
+                        compactNumpad
+                        className="flex-1 min-w-0"
+                        inputClassName="w-full px-3 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm font-bold tabular-nums text-right outline-none focus:border-violet-400"
                       />
                       <span className="text-xs text-gray-400 shrink-0">€</span>
                       {customInputs.length > 1 ? (

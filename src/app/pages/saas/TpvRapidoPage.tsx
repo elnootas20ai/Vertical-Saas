@@ -3,6 +3,8 @@ import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-route
 import { toast } from 'sonner';
 import { toastActionError } from '../../lib/userFacingError';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
+import { DecimalNumpadField } from '../../components/saas/DecimalNumpadField';
+import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -1392,7 +1394,7 @@ export function TpvRapidoOrderFlow({
   );
 
   const changeAmount = useMemo(() => {
-    const given = parseFloat(cashGiven.replace(',', '.'));
+    const given = parseDecimalPadValue(cashGiven);
     if (isNaN(given) || given < finalTotal) return null;
     return given - finalTotal;
   }, [cashGiven, finalTotal]);
@@ -2300,7 +2302,7 @@ export function TpvRapidoOrderFlow({
       }
 
       const amount = payAmount != null ? Math.min(payAmount, due) : due;
-      const tipValue = Math.max(0, Number(String(tipInput).replace(',', '.')) || 0);
+      const tipValue = Math.max(0, parseDecimalPadValue(tipInput) || 0);
       const pdvId = String(register.session.pointOfSaleId || '').trim();
       const pdvName = String(register.session.pointOfSaleName || '').trim();
       const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
@@ -3853,17 +3855,17 @@ export function TpvRapidoOrderFlow({
             {paymentMethod === 'efectivo' && deliveryType !== 'domicilio' && (
               <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                 <label className={LABEL_CLASS}>El cliente paga con</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={cashGiven}
-                    onChange={(e) => setCashGiven(e.target.value)}
-                    placeholder={formatPrice(finalTotal)}
-                    className={`${INPUT_CLASS} text-lg font-medium pr-8`}
-                  />
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
-                </div>
+                <DecimalNumpadField
+                  value={cashGiven}
+                  onChange={setCashGiven}
+                  placeholder={finalTotal.toFixed(2)}
+                  showNumpad
+                  compactNumpad={tabletMode}
+                  inputClassName={`${INPUT_CLASS} text-lg font-medium pr-8`}
+                  suffix={
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                  }
+                />
                 {changeAmount !== null && changeAmount >= 0 && (
                   <div className="mt-3 flex items-center justify-between">
                     <span className="text-sm text-gray-500 dark:text-gray-400">Cambio</span>
@@ -3894,15 +3896,17 @@ export function TpvRapidoOrderFlow({
                     </button>
                   ))}
                   <div className="relative flex-1 min-w-[110px]">
-                    <input
-                      type="text"
-                      inputMode="decimal"
+                    <DecimalNumpadField
                       value={tipInput}
-                      onChange={(e) => setTipInput(e.target.value)}
+                      onChange={setTipInput}
                       placeholder="Otra cantidad"
-                      className={`${INPUT_CLASS} pr-8 text-sm font-semibold`}
+                      showNumpad
+                      compactNumpad={tabletMode}
+                      inputClassName={`${INPUT_CLASS} pr-8 text-sm font-semibold`}
+                      suffix={
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                      }
                     />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
                   </div>
                 </div>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-2">

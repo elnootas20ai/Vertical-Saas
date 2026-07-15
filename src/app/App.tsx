@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { BusinessProvider } from './context/BusinessContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { router } from './routes';
+import { NativeLocalNetworkGate } from './components/native/NativeLocalNetworkGate';
 // Puente que conecta el userId del AuthContext con el OnboardingContext
 function OnboardingUserSync() {
   const { user } = useAuth();
@@ -88,6 +89,7 @@ export default function App() {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
       <ThemeRouteGuard />
+      <NativeLocalNetworkGate />
       <Toaster richColors closeButton position="top-center" style={{ zIndex: 99999 }} />
       <AuthProvider>
         <OnboardingProvider>

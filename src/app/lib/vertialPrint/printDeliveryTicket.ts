@@ -46,7 +46,7 @@ export async function printDeliveryTicket(
       toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
       return { method: 'native', ok: false };
     }
-    const result = await sendNativeEscpos(escpos, config);
+    const result = await sendNativeEscpos(escpos, config, { timeoutMs: 8_000 });
     if (result.ok) return { method: 'native', ok: true };
     toast.error(result.error || 'No se pudo imprimir en la impresora WiFi', {
       duration: 12000,
@@ -153,7 +153,7 @@ export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
       toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
       return { method: 'native', ok: false };
     }
-    const result = await sendNativeEscpos(escpos, config, { retry: false, timeoutMs: 3500 });
+    const result = await sendNativeEscpos(escpos, config, { retry: false, timeoutMs: 10_000 });
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
       return { method: 'native', ok: true };

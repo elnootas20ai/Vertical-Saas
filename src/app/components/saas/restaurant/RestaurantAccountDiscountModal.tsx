@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import { DecimalNumpadField } from '../DecimalNumpadField';
+import { parseDecimalPadValue } from '../../../lib/decimalNumpadInput';
 
 function formatEuro(n: number): string {
   return `${n.toFixed(2).replace('.', ',')} €`;
@@ -33,7 +35,7 @@ export function RestaurantAccountDiscountModal({
   const [reason, setReason] = useState('');
 
   const preview = (() => {
-    const num = parseFloat(value.replace(',', '.'));
+    const num = parseDecimalPadValue(value);
     if (isNaN(num) || num <= 0) return 0;
     if (mode === 'percent') {
       return Math.round(subtotal * Math.min(num, 100) / 100 * 100) / 100;
@@ -70,13 +72,13 @@ export function RestaurantAccountDiscountModal({
               </button>
             ))}
           </div>
-          <input
-            type="text"
-            inputMode="decimal"
+          <DecimalNumpadField
             value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={mode === 'percent' ? '10' : '5,00'}
-            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
+            onChange={setValue}
+            placeholder={mode === 'percent' ? '10' : '5.00'}
+            showNumpad
+            maxDecimals={mode === 'percent' ? 2 : 2}
+            inputClassName="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100"
           />
           <input
             type="text"
@@ -105,7 +107,7 @@ export function RestaurantAccountDiscountModal({
               type="button"
               disabled={submitting}
               onClick={() => {
-                const num = parseFloat(value.replace(',', '.'));
+                const num = parseDecimalPadValue(value);
                 if (isNaN(num) || num <= 0) return;
                 if (mode === 'percent') {
                   onApply({ discountPercent: Math.min(100, num), reason });

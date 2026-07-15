@@ -4,6 +4,8 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
   acknowledgeLocalNetworkPermission,
+  buildLanProbeHosts,
+  buildPrinterDiscoveryHelpMessage,
   dispatchLocalNetworkPermissionAttempted,
   dispatchNativeLocalNetworkPermissionPrompt,
   hasAcknowledgedLocalNetworkPermission,
@@ -43,5 +45,16 @@ describe('localNetworkPermission', () => {
     });
     dispatchLocalNetworkPermissionAttempted();
     expect(attempted).toBe(1);
+  });
+
+  it('buildLanProbeHosts prioriza la subred del dispositivo', () => {
+    const hosts = buildLanProbeHosts({ ip: '192.168.68.42', prefix: '192.168.68' });
+    expect(hosts[0]).toBe('192.168.68.1');
+    expect(hosts.includes('192.168.1.1')).toBe(true);
+  });
+
+  it('buildPrinterDiscoveryHelpMessage avisa si no hay WiFi', () => {
+    expect(buildPrinterDiscoveryHelpMessage({ onWifi: false })).toMatch(/WiFi del local/i);
+    expect(buildPrinterDiscoveryHelpMessage({ onWifi: true, wifiPrefix: '192.168.1' })).toMatch(/192\.168\.1/);
   });
 });
