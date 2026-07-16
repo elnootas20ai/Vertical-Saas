@@ -84,6 +84,50 @@ async function escposProxy() {
   return getEscposPlugin();
 }
 
+/** Respaldo si ESCPOSProxy falla: VertialIosBridge (mismo TCP 9100). */
+async function printViaVertialBridge(
+  host: string,
+  port: number,
+  bytes: Uint8Array,
+  timeoutMs: number,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { registerPlugin } = await import('@capacitor/core');
+    const bridge = registerPlugin<{
+      printEscPos: (opts: { ip: string; port: number; message: string }) => Promise<{ status?: string }>;
+    }>('VertialIosBridge');
+    await withNativeTimeout(
+      bridge.printEscPos({ ip: host, port, message: bytesToBase64(bytes) }),
+      timeoutMs,
+      'Impresión',
+    );
+    return { ok: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo imprimir';
+    return { ok: false, error: message };
+  }
+}
+
+async function pingViaVertialBridge(
+  host: string,
+  port: number,
+): Promise<{ ok: boolean; rtt?: number }> {
+  try {
+    const { registerPlugin } = await import('@capacitor/core');
+    const bridge = registerPlugin<{
+      pingHost: (opts: { ip: string; port: number }) => Promise<{ online?: boolean; rtt?: number }>;
+    }>('VertialIosBridge');
+    const result = await withNativeTimeout(
+      bridge.pingHost({ ip: host, port }),
+      NATIVE_PING_TIMEOUT_MS,
+      'Comprobación de impresora',
+    );
+    return { ok: Boolean(result?.online), rtt: result?.rtt };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function normalizeDiscoveredPrinter(item: {
   ip: string;
   port: number;
@@ -221,16 +265,23 @@ async function sendEscposToHost(
 
   const run = (async () => {
     try {
-      const ESCPOSProxy = await withNativeTimeout(escposProxy(), 2500, 'Plugin impresora');
+      const ESCPOSProxy = await escposProxy();
       await withNativeTimeout(
         ESCPOSProxy.print({ ip: host, port, message: bytesToBase64(bytes) }),
         timeoutMs,
         'Impresión',
       );
       return { ok: true as const };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo conectar con la impresora';
-      return { ok: false as const, error: message };
+    } catch (primaryError) {
+      const fallback = await printViaVertialBridge(host, port, bytes, timeoutMs);
+      if (fallback.ok) return { ok: true as const };
+      const message =
+        fallback.error ||
+        (primaryError instanceof Error ? primaryError.message : 'No se pudo conectar con la impresora');
+      const friendly = /unimplemented|not implemented|is not implemented/i.test(message)
+        ? 'El módulo de impresión nativo no está disponible. Actualiza la app desde TestFlight e inténtalo de nuevo.'
+        : message;
+      return { ok: false as const, error: friendly };
     }
   })();
 
@@ -301,21 +352,7 @@ export async function identifyNativePrinter(
 export async function pingNativePrinter(
   config: VertialPrinterConfig,
 ): Promise<{ ok: boolean; rtt?: number }> {
-  if (!isVertialNativeApp()) return { ok: false };
-  const host = String(config.networkHost || '').trim();
-  if (!host) return { ok: false };
-  const port = Number(config.networkPort || 9100) || 9100;
-  try {
-    const ESCPOSProxy = await escposProxy();
-    const { online, rtt } = await withNativeTimeout(
-      ESCPOSProxy.ping({ ip: host, port }),
-      NATIVE_PING_TIMEOUT_MS + 200,
-      'Comprobación de impresora',
-    );
-    return { ok: Boolean(online), rtt };
-  } catch {
-    return { ok: false };
-  }
+  return pingNativeHost(String(config.networkHost || '').trim(), Number(config.networkPort || 9100) || 9100);
 }
 
 export async function pingNativeHost(
@@ -325,17 +362,19 @@ export async function pingNativeHost(
   if (!isVertialNativeApp()) return { ok: false };
   const ip = String(host || '').trim();
   if (!ip) return { ok: false };
+  const safePort = Number(port) || 9100;
   try {
-    const ESCPOSProxy = await withNativeTimeout(escposProxy(), 2500, 'Plugin impresora');
+    const ESCPOSProxy = await escposProxy();
     const { online, rtt } = await withNativeTimeout(
-      ESCPOSProxy.ping({ ip, port: Number(port) || 9100 }),
+      ESCPOSProxy.ping({ ip, port: safePort }),
       NATIVE_PING_TIMEOUT_MS,
       'Comprobación de impresora',
     );
-    return { ok: Boolean(online), rtt };
+    if (online) return { ok: true, rtt };
   } catch {
-    return { ok: false };
+    /* probar bridge */
   }
+  return pingViaVertialBridge(ip, safePort);
 }
 
 export async function discoverNativeNetworkPrinters(options?: {
