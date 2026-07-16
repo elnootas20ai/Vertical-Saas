@@ -5,8 +5,9 @@ import Network
 
 /**
  * Bridge nativo Vertial:
- * - openAppSettings: abre Ajustes → Vertial (UIApplication.openSettingsURLString)
- * - requestLocalNetworkAccess: Bonjour + TCP LAN para forzar el popup / toggle «Red local»
+ * - openAppSettings: abre Ajustes → Vertial
+ * - requestLocalNetworkAccess: Bonjour (NetServiceBrowser) + TCP para forzar
+ *   el popup iOS y que aparezca el interruptor «Red local» en Ajustes.
  */
 @objc(VertialIosBridgePlugin)
 public class VertialIosBridgePlugin: CAPPlugin, CAPBridgedPlugin {
@@ -17,7 +18,7 @@ public class VertialIosBridgePlugin: CAPPlugin, CAPBridgedPlugin {
     CAPPluginMethod(name: "requestLocalNetworkAccess", returnType: CAPPluginReturnPromise),
   ]
 
-  private var browsers: [NWBrowser] = []
+  private var bonjourTrigger: BonjourPermissionTrigger?
   private var connections: [NWConnection] = []
 
   @objc func openAppSettings(_ call: CAPPluginCall) {
@@ -45,28 +46,19 @@ public class VertialIosBridgePlugin: CAPPlugin, CAPBridgedPlugin {
 
       self.cancelProbes()
 
-      // Tipos alineados con NSBonjourServices del Info.plist (disparan el permiso).
-      let bonjourTypes = [
-        "_pdl-datastream._tcp",
-        "_printer._tcp",
-        "_epos._tcp",
-        "_jetdirect._tcp",
-        "_ipp._tcp",
-      ]
+      // NetServiceBrowser es lo que iOS usa para mostrar el popup «Red local»
+      // y crear el interruptor en Ajustes → Vertial (NWBrowser a veces no basta).
+      let trigger = BonjourPermissionTrigger()
+      self.bonjourTrigger = trigger
+      trigger.start(types: [
+        "_pdl-datastream._tcp.",
+        "_printer._tcp.",
+        "_epos._tcp.",
+        "_jetdirect._tcp.",
+        "_ipp._tcp.",
+      ])
 
-      for type in bonjourTypes {
-        let params = NWParameters()
-        params.includePeerToPeer = true
-        let browser = NWBrowser(for: .bonjour(type: type, domain: "local."), using: params)
-        // NWBrowser.stateUpdateHandler recibe un solo argumento (State), no tres.
-        browser.stateUpdateHandler = { _ in }
-        browser.browseResultsChangedHandler = { _, _ in }
-        browser.start(queue: .main)
-        self.browsers.append(browser)
-      }
-
-      // TCP a IPs privadas: refuerza el prompt de red local en iPadOS.
-      let probeHosts = ["192.168.1.1", "192.168.0.1", "10.0.0.1", "172.16.0.1"]
+      let probeHosts = ["192.168.1.20", "192.168.1.1", "192.168.0.1", "10.0.0.1"]
       for host in probeHosts {
         guard let port = NWEndpoint.Port(rawValue: 9100) else { continue }
         let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: .tcp)
@@ -75,7 +67,7 @@ public class VertialIosBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         self.connections.append(connection)
       }
 
-      DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
         self?.cancelProbes()
         call.resolve(["triggered": true])
       }
@@ -83,9 +75,32 @@ public class VertialIosBridgePlugin: CAPPlugin, CAPBridgedPlugin {
   }
 
   private func cancelProbes() {
-    browsers.forEach { $0.cancel() }
-    browsers.removeAll()
+    bonjourTrigger?.stop()
+    bonjourTrigger = nil
     connections.forEach { $0.cancel() }
     connections.removeAll()
   }
+}
+
+/// Mantiene vivos los browsers hasta stop(); sin strong ref iOS cancela el browse.
+private final class BonjourPermissionTrigger: NSObject, NetServiceBrowserDelegate {
+  private var browsers: [NetServiceBrowser] = []
+
+  func start(types: [String]) {
+    for type in types {
+      let browser = NetServiceBrowser()
+      browser.delegate = self
+      browsers.append(browser)
+      browser.searchForServices(ofType: type, inDomain: "local.")
+    }
+  }
+
+  func stop() {
+    browsers.forEach { $0.stop() }
+    browsers.removeAll()
+  }
+
+  func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {}
+  func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {}
+  func netServiceBrowserDidStopSearch(_ browser: NetServiceBrowser) {}
 }

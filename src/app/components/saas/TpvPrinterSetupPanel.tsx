@@ -5,7 +5,10 @@ import { CheckCircle2, CircleAlert, ExternalLink, Loader2, Network, Printer, Shi
 import type { PointOfSale } from '../../lib/deliveryApi';
 import { IMPRESORA_SETTINGS_PATH } from '../../lib/vertialPrint/nativePrinterFlow';
 import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
-import { openNativeAppSettings } from '../../lib/vertialPrint/localNetworkPermission';
+import {
+  openNativeAppSettings,
+  requestNativeLocalNetworkAccess,
+} from '../../lib/vertialPrint/localNetworkPermission';
 import { pingNativeHost } from '../../lib/vertialPrint/nativePrintClient';
 import {
   clearPrinterVerifiedHost,
@@ -113,11 +116,22 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const [lanConfirmed, setLanConfirmed] = useState(() => readLanManualConfirmed());
   const [diagnostics, setDiagnostics] = useState<NativePrinterDiagnostics | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
+  const [requestingLan, setRequestingLan] = useState(false);
 
   const isNative = isVertialNativeApp();
   const selectedHost = String(config.networkHost || '').trim();
   const isConfigured = isValidIpv4(selectedHost);
   const stepsUnlocked = !isNative || lanConfirmed;
+
+  // iOS solo crea el interruptor «Red local» en Ajustes cuando la app hace Bonjour/TCP LAN.
+  useEffect(() => {
+    if (!isNative) return;
+    void requestNativeLocalNetworkAccess({
+      printerIp: manualIp.trim() || selectedHost || '192.168.1.20',
+    });
+    // Solo al montar el panel
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once per open
+  }, [isNative]);
   const hasUnsavedIp = ipDirty && manualIp.trim() !== selectedHost;
   const canTest = isConfigured && !hasUnsavedIp && stepsUnlocked;
 
@@ -289,8 +303,31 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     })();
   }, [manualIp, stepsUnlocked, refreshDiagnostics]);
 
+  const handleRequestLanPermission = useCallback(async () => {
+    if (!isNative) return;
+    setRequestingLan(true);
+    try {
+      await requestNativeLocalNetworkAccess({
+        printerIp: manualIp.trim() || selectedHost || '192.168.1.20',
+      });
+      toast.message('Si iOS muestra el aviso, pulsa Permitir. Luego debería aparecer «Red local» en Ajustes → Vertial.', {
+        duration: 10000,
+      });
+    } catch {
+      toast.error('No se pudo pedir el permiso. Prueba Abrir Ajustes o reinicia la app.');
+    } finally {
+      setRequestingLan(false);
+    }
+  }, [isNative, manualIp, selectedHost]);
+
   const handleOpenSettings = useCallback(async () => {
     try {
+      // Disparar Bonjour antes de abrir Ajustes para que exista el interruptor.
+      setRequestingLan(true);
+      await requestNativeLocalNetworkAccess({
+        printerIp: manualIp.trim() || selectedHost || '192.168.1.20',
+      }).catch(() => undefined);
+      await new Promise((r) => globalThis.setTimeout(r, 900));
       const opened = await Promise.race([
         openNativeAppSettings(),
         new Promise<boolean>((resolve) => {
@@ -298,12 +335,14 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         }),
       ]);
       if (!opened) {
-        toast.error('Abre Ajustes del iPhone/iPad → Vertial → activa «Red local».');
+        toast.error('Abre Ajustes → Vertial (o Privacidad → Red local) y activa Vertial.');
       }
     } catch {
       toast.error('No se pudo abrir Ajustes. Ve manualmente a Ajustes → Vertial → Red local.');
+    } finally {
+      setRequestingLan(false);
     }
-  }, []);
+  }, [manualIp, selectedHost]);
 
   const handleTest = useCallback(async () => {
     if (!stepsUnlocked) {
@@ -405,25 +444,35 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         <>
           <SettingsSection
             title="1. Red local"
-            description="El cliente lo hace manualmente en el iPhone/iPad. Sin esto no imprime."
+            description="iOS no muestra «Red local» en Ajustes hasta que Vertial lo pide. Sin Permitir, no imprime."
           >
             <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-4 py-3">
               <div className="flex items-start gap-3">
                 <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                 <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
-                  <p className="font-semibold">Activar en Ajustes del sistema</p>
+                  <p className="font-semibold">Orden correcto</p>
                   <ol className="mt-2 space-y-1 list-decimal list-inside text-blue-800/90 dark:text-blue-200/90">
-                    <li>Abre <strong>Ajustes</strong> del iPhone/iPad</li>
-                    <li>Busca <strong>Vertial</strong></li>
-                    <li>Activa <strong>Red local</strong></li>
+                    <li>Pulsa <strong>Pedir permiso de red local</strong> (sale el aviso de iOS → Permitir)</li>
+                    <li>Opcional: <strong>Abrir Ajustes</strong> → Vertial → comprueba que «Red local» está ON</li>
+                    <li>Marca la casilla de abajo y sigue con la IP</li>
                   </ol>
                 </div>
               </div>
             </div>
             <button
               type="button"
+              onClick={() => void handleRequestLanPermission()}
+              disabled={requestingLan}
+              className="mt-4 w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold touch-manipulation active:opacity-80 disabled:opacity-60"
+            >
+              {requestingLan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
+              {requestingLan ? 'Pidiendo permiso…' : 'Pedir permiso de red local'}
+            </button>
+            <button
+              type="button"
               onClick={() => void handleOpenSettings()}
-              className="mt-4 w-full inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700"
+              disabled={requestingLan}
+              className="mt-3 w-full inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
             >
               <ExternalLink className="w-4 h-4" />
               Abrir Ajustes de Vertial
@@ -436,7 +485,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 className="mt-1 h-5 w-5 rounded border-gray-300 text-gray-900 focus:ring-gray-500"
               />
               <span className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
-                <strong>He activado «Red local»</strong> para Vertial en Ajustes del iPhone/iPad.
+                <strong>Ya pulsé Permitir</strong> (o activé «Red local» en Ajustes → Vertial).
               </span>
             </label>
           </SettingsSection>
