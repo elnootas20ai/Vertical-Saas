@@ -1,4 +1,5 @@
 import { isVertialNativeApp } from './isNativeApp';
+import { withNativeCallTimeout } from './nativeCallTimeout';
 
 export interface NativeLocalNetworkInfo {
   ip: string;
@@ -27,9 +28,9 @@ export async function getEscposPlugin(): Promise<EscposPlugin> {
 export async function getNativeLocalNetworkInfo(): Promise<NativeLocalNetworkInfo | null> {
   if (!isVertialNativeApp()) return null;
   try {
-    const plugin = await getEscposPlugin();
+    const plugin = await withNativeCallTimeout(getEscposPlugin(), 2500, 'Plugin impresora');
     if (typeof plugin.getLocalNetworkInfo !== 'function') return null;
-    const raw = await plugin.getLocalNetworkInfo();
+    const raw = await withNativeCallTimeout(plugin.getLocalNetworkInfo(), 2500, 'Lectura WiFi');
     const ip = String(raw?.ip || '').trim();
     const prefix = String(raw?.prefix || '').trim();
     if (prefix && /^\d{1,3}(\.\d{1,3}){2}$/.test(prefix)) {

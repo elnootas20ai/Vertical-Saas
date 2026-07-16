@@ -12,7 +12,7 @@ const NATIVE_PRINT_RETRY_DELAY_MS = 400;
 const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 10_000;
 const NATIVE_DISCOVER_PLUGIN_RETRY_MS = 8_000;
 const NATIVE_DISCOVER_SUBNET_SWEEP_MS = 12_000;
-const NATIVE_PING_TIMEOUT_MS = 5_000;
+const NATIVE_PING_TIMEOUT_MS = 3_500;
 /** Ping corto para barridos: con 3 s por host el barrido no cubre la subred. */
 const NATIVE_SWEEP_PING_TIMEOUT_MS = 1_500;
 
@@ -212,15 +212,16 @@ async function sendEscposToHost(
   const inflight = escposInFlight.get(key);
   if (inflight) {
     try {
-      await inflight;
+      // Nunca esperar sin tope: un print nativo colgado dejaba la cola bloqueada minutos.
+      await withNativeTimeout(inflight, Math.min(timeoutMs, 8_000), 'Impresión anterior');
     } catch {
-      /* esperar a que termine el intento anterior */
+      escposInFlight.delete(key);
     }
   }
 
   const run = (async () => {
     try {
-      const ESCPOSProxy = await escposProxy();
+      const ESCPOSProxy = await withNativeTimeout(escposProxy(), 2500, 'Plugin impresora');
       await withNativeTimeout(
         ESCPOSProxy.print({ ip: host, port, message: bytesToBase64(bytes) }),
         timeoutMs,
@@ -325,10 +326,10 @@ export async function pingNativeHost(
   const ip = String(host || '').trim();
   if (!ip) return { ok: false };
   try {
-    const ESCPOSProxy = await escposProxy();
+    const ESCPOSProxy = await withNativeTimeout(escposProxy(), 2500, 'Plugin impresora');
     const { online, rtt } = await withNativeTimeout(
       ESCPOSProxy.ping({ ip, port: Number(port) || 9100 }),
-      NATIVE_PING_TIMEOUT_MS + 500,
+      NATIVE_PING_TIMEOUT_MS,
       'Comprobación de impresora',
     );
     return { ok: Boolean(online), rtt };

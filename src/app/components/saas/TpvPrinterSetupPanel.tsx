@@ -259,21 +259,30 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     setPingingIp(true);
     void (async () => {
       try {
-        const ping = await pingNativeHost(host, 9100);
+        const ping = await Promise.race([
+          pingNativeHost(host, 9100),
+          new Promise<{ ok: false }>((resolve) => {
+            globalThis.setTimeout(() => resolve({ ok: false }), 6_000);
+          }),
+        ]);
         if (ping.ok) {
           toast.success(`La impresora responde en ${host}`, {
-            description: ping.rtt ? `Tiempo de respuesta: ${ping.rtt} ms` : 'Pulsa «Guardar impresora» para usarla en el TPV.',
+            description:
+              'rtt' in ping && ping.rtt
+                ? `Tiempo de respuesta: ${ping.rtt} ms`
+                : 'Pulsa «Guardar impresora» para usarla en el TPV.',
             duration: 8000,
           });
           refreshDiagnostics();
         } else {
           toast.error('La impresora no responde en esa IP.', {
             duration: 10000,
-            description: 'Comprueba WiFi, que está encendida y que «Red local» está ON en Ajustes → Vertial. Puedes guardarla igualmente si la IP del ticket es correcta.',
+            description:
+              'Puedes guardarla igual si la IP del ticket es correcta (192.168.1.20). Comprueba WiFi y «Red local» en Ajustes → Vertial.',
           });
         }
       } catch {
-        toast.error('No se pudo comprobar la conexión. Revisa la red e inténtalo de nuevo.');
+        toast.error('No se pudo comprobar la conexión. Puedes guardar la IP igualmente.');
       } finally {
         setPingingIp(false);
       }
@@ -282,7 +291,12 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
   const handleOpenSettings = useCallback(async () => {
     try {
-      const opened = await openNativeAppSettings();
+      const opened = await Promise.race([
+        openNativeAppSettings(),
+        new Promise<boolean>((resolve) => {
+          globalThis.setTimeout(() => resolve(false), 4_000);
+        }),
+      ]);
       if (!opened) {
         toast.error('Abre Ajustes del iPhone/iPad → Vertial → activa «Red local».');
       }
@@ -311,10 +325,19 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         terminalId: scope?.terminalId,
         localFallback: loadLegacyPrinterConfig(),
       });
-      const result = await printTestTicket(effective);
+      const result = await Promise.race([
+        printTestTicket(effective).then((value) => ({ ...value, timedOut: false as const })),
+        new Promise<{ ok: false; timedOut: true }>((resolve) => {
+          globalThis.setTimeout(() => resolve({ ok: false, timedOut: true }), 12_000);
+        }),
+      ]);
       if (result.ok) {
         writePrinterVerifiedHost(effective.networkHost);
         refreshDiagnostics();
+      } else if (result.timedOut) {
+        toast.error('La prueba tardó demasiado. Revisa la impresora o guarda de nuevo la IP.', {
+          duration: 8000,
+        });
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo imprimir la prueba', { duration: 8000 });
@@ -516,7 +539,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <button
                 type="button"
                 onClick={handleCheckConnection}
-                disabled={pingingIp || savingIp || !manualIp.trim()}
+                disabled={pingingIp || !manualIp.trim()}
                 className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
               >
                 {pingingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
@@ -525,13 +548,18 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <button
                 type="button"
                 onClick={handleRequestSave}
-                disabled={pingingIp || savingIp || !manualIp.trim()}
+                disabled={savingIp || !manualIp.trim()}
                 className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold touch-manipulation active:opacity-80 disabled:opacity-60"
               >
                 {savingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
                 {savingIp ? 'Guardando…' : 'Guardar impresora'}
               </button>
             </div>
+            {pingingIp ? (
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                La comprobación puede fallar por la red; igual puedes pulsar «Guardar impresora» con la IP del ticket.
+              </p>
+            ) : null}
           </SettingsSection>
 
           <SettingsSection
