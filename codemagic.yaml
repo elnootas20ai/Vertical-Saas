@@ -67,7 +67,7 @@ workflows:
               echo "=== DIAGNOSTICO ERROR (líneas útiles) ==="
               for LOG in $(ls -t /tmp/xcodebuild_logs/*.log 2>/dev/null); do
                 echo "--- $LOG ---"
-                grep -E 'error:|ERROR |Provisioning|entitlement|CodeSign|codesign|Failed to|requires a provisioning|doesn't support|does not support|exit code' "$LOG" | tail -100 || true
+                grep -E "error:|ERROR |Provisioning|entitlement|CodeSign|codesign|Failed to|requires a provisioning|does not support|exit code" "$LOG" | tail -100 || true
                 echo "=== tail 40 ==="
                 tail -40 "$LOG"
               done
