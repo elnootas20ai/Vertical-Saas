@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, createContext, useContext, type ReactNode } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, createContext, useContext, lazy, Suspense, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
@@ -96,7 +96,13 @@ import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
 import type { TpvPrinterScope } from './TpvPrinterSetupPanel';
-import { setActivePrinterScope } from '../../lib/vertialPrint';
+import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
+import { readNativePrinterDiagnosticsSync, readPrinterVerifiedHost } from '../../lib/vertialPrint/nativePrinterDiagnostics';
+import { setActivePrinterScope } from '../../lib/vertialPrint/printerActiveScope';
+
+const TpvPrinterSetupModal = lazy(() =>
+  import('./TpvPrinterSetupModal').then((m) => ({ default: m.TpvPrinterSetupModal })),
+);
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
 import {
   clockIn,
@@ -208,7 +214,9 @@ function shouldKeepTpvSessionInList(
   const pid = String(session.pointOfSaleId || '').trim();
   const matchesScopedPdv = () =>
     Boolean(pid && (scopedPdvs.some((p) => p._id === pid) || scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid)));
+  // Si el listado de tiendas aún no cargó, no borrar cajas abiertas (evita OpeningScreen eterno).
   if (isTpvRegisterSessionOpen(session)) {
+    if (scopedPdvs.length === 0) return true;
     return matchesScopedPdv();
   }
   if (!pid) return !businessId;
@@ -410,7 +418,8 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     || (isTabletMode && restrictedToPdvId
       ? pointsOfSale.find((p) => p._id === restrictedToPdvId)
       : undefined);
-  const availableTerminals = selectedPdv?.terminals.filter(t => t.active) || [];
+  // Misma regla que sala/ensurePdvHasDefaultTerminal: active undefined = activo.
+  const availableTerminals = selectedPdv?.terminals.filter((t) => t.active !== false) || [];
   const selectedTerminal = availableTerminals.find(t => t.id === selectedTerminalId);
 
   const previousCloseCash = useMemo(() => {
@@ -452,10 +461,12 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const hasWorkers = workerOptions.length > 0;
   const hasResolvedPdv = Boolean(selectedPdv) || (isTabletMode && Boolean(restrictedToPdvId));
+  // Bar/restaurante y tablet: si no hay terminal configurado, se usa uno sintético al abrir.
+  const allowSyntheticTerminal = isTabletMode || restaurantOpening;
   const canOpen = hasWorkers
     && Boolean(effectiveWorkerName())
     && hasResolvedPdv
-    && (Boolean(selectedTerminal) || isTabletMode);
+    && (Boolean(selectedTerminal) || allowSyntheticTerminal);
 
   const workerOptionsKey = useMemo(
     () => workerOptions.map((w) => `${w.id}:${w.name}`).join('|'),
@@ -568,13 +579,17 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const handleSubmit = () => {
     const wName = effectiveWorkerName();
+    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
+    const syntheticTerminalId = allowSyntheticTerminal
+      ? `${isTabletMode ? 'tablet' : 'tpv'}-${pdvId || 'default'}`
+      : '';
     onOpen({
       workerId: selectedWorkerId || undefined,
       workerName: wName,
-      pointOfSaleId: selectedPdv?._id || restrictedToPdvId || '',
+      pointOfSaleId: pdvId,
       pointOfSaleName: selectedPdv ? pointOfSaleDisplayLabel(selectedPdv) : (tabletStoreLabel || ''),
-      terminalId: selectedTerminal?.id || (isTabletMode ? `tablet-${selectedPdv?._id || restrictedToPdvId || 'default'}` : ''),
-      terminalName: effectiveTerminalName || 'Tablet',
+      terminalId: selectedTerminal?.id || syntheticTerminalId,
+      terminalName: effectiveTerminalName || (isTabletMode ? 'Tablet' : 'Terminal principal'),
       datafonName: effectiveDatafon,
       printerName: effectivePrinter,
       counts,
@@ -590,7 +605,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     }
     try {
       if (window.history.length > 1) window.history.back();
-      else if (isRestaurantBusinessType(currentBusiness?.businessType)) navigate('/saas/caja');
+      else if (isRestaurantBusinessType(currentBusiness?.businessType)) navigate('/saas/sala');
       else navigate('/saas/delivery-ops');
     } catch {
       // ignore
@@ -982,7 +997,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                   ).map((row) => {
                     const pdv = row.pdvId ? pdvById.get(row.pdvId) : undefined;
                     const selected = Boolean(row.pdvId && selectedPdvId === row.pdvId);
-                    const termCount = pdv?.terminals.filter((t) => t.active).length ?? 0;
+                    const termCount = pdv?.terminals.filter((t) => t.active !== false).length ?? 0;
                     return (
                       <button
                         key={row.rowId}
@@ -1074,6 +1089,10 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                         </div>
                       </button>
                     ))}
+                  </div>
+                ) : allowSyntheticTerminal ? (
+                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-3 text-sm text-emerald-800 dark:text-emerald-200">
+                    Se usará el terminal principal de esta tienda al abrir caja.
                   </div>
                 ) : (
                   <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
@@ -1856,6 +1875,9 @@ function RegisterStatusBar({
   onRequestCashCount,
   onRequestIncident,
   onRequestCashOps,
+  onRequestPrinterSetup,
+  showNativePrinter = false,
+  nativePrinterReady = false,
   clockedInWorkers,
   clockedInWorkersLoading,
   selectedOrderTakerId,
@@ -1869,6 +1891,10 @@ function RegisterStatusBar({
   onRequestCashCount: () => void;
   onRequestIncident: () => void;
   onRequestCashOps: () => void;
+  onRequestPrinterSetup?: () => void;
+  showNativePrinter?: boolean;
+  /** Ticket de prueba OK en la IP guardada de este dispositivo. */
+  nativePrinterReady?: boolean;
   clockedInWorkers: TpvClockedInWorker[];
   clockedInWorkersLoading: boolean;
   selectedOrderTakerId: string | null;
@@ -1926,6 +1952,19 @@ function RegisterStatusBar({
           <button type="button" onClick={onRequestCashOps} title="Movimiento de caja" className={actionBtn}>
             <Banknote className="w-4 h-4 shrink-0" />
           </button>
+          {showNativePrinter && onRequestPrinterSetup && (
+            <button
+              type="button"
+              onClick={onRequestPrinterSetup}
+              title={nativePrinterReady ? 'Impresora lista' : 'Configurar impresora'}
+              className={`${actionBtn} relative`}
+            >
+              <Printer className="w-4 h-4 shrink-0" />
+              {nativePrinterReady ? (
+                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
+              ) : null}
+            </button>
+          )}
           <button type="button" onClick={onRequestCashCount} title="Arqueo" className={actionBtn}>
             <Calculator className="w-4 h-4 shrink-0" />
           </button>
@@ -1988,6 +2027,19 @@ function RegisterStatusBar({
         <button type="button" onClick={onRequestCashOps} className={actionBtn}>
           <Banknote className="w-4 h-4 shrink-0" /> Mov. caja
         </button>
+        {showNativePrinter && onRequestPrinterSetup && (
+          <button
+            type="button"
+            onClick={onRequestPrinterSetup}
+            title={nativePrinterReady ? 'Impresora lista' : 'Configurar impresora WiFi'}
+            className={`${actionBtn} relative`}
+          >
+            <Printer className="w-4 h-4 shrink-0" /> Impresora
+            {nativePrinterReady ? (
+              <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
+            ) : null}
+          </button>
+        )}
         <button type="button" onClick={onRequestCashCount} className={actionBtn}>
           <Calculator className="w-4 h-4 shrink-0" /> Arqueo
         </button>
@@ -2310,6 +2362,16 @@ export function TpvRegisterGate({
   const [showCashOps, setShowCashOps] = useState(false);
   const [showClockIn, setShowClockIn] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
+  const [showPrinterSetup, setShowPrinterSetup] = useState(false);
+  const [printerBarTick, setPrinterBarTick] = useState(0);
+  const isNativeApp = isVertialNativeApp();
+  const nativePrinterReady = useMemo(() => {
+    if (!isNativeApp) return false;
+    void printerBarTick;
+    const diag = readNativePrinterDiagnosticsSync();
+    const verified = readPrinterVerifiedHost();
+    return diag.ready && verified === diag.savedHost;
+  }, [isNativeApp, printerBarTick]);
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
   const [postCloseAggregatorRows, setPostCloseAggregatorRows] = useState<AggregatorCashRow[]>([]);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
@@ -2587,18 +2649,13 @@ export function TpvRegisterGate({
 
   useEffect(() => {
     const pdv = printerModalScope?.pdv;
-    if (!pdv) {
-      setActivePrinterScope({});
-      return;
-    }
+    if (!pdv) return;
     setActivePrinterScope({
       pdvId: pdv._id,
       terminalId: printerModalScope?.terminalId,
       pdv,
     });
   }, [printerModalScope?.pdv?._id, printerModalScope?.pdv?._rev, printerModalScope?.terminalId]);
-
-  useEffect(() => () => setActivePrinterScope({}), []);
 
   const handleOpeningPdvChange = useCallback((pdvId: string) => {
     const id = String(pdvId || '').trim();
@@ -2836,7 +2893,8 @@ export function TpvRegisterGate({
                   let state = await loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
                     ...loadOpts,
                     knownBusinessIds,
-                    tpvBootstrap: false,
+                    // Restaurante/bar: asegurar PDV + terminal al abrir TPV (sin esto la caja no abre).
+                    tpvBootstrap: isRestaurant,
                   });
                   if (state.dataUserId) {
                     state = {
@@ -3023,8 +3081,13 @@ export function TpvRegisterGate({
           setSelectedOrderTakerId(openerId);
           void refreshClockedInWorkers({ silent: true });
         } catch {
-          // La caja ya abrió; el resto puede fichar manualmente desde la barra.
+          // La caja ya abrió; sin fichaje el TPV se bloquea — abrir modal y avisar.
+          toast.warning('Caja abierta. Ficha al equipo para poder vender.', { duration: 7000 });
+          setShowClockIn(true);
         }
+      } else if (isTpvRegisterSessionOpen(created)) {
+        toast.warning('Caja abierta. Ficha al equipo para poder vender.', { duration: 7000 });
+        setShowClockIn(true);
       }
       // Aviso para el campanario de notificaciones. Útil para auditoría y para que
       // un encargado vea aperturas desde el móvil. Si la llamada al backend falla
@@ -3292,7 +3355,8 @@ export function TpvRegisterGate({
   );
   const restaurantTpvPermissions = useMemo(() => resolveRestaurantTpvPermissions(user), [user]);
   const cajaHomePath = isRestaurantVertical ? '/saas/caja' : '/saas/vertical/delivery/caja';
-  const opsHomePath = isRestaurantVertical ? '/saas/caja' : '/saas/delivery-ops';
+  /** Home operativo bar/restaurante = Sala (no Caja). */
+  const opsHomePath = isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops';
 
   const handleRequestClose = useCallback(async () => {
     if (isRestaurantVertical && !restaurantTpvPermissions.canCloseRegister) {
@@ -3644,6 +3708,9 @@ export function TpvRegisterGate({
           onRequestCashCount={() => setShowCashCount(true)}
           onRequestIncident={() => setShowIncident(true)}
           onRequestCashOps={() => setShowCashOps(true)}
+          onRequestPrinterSetup={() => setShowPrinterSetup(true)}
+          showNativePrinter={isNativeApp}
+          nativePrinterReady={nativePrinterReady}
           clockedInWorkers={activeStaff}
           clockedInWorkersLoading={clockedInWorkersLoading}
           selectedOrderTakerId={selectedOrderTakerId}
@@ -3729,6 +3796,25 @@ export function TpvRegisterGate({
       {showIncident && (
         <TpvGatePortal>
           <IncidentModal session={activeSession} onConfirm={addIncident} onCancel={() => setShowIncident(false)} />
+        </TpvGatePortal>
+      )}
+      {showPrinterSetup && (
+        <TpvGatePortal>
+          <Suspense
+            fallback={(
+              <div className="fixed inset-0 z-[110] flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-950 text-gray-700 dark:text-gray-200">
+                <p className="text-sm font-semibold">Cargando configuración de impresora…</p>
+              </div>
+            )}
+          >
+            <TpvPrinterSetupModal
+              scope={printerModalScope}
+              onClose={() => {
+                setShowPrinterSetup(false);
+                setPrinterBarTick((t) => t + 1);
+              }}
+            />
+          </Suspense>
         </TpvGatePortal>
       )}
     </TpvRegisterBoardReadyContext.Provider>,

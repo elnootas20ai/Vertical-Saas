@@ -67,7 +67,16 @@ function comandaToTicket(order: DiningOrder, comanda: DiningComanda): KitchenTic
 
 /**
  * Aplana pedidos de sala en tickets de cocina activos, más antiguos primero.
- * Excluye comandas en borrador, servidas o canceladas y pedidos cerrados.
+ *
+ * Qué entra en cocina (origen: TPV sala):
+ * - Comandas con status `sent_to_kitchen` | `in_preparation` | `ready`
+ * - De pedidos de sala abiertos (mesa), filtrados por empresa activa
+ * - Ítems no cancelados de esa comanda
+ *
+ * Qué NO entra:
+ * - Pedidos Delivery / KDS delivery
+ * - Borradores de comanda no enviados
+ * - Comandas ya servidas o canceladas
  */
 export function buildKitchenTickets(
   orders: DiningOrder[],

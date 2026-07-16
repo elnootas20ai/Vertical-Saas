@@ -580,6 +580,8 @@ export interface AppNotification {
 }
 
 export type SubscriptionStatus =
+  | 'pending_payment'
+  | 'payment_sent'
   | 'trial_active'
   | 'trial_expiring'
   | 'trial_expired'
@@ -1700,6 +1702,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const getAccessRestrictionMessage = (): string | null => {
     if (subscription.billingExempt) return null;
     switch (subscription.status) {
+      case 'pending_payment':
+        return 'Tu cuenta está pendiente de pago. Realiza la transferencia para activar Vertial.';
+      case 'payment_sent':
+        return 'Hemos recibido tu aviso de pago. Acceso disponible cuando validemos la transferencia.';
       case 'trial_expired': return 'Tu periodo de prueba ha expirado. Actualiza tu suscripción para continuar.';
       case 'suspended': return 'Cuenta suspendida. Actualiza tu método de pago para restaurar el acceso.';
       case 'payment_failed': return 'Error en el pago. Algunas funciones están limitadas hasta que actualices tu método de pago.';

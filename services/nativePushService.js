@@ -144,10 +144,14 @@ export async function sendNativePushToUser(req, userId, payload) {
 
   const note = new apn.Notification();
   note.topic = process.env.APNS_BUNDLE_ID || tokens[0]?.bundleId || 'com.vertial.app';
+  // Obligatorio desde iOS 13+: sin pushType=alert Apple puede entregar sin banner/sonido.
+  note.pushType = 'alert';
+  note.priority = 10;
   note.alert = { title: payload.title || 'Vertial', body: payload.body || '' };
-  note.sound = 'default';
+  // Sonido del sistema (también acepta nombre de archivo .caf en el bundle).
+  note.sound = payload.sound || 'default';
   note.payload = payload.data || {};
-  note.badge = payload.badge ?? undefined;
+  if (payload.badge != null) note.badge = payload.badge;
 
   let sent = 0;
   let failed = 0;

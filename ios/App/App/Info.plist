@@ -52,7 +52,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Vertial usa tu ubicación solo mientras usas la app para verificar fichajes y servicios en el lugar de trabajo.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Vertial se conecta a impresoras térmicas en la red WiFi o LAN de tu local para imprimir tickets del TPV.</string>
+	<string>Vertial necesita acceder a la red local de tu WiFi para conectar con la impresora de tickets del TPV (por ejemplo 192.168.1.20). Sin este permiso no puede imprimir.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_pdl-datastream._tcp</string>
@@ -60,8 +60,6 @@
 		<string>_epos._tcp</string>
 		<string>_jetdirect._tcp</string>
 		<string>_ipp._tcp</string>
-		<string>_ipps._tcp</string>
-		<string>_uscans._tcp</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

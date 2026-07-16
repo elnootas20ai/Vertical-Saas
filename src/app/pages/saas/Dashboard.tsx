@@ -4,6 +4,9 @@ import { loadVerticalKpiSnapshot, type VerticalKpiSnapshot } from '../../lib/das
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Layout } from '../../components/saas/Layout';
+import { CeoMobileHome } from '../../components/saas/CeoMobileHome';
+import { useIsMobile } from '../../components/ui/use-mobile';
+import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -377,19 +380,6 @@ interface QuickAccessItem {
 
 function getQuickAccessItems(vertical: string): QuickAccessItem[] {
   /** Delivery: solo enlaces del vertical (sin taller, vehículos ni CRM compraventa genérico). */
-  if (vertical === 'restaurant') {
-    return [
-      { label: 'Sala', icon: <UtensilsCrossed className="w-5 h-5" />, route: '/saas/sala', color: 'text-amber-600', bg: 'bg-amber-50 dark:bg-amber-950/40' },
-      { label: 'Reservas', icon: <BookmarkCheck className="w-5 h-5" />, route: '/saas/reservations', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
-      { label: 'Lista espera', icon: <ListChecks className="w-5 h-5" />, route: '/saas/lista-espera', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
-      { label: 'Caja', icon: <Banknote className="w-5 h-5" />, route: '/saas/caja', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
-      { label: 'Clientes', icon: <Users className="w-5 h-5" />, route: '/saas/clients', color: 'text-blue-600', bg: 'bg-blue-50 dark:bg-blue-950/40' },
-      { label: 'Catálogo', icon: <Boxes className="w-5 h-5" />, route: '/saas/catalog', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
-      { label: 'Equipo', icon: <UserCheck className="w-5 h-5" />, route: '/saas/team', color: 'text-indigo-600', bg: 'bg-indigo-50 dark:bg-indigo-950/40' },
-      { label: 'Finanzas', icon: <Wallet className="w-5 h-5" />, route: '/saas/finance', color: 'text-emerald-600', bg: 'bg-emerald-50 dark:bg-emerald-950/40' },
-    ];
-  }
-
   if (vertical === 'delivery') {
     return [
       { label: 'Pedidos', icon: <Truck className="w-5 h-5" />, route: '/saas/delivery-ops', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
@@ -533,6 +523,7 @@ function DashboardPage() {
   const { businesses, businessesFetchSettled, currentBusiness } = useBusiness();
   const { isPortfolioView, selectBusinessFromPortfolio } = useDashboardView();
   const portfolioPlan = usePortfolioPlanAccess();
+  const isMobile = useIsMobile();
   const vertical = (currentBusiness?.businessType || 'carDealership') as BusinessType;
   const VerticalDashboard = getVerticalDashboard(vertical);
   const [showUnifiedDashboard, setShowUnifiedDashboard] = useState(false);
@@ -546,6 +537,11 @@ function DashboardPage() {
         </div>
       </Layout>
     );
+  }
+
+  // App / iPhone: Home CEO compacto (PC sigue con el dashboard completo).
+  if ((isMobile || isVertialNativeApp()) && !isPortfolioView) {
+    return <CeoMobileHome />;
   }
 
   if (isPortfolioView && portfolioPlan.canUsePortfolioView) {

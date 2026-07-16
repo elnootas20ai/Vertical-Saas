@@ -51,10 +51,16 @@ interface UseNativePushNotificationsOptions {
  */
 export function useNativePushNotifications({ userId, token }: UseNativePushNotificationsOptions) {
   const deviceTokenRef = useRef<string | null>(null);
+  /** Último Bearer válido — se conserva un instante tras logout para poder desregistrar. */
+  const lastAuthTokenRef = useRef<string | null>(null);
   const apiBase = getApiBase();
   const platform = Capacitor.getPlatform();
 
   const cleanupListeners = useRef<(() => void) | null>(null);
+
+  if (token) {
+    lastAuthTokenRef.current = token;
+  }
 
   const register = useCallback(async () => {
     if (!isVertialNativeApp() || !userId || !token) return;
@@ -81,7 +87,9 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
       const regHandle = await PushNotifications.addListener('registration', (ev) => {
         if (cancelled || !ev.value) return;
         deviceTokenRef.current = ev.value;
-        registerNativeToken(apiBase, token, ev.value, platform).catch((err) => {
+        const auth = lastAuthTokenRef.current;
+        if (!auth) return;
+        registerNativeToken(apiBase, auth, ev.value, platform).catch((err) => {
           console.warn('[NativePush] Error registrando token:', err?.message);
         });
       });
@@ -89,6 +97,14 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
       const errHandle = await PushNotifications.addListener('registrationError', (err) => {
         console.warn('[NativePush] Error de registro:', err?.error);
       });
+
+      // Con presentationOptions en capacitor.config, iOS también muestra el aviso en primer plano.
+      const receivedHandle = await PushNotifications.addListener(
+        'pushNotificationReceived',
+        () => {
+          /* El sistema presenta la notificación; no hace falta toast duplicado. */
+        },
+      );
 
       const actionHandle = await PushNotifications.addListener(
         'pushNotificationActionPerformed',
@@ -103,6 +119,7 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
       cleanupListeners.current = () => {
         void regHandle.remove();
         void errHandle.remove();
+        void receivedHandle.remove();
         void actionHandle.remove();
       };
 
@@ -113,12 +130,23 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
       cancelled = true;
       cleanupListeners.current?.();
       cleanupListeners.current = null;
-
-      const deviceToken = deviceTokenRef.current;
-      if (deviceToken && token) {
-        unregisterNativeToken(apiBase, token, deviceToken, platform).catch(() => {});
-      }
-      deviceTokenRef.current = null;
+      // No desregistrar el token en cada remount (Strict Mode / deps): solo en logout.
     };
   }, [userId, token, apiBase, platform, register]);
+
+  // Desregistrar solo cuando el usuario pierde la sesión (logout).
+  useEffect(() => {
+    if (userId && token) return;
+
+    const deviceToken = deviceTokenRef.current;
+    const auth = lastAuthTokenRef.current;
+    if (!deviceToken || !auth) {
+      deviceTokenRef.current = null;
+      return;
+    }
+
+    unregisterNativeToken(apiBase, auth, deviceToken, platform).catch(() => {});
+    deviceTokenRef.current = null;
+    lastAuthTokenRef.current = null;
+  }, [userId, token, apiBase, platform]);
 }

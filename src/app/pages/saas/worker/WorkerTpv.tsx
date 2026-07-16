@@ -3,11 +3,10 @@ import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
-import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 import { TpvRegisterGate } from '../../../components/saas/TpvRegisterGate';
 import { TpvOfflineBanner } from '../../../components/saas/TpvOfflineBanner';
 import { WorkerTpvBottomBar } from '../../../components/saas/WorkerTpvBottomBar';
-import { isTpvTabletBound, readTpvTabletBinding, resolveTpvTabletWorkerPath, TPV_TABLET_VERTICAL_RESTAURANT } from '../../../lib/tpvTabletSession';
+import { isTpvTabletBound, resolveTpvTabletWorkerPath } from '../../../lib/tpvTabletSession';
 import { consumeTpvStockReviewLaunch, TPV_OPEN_STOCK_REVIEW_EVENT } from '../../../lib/tpvStockReview';
 import { WorkerTpvDelivery } from './WorkerTpvDelivery';
 import { WorkerTpvSales } from './WorkerTpvSales';
@@ -61,7 +60,6 @@ import {
 
 const VERTICAL_MODULE: Partial<Record<BusinessType, React.ComponentType>> = {
   delivery: WorkerTpvDelivery,
-  restaurant: WorkerTpvDelivery,
   workshop: WorkerTpvWorkshop,
   cleaning: WorkerTpvCleaning,
   carDealership: WorkerTpvSales,
@@ -83,7 +81,6 @@ const VERTICAL_MODULE: Partial<Record<BusinessType, React.ComponentType>> = {
 
 const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.ReactNode }>> = {
   delivery: { label: 'Pedidos y Cocina', icon: <Truck className="w-6 h-6" /> },
-  restaurant: { label: 'Sala y TPV', icon: <Truck className="w-6 h-6" /> },
   workshop: { label: 'Órdenes de Trabajo', icon: <Wrench className="w-6 h-6" /> },
   cleaning: { label: 'Servicios de Limpieza', icon: <SprayCan className="w-6 h-6" /> },
   carDealership: { label: 'Ventas', icon: <ShoppingCart className="w-6 h-6" /> },
@@ -142,13 +139,8 @@ function WorkerTpvShell({ children, restaurantMode = false }: { children: ReactN
 }
 
 export function WorkerTpvDeliveryRoute() {
-  const { currentBusiness } = useBusiness();
-  const binding = readTpvTabletBinding();
-  const restaurantMode =
-    binding?.tpvVertical === TPV_TABLET_VERTICAL_RESTAURANT
-    || isRestaurantBusinessType(currentBusiness?.businessType);
   return (
-    <WorkerTpvShell restaurantMode={restaurantMode}>
+    <WorkerTpvShell restaurantMode={false}>
       <WorkerTpvDelivery />
     </WorkerTpvShell>
   );
@@ -191,10 +183,8 @@ export function WorkerTpv() {
     );
   }
 
-  const restaurantMode = isRestaurantBusinessType(vertical);
-
   return (
-    <WorkerTpvShell restaurantMode={restaurantMode}>
+    <WorkerTpvShell restaurantMode={false}>
       <Module />
     </WorkerTpvShell>
   );

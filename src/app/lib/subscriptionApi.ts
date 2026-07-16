@@ -131,3 +131,49 @@ export async function purchaseSubscriptionAddon(
 export async function getBillingCapabilities() {
   return request<{ ok: boolean; skipMonei: boolean }>('/api/subscriptions/capabilities');
 }
+
+export interface TransferInstructionsResponse {
+  ok: boolean;
+  companyName: string;
+  email: string;
+  subscription: {
+    status: string;
+    planName: string;
+    selectedPlanId: string;
+    billingMode: string;
+    paymentConcept: string;
+    paymentSentAt?: string;
+    currentPeriodEnd?: string;
+    billingExempt?: boolean;
+  };
+  plan: {
+    id: string;
+    name: string;
+    monthlyPriceCents: number;
+    monthlyPriceEuros: number;
+  };
+  transfer: {
+    iban: string;
+    holder: string;
+    bankName?: string;
+    bic?: string;
+    configured?: boolean;
+  };
+  accessBlocked: boolean;
+}
+
+export async function getTransferInstructions() {
+  return request<TransferInstructionsResponse>('/api/subscriptions/transfer-instructions');
+}
+
+export async function notifyTransferPayment() {
+  return request<{
+    ok: boolean;
+    alreadyActive?: boolean;
+    subscription?: Record<string, unknown>;
+    message?: string;
+  }>('/api/subscriptions/notify-transfer-payment', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}

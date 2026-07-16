@@ -9,6 +9,8 @@ import {
   webhookSubscriptionStatus,
   webhookPaymentStatus,
   purchaseAddon,
+  getTransferInstructions,
+  notifyTransferPayment,
 } from '../controllers/subscriptionController.js';
 
 const subscriptionRouter = Router();
@@ -19,6 +21,8 @@ subscriptionRouter.get('/capabilities', getBillingCapabilities);
 subscriptionRouter.post('/create', requireAuthAndEmailVerified, createAndActivate);
 subscriptionRouter.post('/addons/purchase', requireAuthAndEmailVerified, purchaseAddon);
 subscriptionRouter.get('/status', requireAuthAndEmailVerified, getStatus);
+subscriptionRouter.get('/transfer-instructions', requireAuthAndEmailVerified, getTransferInstructions);
+subscriptionRouter.post('/notify-transfer-payment', requireAuthAndEmailVerified, notifyTransferPayment);
 subscriptionRouter.post('/cancel', requireAuthAndEmailVerified, cancelUserSubscription);
 subscriptionRouter.post('/confirm', requireAuthAndEmailVerified, confirmSubscription);
 

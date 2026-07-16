@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
@@ -10,6 +10,7 @@ import {
   writeDeliveryOpsSelectedPdvId,
 } from '../../lib/deliveryOpsPdvSelection';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { canValidateRegisterClosings } from '../../lib/restaurantTpvPermissions';
 import { ensureTpvSessionIncome } from '../../lib/tpvFinanceSync';
 import {
   listRestaurantRegisterSessions,
@@ -285,7 +286,8 @@ function StoreDayBlock({
   expandedSessionId: string | null;
   onToggleSession: (id: string) => void;
   onViewClosing: (session: TpvRegisterSession) => void;
-  onValidate: (session: TpvRegisterSession) => void;
+  /** Solo gerente/dueño. Si no se pasa, no se muestran acciones de validación. */
+  onValidate?: (session: TpvRegisterSession) => void;
 }) {
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
@@ -418,7 +420,10 @@ function StoreDayBlock({
                         </div>
                       </div>
                       <div className="shrink-0 flex flex-col items-end gap-1">
-                        {session.status === 'closed' && session.closingValidationStatus === 'pending' && isMeaningfulPendingClose(session) && (
+                        {onValidate
+                          && session.status === 'closed'
+                          && session.closingValidationStatus === 'pending'
+                          && isMeaningfulPendingClose(session) && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); onValidate(session); }}
@@ -703,6 +708,7 @@ export function RestaurantCajaPage() {
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
+  const canValidateClosings = canValidateRegisterClosings(user);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -778,7 +784,8 @@ export function RestaurantCajaPage() {
 
     if (validateParam) {
       if (session.status === 'closed' && session.closingValidationStatus === 'pending') {
-        setValidatingSession(session);
+        if (canValidateClosings) setValidatingSession(session);
+        else setViewingClosingSession(session);
       } else if (session.status === 'open') {
         toast.info('Esta caja sigue abierta. El cierre se realiza desde el TPV en tienda.');
       } else {
@@ -788,7 +795,7 @@ export function RestaurantCajaPage() {
       setViewingClosingSession(session);
     }
     clearDeepLink();
-  }, [loading, sessions, deepLinkSessionId, validateParam, setSearchParams]);
+  }, [loading, sessions, deepLinkSessionId, validateParam, canValidateClosings, setSearchParams]);
 
   useEffect(() => {
     const id = window.setInterval(() => { void loadData({ silent: true }); }, 30000);
@@ -804,6 +811,32 @@ export function RestaurantCajaPage() {
   const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
     ? activeStoreScope.allPointsOfSale
     : activeStoreScope.pointsOfSale;
+
+  // Arrancar filtrado por la tienda activa del scope (como Delivery).
+  const didInitPdvFilter = useRef(false);
+  useEffect(() => {
+    if (didInitPdvFilter.current) return;
+    const active = String(activeStoreScope.activeSalesPointId || '').trim();
+    if (!active || pointsOfSale.length === 0) return;
+    if (pointsOfSale.some((p) => p._id === active)) {
+      setFilterPdv(active);
+      didInitPdvFilter.current = true;
+    }
+  }, [activeStoreScope.activeSalesPointId, pointsOfSale]);
+
+  const handleFilterPdvChange = useCallback(
+    (pdvId: string) => {
+      didInitPdvFilter.current = true;
+      setFilterPdv(pdvId);
+      const businessId = resolveBusinessScopeId(currentBusiness);
+      if (pdvId && businessId && dataUserId) {
+        writeDeliveryOpsSelectedPdvId(businessId, dataUserId, pdvId);
+        activeStoreScope.setActiveSalesPoint(pdvId);
+        notifyDeliveryActiveStoreChanged();
+      }
+    },
+    [currentBusiness, dataUserId, activeStoreScope],
+  );
 
   const todayStr = todayIsoDate();
   const weekDays = useMemo(() => last7Days(), [todayStr]);
@@ -998,7 +1031,7 @@ export function RestaurantCajaPage() {
       activeStoreScope.setActiveSalesPoint(pdvId);
       notifyDeliveryActiveStoreChanged();
     }
-    navigate('/saas/caja/tpv');
+    navigate('/saas/sala');
   }, [
     currentBusiness,
     filterPdv,
@@ -1026,13 +1059,7 @@ export function RestaurantCajaPage() {
         <div className="flex items-start gap-3">
           <button
             type="button"
-            onClick={() => {
-              if (typeof window !== 'undefined' && window.history.length > 1) {
-                navigate(-1);
-              } else {
-                navigate('/saas/sala');
-              }
-            }}
+            onClick={() => navigate('/saas/sala', { replace: true })}
             className="mt-0.5 inline-flex items-center justify-center w-10 h-10 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             aria-label="Volver"
             title="Volver"
@@ -1167,7 +1194,7 @@ export function RestaurantCajaPage() {
           />
         ) : null}
 
-        {pendingValidation.length > 0 && (
+        {canValidateClosings && pendingValidation.length > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-sm text-amber-900 dark:text-amber-200">
               <ShieldCheck className="w-4 h-4 inline mr-1" />
@@ -1183,7 +1210,7 @@ export function RestaurantCajaPage() {
           </div>
         )}
 
-        {emptyPendingClosures.length > 0 && (
+        {canValidateClosings && emptyPendingClosures.length > 0 && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
             <p className="text-xs text-gray-500">{emptyPendingClosures.length} cierres de prueba sin ventas</p>
             <button type="button" disabled={dismissingEmpty} onClick={() => void handleDismissEmptyPending()} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white disabled:opacity-50">
@@ -1205,12 +1232,12 @@ export function RestaurantCajaPage() {
               {pointsOfSale.length > 0 && (
                 <select
                   value={filterPdv}
-                  onChange={(e) => setFilterPdv(e.target.value)}
+                  onChange={(e) => handleFilterPdvChange(e.target.value)}
                   className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800"
                 >
                   <option value="">Todas las tiendas ({pointsOfSale.length})</option>
                   {pointsOfSale.map((p) => (
-                    <option key={p._id} value={p._id}>{p.name}</option>
+                    <option key={p._id} value={p._id}>{p.name || p.code || 'Tienda'}</option>
                   ))}
                 </select>
               )}
@@ -1274,7 +1301,7 @@ export function RestaurantCajaPage() {
                   expandedSessionId={expandedSessionId}
                   onToggleSession={handleToggleSession}
                   onViewClosing={handleViewClosing}
-                  onValidate={setValidatingSession}
+                  onValidate={canValidateClosings ? setValidatingSession : undefined}
                 />
               ))}
             </div>

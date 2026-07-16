@@ -94,11 +94,16 @@ export function buildLanProbeHosts(info?: NativeLocalNetworkInfo | null): string
 
 /**
  * Dispara el aviso de «red local» de iOS/Android.
- * Apple solo muestra el popup cuando la app intenta acceder a la LAN (Bonjour + TCP).
- * Flujo corto: no escanea toda la subred (eso va en «Buscar impresoras»).
+ * Apple solo muestra el popup (y el toggle en Ajustes → Vertial) cuando la app
+ * intenta acceder a la LAN (Bonjour + TCP a IPs privadas).
  */
-export async function requestNativeLocalNetworkAccess(): Promise<void> {
+export async function requestNativeLocalNetworkAccess(options?: {
+  /** IP de la impresora: prioriza un ping real para forzar el permiso. */
+  printerIp?: string;
+}): Promise<void> {
   if (!isVertialNativeApp()) return;
+
+  const printerIp = String(options?.printerIp || '').trim();
 
   const activate = async () => {
     const plugin = await getEscposPlugin();
@@ -115,22 +120,38 @@ export async function requestNativeLocalNetworkAccess(): Promise<void> {
 
     await wait(250);
 
-    const probeHosts = buildLanProbeHosts(networkInfo).slice(0, 4);
+    const probeHosts = new Set<string>();
+    if (isValidLanIpv4(printerIp)) {
+      probeHosts.add(printerIp);
+    }
+    for (const ip of buildLanProbeHosts(networkInfo).slice(0, 4)) {
+      probeHosts.add(ip);
+    }
+
     await Promise.all(
-      probeHosts.map((ip) =>
+      Array.from(probeHosts).slice(0, 5).map((ip) =>
         Promise.race([
           plugin.ping({ ip, port: 9100 }).catch(() => undefined),
-          wait(450),
+          wait(600),
         ]),
       ),
     );
   };
 
   try {
-    await withNativeCallTimeout(activate(), 8000, 'Activación permiso red local');
+    await withNativeCallTimeout(activate(), 9000, 'Activación permiso red local');
   } catch {
     /* Cortamos si tarda demasiado; el usuario puede seguir con IP manual */
   }
+}
+
+function isValidLanIpv4(value: string): boolean {
+  const parts = value.split('.');
+  if (parts.length !== 4) return false;
+  return parts.every((part) => {
+    const n = Number(part);
+    return Number.isInteger(n) && n >= 0 && n <= 255;
+  });
 }
 
 /** Reinicia el flujo de permiso y vuelve a disparar el aviso de iOS. */
@@ -147,10 +168,12 @@ export async function openNativeAppSettings(): Promise<boolean> {
   try {
     const { Capacitor } = await import('@capacitor/core');
     const platform = Capacitor.getPlatform();
-    if (platform === 'ios' || platform === 'android') {
-      window.location.href = 'app-settings:';
-      return true;
-    }
+    if (platform !== 'ios' && platform !== 'android') return false;
+
+    // Debe abrirse vía plugin nativo: WKWebView bloquea `window.location = app-settings:`.
+    const { App } = await import('@capacitor/app');
+    await App.openUrl({ url: 'app-settings:' });
+    return true;
   } catch {
     /* ignore */
   }

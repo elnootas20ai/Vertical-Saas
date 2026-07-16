@@ -129,6 +129,10 @@ import scrapyardAlertRouter from './routers/scrapyardAlertRouter.js';
 import { adminMoneiRouter } from './routers/adminMoneiRouter.js';
 import { adminClientsRouter } from './routers/adminClientsRouter.js';
 import {
+  webAnalyticsPublicRouter,
+  webAnalyticsAdminRouter,
+} from './routers/webAnalyticsRouter.js';
+import {
   canEmitCatalogStockAlerts,
   filterStockTrackedCatalogItems,
   filterStockTrackedParts,
@@ -152,6 +156,7 @@ import { startSubscriptionLifecycle } from './services/subscriptionLifecycle.js'
 import { createVerticalRouter } from './services/verticalCrudFactory.js';
 import { allVerticalConfigs } from './verticalConfigs/all.js';
 import { requireAuthAndEmailVerified } from './middleware/auth.js';
+import { requireActiveSubscription } from './middleware/requireActiveSubscription.js';
 import { apiLimiter, planAwareLimiter, burstLimiter, sensitiveOpLimiter, getAbuseStats } from './middleware/rateLimiter.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { notFoundHandler, errorHandler } from './middleware/errorHandler.js';
@@ -987,74 +992,76 @@ app.get('/api/workshop/public/:workOrderId', async (req, res) => {
   }
 });
 
+const saasAuthGate = [requireAuthAndEmailVerified, requireActiveSubscription, burstLimiter, planAwareLimiter];
+
 const internalRouters = [
-  ['/api/businesses',    requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, businessRouter],
-  ['/api/orgchart',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, orgchartRouter],
-  ['/api/clockins',        requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, clockinsRouter],
-  ['/api/clockin-alerts',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, clockinAlertsRouter],
-  ['/api/team-alerts',     requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, teamAlertsRouter],
-  ['/api/groups',        requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, groupRouter],
-  ['/api/notifications', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, notificationRouter],
-  ['/api/vehicles',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, vehicleRouter],
-  ['/api/fleet',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, fleetRouter],
-  ['/api/tradeins',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, tradeInRouter],
-  ['/api/sales',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, salesRouter],
-  ['/api/sales-metrics', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, salesMetricsRouter],
-  ['/api/reservations',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, reservationRouter],
-  ['/api/leads',          requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, leadsRouter],
-  ['/api/clients',        requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, clientsRouter],
-  ['/api/crm/segments',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, crmSegmentsRouter],
-  ['/api/crm/assignment', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, leadAssignmentRouter],
-  ['/api/crm',            requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, crmRouter],
-  ['/api/finance',               requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, financeRouter],
-  ['/api/bank-reconciliation',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, bankReconciliationRouter],
-  ['/api/invoices',              requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, invoicesRouter],
-  ['/api/documents',     requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, documentsRouter],
-  ['/api/locations',     requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, locationsRouter],
-  ['/api/workshop',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, workshopRouter],
-  ['/api/brands',        requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, brandRouter],
-  ['/api/delivery',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryRouter],
-  ['/api/sala',           requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, salaRouter],
-  ['/api/delivery-crm',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryCrmRouter],
-  ['/api/cleaning',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, cleaningRouter],
-  ['/api/cleaning/clients',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, cleaningClientsRouter],
-  ['/api/cleaning/contracts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, cleaningContractRouter],
-  ['/api/cleaning/billing',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, cleaningBillingRouter],
-  ['/api/cleaning/hub',        requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, cleaningHubRouter],
-  ['/api/cleaning/materials',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, cleaningMaterialsRouter],
-  ...allVerticalConfigs.map(cfg => [`/api/${cfg.name}`, requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, createVerticalRouter(cfg)]),
-  ['/api/construction',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, constructionRouter],
-  ['/api/email',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, emailRouter],
-  ['/api/gdpr',          requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, gdprRouter],
-  ['/api/chat',          requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, chatRouter],
-  ['/api/catalog-config', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, catalogConfigRouter],
-  ['/api/purchase-orders', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, purchaseOrderRouter],
-  ['/api/supplier-invoices', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, supplierInvoiceRouter],
-  ['/api/promotions', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, promotionsRouter],
-  ['/api/warehouses',       requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, warehouseRouter],
-  ['/api/alerts',          requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, alertRouter],
-  ['/api/butcher',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherRouter],
-  ['/api/butcher-clients', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherClientsRouter],
-  ['/api/butcher-orders',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherOrdersRouter],
-  ['/api/butcher-sales',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherSalesRouter],
-  ['/api/butcher-reports', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, butcherReportsRouter],
-  ['/api/delivery/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryAlertRouter],
-  ['/api/delivery-reports', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, deliveryReportsRouter],
-  ['/api/recipes',         requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, recipeRouter],
-  ['/api/waste',           requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, wasteRouter],
-  ['/api/stock-counts',    requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, stockCountRouter],
-  ['/api/stock-movements', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, stockMovementRouter],
-  ['/api/setup-progress',  requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, setupProgressRouter],
-  ['/api/signatures',      requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, signatureRouter],
-  ['/api/vehicle-acquisitions', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, vehicleAcquisitionRouter],
-  ['/api/fiscal-consultations', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, fiscalConsultationRouter],
-  ['/api/scrapyard/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, scrapyardAlertRouter],
-  ['/api/scrapyard',       requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, scrapyardRouter],
-  ['/api/compraventa',     requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, compraventaRouter],
-  ['/api/compraventa/alerts', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, compraventaAlertRouter],
-  ['/api/worker-performance', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, workerPerformanceRouter],
-  ['/api/preparation-expenses', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, preparationExpenseRouter],
-  ['/api/opportunities',   requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, opportunitiesRouter],
+  ['/api/businesses',    ...saasAuthGate, businessRouter],
+  ['/api/orgchart',      ...saasAuthGate, orgchartRouter],
+  ['/api/clockins',        ...saasAuthGate, clockinsRouter],
+  ['/api/clockin-alerts',  ...saasAuthGate, clockinAlertsRouter],
+  ['/api/team-alerts',     ...saasAuthGate, teamAlertsRouter],
+  ['/api/groups',        ...saasAuthGate, groupRouter],
+  ['/api/notifications', ...saasAuthGate, notificationRouter],
+  ['/api/vehicles',      ...saasAuthGate, vehicleRouter],
+  ['/api/fleet',         ...saasAuthGate, fleetRouter],
+  ['/api/tradeins',      ...saasAuthGate, tradeInRouter],
+  ['/api/sales',         ...saasAuthGate, salesRouter],
+  ['/api/sales-metrics', ...saasAuthGate, salesMetricsRouter],
+  ['/api/reservations',  ...saasAuthGate, reservationRouter],
+  ['/api/leads',          ...saasAuthGate, leadsRouter],
+  ['/api/clients',        ...saasAuthGate, clientsRouter],
+  ['/api/crm/segments',   ...saasAuthGate, crmSegmentsRouter],
+  ['/api/crm/assignment', ...saasAuthGate, leadAssignmentRouter],
+  ['/api/crm',            ...saasAuthGate, crmRouter],
+  ['/api/finance',               ...saasAuthGate, financeRouter],
+  ['/api/bank-reconciliation',   ...saasAuthGate, bankReconciliationRouter],
+  ['/api/invoices',              ...saasAuthGate, invoicesRouter],
+  ['/api/documents',     ...saasAuthGate, documentsRouter],
+  ['/api/locations',     ...saasAuthGate, locationsRouter],
+  ['/api/workshop',      ...saasAuthGate, workshopRouter],
+  ['/api/brands',        ...saasAuthGate, brandRouter],
+  ['/api/delivery',      ...saasAuthGate, deliveryRouter],
+  ['/api/sala',           ...saasAuthGate, salaRouter],
+  ['/api/delivery-crm',  ...saasAuthGate, deliveryCrmRouter],
+  ['/api/cleaning',      ...saasAuthGate, cleaningRouter],
+  ['/api/cleaning/clients',   ...saasAuthGate, cleaningClientsRouter],
+  ['/api/cleaning/contracts', ...saasAuthGate, cleaningContractRouter],
+  ['/api/cleaning/billing',   ...saasAuthGate, cleaningBillingRouter],
+  ['/api/cleaning/hub',        ...saasAuthGate, cleaningHubRouter],
+  ['/api/cleaning/materials',  ...saasAuthGate, cleaningMaterialsRouter],
+  ...allVerticalConfigs.map(cfg => [`/api/${cfg.name}`, ...saasAuthGate, createVerticalRouter(cfg)]),
+  ['/api/construction',   ...saasAuthGate, constructionRouter],
+  ['/api/email',         ...saasAuthGate, emailRouter],
+  ['/api/gdpr',          ...saasAuthGate, gdprRouter],
+  ['/api/chat',          ...saasAuthGate, chatRouter],
+  ['/api/catalog-config', ...saasAuthGate, catalogConfigRouter],
+  ['/api/purchase-orders', ...saasAuthGate, purchaseOrderRouter],
+  ['/api/supplier-invoices', ...saasAuthGate, supplierInvoiceRouter],
+  ['/api/promotions', ...saasAuthGate, promotionsRouter],
+  ['/api/warehouses',       ...saasAuthGate, warehouseRouter],
+  ['/api/alerts',          ...saasAuthGate, alertRouter],
+  ['/api/butcher',         ...saasAuthGate, butcherRouter],
+  ['/api/butcher-clients', ...saasAuthGate, butcherClientsRouter],
+  ['/api/butcher-orders',  ...saasAuthGate, butcherOrdersRouter],
+  ['/api/butcher-sales',   ...saasAuthGate, butcherSalesRouter],
+  ['/api/butcher-reports', ...saasAuthGate, butcherReportsRouter],
+  ['/api/delivery/alerts', ...saasAuthGate, deliveryAlertRouter],
+  ['/api/delivery-reports', ...saasAuthGate, deliveryReportsRouter],
+  ['/api/recipes',         ...saasAuthGate, recipeRouter],
+  ['/api/waste',           ...saasAuthGate, wasteRouter],
+  ['/api/stock-counts',    ...saasAuthGate, stockCountRouter],
+  ['/api/stock-movements', ...saasAuthGate, stockMovementRouter],
+  ['/api/setup-progress',  ...saasAuthGate, setupProgressRouter],
+  ['/api/signatures',      ...saasAuthGate, signatureRouter],
+  ['/api/vehicle-acquisitions', ...saasAuthGate, vehicleAcquisitionRouter],
+  ['/api/fiscal-consultations', ...saasAuthGate, fiscalConsultationRouter],
+  ['/api/scrapyard/alerts', ...saasAuthGate, scrapyardAlertRouter],
+  ['/api/scrapyard',       ...saasAuthGate, scrapyardRouter],
+  ['/api/compraventa',     ...saasAuthGate, compraventaRouter],
+  ['/api/compraventa/alerts', ...saasAuthGate, compraventaAlertRouter],
+  ['/api/worker-performance', ...saasAuthGate, workerPerformanceRouter],
+  ['/api/preparation-expenses', ...saasAuthGate, preparationExpenseRouter],
+  ['/api/opportunities',   ...saasAuthGate, opportunitiesRouter],
 ];
 
 for (const [path, ...middlewares] of internalRouters) {
@@ -1082,6 +1089,12 @@ app.use('/api/admin/monei', adminMoneiRouter);
 app.use('/api/v2/admin/monei', adminMoneiRouter);
 app.use('/api/admin', adminClientsRouter);
 app.use('/api/v2/admin', adminClientsRouter);
+app.use('/api/admin/web-analytics', webAnalyticsAdminRouter);
+app.use('/api/v2/admin/web-analytics', webAnalyticsAdminRouter);
+
+// Analytics web pública (landing) — sin auth; rate-limited
+app.use('/api/public/web-analytics', webAnalyticsPublicRouter);
+app.use('/api/v2/public/web-analytics', webAnalyticsPublicRouter);
 
 // API-01: Documentación interactiva Swagger/OpenAPI (pública, sin auth)
 app.use('/api/docs', docsRouter);
@@ -1093,25 +1106,25 @@ app.use('/api/affiliate', affiliateRouter);
 app.use('/api/quotes', quoteRouter);
 
 // API-03: Webhooks salientes (requiere JWT)
-app.use('/api/webhooks', requireAuthAndEmailVerified, webhooksRouter);
+app.use('/api/webhooks', requireAuthAndEmailVerified, requireActiveSubscription, webhooksRouter);
 
 // Webhooks ENTRANTES de plataformas delivery (Glovo, Just Eat, Uber Eats).
 // SIN auth JWT: las plataformas autentican por `x-webhook-token` o `?token=` por negocio.
 app.use('/api/delivery-webhooks', burstLimiter, webhookRouter);
 
 // API pública v1 (requiere API Token Bearer)
-app.use('/api/tokens', requireAuthAndEmailVerified, tokenRouter);
+app.use('/api/tokens', requireAuthAndEmailVerified, requireActiveSubscription, tokenRouter);
 app.use('/api/v1', apiLimiter, publicApiRouter);
 // WEB Storefront — rutas públicas (sin auth) + protegidas
 app.use('/api/web', webPublicRouter);
-app.use('/api/web', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter, webProtectedRouter);
+app.use('/api/web', requireAuthAndEmailVerified, requireActiveSubscription, burstLimiter, planAwareLimiter, webProtectedRouter);
 
 // CRM-01: Formulario embebible público (sin requireAuth — acceso por dealerId)
-app.use('/api/appointments', requireAuthAndEmailVerified, appointmentsRouter);
+app.use('/api/appointments', requireAuthAndEmailVerified, requireActiveSubscription, appointmentsRouter);
 app.use('/api/booking', bookingRouter);
 app.use('/api/embed', embedRouter);
 // CRM-02: Workflows de seguimiento automático
-app.use('/api/workflows', requireAuthAndEmailVerified, workflowsRouter);
+app.use('/api/workflows', requireAuthAndEmailVerified, requireActiveSubscription, workflowsRouter);
 
 // CRM-08: Portal del cliente — acceso público por token
 app.use('/api/portal', portalRouter);
@@ -1172,10 +1185,10 @@ app.get('/api/public/vehicle/:vehicleId', async (req, res) => {
 // Plugin — Agent Hub: REMOVED (security hardening)
 
 // OCR Transversal — procesamiento, clasificación y enrutamiento de documentos
-app.use('/api/ocr', requireAuthAndEmailVerified, ocrApiRouter);
+app.use('/api/ocr', requireAuthAndEmailVerified, requireActiveSubscription, ocrApiRouter);
 
 // AI Parser — procesamiento de texto libre con IA para módulos SaaS
-app.use('/api/ai', requireAuthAndEmailVerified, aiParserRouter);
+app.use('/api/ai', requireAuthAndEmailVerified, requireActiveSubscription, aiParserRouter);
 
 // RT-01: SSE — sin requireAuth middleware (usa JWT por query param)
 app.use('/api/sse', sseRouter);
@@ -1185,8 +1198,8 @@ app.use('/api/sse', sseRouter);
 app.use('/api/push', pushRouter);
 
 // S-04: Rate limiting por usuario autenticado (no por IP — varios usuarios en la misma red).
-app.use('/api/couch', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter);
-app.use('/api/calls', requireAuthAndEmailVerified, burstLimiter, planAwareLimiter);
+app.use('/api/couch', requireAuthAndEmailVerified, requireActiveSubscription, burstLimiter, planAwareLimiter);
+app.use('/api/calls', requireAuthAndEmailVerified, requireActiveSubscription, burstLimiter, planAwareLimiter);
 
 // I-06: sensitiveOpLimiter — procesamiento de llamadas con IA es costoso (10/min por usuario)
 app.post('/api/calls/process/:callId', sensitiveOpLimiter, async (req, res) => {

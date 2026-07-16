@@ -107,8 +107,8 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
   const { t } = useTranslation();
   const { currentBusiness } = useBusiness();
   const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
-  const isRestaurant = isRestaurantBusinessType(vertical);
   const isDelivery = vertical === 'delivery';
+  const isRestaurantVertical = isRestaurantBusinessType(vertical);
   const [workerMode, setWorkerMode] = useState(false);
 
   const CATEGORY_LABEL: Record<SearchCategory, string> = {
@@ -124,7 +124,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
   const CATEGORY_ORDER = workerMode ? CATEGORY_ORDER_WORKER : isDelivery ? CATEGORY_ORDER_DELIVERY : CATEGORY_ORDER_DEFAULT;
   const QUICK_ACTIONS = workerMode
     ? QUICK_ACTIONS_WORKER
-    : isRestaurant
+    : isRestaurantVertical
       ? QUICK_ACTIONS_RESTAURANT
       : isDelivery
         ? QUICK_ACTIONS_DELIVERY
@@ -208,9 +208,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
       return results;
     }
 
-    if (isRestaurant) {
-      /* Sala/cocina no indexan pedidos delivery en búsqueda global */
-    } else if (!isDelivery) {
+    if (!isRestaurantVertical && !isDelivery) {
       results.push(
         ...vehicles.map(v => ({
           id: `vehicle-${v.id}`,
@@ -237,7 +235,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
           searchText: `${z.name} ${z.description}`,
         })),
       );
-    } else {
+    } else if (isDelivery) {
       results.push(
         ...deliveryOrders.map(o => ({
           id: `order-${o.id}`,
@@ -286,7 +284,20 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
     );
 
     return results;
-  }, [clients, realDocuments, leads, sales, teamMembers, vehicles, zones, deliveryOrders, isDelivery, workerMode]);
+  }, [
+    clients,
+    realDocuments,
+    leads,
+    sales,
+    teamMembers,
+    vehicles,
+    zones,
+    deliveryOrders,
+    isDelivery,
+    isRestaurantVertical,
+    vertical,
+    workerMode,
+  ]);
 
   const normalizedQuery = useMemo(() => normalize(debouncedQuery), [debouncedQuery]);
 

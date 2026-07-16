@@ -14,7 +14,9 @@ import {
 } from '../../lib/deliverySetup';
 
 function hasActiveTerminal(pdvs: PointOfSale[]): boolean {
-  return (pdvs || []).some((p) => Boolean(p.active) && (p.terminals || []).some((t) => Boolean(t.active)));
+  return (pdvs || []).some(
+    (p) => p.active !== false && (p.terminals || []).some((t) => t.active !== false),
+  );
 }
 
 /**

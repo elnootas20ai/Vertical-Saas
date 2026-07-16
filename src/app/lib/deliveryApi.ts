@@ -20,7 +20,11 @@ function getCouchHeaders(): Record<string, string> {
   return headers;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+type DeliveryRequestOptions = {
+  suppressLogout?: boolean;
+};
+
+async function request<T>(path: string, init?: RequestInit, options?: DeliveryRequestOptions): Promise<T> {
   const response = await authFetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -28,7 +32,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...getCouchHeaders(),
       ...(init?.headers || {}),
     },
-  });
+  }, 0, false, { suppressLogout: options?.suppressLogout });
   const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
   if (!response.ok) {
     throw new Error(payload?.error || 'Error inesperado en delivery API');
@@ -1145,7 +1149,7 @@ export function invalidatePointsOfSaleCache(): void {
 
 export async function listPointsOfSaleRequest(
   userId: string,
-  options?: { includeInactive?: boolean },
+  options?: { includeInactive?: boolean; suppressLogout?: boolean },
 ): Promise<PointOfSale[]> {
   const id = normalizeUserId(userId);
   const query = options?.includeInactive ? '?includeInactive=1' : '';
@@ -1162,6 +1166,8 @@ export async function listPointsOfSaleRequest(
     try {
       const payload = await request<{ ok: boolean; pointsOfSale: PointOfSale[] }>(
         `/api/delivery/points-of-sale/${encodeURIComponent(id)}${query}`,
+        undefined,
+        { suppressLogout: options?.suppressLogout },
       );
       const pdvs = payload.pointsOfSale || [];
       pdvListCache.set(cacheKey, { pdvs, savedAt: Date.now() });
@@ -1288,7 +1294,10 @@ async function ensurePdvHasTabletCode(userId: string, pdv: PointOfSale): Promise
   }
 }
 
-/** Código tablet TPV listo en cada PDV (sin paso manual «Activar caja»). */
+/**
+ * Código tablet TPV + terminal activo por defecto en cada PDV.
+ * Sin terminal activo el CEO no puede abrir caja en web (solo tablet inventa uno).
+ */
 export async function ensureTabletCodesForPointsOfSale(
   userId: string,
   pointsOfSale: PointOfSale[],
@@ -1297,8 +1306,19 @@ export async function ensureTabletCodesForPointsOfSale(
   if (!id || !Array.isArray(pointsOfSale) || pointsOfSale.length === 0) return pointsOfSale;
   const out = [...pointsOfSale];
   for (let i = 0; i < out.length; i++) {
-    if (String(out[i].terminalCode || '').trim()) continue;
-    out[i] = await ensurePdvHasTabletCode(id, out[i]);
+    let pdv = out[i];
+    const withTerminal = ensurePdvHasDefaultTerminal(pdv);
+    if (withTerminal.changed) {
+      try {
+        pdv = await updatePointOfSaleRequest(id, withTerminal.pdv);
+      } catch {
+        pdv = withTerminal.pdv;
+      }
+    }
+    if (!String(pdv.terminalCode || '').trim()) {
+      pdv = await ensurePdvHasTabletCode(id, pdv);
+    }
+    out[i] = pdv;
   }
   return out;
 }
@@ -1516,11 +1536,16 @@ export async function createPointOfSaleRequest(userId: string, data: Partial<Poi
   return result.pointOfSale;
 }
 
-export async function updatePointOfSaleRequest(userId: string, pdv: PointOfSale): Promise<PointOfSale> {
+export async function updatePointOfSaleRequest(
+  userId: string,
+  pdv: PointOfSale,
+  options?: { suppressLogout?: boolean },
+): Promise<PointOfSale> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; pointOfSale: PointOfSale }>(
     `/api/delivery/points-of-sale/${encodeURIComponent(id)}/${encodeURIComponent(pdv._id)}`,
     { method: 'PUT', body: JSON.stringify({ pointOfSale: pdv }) },
+    { suppressLogout: options?.suppressLogout },
   );
   if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
   invalidatePointsOfSaleCache();

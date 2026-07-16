@@ -1,5 +1,6 @@
 /** Rutas accesibles con suscripción bloqueada (pago / recuperación). */
 export const BILLING_RECOVERY_PATHS = [
+  '/saas/subscription',
   '/saas/suspended',
   '/saas/billing',
   '/saas/help',
@@ -13,9 +14,14 @@ export function isBillingRecoveryPath(pathname: string): boolean {
 }
 
 export function isBlockingSubscriptionStatus(status: string | undefined): boolean {
-  return ['suspended', 'grace_period', 'payment_failed', 'trial_expired'].includes(
-    String(status || ''),
-  );
+  return [
+    'pending_payment',
+    'payment_sent',
+    'suspended',
+    'grace_period',
+    'payment_failed',
+    'trial_expired',
+  ].includes(String(status || ''));
 }
 
 export function isSuspendedStatus(status: string | undefined): boolean {
@@ -35,4 +41,8 @@ export function shouldBlockSaasAccess(
 ): boolean {
   if (isBillingExemptSubscription(subscription)) return false;
   return isBlockingSubscriptionStatus(status);
+}
+
+export function isPendingPaymentStatus(status: string | undefined): boolean {
+  return ['pending_payment', 'payment_sent'].includes(String(status || ''));
 }

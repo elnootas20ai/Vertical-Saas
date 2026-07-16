@@ -14,6 +14,10 @@ const config: CapacitorConfig = {
     Camera: {
       // Permissions are declared in AndroidManifest.xml and Info.plist
     },
+    PushNotifications: {
+      // iOS: muestra banner/listado/sonido/badge con la app en primer plano
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
     SplashScreen: {
       launchShowDuration: 2000,
       launchAutoHide: true,

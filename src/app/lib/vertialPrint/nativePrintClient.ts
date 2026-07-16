@@ -12,7 +12,7 @@ const NATIVE_PRINT_RETRY_DELAY_MS = 400;
 const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 10_000;
 const NATIVE_DISCOVER_PLUGIN_RETRY_MS = 8_000;
 const NATIVE_DISCOVER_SUBNET_SWEEP_MS = 12_000;
-const NATIVE_PING_TIMEOUT_MS = 3_000;
+const NATIVE_PING_TIMEOUT_MS = 5_000;
 /** Ping corto para barridos: con 3 s por host el barrido no cubre la subred. */
 const NATIVE_SWEEP_PING_TIMEOUT_MS = 1_500;
 

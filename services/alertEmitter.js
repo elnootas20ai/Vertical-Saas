@@ -35,6 +35,7 @@ import {
 import { resolveAlertPlanTier } from './alertPlanTiers.js';
 import { resolvePlanTier } from './subscriptionAddons.js';
 import { MANAGER_RECIPIENT_ROLES, ALL_ALERT_RULE_DEFINITIONS } from './alertRulesCatalog.js';
+import { isCeoUrgentMobilePushRule } from './pushAlertPolicy.js';
 
 export const fakeReq = { headers: {} };
 const SETTINGS_DB = 'settings';
@@ -180,7 +181,15 @@ async function resolveChannels(businessId, ruleId, category) {
     if (config.global?.muteAll) return [];
     const rules = config.rules || [];
     const rule = rules.find((r) => r.id === ruleId || r.id === category);
-    return rule?.channels?.length ? rule.channels : (config.global?.defaultChannels || ['inApp']);
+    const channels = rule?.channels?.length
+      ? [...rule.channels]
+      : [...(config.global?.defaultChannels || ['inApp'])];
+
+    // CEO urgentes (caja / impagos): forzar push aunque el negocio solo tenga inApp guardado.
+    if (isCeoUrgentMobilePushRule(ruleId, category) && !channels.includes('push')) {
+      channels.push('push');
+    }
+    return channels;
   } catch {
     return ['inApp'];
   }
@@ -266,10 +275,8 @@ export async function emitGlobalAlert({
     if (recipientUserIds.length === 0) return null;
 
     const quiet = await isQuietHours(businessId);
-    const bypassQuiet = quiet && (
-      ruleId === 'delivery_cash_pending_close'
-      || category === 'delivery_cash_pending_close'
-    ) && (resolvedPriority === 'high' || resolvedPriority === 'critical');
+    // Dinero/caja al CEO: suenan aunque sea horario silencioso.
+    const bypassQuiet = quiet && isCeoUrgentMobilePushRule(ruleId, category);
 
     const now = new Date().toISOString();
     const notifBase = buildNotificationDocument({

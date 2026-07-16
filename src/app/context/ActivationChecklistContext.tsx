@@ -15,6 +15,9 @@ import {
   resolveBusinessScopeId,
 } from '../lib/deliverySetup';
 import { loadRetailStoresForBusiness } from '../verticals/retailScopeRegistry';
+import { loadRestaurantStores } from '../verticals/restaurant/loadRestaurantStores';
+import { getFloorConfigRequest, listDiningTablesRequest } from '../lib/salaApi';
+import { isSalaQuickSetupComplete } from '../lib/salaQuickSetup';
 import {
   buildCompraventaActivationStepDefs,
   EMPTY_COMPRAVENTA_ACTIVATION_FLAGS,
@@ -181,7 +184,7 @@ function buildStepDefsForBusiness(
   bundle: ActivationFlagsBundle | null,
 ): StepDef[] {
   const kind = bundle?.kind
-    ?? (isDeliveryOpsBusinessType(businessType)
+    ?? (isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType)
       ? 'delivery'
       : businessType === 'carDealership'
         ? 'compraventa'
@@ -199,7 +202,7 @@ function buildStepDefsForBusiness(
     const flags = bundle?.kind === 'delivery'
       ? bundle.flags
       : EMPTY_DELIVERY_ACTIVATION_FLAGS;
-    if (businessType === 'restaurant' || isRestaurantBusinessType(businessType)) {
+    if (isRestaurantBusinessType(businessType)) {
       return buildRestaurantActivationStepDefs(flags);
     }
     return buildDeliveryActivationStepDefs(flags);
@@ -317,18 +320,32 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     const load = async () => {
       lastLoadAt = Date.now();
       try {
-        if (isDeliveryOpsBusinessType(businessType)) {
+        if (isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType)) {
           // Solo lectura: el checklist observa el estado, nunca crea/repara PDVs.
-          const [storeState, brands, catalog] = await Promise.all([
+          const isRestaurant = isRestaurantBusinessType(businessType);
+          const [storeState, brands, catalog, floorConfig, diningTables] = await Promise.all([
             currentBusiness
-              ? loadRetailStoresForBusiness(user, currentBusiness, businessesRef.current, {
-                  includeInactivePdvs: true,
-                  accountBusinessCount: businessesCount,
-                  tpvBootstrap: false,
-                }).catch(() => ({ dataUserId: '', workCenters: [], pointsOfSale: [] }))
+              ? (isRestaurant
+                  ? loadRestaurantStores(user, currentBusiness, businessesRef.current, {
+                      includeInactivePdvs: true,
+                      accountBusinessCount: businessesCount,
+                      tpvBootstrap: false,
+                    })
+                  : loadRetailStoresForBusiness(user, currentBusiness, businessesRef.current, {
+                      includeInactivePdvs: true,
+                      accountBusinessCount: businessesCount,
+                      tpvBootstrap: false,
+                    })
+                ).catch(() => ({ dataUserId: '', workCenters: [], pointsOfSale: [] }))
               : Promise.resolve({ dataUserId: '', workCenters: [], pointsOfSale: [] }),
             businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
             listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []),
+            isRestaurant
+              ? getFloorConfigRequest(dataUserId).catch(() => null)
+              : Promise.resolve(null),
+            isRestaurant
+              ? listDiningTablesRequest(dataUserId).catch(() => [])
+              : Promise.resolve([]),
           ]);
 
           if (cancelled) return;
@@ -344,8 +361,11 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           );
           const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
 
-          const setupCtx = { isDelivery: true, retailStoreCount: retailStores.length };
+          const setupCtx = { isDelivery: !isRestaurant, retailStoreCount: retailStores.length };
           const brandReady = isDeliveryBrandActivationComplete(brands, setupCtx);
+          const hasSalaMapped = isRestaurant
+            ? isSalaQuickSetupComplete(floorConfig) || (Array.isArray(diningTables) && diningTables.length > 0)
+            : false;
 
           const nextBundle: ActivationFlagsBundle = {
             kind: 'delivery',
@@ -357,6 +377,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
               hasCatalogProduct: catalogForBusiness.length > 0,
               hasPricedProduct: priced.length > 0,
               hasBusinessHours: anyActiveRetailStoreHasOpeningHours(retailStores),
+              hasSalaMapped,
             },
           };
           activationFlagsRef.current = nextBundle;
@@ -505,7 +526,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         }
       } catch {
         if (cancelled || activationFlagsRef.current) return;
-        if (isDeliveryOpsBusinessType(businessType)) {
+        if (isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType)) {
           const fallback: ActivationFlagsBundle = { kind: 'delivery', flags: EMPTY_DELIVERY_ACTIVATION_FLAGS };
           activationFlagsRef.current = fallback;
           setActivationFlags(fallback);

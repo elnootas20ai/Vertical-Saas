@@ -24,7 +24,7 @@ import {
   notifyDeliveryActiveStoreChanged,
   writeDeliveryOpsSelectedPdvId,
 } from '../../lib/deliveryOpsPdvSelection';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveRetailCeoTpvPath } from '../../lib/retailOpsPaths';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
@@ -71,13 +71,11 @@ export function TpvQuickBridgePage() {
   const [openingPdvId, setOpeningPdvId] = useState<string | null>(null);
 
   const opsBusinesses = useMemo(
-    () => businesses.filter((b) => isDeliveryOpsBusinessType(b.businessType)),
+    () => businesses.filter((b) => isStrictDeliveryBusinessType(b.businessType)),
     [businesses],
   );
   const bridgeCopy = useMemo(
-    () => getRetailOpsUiCopy(
-      isRestaurantBusinessType(currentBusiness?.businessType) ? 'restaurant' : currentBusiness?.businessType,
-    ),
+    () => getRetailOpsUiCopy(currentBusiness?.businessType),
     [currentBusiness?.businessType],
   );
 
@@ -107,20 +105,16 @@ export function TpvQuickBridgePage() {
             const businessId = resolveBusinessScopeId(business);
             if (!businessId) return [] as BridgeStoreRow[];
 
-            const state = await bootstrapCeoTpvStores(
-              user,
-              business,
-              businesses,
-              { accountBusinessCount },
-            ).catch(() => null);
+            const resolved = await bootstrapCeoTpvStores(user, business, businesses, {
+              accountBusinessCount,
+            }).catch(() => null);
 
-            if (!state) return [] as BridgeStoreRow[];
+            if (!resolved) return [] as BridgeStoreRow[];
 
-            const retail = state.workCenters || [];
-            const pdvs = (state.pointsOfSale || []).filter((p) => p.active !== false);
+            const retail = resolved.workCenters || [];
+            const pdvs = (resolved.pointsOfSale || []).filter((p) => p.active !== false);
             const storeRows = buildCeoTpvStoreRows(retail, pdvs, businessId, {
-              business,
-              businesses,
+              accountBusinessCount,
             });
 
             return storeRows
@@ -274,8 +268,7 @@ export function TpvQuickBridgePage() {
                 Sin negocios con TPV
               </p>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-2 max-w-md mx-auto">
-                El puente TPV está pensado para bar/restaurante y reparto a domicilio. Cambia a una empresa
-                operativa o créala en Configuración.
+                El puente TPV es para Delivery. Cambia a una empresa Delivery o créala en Configuración.
               </p>
             </div>
           ) : rows.length === 0 ? (

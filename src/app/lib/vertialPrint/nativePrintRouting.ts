@@ -8,7 +8,7 @@ export function isNativeWifiPrinterReady(config: VertialPrinterConfig): boolean 
 }
 
 export const NATIVE_WIFI_PRINTER_SETUP_MESSAGE =
-  'Configura la impresora WiFi en Ajustes → Tickets (busca en la red o escribe la IP). La app imprime directo, sin ventana de imprimir.';
+  'Configura la impresora WiFi: escribe la IP del ticket SELF-TEST en Ajustes → Empresa → Impresora, o pulsa el icono de impresora en la barra del TPV.';
 
 export function shouldBlockBrowserPrintOnNative(): boolean {
   return isVertialNativeApp();

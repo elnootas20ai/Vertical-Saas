@@ -31,6 +31,8 @@ export type DeliveryActivationFlags = {
   hasCatalogProduct: boolean;
   hasPricedProduct: boolean;
   hasBusinessHours: boolean;
+  /** Solo bar/restaurante: asistente de zonas/mesas completado. */
+  hasSalaMapped?: boolean;
 };
 
 /** Progreso 0/5 mientras cargan datos reales (evita ocultar el sidebar). */
@@ -45,6 +47,7 @@ export const EMPTY_DELIVERY_ACTIVATION_FLAGS: DeliveryActivationFlags = {
   hasCatalogProduct: false,
   hasPricedProduct: false,
   hasBusinessHours: false,
+  hasSalaMapped: false,
 };
 
 const DELIVERY_ACTIVATION_STEP_DEFS = (
@@ -133,8 +136,7 @@ export function buildDeliveryActivationStepDefs(
 const RESTAURANT_ACTIVATION_STEP_DEFS = (
   flags: DeliveryActivationFlags,
 ): DeliveryActivationStepDef[] => {
-  const steps = DELIVERY_ACTIVATION_STEP_DEFS(flags);
-  return steps.map((step) => {
+  const steps = DELIVERY_ACTIVATION_STEP_DEFS(flags).map((step) => {
     if (step.id === 'delivery_store') {
       return {
         ...step,
@@ -146,25 +148,59 @@ const RESTAURANT_ACTIVATION_STEP_DEFS = (
         ],
       };
     }
+    if (step.id === 'delivery_brand') {
+      return {
+        ...step,
+        label: 'Completa tu carta (marca)',
+        description: 'Nombre visible, categorías y locales donde se sirve',
+      };
+    }
+    if (step.id === 'delivery_catalog') {
+      return {
+        ...step,
+        label: 'Carta / productos',
+        description: 'Platos o bebidas con precio de venta',
+      };
+    }
     if (step.id === 'delivery_operate') {
       return {
         ...step,
-        description: 'Horario en el bar/restaurante y acceso al TPV rápido',
+        description: 'Horario en el bar/restaurante y acceso al TPV',
         subSteps: [
           { id: 'business_hours', label: 'Horario de apertura', completed: flags.hasBusinessHours },
           {
             id: 'tpv_ready',
-            label: 'Bar/restaurante, marca y carta listos',
+            label: 'Bar/restaurante, marca, carta y sala listos',
             completed:
               flags.hasActivePdv &&
               flags.brandSetupComplete &&
-              flags.hasPricedProduct,
+              flags.hasPricedProduct &&
+              Boolean(flags.hasSalaMapped),
           },
         ],
       };
     }
     return step;
   });
+
+  const salaStep: DeliveryActivationStepDef = {
+    id: 'restaurant_sala',
+    number: 2,
+    label: 'Sala y mesas',
+    description: 'Zonas (salón, terraza…) y mesas de cada una',
+    route: '/saas/sala',
+    icon: 'store',
+    subSteps: [
+      {
+        id: 'sala_mapped',
+        label: 'Salas y mesas configuradas',
+        completed: Boolean(flags.hasSalaMapped),
+      },
+    ],
+  };
+
+  const withSala = [steps[0], salaStep, ...steps.slice(1)];
+  return withSala.map((step, index) => ({ ...step, number: index + 1 }));
 };
 
 export function buildRestaurantActivationStepDefs(

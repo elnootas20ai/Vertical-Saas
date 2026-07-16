@@ -160,11 +160,14 @@ async function sendWebPushToUser(req, userId, payload) {
 }
 
 /**
- * Envía push web y/o nativo según política de alertas.
+ * Envía push web y nativo (iOS APNs) según política de alertas.
+ *
+ * - Con ruleId/category: solo whitelist + plan (pushAlertPolicy) → iPhone con sonido.
+ * - Sin contexto de regla (avisos puntuales): web + nativo siempre.
  *
  * @param {object|null} req
  * @param {string} userId
- * @param {{ title: string; body: string; data?: Record<string, unknown> }} payload
+ * @param {{ title: string; body: string; data?: Record<string, unknown>; sound?: string; badge?: number }} payload
  * @param {{ ruleId?: string; category?: string; channels?: string[] }} [options]
  */
 export async function sendPushToUser(req, userId, payload, options = {}) {
@@ -176,11 +179,15 @@ export async function sendPushToUser(req, userId, payload, options = {}) {
     if (!allowed) return;
   }
 
-  await sendWebPushToUser(req, userId, payload);
+  const nativePayload = {
+    ...payload,
+    sound: payload.sound || 'default',
+  };
 
-  if (hasRuleContext) {
-    await sendNativePushToUser(req, userId, payload);
-  }
+  await Promise.all([
+    sendWebPushToUser(req, userId, payload),
+    sendNativePushToUser(req, userId, nativePayload),
+  ]);
 }
 
 export { vapidPublicKey as VAPID_PUBLIC_KEY };

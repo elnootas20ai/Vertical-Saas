@@ -58,7 +58,8 @@ function readPosition(
       let nextStatus: GeoStatus;
       switch (err.code) {
         case err.PERMISSION_DENIED:
-          msg = 'Permiso de ubicación denegado. Actívalo en los ajustes del navegador.';
+          msg =
+            'Permiso de ubicación denegado. Actívalo en Ajustes → Vertial → Ubicación (o en el navegador si no usas la app).';
           nextStatus = 'denied';
           break;
         case err.TIMEOUT:

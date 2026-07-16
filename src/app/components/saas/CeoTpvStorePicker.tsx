@@ -12,12 +12,9 @@ import type { WorkCenter } from '../../lib/workCentersApi';
 import type { DeliverySidebarStoreRow } from '../../lib/deliveryApi';
 import {
   filterPointsOfSaleForWorkCenters,
-  workCentersStrictlyForBusiness,
+  filterWorkCentersForBusinessScope,
 } from '../../lib/deliverySetup';
-import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
-import { filterRestaurantRetailWorkCenters } from '../../verticals/restaurant/retailScope';
-import type { Business } from '../../lib/businessApi';
 
 interface CeoTpvStorePickerProps {
   storeName?: string;
@@ -112,7 +109,7 @@ export function CeoTpvStorePicker({
               {openable.map((row) => {
                 const pdv = row.pdvId ? pointsOfSale.find((p) => p._id === row.pdvId) : undefined;
                 const disabled = row.needsPdv || !row.pdvId || row.inactive;
-                const termCount = pdv?.terminals?.filter((t) => t.active).length ?? 0;
+                const termCount = pdv?.terminals?.filter((t) => t.active !== false).length ?? 0;
 
                 return (
                   <button
@@ -162,35 +159,23 @@ export function CeoTpvStorePicker({
   );
 }
 
+/** Filas TPV CEO para delivery. Mismo scope soft que sidebar (huérfanas incluidas). */
 export function buildCeoTpvStoreRows(
   workCenters: WorkCenter[],
   pointsOfSale: PointOfSale[],
   businessId?: string,
-  scope?: {
-    business?: Pick<Business, 'business_id' | 'businessType' | 'createdAt' | 'name'> | null;
-    businesses?: Pick<Business, 'business_id' | 'businessType' | 'createdAt' | 'name'>[];
-  },
+  options?: { accountBusinessCount?: number },
 ): DeliverySidebarStoreRow[] {
   const retailBase = workCenters.filter(
     (wc) =>
       !wc.deletedAt &&
       (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
   );
-
-  let retail = retailBase;
-  if (scope?.business && isRestaurantBusinessType(scope.business.businessType)) {
-    retail = filterRestaurantRetailWorkCenters(
-      retailBase,
-      scope.business,
-      scope.businesses || [scope.business],
-    );
-  } else if (businessId) {
-    retail = workCentersStrictlyForBusiness(workCenters, businessId).filter(
-      (wc) =>
-        !wc.deletedAt &&
-        (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-    );
-  }
+  const retail = businessId
+    ? filterWorkCentersForBusinessScope(retailBase, businessId, {
+        accountBusinessCount: options?.accountBusinessCount ?? 1,
+      })
+    : retailBase;
 
   const scopedPdvs = filterPointsOfSaleForWorkCenters(pointsOfSale, retail);
   return buildDeliverySidebarStoreRows(retail, scopedPdvs).filter(

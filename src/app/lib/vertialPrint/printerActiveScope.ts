@@ -11,6 +11,7 @@ import {
   isVertialPrinterConfigConfigured,
   normalizeVertialPrinterConfig,
 } from './printerConfigNormalize';
+import { isVertialNativeApp } from './isNativeApp';
 
 export interface ActivePrinterScope {
   pdvId?: string;
@@ -48,6 +49,12 @@ export function resolveEffectivePrinterConfig(options?: {
   const terminalId = String(scope.terminalId ?? activeScope.terminalId ?? '').trim();
   const pdvId = String(scope.pdvId || pdv?._id || activeScope.pdvId || '').trim();
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
+  const localCfg = normalizeVertialPrinterConfig(localFallback);
+
+  // En app nativa la IP de ESTE dispositivo manda sobre terminal/tienda/servidor.
+  if (isVertialNativeApp() && isVertialPrinterConfigConfigured(localCfg)) {
+    return localCfg;
+  }
 
   const terminal = terminalId
     ? pdv?.terminals?.find((t) => t.id === terminalId)
@@ -79,7 +86,7 @@ export function resolveEffectivePrinterConfig(options?: {
   return normalizeVertialPrinterConfig(localFallback || DEFAULT_PRINTER_CONFIG);
 }
 
-/** Config efectiva según terminal → tienda → caché local → legacy del dispositivo. */
+/** Config efectiva: dispositivo (nativo) → terminal → tienda → caché → legacy. */
 export function loadPrinterConfig(): VertialPrinterConfig {
   return resolveEffectivePrinterConfig();
 }

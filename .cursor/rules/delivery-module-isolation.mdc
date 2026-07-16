@@ -14,6 +14,7 @@ Uriel necesita que **Delivery sea un módulo de código independiente**. Al prog
 | **Core** | `context/`, auth, billing, equipo genérico | Sin imports de páginas/lib **de negocio** delivery o compraventa |
 | **Módulo Delivery** | `src/app/verticals/delivery/`, `pages/saas/Delivery*`, `components/delivery/`, `lib/delivery*` | Solo delivery; **no** importar `compraventa/` ni `vehicles/` de compraventa |
 | **Módulo Compraventa** | `vertical/compraventa/`, `components/saas/compraventa/`, `lib/compraventa*` | Solo compraventa; **no** importar pantallas/lib delivery (catálogo TPV, cocina, reparto…) |
+| **Módulo Restaurant** | `verticals/restaurant/`, sala, cocina, `restaurantCajaApi` | Independiente; ve `.cursor/rules/restaurant-module-isolation.mdc` |
 | **Retail compartido (legacy)** | `deliverySetup`, `deliveryApi` (PDV/tiendas), `workCentersApi`, `brandsApi` | Única excepción documentada entre verticales retail; **no añadir** más acoplamientos aquí |
 
 Registro central: `src/app/verticals/registry.ts`  

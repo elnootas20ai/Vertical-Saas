@@ -12,8 +12,8 @@ import {
   listDiningTablesRequest,
   getFloorConfigRequest,
   type DiningTable,
-  type DiningZone,
 } from '../../lib/salaApi';
+import type { SalaRoom } from '../../lib/salaStudioTypes';
 import {
   listReservations,
   createReservation,
@@ -124,7 +124,7 @@ export function RestaurantReservationsPage() {
   const { currentBusiness } = useBusiness();
   const navigate = useNavigate();
   const userId = user?.user_id || user?.id || '';
-  const userName = user?.name || user?.email || 'Usuario';
+  const userName = user?.fullName || user?.email || 'Usuario';
   const businessId = currentBusiness?.business_id || '';
   const businessScopeId = resolveBusinessScopeId(currentBusiness);
   const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessScopeId);
@@ -135,7 +135,7 @@ export function RestaurantReservationsPage() {
 
   const [reservations, setReservations] = useState<RestaurantReservation[]>([]);
   const [tables, setTables] = useState<DiningTable[]>([]);
-  const [zones, setZones] = useState<DiningZone[]>([]);
+  const [rooms, setRooms] = useState<SalaRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [filterStatus, setFilterStatus] = useState<ReservationFilterStatus>('all');
@@ -200,10 +200,14 @@ export function RestaurantReservationsPage() {
       ]);
       setReservations(resList);
       setTables(tableList);
-      setZones(floorConfig?.zones || []);
+      const floorRooms = Array.isArray(floorConfig?.rooms)
+        ? (floorConfig.rooms as SalaRoom[])
+        : [];
+      setRooms(floorRooms);
     } catch {
       setReservations([]);
       setTables([]);
+      setRooms([]);
     } finally {
       setLoading(false);
     }
@@ -400,11 +404,11 @@ export function RestaurantReservationsPage() {
   const handleSeat = async (item: RestaurantReservation) => {
     setSaving(true);
     try {
-      const { tableId, orderId } = await seatGuest(userId, item, actor, businessId);
-      toast.success('Cliente sentado · Abriendo TPV');
-      writeSalaTpvOpenTable({ tableId, orderId });
-      navigate('/saas/caja/tpv');
+      const { tableId } = await seatGuest(userId, item, actor, businessId);
+      toast.success('Cliente sentado en mesa · Ve a Sala para servir');
+      writeSalaTpvOpenTable({ tableId });
       await loadData();
+      navigate('/saas/sala');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo sentar al cliente');
     } finally {
@@ -426,9 +430,9 @@ export function RestaurantReservationsPage() {
 
   const zoneOptions = useMemo(() => {
     const fromTables = [...new Set(tables.map((t) => t.zone).filter(Boolean))];
-    const fromConfig = zones.map((z) => z.name);
-    return [...new Set([...fromConfig, ...fromTables])];
-  }, [tables, zones]);
+    const fromRooms = rooms.map((r) => r.name).filter(Boolean);
+    return [...new Set([...fromRooms, ...fromTables])];
+  }, [tables, rooms]);
 
   const availableTablesForAssign = useMemo(() => {
     if (!selected) return [];
@@ -479,7 +483,7 @@ export function RestaurantReservationsPage() {
               <button
                 type="button"
                 onClick={openCreate}
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
+                className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-stone-800"
               >
                 <Plus className="h-4 w-4" />
                 Nueva reserva
@@ -714,7 +718,7 @@ export function RestaurantReservationsPage() {
                         <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">{selected.guestName}</h2>
                         {selected.clientId ? (
                           <Link
-                            to={`/saas/clients/${encodeURIComponent(selected.clientId)}`}
+                            to={`/saas/crm/clientes/${encodeURIComponent(selected.clientId)}`}
                             className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-0.5 text-xs font-medium text-violet-700 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-300"
                           >
                             CRM
@@ -912,7 +916,7 @@ export function RestaurantReservationsPage() {
                         {selectedClient?.name || form.guestName}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Se guardará en Clientes (/saas/clients)
+                        Se vinculará al CRM de clientes
                       </p>
                     </div>
                     <button

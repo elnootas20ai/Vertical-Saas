@@ -59,12 +59,12 @@ export function SalaQuickSetupWizard({ storeLabel, saving, onSubmit }: Props) {
           </div>
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50">
-              Configura tu sala
+              Asistente rápido de sala
             </h1>
             <p className="mt-1 text-sm text-gray-500">
               {storeLabel
-                ? `Centro ${storeLabel} listo. Define salas y mesas; cada sala tendrá su terminal TPV.`
-                : 'Define salas y mesas; cada sala tendrá su terminal TPV dentro del mismo PDV.'}
+                ? `PDV «${storeLabel}» nuevo. Indica cuántas zonas tienes y cuántas mesas hay en cada una.`
+                : 'Indica cuántas zonas tienes (salón, terraza, terraza 2…) y cuántas mesas en cada una.'}
             </p>
           </div>
         </div>
@@ -72,7 +72,7 @@ export function SalaQuickSetupWizard({ storeLabel, saving, onSubmit }: Props) {
         <form onSubmit={handleSubmit} className="mt-8 space-y-6">
           <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-800 dark:bg-gray-900/40">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              ¿Cuántas salas tienes?
+              ¿Cuántas zonas / salas tienes?
             </label>
             <div className="mt-3 flex items-center gap-3">
               <input
@@ -83,7 +83,7 @@ export function SalaQuickSetupWizard({ storeLabel, saving, onSubmit }: Props) {
                 onChange={(e) => syncCount(Number(e.target.value))}
                 className={inputCls}
               />
-              <span className="text-xs text-gray-500">Salón, terraza, barra…</span>
+              <span className="text-xs text-gray-500">Salón principal, terraza, terraza 2, barra…</span>
             </div>
           </div>
 
@@ -95,7 +95,7 @@ export function SalaQuickSetupWizard({ storeLabel, saving, onSubmit }: Props) {
               >
                 <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
                   <LayoutGrid className="h-4 w-4 text-gray-400" />
-                  Sala {index + 1}
+                  Zona {index + 1}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Field label="Nombre">
@@ -145,7 +145,7 @@ export function SalaQuickSetupWizard({ storeLabel, saving, onSubmit }: Props) {
 
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-gray-50 px-4 py-3 dark:bg-gray-900/50">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              <strong className="text-gray-900 dark:text-gray-100">{drafts.length}</strong> salas ·{' '}
+              <strong className="text-gray-900 dark:text-gray-100">{drafts.length}</strong> zonas ·{' '}
               <strong className="text-gray-900 dark:text-gray-100">{totalTables}</strong> mesas
             </p>
             <button
@@ -154,7 +154,7 @@ export function SalaQuickSetupWizard({ storeLabel, saving, onSubmit }: Props) {
               className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50 dark:bg-white dark:text-gray-900"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-              Crear configuración
+              Crear mapa de sala
             </button>
           </div>
         </form>

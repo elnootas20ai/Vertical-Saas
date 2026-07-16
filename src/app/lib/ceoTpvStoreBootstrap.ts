@@ -27,7 +27,8 @@ export async function bootstrapCeoTpvStores(
     includeInactivePdvs: true,
     skipPdvMerge: false,
     ensureTabletCodes: true,
-    tpvBootstrap: false,
+    // Delivery/CEO: enlazar PDV faltantes para que el selector no quede vacío.
+    tpvBootstrap: true,
   });
 
   if (state.dataUserId && state.workCenters.length > 0) {

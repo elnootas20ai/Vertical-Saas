@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_PRINTER_CONFIG,
   cacheServerPdvPrinterConfigs,
+  saveLegacyPrinterConfig,
 } from '../src/app/lib/vertialPrint/printerConfig';
 import { resolveEffectivePrinterConfig } from '../src/app/lib/vertialPrint/printerActiveScope';
 import type { PointOfSale } from '../src/app/lib/deliveryApi';
@@ -105,5 +106,78 @@ describe('cacheServerPdvPrinterConfigs + resolución por pdvId', () => {
       { _id: 'pdv-null', printerConfig: null },
     ]);
     expect(store.size).toBe(0);
+  });
+});
+
+describe('resolveEffectivePrinterConfig en app nativa', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+    vi.doUnmock('../src/app/lib/vertialPrint/isNativeApp');
+  });
+
+  it('prioriza la IP guardada en el dispositivo sobre la IP de la tienda en el servidor', async () => {
+    vi.resetModules();
+    vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
+      isVertialNativeApp: () => true,
+    }));
+    stubLocalStorage();
+    saveLegacyPrinterConfig({
+      ...DEFAULT_PRINTER_CONFIG,
+      connectionType: 'network',
+      networkHost: '192.168.1.20',
+    });
+    const { resolveEffectivePrinterConfig: resolveNative } = await import(
+      '../src/app/lib/vertialPrint/printerActiveScope'
+    );
+    const pdv = basePdv({
+      printerConfig: {
+        ...DEFAULT_PRINTER_CONFIG,
+        connectionType: 'network',
+        networkHost: '192.168.1.99',
+      },
+    });
+    const cfg = resolveNative({ pdv, localFallback: {
+      ...DEFAULT_PRINTER_CONFIG,
+      connectionType: 'network',
+      networkHost: '192.168.1.20',
+    } });
+    expect(cfg.networkHost).toBe('192.168.1.20');
+  });
+
+  it('en app nativa la IP del dispositivo manda sobre la del terminal', async () => {
+    vi.resetModules();
+    vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
+      isVertialNativeApp: () => true,
+    }));
+    stubLocalStorage();
+    const localCfg = {
+      ...DEFAULT_PRINTER_CONFIG,
+      connectionType: 'network' as const,
+      networkHost: '192.168.1.20',
+    };
+    saveLegacyPrinterConfig(localCfg);
+    const { resolveEffectivePrinterConfig: resolveNative } = await import(
+      '../src/app/lib/vertialPrint/printerActiveScope'
+    );
+    const pdv = basePdv({
+      terminals: [{
+        id: 'term-1',
+        code: 'Caja 1',
+        name: 'Principal',
+        datafonName: '',
+        printerName: '',
+        scaleDeviceId: '',
+        scaleName: '',
+        active: true,
+        printerConfig: {
+          ...DEFAULT_PRINTER_CONFIG,
+          connectionType: 'network',
+          networkHost: '192.168.1.77',
+        },
+      }],
+    });
+    const cfg = resolveNative({ pdv, terminalId: 'term-1', localFallback: localCfg });
+    expect(cfg.networkHost).toBe('192.168.1.20');
   });
 });

@@ -1,19 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 import { useActiveStoreScope } from '../../../context/ActiveStoreScopeContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import { useAuth } from '../../../context/AuthContext';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
 import { pointOfSaleDisplayLabel, type PointOfSale } from '../../../lib/deliveryApi';
 import { coerceSelectedPdvId } from '../../../lib/deliveryOpsPdvSelection';
-import { setActivePrinterScope } from '../../../lib/vertialPrint';
+import { setActivePrinterScope, getActivePrinterScope } from '../../../lib/vertialPrint/printerActiveScope';
 import { loadRetailStoresForBusiness } from '../../../verticals/retailScopeRegistry';
 import type { Business } from '../../../lib/businessApi';
-import { TpvPrinterSetupPanel } from '../TpvPrinterSetupPanel';
+
+const TpvPrinterSetupPanel = lazy(() =>
+  import('../TpvPrinterSetupPanel').then((m) => ({ default: m.TpvPrinterSetupPanel })),
+);
 
 /**
- * Ajustes → Tickets. La impresora NUNCA depende de la tienda: el panel se
- * muestra siempre y guarda en este dispositivo. Si la tienda del usuario se
- * resuelve en segundo plano, además se sincroniza con ella (todos los TPV la heredan).
+ * Ajustes → Empresa → Impresora. También accesible desde el icono de impresora en el TPV.
+ * La IP se guarda en este dispositivo y se sincroniza con la tienda si hay PDV resuelto.
  */
 export function TpvPrinterSettingsTab() {
   const { user } = useAuth();
@@ -79,28 +81,29 @@ export function TpvPrinterSettingsTab() {
   const pdv = activeStores.find((p) => p._id === resolvedPdvId) || activeStores[0] || null;
 
   useEffect(() => {
-    if (!pdv) {
-      setActivePrinterScope({});
-      return;
-    }
-    setActivePrinterScope({ pdvId: pdv._id, pdv });
+    if (!pdv) return;
+    const terminalId = getActivePrinterScope().terminalId;
+    setActivePrinterScope({ pdvId: pdv._id, pdv, terminalId });
   }, [pdv?._id, pdv?._rev]);
-
-  useEffect(() => () => setActivePrinterScope({}), []);
 
   const handlePdvUpdated = useCallback(() => {
     void refresh();
   }, [refresh]);
 
-  const scope = userId && pdv
+  const scope = pdv
     ? {
-        userId,
+        userId: userId || '',
         pdvId: pdv._id,
         pdv,
+        terminalId: getActivePrinterScope().terminalId,
         storeLabel: displayLabelForActive || pointOfSaleDisplayLabel(pdv),
         onPdvUpdated: handlePdvUpdated,
       }
     : undefined;
 
-  return <TpvPrinterSetupPanel scope={scope} />;
+  return (
+    <Suspense fallback={<p className="text-sm text-gray-500 dark:text-gray-400 p-4">Cargando impresora…</p>}>
+      <TpvPrinterSetupPanel scope={scope} />
+    </Suspense>
+  );
 }

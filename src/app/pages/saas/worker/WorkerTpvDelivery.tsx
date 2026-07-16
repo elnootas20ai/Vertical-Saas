@@ -39,8 +39,7 @@ import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../.
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
 import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetailCard';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
-import { RestaurantTpvPage } from '../restaurant/RestaurantTpvPage';
-import { isRestaurantBusinessType, resolveRestaurantVerticalFromContext, isTpvOpsVerticalPending } from '../../../lib/deliveryOpsTypes';
+import { isTpvOpsVerticalPending } from '../../../lib/deliveryOpsTypes';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
 import {
@@ -962,17 +961,6 @@ export function WorkerTpvDelivery({
   const isTabletSession = registerScope.isTabletSession;
   const tabletVertical = tabletBinding?.tpvVertical ?? null;
 
-  const isRestaurant = useMemo(
-    () => resolveRestaurantVerticalFromContext({
-      currentBusiness,
-      businesses,
-      scopeBusinessId: registerScope.scopeBusinessId,
-      isTabletSession,
-      tabletVertical,
-    }),
-    [currentBusiness, businesses, registerScope.scopeBusinessId, isTabletSession, tabletVertical],
-  );
-
   const tpvVerticalPending = useMemo(
     () => isTpvOpsVerticalPending({
       currentBusiness,
@@ -985,7 +973,7 @@ export function WorkerTpvDelivery({
     [currentBusiness, businesses, registerScope.scopeBusinessId, businessesFetchSettled, isTabletSession, tabletVertical],
   );
 
-  useTpvSuppressBottomBar(isRestaurant ? true : view !== 'board');
+  useTpvSuppressBottomBar(view !== 'board');
   const isTabletUi = Boolean(tabletBinding) && !ceoMode;
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
@@ -1422,19 +1410,6 @@ export function WorkerTpvDelivery({
         <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
         <p className="text-sm text-gray-600 dark:text-gray-400">Preparando TPV…</p>
       </div>
-    );
-  }
-
-  if (isRestaurant) {
-    return (
-      <RestaurantTpvPage
-        tabletMode={isTabletUi || ceoMode}
-        ceoMode={ceoMode}
-        pdvName={scopedPdvName}
-        forcedPdvId={scopedPdvId}
-        onChangeStore={onChangeStore}
-        staffConsumptionEnabled={staffConsumptionEnabled}
-      />
     );
   }
 

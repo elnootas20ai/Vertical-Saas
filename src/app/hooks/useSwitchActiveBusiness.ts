@@ -4,8 +4,12 @@ import { toast } from 'sonner';
 import { useBusiness } from '../context/BusinessContext';
 import { useDashboardViewOptional } from '../context/DashboardViewContext';
 import { saasPathWithBusinessScope } from '../lib/businessScopeUrl';
+import { resolvePathAfterBusinessSwitch } from '../lib/businessSwitchPath';
 import { normalizeBusinessScopeId } from '../lib/deliverySetup';
+import { isRestaurantBusinessType } from '../lib/deliveryOpsTypes';
 import type { Business } from '../lib/businessApi';
+import { clearRestaurantClientCaches } from '../verticals/restaurant/clearRestaurantClientCaches';
+import { RESTAURANT_OPS_HOME_PATH } from '../lib/retailOpsPaths';
 
 function findBusinessByScopeId(list: Business[], businessId: string): Business | undefined {
   const norm = normalizeBusinessScopeId(businessId);
@@ -36,16 +40,25 @@ export function useSwitchActiveBusiness() {
       const activeId = normalizeBusinessScopeId(currentBusiness?.business_id);
       const targetId = normalizeBusinessScopeId(found.business_id);
       dashboardView?.enterBusinessView();
+      if (isRestaurantBusinessType(found.businessType)) {
+        clearRestaurantClientCaches(found.business_id);
+      }
       switchBusiness(found.business_id);
 
       if (options?.syncUrl !== false) {
-        navigate(
-          saasPathWithBusinessScope(
-            `${location.pathname}${location.search}`,
-            found.business_id,
-          ),
-          { replace: true, preventScrollReset: true },
+        const switchedPath = resolvePathAfterBusinessSwitch(
+          location.pathname,
+          found.businessType,
         );
+        const nextPath =
+          switchedPath
+          || (isRestaurantBusinessType(found.businessType)
+            ? RESTAURANT_OPS_HOME_PATH
+            : location.pathname);
+        navigate(saasPathWithBusinessScope(nextPath, found.business_id), {
+          replace: true,
+          preventScrollReset: true,
+        });
       }
 
       return activeId !== targetId;
@@ -55,7 +68,6 @@ export function useSwitchActiveBusiness() {
       currentBusiness?.business_id,
       dashboardView,
       location.pathname,
-      location.search,
       navigate,
       switchBusiness,
     ],

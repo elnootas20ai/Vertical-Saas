@@ -199,6 +199,8 @@ export interface BillingPaymentSummary {
 
 export interface BillingSubscription {
   status:
+    | 'pending_payment'
+    | 'payment_sent'
     | 'trial_active'
     | 'trial_expiring'
     | 'trial_expired'
@@ -228,8 +230,10 @@ export interface BillingSubscription {
   adminProAccess?: boolean;
   /** Exento de suspensión automática por MONEI/cron. */
   billingExempt?: boolean;
-  moneiSubscriptionId?: string;
-  moneiSubscriptionStatus?: string;
+  paymentConcept?: string;
+  paymentSentAt?: string;
+  paymentProvider?: string;
+  activationDate?: string;
 }
 
 export interface BillingCard {
@@ -456,6 +460,11 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
   return _refreshPromise;
 }
 
+export type AuthFetchOptions = {
+  /** Si true, un 401 tras refresh rechazado no dispara logout (sync en segundo plano). */
+  suppressLogout?: boolean;
+};
+
 /**
  * Wrapper de fetch para rutas autenticadas:
  * - Adjunta Authorization si hay access token en memoria.
@@ -466,6 +475,7 @@ export async function authFetch(
   init?: RequestInit,
   attempt = 0,
   authRetried = false,
+  options: AuthFetchOptions = {},
 ): Promise<Response> {
   const headers = new Headers(init?.headers || {});
   if (_inMemoryToken && !headers.has('Authorization')) {
@@ -484,7 +494,7 @@ export async function authFetch(
       || (err instanceof Error && /failed to fetch|network|load failed/i.test(err.message));
     if (isNetwork && attempt < 2) {
       await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
-      return authFetch(input, init, attempt + 1, authRetried);
+      return authFetch(input, init, attempt + 1, authRetried, options);
     }
     throw err;
   }
@@ -492,10 +502,10 @@ export async function authFetch(
   if (response.status === 401 && !authRetried) {
     const refreshed = await tryRefreshToken();
     if (refreshed === 'refreshed') {
-      return authFetch(input, init, attempt, true);
+      return authFetch(input, init, attempt, true, options);
     }
     // Solo cerrar sesión si el servidor rechazó el refresh; un fallo de red no invalida la sesión.
-    if (refreshed === 'rejected') {
+    if (refreshed === 'rejected' && !options.suppressLogout) {
       _onUnauthorized?.();
     }
   }

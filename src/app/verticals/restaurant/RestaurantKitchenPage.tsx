@@ -429,6 +429,12 @@ export function RestaurantKitchenPage() {
   return (
     <Layout title="Cocina" noPadding>
       <div className="flex flex-col h-[calc(100vh-64px)] min-h-0">
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+          <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
+            Recibe comandas del <strong>TPV sala</strong> (mesa → pedir → enviar a cocina).
+            No muestra pedidos de Delivery.
+          </p>
+        </div>
         {/* Barra de alertas */}
         {overtimeCount > 0 && (
           <div className="shrink-0 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2">

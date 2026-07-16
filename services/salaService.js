@@ -92,7 +92,7 @@ export function sanitizeDiningTable(doc) {
     name: doc.name || '',
     zone: doc.zone || '',
     zoneResponsible: doc.zoneResponsible || '',
-    capacity: doc.capacity || 4,
+    capacity: Number(doc.capacity) > 0 ? Number(doc.capacity) : 4,
     currentGuests: doc.currentGuests || 0,
     gridW: doc.gridW || 4,
     gridH: doc.gridH || 4,

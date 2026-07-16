@@ -13,7 +13,12 @@ import {
   shouldBlockBrowserPrintOnNative,
 } from './nativePrintRouting';
 import { sendEposTestTicket, sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
+import { normalizeVertialPrinterConfig } from './printerConfigNormalize';
 import type { VertialPrinterConfig } from './printerConfig';
+import {
+  NATIVE_PRINTER_PRINT_FAILED_MESSAGE,
+  resolveNativePrinterForPrint,
+} from './nativePrinterFlow';
 
 export type PrintDeliveryTicketResult = {
   method: 'epos' | 'native' | 'bridge' | 'browser';
@@ -42,24 +47,26 @@ export async function printDeliveryTicket(
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
   if (isVertialNativeApp()) {
-    if (!isNativeWifiPrinterReady(config)) {
-      toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+    const prepared = resolveNativePrinterForPrint(config);
+    if (!prepared.ready) {
+      toast.error(prepared.error || NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
       return { method: 'native', ok: false };
     }
-    const result = await sendNativeEscpos(escpos, config, { timeoutMs: 8_000 });
+    const printConfig = prepared.config;
+    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 8_000 });
     if (result.ok) return { method: 'native', ok: true };
-    toast.error(result.error || 'No se pudo imprimir en la impresora WiFi', {
+    toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
       duration: 12000,
       action: {
         label: 'Reintentar',
         onClick: () => {
           toast.loading('Reintentando impresión…', { id: 'native-print-retry' });
-          void sendNativeEscpos(escpos, config).then((retry) => {
+          void sendNativeEscpos(escpos, printConfig).then((retry) => {
             toast.dismiss('native-print-retry');
             if (retry.ok) {
               toast.success('Ticket impreso');
             } else {
-              toast.error(retry.error || 'La impresora sigue sin responder. Revisa Ajustes → Tickets.', {
+              toast.error(retry.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
                 duration: 10000,
               });
             }
@@ -143,22 +150,26 @@ async function bridgeTestPrint(
   return sendEscposToBridge(escpos, config, { timeoutMs: 5000 });
 }
 
-export async function printTestTicket(): Promise<PrintDeliveryTicketResult> {
-  const config = resolveEffectivePrinterConfig();
+export async function printTestTicket(overrideConfig?: VertialPrinterConfig): Promise<PrintDeliveryTicketResult> {
+  const config = overrideConfig
+    ? normalizeVertialPrinterConfig({ ...resolveEffectivePrinterConfig(), ...overrideConfig })
+    : resolveEffectivePrinterConfig();
   const { encodeTestTicketEscpos } = await import('./escposEncode');
   const escpos = encodeTestTicketEscpos(config.paperWidthMm);
 
   if (isVertialNativeApp()) {
-    if (!isNativeWifiPrinterReady(config)) {
-      toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+    const prepared = resolveNativePrinterForPrint(config);
+    if (!prepared.ready) {
+      toast.error(prepared.error || NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
       return { method: 'native', ok: false };
     }
-    const result = await sendNativeEscpos(escpos, config, { retry: false, timeoutMs: 10_000 });
+    const printConfig = prepared.config;
+    const result = await sendNativeEscpos(escpos, printConfig, { retry: false, timeoutMs: 10_000 });
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
       return { method: 'native', ok: true };
     }
-    toast.error(result.error || 'No se pudo imprimir la prueba', { duration: 8000 });
+    toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, { duration: 8000 });
     return { method: 'native', ok: false };
   }
 

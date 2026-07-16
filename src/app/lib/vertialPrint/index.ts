@@ -77,3 +77,20 @@ export {
   sendEposTicket,
   sendEposTestTicket,
 } from './eposPrintClient';
+export {
+  IMPRESORA_SETTINGS_PATH,
+  NATIVE_PRINTER_NOT_CONFIGURED_MESSAGE,
+  NATIVE_PRINTER_PERMISSION_HINT,
+  NATIVE_PRINTER_PRINT_FAILED_MESSAGE,
+  resolveNativePrinterForPrint,
+  prepareNativePrinterForPrint,
+} from './nativePrinterFlow';
+export type { NativePrinterPrepareResult } from './nativePrinterFlow';
+export {
+  loadNativePrinterDiagnostics,
+  readNativePrinterDiagnosticsSync,
+  readPrinterVerifiedHost,
+  writePrinterVerifiedHost,
+  clearPrinterVerifiedHost,
+} from './nativePrinterDiagnostics';
+export type { NativePrinterDiagnostics } from './nativePrinterDiagnostics';

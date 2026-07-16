@@ -1858,7 +1858,9 @@ export function buildAccountDocument({
   const now = new Date().toISOString();
   const normalizedEmail = normalizeEmail(email);
   const resolvedAccountType = ['user', 'company'].includes(accountType) ? accountType : 'company';
-  const defaultLanding = resolvedAccountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/saas/dashboard';
+  const defaultLanding =
+    resolvedAccountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/saas/subscription';
+  const paymentConcept = `VERTIAL-${String(userId).replace(/[^a-fA-F0-9]/g, '').slice(0, 6).toUpperCase()}`;
 
   return {
     _id: `account:${userId}`,
@@ -1886,15 +1888,25 @@ export function buildAccountDocument({
     emailVerified: Boolean(emailVerified),
     paymentSummary: null,
     subscription: resolvedAccountType === 'user' ? null : {
-      status: 'trial_active',
+      status: 'pending_payment',
       planName: 'Basic',
       selectedPlanId: 'basic',
-      trialEndsAt: addDays(now, 14),
-      currentPeriodStart: now,
-      currentPeriodEnd: addDays(now, 14),
-      gracePeriodEndsAt: addDays(now, 17),
+      trialEndsAt: '',
+      currentPeriodStart: '',
+      currentPeriodEnd: '',
+      gracePeriodEndsAt: '',
       lastPaymentAt: '',
       cancelAtPeriodEnd: false,
+      paymentProvider: 'bank_transfer',
+      paymentConcept,
+      licenseHistory: [
+        {
+          at: now,
+          action: 'account_created',
+          by: 'system',
+          note: 'Empresa registrada. Acceso pendiente de pago o activación admin.',
+        },
+      ],
     },
     landingPage: String(landingPage || defaultLanding).trim(),
     linkedBusinessId: String(linkedBusinessId || '').trim(),

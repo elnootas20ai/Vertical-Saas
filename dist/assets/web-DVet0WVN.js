@@ -1,0 +1,1 @@
+import{Y as r}from"./index-5-qR25K6.js";class o extends r{async print(n){return console.log("ECHO",n),{status:"printed"}}async ping(n){return{online:!1}}async discover(n){return{printers:[]}}}export{o as ESCPOSProxyWeb};

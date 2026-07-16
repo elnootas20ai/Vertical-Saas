@@ -38,9 +38,9 @@ const SLIDES: Slide[] = [
   {
     icon: Layers,
     eyebrow: 'Todo en 1',
-    title: 'El sistema operativo de tu negocio',
+    title: 'Más tiempo, menos tareas, más control',
     subtitle:
-      'Stock, operaciones, clientes, TPV y finanzas en una sola plataforma. Sin caos, sin papeles perdidos, sin herramientas sueltas.',
+      'Elimina el trabajo manual y céntrate en lo que realmente importa.',
     features: [
       { icon: BarChart3, title: 'Dashboard en vivo', desc: 'KPIs y actividad del día en tiempo real.' },
       { icon: Users, title: 'CRM unificado', desc: 'Clientes, historial y segmentación en un solo sitio.' },
@@ -88,9 +88,9 @@ const SLIDES: Slide[] = [
     eyebrow: 'Impresora WiFi',
     title: 'Imprime tickets como en Revo',
     subtitle:
-      'Vertial busca la impresora térmica en la WiFi de tu local. iOS pedirá permiso de red local: pulsa Permitir para detectar e imprimir.',
+      'Configura la impresora con la IP del ticket SELF-TEST. Activa «Red local» en Ajustes del iPhone/iPad → Vertial.',
     features: [
-      { icon: Printer, title: 'Buscar impresoras', desc: 'Detecta Epson y otras térmicas en la WiFi.' },
+      { icon: Printer, title: 'IP fija', desc: 'Escribe la IP de la impresora térmica (HPRT, Epson…).' },
       { icon: Monitor, title: 'TPV en tablet', desc: 'Tickets de pedidos y cierre desde el mostrador.' },
       { icon: Check, title: 'Sin cables', desc: 'Solo WiFi del local; sin PC obligatorio en iPhone/iPad.' },
     ],

@@ -17,7 +17,7 @@ function wc(overrides) {
 }
 
 describe('filterRestaurantRetailWorkCenters', () => {
-  it('bodegeta no muestra badlona mal etiquetada', () => {
+  it('respeta local etiquetado del restaurante (badlona → bodegetta)', () => {
     const businesses = [
       {
         business_id: 'biz-bodegeta',
@@ -37,13 +37,13 @@ describe('filterRestaurantRetailWorkCenters', () => {
       name: 'badlona',
       businessId: 'biz-bodegeta',
     });
-    expect(resolveRestaurantRetailOwnerId(center, businesses[0], businesses)).toBe('biz-modomio');
+    expect(resolveRestaurantRetailOwnerId(center)).toBe('biz-bodegeta');
     expect(
       filterRestaurantRetailWorkCenters([center], businesses[0], businesses),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 
-  it('muestra tienda cuyo nombre coincide con el restaurante', () => {
+  it('no muestra tienda etiquetada en otra empresa (aunque el nombre coincida)', () => {
     const businesses = [
       {
         business_id: 'biz-bodegeta',
@@ -51,16 +51,22 @@ describe('filterRestaurantRetailWorkCenters', () => {
         name: 'bodegeta',
         createdAt: '2025-01-01T00:00:00.000Z',
       },
+      {
+        business_id: 'biz-modomio',
+        businessType: 'delivery',
+        name: 'modomio',
+        createdAt: '2024-01-01T00:00:00.000Z',
+      },
     ];
     const center = wc({
-      _id: 'store-own',
-      name: 'bodegeta sala',
-      businessId: 'biz-bodegeta',
-      createdAt: '2025-06-01T00:00:00.000Z',
+      _id: 'store-modomio',
+      name: 'Modomio Badalona',
+      businessId: 'biz-modomio',
     });
+    expect(resolveRestaurantRetailOwnerId(center)).toBe('biz-modomio');
     expect(
       filterRestaurantRetailWorkCenters([center], businesses[0], businesses),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it('oculta centros creados automáticamente por sala', () => {

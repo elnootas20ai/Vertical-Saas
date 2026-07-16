@@ -13,30 +13,94 @@ export type UseCameraOptions = {
   source?: 'camera' | 'photos' | 'prompt';
 };
 
+export type CameraPermissionStatus = {
+  camera: string;
+  photos: string;
+};
+
+export type TakePhotoResult =
+  | { ok: true; photo: CameraPhoto }
+  | { ok: false; reason: 'cancelled' | 'denied' | 'unavailable' | 'failed'; message: string };
+
 const ALLOWED_CAMERA_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 const CAMERA_ACCEPT = 'image/jpeg,image/png,image/webp';
 
+function isUserCancelled(err: unknown): boolean {
+  const msg = String((err as { message?: string })?.message || err || '').toLowerCase();
+  return (
+    msg.includes('cancel') ||
+    msg.includes('user cancelled') ||
+    msg.includes('user canceled') ||
+    msg.includes('no image')
+  );
+}
+
+function isPermissionDenied(err: unknown): boolean {
+  const msg = String((err as { message?: string })?.message || err || '').toLowerCase();
+  return (
+    msg.includes('permission') ||
+    msg.includes('denied') ||
+    msg.includes('not authorized') ||
+    msg.includes('access')
+  );
+}
+
 /**
- * useCamera – abstraction that uses the native Capacitor Camera plugin
- * when running inside a Capacitor app (Android / iOS), and falls back to
- * a standard HTML <input type="file"> when running as a PWA in the browser.
+ * useCamera – Capacitor Camera en app nativa; input file en navegador.
  */
 export function useCamera() {
   const isNative = Capacitor.isNativePlatform();
 
+  const requestPermissions = useCallback(async (): Promise<CameraPermissionStatus | null> => {
+    if (!isNative) return { camera: 'granted', photos: 'granted' };
+    try {
+      return await Camera.requestPermissions({ permissions: ['camera', 'photos'] });
+    } catch {
+      return null;
+    }
+  }, [isNative]);
+
+  const checkPermissions = useCallback(async (): Promise<CameraPermissionStatus | null> => {
+    if (!isNative) return { camera: 'granted', photos: 'granted' };
+    try {
+      return await Camera.checkPermissions();
+    } catch {
+      return null;
+    }
+  }, [isNative]);
+
   /**
-   * Take a photo or pick one from the gallery.
-   * Returns a data URL (base64) or null if the user cancelled.
+   * Captura con resultado tipado (razón de fallo). Preferible para OCR.
    */
-  const takePhoto = useCallback(
-    async (opts: UseCameraOptions = {}): Promise<CameraPhoto | null> => {
-      const {
-        quality = 85,
-        allowEditing = false,
-        source = 'prompt',
-      } = opts;
+  const takePhotoDetailed = useCallback(
+    async (opts: UseCameraOptions = {}): Promise<TakePhotoResult> => {
+      const { quality = 85, allowEditing = false, source = 'prompt' } = opts;
 
       if (isNative) {
+        const needCamera = source === 'camera' || source === 'prompt';
+        const needPhotos = source === 'photos' || source === 'prompt';
+
+        let perms = await checkPermissions();
+        const cameraOk = !needCamera || perms?.camera === 'granted';
+        const photosOk = !needPhotos || perms?.photos === 'granted' || perms?.photos === 'limited';
+
+        if (!cameraOk || !photosOk) {
+          perms = await requestPermissions();
+        }
+
+        const cameraGranted = !needCamera || perms?.camera === 'granted';
+        const photosGranted =
+          !needPhotos || perms?.photos === 'granted' || perms?.photos === 'limited';
+
+        if (!cameraGranted || !photosGranted) {
+          return {
+            ok: false,
+            reason: 'denied',
+            message:
+              'Sin permiso de cámara o fotos. Actívalo en Ajustes → Vertial → Cámara / Fotos.',
+          };
+        }
+
         try {
           const sourceMap = {
             camera: CameraSource.Camera,
@@ -48,15 +112,33 @@ export function useCamera() {
             allowEditing,
             resultType: CameraResultType.DataUrl,
             source: sourceMap[source],
+            // Mejor lectura OCR: evita recortes raros del editor nativo
+            correctOrientation: true,
           });
-          if (!photo.dataUrl) return null;
-          return { dataUrl: photo.dataUrl, format: photo.format };
-        } catch {
-          return null;
+          if (!photo.dataUrl) {
+            return { ok: false, reason: 'cancelled', message: 'No se obtuvo ninguna imagen.' };
+          }
+          return { ok: true, photo: { dataUrl: photo.dataUrl, format: photo.format || 'jpeg' } };
+        } catch (err) {
+          if (isUserCancelled(err)) {
+            return { ok: false, reason: 'cancelled', message: 'Captura cancelada.' };
+          }
+          if (isPermissionDenied(err)) {
+            return {
+              ok: false,
+              reason: 'denied',
+              message:
+                'Sin permiso de cámara o fotos. Actívalo en Ajustes → Vertial → Cámara / Fotos.',
+            };
+          }
+          return {
+            ok: false,
+            reason: 'failed',
+            message: 'No se pudo abrir la cámara. Prueba de nuevo o elige una foto de la galería.',
+          };
         }
       }
 
-      // Browser fallback – open a file picker
       return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
@@ -66,39 +148,47 @@ export function useCamera() {
         }
         input.onchange = () => {
           const file = input.files?.[0];
-          if (!file) { resolve(null); return; }
+          if (!file) {
+            resolve({ ok: false, reason: 'cancelled', message: 'No se seleccionó ningún archivo.' });
+            return;
+          }
           const type = (file.type || '').toLowerCase();
           if (!ALLOWED_CAMERA_MIME_TYPES.includes(type as (typeof ALLOWED_CAMERA_MIME_TYPES)[number])) {
-            resolve(null);
+            resolve({
+              ok: false,
+              reason: 'failed',
+              message: 'Formato no soportado. Usa JPG, PNG o WebP.',
+            });
             return;
           }
           const reader = new FileReader();
           reader.onload = () => {
             const dataUrl = reader.result as string;
             const format = file.type.split('/')[1] ?? 'jpeg';
-            resolve({ dataUrl, format });
+            resolve({ ok: true, photo: { dataUrl, format } });
           };
-          reader.onerror = () => resolve(null);
+          reader.onerror = () =>
+            resolve({ ok: false, reason: 'failed', message: 'No se pudo leer la imagen.' });
           reader.readAsDataURL(file);
         };
-        input.oncancel = () => resolve(null);
+        input.oncancel = () =>
+          resolve({ ok: false, reason: 'cancelled', message: 'Captura cancelada.' });
         input.click();
       });
     },
-    [isNative],
+    [isNative, checkPermissions, requestPermissions],
   );
 
   /**
-   * Request camera/gallery permissions (native only – no-op in browser).
+   * Compatibilidad: data URL o null (cancel / error).
    */
-  const requestPermissions = useCallback(async () => {
-    if (!isNative) return { camera: 'granted', photos: 'granted' };
-    try {
-      return await Camera.requestPermissions({ permissions: ['camera', 'photos'] });
-    } catch {
-      return null;
-    }
-  }, [isNative]);
+  const takePhoto = useCallback(
+    async (opts: UseCameraOptions = {}): Promise<CameraPhoto | null> => {
+      const result = await takePhotoDetailed(opts);
+      return result.ok ? result.photo : null;
+    },
+    [takePhotoDetailed],
+  );
 
-  return { takePhoto, requestPermissions, isNative };
+  return { takePhoto, takePhotoDetailed, requestPermissions, checkPermissions, isNative };
 }

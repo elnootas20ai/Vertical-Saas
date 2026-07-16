@@ -3,11 +3,10 @@ import type { VerticalModuleDefinition } from '../types';
 /**
  * Módulo Delivery — frontera de código.
  *
- * Todo lo específico de delivery (pedidos, cocina, reparto, catálogo TPV delivery, CRM delivery)
- * vive bajo estas rutas o se importa desde `@/verticals/delivery` (barrel).
+ * Bar/restaurante NO forma parte de este módulo (retirado del producto).
  *
  * Otros verticales NO deben importar páginas, componentes ni lib de negocio delivery.
- * Solo pueden usar `legacySharedImports` (retail/PDV compartido — renombrar en fases futuras).
+ * Solo pueden usar `legacySharedImports` (retail/PDV compartido).
  */
 export const DELIVERY_MODULE: VerticalModuleDefinition = {
   id: 'delivery',
@@ -19,9 +18,6 @@ export const DELIVERY_MODULE: VerticalModuleDefinition = {
     '/saas/delivery-montaje',
     '/saas/delivery-catalog',
     '/saas/delivery-integrations',
-    '/saas/tpv',
-    '/saas/sala',
-    '/saas/caja',
     '/saas/vertical/delivery',
     '/saas/worker/tpv/delivery',
   ],

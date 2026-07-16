@@ -60,6 +60,7 @@ import { ConfiguracionGeneral } from './pages/saas/ConfiguracionGeneral';
 import { Billing } from './pages/saas/Billing';
 import { HelpCenter } from './pages/saas/HelpCenter';
 import { Suspended } from './pages/saas/Suspended';
+import { SubscriptionPaymentPage } from './pages/saas/SubscriptionPaymentPage';
 import { Reports } from './pages/saas/Reports';
 import AlertCenterPage from './pages/saas/AlertCenterPage';
 import OcrReviewPage from './pages/saas/OcrReviewPage';
@@ -104,12 +105,14 @@ import { TechnicianView } from './pages/saas/TechnicianView';
 import { Commissions } from './pages/saas/Commissions';
 import { PayrollPage } from './pages/saas/PayrollPage';
 import { RedirectLegacyDelivery } from './components/saas/RedirectLegacyDelivery';
-import { SalaPage } from './pages/saas/SalaPage';
-import { RestaurantWaitlistPage } from './verticals/restaurant/RestaurantWaitlistPage';
 import { RestaurantReservationsRouteEntry } from './verticals/restaurant/RestaurantReservationsRouteEntry';
+import { RestaurantWaitlistPage } from './verticals/restaurant/RestaurantWaitlistPage';
 import { RestaurantKitchenRouteEntry } from './verticals/restaurant/RestaurantKitchenRouteEntry';
 import { RestaurantReportsPage } from './verticals/restaurant/RestaurantReportsPage';
 import { RestaurantCajaRouteEntry } from './verticals/restaurant/RestaurantCajaRouteEntry';
+import { RestaurantCeoTpvPage } from './verticals/restaurant/RestaurantCeoTpvPage';
+import { RestaurantSalaRouteEntry } from './verticals/restaurant/RestaurantSalaRouteEntry';
+import { RequireRestaurantVertical } from './components/saas/RequireRestaurantVertical';
 import { DeliveryReparto } from './pages/saas/DeliveryReparto';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
@@ -610,11 +613,11 @@ export const router = createBrowserRouter([
           { path: 'tech', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
           { path: 'payroll', element: <RequireBusinessOwner><PayrollPage /></RequireBusinessOwner> },
-          { path: 'sala/setup', Component: SalaPage },
-          { path: 'sala', Component: SalaPage },
-          { path: 'lista-espera', element: <RequireWorkerPermission permission="delivery"><RestaurantWaitlistPage /></RequireWorkerPermission> },
-          { path: 'cocina', element: <RequireWorkerPermission permission="delivery"><RestaurantKitchenRouteEntry /></RequireWorkerPermission> },
-          { path: 'vertical/restaurant/informes', element: <RequireBusinessOwner><RestaurantReportsPage /></RequireBusinessOwner> },
+          { path: 'sala/setup', element: <RequireRestaurantVertical><RestaurantSalaRouteEntry /></RequireRestaurantVertical> },
+          { path: 'sala', element: <RequireRestaurantVertical><RestaurantSalaRouteEntry /></RequireRestaurantVertical> },
+          { path: 'lista-espera', element: <RequireRestaurantVertical><RequireWorkerPermission permission="delivery"><RestaurantWaitlistPage /></RequireWorkerPermission></RequireRestaurantVertical> },
+          { path: 'cocina', element: <RequireRestaurantVertical><RequireWorkerPermission permission="delivery"><RestaurantKitchenRouteEntry /></RequireWorkerPermission></RequireRestaurantVertical> },
+          { path: 'vertical/restaurant/informes', element: <RequireBusinessOwner><RequireRestaurantVertical><RestaurantReportsPage /></RequireRestaurantVertical></RequireBusinessOwner> },
           { path: 'tpv/locales', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },
@@ -655,8 +658,8 @@ export const router = createBrowserRouter([
           { path: 'delivery-montaje', element: <RequireDeliveryVertical><RequireWorkerPermission permission="delivery"><DeliveryMontaje /></RequireWorkerPermission></RequireDeliveryVertical> },
           { path: 'delivery-catalog', element: <Navigate to="/saas/catalog" replace /> },
           { path: 'vertical/delivery/tpv', element: <RequireBusinessOwner><RequireDeliveryVertical><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RequireDeliveryVertical></RequireBusinessOwner> },
-          { path: 'caja', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><RequirePdvTerminal><TpvRouteShell><RestaurantCajaRouteEntry /></TpvRouteShell></RequirePdvTerminal></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
-          { path: 'caja/tpv', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><RequirePdvTerminal><TpvRouteShell><TpvRapidoPage /></TpvRouteShell></RequirePdvTerminal></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
+          { path: 'caja', element: <RequireBusinessOwner><RequireRestaurantVertical><RedirectEventsFromRetailRoutes><RequirePdvTerminal><TpvRouteShell><RestaurantCajaRouteEntry /></TpvRouteShell></RequirePdvTerminal></RedirectEventsFromRetailRoutes></RequireRestaurantVertical></RequireBusinessOwner> },
+          { path: 'caja/tpv', element: <RequireBusinessOwner><RequireRestaurantVertical><RedirectEventsFromRetailRoutes><RestaurantCeoTpvPage /></RedirectEventsFromRetailRoutes></RequireRestaurantVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequireDeliveryVertical><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireDeliveryVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><RequireDeliveryVertical><RequireWebOrderingVertical><DeliveryIntegrations /></RequireWebOrderingVertical></RequireDeliveryVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/informes', element: <RequireBusinessOwner><RequireDeliveryVertical><DeliveryReports /></RequireDeliveryVertical></RequireBusinessOwner> },
@@ -907,6 +910,7 @@ export const router = createBrowserRouter([
           { path: 'vertical/compraventa/gastos-preparacion', element: <RequireBusinessOwner><PreparationExpenses /></RequireBusinessOwner> },
 
           { path: 'changelog', Component: ChangelogPage },
+          { path: 'subscription', Component: SubscriptionPaymentPage },
           { path: 'suspended', Component: Suspended },
           { path: 'qa-final', Component: QAFinal },
           { path: 'block-a1-checklist', Component: BlockA1Checklist },
@@ -920,7 +924,7 @@ export const router = createBrowserRouter([
           { path: 'worker/complete-payroll', Component: WorkerPayrollSetup },
           { path: 'worker', element: <Navigate to="/saas/worker/tasks" replace /> },
           { path: 'worker/tpv/delivery', element: <RequireTpvTabletEntry requireForAll><WorkerTpvDeliveryRoute /></RequireTpvTabletEntry> },
-          { path: 'worker/tpv/restaurant', element: <RequireTpvTabletEntry requireForAll><WorkerTpvDeliveryRoute /></RequireTpvTabletEntry> },
+          { path: 'worker/tpv/restaurant', element: <RequireTpvTabletEntry requireForAll><RequireRestaurantVertical><RestaurantCeoTpvPage /></RequireRestaurantVertical></RequireTpvTabletEntry> },
           { path: 'worker/tpv', element: <RequireTpvTabletEntry><WorkerTpvEntry /></RequireTpvTabletEntry> },
           { path: 'worker/tasks', Component: WorkerTasks },
           { path: 'worker/stock-review', Component: WorkerStockReviewPage },

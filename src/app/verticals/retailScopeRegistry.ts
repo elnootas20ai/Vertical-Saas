@@ -85,13 +85,18 @@ export function resolveRetailScopeKind(
   return 'strict';
 }
 
+function isRetailCenterType(wc: WorkCenter): boolean {
+  return wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen';
+}
+
+/** Retail genérico (sin marcar sala). Delivery NO debe filtrar notas sala_room. */
 function pickRetailWorkCenters(workCenters: WorkCenter[]): WorkCenter[] {
-  return workCenters.filter(
-    (wc) =>
-      !wc.deletedAt &&
-      !isSalaManagedWorkCenter(wc) &&
-      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-  );
+  return workCenters.filter((wc) => !wc.deletedAt && isRetailCenterType(wc));
+}
+
+/** Solo restaurante: excluye centros técnicos de sala (mesas), no tiendas delivery. */
+function pickRestaurantFloorRetail(workCenters: WorkCenter[]): WorkCenter[] {
+  return pickRetailWorkCenters(workCenters).filter((wc) => !isSalaManagedWorkCenter(wc));
 }
 
 /** Filtra centros retail ya cargados según el vertical activo. */
@@ -101,20 +106,28 @@ export function filterRetailWorkCentersForScope(
 ): WorkCenter[] {
   const business = ctx.business;
   const businessId = normalizeBusinessScopeId(business?.business_id);
-  const picked = pickRetailWorkCenters(workCenters);
-  if (!businessId || !business) return picked;
+  if (!businessId || !business) return pickRetailWorkCenters(workCenters);
 
   const kind = resolveRetailScopeKind(business.businessType);
-  if (kind === 'restaurant') {
-    return filterRestaurantRetailWorkCenters(picked, business, ctx.businesses);
-  }
+
+  // Delivery: scope soft por businessId + huérfanas. Nunca filtrar por sala_room.
   if (kind === 'delivery') {
     return dedupeRetailWorkCentersForBusiness(
-      filterWorkCentersForBusinessScope(picked, businessId, {
+      filterWorkCentersForBusinessScope(pickRetailWorkCenters(workCenters), businessId, {
         accountBusinessCount: ctx.accountBusinessCount,
       }),
     );
   }
+
+  if (kind === 'restaurant') {
+    return filterRestaurantRetailWorkCenters(
+      pickRestaurantFloorRetail(workCenters),
+      business,
+      ctx.businesses,
+    );
+  }
+
+  const picked = pickRetailWorkCenters(workCenters);
   return sanitizeRetailScopeSnapshot(
     businessId,
     { retailWorkCenters: picked, allPointsOfSale: [] },

@@ -6,10 +6,10 @@ import { printDeliveryTicketBrowser } from './printBrowser';
 import { isVertialNativeApp } from './isNativeApp';
 import { sendNativeEscpos } from './nativePrintClient';
 import {
-  isNativeWifiPrinterReady,
-  NATIVE_WIFI_PRINTER_SETUP_MESSAGE,
-  shouldBlockBrowserPrintOnNative,
-} from './nativePrintRouting';
+  NATIVE_PRINTER_PRINT_FAILED_MESSAGE,
+  resolveNativePrinterForPrint,
+} from './nativePrinterFlow';
+import { shouldBlockBrowserPrintOnNative, NATIVE_WIFI_PRINTER_SETUP_MESSAGE } from './nativePrintRouting';
 import { sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
 import type { VertialPrinterConfig } from './printerConfig';
 import type { TicketDocument } from './ticketDocument';
@@ -28,20 +28,22 @@ export async function printTicketDocument(
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
   if (isVertialNativeApp()) {
-    if (!isNativeWifiPrinterReady(config)) {
-      toast.error(NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+    const prepared = resolveNativePrinterForPrint(config);
+    if (!prepared.ready) {
+      toast.error(prepared.error || NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
       return { method: 'native', ok: false };
     }
-    const result = await sendNativeEscpos(escpos, config, { timeoutMs: 8_000 });
+    const printConfig = prepared.config;
+    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 8_000 });
     if (result.ok) return { method: 'native', ok: true };
-    toast.error(result.error || 'No se pudo imprimir en la impresora WiFi', {
+    toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
       duration: 12000,
       action: {
         label: 'Reintentar',
         onClick: () => {
-          void sendNativeEscpos(escpos, config, { retry: false, timeoutMs: 10_000 }).then((retry) => {
+          void sendNativeEscpos(escpos, printConfig, { retry: false, timeoutMs: 10_000 }).then((retry) => {
             if (retry.ok) toast.success('Ticket impreso');
-            else toast.error(retry.error || 'Revisa Ajustes → Tickets y el permiso «Red local».', { duration: 10000 });
+            else toast.error(retry.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, { duration: 10000 });
           });
         },
       },

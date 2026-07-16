@@ -560,7 +560,8 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   },
   restaurant: {
     clientesCrm: ['clients'],
-    delivery: ['sala', 'cocina', 'tpv-rapido', 'caja', 'reservas', 'lista-espera'],
+    // TPV sala propio (/saas/caja/tpv) — no el TPV de Delivery.
+    delivery: ['sala', 'tpv-rapido', 'cocina', 'caja', 'reservas', 'lista-espera'],
   },
   events: {
     clientesCrm: ['clients'],
@@ -571,7 +572,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   },
 };
 
-/** Rutas del sidebar distintas para bar/restaurante (sin pasar por delivery). */
+/** Rutas sidebar bar/restaurante (separadas de Delivery). */
 const RESTAURANT_SIDEBAR_PATH_OVERRIDES: Record<string, string> = {
   caja: '/saas/caja',
   'tpv-rapido': '/saas/caja/tpv',
@@ -684,7 +685,7 @@ function SidebarInner({
   const isCompraventa = isCompraventaBusinessType(vertical);
   const isRestaurantVertical = isRestaurantBusinessType(vertical);
   const isStrictDeliveryVertical = isDeliveryBusinessType(vertical);
-  const usesOpsStoreSidebar = isDeliveryOpsBusinessType(vertical);
+  const usesOpsStoreSidebar = isDeliveryOpsBusinessType(vertical) || isRestaurantVertical;
   const showWorkCentersSidebar = usesOpsStoreSidebar || isCompraventa;
   const allowedGroups = vertical
     ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
@@ -845,6 +846,12 @@ function SidebarInner({
     window.addEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
     return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
   }, [usesOpsStoreSidebar, activeStore.refresh]);
+
+  /** Al entrar en Delivery, forzar recarga de tiendas/PDV (no quedarse con scope vacío de otro vertical). */
+  useEffect(() => {
+    if (!isStrictDeliveryVertical || !businessScopeId) return;
+    void activeStore.refresh();
+  }, [isStrictDeliveryVertical, businessScopeId, activeStore.refresh]);
 
   useEffect(() => {
     if (!usesOpsStoreSidebar) return;
@@ -1023,7 +1030,12 @@ function SidebarInner({
     return menuItemDefs.map((item) => {
       const base: SidebarItem = {
         ...item,
-        label: t(`nav.${item.navKey}`),
+        label:
+          isRestaurantVertical && item.id === 'tpv-rapido'
+            ? 'TPV sala'
+            : isRestaurantVertical && item.id === 'cocina'
+              ? 'Cocina'
+              : t(`nav.${item.navKey}`),
       };
       let resolved: SidebarItem;
       if (eventsNav.isEvents && !item.disabled) {
@@ -1039,6 +1051,9 @@ function SidebarInner({
               disabled: true,
               lockTitle: lock.title,
             };
+      } else if (isRestaurantVertical) {
+        const pathOverride = RESTAURANT_SIDEBAR_PATH_OVERRIDES[item.id];
+        resolved = pathOverride ? { ...base, path: pathOverride } : base;
       } else if (!deliveryNav.isDelivery || item.disabled) {
         resolved = base;
       } else if (item.id === 'reports') {
@@ -1055,12 +1070,6 @@ function SidebarInner({
               disabled: true,
               lockTitle: lock.title,
             };
-      }
-      if (isRestaurantVertical) {
-        const pathOverride = RESTAURANT_SIDEBAR_PATH_OVERRIDES[item.id];
-        if (pathOverride) {
-          resolved = { ...resolved, path: pathOverride };
-        }
       }
       return resolved;
     });

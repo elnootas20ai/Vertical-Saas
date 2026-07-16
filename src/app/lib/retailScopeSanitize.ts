@@ -104,7 +104,6 @@ function dedupePointsOfSale(pointsOfSale: PointOfSale[]): PointOfSale[] {
 export function isRetailWorkCenter(wc: WorkCenter): boolean {
   return (
     !wc.deletedAt &&
-    wc.active !== false &&
     (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen')
   );
 }

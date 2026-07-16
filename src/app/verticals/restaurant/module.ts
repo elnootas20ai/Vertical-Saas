@@ -1,17 +1,18 @@
 import type { VerticalModuleDefinition } from '../types';
 
 /**
- * Módulo Restauración — vertical propio (bar, restaurante, sala).
- * Reutiliza el motor operativo de pedidos/TPV vía rutas compartidas,
- * pero con frontera de código y datos separada de delivery puro.
- * Las rutas delivery-* (ops, kitchen, montaje) NO pertenecen a este módulo:
- * las bloquea RequireDeliveryVertical y redirigen a /saas/sala.
+ * Módulo Bar / Restaurante — frontera de código independiente de Delivery.
+ *
+ * Delivery NO incluye /saas/caja, /saas/sala ni /saas/cocina.
+ * Este módulo es dueño de sala, caja restaurant, TPV mesa, cocina KDS y reservas.
+ *
+ * PDV/tiendas (`deliveryApi`, `deliverySetup`) tienen nombre legacy compartido;
+ * no importar pantallas DeliveryOps, DeliveryKitchen, etc.
  */
 export const RESTAURANT_MODULE: VerticalModuleDefinition = {
   id: 'restaurant',
   businessType: 'restaurant',
   routePrefixes: [
-    '/saas/tpv',
     '/saas/sala',
     '/saas/sala/setup',
     '/saas/reservations',
@@ -24,16 +25,35 @@ export const RESTAURANT_MODULE: VerticalModuleDefinition = {
   ],
   codeRoots: [
     'src/app/verticals/restaurant',
+    'src/app/pages/saas/restaurant',
+    'src/app/components/saas/restaurant',
+    'src/app/components/saas/sala',
+    'src/app/lib/restaurantCajaApi',
+    'src/app/lib/restaurantTpvPermissions',
+    'src/app/lib/restaurantCloseWarnings',
+    'src/app/lib/restaurantFloorReservations',
+    'src/app/lib/restaurantReservationsApi',
+    'src/app/lib/salaApi',
+    'src/app/lib/salaRoomPdv',
+    'src/app/lib/salaRoomTerminal',
+    'src/app/lib/salaStoreTpv',
+    'src/app/lib/salaTpvLaunch',
   ],
   legacySharedImports: [
     'deliverySetup',
     'deliveryApi',
     'deliveryOpsPdvSelection',
+    'deliveryOpsTypes',
+    // Ticket helpers compartidos (nombre legacy); KDS sala los reutiliza sin DeliveryOps.
+    'deliveryTicketPrint',
+    'deliveryTicketHelpers',
     'workCentersApi',
     'brandsApi',
     'pdvScope',
     'retailScopeCache',
     'retailScopeRegistry',
+    'tpvRegisterScope',
+    'tpvCajaScope',
   ],
 };
 

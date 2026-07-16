@@ -1,0 +1,30 @@
+---
+description: Bar/restaurante — vertical propio, no mezclar con Delivery
+alwaysApply: true
+---
+
+# Bar / Restaurante — aislado de Delivery
+
+Bar/restaurante se monta **de nuevo**, independiente de Delivery.
+
+## Fronteras
+
+- Restaurant: `/saas/caja`, `/saas/caja/tpv`, `/saas/sala`, `/saas/cocina`, `/saas/lista-espera`, `/saas/reservations` (si negocio restaurant), `/saas/vertical/restaurant/*`
+- Delivery: `/saas/delivery-ops`, `/saas/vertical/delivery/*`, cocina/reparto/montaje delivery
+- **Prohibido** montar `TpvRapidoPage` / `WorkerTpvDelivery` en rutas restaurant
+- Código nuevo → `src/app/verticals/restaurant/` (placeholders por ahora)
+
+## Crear empresa / tour
+
+- `businessType: restaurant` habilitado en onboarding, Gate y Settings
+- Checklist/tour: `GUIDED_ACTIVATION_BUSINESS_TYPES` incluye `restaurant`
+- Delivery no se toca al montar restaurant
+
+## Flujo TPV → Cocina (solo restaurant)
+
+1. TPV sala (`/saas/caja/tpv`): comandas de mesa.
+2. Al **enviar a cocina**, la comanda pasa a status `sent_to_kitchen`.
+3. Cocina (`/saas/cocina`) muestra esas comandas (nueva → preparación → lista).
+4. **No** entra Delivery ni el KDS de delivery.
+
+Sidebar restaurant debe incluir: Sala, **TPV sala**, Cocina, Caja, Reservas, Lista de espera.

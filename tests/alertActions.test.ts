@@ -35,55 +35,39 @@ function alertWith(partial: Partial<AlertRecord>): AlertRecord {
 }
 
 describe('resolveAlertRouteForBusiness', () => {
-  it('traduce rutas delivery a rutas de restaurante', () => {
-    expect(resolveAlertRouteForBusiness('/saas/delivery-kitchen', 'restaurant')).toBe('/saas/cocina');
-    expect(resolveAlertRouteForBusiness('/saas/delivery-ops', 'restaurant')).toBe('/saas/sala');
-    expect(resolveAlertRouteForBusiness('/saas/delivery-reparto', 'restaurant')).toBe('/saas/sala');
-    expect(resolveAlertRouteForBusiness('/saas/vertical/delivery/caja', 'restaurant')).toBe('/saas/caja');
+  it('no remapea a bar/restaurante (retirado)', () => {
+    expect(resolveAlertRouteForBusiness('/saas/delivery-kitchen', 'restaurant')).toBe('/saas/delivery-kitchen');
+    expect(resolveAlertRouteForBusiness('/saas/delivery-ops', 'restaurant')).toBe('/saas/delivery-ops');
+    expect(resolveAlertRouteForBusiness('/saas/vertical/delivery/caja', 'restaurant')).toBe('/saas/vertical/delivery/caja');
   });
 
-  it('traduce también rutas con query string', () => {
-    expect(resolveAlertRouteForBusiness('/saas/delivery-ops?orderId=x', 'restaurant')).toBe('/saas/sala');
-  });
-
-  it('no toca rutas para delivery puro ni rutas neutrales', () => {
+  it('conserva rutas delivery', () => {
     expect(resolveAlertRouteForBusiness('/saas/delivery-kitchen', 'delivery')).toBe('/saas/delivery-kitchen');
-    expect(resolveAlertRouteForBusiness('/saas/catalog', 'restaurant')).toBe('/saas/catalog');
-    expect(resolveAlertRouteForBusiness('/saas/finance', 'restaurant')).toBe('/saas/finance');
+    expect(resolveAlertRouteForBusiness('/saas/catalog', 'delivery')).toBe('/saas/catalog');
   });
 
   it('devuelve cadena vacía si no hay ruta', () => {
-    expect(resolveAlertRouteForBusiness('', 'restaurant')).toBe('');
-    expect(resolveAlertRouteForBusiness(undefined, 'restaurant')).toBe('');
+    expect(resolveAlertRouteForBusiness('', 'delivery')).toBe('');
+    expect(resolveAlertRouteForBusiness(undefined, 'delivery')).toBe('');
   });
 });
 
 describe('mapAlertsForBusinessVertical', () => {
-  it('mapea solo las alertas con rutas delivery para restaurantes', () => {
+  it('deja rutas delivery intactas', () => {
     const alerts = [
       alertWith({ id: 'a1', route: '/saas/delivery-kitchen' }),
       alertWith({ id: 'a2', route: '/saas/catalog' }),
     ];
     const mapped = mapAlertsForBusinessVertical(alerts, 'restaurant');
-    expect(mapped[0].route).toBe('/saas/cocina');
+    expect(mapped[0].route).toBe('/saas/delivery-kitchen');
     expect(mapped[1].route).toBe('/saas/catalog');
-  });
-
-  it('devuelve la misma lista para otros verticales', () => {
-    const alerts = [alertWith({ route: '/saas/delivery-kitchen' })];
-    expect(mapAlertsForBusinessVertical(alerts, 'delivery')).toBe(alerts);
   });
 });
 
 describe('getAlertResolveLabel', () => {
-  it('etiqueta rutas de cocina y sala de restaurante', () => {
-    expect(getAlertResolveLabel(alertWith({ route: '/saas/cocina' }))).toBe('Ir a cocina');
-    expect(getAlertResolveLabel(alertWith({ route: '/saas/sala', category: 'sala_long_occupied_table' }))).toBe('Ir a sala');
-    expect(getAlertResolveLabel(alertWith({ route: '/saas/caja' }))).toBe('Ir a caja');
-  });
-
-  it('mantiene las etiquetas delivery existentes', () => {
+  it('etiqueta rutas delivery', () => {
     expect(getAlertResolveLabel(alertWith({ route: '/saas/delivery-kitchen' }))).toBe('Ir a cocina');
     expect(getAlertResolveLabel(alertWith({ route: '/saas/delivery-ops' }))).toBe('Ir a pedidos');
+    expect(getAlertResolveLabel(alertWith({ route: '/saas/vertical/delivery/caja' }))).toBe('Ir a caja');
   });
 });

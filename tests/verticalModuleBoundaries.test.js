@@ -37,6 +37,10 @@ function fileBelongsToVertical(filePath, moduleDef) {
     const base = r.split('/').pop() || '';
     if (r.startsWith('src/app/pages/saas/') && /^Delivery/i.test(base)) return true;
   }
+  if (moduleDef.id === 'restaurant') {
+    if (r.startsWith('src/app/lib/restaurant')) return true;
+    if (r.startsWith('src/app/lib/sala')) return true;
+  }
   if (moduleDef.id === 'compraventa' && r.startsWith('src/app/lib/compraventa')) {
     return true;
   }
@@ -46,6 +50,8 @@ function fileBelongsToVertical(filePath, moduleDef) {
 const DELIVERY_ONLY_IMPORT_PATTERNS = [
   /\/pages\/saas\/Delivery/,
   /\/pages\/saas\/delivery\//,
+  /\/pages\/saas\/TpvRapidoPage/,
+  /\/pages\/saas\/worker\/WorkerTpvDelivery/,
   /\/components\/delivery\//,
   /\/lib\/deliveryCatalog/,
   /\/lib\/deliveryTicket/,
@@ -59,6 +65,21 @@ const DELIVERY_ONLY_IMPORT_PATTERNS = [
   /\/lib\/deliveryStock/,
   /\/lib\/deliveryActa/,
   /\/verticals\/delivery\//,
+];
+
+const RESTAURANT_ONLY_IMPORT_PATTERNS = [
+  /\/verticals\/restaurant\//,
+  /\/pages\/saas\/restaurant\//,
+  /\/components\/saas\/restaurant\//,
+  /\/components\/saas\/sala\//,
+  /\/lib\/restaurantCajaApi/,
+  /\/lib\/restaurantCloseWarnings/,
+  /\/lib\/restaurantFloorReservations/,
+  /\/lib\/restaurantReservationsApi/,
+  /\/lib\/salaApi/,
+  /\/lib\/salaRoom/,
+  /\/lib\/salaStoreTpv/,
+  /\/lib\/salaTpvLaunch/,
 ];
 
 const COMPRAVENTA_ONLY_IMPORT_PATTERNS = [
@@ -147,5 +168,39 @@ describe('vertical module boundaries', () => {
     expect(isLegacySharedCrossVerticalImport('./deliverySetup')).toBe(true);
     expect(isLegacySharedCrossVerticalImport('../lib/deliveryApi')).toBe(true);
     expect(isLegacySharedCrossVerticalImport('../lib/deliveryCatalogImport')).toBe(false);
+  });
+
+  it('delivery no reclama rutas de sala/caja restaurant', async () => {
+    const { isDeliveryModuleRoute } = await import('../src/app/verticals/delivery/module.ts');
+    const { isRestaurantModuleRoute } = await import('../src/app/verticals/restaurant/module.ts');
+    expect(isDeliveryModuleRoute('/saas/caja')).toBe(false);
+    expect(isDeliveryModuleRoute('/saas/sala')).toBe(false);
+    expect(isDeliveryModuleRoute('/saas/cocina')).toBe(false);
+    expect(isDeliveryModuleRoute('/saas/vertical/delivery/caja')).toBe(true);
+    expect(isRestaurantModuleRoute('/saas/caja')).toBe(true);
+    expect(isRestaurantModuleRoute('/saas/sala')).toBe(true);
+    expect(isRestaurantModuleRoute('/saas/vertical/delivery/caja')).toBe(false);
+  });
+
+  it('restaurant no importa pantallas/lib de negocio delivery', async () => {
+    const { RESTAURANT_MODULE } = await import('../src/app/verticals/restaurant/module.ts');
+    const { isLegacySharedCrossVerticalImport } = await import('../src/app/verticals/registry.ts');
+    const violations = scanCrossVerticalViolations(
+      RESTAURANT_MODULE,
+      DELIVERY_ONLY_IMPORT_PATTERNS,
+      isLegacySharedCrossVerticalImport,
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('delivery no importa pantallas/lib de negocio restaurant', async () => {
+    const { DELIVERY_MODULE } = await import('../src/app/verticals/delivery/module.ts');
+    const { isLegacySharedCrossVerticalImport } = await import('../src/app/verticals/registry.ts');
+    const violations = scanCrossVerticalViolations(
+      DELIVERY_MODULE,
+      RESTAURANT_ONLY_IMPORT_PATTERNS,
+      isLegacySharedCrossVerticalImport,
+    );
+    expect(violations).toEqual([]);
   });
 });

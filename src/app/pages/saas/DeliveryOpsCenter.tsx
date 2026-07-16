@@ -693,7 +693,6 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, activationFoc
     { l: 'Cocina', i: ChefHat, r: '/saas/delivery-kitchen', b: kpis?.byStatus.cocina ?? null, v: cfg?.hasKitchen !== false },
     { l: 'Montaje', i: ClipboardCheck, r: '/saas/delivery-montaje', b: kpis?.byStatus.listo ?? null, v: cfg?.hasAssemblyStation !== false },
     { l: 'Reparto', i: Truck, r: '/saas/delivery-reparto', b: null, v: (cfg?.hasOwnDelivery || cfg?.hasPlatformDelivery) === true },
-    { l: 'Sala', i: Armchair, r: '/saas/sala', b: null, v: cfg?.hasPhysicalTables === true },
     { l: 'Catálogo', i: BookOpen, r: '/saas/catalog', b: null, v: true },
     { l: 'Pedidos web', i: Package, r: '/saas/web-orders', b: null, v: true },
     { l: 'Web config', i: Globe, r: '/saas/web-config', b: null, v: true },

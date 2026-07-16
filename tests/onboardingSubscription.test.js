@@ -22,11 +22,23 @@ describe('onboarding subscription provisioning', () => {
 
     expect(sub.selectedPlanId).toBe('pro');
     expect(sub.planName).toBe('Pro');
-    expect(sub.status).toBe('trial_active');
+    expect(sub.status).toBe('pending_payment');
     expect(sub.extraPointOfSaleSlots).toBe(1);
     expect(sub.extraCommercialBrandSlots).toBe(0);
     expect(sub.extraBusinessSlots).toBe(0);
-    expect(sub.paymentProvider).toBe('onboarding_stub');
+    expect(sub.paymentProvider).toBe('bank_transfer');
+  });
+
+  it('no convierte pending_payment en trial al provisionar onboarding', () => {
+    const sub = buildSubscriptionFromOnboarding(
+      {
+        businessMetrics: { userCount: 1, locationCount: 1, businessCount: 1, commercialBrandCount: 0 },
+        subscriptionSelection: { recommendedPlanId: 'basic', billingMode: 'monthly' },
+      },
+      { status: 'pending_payment', paymentConcept: 'VERTIAL-ABC123' },
+    );
+    expect(sub.status).toBe('pending_payment');
+    expect(sub.paymentConcept).toBe('VERTIAL-ABC123');
   });
 
   it('añade cupos extra cuando supera límites PRO', () => {

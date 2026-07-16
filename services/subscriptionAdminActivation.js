@@ -1,5 +1,19 @@
-const ACTIVATION_STATUSES = new Set(['subscription_active', 'trial_active']);
-const BLOCKING_STATUSES = new Set(['suspended', 'grace_period', 'payment_failed', 'trial_expired']);
+import {
+  ACTIVE_SUBSCRIPTION_STATUSES,
+  BLOCKING_SUBSCRIPTION_STATUSES,
+  isActiveSubscriptionStatus,
+  isBlockingSubscriptionStatus,
+  appendSubscriptionHistory,
+} from '../shared/billing/subscriptionAccess.js';
+
+export {
+  isActiveSubscriptionStatus,
+  isBlockingSubscriptionStatus,
+  appendSubscriptionHistory,
+};
+
+const ACTIVATION_STATUSES = ACTIVE_SUBSCRIPTION_STATUSES;
+const BLOCKING_STATUSES = BLOCKING_SUBSCRIPTION_STATUSES;
 
 /**
  * Cuando un superadmin activa una cuenta manualmente, MONEI (CANCELLED) y el cron
@@ -20,18 +34,16 @@ export function applySuperAdminSubscriptionActivation(merged, previousSubscripti
     ...merged,
     billingExempt: Boolean(merged.billingExempt),
     cancelAtPeriodEnd: false,
+    currentPeriodStart: merged.currentPeriodStart || now.toISOString(),
     currentPeriodEnd: merged.currentPeriodEnd || periodEnd.toISOString(),
     gracePeriodEndsAt:
       BLOCKING_STATUSES.has(prevStatus) || !merged.gracePeriodEndsAt
         ? graceEnd.toISOString()
         : merged.gracePeriodEndsAt,
+    activationDate: merged.activationDate || now.toISOString(),
   };
 }
 
 export function isActivationStatus(status) {
-  return ACTIVATION_STATUSES.has(String(status || '').trim());
-}
-
-export function isBlockingSubscriptionStatus(status) {
-  return BLOCKING_STATUSES.has(String(status || '').trim());
+  return isActiveSubscriptionStatus(status);
 }

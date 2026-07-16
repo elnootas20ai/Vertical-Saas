@@ -19,12 +19,18 @@ export type PrinterConfigTarget = 'store' | 'terminal';
  * con «No puedes dejar el PDV sin terminales» aunque la tienda estaba bien.
  * El backend hace `{ ...existing, ...payload }`, así que el parche parcial es seguro.
  */
+export type PrinterPdvSyncOptions = {
+  /** Sync en segundo plano: no cerrar sesión si el token expiró. */
+  suppressLogout?: boolean;
+};
+
 export async function savePrinterConfigToPdv(
   userId: string,
   pdv: PointOfSale,
   config: VertialPrinterConfig,
   target: PrinterConfigTarget,
   terminalId?: string,
+  options?: PrinterPdvSyncOptions,
 ): Promise<PointOfSale> {
   const normalized = normalizeVertialPrinterConfig(config);
   const label = printerLabelFromConfig(normalized);
@@ -39,7 +45,10 @@ export async function savePrinterConfigToPdv(
       baseTerminals.length === 0
       || !baseTerminals.some((t) => String(t?.code || '').trim() && String(t?.name || '').trim());
     if (looksIncomplete) {
-      const fresh = (await listPointsOfSaleRequest(userId, { includeInactive: true }))
+      const fresh = (await listPointsOfSaleRequest(userId, {
+        includeInactive: true,
+        suppressLogout: options?.suppressLogout,
+      }))
         .find((p) => p._id === pdv._id);
       if (fresh && Array.isArray(fresh.terminals) && fresh.terminals.length > 0) {
         baseTerminals = fresh.terminals;
@@ -60,7 +69,9 @@ export async function savePrinterConfigToPdv(
     payload = { _id: pdv._id, printerConfig: normalized };
   }
 
-  const saved = await updatePointOfSaleRequest(userId, payload as PointOfSale);
+  const saved = await updatePointOfSaleRequest(userId, payload as PointOfSale, {
+    suppressLogout: options?.suppressLogout,
+  });
   cachePdvPrinterConfig(saved._id, normalized);
   return saved;
 }

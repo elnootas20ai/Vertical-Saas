@@ -156,11 +156,8 @@ export function isTpvTabletSaasSession(pathname: string): boolean {
   return isTpvTabletBound() && isTpvTabletWorkerPath(pathname);
 }
 
-/** Destino del TPV según el binding tablet (independiente del vertical de la empresa). */
+/** Destino del TPV tablet — solo Delivery (bar/restaurante retirado del producto). */
 export function resolveTpvTabletWorkerPath(): string {
-  const binding = readTpvTabletBinding();
-  if (!binding) return TPV_TABLET_DELIVERY_PATH;
-  if (binding.tpvVertical === TPV_TABLET_VERTICAL_RESTAURANT) return TPV_TABLET_RESTAURANT_PATH;
   return TPV_TABLET_DELIVERY_PATH;
 }
 

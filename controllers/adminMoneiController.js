@@ -19,7 +19,10 @@ import {
   saveAccount,
   writeChangelog,
 } from '../services/couchdb.js';
-import { applySuperAdminSubscriptionActivation } from '../services/subscriptionAdminActivation.js';
+import {
+  appendSubscriptionHistory,
+  applySuperAdminSubscriptionActivation,
+} from '../services/subscriptionAdminActivation.js';
 import logger from '../services/logger.js';
 
 const MONEI_COMMISSION_PERCENT = 0.8;
@@ -288,22 +291,34 @@ export async function adminGrantFreeMonths(req, res) {
 
     const updatedAccount = await saveAccount(req, {
       ...account,
-      subscription: {
-        ...sub,
-        status: 'subscription_active',
-        currentPeriodEnd: newPeriodEnd.toISOString(),
-        gracePeriodEndsAt: newGracePeriodEnd.toISOString(),
-        freeMonthsHistory: [
-          ...previousFreeMonths,
-          {
-            months: numMonths,
-            grantedAt: now.toISOString(),
-            grantedBy: req.authUser?.userId || 'admin',
-            previousPeriodEnd: sub.currentPeriodEnd || null,
-            newPeriodEnd: newPeriodEnd.toISOString(),
-          },
-        ],
-      },
+      subscription: appendSubscriptionHistory(
+        {
+          ...sub,
+          status: 'subscription_active',
+          currentPeriodStart: sub.currentPeriodStart || now.toISOString(),
+          currentPeriodEnd: newPeriodEnd.toISOString(),
+          gracePeriodEndsAt: newGracePeriodEnd.toISOString(),
+          activationDate: sub.activationDate || now.toISOString(),
+          cancelAtPeriodEnd: false,
+          freeMonthsHistory: [
+            ...previousFreeMonths,
+            {
+              months: numMonths,
+              grantedAt: now.toISOString(),
+              grantedBy: req.authUser?.userId || 'admin',
+              previousPeriodEnd: sub.currentPeriodEnd || null,
+              newPeriodEnd: newPeriodEnd.toISOString(),
+            },
+          ],
+        },
+        {
+          at: now.toISOString(),
+          action: 'grant_free_months',
+          by: req.authUser?.userId || 'admin',
+          note: `${numMonths} mes(es) gratis concedido(s) por admin`,
+          meta: { months: numMonths },
+        },
+      ),
       updatedAt: now.toISOString(),
     });
 
@@ -345,7 +360,7 @@ export async function adminReactivateAccount(req, res) {
     const denied = requireAdmin(req);
     if (denied) return res.status(denied.status).json(denied);
 
-    const { userId, billingExempt = true } = req.body || {};
+    const { userId, billingExempt } = req.body || {};
     if (!userId) {
       return res.status(400).json({ ok: false, error: 'userId es requerido' });
     }
@@ -362,19 +377,38 @@ export async function adminReactivateAccount(req, res) {
     periodEnd.setMonth(periodEnd.getMonth() + 1);
     const graceEnd = new Date(periodEnd);
     graceEnd.setDate(graceEnd.getDate() + 7);
+    // Por defecto: no exento (transferencia/pago real). Exento solo si el admin lo pide.
+    const resolvedBillingExempt =
+      billingExempt === undefined || billingExempt === null
+        ? Boolean(sub.billingExempt)
+        : Boolean(billingExempt);
 
     const updatedAccount = await saveAccount(req, {
       ...account,
-      subscription: applySuperAdminSubscriptionActivation(
+      subscription: appendSubscriptionHistory(
+        applySuperAdminSubscriptionActivation(
+          {
+            ...sub,
+            status: 'subscription_active',
+            billingExempt: resolvedBillingExempt,
+            currentPeriodStart: now.toISOString(),
+            currentPeriodEnd: periodEnd.toISOString(),
+            gracePeriodEndsAt: graceEnd.toISOString(),
+            cancelAtPeriodEnd: false,
+            lastPaymentAt:
+              previousStatus === 'payment_sent' || previousStatus === 'pending_payment'
+                ? now.toISOString()
+                : sub.lastPaymentAt || now.toISOString(),
+            activationDate: now.toISOString(),
+          },
+          sub,
+        ),
         {
-          ...sub,
-          status: 'subscription_active',
-          billingExempt: Boolean(billingExempt),
-          currentPeriodEnd: periodEnd.toISOString(),
-          gracePeriodEndsAt: graceEnd.toISOString(),
-          cancelAtPeriodEnd: false,
+          at: now.toISOString(),
+          action: previousStatus === 'payment_sent' ? 'payment_validated' : 'license_activated',
+          by: req.authUser?.userId || 'admin',
+          note: 'Suscripción activada por administrador',
         },
-        sub,
       ),
       updatedAt: now.toISOString(),
     });
@@ -388,12 +422,12 @@ export async function adminReactivateAccount(req, res) {
       actorName: req.authUser?.fullName || 'Admin',
       changes: {
         status: { before: previousStatus, after: 'subscription_active' },
-        billingExempt: { before: Boolean(sub.billingExempt), after: Boolean(billingExempt) },
+        billingExempt: { before: Boolean(sub.billingExempt), after: resolvedBillingExempt },
       },
     });
 
     logger.info(
-      { userId, billingExempt: Boolean(billingExempt) },
+      { userId, billingExempt: resolvedBillingExempt },
       `[Admin] Cuenta reactivada: ${account.fullName || account.email}`,
     );
 

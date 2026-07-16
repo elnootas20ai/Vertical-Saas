@@ -97,19 +97,21 @@ export function buildSubscriptionFromOnboarding(onboardingData, existingSubscrip
   const billingMode = resolveBillingMode(onboardingData, overrides);
   const now = new Date().toISOString();
 
+  // No activar trial automáticamente: preservar estado (p. ej. pending_payment / payment_sent).
+  const status = prev.status || 'pending_payment';
+
   return {
     ...prev,
-    status: prev.status || 'trial_active',
+    status,
     selectedPlanId: tier,
     planName: PLAN_TIER_LABELS[tier] || 'Básico',
     billingMode,
     extraPointOfSaleSlots: extras.extraPointOfSaleSlots,
     extraBusinessSlots: extras.extraBusinessSlots,
     extraCommercialBrandSlots: extras.extraCommercialBrandSlots,
-    trialEndsAt: resolveTrialEndsAt(onboardingData, prev) || prev.trialEndsAt,
-    currentPeriodStart: prev.currentPeriodStart || now,
+    trialEndsAt: resolveTrialEndsAt(onboardingData, prev) || prev.trialEndsAt || '',
+    currentPeriodStart: prev.currentPeriodStart || '',
     onboardingProvisionedAt: now,
-    /** Hasta enchufar MONEI: cupos según onboarding, sin cargo real. */
-    paymentProvider: 'onboarding_stub',
+    paymentProvider: prev.paymentProvider || 'bank_transfer',
   };
 }

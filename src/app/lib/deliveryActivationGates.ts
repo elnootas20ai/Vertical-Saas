@@ -37,6 +37,17 @@ export function getDeliveryStepLock(
     return { locked: false, unlockRoute: DELIVERY_MARCA_SETTINGS_PATH };
   }
 
+  if (stepId === 'restaurant_sala') {
+    if (!pdvReady) {
+      return {
+        locked: true,
+        lockedReason: 'Primero crea tu bar/restaurante y el PDV en Ajustes → Tienda.',
+        unlockRoute: DELIVERY_TIENDA_SETTINGS_PATH,
+      };
+    }
+    return { locked: false, unlockRoute: '/saas/sala' };
+  }
+
   if (!pdvReady) {
     const reason = flags.hasActiveRetailStore
       ? 'Falta el PDV de caja. Edita la tienda en Ajustes → Tienda o créala de nuevo con dirección válida.'

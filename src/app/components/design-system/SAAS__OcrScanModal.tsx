@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { X, ScanLine, Upload, FileText, CheckCircle, Loader2, AlertCircle, Eye, Receipt, ArrowRight, AlertTriangle, Copy, RotateCcw, Send, Shield, Zap, Target, PackagePlus, Factory } from 'lucide-react';
+import { X, ScanLine, Upload, FileText, CheckCircle, Loader2, AlertCircle, Eye, Receipt, ArrowRight, AlertTriangle, Copy, RotateCcw, Send, Shield, Zap, Target, PackagePlus, Factory, Camera, Images } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useCamera } from '../../hooks/useCamera';
 import {
@@ -9,6 +9,7 @@ import {
   type OcrRouteResult,
 } from '../../lib/ocrApi';
 import { createSupplierRequest } from '../../lib/deliveryApi';
+import { openNativeAppSettings } from '../../lib/vertialPrint/localNetworkPermission';
 import { toast } from 'sonner';
 
 const MAX_IMAGE_DIMENSION = 2000;
@@ -118,37 +119,50 @@ function WarningsList({ warnings }: { warnings: Array<{ code: string; field: str
  * en negro / congelarse al pasarlas a base64.
  * Devuelve { base64, mime } listos para enviar al OCR.
  */
+async function downscaleImageSrcToBase64(src: string): Promise<{ base64: string; mime: string }> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error('No se pudo decodificar la imagen'));
+    el.src = src;
+  });
+
+  const maxSide = Math.max(img.naturalWidth, img.naturalHeight);
+  const scale = maxSide > MAX_IMAGE_DIMENSION ? MAX_IMAGE_DIMENSION / maxSide : 1;
+  const w = Math.max(1, Math.round(img.naturalWidth * scale));
+  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('No se pudo crear canvas');
+  // Fondo blanco por si la imagen es PNG con transparencia (OpenAI Vision prefiere JPEG).
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, 0, 0, w, h);
+
+  const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+  const base64 = dataUrl.split(',')[1] || '';
+  return { base64, mime: 'image/jpeg' };
+}
+
 async function downscaleImageToBase64(file: File): Promise<{ base64: string; mime: string }> {
   const url = URL.createObjectURL(file);
   try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = () => reject(new Error('No se pudo decodificar la imagen'));
-      el.src = url;
-    });
-
-    const maxSide = Math.max(img.naturalWidth, img.naturalHeight);
-    const scale = maxSide > MAX_IMAGE_DIMENSION ? MAX_IMAGE_DIMENSION / maxSide : 1;
-    const w = Math.max(1, Math.round(img.naturalWidth * scale));
-    const h = Math.max(1, Math.round(img.naturalHeight * scale));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('No se pudo crear canvas');
-    // Fondo blanco por si la imagen es PNG con transparencia (OpenAI Vision prefiere JPEG).
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-
-    const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-    const base64 = dataUrl.split(',')[1] || '';
-    return { base64, mime: 'image/jpeg' };
+    return await downscaleImageSrcToBase64(url);
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, raw] = dataUrl.split(',');
+  const mime = /data:([^;]+);/.exec(header || '')?.[1] || 'image/jpeg';
+  const binary = atob(raw || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 /**
@@ -187,7 +201,7 @@ async function pdfFileToPngBase64(file: File): Promise<string> {
 }
 
 export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId, targetModule, context, vehicles, clients, defaultOcrMode, autoOpenCamera }: Props) {
-  const { takePhoto, isNative } = useCamera();
+  const { takePhotoDetailed, isNative } = useCamera();
   const [ocrMode, setOcrMode] = useState<'financial' | 'vehicle'>(defaultOcrMode || 'financial');
   const [step, setStep] = useState<Step>('upload');
   const [file, setFile] = useState<File | null>(null);
@@ -321,27 +335,73 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
     }
   }, [setPreview]);
 
+  const ingestNativePhoto = useCallback(
+    async (source: 'camera' | 'photos') => {
+      setError(null);
+      setIsPreparing(true);
+      try {
+        const result = await takePhotoDetailed({
+          source,
+          // Calidad alta suficiente para OCR sin saturar memoria en iOS.
+          quality: 90,
+          allowEditing: false,
+        });
+
+        if (!result.ok) {
+          if (result.reason !== 'cancelled') {
+            setError(result.message);
+            toast.error(result.message);
+            if (result.reason === 'denied') {
+              toast.message('Abre Ajustes de Vertial para activar Cámara y Fotos', {
+                action: {
+                  label: 'Ajustes',
+                  onClick: () => {
+                    void openNativeAppSettings();
+                  },
+                },
+              });
+            }
+          }
+          return;
+        }
+
+        // Downscale directo desde dataUrl (evita File/fetch frágil en WebView).
+        const { base64, mime } = await downscaleImageSrcToBase64(result.photo.dataUrl);
+        base64Ref.current = base64;
+        mimeRef.current = mime;
+        const blob = dataUrlToBlob(`data:${mime};base64,${base64}`);
+        const f = new File([blob], `ocr-${source}-${Date.now()}.jpg`, { type: mime });
+        setFile(f);
+        setPreview(URL.createObjectURL(blob));
+      } catch (err: unknown) {
+        const msg = (err as Error).message || 'No se pudo procesar la foto';
+        setError(msg);
+        toast.error(msg);
+      } finally {
+        setIsPreparing(false);
+      }
+    },
+    [takePhotoDetailed, setPreview],
+  );
+
   /**
-   * Abre la cámara. En app nativa (Capacitor) usa el plugin oficial — más
-   * fiable y sin el bug del WebView en negro. En web cae al input file.
+   * Cámara nativa (Capacitor) o input file en web.
    */
   const handleOpenCamera = useCallback(async () => {
     if (isNative) {
-      const photo = await takePhoto({ source: 'camera', quality: 85 });
-      if (!photo?.dataUrl) return;
-      // Convertir la dataUrl a File para pasar por el mismo pipeline (downscaling, etc.).
-      try {
-        const fetched = await fetch(photo.dataUrl);
-        const blob = await fetched.blob();
-        const f = new File([blob], `camera-${Date.now()}.${photo.format || 'jpg'}`, { type: blob.type || 'image/jpeg' });
-        await handleFileSelect(f);
-      } catch {
-        setError('No se pudo procesar la foto');
-      }
+      await ingestNativePhoto('camera');
       return;
     }
     cameraInputRef.current?.click();
-  }, [isNative, takePhoto, handleFileSelect]);
+  }, [isNative, ingestNativePhoto]);
+
+  const handleOpenGallery = useCallback(async () => {
+    if (isNative) {
+      await ingestNativePhoto('photos');
+      return;
+    }
+    fileInputRef.current?.click();
+  }, [isNative, ingestNativePhoto]);
 
   // Auto-open camera input on open when requested.
   // (Only when no file selected yet.)
@@ -397,7 +457,8 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
         sourceMimeType: mimeRef.current,
         sourceSize: file.size,
         sourceHash: scanRes.meta.sourceHash,
-        sourceImageBase64: base64Ref.current.substring(0, 500),
+        // No enviamos la imagen completa de nuevo (ya se escaneó); evita payloads enormes.
+        sourceImageBase64: undefined,
         processingTimeMs: scanRes.meta.processingTimeMs,
         tokensUsed: scanRes.meta.tokensUsed,
         model: scanRes.meta.model,
@@ -675,13 +736,27 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
                     <div className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Arrastra cualquier documento</div>
                     <div className="text-sm text-gray-500">Facturas, tickets, contratos, nominas, albaranes, certificados...</div>
                     <div className="text-xs text-gray-400 mt-2">JPG, PNG, WebP o PDF &bull; La IA lo clasificara automaticamente</div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); void handleOpenCamera(); }}
-                      className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
-                    >
-                      <ScanLine className="w-4 h-4" /> Usar cámara
-                    </button>
+                    <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); void handleOpenCamera(); }}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors"
+                      >
+                        <Camera className="w-4 h-4" /> Usar cámara
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); void handleOpenGallery(); }}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-100 text-sm font-semibold transition-colors hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        <Images className="w-4 h-4" /> Galería
+                      </button>
+                    </div>
+                    {error && step === 'upload' && (
+                      <p className="mt-3 text-sm text-red-600 dark:text-red-400 flex items-center justify-center gap-1.5">
+                        <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

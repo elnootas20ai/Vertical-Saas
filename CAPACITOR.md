@@ -164,3 +164,5 @@ Resumen de cumplimiento ya aplicado en código:
 | Privacy manifest | `PrivacyInfo.xcprivacy` |
 | Export encryption | `ITSAppUsesNonExemptEncryption = false` |
 | API en app nativa | `VITE_NATIVE_API_ORIGIN` + CORS Capacitor |
+| Push nativo | `@capacitor/push-notifications` + `aps-environment` |
+| Abrir Ajustes (Red local) | `@capacitor/app` → `App.openUrl('app-settings:')` |

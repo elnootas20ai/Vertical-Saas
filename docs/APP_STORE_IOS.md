@@ -30,13 +30,21 @@ Declarar según uso real:
 
 ### Info.plist
 - Textos de privacidad (cámara, fotos, ubicación, red local)
-- `NSBonjourServices` para impresoras térmicas LAN
+- `NSBonjourServices` para impresoras térmicas LAN (`_pdl-datastream`, `_printer`, `_epos`, `_jetdirect`, `_ipp`)
+- `UIBackgroundModes` → `remote-notification` (push)
 - `ITSAppUsesNonExemptEncryption = false`
 - Sin `armv7` (solo dispositivos arm64 actuales)
 - iOS mínimo **15.0**
 
+### Capacidades / entitlements
+- **Sign in with Apple** + **Push** (`aps-environment` = `production` para TestFlight / App Store)
+- En developer.apple.com el App ID `com.vertial.app` debe tener **Push Notifications** y **Sign In with Apple**; regenerar el perfil si acabas de activar Push
+
+### Plugins nativos
+Tras `npm run cap:sync`, `packageClassList` debe incluir Push, Apple Sign In, App, Camera, Splash, StatusBar y ESC/POS. En Mac: `cd ios/App && pod install`.
+
 ### Privacidad Apple
-- `ios/App/App/PrivacyInfo.xcprivacy` incluido en el target Xcode
+- `ios/App/App/PrivacyInfo.xcprivacy` (email, nombre, user ID, device ID/APNs, fotos, ubicación)
 
 ### Guideline 4.8 — Login
 - **Google oculto en app iOS**; **Sign in with Apple** en login y registro (`@capacitor-community/apple-sign-in`)
@@ -69,11 +77,29 @@ npm run cap:ios
 
 Antes del archive, verifica en dispositivo real:
 
-1. Login email/contraseña
-2. Navegación TPV / módulos principales
-3. Cámara (si usáis esa función)
-4. Ajustes → Seguridad → enlaces legales abren en Safari
-5. Eliminar cuenta (cuenta de prueba)
+1. Login email/contraseña **y** Sign in with Apple
+2. Al iniciar sesión, iOS pide permiso de **notificaciones** → aceptar; enviar un push de prueba
+3. TPV → configurar impresora: modal de **red local** → Continuar → popup iOS → permitir; botón «Abrir Ajustes» abre la ficha de Vertial
+4. Cámara (si usáis esa función)
+5. Fichaje / ubicación (si aplica): permiso de ubicación
+6. Ajustes → Seguridad → enlaces legales abren en Safari
+7. Eliminar cuenta (cuenta de prueba)
+
+### Push (TestFlight → producción)
+
+| Pieza | Dónde |
+|-------|--------|
+| Entitlement `aps-environment` = production | `ios/App/App/App.entitlements` |
+| AppDelegate token hooks | `AppDelegate.swift` (ya están) |
+| JS registro | `useNativePushNotifications` + backend `/api/push/native-register` |
+| APNs key / cert en servidor | variables `APNS_*` (mismo key sirve sandbox+prod; el entorno lo marca el token) |
+| Capability en Xcode | Signing & Capabilities → Push Notifications (si no aparece, añádela una vez) |
+
+**Importante:** builds de debug con perfil *development* usan tokens sandbox; TestFlight/App Store usan producción. El entitlement del repo está en `production` para TestFlight.
+
+En el **servidor** (.env): `APNS_PRODUCTION=true` para TestFlight, más `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_KEY_PATH` o `APNS_KEY_CONTENT`. El payload APNs usa `pushType=alert` y `sound=default` (banner + sonido).
+
+Push al iPhone del **CEO**: solo críticas + dinero/caja (descuadre, caja sin cerrar, impagos…). Lista en `services/pushAlertPolicy.js` (`CEO_MOBILE_PUSH_RULE_IDS`). Suenan también en horario silencioso.
 
 ## Notas para el revisor (Review Notes)
 
@@ -92,7 +118,7 @@ Si **Compilar IPA** falla con `Failed to archive` / exit code **65**, casi siemp
 5. Comprueba que junto al perfil aparece **certificado en verde** (checkmark).
 6. Vuelve a lanzar el build en **`iOS Release (TestFlight)`**.
 
-Comprueba en [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list) que el App ID `com.vertial.app` tiene **Sign In with Apple** activo.
+Comprueba en [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list) que el App ID `com.vertial.app` tiene **Sign In with Apple** y **Push Notifications** activos.
 
 ### Error «Cannot save Signing Certificates without certificate private key»
 
@@ -100,6 +126,5 @@ Ese paso falló porque Codemagic no tiene la variable **`CERTIFICATE_PRIVATE_KEY
 
 ## Pendiente a futuro (no bloqueante si se mantiene política actual)
 
-- **Sign in with Apple** — necesario si volvéis a mostrar Google en iOS
 - **IAP StoreKit** — alternativa si queréis vender planes dentro de la app iOS
 - Cookies `SameSite=strict` — la app nativa usa Bearer token en localStorage; revisar refresh de sesión en iOS

@@ -50,13 +50,27 @@ describe('retailScopeRegistry', () => {
     expect(resolveRetailScopeKind('events')).toBe('strict');
   });
 
-  it('restaurante no hereda tiendas delivery mal etiquetadas', () => {
+  it('restaurante respeta local propio etiquetado aunque el nombre no coincida', () => {
     const badlona = wc({
       _id: 'store-badlona',
       name: 'badlona',
       businessId: 'biz-bodegeta',
     });
     const filtered = filterRetailWorkCentersForScope([badlona], {
+      business: businesses[0],
+      businesses,
+    });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]._id).toBe('store-badlona');
+  });
+
+  it('restaurante no hereda tienda etiquetada en delivery', () => {
+    const stolen = wc({
+      _id: 'store-modomio',
+      name: 'modomio central',
+      businessId: 'biz-modomio',
+    });
+    const filtered = filterRetailWorkCentersForScope([stolen], {
       business: businesses[0],
       businesses,
     });

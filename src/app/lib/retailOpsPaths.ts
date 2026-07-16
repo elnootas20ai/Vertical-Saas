@@ -3,8 +3,8 @@ import { isRestaurantBusinessType } from './deliveryOpsTypes';
 /** Centro operativo delivery (pedidos, cocina, reparto). */
 export const DELIVERY_OPS_HOME_PATH = '/saas/delivery-ops';
 
-/** Hub operativo bar/restaurante (caja + sala). */
-export const RESTAURANT_OPS_HOME_PATH = '/saas/caja';
+/** Home al abrir empresa bar/restaurante (Sala; el remount limpia mapa legado una vez). */
+export const RESTAURANT_OPS_HOME_PATH = '/saas/sala';
 
 /** TPV gerente delivery. */
 export const DELIVERY_CEO_TPV_PATH = '/saas/vertical/delivery/tpv';
@@ -35,14 +35,17 @@ export function resolveTpvCeoExitPath(
   pathname: string,
   businessType?: string | null,
 ): string {
-  if (pathname.startsWith('/saas/caja')) return RESTAURANT_CAJA_PATH;
+  // Restaurant: volver a Sala (home ops), no a la pantalla Caja.
+  if (pathname.startsWith('/saas/caja')) return RESTAURANT_OPS_HOME_PATH;
+  if (pathname.startsWith('/saas/vertical/delivery/caja')) return DELIVERY_CAJA_PATH;
   return resolveRetailOpsHomePath(businessType);
 }
 
-/** Recarga agresiva de tiendas en pantallas operativas retail y ajustes de tickets. */
+/** Recarga agresiva de tiendas en pantallas operativas retail y ajustes. */
 export function shouldForceRetailStoreReload(pathname: string): boolean {
   return (
     pathname.includes('/delivery-ops')
+    || pathname.startsWith('/saas/vertical/delivery/')
     || pathname.startsWith('/saas/caja')
     || pathname.startsWith('/saas/sala')
     || pathname.startsWith('/saas/cocina')
@@ -52,7 +55,7 @@ export function shouldForceRetailStoreReload(pathname: string): boolean {
   );
 }
 
-/** Rutas que solo aplican a delivery puro (bloqueadas para restaurante). */
+/** Rutas que solo aplican a delivery puro. */
 export function isDeliveryOnlyRoute(route: string): boolean {
   const r = String(route || '');
   return (

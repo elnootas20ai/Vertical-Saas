@@ -1,31 +1,11 @@
 import type { AlertRecord } from './alertCenterApi';
 
-/**
- * Los motores de alertas emiten rutas del centro operativo delivery.
- * En bar/restaurante esas rutas están bloqueadas (RequireDeliveryVertical → /saas/sala),
- * así que se traducen a sus equivalentes de restaurante antes de navegar.
- */
-const RESTAURANT_ROUTE_MAP: [prefix: string, target: string][] = [
-  ['/saas/delivery-kitchen', '/saas/cocina'],
-  ['/saas/delivery-ops', '/saas/sala'],
-  ['/saas/delivery-reparto', '/saas/sala'],
-  ['/saas/delivery-montaje', '/saas/sala'],
-  ['/saas/vertical/delivery/caja', '/saas/caja'],
-];
-
+/** Rutas de alerta: sin remap a bar/restaurante (retirado del producto). */
 export function resolveAlertRouteForBusiness(
   route: string | undefined | null,
-  businessType?: string | null,
+  _businessType?: string | null,
 ): string {
-  const raw = String(route || '').trim();
-  if (!raw) return '';
-  if (String(businessType || '').trim() !== 'restaurant') return raw;
-  for (const [prefix, target] of RESTAURANT_ROUTE_MAP) {
-    if (raw === prefix || raw.startsWith(`${prefix}?`) || raw.startsWith(`${prefix}/`)) {
-      return target;
-    }
-  }
-  return raw;
+  return String(route || '').trim();
 }
 
 /** Devuelve la alerta con la ruta adaptada al vertical del negocio activo. */
@@ -36,7 +16,6 @@ export function mapAlertForBusinessVertical(alert: AlertRecord, businessType?: s
 }
 
 export function mapAlertsForBusinessVertical(alerts: AlertRecord[], businessType?: string | null): AlertRecord[] {
-  if (String(businessType || '').trim() !== 'restaurant') return alerts;
   return alerts.map((alert) => mapAlertForBusinessVertical(alert, businessType));
 }
 
@@ -47,7 +26,6 @@ export function getAlertResolveLabel(alert: AlertRecord): string {
 
   if (route.includes('caja') || cat.includes('cash') || cat.includes('register')) return 'Ir a caja';
   if (route.includes('cocina') || route.includes('delivery-kitchen') || cat.includes('kitchen')) return 'Ir a cocina';
-  if (route.includes('/sala') || cat.startsWith('sala')) return 'Ir a sala';
   if (route.includes('delivery-reparto') || cat.includes('reparto')) return 'Ir a reparto';
   if (route.includes('delivery-ops') || route.includes('delivery')) return 'Ir a pedidos';
   if (route.includes('finance') || alert.source === 'finanzas') return 'Ir a finanzas';

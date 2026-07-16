@@ -1,9 +1,10 @@
-/** Tipos que comparten el motor operativo de delivery (TPV, pedidos, cocina, caja). */
-export const DELIVERY_OPS_BUSINESS_TYPES = ['delivery', 'restaurant'] as const;
+/** Solo Delivery (bar/restaurante es vertical aparte). */
+export const DELIVERY_OPS_BUSINESS_TYPES = ['delivery'] as const;
 
-/** Verticales con checklist lateral y tour popup de 5 pasos. */
+/** Verticales con checklist lateral y tour popup de alta. */
 export const GUIDED_ACTIVATION_BUSINESS_TYPES = [
   ...DELIVERY_OPS_BUSINESS_TYPES,
+  'restaurant',
   'carDealership',
   'cleaning',
   'gym',
@@ -35,7 +36,7 @@ export function isEventsBusinessType(businessType?: string | null): boolean {
 /** Negocios con tienda / PDV / TPV en sidebar y ajustes. */
 export function isRetailStoreBusinessType(businessType?: string | null): boolean {
   const t = String(businessType || '').trim();
-  return isDeliveryOpsBusinessType(t) || t === 'carDealership';
+  return isDeliveryOpsBusinessType(t) || t === 'restaurant' || t === 'carDealership';
 }
 
 export function getGuidedActivationChecklistTitle(businessType?: string | null): string {
@@ -56,6 +57,7 @@ export function getGuidedActivationFirstStepId(businessType?: string | null): st
   if (t === 'gym') return 'gym_company';
   if (t === 'workshop') return 'workshop_company';
   if (t === 'events') return 'events_company';
+  if (t === 'restaurant') return 'retail_store';
   if (isDeliveryOpsBusinessType(t)) return 'delivery_store';
   return undefined;
 }

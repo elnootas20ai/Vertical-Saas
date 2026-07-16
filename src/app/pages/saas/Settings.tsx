@@ -414,6 +414,8 @@ function TabBilling() {
   const wantsDifferentPlanThanSubscription = selectedPlanId !== activeSubscriptionPlanId;
 
   const statusConfig: Record<string, { label: string; dot: string; badgeBg: string; badgeText: string }> = {
+    pending_payment: { label: 'Pendiente de pago', dot: 'bg-amber-500', badgeBg: 'bg-amber-50', badgeText: 'text-amber-800' },
+    payment_sent: { label: 'Pago avisado', dot: 'bg-violet-500', badgeBg: 'bg-violet-50', badgeText: 'text-violet-800' },
     trial_active: { label: 'Periodo de prueba', dot: 'bg-blue-500', badgeBg: 'bg-blue-50', badgeText: 'text-blue-700' },
     trial_expiring: { label: 'Prueba por expirar', dot: 'bg-amber-500', badgeBg: 'bg-amber-50', badgeText: 'text-amber-700' },
     trial_expired: { label: 'Prueba expirada', dot: 'bg-red-500', badgeBg: 'bg-red-50', badgeText: 'text-red-700' },
@@ -1461,7 +1463,7 @@ const ALL_BUSINESS_TYPES: { value: string; label: string; description: string; i
   { value: 'carDealership', label: 'Compraventa de coches', description: 'Venta y compra de vehículos',   icon: <Car className="w-6 h-6" />,            keywords: 'coche vehículo concesionario automóvil motor' },
   { value: 'workshop',      label: 'Taller',                description: 'Taller mecánico',               icon: <Wrench className="w-6 h-6" />,         keywords: 'mecánico reparación motor vehículo' },
   { value: 'delivery',      label: 'Delivery',              description: 'Reparto y pedidos a domicilio', icon: <Truck className="w-6 h-6" />,          keywords: 'envío transporte reparto logística comida domicilio' },
-  { value: 'restaurant',    label: 'Bar/restaurante',       description: 'TPV, comandas, cocina y sala', icon: <UtensilsCrossed className="w-6 h-6" />, keywords: 'bar restaurante tapas carta cocina sala terraza hostelería' },
+  { value: 'restaurant',    label: 'Bar/restaurante',       description: 'Sala, TPV, cocina y caja',       icon: <UtensilsCrossed className="w-6 h-6" />, keywords: 'bar restaurante tapas carta cocina sala terraza hostelería' },
   { value: 'cleaning',      label: 'Limpieza',              description: 'Empresa de limpieza',           icon: <SprayCan className="w-6 h-6" />,       keywords: 'limpiar hogar oficina mantenimiento' },
   { value: 'hairSalon',     label: 'Peluquería',            description: 'Salón de belleza',               icon: <Scissors className="w-6 h-6" />,       keywords: 'pelo corte color estilista barbería belleza estética' },
   { value: 'gym',           label: 'Gimnasio',              description: 'Gimnasio y fitness',             icon: <Dumbbell className="w-6 h-6" />,       keywords: 'deporte fitness entrenamiento crossfit yoga' },
@@ -3953,7 +3955,7 @@ export function Settings() {
   useEffect(() => {
     if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (activeTab === 'billing') return;
-    navigate('/saas/settings/facturacion', { replace: true });
+    navigate('/saas/subscription', { replace: true });
   }, [subscription, subscription.status, activeTab, navigate]);
 
   const teamStats = useMemo(() => {

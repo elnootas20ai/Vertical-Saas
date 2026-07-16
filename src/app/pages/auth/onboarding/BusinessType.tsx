@@ -24,7 +24,7 @@ const BUSINESS_TYPES = [
   { id: 'carDealership', icon: Car,           title: 'Compraventa',          description: 'Coches' },
   { id: 'workshop',      icon: Wrench,        title: 'Taller',                description: 'Mecánico' },
   { id: 'delivery',      icon: Truck,           title: 'Delivery',              description: 'Reparto y pedidos a domicilio' },
-  { id: 'restaurant',    icon: UtensilsCrossed, title: 'Bar/restaurante',       description: 'TPV, comandas, cocina y sala' },
+  { id: 'restaurant',    icon: UtensilsCrossed, title: 'Bar/restaurante',     description: 'Sala, TPV, cocina y caja' },
   { id: 'cleaning',      icon: SprayCan,      title: 'Limpieza',             description: 'Limpieza' },
   { id: 'hairSalon',     icon: Scissors,      title: 'Peluquería',           description: 'Salón' },
   { id: 'gym',           icon: Dumbbell,      title: 'Gimnasio',             description: 'Fitness' },

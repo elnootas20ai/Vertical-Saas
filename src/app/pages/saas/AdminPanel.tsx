@@ -89,6 +89,7 @@ import {
 } from '../../lib/onboardingCompanyVerification';
 import { AdminCompanyVerificationPanel } from '../../components/saas/admin/AdminCompanyVerificationPanel';
 import { AdminClientUsagePanel } from '../../components/saas/admin/AdminClientUsagePanel';
+import { AdminWebAnalyticsTab } from '../../components/saas/admin/AdminWebAnalyticsTab';
 import {
   computeClientHealthFromLogin,
   healthBadgeClasses,
@@ -147,6 +148,7 @@ async function apiFetch(path: string, init?: RequestInit) {
 
 const TABS = [
   { id: 'clients', label: 'Clientes SaaS', icon: Users },
+  { id: 'web', label: 'Web / Landing', icon: MousePointerClick },
   { id: 'payments', label: 'Pagos MONEI', icon: CreditCard },
   { id: 'plans', label: 'Planes y precios', icon: DollarSign },
   { id: 'affiliate_requests', label: 'Solicitudes afiliados', icon: HandshakeIcon },
@@ -178,6 +180,8 @@ function initialPlanFromSubscription(sub?: AuthUser['subscription'] | null): { i
 }
 
 const SUBSCRIPTION_STATUS_OPTIONS = [
+  { id: 'pending_payment', label: 'Pendiente de pago', color: 'text-amber-800 bg-amber-50' },
+  { id: 'payment_sent', label: 'Pago avisado', color: 'text-violet-800 bg-violet-50' },
   { id: 'trial_active', label: 'Trial activo', color: 'text-blue-700 bg-blue-50' },
   { id: 'trial_expiring', label: 'Trial expirando', color: 'text-amber-700 bg-amber-50' },
   { id: 'trial_expired', label: 'Trial expirado', color: 'text-red-700 bg-red-50' },
@@ -291,7 +295,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [planName, setPlanName] = useState(initialPlan.name);
   const [selectedPlanId, setSelectedPlanId] = useState(initialPlan.id);
   const [subscriptionStatus, setSubscriptionStatus] = useState(
-    account.subscription?.status || 'trial_active',
+    account.subscription?.status || 'pending_payment',
   );
   const [extraPointOfSaleSlots, setExtraPointOfSaleSlots] = useState(
     String(account.subscription?.extraPointOfSaleSlots ?? 0),
@@ -337,12 +341,15 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     try {
       const res = await apiFetch('/api/admin/monei/reactivate-account', {
         method: 'POST',
-        body: JSON.stringify({ userId: account.user_id, billingExempt }),
+        body: JSON.stringify({
+          userId: account.user_id,
+          // Pago por transferencia: no marcar exento salvo que el admin lo pida explícitamente.
+          billingExempt,
+        }),
       });
       const data = await res.json();
       if (data.ok) {
         setSubscriptionStatus('subscription_active');
-        setBillingExempt(true);
         setReactivateResult({ ok: true });
         const updated = await updateUser(account.user_id, {});
         if (updated.user) onSaved(updated.user);
@@ -411,9 +418,14 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
     setSaveError('');
     setSaveSuccess(false);
     const activating = subscriptionStatus === 'subscription_active' || subscriptionStatus === 'trial_active';
-    const wasBlocked = ['suspended', 'grace_period', 'payment_failed', 'trial_expired'].includes(
-      account.subscription?.status || '',
-    );
+    const wasBlocked = [
+      'pending_payment',
+      'payment_sent',
+      'suspended',
+      'grace_period',
+      'payment_failed',
+      'trial_expired',
+    ].includes(account.subscription?.status || '');
     const effectiveBillingExempt = billingExempt || (activating && wasBlocked);
     const result = await updateUser(account.user_id, {
       companyName,
@@ -908,12 +920,20 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
           {(accountNeedsAccessRestore || subscriptionStatus === 'suspended') && (
             <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 space-y-3">
               <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 uppercase tracking-wider">
-                Restaurar acceso al SaaS
+                {(subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent')
+                  ? 'Validar transferencia y activar'
+                  : 'Restaurar acceso al SaaS'}
               </p>
               <p className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">
-                Para cuentas como Pauroyo / Modomio sin cobro en pasarela: activa suscripción, marca «Exento de suspensión» arriba y
-                guarda. Si MONEI suspende sola, usa también «Quitar enlace MONEI».
+                {(subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent')
+                  ? 'El cliente avisó del pago. Si ves el ingreso en el banco, activa la suscripción (1 mes). También puedes usar «1 mes gratis» más abajo sin marcar pago.'
+                  : 'Activa la suscripción para dar acceso. Usa «Exento de suspensión» solo si no quieres que el cron/pasarela vuelva a cortar. Para 1 mes de cortesía usa «1 mes gratis».'}
               </p>
+              {(account.subscription as { paymentConcept?: string } | undefined)?.paymentConcept ? (
+                <p className="text-xs font-mono text-emerald-900 dark:text-emerald-100 bg-white/60 dark:bg-black/20 rounded-lg px-3 py-2">
+                  Concepto: {(account.subscription as { paymentConcept?: string }).paymentConcept}
+                </p>
+              ) : null}
               <button
                 type="button"
                 onClick={() => void handleReactivateAccount()}
@@ -921,7 +941,11 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
               >
                 <CheckCircle className={`w-4 h-4 ${reactivating ? 'animate-spin' : ''}`} />
-                {reactivating ? 'Reactivando…' : 'Reactivar y marcar exento'}
+                {reactivating
+                  ? 'Activando…'
+                  : subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent'
+                    ? 'Activar suscripción (pago validado)'
+                    : 'Activar suscripción'}
               </button>
               {(account.subscription as { moneiSubscriptionId?: string } | undefined)?.moneiSubscriptionId ? (
                 <button
@@ -3663,6 +3687,7 @@ export function AdminPanel() {
             accountSaveCallbackRef={accountSaveCallbackRef}
           />
         )}
+        {activeTab === 'web' && <AdminWebAnalyticsTab />}
         {activeTab === 'payments' && <MoneiPaymentsTab />}
         {activeTab === 'plans' && <PlansTab userId={user?.id || user?.user_id || ''} />}
         {activeTab === 'affiliate_requests' && (

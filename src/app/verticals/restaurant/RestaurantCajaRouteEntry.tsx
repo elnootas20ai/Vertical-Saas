@@ -1,13 +1,9 @@
-import { useBusinessOptional } from '../../context/BusinessContext';
-import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
-import { CajaPage } from '../../pages/saas/CajaPage';
 import { RestaurantCajaPage } from './RestaurantCajaPage';
 
-/** Bar/restaurante usa caja de sala; delivery mantiene su caja original. */
+/**
+ * Caja bar/restaurante: resumen por tienda + turnos desplegables
+ * (mismo patrón que Delivery, datos de sala/TPV restaurant).
+ */
 export function RestaurantCajaRouteEntry() {
-  const businessCtx = useBusinessOptional();
-  if (isRestaurantBusinessType(businessCtx?.currentBusiness?.businessType)) {
-    return <RestaurantCajaPage />;
-  }
-  return <CajaPage />;
+  return <RestaurantCajaPage />;
 }

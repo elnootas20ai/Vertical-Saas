@@ -3782,7 +3782,7 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
   const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
 
   const businessType = String(business.businessType || '').trim();
-  const tpvVertical = businessType === 'restaurant' ? 'restaurant' : 'delivery';
+  const tpvVertical = 'delivery';
 
   return res.json({
     ok: true,
@@ -3802,13 +3802,10 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
       businessId: business.business_id,
       dataUserId: pdv.user_id,
       tpvVertical,
-      ...(resolved.salaTerminalId ? { salaTerminalId: resolved.salaTerminalId } : {}),
     },
     accessToken,
     refreshToken,
-    redirectTo: tpvVertical === 'restaurant'
-      ? '/saas/worker/tpv/restaurant'
-      : '/saas/worker/tpv/delivery',
+    redirectTo: '/saas/worker/tpv/delivery',
     needsClockIn: true,
   });
 }

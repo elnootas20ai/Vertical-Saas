@@ -28,7 +28,11 @@ import {
   loadRetailStoresForBusiness,
   persistRetailScopeAfterStoreSave,
 } from '../../../verticals/retailScopeRegistry';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
+import {
+  isDeliveryOpsBusinessType,
+  isRestaurantBusinessType,
+  isRetailStoreBusinessType,
+} from '../../../lib/deliveryOpsTypes';
 import { loadRestaurantStores } from '../../../verticals/restaurant/loadRestaurantStores';
 import {
   getRetailLocationCopy,
@@ -1588,10 +1592,15 @@ export function SalesPointsTab() {
     businesses,
   });
   const isOpsBusiness = isDeliveryOpsBusinessType(currentBusiness?.businessType);
+  const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
   const hasDeliveryPdvs = Object.keys(deliveryPdvsByWorkCenter).length > 0;
   const isDelivery = isDeliveryAccount || hasDeliveryPdvs || isOpsBusiness;
   const isCompraventa = isCompraventaBusinessType(currentBusiness?.businessType);
-  const usesRetailPdvFlow = isDelivery || isCompraventa;
+  /** Delivery, compraventa y bar/restaurante crean local + PDV/caja. */
+  const usesRetailPdvFlow =
+    isRetailStoreBusinessType(currentBusiness?.businessType) ||
+    isDeliveryAccount ||
+    hasDeliveryPdvs;
   const pdvWizardVariant = resolvePdvWizardVariant({
     businessType: currentBusiness?.businessType,
     isDeliveryAccount,
@@ -1776,13 +1785,21 @@ export function SalesPointsTab() {
 
   useEffect(() => {
     if (!businessesFetchSettled) return;
-    if ((isDeliveryAccount || isCompraventa || isOpsBusiness) && !businessScopeId) {
+    if ((isDeliveryAccount || isCompraventa || isOpsBusiness || isRestaurant) && !businessScopeId) {
       setWorkCenters([]);
       setLoading(false);
       return;
     }
     void loadData();
-  }, [businessesFetchSettled, businessScopeId, isDeliveryAccount, isCompraventa, isOpsBusiness, loadData]);
+  }, [
+    businessesFetchSettled,
+    businessScopeId,
+    isDeliveryAccount,
+    isCompraventa,
+    isOpsBusiness,
+    isRestaurant,
+    loadData,
+  ]);
 
   const loadDataRef = useRef(loadData);
   loadDataRef.current = loadData;
@@ -2204,7 +2221,7 @@ export function SalesPointsTab() {
           }
           const [createdWithTablet] = await ensureTabletCodesForPointsOfSale(dataUserId, [createdPdv]);
           createdPdv = createdWithTablet ?? createdPdv;
-          if (isDelivery) {
+          if (isRestaurant || isDelivery) {
             await bootstrapRetailStoreAfterCreate(user, currentBusiness, {
               workCenter: created,
               pointOfSale: createdPdv,
@@ -2217,6 +2234,7 @@ export function SalesPointsTab() {
             });
           }
           selectDeliveryPointOfSale(currentBusiness, dataUserId, createdPdv._id);
+          activeStore.setActiveSalesPoint(createdPdv._id);
           persistRetailScopeAfterStoreSave(businessIdForWc, created, createdPdv, {
             business: currentBusiness,
             businesses,
@@ -2259,11 +2277,12 @@ export function SalesPointsTab() {
             : `"${created.name}" creada`,
         );
         await loadData();
-        if (isDeliveryAccount || isOpsBusiness) void activeStore.refresh();
-        if (isRestaurantBusinessType(currentBusiness?.businessType) && createdPdv) {
+        if (usesRetailPdvFlow) await activeStore.refresh();
+        if (isRestaurant && createdPdv) {
           writeSalaSetupPending(businessIdForWc, createdPdv._id);
-          void activeStore.refresh();
-          navigate('/saas/sala/setup');
+          activeStore.setActiveSalesPoint(createdPdv._id);
+          await activeStore.refresh();
+          navigate(`/saas/sala/setup?pdv=${encodeURIComponent(createdPdv._id)}`);
         }
       }
     } catch (err) {

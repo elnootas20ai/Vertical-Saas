@@ -207,7 +207,8 @@ function SaasContent() {
       isAutoCreating ||
       autoCreateAttempted.current ||
       isUserAccount ||
-      tpvTabletSaasSession
+      tpvTabletSaasSession ||
+      shouldBlockSaasAccess(subscription.status, subscription)
     ) {
       return;
     }
@@ -337,27 +338,33 @@ function SaasContent() {
 
     tpvTabletSaasSession,
 
+    subscription.status,
+
+    subscription.billingExempt,
+
   ]);
 
 
 
   useEffect(() => {
     if (!sessionSyncedWithServer) return;
-    if (user?.subscription?.billingExempt || subscription.billingExempt) return;
-    if (subscription.status !== 'suspended') return;
-    if (isBillingRecoveryPath(location.pathname)) return;
-    navigate('/saas/suspended', { replace: true });
-  }, [subscription.status, subscription.billingExempt, sessionSyncedWithServer, location.pathname, navigate, user?.subscription?.billingExempt]);
-
-  useEffect(() => {
-    if (!sessionSyncedWithServer) return;
     if (isWorkerAccount(user)) return;
     if (user?.subscription?.billingExempt || subscription.billingExempt) return;
-    if (subscription.status === 'suspended') return;
     if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (isBillingRecoveryPath(location.pathname)) return;
-    navigate('/saas/settings/facturacion', { replace: true });
-  }, [sessionSyncedWithServer, subscription.status, subscription.billingExempt, location.pathname, navigate, user]);
+    if (subscription.status === 'suspended') {
+      navigate('/saas/suspended', { replace: true });
+      return;
+    }
+    navigate('/saas/subscription', { replace: true });
+  }, [
+    sessionSyncedWithServer,
+    subscription.status,
+    subscription.billingExempt,
+    location.pathname,
+    navigate,
+    user,
+  ]);
 
   const billingRecoveryMode =
     shouldBlockSaasAccess(subscription.status, subscription) &&
@@ -380,6 +387,7 @@ function SaasContent() {
     if (isInitializing || !isAuthenticated || !user) return;
     if (isUserAccount || isLinkedWorker) return;
     if (tpvTabletSaasSession) return;
+    if (billingRecoveryMode) return;
     if (!businessesFetchSettled || isLoadingBusinesses) return;
     if (businesses.length > 0) return;
     if (isAutoCreating || autoCreateAttempted.current) return;
@@ -391,6 +399,7 @@ function SaasContent() {
     isUserAccount,
     isLinkedWorker,
     tpvTabletSaasSession,
+    billingRecoveryMode,
     businessesFetchSettled,
     isLoadingBusinesses,
     businesses.length,
@@ -429,7 +438,7 @@ function SaasContent() {
   }
 
   if (businesses.length === 0 && !isUserAccount && !isLinkedWorker && businessesFetchSettled) {
-    if (tpvTabletSaasSession) {
+    if (billingRecoveryMode || tpvTabletSaasSession) {
       return (
         <>
           <Outlet />

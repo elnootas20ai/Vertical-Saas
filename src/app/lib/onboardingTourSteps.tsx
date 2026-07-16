@@ -15,6 +15,7 @@ import {
   Dumbbell,
   PartyPopper,
   FileText,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   isGuidedActivationBusinessType,
@@ -201,7 +202,7 @@ const DELIVERY_OPS_TOUR_STEPS_BEFORE_DONE: OnboardingTourStep[] = [
   },
 ];
 
-/** Tour popup paso 1–5 para bar/restaurante (misma ruta ops, distinta terminología). */
+/** Tour popup para bar/restaurante (tienda → sala → marca → carta → empresa → horarios). */
 const RESTAURANT_OPS_TOUR_STEPS_BEFORE_DONE: OnboardingTourStep[] = [
   {
     id: 'delivery_store',
@@ -213,6 +214,17 @@ const RESTAURANT_OPS_TOUR_STEPS_BEFORE_DONE: OnboardingTourStep[] = [
     hint: 'Al crear el bar/restaurante también se prepara un borrador de carta (marca) vinculado al local.',
     route: '/saas/settings/tienda',
     checklist: ['Primer bar/restaurante creado', 'Confirmar que la caja / PDV está activa'],
+  },
+  {
+    id: 'restaurant_sala',
+    icon: <LayoutGrid className="w-7 h-7 text-white" />,
+    iconBg: 'bg-gradient-to-br from-amber-500 to-orange-600',
+    title: 'Mapea tu sala',
+    description:
+      'Indica cuántas zonas tienes (salón, terraza, terraza 2…) y cuántas mesas hay en cada una. Es el primer paso operativo del local.',
+    hint: 'Tras crear el PDV se abre el asistente. También en menú → Sala.',
+    route: '/saas/sala',
+    checklist: ['Zonas definidas', 'Mesas por zona creadas'],
   },
   {
     id: 'delivery_brand',

@@ -11,7 +11,6 @@ import {
   dedupeRetailWorkCentersForBusiness,
   filterPointsOfSaleForWorkCenters,
   filterWorkCentersForBusinessScope,
-  isRetailWorkCenter,
   resolveBusinessScopeId,
   knownBusinessIdsFromList,
   rescueRetailForBusinessWithoutStores,
@@ -59,10 +58,8 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
   );
 
   useLayoutEffect(() => {
+    // Delivery off (otro vertical): no borrar caché local — al volver a Modomio deben reaparecer.
     if (!enabled || !businessId) {
-      stableRowsRef.current = [];
-      stableBusinessIdRef.current = null;
-      setFallbackRows([]);
       return;
     }
     if (stableBusinessIdRef.current !== businessId) {
@@ -108,7 +105,6 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
   useEffect(() => {
     if (!enabled || !dataUserId || !businessId) return;
     if (rowsFromScope.length > 0) return;
-    if (stableRowsRef.current.length > 0) return;
     if (inflightRef.current) return;
 
     let cancelled = false;
@@ -128,7 +124,12 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
         const scopedWcs = filterWorkCentersForBusinessScope(preparedWcs, businessId, {
           accountBusinessCount: accountN,
         });
-        const retail = dedupeRetailWorkCentersForBusiness(scopedWcs).filter(isRetailWorkCenter);
+        // Delivery: incluir retail aunque `active === false` en listado; UI marca inactive.
+        const retail = dedupeRetailWorkCentersForBusiness(scopedWcs).filter(
+          (wc) =>
+            !wc.deletedAt &&
+            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        );
         const scopedPdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail);
         const rows = buildDeliverySidebarStoreRows(retail, scopedPdvs);
         if (rows.length > 0) {
@@ -171,6 +172,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
     activeStore.retailWorkCenters.length,
     activeStore.refresh,
     currentBusiness,
+    businesses,
   ]);
 
   const liveRows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;

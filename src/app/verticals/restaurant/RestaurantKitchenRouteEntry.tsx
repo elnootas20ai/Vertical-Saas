@@ -3,7 +3,10 @@ import { useBusinessOptional } from '../../context/BusinessContext';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { RestaurantKitchenPage } from './RestaurantKitchenPage';
 
-/** Cocina de sala para bar/restaurante; delivery mantiene su KDS propio. */
+/**
+ * Cocina de sala (bar/restaurante).
+ * Recibe comandas enviadas desde el TPV sala — no el KDS de Delivery.
+ */
 export function RestaurantKitchenRouteEntry() {
   const businessCtx = useBusinessOptional();
   if (isRestaurantBusinessType(businessCtx?.currentBusiness?.businessType)) {

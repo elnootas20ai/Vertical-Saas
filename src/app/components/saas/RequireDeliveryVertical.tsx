@@ -5,7 +5,7 @@ import { isRestaurantBusinessType, isStrictDeliveryBusinessType } from '../../li
 import { RESTAURANT_OPS_HOME_PATH } from '../../lib/retailOpsPaths';
 import { AuthRouteLoading } from '../AuthRouteLoading';
 
-/** Bloquea rutas de delivery en negocios que no son delivery (p. ej. restaurante → caja). */
+/** Bloquea rutas de delivery en negocios que no son delivery. */
 export function RequireDeliveryVertical({ children }: { children: React.ReactNode }) {
   const businessCtx = useBusinessOptional();
   const navigate = useNavigate();
@@ -17,7 +17,7 @@ export function RequireDeliveryVertical({ children }: { children: React.ReactNod
     if (pending) return;
     if (!allowed) {
       navigate(
-        isRestaurantBusinessType(businessType) ? RESTAURANT_OPS_HOME_PATH : '/saas/sala',
+        isRestaurantBusinessType(businessType) ? RESTAURANT_OPS_HOME_PATH : '/saas',
         { replace: true },
       );
     }

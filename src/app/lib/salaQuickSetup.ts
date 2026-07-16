@@ -18,6 +18,9 @@ export type SalaQuickSetupRoomDraft = {
 
   defaultCapacity: number;
 
+  /** Capacidad por mesa (si difiere del defaultCapacity). */
+  capacities?: number[];
+
 };
 
 
@@ -155,7 +158,11 @@ export function defaultRoomDrafts(count: number): SalaQuickSetupRoomDraft[] {
 
     { name: 'Terraza', roomType: 'terraza', tableCount: 8 },
 
+    { name: 'Terraza 2', roomType: 'terraza', tableCount: 6 },
+
     { name: 'Barra', roomType: 'barra', tableCount: 6 },
+
+    { name: 'Privado', roomType: 'privado', tableCount: 4 },
 
     { name: 'VIP', roomType: 'vip', tableCount: 4 },
 

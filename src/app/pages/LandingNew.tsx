@@ -10,6 +10,7 @@ import { Header } from '../components/Header';
 import { Footer } from '../components/Footer';
 import { BrowserFrame } from '../components/landing/BrowserFrame';
 import { ModalComingSoon } from '../components/landing/ModalComingSoon';
+import { LandingAnalytics, trackLandingCta } from '../components/landing/LandingAnalytics';
 import { AUTH_PATHS } from '../lib/authEntryPaths';
 import '../../styles/landing.css';
 
@@ -34,6 +35,7 @@ const BENTO = [
   { icon: Monitor, title: 'TPV en tablet', desc: 'Caja, consumo de equipo y turnos listos para el mostrador.' },
   { icon: Shield, title: 'Seguro en Europa', desc: 'RGPD, permisos granulares y backups automáticos.' },
   { icon: Bell, title: 'Centro de alertas', desc: 'Push, email e in-app configurables por rol.' },
+  { icon: Zap, title: 'Eficiencia', desc: 'Menos trabajo manual, más control. Céntrate en lo que importa.', span: 'lg:col-span-2' },
 ];
 
 const FAQ = [
@@ -135,6 +137,7 @@ export function LandingNew() {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-[Plus_Jakarta_Sans,system-ui,sans-serif] antialiased">
+      <LandingAnalytics />
       <Header landingDark />
 
       {/* ── HERO ── */}
@@ -150,19 +153,23 @@ export function LandingNew() {
 
               <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400/90 mb-3">Vertial</p>
               <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold leading-[1.05] tracking-tight mb-6">
-                El sistema operativo
+                Más tiempo,
                 <br />
-                <span className="vertial-text-gradient">de tu negocio</span>
+                menos tareas,
+                <br />
+                <span className="vertial-text-gradient">más control</span>
               </h1>
               <p className="text-lg text-zinc-400 max-w-lg mb-8 leading-relaxed">
-                Stock, operaciones, clientes, TPV y finanzas en una sola plataforma profesional.
-                Sin caos. Sin papeles perdidos. Sin herramientas sueltas.
+                Elimina el trabajo manual y céntrate en lo que realmente importa.
               </p>
 
               <div className="flex flex-col sm:flex-row gap-3 mb-6">
                 <button
                   type="button"
-                  onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
+                  onClick={() => {
+                    trackLandingCta('cta_register');
+                    navigate(AUTH_PATHS.register, { state: { accountType: 'company' } });
+                  }}
                   className="px-8 py-4 vertial-glow-btn text-white font-bold rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-950/40 hover:opacity-95 transition-opacity"
                 >
                   Probar Vertial gratis
@@ -170,10 +177,13 @@ export function LandingNew() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => scrollTo('contacto')}
+                  onClick={() => {
+                    trackLandingCta('cta_sales');
+                    navigate('/affiliados');
+                  }}
                   className="px-8 py-4 rounded-2xl border border-zinc-600 text-zinc-200 font-semibold hover:bg-white/5 hover:border-zinc-500 transition-colors"
                 >
-                  Hablar con ventas
+                  Hazte colaborador
                 </button>
               </div>
 
@@ -277,7 +287,7 @@ export function LandingNew() {
         <div className="max-w-7xl mx-auto">
           <SectionHeader
             eyebrow="Por qué Vertial"
-            title={<>Grande. Conectado. <span className="vertial-text-gradient">Profesional.</span></>}
+            title={<>El sistema operativo <span className="vertial-text-gradient">de tu negocio</span></>}
             subtitle="No es otro Excel con login. Es el núcleo operativo de tu empresa — diseñado para escalar por vertical sin empezar de cero."
           />
 
@@ -378,32 +388,31 @@ export function LandingNew() {
           <SectionHeader
             eyebrow="Implementación"
             title="En marcha en minutos"
-            subtitle="Tres pasos para tener Vertial operando en tu empresa, con datos reales desde el primer día."
+            subtitle="Cinco claves para tener Vertial operando en tu empresa, con datos reales desde el primer día."
           />
 
-          <div className="relative">
-            <div className="hidden lg:block absolute top-16 left-[16%] right-[16%] h-px vertial-step-line" />
-            <div className="grid lg:grid-cols-3 gap-6">
-              {[
-                { n: '01', title: 'Crea tu espacio', desc: 'Regístrate, elige vertical y configura tu negocio con el asistente de alta.', icon: Building2 },
-                { n: '02', title: 'Conecta tu operativa', desc: 'Stock, pedidos o vehículos: importa datos o empieza desde cero con plantillas.', icon: Target },
-                { n: '03', title: 'Controla con datos reales', desc: 'Dashboard, alertas y equipo trabajando sobre la misma fuente de verdad.', icon: Zap },
-              ].map((step) => {
-                const Icon = step.icon;
-                return (
-                  <div key={step.n} className="vertial-bento-card vertial-card-lift rounded-2xl p-8 relative">
-                    <div className="flex items-center gap-4 mb-6">
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-blue-500/10 border border-emerald-500/20 flex items-center justify-center">
-                        <Icon className="w-7 h-7 text-emerald-400" />
-                      </div>
-                      <span className="text-3xl font-black text-zinc-700">{step.n}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-6">
+            {[
+              { n: '01', title: 'Crea tu espacio', desc: 'Regístrate, elige vertical y configura tu negocio con el asistente de alta.', icon: Building2, span: 'lg:col-span-2' },
+              { n: '02', title: 'Conecta tu operativa', desc: 'Stock, pedidos o vehículos: importa datos o empieza desde cero con plantillas.', icon: Target, span: 'lg:col-span-2' },
+              { n: '03', title: 'Controla con datos reales', desc: 'Dashboard, alertas y equipo trabajando sobre la misma fuente de verdad.', icon: Zap, span: 'lg:col-span-2' },
+              { n: '04', title: 'Tranquilidad', desc: 'Todo organizado, sin estrés ni caos.', icon: Sparkles, span: 'lg:col-span-2 lg:col-start-2' },
+              { n: '05', title: 'Rentabilidad', desc: 'Menos pérdidas, más beneficios.', icon: TrendingUp, span: 'lg:col-span-2' },
+            ].map((step) => {
+              const Icon = step.icon;
+              return (
+                <div key={step.n} className={`vertial-bento-card vertial-card-lift rounded-2xl p-8 relative ${step.span}`}>
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-blue-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <Icon className="w-7 h-7 text-emerald-400" />
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-3">{step.title}</h3>
-                    <p className="text-zinc-400 text-sm leading-relaxed">{step.desc}</p>
+                    <span className="text-3xl font-black text-zinc-700">{step.n}</span>
                   </div>
-                );
-              })}
-            </div>
+                  <h3 className="text-xl font-bold text-white mb-3">{step.title}</h3>
+                  <p className="text-zinc-400 text-sm leading-relaxed">{step.desc}</p>
+                </div>
+              );
+            })}
           </div>
 
           <div className="mt-14 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -518,7 +527,15 @@ export function LandingNew() {
                 </ul>
                 <button
                   type="button"
-                  onClick={() => (plan.sales ? scrollTo('contacto') : navigate(AUTH_PATHS.register, { state: { accountType: 'company' } }))}
+                  onClick={() => {
+                    if (plan.sales) {
+                      trackLandingCta('cta_sales');
+                      scrollTo('contacto');
+                    } else {
+                      trackLandingCta('cta_plan');
+                      navigate(AUTH_PATHS.register, { state: { accountType: 'company' } });
+                    }
+                  }}
                   className={`w-full py-3.5 rounded-xl font-bold transition-all ${
                     plan.primary
                       ? 'vertial-glow-btn text-white shadow-lg'
@@ -585,16 +602,37 @@ export function LandingNew() {
           </h2>
           <p className="text-xl text-zinc-400 mb-10">30 días gratis · Sin tarjeta · Soporte en español</p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-8">
-            <button type="button" onClick={() => navigate(AUTH_PATHS.entry)} className="px-10 py-4 vertial-glow-btn text-white font-bold rounded-2xl text-lg shadow-xl shadow-emerald-950/30">
+            <button
+              type="button"
+              onClick={() => {
+                trackLandingCta('cta_login');
+                navigate(AUTH_PATHS.entry);
+              }}
+              className="px-10 py-4 vertial-glow-btn text-white font-bold rounded-2xl text-lg shadow-xl shadow-emerald-950/30"
+            >
               Empezar ahora
             </button>
-            <button type="button" onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)} className="px-10 py-4 rounded-2xl border border-zinc-600 font-semibold flex items-center justify-center gap-2 hover:bg-white/5 hover:border-zinc-500 transition-colors">
+            <button
+              type="button"
+              onClick={() => {
+                trackLandingCta('cta_tablet');
+                navigate(AUTH_PATHS.tpvTabletLogin);
+              }}
+              className="px-10 py-4 rounded-2xl border border-zinc-600 font-semibold flex items-center justify-center gap-2 hover:bg-white/5 hover:border-zinc-500 transition-colors"
+            >
               <Monitor className="w-5 h-5" /> TPV en tablet
             </button>
           </div>
           <p className="text-sm text-zinc-500">
             ¿Ya tienes cuenta?{' '}
-            <button type="button" onClick={() => navigate(AUTH_PATHS.workerLogin)} className="text-emerald-400 font-semibold hover:underline">
+            <button
+              type="button"
+              onClick={() => {
+                trackLandingCta('cta_worker');
+                navigate(AUTH_PATHS.workerLogin);
+              }}
+              className="text-emerald-400 font-semibold hover:underline"
+            >
               Acceso trabajadores
             </button>
           </p>

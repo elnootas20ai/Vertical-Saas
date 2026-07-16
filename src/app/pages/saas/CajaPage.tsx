@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { canValidateRegisterClosings } from '../../lib/restaurantTpvPermissions';
 import { ensureTpvSessionIncome } from '../../lib/tpvFinanceSync';
 import {
   listCajaBootstrapRequest,
@@ -293,7 +294,8 @@ function StoreDayBlock({
   expandedSessionId: string | null;
   onToggleSession: (id: string) => void;
   onViewClosing: (session: TpvRegisterSession) => void;
-  onValidate: (session: TpvRegisterSession) => void;
+  /** Solo gerente/dueño. Si no se pasa, no se muestran acciones de validación. */
+  onValidate?: (session: TpvRegisterSession) => void;
 }) {
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden shadow-sm">
@@ -441,7 +443,10 @@ function StoreDayBlock({
                       </div>
 
                       <div className="shrink-0 flex flex-col items-end gap-1">
-                        {session.status === 'closed' && session.closingValidationStatus === 'pending' && isMeaningfulPendingClose(session) && (
+                        {onValidate
+                          && session.status === 'closed'
+                          && session.closingValidationStatus === 'pending'
+                          && isMeaningfulPendingClose(session) && (
                           <button
                             type="button"
                             onClick={(e) => { e.stopPropagation(); onValidate(session); }}
@@ -750,6 +755,7 @@ export function CajaPage() {
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
+  const canValidateClosings = canValidateRegisterClosings(user);
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -826,7 +832,8 @@ export function CajaPage() {
 
     if (validateParam) {
       if (session.status === 'closed' && session.closingValidationStatus === 'pending') {
-        setValidatingSession(session);
+        if (canValidateClosings) setValidatingSession(session);
+        else setViewingClosingSession(session);
       } else if (session.status === 'open') {
         toast.info('Esta caja sigue abierta. El cierre se realiza desde el TPV en tienda.');
       } else {
@@ -836,7 +843,7 @@ export function CajaPage() {
       setViewingClosingSession(session);
     }
     clearDeepLink();
-  }, [loading, sessions, deepLinkSessionId, validateParam, setSearchParams]);
+  }, [loading, sessions, deepLinkSessionId, validateParam, canValidateClosings, setSearchParams]);
 
   useEffect(() => {
     const id = window.setInterval(() => { void loadData({ silent: true }); }, 30000);
@@ -1187,7 +1194,7 @@ export function CajaPage() {
           />
         )}
 
-        {pendingValidation.length > 0 && (
+        {canValidateClosings && pendingValidation.length > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
             <p className="text-sm text-amber-900 dark:text-amber-200">
               <ShieldCheck className="w-4 h-4 inline mr-1" />
@@ -1203,7 +1210,7 @@ export function CajaPage() {
           </div>
         )}
 
-        {emptyPendingClosures.length > 0 && (
+        {canValidateClosings && emptyPendingClosures.length > 0 && (
           <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-3">
             <p className="text-xs text-gray-500">{emptyPendingClosures.length} cierres de prueba sin ventas</p>
             <button type="button" disabled={dismissingEmpty} onClick={() => void handleDismissEmptyPending()} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white disabled:opacity-50">
@@ -1278,7 +1285,7 @@ export function CajaPage() {
                   expandedSessionId={expandedSessionId}
                   onToggleSession={handleToggleSession}
                   onViewClosing={handleViewClosing}
-                  onValidate={setValidatingSession}
+                  onValidate={canValidateClosings ? setValidatingSession : undefined}
                 />
               ))}
             </div>

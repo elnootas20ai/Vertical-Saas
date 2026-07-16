@@ -13,6 +13,7 @@ import {
   Package,
   ChefHat,
   Truck,
+  Zap,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuthOptional } from '../../context/AuthContext';
@@ -68,13 +69,8 @@ function ownerNavItemsForVertical(businessType?: string | null): BottomNavItem[]
     return [
       HOME_ITEM,
       { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
-      {
-        id: 'caja',
-        path: '/saas/caja',
-        icon: Calculator,
-        label: 'Caja',
-        matchPaths: ['/saas/caja/tpv'],
-      },
+      { id: 'tpv', path: '/saas/caja/tpv', icon: Zap, label: 'TPV' },
+      { id: 'cocina', path: '/saas/cocina', icon: ChefHat, label: 'Cocina' },
       CLIENTS_ITEM,
     ];
   }
@@ -164,7 +160,7 @@ function workerNavItemsForVertical(
     const items: BottomNavItem[] = [HOME_ITEM];
     if (hasWorkerPermission(permissions, 'delivery')) {
       items.push(
-        { id: 'cocina', path: '/saas/cocina', icon: ChefHat, label: 'Cocina' },
+        { id: 'cocina', path: '/saas/delivery-kitchen', icon: ChefHat, label: 'Cocina' },
         {
           id: 'reparto',
           path: '/saas/vertical/delivery/reparto',

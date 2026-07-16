@@ -32,7 +32,10 @@ import {
   canPurchaseAddon,
   resolveAddonAmountCents,
 } from '../services/subscriptionAddons.js';
-import { isBlockingSubscriptionStatus } from '../services/subscriptionAdminActivation.js';
+import {
+  appendSubscriptionHistory,
+  isBlockingSubscriptionStatus,
+} from '../services/subscriptionAdminActivation.js';
 import {
   applyBillingExemptOverride,
   mapMoneiStatusToAppStatus,
@@ -40,6 +43,11 @@ import {
 } from '../services/moneiSubscriptionSync.js';
 import { isAdminPlanLocked } from '../shared/billing/adminPlanLock.js';
 import { recordSubscriptionPaymentInvoice } from '../services/subscriptionBillingInvoice.js';
+import { getTransferPaymentInstructions } from '../services/transferPaymentConfig.js';
+import {
+  buildTransferPaymentConcept,
+  shouldBlockSubscriptionAccess,
+} from '../shared/billing/subscriptionAccess.js';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:3005';
 
@@ -823,5 +831,169 @@ export async function purchaseAddon(req, res) {
         error instanceof Error ? error.message : 'Error al contratar la ampliación',
       ),
     });
+  }
+}
+
+/**
+ * GET /api/subscriptions/transfer-instructions
+ * Datos de transferencia + plan/concepto para la pantalla de activación.
+ */
+export async function getTransferInstructions(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'No autenticado' });
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    const sub = account.subscription || {};
+    const planId = String(sub.selectedPlanId || 'basic').toLowerCase();
+    const plan = PLAN_CATALOG[planId] || PLAN_CATALOG.basic;
+    const concept =
+      String(sub.paymentConcept || '').trim() || buildTransferPaymentConcept(userId);
+    const bank = getTransferPaymentInstructions();
+
+    return res.json({
+      ok: true,
+      companyName: account.companyName || account.fullName || '',
+      email: account.email || '',
+      subscription: {
+        status: sub.status || 'pending_payment',
+        planName: sub.planName || plan.name,
+        selectedPlanId: planId,
+        billingMode: sub.billingMode || 'monthly',
+        paymentConcept: concept,
+        paymentSentAt: sub.paymentSentAt || '',
+        currentPeriodEnd: sub.currentPeriodEnd || '',
+        billingExempt: Boolean(sub.billingExempt),
+      },
+      plan: {
+        id: planId,
+        name: plan.name,
+        monthlyPriceCents: plan.monthlyPrice,
+        monthlyPriceEuros: plan.monthlyPrice / 100,
+      },
+      transfer: bank,
+      accessBlocked: shouldBlockSubscriptionAccess(sub),
+    });
+  } catch (error) {
+    logger.error(error, '[Subscription] Error cargando instrucciones de transferencia');
+    return res.status(500).json({ ok: false, error: 'Error al cargar datos de pago' });
+  }
+}
+
+/**
+ * POST /api/subscriptions/notify-transfer-payment
+ * El cliente avisa que ha transferido. NO activa la licencia.
+ */
+export async function notifyTransferPayment(req, res) {
+  try {
+    const userId = req.authUser?.userId;
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'No autenticado' });
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    if (account.accountType === 'user' || !account.subscription) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Solo la cuenta empresa puede avisar del pago de la suscripción.',
+      });
+    }
+
+    const sub = account.subscription;
+    if (sub.status === 'subscription_active' || sub.status === 'trial_active' || sub.status === 'trial_expiring') {
+      return res.json({
+        ok: true,
+        alreadyActive: true,
+        subscription: sub,
+        message: 'Tu suscripción ya está activa.',
+      });
+    }
+
+    const now = new Date().toISOString();
+    const concept =
+      String(sub.paymentConcept || '').trim() || buildTransferPaymentConcept(userId);
+    const planId = String(sub.selectedPlanId || 'basic').toLowerCase();
+    const plan = PLAN_CATALOG[planId] || PLAN_CATALOG.basic;
+
+    const nextSub = appendSubscriptionHistory(
+      {
+        ...sub,
+        status: 'payment_sent',
+        paymentConcept: concept,
+        paymentSentAt: now,
+        paymentProvider: sub.paymentProvider || 'bank_transfer',
+      },
+      {
+        at: now,
+        action: 'payment_sent',
+        by: userId,
+        note: 'Cliente indicó que realizó la transferencia',
+      },
+    );
+
+    const updatedAccount = await saveAccount(req, {
+      ...account,
+      subscription: nextSub,
+      updatedAt: now,
+    });
+
+    await writeChangelog(req, {
+      entity: 'subscription',
+      entityId: account.user_id,
+      entityLabel: account.fullName || account.email,
+      action: 'payment_sent',
+      actorUserId: userId,
+      actorName: account.fullName || account.email,
+      changes: {
+        status: { before: sub.status, after: 'payment_sent' },
+        paymentSentAt: { before: sub.paymentSentAt || null, after: now },
+      },
+      metadata: { paymentConcept: concept, planId },
+    });
+
+    const amountLabel = `${(plan.monthlyPrice / 100).toFixed(2)} €/mes`;
+    await sendAdminAlert({
+      key: `payment_sent:${userId}`,
+      subject: `Pago avisado: ${account.companyName || account.email}`,
+      html: `
+        <p>Un cliente ha indicado que realizó la transferencia.</p>
+        <ul>
+          <li><strong>Empresa:</strong> ${account.companyName || '—'}</li>
+          <li><strong>Titular:</strong> ${account.fullName || '—'}</li>
+          <li><strong>Email:</strong> ${account.email || '—'}</li>
+          <li><strong>Plan:</strong> ${plan.name} (${amountLabel})</li>
+          <li><strong>Concepto:</strong> ${concept}</li>
+          <li><strong>Fecha aviso:</strong> ${now}</li>
+        </ul>
+        <p>Revisa el ingreso y activa la suscripción en Administración → Licencias / Clientes.</p>
+      `,
+      cooldownMs: 2 * 60_000,
+      severity: 'business',
+    });
+
+    logger.info(
+      { userId, concept, planId },
+      '[Subscription] Aviso de transferencia registrado',
+    );
+
+    return res.json({
+      ok: true,
+      subscription: updatedAccount.subscription,
+      message:
+        'Hemos recibido tu aviso. Comprobaremos la transferencia lo antes posible. Recibirás acceso automáticamente una vez validado el pago.',
+    });
+  } catch (error) {
+    logger.error(error, '[Subscription] Error registrando aviso de transferencia');
+    return res.status(500).json({ ok: false, error: 'No se pudo registrar el aviso de pago' });
   }
 }

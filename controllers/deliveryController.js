@@ -2638,9 +2638,10 @@ export async function createTpvRegisterSession(req, res) {
     );
 
     for (const stale of openForPdv) {
-      const openDay = String(stale.openedAt || '').slice(0, 10);
-      const today = new Date().toISOString().slice(0, 10);
-      if (openDay && openDay < today) {
+      // Día local ES (no UTC): entre 00:00–02:00 en España UTC aún es el día anterior.
+      const openDay = calendarDayInTimeZone(stale.openedAt, 'Europe/Madrid');
+      const today = calendarDayInTimeZone(new Date(), 'Europe/Madrid');
+      if (openDay && today && openDay < today) {
         const closedDoc = autoCloseTpvRegisterSessionDocument(
           userId,
           stale,
@@ -2812,6 +2813,22 @@ async function ensurePointOfSaleOwner(req, userId, pdvId) {
 
 function normalizeBusinessScopeId(value) {
   return String(value || '').replace(/^business:/, '').trim();
+}
+
+/** YYYY-MM-DD en zona horaria operativa (bares ES = Europe/Madrid). */
+function calendarDayInTimeZone(value, timeZone = 'Europe/Madrid') {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
 }
 
 /** Resuelve la empresa real del PDV (legacy sin businessId en tienda, tablet, etc.). */

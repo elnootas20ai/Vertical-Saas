@@ -33,12 +33,22 @@ export function isAppleMobileWebBrowser(): boolean {
 }
 
 export function isValidIpv4(value: string): boolean {
-  const parts = String(value || '').trim().split('.');
+  const normalized = sanitizeIpv4Input(value);
+  const parts = normalized.split('.');
   if (parts.length !== 4) return false;
   return parts.every((part) => {
     const n = Number(part);
     return Number.isInteger(n) && n >= 0 && n <= 255 && String(n) === part.trim();
   });
+}
+
+/** Normaliza lo que escribe el usuario (p. ej. comas del teclado iOS español → puntos). */
+export function sanitizeIpv4Input(value: string): string {
+  return String(value || '')
+    .trim()
+    .replace(/,/g, '.')
+    .replace(/[^\d.]/g, '')
+    .replace(/\.{2,}/g, '.');
 }
 
 export type PrinterStatusTone = 'ok' | 'warn' | 'idle';
@@ -69,8 +79,8 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
       tone: 'warn',
       label: 'Falta el número de la impresora',
       detail: isVertialNativeApp()
-        ? 'Pulsa «Buscar impresoras» y elige la tuya en la lista.'
-        : 'Pon la IP de la impresora Epson (ej. 192.168.1.200). Sale en el ticket de configuración.',
+        ? 'Escribe la IP del ticket SELF-TEST en Ajustes → Empresa → Impresora (o desde el icono de impresora en el TPV).'
+        : 'Pon la IP de la impresora (ej. 192.168.1.20). Sale en el ticket de configuración.',
       bridgeOk: false,
       configured: false,
     };
@@ -153,7 +163,7 @@ export async function evaluatePrinterStatus(config: VertialPrinterConfig): Promi
     return {
       tone: 'warn',
       label: 'Configura impresora WiFi',
-      detail: 'Pulsa «Buscar impresoras» para escanear la WiFi del local.',
+      detail: 'Escribe la IP del ticket SELF-TEST en Ajustes → Empresa → Impresora.',
       bridgeOk: false,
       configured: false,
     };
