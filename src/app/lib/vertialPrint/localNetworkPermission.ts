@@ -170,10 +170,24 @@ export async function openNativeAppSettings(): Promise<boolean> {
     const platform = Capacitor.getPlatform();
     if (platform !== 'ios' && platform !== 'android') return false;
 
-    // Debe abrirse vía plugin nativo: WKWebView bloquea `window.location = app-settings:`.
+    // Plugin nativo: `App.openUrl('app-settings:')` en iPad a menudo solo muestra un banner
+    // y no abre Ajustes. NativeSettings usa UIApplication.openSettingsURLString.
+    try {
+      const { NativeSettings, AndroidSettings, IOSSettings } = await import(
+        'capacitor-native-settings'
+      );
+      const result = await NativeSettings.open({
+        optionAndroid: AndroidSettings.ApplicationDetails,
+        optionIOS: IOSSettings.App,
+      });
+      if (result?.status !== false) return true;
+    } catch {
+      /* fallback abajo */
+    }
+
     const { App } = await import('@capacitor/app');
-    await App.openUrl({ url: 'app-settings:' });
-    return true;
+    const opened = await App.openUrl({ url: 'app-settings:' });
+    return Boolean(opened?.completed);
   } catch {
     /* ignore */
   }
