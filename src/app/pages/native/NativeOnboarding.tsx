@@ -90,7 +90,7 @@ const SLIDES: Slide[] = [
     subtitle:
       'Configura la impresora con la IP del ticket SELF-TEST. Activa «Red local» en Ajustes del iPhone/iPad → Vertial.',
     features: [
-      { icon: Printer, title: 'IP fija', desc: 'Escribe la IP de la impresora térmica (HPRT, Epson…).' },
+      { icon: Printer, title: 'IP y puerto', desc: 'IP del ticket + puerto (casi siempre 9100).' },
       { icon: Monitor, title: 'TPV en tablet', desc: 'Tickets de pedidos y cierre desde el mostrador.' },
       { icon: Check, title: 'Sin cables', desc: 'Solo WiFi del local; sin PC obligatorio en iPhone/iPad.' },
     ],

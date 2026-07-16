@@ -218,9 +218,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     try {
       savePrinterConfig(next);
       const readBack = loadLegacyPrinterConfig();
-      const savedOk = String(readBack.networkHost || '').trim() === host;
-      if (!savedOk) {
-        toast.error('La IP no quedó guardada en el dispositivo. Inténtalo de nuevo.');
+      const savedHostOk = String(readBack.networkHost || '').trim() === host;
+      const savedPortOk = Number(readBack.networkPort || 0) === safePort;
+      if (!savedHostOk || !savedPortOk) {
+        toast.error('IP o puerto no quedaron guardados. Inténtalo de nuevo.');
         return;
       }
       syncActiveScope(next);
@@ -458,8 +459,8 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             </p>
           </div>
           {selectedHost && (
-            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">
-              IP guardada en este dispositivo: {selectedHost}
+            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 font-mono">
+              Guardada en este dispositivo: {selectedHost}:{selectedPort}
             </p>
           )}
         </SettingsSection>
@@ -514,14 +515,17 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           </SettingsSection>
 
           <SettingsSection
-            title="2. Datos de conexión (manual)"
-            description={
-              stepsUnlocked
-                ? 'Pon IP y puerto a mano. Sin búsqueda automática.'
-                : 'Completa el paso 1 antes de conectar.'
-            }
-            disabled={!stepsUnlocked}
+            title="2. IP y puerto (obligatorios)"
+            description="Los dos hacen falta para conectar. Sin búsqueda automática."
           >
+            {!stepsUnlocked ? (
+              <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
+                <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <p className="text-sm text-amber-900 dark:text-amber-100">
+                  Completa el paso 1 (Red local) antes de guardar o probar.
+                </p>
+              </div>
+            ) : null}
             {isConfigured && !hasUnsavedIp ? (
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -536,19 +540,21 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
                 <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p className="text-sm text-amber-900 dark:text-amber-100">
-                  Tienes cambios sin guardar. Pulsa «Guardar impresora».
+                  Cambios sin guardar. Pulsa «Guardar impresora».
                 </p>
               </div>
             ) : (
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
                 <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p className="text-sm text-amber-900 dark:text-amber-100">
-                  IP del ticket SELF-TEST + puerto (HPRT suele ser 9100).
+                  HPRT: IP del ticket SELF-TEST y puerto <strong>9100</strong>.
                 </p>
               </div>
             )}
             <label className="block">
-              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">IP</span>
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                IP <span className="text-red-600 dark:text-red-400">(obligatorio)</span>
+              </span>
               <div className="mt-2 flex gap-2">
                 <input
                   type="text"
@@ -574,7 +580,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               </div>
             </label>
             <label className="block mt-4">
-              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Puerto</span>
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Puerto <span className="text-red-600 dark:text-red-400">(obligatorio)</span>
+              </span>
               <input
                 type="text"
                 inputMode="numeric"
@@ -582,7 +590,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 placeholder="9100"
                 value={String(manualPort)}
                 onChange={(e) => handleManualPortChange(e.target.value)}
-                className="mt-2 w-full min-h-[52px] rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 text-lg font-semibold text-gray-900 dark:text-gray-100 font-mono"
+                className="mt-2 w-full min-h-[52px] rounded-xl border-2 border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-900 px-4 text-lg font-semibold text-gray-900 dark:text-gray-100 font-mono"
               />
               <div className="mt-2 flex flex-wrap gap-2">
                 {PRINTER_PORT_OPTIONS.map((port) => (
@@ -590,7 +598,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                     key={port}
                     type="button"
                     onClick={() => handleManualPortChange(String(port))}
-                    className={`min-h-[40px] px-3 rounded-lg border text-sm font-bold font-mono touch-manipulation ${
+                    className={`min-h-[44px] px-4 rounded-xl border-2 text-sm font-bold font-mono touch-manipulation ${
                       manualPort === port
                         ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
                         : 'border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100'
@@ -600,10 +608,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                   </button>
                 ))}
               </div>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Por defecto <strong>9100</strong> (casi todas las térmicas ESC/POS). Si no conecta, prueba 9101 o 9102.
+              </p>
             </label>
-            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              Valores típicos: IP del ticket · puerto <strong>9100</strong> (ESC/POS). Alternativas: 9101, 9102. Epson ePOS a veces 8008/8043.
-            </p>
             {(diagLoading || diagnostics) ? (
               <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 text-xs text-gray-700 dark:text-gray-300 space-y-1.5">
                 <p className="font-semibold text-gray-900 dark:text-gray-100">Estado de red en esta tablet</p>
@@ -645,7 +653,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <button
                 type="button"
                 onClick={handleCheckConnection}
-                disabled={pingingIp || !manualIp.trim()}
+                disabled={pingingIp || !manualIp.trim() || !stepsUnlocked}
                 className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
               >
                 {pingingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
@@ -654,13 +662,16 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <button
                 type="button"
                 onClick={handleRequestSave}
-                disabled={savingIp || !manualIp.trim()}
+                disabled={savingIp || !manualIp.trim() || !stepsUnlocked}
                 className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold touch-manipulation active:opacity-80 disabled:opacity-60"
               >
                 {savingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
                 {savingIp ? 'Guardando…' : 'Guardar impresora'}
               </button>
             </div>
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 font-mono">
+              Se guardará: {(manualIp.trim() || '—')}:{manualPort}
+            </p>
             {pingingIp ? (
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 La comprobación puede fallar por la red; igual puedes pulsar «Guardar impresora» con la IP del ticket.

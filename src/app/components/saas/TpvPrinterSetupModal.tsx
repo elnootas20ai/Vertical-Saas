@@ -16,7 +16,7 @@ export function TpvPrinterSetupModal({
         <div className="min-w-0">
           <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Configurar impresora</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-            Red local (manual) → IP → Probar ticket
+            Red local → IP + puerto → Guardar → Probar
           </p>
         </div>
         <button
