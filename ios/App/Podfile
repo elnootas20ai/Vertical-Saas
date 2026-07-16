@@ -19,6 +19,7 @@ def capacitor_pods
   pod 'CapacitorStatusBar', :path => '../../node_modules/@capacitor/status-bar'
   pod 'CapacitorNativeSettings', :path => '../../node_modules/capacitor-native-settings'
   pod 'EscPosProxyCapacitorPlugin', :path => '../../node_modules/esc-pos-proxy-capacitor-plugin'
+  pod 'VertialIosBridge', :path => '../../plugins/vertial-ios-bridge'
 end
 
 target 'App' do

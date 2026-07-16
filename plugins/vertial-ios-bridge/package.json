@@ -1,0 +1,28 @@
+{
+  "name": "vertial-ios-bridge",
+  "version": "1.0.0",
+  "description": "Vertial iOS helpers: open app Settings and trigger Local Network permission",
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "files": [
+    "android/",
+    "dist/",
+    "ios/",
+    "Package.swift",
+    "VertialIosBridge.podspec"
+  ],
+  "author": "Vertial",
+  "license": "UNLICENSED",
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    },
+    "android": {
+      "src": "android"
+    }
+  }
+}

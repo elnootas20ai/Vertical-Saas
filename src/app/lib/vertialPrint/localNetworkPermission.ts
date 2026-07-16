@@ -106,6 +106,17 @@ export async function requestNativeLocalNetworkAccess(options?: {
   const printerIp = String(options?.printerIp || '').trim();
 
   const activate = async () => {
+    // Primero: Bonjour nativo propio (fuerza el popup / toggle «Red local» en iPad).
+    try {
+      const { registerPlugin } = await import('@capacitor/core');
+      const VertialIosBridge = registerPlugin<{
+        requestLocalNetworkAccess: () => Promise<{ triggered?: boolean }>;
+      }>('VertialIosBridge');
+      await Promise.race([VertialIosBridge.requestLocalNetworkAccess(), wait(4000)]);
+    } catch {
+      /* seguir con escpos */
+    }
+
     const plugin = await getEscposPlugin();
     const networkInfo = await getNativeLocalNetworkInfo();
 
@@ -139,7 +150,7 @@ export async function requestNativeLocalNetworkAccess(options?: {
   };
 
   try {
-    await withNativeCallTimeout(activate(), 9000, 'Activación permiso red local');
+    await withNativeCallTimeout(activate(), 12000, 'Activación permiso red local');
   } catch {
     /* Cortamos si tarda demasiado; el usuario puede seguir con IP manual */
   }
@@ -166,12 +177,22 @@ export async function rerequestNativeLocalNetworkPermission(): Promise<void> {
 export async function openNativeAppSettings(): Promise<boolean> {
   if (!isVertialNativeApp()) return false;
   try {
-    const { Capacitor } = await import('@capacitor/core');
+    const { Capacitor, registerPlugin } = await import('@capacitor/core');
     const platform = Capacitor.getPlatform();
     if (platform !== 'ios' && platform !== 'android') return false;
 
-    // Plugin nativo: `App.openUrl('app-settings:')` en iPad a menudo solo muestra un banner
-    // y no abre Ajustes. NativeSettings usa UIApplication.openSettingsURLString.
+    // 1) Plugin propio: UIApplication.openSettingsURLString en hilo principal (iPad).
+    try {
+      const VertialIosBridge = registerPlugin<{
+        openAppSettings: () => Promise<{ opened?: boolean }>;
+      }>('VertialIosBridge');
+      const result = await VertialIosBridge.openAppSettings();
+      if (result?.opened !== false) return true;
+    } catch {
+      /* siguiente fallback */
+    }
+
+    // 2) capacitor-native-settings
     try {
       const { NativeSettings, AndroidSettings, IOSSettings } = await import(
         'capacitor-native-settings'
@@ -180,11 +201,12 @@ export async function openNativeAppSettings(): Promise<boolean> {
         optionAndroid: AndroidSettings.ApplicationDetails,
         optionIOS: IOSSettings.App,
       });
-      if (result?.status !== false) return true;
+      if ((result as { success?: boolean; status?: boolean })?.success !== false) return true;
     } catch {
-      /* fallback abajo */
+      /* siguiente fallback */
     }
 
+    // 3) Último recurso (en iPad a menudo solo muestra banner).
     const { App } = await import('@capacitor/app');
     const opened = await App.openUrl({ url: 'app-settings:' });
     return Boolean(opened?.completed);
