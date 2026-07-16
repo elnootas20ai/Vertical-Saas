@@ -40,6 +40,21 @@ workflows:
         script: |
           cd ios/App
           agvtool new-version -all $BUILD_NUMBER
+      - name: Diagnóstico firma (perfil vs entitlements)
+        script: |
+          set -e
+          echo "=== App.entitlements (repo) ==="
+          cat ios/App/App/App.entitlements
+          echo "=== Identidades en keychain ==="
+          security find-identity -v -p codesigning || true
+          echo "=== Perfiles descargados en la máquina ==="
+          ls -la "$HOME/Library/MobileDevice/Provisioning Profiles" || true
+          for p in "$HOME/Library/MobileDevice/Provisioning Profiles"/*.mobileprovision; do
+            [ -f "$p" ] || continue
+            echo "--- PROFILE: $(basename "$p") ---"
+            security cms -D -i "$p" 2>/dev/null | plutil -extract Name raw -o - - 2>/dev/null || true
+            security cms -D -i "$p" 2>/dev/null | plutil -extract Entitlements xml1 -o - - 2>/dev/null || true
+          done
       - name: Aplicar perfiles de firma
         script: xcode-project use-profiles
       - name: Compilar IPA
@@ -48,10 +63,16 @@ workflows:
           xcode-project build-ipa \
             --workspace ios/App/App.xcworkspace \
             --scheme App \
-            --archive-flags="-allowProvisioningUpdates" || {
-              echo "=== xcodebuild log (últimas 100 líneas) ==="
-              LOG=$(ls -t /tmp/xcodebuild_logs/*.log 2>/dev/null | head -1)
-              if [ -n "$LOG" ]; then tail -100 "$LOG"; fi
+            --archive-flags="-allowProvisioningUpdates -verbose" || {
+              echo "=== DIAGNOSTICO ERROR (líneas útiles) ==="
+              for LOG in $(ls -t /tmp/xcodebuild_logs/*.log 2>/dev/null); do
+                echo "--- $LOG ---"
+                grep -E 'error:|ERROR |Provisioning|entitlement|CodeSign|codesign|Failed to|requires a provisioning|doesn't support|does not support|exit code' "$LOG" | tail -100 || true
+                echo "=== tail 40 ==="
+                tail -40 "$LOG"
+              done
+              echo "=== App.entitlements ==="
+              cat ios/App/App/App.entitlements
               exit 65
             }
     artifacts:
