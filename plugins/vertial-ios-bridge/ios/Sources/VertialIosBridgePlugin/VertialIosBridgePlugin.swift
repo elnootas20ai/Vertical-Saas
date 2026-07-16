@@ -58,7 +58,8 @@ public class VertialIosBridgePlugin: CAPPlugin, CAPBridgedPlugin {
         let params = NWParameters()
         params.includePeerToPeer = true
         let browser = NWBrowser(for: .bonjour(type: type, domain: "local."), using: params)
-        browser.stateUpdateHandler = { _, _, _ in }
+        // NWBrowser.stateUpdateHandler recibe un solo argumento (State), no tres.
+        browser.stateUpdateHandler = { _ in }
         browser.browseResultsChangedHandler = { _, _ in }
         browser.start(queue: .main)
         self.browsers.append(browser)
