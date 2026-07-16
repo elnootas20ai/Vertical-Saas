@@ -72,8 +72,10 @@ export function catalogItemBelongsToBusinessScope(
 
   const universalCategory = shouldClearBrandForCategory(String(item.category || ''));
   if (universalCategory) {
-    if (activeType && !isDeliveryOpsBusinessType(activeType)) return false;
-    if (multiAccount) return isDeliveryOpsBusinessType(activeType);
+    const allowsUniversal =
+      isDeliveryOpsBusinessType(activeType) || isRestaurantBusinessType(activeType);
+    if (activeType && !allowsUniversal) return false;
+    if (multiAccount) return allowsUniversal;
     if (isRestaurantBusinessType(activeType)) return true;
     return brandIds.size > 0;
   }

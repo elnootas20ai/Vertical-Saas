@@ -34,7 +34,7 @@ function isDeliveryBusinessType(businessType?: string | null): boolean {
 }
 
 /**
- * Catálogo TPV: la empresa activa si es delivery ops (delivery/restaurante) usa su propio catálogo.
+ * Catálogo TPV: delivery y restaurante usan el catálogo de su propia empresa.
  * Solo redirige al negocio delivery si el selector apunta a otra vertical (p. ej. limpieza).
  */
 export function resolveTpvCatalogBusinessId(
@@ -45,7 +45,13 @@ export function resolveTpvCatalogBusinessId(
   const match = businesses.find(
     (b) => businessScopeIdFromRawId(b.business_id || b.id) === bid,
   );
-  if (match && isDeliveryOpsBusinessType(match.businessType)) return bid;
+  if (
+    match &&
+    (isDeliveryOpsBusinessType(match.businessType) ||
+      isRestaurantBusinessType(match.businessType))
+  ) {
+    return bid;
+  }
 
   const deliveryId = deliveryBusinessIdForTpv(businesses);
   return deliveryId || bid;
