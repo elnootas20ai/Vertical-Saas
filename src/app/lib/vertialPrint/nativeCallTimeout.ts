@@ -3,14 +3,16 @@ export function withNativeCallTimeout<T>(
   timeoutMs: number,
   label: string,
 ): Promise<T> {
+  const ms = Number(timeoutMs);
+  const safeMs = Number.isFinite(ms) && ms > 0 ? ms : 8_000;
   return new Promise((resolve, reject) => {
     const timer = globalThis.setTimeout(() => {
       reject(
         new Error(
-          `${label} tardó demasiado. Comprueba que la impresora está encendida, en la misma WiFi, y que Vertial tiene permiso de «red local» en Ajustes.`,
+          `${label} no respondió a tiempo (${Math.round(safeMs / 1000)}s). Comprueba IP, WiFi e impresora encendida.`,
         ),
       );
-    }, timeoutMs);
+    }, safeMs);
     promise
       .then((value) => {
         globalThis.clearTimeout(timer);

@@ -264,6 +264,10 @@ async function sendEscposToHost(
   }
 
   const run = (async () => {
+    // 1) Bridge propio primero (estable en iPad). 2) ESCPOSProxy de respaldo.
+    const viaBridge = await printViaVertialBridge(host, port, bytes, timeoutMs);
+    if (viaBridge.ok) return { ok: true as const };
+
     try {
       const ESCPOSProxy = await escposProxy();
       await withNativeTimeout(
@@ -273,15 +277,16 @@ async function sendEscposToHost(
       );
       return { ok: true as const };
     } catch (primaryError) {
-      const fallback = await printViaVertialBridge(host, port, bytes, timeoutMs);
-      if (fallback.ok) return { ok: true as const };
       const message =
-        fallback.error ||
+        viaBridge.error ||
         (primaryError instanceof Error ? primaryError.message : 'No se pudo conectar con la impresora');
       const friendly = /unimplemented|not implemented|is not implemented/i.test(message)
         ? 'El módulo de impresión nativo no está disponible. Actualiza la app desde TestFlight e inténtalo de nuevo.'
         : message;
-      return { ok: false as const, error: friendly };
+      return {
+        ok: false as const,
+        error: `${friendly} (IP ${host}:${port})`,
+      };
     }
   })();
 
@@ -363,6 +368,8 @@ export async function pingNativeHost(
   const ip = String(host || '').trim();
   if (!ip) return { ok: false };
   const safePort = Number(port) || 9100;
+  const viaBridge = await pingViaVertialBridge(ip, safePort);
+  if (viaBridge.ok) return viaBridge;
   try {
     const ESCPOSProxy = await escposProxy();
     const { online, rtt } = await withNativeTimeout(
@@ -370,11 +377,10 @@ export async function pingNativeHost(
       NATIVE_PING_TIMEOUT_MS,
       'Comprobación de impresora',
     );
-    if (online) return { ok: true, rtt };
+    return { ok: Boolean(online), rtt };
   } catch {
-    /* probar bridge */
+    return { ok: false };
   }
-  return pingViaVertialBridge(ip, safePort);
 }
 
 export async function discoverNativeNetworkPrinters(options?: {
