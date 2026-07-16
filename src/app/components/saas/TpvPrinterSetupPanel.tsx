@@ -27,6 +27,7 @@ import { loadLegacyPrinterConfig, type VertialPrinterConfig } from '../../lib/ve
 import { normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
 import { isValidIpv4, sanitizeIpv4Input } from '../../lib/vertialPrint/printerSetupStatus';
 import { savePrinterConfigToPdv, type PrinterConfigTarget } from '../../lib/vertialPrint/printerPdvSync';
+
 const LAN_MANUAL_CONFIRM_KEY = 'vertial_lan_manual_confirmed_v1';
 
 export interface TpvPrinterScope {
@@ -93,11 +94,20 @@ function SettingsSection({
   );
 }
 
+const PRINTER_PORT_OPTIONS = [9100, 9101, 9102, 8008, 8043] as const;
+
+function sanitizePortInput(raw: string): number {
+  const digits = String(raw || '').replace(/\D/g, '').slice(0, 5);
+  const n = Number(digits);
+  if (!Number.isFinite(n) || n < 1 || n > 65535) return 9100;
+  return n;
+}
+
 /**
  * Flujo impresora tablet/móvil (100 % manual):
- * 1) Cliente activa Red local en Ajustes → Vertial y lo confirma
- * 2) IP fija → Comprobar (opcional) → Guardar impresora (con confirmación)
- * 3) Probar ticket (solo tras guardar)
+ * 1) Red local (permiso iOS)
+ * 2) IP + puerto → Guardar
+ * 3) Probar ticket
  */
 export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const [pdv, setPdv] = useState<PointOfSale | null | undefined>(scope?.pdv);
@@ -106,6 +116,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     const host = String(initialConfig(scope).networkHost || '').trim();
     return host;
   });
+  const [manualPort, setManualPort] = useState(() => {
+    const port = Number(initialConfig(scope).networkPort || 9100);
+    return Number.isFinite(port) && port > 0 ? port : 9100;
+  });
   const [ipDirty, setIpDirty] = useState(false);
   const ipDirtyRef = useRef(false);
   const [testing, setTesting] = useState(false);
@@ -113,6 +127,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const [savingIp, setSavingIp] = useState(false);
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [pendingSaveHost, setPendingSaveHost] = useState('');
+  const [pendingSavePort, setPendingSavePort] = useState(9100);
   const [lanConfirmed, setLanConfirmed] = useState(() => readLanManualConfirmed());
   const [diagnostics, setDiagnostics] = useState<NativePrinterDiagnostics | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
@@ -120,19 +135,11 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
   const isNative = isVertialNativeApp();
   const selectedHost = String(config.networkHost || '').trim();
+  const selectedPort = Number(config.networkPort || 9100) || 9100;
   const isConfigured = isValidIpv4(selectedHost);
   const stepsUnlocked = !isNative || lanConfirmed;
-
-  // iOS solo crea el interruptor «Red local» en Ajustes cuando la app hace Bonjour/TCP LAN.
-  useEffect(() => {
-    if (!isNative) return;
-    void requestNativeLocalNetworkAccess({
-      printerIp: manualIp.trim() || selectedHost || '192.168.1.20',
-    });
-    // Solo al montar el panel
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once per open
-  }, [isNative]);
-  const hasUnsavedIp = ipDirty && manualIp.trim() !== selectedHost;
+  const hasUnsavedIp =
+    ipDirty && (manualIp.trim() !== selectedHost || manualPort !== selectedPort);
   const canTest = isConfigured && !hasUnsavedIp && stepsUnlocked;
 
   const refreshDiagnostics = useCallback(() => {
@@ -159,6 +166,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     const next = initialConfig(scope);
     setConfig(next);
     setManualIp(String(next.networkHost || '').trim());
+    setManualPort(Number(next.networkPort || 9100) || 9100);
   }, [scope?.pdv?._id, scope?.pdv?._rev, scope?.pdvId, scope?.terminalId]);
 
   const handleLanConfirmChange = useCallback((checked: boolean) => {
@@ -196,12 +204,13 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     })();
   }, [pdv, scope, syncActiveScope]);
 
-  const commitSave = useCallback((host: string) => {
+  const commitSave = useCallback((host: string, port: number) => {
+    const safePort = sanitizePortInput(String(port));
     const next = normalizeVertialPrinterConfig({
       ...config,
       connectionType: 'network',
       networkHost: host,
-      networkPort: 9100,
+      networkPort: safePort,
       paperWidthMm: 80,
     });
 
@@ -217,10 +226,11 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       syncActiveScope(next);
       setConfig(next);
       setManualIp(host);
+      setManualPort(safePort);
       ipDirtyRef.current = false;
       setIpDirty(false);
       clearPrinterVerifiedHost();
-      toast.success(`Impresora guardada en este dispositivo: ${host}`, {
+      toast.success(`Impresora guardada: ${host}:${safePort}`, {
         description: 'Ya puedes probar el ticket en el paso 3.',
         duration: 6000,
       });
@@ -232,6 +242,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setSavingIp(false);
       setConfirmSaveOpen(false);
       setPendingSaveHost('');
+      setPendingSavePort(9100);
     }
   }, [config, syncActiveScope, syncToServerInBackground, refreshDiagnostics]);
 
@@ -246,8 +257,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       return;
     }
     setPendingSaveHost(host);
+    setPendingSavePort(sanitizePortInput(String(manualPort)));
     setConfirmSaveOpen(true);
-  }, [manualIp, stepsUnlocked]);
+  }, [manualIp, manualPort, stepsUnlocked]);
 
   const handleConfirmSave = useCallback(() => {
     const host = pendingSaveHost.trim();
@@ -257,8 +269,8 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       toast.error('La IP ya no es válida. Revísala e inténtalo de nuevo.');
       return;
     }
-    commitSave(host);
-  }, [commitSave, pendingSaveHost]);
+    commitSave(host, pendingSavePort);
+  }, [commitSave, pendingSaveHost, pendingSavePort]);
 
   const handleCheckConnection = useCallback(() => {
     if (!stepsUnlocked) {
@@ -266,6 +278,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       return;
     }
     const host = manualIp.trim();
+    const port = sanitizePortInput(String(manualPort));
     if (!isValidIpv4(host)) {
       toast.error('Escribe una IP válida, por ejemplo 192.168.1.20');
       return;
@@ -274,13 +287,13 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     void (async () => {
       try {
         const ping = await Promise.race([
-          pingNativeHost(host, 9100),
+          pingNativeHost(host, port),
           new Promise<{ ok: false }>((resolve) => {
             globalThis.setTimeout(() => resolve({ ok: false }), 6_000);
           }),
         ]);
         if (ping.ok) {
-          toast.success(`La impresora responde en ${host}`, {
+          toast.success(`Responde en ${host}:${port}`, {
             description:
               'rtt' in ping && ping.rtt
                 ? `Tiempo de respuesta: ${ping.rtt} ms`
@@ -289,19 +302,19 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           });
           refreshDiagnostics();
         } else {
-          toast.error('La impresora no responde en esa IP.', {
+          toast.error(`No responde en ${host}:${port}`, {
             duration: 10000,
             description:
-              'Puedes guardarla igual si la IP del ticket es correcta (192.168.1.20). Comprueba WiFi y «Red local» en Ajustes → Vertial.',
+              'Prueba otro puerto (9100 / 9101 / 9102). Puedes guardar igual si los datos del ticket son correctos.',
           });
         }
       } catch {
-        toast.error('No se pudo comprobar la conexión. Puedes guardar la IP igualmente.');
+        toast.error('No se pudo comprobar. Puedes guardar IP y puerto igualmente.');
       } finally {
         setPingingIp(false);
       }
     })();
-  }, [manualIp, stepsUnlocked, refreshDiagnostics]);
+  }, [manualIp, manualPort, stepsUnlocked, refreshDiagnostics]);
 
   const handleRequestLanPermission = useCallback(async () => {
     if (!isNative) return;
@@ -388,11 +401,20 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const handleManualIpChange = useCallback((raw: string) => {
     const value = sanitizeIpv4Input(raw);
     setManualIp(value);
-    const dirty = value !== selectedHost;
+    const dirty = value !== selectedHost || manualPort !== selectedPort;
     ipDirtyRef.current = dirty;
     setIpDirty(dirty);
     if (dirty) clearPrinterVerifiedHost();
-  }, [selectedHost]);
+  }, [manualPort, selectedHost, selectedPort]);
+
+  const handleManualPortChange = useCallback((raw: string) => {
+    const port = sanitizePortInput(raw);
+    setManualPort(port);
+    const dirty = manualIp.trim() !== selectedHost || port !== selectedPort;
+    ipDirtyRef.current = dirty;
+    setIpDirty(dirty);
+    if (dirty) clearPrinterVerifiedHost();
+  }, [manualIp, selectedHost, selectedPort]);
 
   const handleInsertIpDot = useCallback(() => {
     setManualIp((current) => {
@@ -408,9 +430,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     });
   }, [selectedHost]);
 
-  const confirmDescription = pendingSaveHost && selectedHost && pendingSaveHost !== selectedHost
-    ? `Vas a cambiar la impresora de ${selectedHost} a ${pendingSaveHost} (puerto 9100). Los tickets de este dispositivo se imprimirán en la nueva IP.`
-    : `Los tickets de este dispositivo se imprimirán en ${pendingSaveHost || '—'} (puerto 9100).`;
+  const confirmDescription =
+    pendingSaveHost && selectedHost && (pendingSaveHost !== selectedHost || pendingSavePort !== selectedPort)
+      ? `Vas a guardar ${pendingSaveHost}:${pendingSavePort} (antes ${selectedHost}:${selectedPort}).`
+      : `Los tickets de este dispositivo se imprimirán en ${pendingSaveHost || '—'}:${pendingSavePort}.`;
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -491,8 +514,12 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           </SettingsSection>
 
           <SettingsSection
-            title="2. IP de la impresora"
-            description={stepsUnlocked ? 'Escribe la IP, comprueba si quieres y guarda la impresora.' : 'Completa el paso 1 antes de poner la IP.'}
+            title="2. Datos de conexión (manual)"
+            description={
+              stepsUnlocked
+                ? 'Pon IP y puerto a mano. Sin búsqueda automática.'
+                : 'Completa el paso 1 antes de conectar.'
+            }
             disabled={!stepsUnlocked}
           >
             {isConfigured && !hasUnsavedIp ? (
@@ -500,26 +527,28 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">Impresora guardada</p>
-                  <p className="text-sm text-emerald-800/90 dark:text-emerald-200/90 font-mono mt-0.5">{selectedHost}</p>
+                  <p className="text-sm text-emerald-800/90 dark:text-emerald-200/90 font-mono mt-0.5">
+                    {selectedHost}:{selectedPort}
+                  </p>
                 </div>
               </div>
             ) : hasUnsavedIp ? (
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
                 <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p className="text-sm text-amber-900 dark:text-amber-100">
-                  Tienes una IP sin guardar. Pulsa «Guardar impresora» antes de probar el ticket.
+                  Tienes cambios sin guardar. Pulsa «Guardar impresora».
                 </p>
               </div>
             ) : (
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
                 <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p className="text-sm text-amber-900 dark:text-amber-100">
-                  Escribe la IP del ticket de la impresora y pulsa Guardar impresora.
+                  IP del ticket SELF-TEST + puerto (HPRT suele ser 9100).
                 </p>
               </div>
             )}
             <label className="block">
-              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Dirección IP</span>
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">IP</span>
               <div className="mt-2 flex gap-2">
                 <input
                   type="text"
@@ -544,8 +573,36 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 </button>
               </div>
             </label>
+            <label className="block mt-4">
+              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">Puerto</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="9100"
+                value={String(manualPort)}
+                onChange={(e) => handleManualPortChange(e.target.value)}
+                className="mt-2 w-full min-h-[52px] rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 text-lg font-semibold text-gray-900 dark:text-gray-100 font-mono"
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                {PRINTER_PORT_OPTIONS.map((port) => (
+                  <button
+                    key={port}
+                    type="button"
+                    onClick={() => handleManualPortChange(String(port))}
+                    className={`min-h-[40px] px-3 rounded-lg border text-sm font-bold font-mono touch-manipulation ${
+                      manualPort === port
+                        ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100'
+                    }`}
+                  >
+                    {port}
+                  </button>
+                ))}
+              </div>
+            </label>
             <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              Escribe números y toca <strong>·</strong> entre bloques (192.168.1.20). Si el teclado pone coma, se convierte en punto. Puerto 9100 · IP del ticket SELF-TEST.
+              Valores típicos: IP del ticket · puerto <strong>9100</strong> (ESC/POS). Alternativas: 9101, 9102. Epson ePOS a veces 8008/8043.
             </p>
             {(diagLoading || diagnostics) ? (
               <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 text-xs text-gray-700 dark:text-gray-300 space-y-1.5">
@@ -661,6 +718,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                       if (savingIp) return;
                       setConfirmSaveOpen(false);
                       setPendingSaveHost('');
+                      setPendingSavePort(9100);
                     }}
                     className="min-h-[44px] rounded-xl border-2 border-gray-300 dark:border-gray-600 px-4 text-sm font-bold text-gray-800 dark:text-gray-100 disabled:opacity-60"
                   >
