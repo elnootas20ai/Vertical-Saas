@@ -1,9 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { DeliveryOrder, TpvRegisterSession } from '../lib/deliveryApi';
-import { orderInRegisterSession } from '../lib/tpvCajaScope';
+import { orderInRegisterSession, orderOnOpenTpvOpsBoard } from '../lib/tpvCajaScope';
 import { isTpvBoardSoundEnabled, playTpvChannelOrderSound } from '../lib/tpvChannelSounds';
-
-const ACTIVE_BOARD_STATUSES = new Set(['nuevo', 'cocina', 'listo', 'en_reparto']);
 
 /**
  * Suena al detectar pedidos nuevos de canales externos (web, agregadores).
@@ -29,11 +27,7 @@ export function useTpvIncomingOrderSounds(
   useEffect(() => {
     if (!soundEnabled || !session?.openedAt) return;
 
-    const relevant = orders.filter(
-      (o) =>
-        ACTIVE_BOARD_STATUSES.has(o.status)
-        && orderInRegisterSession(o, session),
-    );
+    const relevant = orders.filter((o) => orderOnOpenTpvOpsBoard(o, session));
 
     if (seenRef.current === null) {
       seenRef.current = new Set(relevant.map((o) => o._id));

@@ -112,6 +112,56 @@ export function orderInRegisterSession(
   return true;
 }
 
+const OPEN_OPS_STATUSES = new Set(['nuevo', 'cocina', 'listo', 'en_reparto']);
+
+/** Pedido aún operativo (montaje / reparto), no cerrado. */
+export function isOpenOperationalDeliveryStatus(status?: string | null): boolean {
+  return OPEN_OPS_STATUSES.has(String(status || '').toLowerCase());
+}
+
+/**
+ * Tablero TPV (montaje/reparto): pedidos abiertos del día de la caja,
+ * aunque se crearan antes de `openedAt` (p. ej. tras re-login o nueva caja el mismo día).
+ * La caja/ventas siguen usando `orderInRegisterSession`.
+ */
+export function orderOnOpenTpvOpsBoard(
+  order: { createdAt?: string; status?: string | null },
+  session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt' | 'status'> | null | undefined,
+): boolean {
+  if (!session || String(session.status || '') !== 'open') return false;
+  if (!isOpenOperationalDeliveryStatus(order.status)) return false;
+  const createdAt = String(order.createdAt || '').trim();
+  const openedAt = String(session.openedAt || '').trim();
+  if (!createdAt || !openedAt) return false;
+  const createdMs = new Date(createdAt).getTime();
+  if (Number.isNaN(createdMs)) return false;
+  const openDayStart = new Date(localDayBoundsForKey(localCalendarDayKey(new Date(openedAt))).from).getTime();
+  if (Number.isNaN(openDayStart) || createdMs < openDayStart) return false;
+  return true;
+}
+
+/** Montaje en tablero TPV (listo sin montaje cerrado sigue aquí). */
+export function isTpvMontajeBoardOrder(order: {
+  status?: string | null;
+  assemblyCompletedAt?: string | null;
+}): boolean {
+  const status = String(order.status || '').toLowerCase();
+  if (status === 'nuevo' || status === 'cocina') return true;
+  if (status === 'listo' && !order.assemblyCompletedAt) return true;
+  return false;
+}
+
+/** Reparto en tablero TPV (en_reparto o listo ya montado). */
+export function isTpvRepartoBoardOrder(order: {
+  status?: string | null;
+  assemblyCompletedAt?: string | null;
+}): boolean {
+  const status = String(order.status || '').toLowerCase();
+  if (status === 'en_reparto') return true;
+  if (status === 'listo' && Boolean(order.assemblyCompletedAt)) return true;
+  return false;
+}
+
 export function transactionOnCalendarDay(tx: { date?: string }, dayKey: string): boolean {
   return isLocalCalendarDay(tx.date, dayKey);
 }
@@ -133,7 +183,10 @@ export function buildTpvRegisterSummaryForDay(
   });
 }
 
-/** Rango API de pedidos: desde apertura de caja hasta fin del día local. */
+/**
+ * Rango API para el tablero TPV: desde el inicio del día local de apertura
+ * (no el reloj exacto de openedAt), para no perder montaje/reparto tras re-login.
+ */
 export function orderLoadBoundsForOpenSession(sessionOpenedAt: string | null | undefined): {
   from: string;
   to: string;
@@ -143,7 +196,8 @@ export function orderLoadBoundsForOpenSession(sessionOpenedAt: string | null | u
   if (!openedAt) return { from: today.from, to: today.to };
   const opened = new Date(openedAt);
   if (Number.isNaN(opened.getTime())) return { from: today.from, to: today.to };
-  return { from: opened.toISOString(), to: today.to };
+  const openDay = localDayBoundsForKey(localCalendarDayKey(opened));
+  return { from: openDay.from, to: today.to };
 }
 
 /** Rango de pedidos para recuento de cierre (abierta o cerrada). */

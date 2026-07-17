@@ -28,11 +28,14 @@ import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import {
   isDeliveredBoardOrder,
+  isTpvMontajeBoardOrder,
+  isTpvRepartoBoardOrder,
   localCalendarDayKey,
   localDayBounds,
   orderAlreadyCobrado,
   orderInRegisterSession,
   orderLoadBoundsForOpenSession,
+  orderOnOpenTpvOpsBoard,
 } from '../../../lib/tpvCajaScope';
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../../lib/deliveryTicketHelpers';
@@ -247,8 +250,6 @@ const TABLET_NEXT_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
 };
 
 /** Pedidos visibles en la columna Montaje (cocina omitida: entran directo aquí). */
-const MONTAGE_STATUSES: DeliveryOrderStatus[] = ['nuevo', 'cocina', 'listo'];
-
 const LANE_STATUS_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
   nuevo: 'Montaje',
   cocina: 'Montaje',
@@ -717,7 +718,9 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
   const compact = Boolean(readTpvTabletBinding());
   const cfg = STATUS_CONFIG[order.status];
   const nextLabel = TABLET_NEXT_LABEL[order.status];
-  const displayLabel = LANE_STATUS_LABEL[order.status] || cfg.label;
+  const displayLabel = isTpvRepartoBoardOrder(order)
+    ? 'Reparto'
+    : (LANE_STATUS_LABEL[order.status] || cfg.label);
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
   const StatusIcon = cfg.Icon;
   const TypeIcon = typeBadge.Icon;
@@ -1337,10 +1340,10 @@ export function WorkerTpvDelivery({
 
   const stats = useMemo(() => {
     const montaje = orders.filter(
-      (o) => MONTAGE_STATUSES.includes(o.status) && orderInRegisterSession(o, openSession),
+      (o) => isTpvMontajeBoardOrder(o) && orderOnOpenTpvOpsBoard(o, openSession),
     );
     const enReparto = orders.filter(
-      (o) => o.status === 'en_reparto' && orderInRegisterSession(o, openSession),
+      (o) => isTpvRepartoBoardOrder(o) && orderOnOpenTpvOpsBoard(o, openSession),
     );
     const completados = orders.filter((o) => {
       if (!orderInRegisterSession(o, openSession)) return false;
@@ -1360,17 +1363,13 @@ export function WorkerTpvDelivery({
   }, [orders, openSession, nowMs]);
 
   const scopedActive = useMemo(
-    () => orders.filter(
-      (o) =>
-        (MONTAGE_STATUSES.includes(o.status) || o.status === 'en_reparto')
-        && orderInRegisterSession(o, openSession),
-    ),
+    () => orders.filter((o) => orderOnOpenTpvOpsBoard(o, openSession)),
     [orders, openSession],
   );
 
   const assemblyOrders = useMemo(
     () => scopedActive
-      .filter((o) => MONTAGE_STATUSES.includes(o.status))
+      .filter((o) => isTpvMontajeBoardOrder(o))
       .filter((o) => matchesFulfillmentFilter(o, fulfillmentFilter))
       .filter((o) => matchesSearch(o, search))
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
@@ -1379,7 +1378,7 @@ export function WorkerTpvDelivery({
 
   const deliveryOrders = useMemo(
     () => scopedActive
-      .filter((o) => o.status === 'en_reparto')
+      .filter((o) => isTpvRepartoBoardOrder(o))
       .filter((o) => matchesFulfillmentFilter(o, fulfillmentFilter))
       .filter((o) => matchesSearch(o, search))
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),

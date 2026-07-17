@@ -3,9 +3,12 @@ import {
   buildTpvRegisterSummaryForDay,
   filterSessionTransactionsForDay,
   isLocalCalendarDay,
+  isTpvMontajeBoardOrder,
+  isTpvRepartoBoardOrder,
   localCalendarDayKey,
   orderInRegisterSession,
   orderLoadBoundsForOpenSession,
+  orderOnOpenTpvOpsBoard,
   sessionActiveOnCalendarDay,
   tpvSessionBelongsToBusiness,
 } from '../src/app/lib/tpvCajaScope.js';
@@ -45,10 +48,49 @@ describe('orderInRegisterSession', () => {
 });
 
 describe('orderLoadBoundsForOpenSession', () => {
-  it('starts at session open, not midnight today', () => {
-    const bounds = orderLoadBoundsForOpenSession('2026-06-16T20:00:00.000Z');
-    expect(bounds.from).toBe('2026-06-16T20:00:00.000Z');
+  it('starts at local midnight of the open day, not the exact openedAt clock', () => {
+    const openedAt = '2026-06-16T20:00:00.000Z';
+    const bounds = orderLoadBoundsForOpenSession(openedAt);
+    expect(new Date(bounds.from).getTime()).toBeLessThanOrEqual(new Date(openedAt).getTime());
+    expect(bounds.from).not.toBe(openedAt);
     expect(bounds.to).toBeTruthy();
+  });
+});
+
+describe('orderOnOpenTpvOpsBoard', () => {
+  const session = {
+    openedAt: '2026-06-16T20:00:00.000Z',
+    closedAt: '',
+    status: 'open',
+  };
+
+  it('keeps open reparto orders created before openedAt but same local day', () => {
+    // 15:00Z same calendar day in most EU timezones as 20:00Z open
+    expect(
+      orderOnOpenTpvOpsBoard(
+        { createdAt: '2026-06-16T15:00:00.000Z', status: 'en_reparto' },
+        session,
+      ),
+    ).toBe(true);
+  });
+
+  it('hides delivered / closed statuses from ops board', () => {
+    expect(
+      orderOnOpenTpvOpsBoard(
+        { createdAt: '2026-06-16T21:00:00.000Z', status: 'entregado' },
+        session,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe('isTpvMontajeBoardOrder / isTpvRepartoBoardOrder', () => {
+  it('sends listo+assemblyCompletedAt to reparto column', () => {
+    expect(isTpvMontajeBoardOrder({ status: 'listo' })).toBe(true);
+    expect(isTpvRepartoBoardOrder({ status: 'listo' })).toBe(false);
+    expect(isTpvMontajeBoardOrder({ status: 'listo', assemblyCompletedAt: '2026-06-16T21:00:00.000Z' })).toBe(false);
+    expect(isTpvRepartoBoardOrder({ status: 'listo', assemblyCompletedAt: '2026-06-16T21:00:00.000Z' })).toBe(true);
+    expect(isTpvRepartoBoardOrder({ status: 'en_reparto' })).toBe(true);
   });
 });
 

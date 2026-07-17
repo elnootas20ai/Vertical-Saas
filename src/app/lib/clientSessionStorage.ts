@@ -10,6 +10,8 @@ const KEEP_ON_ACCOUNT_SWITCH = new Set([
   'vertial_saved_worker_login',
   'vertial_cookie_consent',
   'vertial_native_onboarding_seen',
+  // Tablet TPV: al caducar sesión / re-login no perder el vínculo PDV (pedidos de reparto).
+  'vertial_tpv_tablet_binding',
 ]);
 
 /**
