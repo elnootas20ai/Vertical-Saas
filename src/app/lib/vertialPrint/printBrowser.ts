@@ -11,18 +11,18 @@ function escapeHtml(value: string): string {
 
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:12px;font-size:12px;color:#000;line-height:1.35}
-.c{text-align:center}.hr{border-top:1px dashed #333;margin:8px 0}
+body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:16px 12px 28px;font-size:14px;color:#000;line-height:1.4}
+.c{text-align:center}.hr{border-top:1px dashed #333;margin:10px 0}
 table{width:100%;border-collapse:collapse}.b{font-weight:bold}
-.t td{font-size:14px;font-weight:bold;padding-top:4px}
-.f{margin-top:16px;font-size:10px;text-align:center;color:#666;line-height:1.4}
-.small{font-size:10px;color:#444}
-.note{color:#b45309;font-size:10px;font-weight:bold}
-.add{color:#047857;font-size:10px;font-weight:bold}
-.rem{color:#b91c1c;font-size:10px;font-weight:bold;text-decoration:line-through}
-.item{padding:6px 0;border-bottom:1px dotted #ccc}
+.t td{font-size:16px;font-weight:bold;padding-top:6px}
+.f{margin-top:20px;font-size:12px;text-align:center;color:#666;line-height:1.4}
+.small{font-size:12px;color:#444}
+.note{color:#b45309;font-size:12px;font-weight:bold}
+.add{color:#047857;font-size:12px;font-weight:bold}
+.rem{color:#b91c1c;font-size:12px;font-weight:bold;text-decoration:line-through}
+.item{padding:8px 0;border-bottom:1px dotted #ccc}
 .item:last-child{border-bottom:none}
-.big{font-size:14px;font-weight:bold}
+.big{font-size:16px;font-weight:bold}
 .order-note{background:#fef3c7;border:1px solid #f59e0b;padding:6px 8px;margin-top:8px;font-weight:bold;color:#92400e}
 @media print{body{margin:0}}
 `;
@@ -47,14 +47,14 @@ function buildLineDetailHtml(line: TicketDocument['lines'][number]): string {
 
 function buildHeaderHtml(doc: TicketDocument): string {
   return `<div class="c">
-  <strong style="font-size:15px">${escapeHtml(doc.issuer)}</strong><br/>
+  <strong style="font-size:18px">${escapeHtml(doc.issuer)}</strong><br/>
   ${doc.taxId ? `<span class="small">NIF/CIF: ${escapeHtml(doc.taxId)}</span><br/>` : ''}
   ${doc.addressLine ? `<span class="small">${escapeHtml(doc.addressLine)}</span><br/>` : ''}
   ${doc.phone ? `<span class="small">Tel: ${escapeHtml(doc.phone)}</span><br/>` : ''}
 </div>
 <div class="hr"></div>
 <div class="c">
-  <strong style="font-size:16px">${escapeHtml(doc.title)}</strong><br/>
+  <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
   <span class="small">${escapeHtml(doc.ticketNo)} · ${escapeHtml(doc.dateLabel)}</span>
 </div>
 <div class="hr"></div>`;
