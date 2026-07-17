@@ -55,7 +55,7 @@ export function WorkerProfileCompletionBanner() {
               <div className="rounded-xl border border-violet-100 bg-white/70 px-3 py-2 dark:border-violet-900 dark:bg-gray-900/40">
                 <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold text-violet-800 dark:text-violet-300">
                   <FileWarning className="h-3.5 w-3.5" />
-                  Gestoría / RRHH completará
+                  Gestor / RRHH completará
                 </p>
                 <ul className="space-y-0.5">
                   {hrLabels.map((label) => (

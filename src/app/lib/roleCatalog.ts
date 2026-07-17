@@ -3,7 +3,7 @@ import { isRestaurantBusinessType } from './deliveryOpsTypes';
 import { getRetailOpsUiCopy, RESTAURANT_DELIVERY_PERMISSION_LABELS } from './retailUiCopy';
 
 /** Roles predefinidos (mismo criterio que Team.tsx / ROLE_TOKEN). */
-const BUILTIN_ROLE_IDS = new Set(['Admin', 'Gerente', 'Comercial', 'Administración', 'Taller', 'Usuario']);
+const BUILTIN_ROLE_IDS = new Set(['Admin', 'Gerente', 'Comercial', 'Administración', 'Taller', 'Usuario', 'Gestor', 'Administrador', 'Encargado']);
 
 export const ROLE_PERMISSION_OPTIONS = [
   { key: 'vehicles', label: 'Vehiculos', description: 'Stock, fichas y ubicaciones' },
@@ -207,7 +207,8 @@ export function buildRolePermissionsMatrix(role = 'Usuario', roleDefinitions: Ro
     role === 'Admin'
     || role === 'Gerente'
     || role === 'Administrador'
-    || role === 'Encargado';
+    || role === 'Encargado'
+    || role === 'Gestor';
 
   const base = Object.fromEntries(
     ROLE_PERMISSION_OPTIONS.map((option) => [option.key, { view: allEnabled, edit: allEnabled }]),

@@ -74,7 +74,7 @@ ${doc.salesPointName ? `<p>Tienda: ${escapeHtml(doc.salesPointName)}</p>` : ''}
 ${doc.deliveryTypeLabel ? `<p class="b">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
 <p>Cliente: ${escapeHtml(doc.customerName)}</p>
 ${doc.customerPhone ? `<p>Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
-${doc.customerAddress ? `<p>${escapeHtml(doc.customerAddress)}</p>` : ''}
+${doc.customerAddress ? `<p>Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
 ${doc.cashierName ? `<p>Atendido por: ${escapeHtml(doc.cashierName)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
@@ -93,10 +93,11 @@ function buildDeliverySlipHtml(doc: TicketDocument): string {
 <style>${BASE_STYLES}</style></head><body>
 ${buildHeaderHtml(doc)}
 <p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>
+${doc.deliveryTypeLabel ? `<p class="b">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
 <div class="hr"></div>
 <p class="big">${escapeHtml(doc.customerName)}</p>
 ${doc.customerPhone ? `<p class="big">Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
-${doc.customerAddress ? `<p class="big">${escapeHtml(doc.customerAddress)}</p>` : ''}
+${doc.customerAddress ? `<p class="big">Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
 <div class="hr"></div>
@@ -119,6 +120,9 @@ ${buildHeaderHtml(doc)}
 ${doc.salesPointName ? `<p>Tienda: ${escapeHtml(doc.salesPointName)}</p>` : ''}
 <p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>
 <p>Cliente: ${escapeHtml(doc.customerName)}</p>
+${doc.customerPhone ? `<p>Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
+${doc.customerAddress ? `<p>Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
+${doc.deliveryTypeLabel ? `<p>${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
 ${doc.cashierName ? `<p>Atendido por: ${escapeHtml(doc.cashierName)}</p>` : ''}
 <div class="hr"></div>
 <table>${rows}</table>

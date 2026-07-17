@@ -56,6 +56,7 @@ import { toast } from 'sonner';
 import { getAlertResolveLabel, alertHasNavigateTarget, mapAlertsForBusinessVertical } from '../../lib/alertActions';
 import { formatDistanceToNow, format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { useDeliveryAlertsReviewPrompt } from '../../hooks/useDeliveryAlertsReviewPrompt';
 
 const SOURCE_ICONS: Record<string, React.ElementType> = {
   finanzas: DollarSign,
@@ -100,6 +101,11 @@ export default function AlertCenterPage() {
   const businessId = useAlertCenterBusinessId();
   const settingsBusinessId = useAlertSettingsBusinessId();
   const { departments: alertDepartments, departmentSourceFilter } = useAlertDepartments();
+  const {
+    pending: deliveryReviewPending,
+    pendingCount: deliveryPendingCount,
+    markReviewed: markDeliveryReviewed,
+  } = useDeliveryAlertsReviewPrompt();
 
   const [pageTab, setPageTab] = useState<AlertCenterPageTab>(() => tabFromSearch(searchParams.get('tab')));
 
@@ -380,7 +386,11 @@ export default function AlertCenterPage() {
             tabs={[
               { id: 'inbox', label: 'Bandeja', count: summary?.unresolved || undefined },
               { id: 'history', label: 'Historial', count: summary?.historyTotal || undefined },
-              { id: 'settings', label: 'Ajustes' },
+              {
+                id: 'settings',
+                label: deliveryReviewPending ? 'Ajustes · Por revisar' : 'Ajustes',
+                count: deliveryReviewPending ? (deliveryPendingCount || 1) : undefined,
+              },
             ]}
             activeTab={pageTab}
             onChange={(id) => switchPageTab(id as AlertCenterPageTab)}
@@ -398,6 +408,37 @@ export default function AlertCenterPage() {
             </button>
           )}
         </div>
+
+        {deliveryReviewPending && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-800 dark:bg-amber-950/30 md:px-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                  Revisa qué alertas de Delivery quieres activar
+                </p>
+                <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-300">
+                  El pack esencial ya está encendido. El resto espera tu decisión.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => switchPageTab('settings')}
+                  className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700"
+                >
+                  Ir a ajustes
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void markDeliveryReviewed().then(() => toast.success('Revisión marcada como hecha'))}
+                  className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+                >
+                  Ya lo revisé
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* KPIs — solo bandeja e historial */}
         {!isSettings && summary && (

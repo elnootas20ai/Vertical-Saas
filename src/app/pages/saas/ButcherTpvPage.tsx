@@ -763,7 +763,12 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
 
   const printTicket = async (sale: CompletedSale) => {
     if (isVertialNativeApp()) {
-      await printTicketDocument(butcherSaleToTicketDoc(sale));
+      try {
+        const result = await printTicketDocument(butcherSaleToTicketDoc(sale));
+        if (result.ok) toast.success('Ticket enviado a la impresora');
+      } catch {
+        toast.error('No se pudo imprimir el ticket');
+      }
       return;
     }
 

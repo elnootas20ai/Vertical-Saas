@@ -62,11 +62,15 @@ async function resolveClientListOptions(req, userId, businessId) {
   const bid = normalizeBusinessScopeId(businessId);
   if (!bid) return {};
   const count = await countActiveBusinesses(req, userId);
+  const multiBusiness = count > 1;
   return {
     businessId: bid,
-    legacySingleBusiness: count <= 1,
-    /** Oculta clientes antiguos sin business_id cuando se filtra por empresa activa. */
-    excludeUnscopedLegacy: true,
+    legacySingleBusiness: !multiBusiness,
+    /**
+     * Con varias empresas: ocultar clientes antiguos sin business_id (evitar mezclar).
+     * Con una sola empresa: sí mostrarlos — son el CRM histórico del local (TPV incluido).
+     */
+    excludeUnscopedLegacy: multiBusiness,
   };
 }
 

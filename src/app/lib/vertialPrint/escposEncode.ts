@@ -86,7 +86,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
     chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
     if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
-    if (doc.customerAddress) chunks.push(textLine(doc.customerAddress, width));
+    if (doc.customerAddress) chunks.push(textLine(`Dir: ${doc.customerAddress}`, width));
     if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
     chunks.push(textLine('--------------------------------', width));
     for (const line of doc.lines) {
@@ -97,9 +97,10 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
       chunks.push(textLine(`NOTA: ${doc.orderNotes}`, width));
     }
   } else if (doc.variant === 'delivery') {
+    if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
     chunks.push(textLine(doc.customerName, width));
     if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
-    if (doc.customerAddress) chunks.push(textLine(doc.customerAddress, width));
+    if (doc.customerAddress) chunks.push(textLine(`Dir: ${doc.customerAddress}`, width));
     chunks.push(textLine('--------------------------------', width));
     for (const line of doc.lines) {
       pushLineDetail(chunks, line, width);
@@ -117,6 +118,9 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     if (doc.orderNotes) chunks.push(textLine(`NOTA: ${doc.orderNotes}`, width));
   } else {
     chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
+    if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
+    if (doc.customerAddress) chunks.push(textLine(`Dir: ${doc.customerAddress}`, width));
+    if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
     if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
     chunks.push(textLine('--------------------------------', width));
 

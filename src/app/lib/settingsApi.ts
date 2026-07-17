@@ -344,10 +344,17 @@ export const DEFAULT_CASH_REGISTER_OPERATIONAL: CashRegisterOperationalConfig = 
   highReturnThreshold: 50,
 };
 
+/** Primera pasada del dueño por alertas Delivery (pack CEO + pendientes). */
+export interface DeliveryAlertsReviewState {
+  completedAt?: string | null;
+  notifSentAt?: string | null;
+}
+
 export interface AlertsConfig {
   global: AlertsGlobalConfig;
   rules: AlertRule[];
   operational?: AlertsOperationalConfig;
+  deliveryAlertsReview?: DeliveryAlertsReviewState;
 }
 
 export async function getAlertsConfig(businessId: string): Promise<AlertsConfig> {

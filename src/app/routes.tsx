@@ -612,7 +612,7 @@ export const router = createBrowserRouter([
           { path: 'parts', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><Parts /></RequireWorkerPermission> },
           { path: 'tech', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
-          { path: 'payroll', element: <RequireBusinessOwner><PayrollPage /></RequireBusinessOwner> },
+          { path: 'payroll', element: <RequireTeamManager><PayrollPage /></RequireTeamManager> },
           { path: 'sala/setup', element: <RequireRestaurantVertical><RestaurantSalaRouteEntry /></RequireRestaurantVertical> },
           { path: 'sala', element: <RequireRestaurantVertical><RestaurantSalaRouteEntry /></RequireRestaurantVertical> },
           { path: 'lista-espera', element: <RequireRestaurantVertical><RequireWorkerPermission permission="delivery"><RestaurantWaitlistPage /></RequireWorkerPermission></RequireRestaurantVertical> },

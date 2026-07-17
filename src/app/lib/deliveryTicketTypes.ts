@@ -32,7 +32,14 @@ export interface DeliveryOrderLike {
   updatedAt?: string;
   refundedAt?: string;
   notes?: string;
-  items?: Array<{ quantity?: number; name?: string; total?: number; notes?: string }>;
+  items?: Array<{
+    quantity?: number;
+    name?: string;
+    total?: number;
+    notes?: string;
+    extras?: string[];
+    ingredients?: { name: string; quantity: string }[];
+  }>;
 }
 
 export interface DeliveryTicketPrintOptions {

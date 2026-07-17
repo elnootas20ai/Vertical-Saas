@@ -1232,17 +1232,13 @@ export function WorkerTpvDelivery({
           `Pedido #${order.orderNumber} entregado · ${PAYMENT_LABELS[resolvedPayment!]}`,
         );
         if (updated.paymentStatus === 'paid' && currentBusiness) {
-          try {
-            printDeliveryTicket({
-              order: updated,
-              business: businessTicketInfoFrom(currentBusiness),
-              salesPointName: updated.salesPointName,
-              cashierName: user?.fullName,
-              variant: 'customer',
-            });
-          } catch {
-            /* el ticket es opcional; no bloquear la entrega */
-          }
+          void printDeliveryTicket({
+            order: updated,
+            business: businessTicketInfoFrom(currentBusiness),
+            salesPointName: updated.salesPointName,
+            cashierName: user?.fullName,
+            variant: 'customer',
+          });
         }
       } else {
         if (selectedOrder?._id === updated._id) setSelectedOrder(updated);

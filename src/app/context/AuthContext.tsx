@@ -762,6 +762,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     grossMonthlySalary?: string;
     payPeriodsPerYear?: number;
     workCenterId?: string;
+    scheduleTemplateId?: string;
     message?: string;
   }) => {
     try {

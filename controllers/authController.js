@@ -78,6 +78,7 @@ import {
   verifyPassword,
   writeChangelog,
 } from '../services/couchdb.js';
+import { applyInviteScheduleTemplate } from '../services/inviteScheduleAssign.js';
 import {
   mergeEmploymentInfo,
   mergePersonalData,
@@ -1598,7 +1599,7 @@ export async function getBillingCard(req, res) {
 
 export async function inviteUser(req, res) {
   try {
-    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = WORKER_DEFAULT_LANDING_PATH, position = '', contractType = '', grossMonthlySalary = '', payPeriodsPerYear, workCenterId = '', message = '' } = req.body || {};
+    const { name, email, role = 'Usuario', phone = '', invitedBy = '', companyName = '', businessId = '', permissions, landingPage = WORKER_DEFAULT_LANDING_PATH, position = '', contractType = '', grossMonthlySalary = '', payPeriodsPerYear, workCenterId = '', scheduleTemplateId = '', message = '' } = req.body || {};
 
     if (!email) {
       return badRequest(res, 'El email es obligatorio');
@@ -1702,6 +1703,7 @@ export async function inviteUser(req, res) {
           payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
           salesPointId: workCenterId,
         },
+        scheduleTemplateId,
         invitedBy: actorUserId || String(invitedBy || '').trim(),
         invitedByName: invitedByDisplay,
         message,
@@ -1729,6 +1731,7 @@ export async function inviteUser(req, res) {
         payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
         salesPointId: workCenterId,
       };
+      invitationDoc.scheduleTemplateId = String(scheduleTemplateId || '').trim();
       invitationDoc.message = String(message || existingInvitation.message || '').trim();
       invitationDoc.businessName = resolvedCompanyName || existingInvitation.businessName;
     }
@@ -1923,6 +1926,7 @@ function sanitizeInvitation(inv) {
     permissions: inv.permissions || null,
     landingPage: inv.landingPage || WORKER_DEFAULT_LANDING_PATH,
     employment: inv.employment || null,
+    scheduleTemplateId: inv.scheduleTemplateId || '',
     invitedBy: inv.invitedBy,
     invitedByName: inv.invitedByName,
     message: inv.message || '',
@@ -2076,6 +2080,29 @@ export async function acceptInvitation(req, res) {
       updatedAt: now,
     });
 
+    let scheduleApplied = false;
+    if (invitation.scheduleTemplateId) {
+      let workCenterName = '';
+      const salesPointId = String(inviteEmployment.salesPointId || '').trim();
+      if (salesPointId) {
+        try {
+          const wc = await findWorkCenterById(req, salesPointId);
+          workCenterName = String(wc?.name || '').trim();
+        } catch {
+          /* noop */
+        }
+      }
+      const scheduleResult = await applyInviteScheduleTemplate(req, {
+        businessId: business.business_id,
+        memberId: account.user_id,
+        memberName: resolvedFullName,
+        templateId: invitation.scheduleTemplateId,
+        workCenterId: salesPointId,
+        workCenterName,
+      });
+      scheduleApplied = Boolean(scheduleResult.applied);
+    }
+
     await logAccountActivity(req, {
       actorUserId: account.user_id,
       actorName: account.fullName,
@@ -2084,7 +2111,12 @@ export async function acceptInvitation(req, res) {
       action: 'Invitación aceptada',
       entityId: savedInvitation.invitation_id,
       entityLabel: savedInvitation.businessName,
-      metadata: { businessId: business.business_id, role: invitation.role },
+      metadata: {
+        businessId: business.business_id,
+        role: invitation.role,
+        scheduleTemplateId: invitation.scheduleTemplateId || '',
+        scheduleApplied,
+      },
     });
 
     return res.json({
@@ -2092,6 +2124,7 @@ export async function acceptInvitation(req, res) {
       invitation: sanitizeInvitation(savedInvitation),
       user: sanitizeAccount(updatedAccount),
       redirectTo: resolveRedirectAfterInvitationAccept(updatedAccount),
+      scheduleApplied,
     });
   } catch (error) {
     return res.status(500).json({

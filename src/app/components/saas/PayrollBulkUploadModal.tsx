@@ -245,9 +245,22 @@ export function PayrollBulkUploadModal({
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {step === 'setup' && (
             <>
-              <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 text-sm text-blue-900 dark:text-blue-100">
-                Sube <strong>un solo ZIP</strong> (20, 50 o 100 trabajadores da igual). Dentro, <strong>un PDF por persona</strong>.
-                Si el PDF lleva el nombre o DNI del empleado, lo repartimos solos.
+              <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 text-sm text-blue-900 dark:text-blue-100 space-y-2">
+                <p>
+                  <strong>Qué subir:</strong> un solo <strong>ZIP</strong> con <strong>un PDF (o imagen) por trabajador</strong>.
+                  No hace falta un Excel de nóminas.
+                </p>
+                <p className="text-xs text-blue-800/90 dark:text-blue-200/90">
+                  <strong>Cómo nombrar:</strong> que el archivo lleve el nombre o el DNI
+                  (ej. <code className="rounded bg-white/60 dark:bg-black/30 px-1">nomina_ana_lopez_2026_05.pdf</code>).
+                  Así se asigna solo.
+                </p>
+                <p className="text-xs text-blue-800/90 dark:text-blue-200/90">
+                  <strong>CSV opcional (no Excel):</strong> si el nombre no basta, mete dentro del ZIP un
+                  <code className="rounded bg-white/60 dark:bg-black/30 px-1">.csv</code> con columnas
+                  <code className="rounded bg-white/60 dark:bg-black/30 px-1">archivo;nombre;dni</code>.
+                  Eso solo se usa cuando hace falta casar PDF ↔ trabajador.
+                </p>
               </div>
 
               <div>

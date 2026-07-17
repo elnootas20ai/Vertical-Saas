@@ -207,13 +207,24 @@ function resolvePdvIdFromRef(pdvs, ref) {
 async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
   const pdvs = await listScopedPointsOfSaleForUser(req, userId);
   let salesPointId = String(order?.salesPointId || '').trim();
+  const orderBusinessId = String(order?.business_id || order?.businessId || '').trim();
   if (salesPointId) {
     const resolved = resolvePdvIdFromRef(pdvs, salesPointId);
     if (resolved) salesPointId = resolved;
     const pdv = pdvs.find((p) => p._id === salesPointId);
+    let business_id = orderBusinessId;
+    if (!business_id && pdv?.workCenterId) {
+      try {
+        const wc = await findWorkCenterById(req, pdv.workCenterId);
+        business_id = String(wc?.business_id || wc?.businessId || '').trim();
+      } catch {
+        business_id = '';
+      }
+    }
     return {
       salesPointId,
       salesPointName: String(order?.salesPointName || pdv?.name || '').trim(),
+      ...(business_id ? { business_id } : {}),
     };
   }
   const workerRef = String(callerAccount?.employment?.salesPointId || '').trim();
@@ -221,20 +232,44 @@ async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
     const workerPdv = resolvePdvIdFromRef(pdvs, workerRef);
     if (workerPdv) {
       const pdv = pdvs.find((p) => p._id === workerPdv);
+      let business_id = orderBusinessId;
+      if (!business_id && pdv?.workCenterId) {
+        try {
+          const wc = await findWorkCenterById(req, pdv.workCenterId);
+          business_id = String(wc?.business_id || wc?.businessId || '').trim();
+        } catch {
+          business_id = '';
+        }
+      }
       return {
         salesPointId: workerPdv,
         salesPointName: String(order?.salesPointName || pdv?.name || '').trim(),
+        ...(business_id ? { business_id } : {}),
       };
     }
   }
   const active = (pdvs || []).filter((p) => p && p.active !== false);
   if (active.length === 1) {
+    let business_id = orderBusinessId;
+    if (!business_id && active[0].workCenterId) {
+      try {
+        const wc = await findWorkCenterById(req, active[0].workCenterId);
+        business_id = String(wc?.business_id || wc?.businessId || '').trim();
+      } catch {
+        business_id = '';
+      }
+    }
     return {
       salesPointId: active[0]._id,
       salesPointName: String(order?.salesPointName || active[0].name || '').trim(),
+      ...(business_id ? { business_id } : {}),
     };
   }
-  return { salesPointId: '', salesPointName: String(order?.salesPointName || '').trim() };
+  return {
+    salesPointId: '',
+    salesPointName: String(order?.salesPointName || '').trim(),
+    ...(orderBusinessId ? { business_id: orderBusinessId } : {}),
+  };
 }
 
 function assertUserScope(req, res, userId) {

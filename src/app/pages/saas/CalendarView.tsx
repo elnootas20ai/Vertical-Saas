@@ -88,7 +88,21 @@ const EVENT_TYPE_COLOR_PRESETS: Record<EventTypeColorKey, { dot: string; bg: str
 
 type EventTypeConfig = Record<string, { enabled: boolean; label: string; color: EventTypeColorKey }>;
 
-function defaultEventTypeConfig(): EventTypeConfig {
+function isDeliveryLikeCalendar(businessType: string | null | undefined): boolean {
+  return businessType === 'delivery' || businessType === 'restaurant';
+}
+
+function defaultEventTypeConfig(businessType?: string | null): EventTypeConfig {
+  if (isDeliveryLikeCalendar(businessType)) {
+    return {
+      delivery:  { enabled: true,  label: 'Reparto',        color: 'purple' },
+      call:      { enabled: true,  label: 'Llamada',        color: 'orange' },
+      meeting:   { enabled: true,  label: 'Reunión',        color: 'indigo' },
+      visit:     { enabled: true,  label: 'Visita cliente', color: 'blue' },
+      reminder:  { enabled: true,  label: 'Recordatorio',   color: 'rose' },
+      paperwork: { enabled: false, label: 'Documentación',  color: 'amber' },
+    };
+  }
   return {
     sale:      { enabled: true, label: 'Venta',        color: 'green' },
     purchase:  { enabled: true, label: 'Compra',       color: 'cyan' },
@@ -99,6 +113,13 @@ function defaultEventTypeConfig(): EventTypeConfig {
     visit:     { enabled: true, label: 'Visita',       color: 'blue' },
     reminder:  { enabled: true, label: 'Recordatorio', color: 'rose' },
   };
+}
+
+function configurableEventTypes(businessType?: string | null): AppointmentType[] {
+  if (isDeliveryLikeCalendar(businessType)) {
+    return ['delivery', 'call', 'meeting', 'visit', 'reminder', 'paperwork'];
+  }
+  return ['sale', 'purchase', 'delivery', 'paperwork', 'call', 'meeting', 'visit', 'reminder'];
 }
 
 function safeParseJson<T>(raw: string | null): T | null {
@@ -165,6 +186,17 @@ const EVENT_TEXT: Record<string, string> = {
   visit:       'Visita',
   workshop:    'OT Taller',
 };
+
+/** Tipos fijos + configurables que salen en la leyenda lateral. */
+function calendarLegendTypes(businessType?: string | null): string[] {
+  if (isDeliveryLikeCalendar(businessType)) {
+    return ['appointment', 'delivery', 'followup', 'call', 'meeting', 'visit', 'reminder'];
+  }
+  return [
+    'appointment', 'test_drive', 'followup', 'delivery', 'sale', 'purchase',
+    'call', 'meeting', 'reminder', 'paperwork', 'visit', 'workshop',
+  ];
+}
 
 const EVENT_ICONS: Record<string, React.ReactNode> = {
   appointment: <User className="w-4 h-4" />,
@@ -271,19 +303,25 @@ export function CalendarView() {
 
   const userId = authUser?.user_id || user?.id || '';
   const businessType = currentBusiness?.businessType || null;
+  const deliveryCalendar = isDeliveryLikeCalendar(businessType);
 
   const eventTypeStorageKey = useMemo(
-    () => (userId ? `calendar_event_types_v1:${userId}` : 'calendar_event_types_v1:anon'),
-    [userId],
+    () => {
+      const bt = businessType || 'default';
+      return userId
+        ? `calendar_event_types_v2:${userId}:${bt}`
+        : `calendar_event_types_v2:anon:${bt}`;
+    },
+    [userId, businessType],
   );
 
-  const [eventTypeConfig, setEventTypeConfig] = useState<EventTypeConfig>(() => defaultEventTypeConfig());
+  const [eventTypeConfig, setEventTypeConfig] = useState<EventTypeConfig>(() => defaultEventTypeConfig(businessType));
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const saved = safeParseJson<EventTypeConfig>(window.localStorage.getItem(eventTypeStorageKey));
-    setEventTypeConfig({ ...defaultEventTypeConfig(), ...(saved || {}) });
-  }, [eventTypeStorageKey]);
+    setEventTypeConfig({ ...defaultEventTypeConfig(businessType), ...(saved || {}) });
+  }, [eventTypeStorageKey, businessType]);
 
   const persistEventTypeConfig = useCallback((next: EventTypeConfig) => {
     setEventTypeConfig(next);
@@ -292,8 +330,10 @@ export function CalendarView() {
 
   const getTypeLabel = useCallback((tpe: AppointmentType) => {
     const cfg = eventTypeConfig[String(tpe)];
-    return cfg?.label || APPOINTMENT_TYPE_LABELS[tpe] || String(tpe);
-  }, [eventTypeConfig]);
+    if (cfg?.label) return cfg.label;
+    if (deliveryCalendar && tpe === 'delivery') return 'Reparto';
+    return APPOINTMENT_TYPE_LABELS[tpe] || String(tpe);
+  }, [eventTypeConfig, deliveryCalendar]);
 
   const getTypeColors = useCallback((tpe: AppointmentType) => {
     const cfg = eventTypeConfig[String(tpe)];
@@ -307,11 +347,20 @@ export function CalendarView() {
   }, [eventTypeConfig]);
 
   const enabledCustomEventTypes = useMemo(() => {
-    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    const merged = { ...defaultEventTypeConfig(businessType), ...eventTypeConfig };
     return Object.entries(merged)
       .filter(([, v]) => v?.enabled)
       .map(([k]) => k);
-  }, [eventTypeConfig]);
+  }, [eventTypeConfig, businessType]);
+
+  const legendFilterTypes = useMemo(() => calendarLegendTypes(businessType), [businessType]);
+
+  useEffect(() => {
+    if (filterType === 'all') return;
+    if (!legendFilterTypes.includes(filterType)) {
+      setFilterType('all');
+    }
+  }, [filterType, legendFilterTypes]);
 
   const maxSalesPointsByPlan = useMemo(() => {
     const planId = authUser?.subscription?.selectedPlanId || 'basic';
@@ -334,14 +383,17 @@ export function CalendarView() {
   }, [userId]);
 
   const loadWorkOrders = useCallback(async () => {
-    if (!userId) return;
+    if (!userId || isDeliveryLikeCalendar(businessType)) {
+      setWorkOrders([]);
+      return;
+    }
     try {
       const orders = await listWorkOrdersRequest(userId, workshopScope);
       setWorkOrders(orders.filter(wo => wo.status !== 'cancelled' && wo.status !== 'invoiced'));
     } catch {
       // silent
     }
-  }, [userId, workshopScope]);
+  }, [userId, workshopScope, businessType]);
 
   useEffect(() => { void loadAppointments(); void loadWorkOrders(); }, [loadAppointments, loadWorkOrders]);
 
@@ -368,7 +420,7 @@ export function CalendarView() {
         : a.appointmentType === 'test_drive' ? 'test_drive' : 'appointment';
 
       // En verticales como delivery no queremos mezclar "Venta/Compra" (compraventa).
-      if (businessType === 'delivery' && (evType === 'sale' || evType === 'purchase')) return;
+      if (deliveryCalendar && (evType === 'sale' || evType === 'purchase' || evType === 'test_drive' || evType === 'workshop')) return;
 
       const color = (() => {
         if (evType === 'appointment' || evType === 'test_drive' || evType === 'followup' || evType === 'workshop') {
@@ -436,7 +488,8 @@ export function CalendarView() {
     }
 
     // Órdenes de trabajo del taller (por fecha estimada de entrega)
-    workOrders
+    if (!deliveryCalendar) {
+      workOrders
       .filter((wo) => wo.estimatedCompletion)
       .forEach((wo) => {
         result.push({
@@ -451,26 +504,29 @@ export function CalendarView() {
           assignedName: wo.responsible,
         });
       });
+    }
 
     // OTs recién creadas (entrada del vehículo = createdAt)
-    workOrders
-      .filter((wo) => wo.status === 'pending' || wo.status === 'in_progress')
-      .forEach((wo) => {
-        result.push({
-          id: `wo-entry-${wo._id}`,
-          type: 'workshop',
-          title: `🔧 Entrada: ${wo.vehicleBrand} ${wo.vehicleModel}`,
-          subtitle: `${wo.woNumber} · ${wo.clientName || ''} · ${wo.vehiclePlate}`,
-          date: new Date(wo.createdAt),
-          color: EVENT_COLORS.workshop,
-          route: `/saas/workshop/${wo._id}`,
-          assignedTo: wo.responsible,
-          assignedName: wo.responsible,
+    if (!deliveryCalendar) {
+      workOrders
+        .filter((wo) => wo.status === 'pending' || wo.status === 'in_progress')
+        .forEach((wo) => {
+          result.push({
+            id: `wo-entry-${wo._id}`,
+            type: 'workshop',
+            title: `Entrada: ${wo.vehicleBrand} ${wo.vehicleModel}`,
+            subtitle: `${wo.woNumber} · ${wo.clientName || ''} · ${wo.vehiclePlate}`,
+            date: new Date(wo.createdAt),
+            color: EVENT_COLORS.workshop,
+            route: `/saas/workshop/${wo._id}`,
+            assignedTo: wo.responsible,
+            assignedName: wo.responsible,
+          });
         });
-      });
+    }
 
     return result;
-  }, [appointments, leads, sales, vehicles, workOrders, businessType, getTypeLabel, getTypeColors]);
+  }, [appointments, leads, sales, vehicles, workOrders, businessType, deliveryCalendar, getTypeLabel, getTypeColors]);
 
   const filteredEvents = useMemo(() => {
     let evs = events;
@@ -845,6 +901,7 @@ export function CalendarView() {
                 <User className="w-4 h-4" />
                 Nueva cita con cliente
               </button>
+              {!deliveryCalendar && (
               <button
                 onClick={openBookingConfig}
                 className="w-full flex items-center gap-2 px-3 py-2.5 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium transition-colors"
@@ -852,6 +909,7 @@ export function CalendarView() {
                 <Link className="w-4 h-4" />
                 Enlace de reserva
               </button>
+              )}
             </div>
           </div>
 
@@ -872,20 +930,21 @@ export function CalendarView() {
               </button>
             </div>
             <div className="space-y-1.5">
-              {(['appointment', 'test_drive', 'followup', 'delivery', 'sale', 'purchase', 'call', 'meeting', 'reminder', 'paperwork', 'visit', 'workshop'] as const)
+              {legendFilterTypes
                 .filter((ft) => {
-                  if (ft === 'appointment' || ft === 'test_drive' || ft === 'followup' || ft === 'workshop') return true;
+                  if (ft === 'appointment' || ft === 'followup') return true;
+                  if (!deliveryCalendar && (ft === 'test_drive' || ft === 'workshop')) return true;
                   return enabledCustomEventTypes.includes(String(ft));
                 })
                 .map((ft) => {
                   const c = getTypeColors(ft as AppointmentType);
                   const label = (ft === 'appointment' || ft === 'test_drive' || ft === 'followup' || ft === 'workshop')
-                    ? EVENT_TEXT[ft]
+                    ? (deliveryCalendar && ft === 'appointment' ? 'Cita' : EVENT_TEXT[ft])
                     : getTypeLabel(ft as AppointmentType);
                   return (
                 <button
                   key={ft}
-                  onClick={() => setFilterType(filterType === ft ? 'all' : ft)}
+                  onClick={() => setFilterType(filterType === ft ? 'all' : ft as typeof filterType)}
                   className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-xl transition-colors ${
                     filterType === ft ? `${c.bg} ${c.text}` : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
                   }`}
@@ -1008,6 +1067,7 @@ export function CalendarView() {
       {showNewEventModal && (
         <NewEventModal
           userId={userId}
+          businessType={businessType}
           teamMembers={teamMembers}
           eventTypeConfig={eventTypeConfig}
           onClose={() => setShowNewEventModal(false)}
@@ -1021,6 +1081,7 @@ export function CalendarView() {
       {/* ─── Modal Tipos de evento ───────────────────────────────────────────── */}
       {showEventTypesSettings && (
         <EventTypesSettingsModal
+          businessType={businessType}
           config={eventTypeConfig}
           onChange={persistEventTypeConfig}
           onClose={() => setShowEventTypesSettings(false)}
@@ -1072,19 +1133,22 @@ export function CalendarView() {
 
 function NewEventModal({
   userId,
+  businessType,
   teamMembers,
   eventTypeConfig,
   onClose,
   onCreated,
 }: {
   userId: string;
+  businessType: string | null;
   teamMembers: TeamMember[];
   eventTypeConfig: EventTypeConfig;
   onClose: () => void;
   onCreated: (appt: Appointment) => void;
 }) {
+  const deliveryCalendar = isDeliveryLikeCalendar(businessType);
   const [form, setForm] = useState({
-    eventType: 'sale' as AppointmentType,
+    eventType: (deliveryCalendar ? 'delivery' : 'sale') as AppointmentType,
     title: '',
     date: '',
     time: '',
@@ -1095,19 +1159,19 @@ function NewEventModal({
   const [error, setError] = useState('');
 
   const enabledTypes = useMemo(() => {
-    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    const merged = { ...defaultEventTypeConfig(businessType), ...eventTypeConfig };
     return Object.entries(merged)
       .filter(([, v]) => v?.enabled)
       .map(([k]) => k);
-  }, [eventTypeConfig]);
+  }, [eventTypeConfig, businessType]);
 
   const getLabel = useCallback((tpe: AppointmentType) => {
-    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    const merged = { ...defaultEventTypeConfig(businessType), ...eventTypeConfig };
     return merged[String(tpe)]?.label || APPOINTMENT_TYPE_LABELS[tpe] || String(tpe);
-  }, [eventTypeConfig]);
+  }, [eventTypeConfig, businessType]);
 
   const getColors = useCallback((tpe: AppointmentType) => {
-    const merged = { ...defaultEventTypeConfig(), ...eventTypeConfig };
+    const merged = { ...defaultEventTypeConfig(businessType), ...eventTypeConfig };
     const cfg = merged[String(tpe)];
     const preset = cfg?.color ? EVENT_TYPE_COLOR_PRESETS[cfg.color] : null;
     if (preset) return preset;
@@ -1116,29 +1180,48 @@ function NewEventModal({
       bg: EVENT_BG[tpe as keyof typeof EVENT_BG] || 'bg-gray-50',
       text: EVENT_TEXT_COLOR[tpe as keyof typeof EVENT_TEXT_COLOR] || 'text-gray-700',
     };
-  }, [eventTypeConfig]);
+  }, [eventTypeConfig, businessType]);
 
   const categoryGroups = useMemo(() => {
-    const raw = [
-      {
-        label: 'Operaciones',
-        items: [
-          { type: 'sale' as AppointmentType,      icon: Handshake },
-          { type: 'purchase' as AppointmentType,  icon: ShoppingCart },
-          { type: 'delivery' as AppointmentType,  icon: Truck },
-          { type: 'paperwork' as AppointmentType, icon: FileSignature },
-        ],
-      },
-      {
-        label: 'Comunicación',
-        items: [
-          { type: 'call' as AppointmentType,     icon: PhoneCall },
-          { type: 'meeting' as AppointmentType,  icon: Users },
-          { type: 'visit' as AppointmentType,    icon: User },
-          { type: 'reminder' as AppointmentType, icon: BellRing },
-        ],
-      },
-    ];
+    const raw = deliveryCalendar
+      ? [
+          {
+            label: 'Operación',
+            items: [
+              { type: 'delivery' as AppointmentType, icon: Truck },
+              { type: 'paperwork' as AppointmentType, icon: FileSignature },
+            ],
+          },
+          {
+            label: 'Comunicación',
+            items: [
+              { type: 'call' as AppointmentType, icon: PhoneCall },
+              { type: 'meeting' as AppointmentType, icon: Users },
+              { type: 'visit' as AppointmentType, icon: User },
+              { type: 'reminder' as AppointmentType, icon: BellRing },
+            ],
+          },
+        ]
+      : [
+          {
+            label: 'Operaciones',
+            items: [
+              { type: 'sale' as AppointmentType, icon: Handshake },
+              { type: 'purchase' as AppointmentType, icon: ShoppingCart },
+              { type: 'delivery' as AppointmentType, icon: Truck },
+              { type: 'paperwork' as AppointmentType, icon: FileSignature },
+            ],
+          },
+          {
+            label: 'Comunicación',
+            items: [
+              { type: 'call' as AppointmentType, icon: PhoneCall },
+              { type: 'meeting' as AppointmentType, icon: Users },
+              { type: 'visit' as AppointmentType, icon: User },
+              { type: 'reminder' as AppointmentType, icon: BellRing },
+            ],
+          },
+        ];
 
     return raw
       .map((g) => ({
@@ -1152,15 +1235,15 @@ function NewEventModal({
           })),
       }))
       .filter((g) => g.items.length > 0);
-  }, [enabledTypes, getColors, getLabel]);
+  }, [enabledTypes, getColors, getLabel, deliveryCalendar]);
 
   useEffect(() => {
     if (!enabledTypes.includes(String(form.eventType))) {
-      const fallback = (enabledTypes[0] || 'sale') as AppointmentType;
+      const fallback = (enabledTypes[0] || (deliveryCalendar ? 'delivery' : 'sale')) as AppointmentType;
       setForm((f) => ({ ...f, eventType: fallback }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabledTypes.join('|')]);
+  }, [enabledTypes.join('|'), deliveryCalendar]);
 
   // Close on Escape
   useEffect(() => {
@@ -1984,23 +2067,28 @@ function BookingConfigModal({
 }
 
 function EventTypesSettingsModal({
+  businessType,
   config,
   onChange,
   onClose,
 }: {
+  businessType: string | null;
   config: EventTypeConfig;
   onChange: (next: EventTypeConfig) => void;
   onClose: () => void;
 }) {
-  const merged = useMemo(() => ({ ...defaultEventTypeConfig(), ...config }), [config]);
+  const merged = useMemo(
+    () => ({ ...defaultEventTypeConfig(businessType), ...config }),
+    [config, businessType],
+  );
 
-  const orderedTypes: AppointmentType[] = useMemo(() => ([
-    'sale', 'purchase', 'delivery', 'paperwork',
-    'call', 'meeting', 'visit', 'reminder',
-  ] as AppointmentType[]), []);
+  const orderedTypes: AppointmentType[] = useMemo(
+    () => configurableEventTypes(businessType),
+    [businessType],
+  );
 
   const updateOne = (type: AppointmentType, patch: Partial<EventTypeConfig[string]>) => {
-    const current = merged[String(type)];
+    const current = merged[String(type)] || defaultEventTypeConfig(businessType)[String(type)];
     const next: EventTypeConfig = { ...merged, [String(type)]: { ...current, ...patch } as any };
     onChange(next);
   };
@@ -2013,7 +2101,11 @@ function EventTypesSettingsModal({
           <div className="sticky top-0 bg-gray-900 px-6 py-5 rounded-t-3xl sm:rounded-t-3xl flex items-center justify-between z-10">
             <div>
               <h2 className="text-lg font-bold text-white">Tipos de evento</h2>
-              <p className="text-gray-400 dark:text-gray-500 text-sm mt-0.5">Activa, renombra y cambia colores</p>
+              <p className="text-gray-400 dark:text-gray-500 text-sm mt-0.5">
+                {isDeliveryLikeCalendar(businessType)
+                  ? 'Tipos pensados para delivery: reparto, llamadas y seguimiento'
+                  : 'Activa, renombra y cambia colores'}
+              </p>
             </div>
             <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-xl transition-colors">
               <X className="w-5 h-5 text-white" />
@@ -2022,7 +2114,8 @@ function EventTypesSettingsModal({
 
           <div className="p-6 space-y-3">
             {orderedTypes.map((tpe) => {
-              const item = merged[String(tpe)];
+              const item = merged[String(tpe)] || defaultEventTypeConfig(businessType)[String(tpe)];
+              if (!item) return null;
               const preset = EVENT_TYPE_COLOR_PRESETS[item.color];
               return (
                 <div key={String(tpe)} className="border border-gray-200 dark:border-gray-700 rounded-2xl p-4">

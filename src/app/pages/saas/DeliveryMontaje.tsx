@@ -497,8 +497,28 @@ export function DeliveryMontaje() {
   };
 
   const handlePrintTicket = (order: DeliveryOrder) => {
-    toast.success(`Imprimiendo ticket para pedido ${order.orderNumber}...`);
-    toggleChecklistItem(order._id, 'ticket');
+    if (!currentBusiness) {
+      toast.error('No hay negocio activo para imprimir el ticket');
+      return;
+    }
+    void (async () => {
+      try {
+        const { printDeliveryTicket } = await import('../../lib/deliveryTicketPrint');
+        const { businessTicketInfoFrom, buildOrderTicketOptions } = await import(
+          '../../lib/deliveryTicketHelpers'
+        );
+        await printDeliveryTicket(
+          buildOrderTicketOptions(order, businessTicketInfoFrom(currentBusiness), {
+            salesPointName: order.salesPointName,
+            cashierName: user?.fullName,
+            variant: 'customer',
+          }),
+        );
+        toggleChecklistItem(order._id, 'ticket');
+      } catch {
+        toast.error(`No se pudo imprimir el ticket del pedido ${order.orderNumber}`);
+      }
+    })();
   };
 
   // ─── KPIs ────────────────────────────────────────────────────────────────

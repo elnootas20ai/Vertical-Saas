@@ -44,6 +44,7 @@ import {
 import { toast } from 'sonner';
 import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
 import { PayrollBulkUploadModal } from '../../components/saas/PayrollBulkUploadModal';
+import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
 
 type DocFilter = 'all' | PayrollDocumentType;
 
@@ -522,6 +523,8 @@ export function PayrollPage() {
   return (
     <Layout title={t('nav.payroll')}>
       <div className="max-w-7xl mx-auto space-y-6">
+        <HrGestorChecklist mode="hr" />
+
         {/* Stats cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">

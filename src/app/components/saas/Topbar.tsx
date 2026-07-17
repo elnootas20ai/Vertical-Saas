@@ -9,6 +9,7 @@ import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { pointOfSaleDisplayLabel } from '../../lib/deliveryApi';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
+import { useDeliveryAlertsReviewPrompt } from '../../hooks/useDeliveryAlertsReviewPrompt';
 import { SAAS__NotificationsDrawer } from '../design-system/SAAS__NotificationsDrawer';
 import { SAAS__ProfileModal } from '../design-system/SAAS__ProfileModal';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
@@ -57,6 +58,7 @@ function TopbarInner({
     !isWorker ? alertCenterBusinessId : undefined,
     { pollMs: 60_000 },
   );
+  useDeliveryAlertsReviewPrompt({ sendNotif: !isWorker });
   const { setTheme, resolvedTheme } = useTheme();
   const { i18n, t } = useTranslation();
   const [mounted, setMounted] = useState(false);

@@ -2,6 +2,11 @@ import type { VertialPrinterConfig } from './printerConfig';
 import { isVertialNativeApp } from './isNativeApp';
 import { withNativeCallTimeout } from './nativeCallTimeout';
 import { getEscposPlugin, getNativeLocalNetworkInfo } from './escposPlugin';
+import {
+  assertNativePrintTarget,
+  enqueueNativePrint,
+  sanitizePrinterPort,
+} from './nativePrintGuard';
 
 /** Puertos habituales de impresoras térmicas ESC/POS por red. */
 export const NATIVE_RAW_PRINT_PORTS = [9100, 9101, 9102] as const;
@@ -84,7 +89,7 @@ async function escposProxy() {
   return getEscposPlugin();
 }
 
-/** Respaldo si ESCPOSProxy falla: VertialIosBridge (mismo TCP 9100). */
+/** Preferido en iPad: VertialIosBridge (TCP raw ESC/POS). */
 async function printViaVertialBridge(
   host: string,
   port: number,
@@ -94,13 +99,25 @@ async function printViaVertialBridge(
   try {
     const { registerPlugin } = await import('@capacitor/core');
     const bridge = registerPlugin<{
-      printEscPos: (opts: { ip: string; port: number; message: string }) => Promise<{ status?: string }>;
+      printEscPos: (opts: { ip: string; port: number; message: string }) => Promise<{
+        status?: string;
+        ok?: boolean;
+        error?: string;
+      }>;
     }>('VertialIosBridge');
-    await withNativeTimeout(
+    const result = await withNativeTimeout(
       bridge.printEscPos({ ip: host, port, message: bytesToBase64(bytes) }),
       timeoutMs,
       'Impresión',
     );
+    if (result && typeof result === 'object') {
+      if (result.ok === false || /fail|error/i.test(String(result.status || ''))) {
+        return {
+          ok: false,
+          error: result.error || `La impresora no aceptó el ticket (${host}:${port})`,
+        };
+      }
+    }
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'No se pudo imprimir';
@@ -310,34 +327,38 @@ export async function sendNativeEscpos(
   if (!isVertialNativeApp()) {
     return { ok: false, error: 'Impresión nativa solo disponible en la app Vertial' };
   }
-  const host = String(config.networkHost || '').trim();
-  if (!host) {
-    return { ok: false, error: 'Indica la IP de la impresora' };
-  }
-  const port = Number(config.networkPort || 9100) || 9100;
+
+  const target = assertNativePrintTarget(config.networkHost, config.networkPort, bytes);
+  if (!target.ok) return target;
+
+  const { host, port } = target;
   const timeoutMs = Math.max(1500, Number(options?.timeoutMs || NATIVE_PRINT_TIMEOUT_MS));
   const allowRetry = options?.retry !== false;
 
-  const first = await sendEscposToHost(host, port, bytes, timeoutMs);
-  if (first.ok) return first;
-  if (!allowRetry) {
+  return enqueueNativePrint(async () => {
+    const first = await sendEscposToHost(host, port, bytes, timeoutMs);
+    if (first.ok) return first;
+    if (!allowRetry) {
+      return {
+        ok: false,
+        error:
+          first.error ||
+          `La impresora ${host}:${port} no responde. Comprueba que está encendida y en la misma WiFi.`,
+      };
+    }
+
+    await wait(NATIVE_PRINT_RETRY_DELAY_MS);
+    const second = await sendEscposToHost(host, port, bytes, NATIVE_PRINT_RETRY_TIMEOUT_MS);
+    if (second.ok) return second;
+
     return {
       ok: false,
-      error: first.error || `La impresora ${host} no responde. Comprueba que está encendida y en la misma WiFi.`,
+      error:
+        first.error ||
+        second.error ||
+        `La impresora ${host}:${port} no responde. Comprueba WiFi, «Red local» en Ajustes → Vertial, e IP/puerto.`,
     };
-  }
-
-  await wait(NATIVE_PRINT_RETRY_DELAY_MS);
-  const second = await sendEscposToHost(host, port, bytes, NATIVE_PRINT_RETRY_TIMEOUT_MS);
-  if (second.ok) return second;
-
-  return {
-    ok: false,
-    error:
-      first.error ||
-      second.error ||
-      `La impresora ${host} no responde. Comprueba que está encendida, en la misma WiFi, y que Vertial tiene permiso de «red local» en Ajustes.`,
-  };
+  });
 }
 
 /** Imprime un ticket corto de identificación en una impresora detectada (sin guardarla aún). */
@@ -351,13 +372,20 @@ export async function identifyNativePrinter(
   }
   const { encodeIdentifyTicketEscpos } = await import('./escposEncode');
   const bytes = encodeIdentifyTicketEscpos(host, port, paperWidthMm);
-  return sendEscposToHost(String(host || '').trim(), Number(port) || 9100, bytes, NATIVE_PRINT_TIMEOUT_MS);
+  const target = assertNativePrintTarget(host, port, bytes);
+  if (!target.ok) return target;
+  return enqueueNativePrint(() =>
+    sendEscposToHost(target.host, target.port, bytes, NATIVE_PRINT_TIMEOUT_MS),
+  );
 }
 
 export async function pingNativePrinter(
   config: VertialPrinterConfig,
 ): Promise<{ ok: boolean; rtt?: number }> {
-  return pingNativeHost(String(config.networkHost || '').trim(), Number(config.networkPort || 9100) || 9100);
+  return pingNativeHost(
+    String(config.networkHost || '').trim(),
+    sanitizePrinterPort(config.networkPort),
+  );
 }
 
 export async function pingNativeHost(
@@ -367,7 +395,7 @@ export async function pingNativeHost(
   if (!isVertialNativeApp()) return { ok: false };
   const ip = String(host || '').trim();
   if (!ip) return { ok: false };
-  const safePort = Number(port) || 9100;
+  const safePort = sanitizePrinterPort(port);
   const viaBridge = await pingViaVertialBridge(ip, safePort);
   if (viaBridge.ok) return viaBridge;
   try {

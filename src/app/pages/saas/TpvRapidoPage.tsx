@@ -27,7 +27,7 @@ import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
-import { businessTicketInfoFrom } from '../../lib/deliveryTicketHelpers';
+import { businessTicketInfoFrom, formatTicketCustomerAddress, formatTicketCustomerPhone } from '../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../components/delivery/OrderTicketButtons';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
 import { useTpvCatalog } from '../../hooks/useTpvCatalog';
@@ -843,6 +843,7 @@ export function TpvRapidoOrderFlow({
       matchByName: true,
       minQueryLength: 1,
       debounceMs: 250,
+      resultLimit: 40,
     });
 
   // Step 2 - Delivery
@@ -2013,18 +2014,23 @@ export function TpvRapidoOrderFlow({
         const orderData: Partial<DeliveryOrder> = {
           clientId: saleClient.id,
           customerName: saleClient.name,
-          customerPhone: `${saleClient.phonePrefix || phonePrefix} ${saleClient.phone}`,
+          customerPhone: formatTicketCustomerPhone(
+            saleClient.phone,
+            saleClient.phonePrefix || phonePrefix,
+          ),
           customerEmail: saleClient.email || '',
-          customerAddress: [selectedAddr?.street || saleClient.address || '', selectedAddr?.city || saleClient.city || '']
-            .map((s) => String(s || '').trim())
-            .filter(Boolean)
-            .join(', ') || '',
+          customerAddress: formatTicketCustomerAddress({
+            street: selectedAddr?.street || saleClient.address,
+            city: selectedAddr?.city || saleClient.city,
+            postalCode: selectedAddr?.postalCode || saleClient.postalCode,
+          }),
           deliveryType,
           channel: 'tpv',
           status: submitStatus,
           ...(tabletMode ? { assemblyStartedAt: now, kitchenCompletedAt: now } : {}),
           salesPointId: pdvId,
           salesPointName: pdvName,
+          business_id: currentBusiness?.business_id || '',
           takenBy: takerId || user?.user_id || user?.id || '',
           takenByName: takerName,
           items,
@@ -2285,12 +2291,21 @@ export function TpvRapidoOrderFlow({
       const orderData: Partial<DeliveryOrder> = {
         clientId: saleClient?.id || '',
         customerName: saleClient?.name || tableNote || 'Sala',
-        customerPhone: saleClient?.phone || '',
+        customerPhone: formatTicketCustomerPhone(
+          saleClient?.phone,
+          saleClient?.phonePrefix || phonePrefix,
+        ),
+        customerAddress: formatTicketCustomerAddress({
+          street: saleClient?.address,
+          city: saleClient?.city,
+          postalCode: saleClient?.postalCode,
+        }),
         channel: 'tpv',
         deliveryType: 'recogida',
         status: 'entregado',
         salesPointId: pdvId,
         salesPointName: pdvName,
+        business_id: currentBusiness?.business_id || '',
         takenBy: effectiveOrderTakerId || userId,
         takenByName: takerName,
         items: [{

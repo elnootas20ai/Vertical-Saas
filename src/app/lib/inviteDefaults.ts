@@ -15,6 +15,8 @@ export const INVITE_LANDING_PAGE_DEFS = [
   { id: '/saas/delivery-kitchen', key: 'delivery-kitchen' },
   { id: '/saas/delivery-ops', key: 'delivery-ops' },
   { id: '/saas/cocina', key: 'cocina' },
+  { id: '/saas/payroll', key: 'payroll' },
+  { id: '/saas/team', key: 'team' },
 ] as const;
 
 export type InviteLandingPageId = (typeof INVITE_LANDING_PAGE_DEFS)[number]['id'];
@@ -24,6 +26,8 @@ const DELIVERY_LANDING_IDS = new Set<InviteLandingPageId>([
   '/saas/delivery-reparto',
   '/saas/delivery-kitchen',
   '/saas/delivery-ops',
+  '/saas/payroll',
+  '/saas/team',
 ]);
 
 const RETAIL_LANDING_IDS = new Set<InviteLandingPageId>([
@@ -34,18 +38,24 @@ const RETAIL_LANDING_IDS = new Set<InviteLandingPageId>([
   '/saas/workshop',
   '/saas/documents',
   '/saas/calendar',
+  '/saas/payroll',
+  '/saas/team',
 ]);
 
 const RESTAURANT_LANDING_IDS = new Set<InviteLandingPageId>([
   WORKER_DEFAULT_LANDING_PATH,
   '/saas/cocina',
   '/saas/calendar',
+  '/saas/payroll',
+  '/saas/team',
 ]);
 
 const GENERIC_LANDING_IDS = new Set<InviteLandingPageId>([
   WORKER_DEFAULT_LANDING_PATH,
   '/saas/documents',
   '/saas/calendar',
+  '/saas/payroll',
+  '/saas/team',
 ]);
 
 /** Páginas iniciales visibles según la vertical del negocio. */
@@ -65,22 +75,26 @@ export function getInviteLandingPagesForBusiness(
   return INVITE_LANDING_PAGE_DEFS.filter((p) => GENERIC_LANDING_IDS.has(p.id));
 }
 
+function isHrManagerRole(role: string): boolean {
+  return role === 'Gestor' || role === 'Administrador' || role === 'Encargado' || role === 'Gerente' || role === 'Admin';
+}
+
 /** Landing sugerida al elegir función (delivery y resto). */
 export function getDefaultInviteLandingPage(
   businessType: string | null | undefined,
   roleId: string | null | undefined,
 ): InviteLandingPageId {
   const role = String(roleId || '').trim();
+  if (isHrManagerRole(role)) return '/saas/payroll';
+
   if (isDeliveryBusinessType(businessType)) {
     if (role === 'Reparto') return '/saas/delivery-reparto';
     if (role === 'Cocina') return '/saas/delivery-kitchen';
-    if (role === 'Encargado' || role === 'Administrador') return '/saas/delivery-ops';
     return WORKER_DEFAULT_LANDING_PATH;
   }
   if (isRestaurantBusinessType(businessType)) {
     if (role === 'Cocina') return '/saas/cocina';
     return WORKER_DEFAULT_LANDING_PATH;
   }
-  if (role === 'Administrador' || role === 'Encargado') return WORKER_DEFAULT_LANDING_PATH;
   return WORKER_DEFAULT_LANDING_PATH;
 }

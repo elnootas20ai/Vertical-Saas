@@ -105,12 +105,15 @@ import {
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { fetchTeamAlerts, type TeamAlert } from '../../lib/teamAlertsApi';
+import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
+import { canManagePayroll } from '../../lib/teamManagerAccess';
 
 type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'staff-consumptions' | 'payroll';
 type MemberStatus = 'active' | 'pending' | 'inactive';
 
 const RESTAURANT_FUNCTION_ROLES: RoleDefinition[] = [
   { id: 'Administrador', description: 'Responsable del negocio o del local.', permissions: [], users: 0 },
+  { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
   { id: 'Encargado', description: 'Coordina la operativa diaria.', permissions: [], users: 0 },
   { id: 'Mostrador / Atención', description: 'Atiende clientes, mostrador y sala.', permissions: [], users: 0 },
   { id: 'Cocina', description: 'Prepara comandas y cocina.', permissions: [], users: 0 },
@@ -118,6 +121,7 @@ const RESTAURANT_FUNCTION_ROLES: RoleDefinition[] = [
 
 const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
   { id: 'Administrador', description: 'Responsable del negocio o del local.', permissions: [], users: 0 },
+  { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
   { id: 'Encargado', description: 'Coordina la operativa diaria.', permissions: [], users: 0 },
   { id: 'Mostrador / Atención', description: 'Atiende clientes, mostrador, sala o food truck.', permissions: [], users: 0 },
   { id: 'Cocina', description: 'Prepara pedidos y cocina.', permissions: [], users: 0 },
@@ -126,6 +130,7 @@ const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
 
 const EVENTS_FUNCTION_ROLES: RoleDefinition[] = [
   { id: 'Administrador', description: 'Gestiona equipo, permisos y operación del negocio.', permissions: [], users: 0 },
+  { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
   { id: 'Encargado', description: 'Coordina contrataciones, catering y logística.', permissions: [], users: 0 },
   { id: 'Comercial', description: 'Presupuestos, clientes y cierre de contratos.', permissions: [], users: 0 },
   { id: 'Operaciones', description: 'Planificación del día del evento e invitados.', permissions: [], users: 0 },
@@ -787,6 +792,14 @@ const ROLE_TOKEN: Record<
     accentBorder: 'border-l-slate-700',
     headerBg: 'bg-gradient-to-br from-slate-50 to-slate-100',
     avatarBg: 'bg-slate-800',
+  },
+  Gestor: {
+    badgeBg: 'bg-violet-50',
+    badgeText: 'text-violet-700',
+    dot: 'bg-violet-500',
+    accentBorder: 'border-l-violet-500',
+    headerBg: 'bg-gradient-to-br from-violet-50 to-violet-100/70',
+    avatarBg: 'bg-violet-600',
   },
   Encargado: {
     badgeBg: 'bg-blue-50',
@@ -1761,6 +1774,7 @@ function MemberDrawer({
 
               <div>
                 <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Información laboral</p>
+                <HrGestorChecklist mode="hr" compact className="mb-4" />
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Departamento</label>
@@ -3051,12 +3065,13 @@ export function Team() {
   };
 
   const handleInvite = async (payload: InviteUserPayload) => {
-    const { name, email, role, landingPage, phone, position, contractType, grossMonthlySalary, payPeriodsPerYear, workCenterId, businessId } = payload;
+    const { name, email, role, landingPage, phone, position, contractType, grossMonthlySalary, payPeriodsPerYear, workCenterId, scheduleTemplateId, businessId } = payload;
     const permissions = getInvitePermissionsForUser(role, roles);
     const result = await inviteUser({
       name, email, role, phone, permissions,
       businessId: businessId || currentBusiness?.business_id,
       landingPage, position, contractType, grossMonthlySalary, payPeriodsPerYear, workCenterId,
+      scheduleTemplateId,
     });
     if (!result.success) {
       throw new Error(result.error || 'No se pudo invitar al usuario.');
@@ -3673,7 +3688,7 @@ export function Team() {
           <StaffExpensesTab
             members={orderedMembers}
             currentUser={user}
-            isAdmin={user.role === 'Admin' || user.role === 'Superadmin'}
+            isAdmin={canManagePayroll(user, businesses)}
           />
         )}
 
@@ -3688,7 +3703,7 @@ export function Team() {
           <PayrollTab
             members={orderedMembers}
             currentUser={user}
-            isAdmin={user.role === 'Admin' || user.role === 'Superadmin'}
+            isAdmin={canManagePayroll(user, businesses)}
           />
         )}
       </div>

@@ -10,13 +10,21 @@ import type { DeliveryOrderItem } from './deliveryApi';
 export function orderItemCustomizationDetail(
   item: Pick<DeliveryOrderItem, 'extras' | 'ingredients'>,
 ): string[] {
-  if (Array.isArray(item.extras) && item.extras.length > 0) {
-    return item.extras.map((e) => String(e || '').trim()).filter(Boolean);
+  const lines: string[] = [];
+  if (Array.isArray(item.extras)) {
+    for (const e of item.extras) {
+      const text = String(e || '').trim();
+      if (text) lines.push(text);
+    }
   }
-  if (!Array.isArray(item.ingredients)) return [];
-  return item.ingredients
-    .filter((ing) => String(ing.quantity || '').toLowerCase() === 'sin')
-    .map((ing) => `- sin ${ing.name}`);
+  if (Array.isArray(item.ingredients)) {
+    for (const ing of item.ingredients) {
+      if (String(ing.quantity || '').toLowerCase() !== 'sin') continue;
+      const name = String(ing.name || '').trim();
+      if (name) lines.push(`- sin ${name}`);
+    }
+  }
+  return lines;
 }
 
 export type OrderItemCustomizationParts = {
@@ -94,6 +102,34 @@ export function businessTicketInfoFrom(business: BusinessLike): DeliveryTicketBu
     city: business.city,
     phone: business.phone,
   };
+}
+
+/** Teléfono legible para ticket (prefijo + número). */
+export function formatTicketCustomerPhone(
+  phone?: string | null,
+  phonePrefix?: string | null,
+): string {
+  const digits = String(phone || '').trim();
+  if (!digits) return '';
+  const prefix = String(phonePrefix || '').trim();
+  if (!prefix) return digits;
+  if (digits.startsWith('+') || digits.startsWith(prefix)) return digits;
+  return `${prefix} ${digits}`.replace(/\s+/g, ' ').trim();
+}
+
+/** Calle + CP + ciudad en una sola línea para el ticket. */
+export function formatTicketCustomerAddress(parts: {
+  street?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  fallback?: string | null;
+}): string {
+  const street = String(parts.street || '').trim();
+  const postal = String(parts.postalCode || '').trim();
+  const city = String(parts.city || '').trim();
+  const composed = [street, [postal, city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  if (composed) return composed;
+  return String(parts.fallback || '').trim();
 }
 
 export function buildOrderTicketOptions(

@@ -118,6 +118,7 @@ export const MANAGER_ROLES = new Set([
   'Gerente',
   'Administrador',
   'Encargado',
+  'Gestor',
   'Superadmin',
   'owner',
   'admin',

@@ -2,7 +2,15 @@ import { v4 as uuidv4 } from 'uuid';
 
 export type FinanceMovementDocType = 'cobro' | 'pago';
 export type FinanceMovementStatus = 'paid' | 'pending';
-export type FinanceMovementSource = 'manual' | 'invoice' | 'ocr' | 'sale' | 'tpv_session' | 'supplier_invoice' | 'rent_contract';
+export type FinanceMovementSource =
+  | 'manual'
+  | 'invoice'
+  | 'ocr'
+  | 'sale'
+  | 'tpv_session'
+  | 'delivery_order'
+  | 'supplier_invoice'
+  | 'rent_contract';
 
 export interface LinkedDocument {
   id: string;

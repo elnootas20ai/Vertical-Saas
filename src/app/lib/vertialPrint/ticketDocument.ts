@@ -85,17 +85,19 @@ export function buildTicketDocument({
     ? paymentMethodLabel || 'Cobrado'
     : (variant === 'customer' ? 'Pendiente' : '-');
 
-  const lines: TicketLine[] = (order.items || []).map((item) => {
-    const parts = orderItemCustomizationParts(item);
-    return {
-      qty: Number(item.quantity || 0),
-      name: item.name || '',
-      total: Number(item.total || 0),
-      note: parts.note || undefined,
-      added: parts.added.length > 0 ? parts.added : undefined,
-      removed: parts.removed.length > 0 ? parts.removed : undefined,
-    };
-  });
+  const lines: TicketLine[] = (order.items || [])
+    .map((item) => {
+      const parts = orderItemCustomizationParts(item);
+      return {
+        qty: Number(item.quantity || 0),
+        name: String(item.name || '').trim(),
+        total: Number(item.total || 0),
+        note: parts.note || undefined,
+        added: parts.added.length > 0 ? parts.added : undefined,
+        removed: parts.removed.length > 0 ? parts.removed : undefined,
+      };
+    })
+    .filter((line) => line.name && line.qty > 0);
 
   const shared = {
     variant,
@@ -108,8 +110,8 @@ export function buildTicketDocument({
     salesPointName: salesPointName || order.salesPointName || '',
     orderNumber: order.orderNumber || '',
     customerName: order.customerName || '-',
-    customerPhone: order.customerPhone || '',
-    customerAddress: order.customerAddress || '',
+    customerPhone: String(order.customerPhone || '').trim(),
+    customerAddress: String(order.customerAddress || '').trim(),
     deliveryTypeLabel,
     cashierName: cashierName || order.takenByName || '',
     lines,

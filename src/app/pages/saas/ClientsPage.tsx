@@ -2072,6 +2072,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       const ids: string[] = [];
       const limit = 200;
       let skip = 0;
+      // Recoger IDs primero (sin borrar a la vez) para no romper la paginación.
       while (true) {
         const { clients, meta } = await listClientsPageRequest(clientsDataUserId, {
           limit,
@@ -2089,8 +2090,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       let removed = 0;
       for (const id of ids) {
         try {
+          // Una sola borrado por API con el titular de datos (no AppContext.deleteClient:
+          // hacía doble DELETE y usaba authUser en vez de clientsDataUserId).
           await deleteClientRequest(clientsDataUserId, { id } as AppContextClient);
-          await deleteClient(id);
           removed += 1;
         } catch {
           // seguir con el resto
@@ -2107,7 +2109,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     businessScopeId,
     clientsDataUserId,
     clientsListTotal,
-    deleteClient,
     isDeliveryBusiness,
     refreshPaginatedClients,
     useSegmentMode,
@@ -4222,10 +4223,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         isOpen={crmImportMode !== null}
         onClose={() => setCrmImportMode(null)}
         initialMode={crmImportMode ?? undefined}
-        exportUserId={authUser?.user_id}
+        exportUserId={clientsDataUserId || authUser?.user_id}
         exportBusinessId={scopedClientsBusinessId}
         importBusinessId={scopedClientsBusinessId}
         includeResponsible={!isDeliveryBusiness}
+        onImportComplete={() => {
+          if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
+        }}
       />
       {showImportFromBusiness && (
         <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4">

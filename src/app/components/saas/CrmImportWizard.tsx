@@ -51,6 +51,8 @@ interface CrmImportWizardProps {
   /** businessId al crear clientes importados. */
   importBusinessId?: string;
   clientExportRows?: ClientExportRow[];
+  /** Tras importar con éxito (p. ej. refrescar listado paginado del CRM). */
+  onImportComplete?: () => void;
 }
 
 // ─── Field definitions ────────────────────────────────────────────────────────
@@ -94,6 +96,7 @@ export function CrmImportWizard({
   exportBusinessId,
   importBusinessId,
   clientExportRows = [],
+  onImportComplete,
 }: CrmImportWizardProps) {
   const { addLead, addClient, refreshClients, refreshLeads, leads: existingLeads, clientsTotalCount } = useApp();
   const { user } = useAuth();
@@ -423,8 +426,9 @@ export function CrmImportWizard({
 
         if (user?.user_id) {
           setImportProgress({ done: 0, total: clientsToCreate.length });
+          const dataOwnerId = String(exportUserId || user.user_id).trim();
           const result = await bulkCreateClientsInChunks(
-            user.user_id,
+            dataOwnerId,
             clientsToCreate,
             (done, total) => setImportProgress({ done, total }),
             importBusinessId
@@ -435,11 +439,13 @@ export function CrmImportWizard({
           failed = clientsToCreate.length - created;
           setImportProgress(null);
           await refreshClients();
+          if (created > 0) onImportComplete?.();
         } else {
           for (const c of clientsToCreate) {
             await addClient(c);
             created++;
           }
+          if (created > 0) onImportComplete?.();
         }
       }
     } catch (err) {

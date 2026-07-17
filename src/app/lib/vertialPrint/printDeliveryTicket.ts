@@ -6,7 +6,6 @@ import { resolveEffectivePrinterConfig } from './printerActiveScope';
 import { fetchBridgeHealth, fetchBridgePingPrinter, sendEscposToBridge } from './printBridgeClient';
 import { printDeliveryTicketBrowser, printTestTicketBrowser } from './printBrowser';
 import { isVertialNativeApp } from './isNativeApp';
-import { sendNativeEscpos } from './nativePrintClient';
 import {
   isNativeWifiPrinterReady,
   NATIVE_WIFI_PRINTER_SETUP_MESSAGE,
@@ -15,10 +14,7 @@ import {
 import { sendEposTestTicket, sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
 import { normalizeVertialPrinterConfig } from './printerConfigNormalize';
 import type { VertialPrinterConfig } from './printerConfig';
-import {
-  NATIVE_PRINTER_PRINT_FAILED_MESSAGE,
-  resolveNativePrinterForPrint,
-} from './nativePrinterFlow';
+import { printNativeEscposWithUi } from './printNativeEscposWithUi';
 
 export type PrintDeliveryTicketResult = {
   method: 'epos' | 'native' | 'bridge' | 'browser';
@@ -43,38 +39,24 @@ export async function printDeliveryTicket(
   options: DeliveryTicketPrintOptions,
 ): Promise<PrintDeliveryTicketResult> {
   const config = resolvePrinterConfigForOrder(options);
-  const doc = buildTicketDocument(options);
-  const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
+  let doc;
+  let escpos: Uint8Array;
+  try {
+    doc = buildTicketDocument(options);
+    escpos = encodeTicketEscpos(doc, config.paperWidthMm);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo generar el ticket';
+    toast.error(message, { duration: 10000 });
+    return { method: isVertialNativeApp() ? 'native' : 'browser', ok: false };
+  }
+  if (!escpos.byteLength) {
+    toast.error('El ticket está vacío; no hay nada que imprimir.', { duration: 8000 });
+    return { method: isVertialNativeApp() ? 'native' : 'browser', ok: false };
+  }
 
   if (isVertialNativeApp()) {
-    const prepared = resolveNativePrinterForPrint(config);
-    if (!prepared.ready) {
-      toast.error(prepared.error || NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
-      return { method: 'native', ok: false };
-    }
-    const printConfig = prepared.config;
-    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 8_000 });
-    if (result.ok) return { method: 'native', ok: true };
-    toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
-      duration: 12000,
-      action: {
-        label: 'Reintentar',
-        onClick: () => {
-          toast.loading('Reintentando impresión…', { id: 'native-print-retry' });
-          void sendNativeEscpos(escpos, printConfig).then((retry) => {
-            toast.dismiss('native-print-retry');
-            if (retry.ok) {
-              toast.success('Ticket impreso');
-            } else {
-              toast.error(retry.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
-                duration: 10000,
-              });
-            }
-          });
-        },
-      },
-    });
-    return { method: 'native', ok: false };
+    const result = await printNativeEscposWithUi(escpos, config, { timeoutMs: 8_000 });
+    return { method: 'native', ok: result.ok };
   }
 
   if (shouldUseEposPrint(config)) {
@@ -158,18 +140,14 @@ export async function printTestTicket(overrideConfig?: VertialPrinterConfig): Pr
   const escpos = encodeTestTicketEscpos(config.paperWidthMm);
 
   if (isVertialNativeApp()) {
-    const prepared = resolveNativePrinterForPrint(config);
-    if (!prepared.ready) {
-      toast.error(prepared.error || NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
-      return { method: 'native', ok: false };
-    }
-    const printConfig = prepared.config;
-    const result = await sendNativeEscpos(escpos, printConfig, { retry: false, timeoutMs: 10_000 });
+    const result = await printNativeEscposWithUi(escpos, config, {
+      retry: false,
+      timeoutMs: 10_000,
+    });
     if (result.ok) {
       toast.success('Ticket de prueba enviado a la impresora');
       return { method: 'native', ok: true };
     }
-    toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, { duration: 8000 });
     return { method: 'native', ok: false };
   }
 

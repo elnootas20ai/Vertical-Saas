@@ -4,6 +4,10 @@ import { toast } from 'sonner';
 import { listWorkCentersForDelivery, type WorkCenter } from './workCentersApi';
 import type { StoreIngredient, TpvBrandIngredientSelection, TpvBrandSupplements, TpvCategoryTemplates } from './catalogCustomization';
 import { cacheServerPdvPrinterConfigs, type VertialPrinterConfig } from './vertialPrint/printerConfig';
+import {
+  ensureDeliveryOrderIncome,
+  shouldSyncDeliveryOrderIncome,
+} from './deliveryOrderFinanceSync';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -95,6 +99,8 @@ export interface DeliveryOrder {
 
   salesPointId: string;
   salesPointName: string;
+  /** Empresa dueña del pedido (para finanzas / portfolio). */
+  business_id?: string;
   tableNumber?: number | null;
   tableId?: string | null;
 
@@ -182,6 +188,20 @@ function unwrapOrderResponse<T extends { order?: DeliveryOrder; cajaRegistration
   notifyCajaRegistration(result.cajaRegistration);
   if (!result.order) throw new Error('Respuesta inválida del servidor');
   return result.order;
+}
+
+/** Enlaza pedido cobrado → movimiento financiero (empresa/tienda). No bloquea el flujo TPV. */
+function queueDeliveryOrderFinanceSync(userId: string, order: DeliveryOrder | null | undefined) {
+  const id = normalizeUserId(userId);
+  if (!id || !order?._id) return;
+  if (!shouldSyncDeliveryOrderIncome(order)) return;
+  void ensureDeliveryOrderIncome(id, order, {
+    businessId: String(order.business_id || '').trim() || undefined,
+    pointOfSaleId: order.salesPointId,
+    pointOfSaleName: order.salesPointName,
+  }).catch(() => {
+    /* finanzas no debe tumbar el cobro */
+  });
 }
 
 export type CatalogItemType = 'product' | 'service' | 'combo';
@@ -427,6 +447,7 @@ export async function createDeliveryOrderWithCajaStatus(
   );
   const cajaStatus = notifyCajaRegistration(result.cajaRegistration);
   if (!result.order) throw new Error('Respuesta inválida del servidor');
+  queueDeliveryOrderFinanceSync(id, result.order);
   return { order: result.order, cajaStatus };
 }
 
@@ -436,7 +457,9 @@ export async function updateDeliveryOrderRequest(userId: string, order: Delivery
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(order._id)}`,
     { method: 'PUT', body: JSON.stringify({ order }) },
   );
-  return unwrapOrderResponse(result);
+  const updated = unwrapOrderResponse(result);
+  queueDeliveryOrderFinanceSync(id, updated);
+  return updated;
 }
 
 export async function deleteDeliveryOrderRequest(userId: string, orderId: string): Promise<void> {
@@ -453,7 +476,9 @@ export async function registerPaymentRequest(userId: string, orderId: string, pa
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/payment`,
     { method: 'PUT', body: JSON.stringify({ paymentMethod, paidAmount }) },
   );
-  return unwrapOrderResponse(result);
+  const updated = unwrapOrderResponse(result);
+  queueDeliveryOrderFinanceSync(id, updated);
+  return updated;
 }
 
 export async function correctDeliveryOrderPaymentRequest(

@@ -70,6 +70,7 @@ export function SAAS__ProfileModal({ isOpen, onClose }: Props) {
       contractType: payload.contractType,
       grossMonthlySalary: payload.grossMonthlySalary,
       workCenterId: payload.workCenterId,
+      scheduleTemplateId: payload.scheduleTemplateId,
     });
     if (!result.success) {
       throw new Error(result.error || 'No se pudo invitar al usuario.');

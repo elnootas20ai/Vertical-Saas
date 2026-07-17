@@ -27,6 +27,7 @@ import {
   ALL_ALERT_RULE_DEFINITIONS,
   mergeAlertRules,
 } from '../services/alertRulesCatalog.js';
+import { sanitizeDeliveryAlertsReview } from '../services/deliveryAlertsReview.js';
 import {
   signAccessToken,
   signRefreshToken,
@@ -557,6 +558,7 @@ export async function getAlertsConfig(req, res) {
         doc?.operational?.delivery || DEFAULT_DELIVERY_OPERATIONAL,
       ),
     };
+    const deliveryAlertsReview = sanitizeDeliveryAlertsReview(doc?.deliveryAlertsReview);
     return res.json({
       ok: true,
       alerts: doc
@@ -564,8 +566,9 @@ export async function getAlertsConfig(req, res) {
             global: { ...DEFAULT_ALERTS_GLOBAL, ...(doc.global || {}) },
             rules,
             operational,
+            deliveryAlertsReview,
           }
-        : { global: DEFAULT_ALERTS_GLOBAL, rules, operational },
+        : { global: DEFAULT_ALERTS_GLOBAL, rules, operational, deliveryAlertsReview },
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -577,7 +580,11 @@ export async function saveAlertsConfig(req, res) {
     const businessId = String(req.params.businessId || '').trim();
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
 
-    const { global: g, rules, operational: op } = req.body || {};
+    const { global: g, rules, operational: op, deliveryAlertsReview: reviewIn } = req.body || {};
+    const business = await findBusinessById(req, businessId);
+    const vertical = (business?.businessType === 'delivery' || business?.businessType === 'restaurant')
+      ? 'delivery'
+      : null;
 
     const sanitizedGlobal = {
       muteAll: Boolean(g?.muteAll),
@@ -618,14 +625,19 @@ export async function saveAlertsConfig(req, res) {
       ),
     };
 
+    const existingDoc = await getSettingsDoc(req, 'alerts', businessId);
+    const deliveryAlertsReview = sanitizeDeliveryAlertsReview(
+      reviewIn !== undefined ? reviewIn : existingDoc?.deliveryAlertsReview,
+    );
+
     await saveSettingsDoc(req, 'alerts', businessId, {
       global: sanitizedGlobal,
-      rules: mergeAlertRules(sanitizedRules),
+      rules: mergeAlertRules(sanitizedRules, { vertical }),
       operational: sanitizedOperational,
+      deliveryAlertsReview,
     });
 
     try {
-      const business = await findBusinessById(req, businessId);
       if (business?.owner_user_id) {
         await syncCashRegisterAlertsToAccount(req, business.owner_user_id, sanitizedOperational.cashRegister);
         await syncDeliveryAlertsToAccount(req, business.owner_user_id, sanitizedOperational.delivery);
@@ -655,6 +667,7 @@ export async function seedAlertsConfigIfMissing(req, businessId, businessType) {
   await saveSettingsDoc(req, 'alerts', id, {
     global: DEFAULT_ALERTS_GLOBAL,
     rules,
+    deliveryAlertsReview: { completedAt: null, notifSentAt: null },
     operational: {
       cashRegister: DEFAULT_CASH_REGISTER_OPERATIONAL,
       delivery: DEFAULT_DELIVERY_OPERATIONAL,

@@ -289,6 +289,7 @@ export interface TeamInvitation {
   permissions: AccountPermissionMatrix | null;
   landingPage: string;
   employment: Partial<EmploymentInfo> | null;
+  scheduleTemplateId?: string;
   invitedBy: string;
   invitedByName: string;
   message: string;
@@ -959,6 +960,7 @@ export async function inviteUserRequest(data: {
   grossMonthlySalary?: string;
   payPeriodsPerYear?: number;
   workCenterId?: string;
+  scheduleTemplateId?: string;
   message?: string;
 }) {
   return request<AuthUser>('/api/auth/invite', {

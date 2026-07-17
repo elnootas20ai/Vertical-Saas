@@ -350,11 +350,18 @@ export async function softDeleteDocument(req, dbName, docId) {
   }
 
   const now = new Date().toISOString();
-  return putDocument(req, dbName, docId, {
+  const saved = await putDocument(req, dbName, docId, {
     ...doc,
     deletedAt: now,
     updatedAt: now,
   });
+
+  // putDocument ya invalida clients_user si type=client; reforzar por si falta user_id en edge cases.
+  if (doc?.type === 'client' && doc?.user_id) {
+    cacheService.invalidateByPrefix(`clients_user:${String(doc.user_id)}:`);
+  }
+
+  return saved;
 }
 
 function normalizeText(value) {
@@ -3892,6 +3899,7 @@ export async function findDuplicateClients(req, userId, candidateData, options =
   const clients = await listClientsByUser(req, userId, {
     businessId,
     legacySingleBusiness: options.legacySingleBusiness,
+    excludeUnscopedLegacy: options.excludeUnscopedLegacy,
   });
   const normPhone = (p) => String(p || '').replace(/\D/g, '').slice(-9);
   const normStr = (s) => String(s || '').trim().toLowerCase();
@@ -3902,7 +3910,7 @@ export async function findDuplicateClients(req, userId, candidateData, options =
   const excludeId = candidateData.id || candidateData._id || '';
 
   return clients.filter((c) => {
-    if (c._id === excludeId) return false;
+    if (c._id === excludeId || c.deletedAt) return false;
     if (email && normStr(c.email) === email) return true;
     if (phone && phone.length >= 9 && normPhone(c.phone) === phone) return true;
     if (dni && normStr(c.dni) === dni) return true;
@@ -5504,6 +5512,9 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
 
     salesPointId: String(data.salesPointId || existing?.salesPointId || ''),
     salesPointName: String(data.salesPointName || existing?.salesPointName || ''),
+    business_id: String(
+      data.business_id || data.businessId || existing?.business_id || existing?.businessId || '',
+    ).trim(),
     tableNumber: data.tableNumber != null ? Number(data.tableNumber) : (existing?.tableNumber ?? null),
     tableId: String(data.tableId || existing?.tableId || '').trim() || null,
 
@@ -5585,6 +5596,7 @@ export function sanitizeDeliveryOrder(doc) {
 
     salesPointId: doc.salesPointId || '',
     salesPointName: doc.salesPointName || '',
+    business_id: doc.business_id || doc.businessId || '',
     tableNumber: doc.tableNumber ?? null,
     tableId: doc.tableId || null,
 
@@ -10919,6 +10931,7 @@ export function buildTeamInvitationDocument({
   permissions = null,
   landingPage = WORKER_DEFAULT_LANDING_PATH,
   employment = null,
+  scheduleTemplateId = '',
   invitedBy = '',
   invitedByName = '',
   message = '',
@@ -10940,6 +10953,7 @@ export function buildTeamInvitationDocument({
     permissions: permissions || null,
     landingPage: String(landingPage || WORKER_DEFAULT_LANDING_PATH),
     employment: employment || null,
+    scheduleTemplateId: String(scheduleTemplateId || '').trim(),
     invitedBy: String(invitedBy || '').trim(),
     invitedByName: String(invitedByName || '').trim(),
     message: String(message || '').trim(),

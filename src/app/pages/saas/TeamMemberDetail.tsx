@@ -47,6 +47,7 @@ import {
 import { formatIbanInput } from '../../lib/employmentBankUtils';
 import { computeTotalLaborCost, formatLaborCurrency, computeLaborCostBreakdown } from '../../lib/laborCost';
 import { Layout } from '../../components/saas/Layout';
+import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type {
@@ -929,19 +930,7 @@ export function TeamMemberDetail() {
         {activeTab === 'info' && (
           <div className="space-y-6">
             {profileCompletion && !profileCompletion.hrCompleted && (
-              <div className="rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-800 dark:bg-violet-900/20">
-                <p className="text-sm font-semibold text-violet-900 dark:text-violet-200">
-                  Pendiente de alta laboral (RRHH / gestoría)
-                </p>
-                <p className="mt-0.5 text-xs text-violet-700 dark:text-violet-300">
-                  Faltan:{' '}
-                  {HR_OWNED_FIELD_DEFS
-                    .filter((f) => profileCompletion.hrMissing?.includes(f.id))
-                    .map((f) => f.label)
-                    .join(', ') || 'datos de gestoría'}
-                  . Complétalos abajo y pulsa Guardar.
-                </p>
-              </div>
+              <HrGestorChecklist mode="hr" />
             )}
 
             {/* Datos personales */}

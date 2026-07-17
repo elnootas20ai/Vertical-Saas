@@ -10,6 +10,7 @@ import {
 } from '../lib/deliveryApi';
 import { listFinanceMovements } from '../lib/financeApi';
 import type { FinanceMovementRecord } from '../lib/financeTypes';
+import { backfillDeliveryOrdersFinance } from '../lib/deliveryOrderFinanceSync';
 import { listBankAccounts } from '../lib/bankAccountsApi';
 import { getTotalBalance } from '../lib/bankAccountTypes';
 import {
@@ -500,26 +501,6 @@ export function usePortfolioOverview(
         financeMovements = [];
         bankAccounts = [];
       }
-      const financeTotals = consolidatePortfolioFinance(
-        financeMovements,
-        monthKey,
-        businessesSnapshot.map((b) => b.business_id),
-      );
-      financeTotals.cashBalance = getTotalBalance(bankAccounts);
-      const scopedForEbitda =
-        businessesSnapshot.length > 1
-          ? financeMovements.filter((m) => {
-              const bid = String(m.businessId || '').replace(/^business:/, '').trim();
-              return bid && businessesSnapshot.some((b) => b.business_id === bid);
-            })
-          : financeMovements;
-      try {
-        const ebitdaTotals = computeEbitdaForMonth(scopedForEbitda, monthKey, { level: 'all' });
-        financeTotals.ebitdaMonth = ebitdaTotals.ebitda;
-        financeTotals.ebitdaMarginMonth = ebitdaTotals.ebitdaMargin;
-      } catch {
-        financeLoadWarning = financeLoadWarning || 'EBITDA no disponible en este momento';
-      }
 
       const ordersByUser = new Map<
         string,
@@ -561,6 +542,67 @@ export function usePortfolioOverview(
           ordersByUser.set(dataUserId, orderResult.orders);
         }),
       );
+
+      // Conectar pedidos cobrados del mes → finanzas (empresa/tienda) antes de calcular filas.
+      await Promise.all(
+        structures
+          .filter((s) => s.isDelivery && s.dataUserId)
+          .map(async (s) => {
+            const orders = ordersByUser.get(s.dataUserId) || [];
+            if (orders.length === 0) return;
+            const pdvToWc = new Map<string, string>();
+            const wcNames = new Map<string, string>();
+            for (const p of s.pointsOfSale) {
+              const wcId = String(p.workCenterId || '').trim();
+              if (wcId) pdvToWc.set(p._id, wcId);
+            }
+            for (const wc of s.workCenters) {
+              wcNames.set(wc.id, wc.name);
+            }
+            try {
+              await backfillDeliveryOrdersFinance(
+                s.dataUserId,
+                orders,
+                {
+                  businessId: s.business.business_id,
+                  businessName: s.business.name,
+                  pdvToWorkCenterId: pdvToWc,
+                  workCenterNameById: wcNames,
+                },
+                monthKey,
+              );
+            } catch {
+              /* no tumbar el portfolio */
+            }
+          }),
+      );
+
+      try {
+        financeMovements = await listFinanceMovements(ownerId).catch(() => financeMovements);
+      } catch {
+        /* keep previous */
+      }
+
+      const financeTotals = consolidatePortfolioFinance(
+        financeMovements,
+        monthKey,
+        businessesSnapshot.map((b) => b.business_id),
+      );
+      financeTotals.cashBalance = getTotalBalance(bankAccounts);
+      const scopedForEbitda =
+        businessesSnapshot.length > 1
+          ? financeMovements.filter((m) => {
+              const bid = String(m.businessId || '').replace(/^business:/, '').trim();
+              return bid && businessesSnapshot.some((b) => b.business_id === bid);
+            })
+          : financeMovements;
+      try {
+        const ebitdaTotals = computeEbitdaForMonth(scopedForEbitda, monthKey, { level: 'all' });
+        financeTotals.ebitdaMonth = ebitdaTotals.ebitda;
+        financeTotals.ebitdaMarginMonth = ebitdaTotals.ebitdaMargin;
+      } catch {
+        financeLoadWarning = financeLoadWarning || 'EBITDA no disponible en este momento';
+      }
 
       loaded = await Promise.all(
         structures.map(async (s) => {

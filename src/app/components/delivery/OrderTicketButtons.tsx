@@ -1,4 +1,5 @@
-import { ChefHat, Receipt, Truck } from 'lucide-react';
+import { useState } from 'react';
+import { ChefHat, Loader2, Receipt, Truck } from 'lucide-react';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
 import { buildOrderTicketOptions } from '../../lib/deliveryTicketHelpers';
 import type {
@@ -35,17 +36,20 @@ export function OrderTicketButtons({
   showDelivery,
   className = '',
 }: OrderTicketButtonsProps) {
+  const [printing, setPrinting] = useState<DeliveryTicketVariant | null>(null);
   const isDomicilio = order.deliveryType === 'domicilio';
   const showDeliveryBtn = showDelivery ?? isDomicilio;
 
   const print = (variant: DeliveryTicketVariant) => {
-    printDeliveryTicket(
+    if (printing) return;
+    setPrinting(variant);
+    void printDeliveryTicket(
       buildOrderTicketOptions(order, business, {
         salesPointName,
         cashierName,
         variant,
       }),
-    );
+    ).finally(() => setPrinting(null));
   };
 
   const containerClass =
@@ -58,25 +62,53 @@ export function OrderTicketButtons({
   const btnClass =
     layout === 'tablet' ? BTN_TABLET : layout === 'compact' ? BTN_COMPACT : BTN;
 
+  const iconClass = `shrink-0 ${layout === 'tablet' ? 'w-4 h-4' : 'w-3.5 h-3.5'}`;
+
   return (
     <div className={`${containerClass} ${className}`}>
-      <button type="button" onClick={() => print('kitchen')} className={btnClass}>
-        <ChefHat className={`shrink-0 ${layout === 'tablet' ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
+      <button
+        type="button"
+        onClick={() => print('kitchen')}
+        disabled={Boolean(printing)}
+        className={btnClass}
+        title="Comanda cocina: productos y notas, sin precios"
+      >
+        {printing === 'kitchen' ? (
+          <Loader2 className={`${iconClass} animate-spin`} />
+        ) : (
+          <ChefHat className={iconClass} />
+        )}
         Cocina
       </button>
       {showDeliveryBtn && (
-        <button type="button" onClick={() => print('delivery')} className={btnClass}>
-          <Truck className={`shrink-0 ${layout === 'tablet' ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
+        <button
+          type="button"
+          onClick={() => print('delivery')}
+          disabled={Boolean(printing)}
+          className={btnClass}
+          title="Hoja de reparto: dirección, productos y total"
+        >
+          {printing === 'delivery' ? (
+            <Loader2 className={`${iconClass} animate-spin`} />
+          ) : (
+            <Truck className={iconClass} />
+          )}
           Reparto
         </button>
       )}
       <button
         type="button"
         onClick={() => print('customer')}
+        disabled={Boolean(printing)}
         className={`${btnClass} ${layout === 'grid' ? 'col-span-2 border-gray-900 dark:border-gray-300 font-semibold' : ''}`}
+        title="Ticket cliente: productos, IVA y total"
       >
-        <Receipt className={`shrink-0 ${layout === 'tablet' ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
-        Ticket
+        {printing === 'customer' ? (
+          <Loader2 className={`${iconClass} animate-spin`} />
+        ) : (
+          <Receipt className={iconClass} />
+        )}
+        Ticket cliente
       </button>
     </div>
   );

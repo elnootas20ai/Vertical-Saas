@@ -130,6 +130,7 @@ import {
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
+import { canManageTeam } from '../../lib/teamManagerAccess';
 import {
   workerNeedsBusinessLink,
   WORKER_UNLINKED_HOME_PATH,
@@ -667,19 +668,22 @@ function SidebarInner({
   })();
 
   const isWorker = isWorkerAccount(user);
+  const isHrManager = canManageTeam(user, businesses);
+  /** Invitados con rol Gestor/Encargado/Admin ven backoffice RRHH (equipo + nóminas), no solo vista worker. */
+  const treatAsWorkerNav = isWorker && !isHrManager;
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved } = useAlertCenterSummary(
-    !isWorker ? alertCenterBusinessId : undefined,
+    !treatAsWorkerNav ? alertCenterBusinessId : undefined,
   );
   /** Trabajador con empresa asignada (invitación aceptada / miembro en el negocio). */
   const unlinkedWorkerNeedsCompany = workerNeedsBusinessLink(user);
   const workerHasLinkedCompany = Boolean(
-    isWorker && String(user?.linkedBusinessId || '').trim() && currentBusiness?.business_id,
+    treatAsWorkerNav && String(user?.linkedBusinessId || '').trim() && currentBusiness?.business_id,
   );
 
   const vertical: BusinessType | null = currentBusiness?.businessType
     ? (currentBusiness.businessType as BusinessType)
-    : isWorker
+    : treatAsWorkerNav
       ? null
       : 'carDealership';
   const isCompraventa = isCompraventaBusinessType(vertical);
@@ -706,10 +710,10 @@ function SidebarInner({
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   // `workerMode` ya no es alternable por el usuario: lo derivamos de la cuenta.
-  // - Cuenta tipo 'user' o con `invitedBy` (team member invitado) → modo trabajador.
-  // - Resto (owner/gerente que se registró por el flujo normal) → modo gerente.
-  // Se mantiene espejado en localStorage por compatibilidad con código que aún lo lee.
-  const workerMode = isWorker;
+  // - Trabajador operativo → modo trabajador.
+  // - Gestor/Encargado/Admin invitado → backoffice RRHH (Equipo + Nóminas).
+  // - Owner → modo gerente.
+  const workerMode = treatAsWorkerNav;
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('saas-worker-mode', String(workerMode));
@@ -1309,15 +1313,16 @@ function SidebarInner({
     if (!user) {
       return true;
     }
-    // Worker: nunca ver items admin-only por mucho que se cuelen en el menú base.
-    if (isWorker && BUSINESS_OWNER_ONLY_IDS.has(item.id)) {
+    // Worker operativo: nunca ver items admin-only.
+    // Gestor/Encargado invitado (isHrManager): sí ve Equipo + Nóminas (+ resto con permiso).
+    if (treatAsWorkerNav && BUSINESS_OWNER_ONLY_IDS.has(item.id)) {
       return false;
     }
-    if (isWorker && WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id)) {
+    if (treatAsWorkerNav && WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id)) {
       return false;
     }
-    // Items siempre accesibles para el owner (entran sin permiso explícito).
-    if (!isWorker && ['dashboard', 'settings', 'configuracion', 'chat', 'team'].includes(item.id)) {
+    // Items siempre accesibles para el owner / gestor RRHH.
+    if (!treatAsWorkerNav && ['dashboard', 'settings', 'configuracion', 'chat', 'team', 'payroll'].includes(item.id)) {
       return true;
     }
     // Items operativos siempre visibles para todos (chat es transversal).
@@ -1354,8 +1359,8 @@ function SidebarInner({
       || (['workshop', 'parts', 'tech'].includes(item.id) ? (permissionMap.workshop || permissionMap.vehicles) : undefined)
       || (item.id.startsWith('events-') ? permissionMap.sales : undefined);
     if (!permission) {
-      // Sin permiso definido: el owner lo ve, el worker no (defensa por defecto).
-      return !isWorker;
+      // Sin permiso definido: owner/gestor RRHH lo ve; worker operativo no.
+      return !treatAsWorkerNav;
     }
     return Boolean(permission.view);
   });

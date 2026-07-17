@@ -249,7 +249,14 @@ function tpvOrderToTicketDoc(
 
 async function printReceipt(order: TpvOrder, billedBy: string, method: string, received: number, change: number) {
   if (isVertialNativeApp()) {
-    await printTicketDocument(tpvOrderToTicketDoc(order, billedBy, method, received, change));
+    try {
+      const result = await printTicketDocument(
+        tpvOrderToTicketDoc(order, billedBy, method, received, change),
+      );
+      if (result.ok) toast.success('Ticket enviado a la impresora');
+    } catch {
+      toast.error('No se pudo imprimir el ticket');
+    }
     return;
   }
   const w = window.open('', '_blank', 'width=320,height=600');

@@ -5,20 +5,41 @@ export type {
   DeliveryTicketVariant,
 } from './deliveryTicketTypes';
 
+/** Evita doble tap: un ticket a la vez desde la UI. */
+let printInFlight: Promise<void> | null = null;
+
 export async function printDeliveryTicket(
   options: import('./deliveryTicketTypes').DeliveryTicketPrintOptions,
 ): Promise<void> {
   const { toast } = await import('sonner');
-  try {
-    const { printDeliveryTicket: printUnified } = await import('./vertialPrint/printDeliveryTicket');
-    const result = await printUnified(options);
-    // Confirmación visible de que el click funcionó cuando la impresión es silenciosa (sin ventana).
-    // Solo si de verdad se envió: en fallos el flujo ya muestra su propio error con detalle.
-    if (result.ok && (result.method === 'bridge' || result.method === 'native' || result.method === 'epos')) {
-      toast.success('Ticket enviado a la impresora');
+
+  if (printInFlight) {
+    toast.message('Espera: hay un ticket imprimiéndose…');
+    await printInFlight.catch(() => undefined);
+    return;
+  }
+
+  printInFlight = (async () => {
+    try {
+      const { printDeliveryTicket: printUnified } = await import('./vertialPrint/printDeliveryTicket');
+      const result = await printUnified(options);
+      if (result.ok && (result.method === 'bridge' || result.method === 'native' || result.method === 'epos')) {
+        toast.success('Ticket enviado a la impresora');
+      }
+    } catch (error) {
+      const num = String(options.order?.orderNumber || '').trim();
+      const detail = error instanceof Error && error.message ? `: ${error.message}` : '';
+      toast.error(
+        num
+          ? `No se pudo imprimir el ticket del pedido #${num}${detail}`
+          : `No se pudo imprimir el ticket${detail}`,
+      );
     }
-  } catch {
-    const num = String(options.order?.orderNumber || '').trim();
-    toast.error(num ? `No se pudo imprimir el ticket del pedido #${num}` : 'No se pudo imprimir el ticket');
+  })();
+
+  try {
+    await printInFlight;
+  } finally {
+    printInFlight = null;
   }
 }

@@ -71,7 +71,7 @@ export function buildEposTicket(
     if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
     line(builder, `Cliente: ${doc.customerName}`, width);
     if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
-    if (doc.customerAddress) line(builder, doc.customerAddress, width);
+    if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
     for (const item of doc.lines) pushLineDetail(builder, item, width);
@@ -80,9 +80,10 @@ export function buildEposTicket(
       line(builder, `NOTA: ${doc.orderNotes}`, width);
     }
   } else if (doc.variant === 'delivery') {
+    if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
     line(builder, doc.customerName, width);
     if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
-    if (doc.customerAddress) line(builder, doc.customerAddress, width);
+    if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
     sep(builder, width);
     for (const item of doc.lines) pushLineDetail(builder, item, width);
     sep(builder, width);
@@ -92,6 +93,9 @@ export function buildEposTicket(
     if (doc.orderNotes) line(builder, `NOTA: ${doc.orderNotes}`, width);
   } else {
     line(builder, `Cliente: ${doc.customerName}`, width);
+    if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
+    if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
+    if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
     for (const item of doc.lines) {

@@ -34,6 +34,11 @@ import {
   type AlertPlanTier,
 } from '../../lib/alertPlanTiers';
 import {
+  countDeliveryPendingActivation,
+  isDeliveryAlertsReviewPending,
+  splitDeliveryReviewRules,
+} from '../../lib/deliveryAlertsReview';
+import {
   PRO_PLAN_CARD_OPEN,
   PRO_PLAN_GRADIENT,
   PRO_PLAN_GRADIENT_HOVER,
@@ -85,6 +90,10 @@ const RULE_TO_CASH_FLAG: Record<string, keyof CashRegisterOperationalConfig> = {
 function normalizeAlertsConfig(data: AlertsConfig): AlertsConfig {
   return {
     ...data,
+    deliveryAlertsReview: {
+      completedAt: data.deliveryAlertsReview?.completedAt || null,
+      notifSentAt: data.deliveryAlertsReview?.notifSentAt || null,
+    },
     operational: {
       cashRegister: {
         ...DEFAULT_CASH_REGISTER_OPERATIONAL,
@@ -224,6 +233,28 @@ export function AlertCenterSettingsPanel({
     }
   };
 
+  const markDeliveryReviewed = async () => {
+    if (!config || !businessId) return;
+    const next = {
+      ...config,
+      deliveryAlertsReview: {
+        ...(config.deliveryAlertsReview || {}),
+        completedAt: new Date().toISOString(),
+      },
+    };
+    setConfig(next);
+    setSaving(true);
+    try {
+      await saveAlertsConfig(businessId, next);
+      toast.success('Listo: ya revisaste las alertas de Delivery');
+      onSaved?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al guardar');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const matchesFilters = useCallback((r: AlertRule) => {
     const dept = ruleDepartment(r);
     if (activeDept !== 'all' && dept !== activeDept) return false;
@@ -277,6 +308,27 @@ export function AlertCenterSettingsPanel({
       return { ...dept, total: rules.length, enabled };
     });
   }, [alertDepartments, businessRules]);
+
+  const deliveryReviewPending = Boolean(
+    (vertical === 'delivery' || vertical === 'restaurant')
+    && config
+    && isDeliveryAlertsReviewPending(config.deliveryAlertsReview),
+  );
+  const deliveryPendingCount = config ? countDeliveryPendingActivation(config.rules) : 0;
+  const deliverySplit = useMemo(
+    () => (config ? splitDeliveryReviewRules(config.rules) : null),
+    [config],
+  );
+
+  useEffect(() => {
+    if (!deliveryReviewPending || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('focus') !== 'delivery-review') return;
+    const t = window.setTimeout(() => {
+      document.getElementById('delivery-review')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+    return () => window.clearTimeout(t);
+  }, [deliveryReviewPending, loading]);
 
   if (loading) {
     return (
@@ -463,6 +515,40 @@ export function AlertCenterSettingsPanel({
 
   const filtersAndTiersHeader = (
     <div className="space-y-4 shrink-0">
+      {deliveryReviewPending && (
+        <div
+          id="delivery-review"
+          className="rounded-2xl border border-amber-200 bg-amber-50/90 p-3 dark:border-amber-800 dark:bg-amber-950/30"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                Revisa tus alertas de Delivery
+              </p>
+              <p className="mt-1 text-xs text-amber-800/90 dark:text-amber-300/90">
+                Ya tienes activas las esenciales (caja, pedidos críticos, fichaje).
+                {deliveryPendingCount > 0
+                  ? ` Hay ${deliveryPendingCount} avisos más apagados: actívalos si los necesitas.`
+                  : ' Confirma que la configuración te encaja.'}
+              </p>
+              {deliverySplit && (
+                <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
+                  Pack esencial: {deliverySplit.recommended.filter((r) => r.enabled).length}/
+                  {deliverySplit.recommended.length} activos
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void markDeliveryReviewed()}
+              className="shrink-0 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              Ya lo revisé
+            </button>
+          </div>
+        </div>
+      )}
       {deptFilterBar}
       {tierOverview}
     </div>

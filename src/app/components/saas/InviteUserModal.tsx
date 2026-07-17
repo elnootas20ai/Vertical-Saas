@@ -4,7 +4,7 @@ import {
   X, Mail, User, Shield, ChevronDown, Wrench, Star, Check, CheckCircle2,
   ArrowLeft, ArrowRight, Loader2, Briefcase,
   Building2, MapPin, ClipboardList, UserCheck, FileWarning,
-  DollarSign,
+  DollarSign, Clock,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { InviteLookupResult, RoleDefinition } from '../../lib/authApi';
@@ -12,13 +12,14 @@ import type { Business } from '../../lib/businessApi';
 import { useBusiness } from '../../context/BusinessContext';
 import { useInviteWorkCenters } from '../../hooks/useInviteWorkCenters';
 import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
-import { getHrOwnedLabels, getWorkerOwnedLabels } from '../../lib/workerProfileCompletion';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import {
   computeLaborCostBreakdown,
   formatLaborCurrency,
   resolvePayPeriodsPerYear,
 } from '../../lib/laborCost';
+import { listShiftTemplates, type ShiftTemplate } from '../../lib/schedulesApi';
+import { HrGestorChecklist } from './HrGestorChecklist';
 
 // --- Types ---
 
@@ -38,6 +39,7 @@ export interface InviteUserPayload {
   grossMonthlySalary: string;
   payPeriodsPerYear?: number;
   workCenterId: string;
+  scheduleTemplateId?: string;
   businessId?: string;
 }
 
@@ -137,6 +139,7 @@ const ROLES: {
   tier: 'standard' | 'normal' | 'pro';
 }[] = [
   { id: 'Administrador', dot: 'bg-slate-900', badgeBg: 'bg-slate-100', badgeText: 'text-slate-700', dotColor: '#111827', icon: <Shield className="w-3.5 h-3.5" />, desc: 'Responsable del negocio o del local.', tier: 'standard' },
+  { id: 'Gestor', dot: 'bg-violet-500', badgeBg: 'bg-violet-50', badgeText: 'text-violet-700', dotColor: '#8b5cf6', icon: <ClipboardList className="w-3.5 h-3.5" />, desc: 'Gestiona equipo, altas y nóminas (RRHH).', tier: 'standard' },
   { id: 'Encargado', dot: 'bg-blue-500', badgeBg: 'bg-blue-50', badgeText: 'text-blue-700', dotColor: '#3b82f6', icon: <Star className="w-3.5 h-3.5" />, desc: 'Coordina la operativa diaria.', tier: 'standard' },
   { id: 'Mostrador / Atención', dot: 'bg-emerald-500', badgeBg: 'bg-emerald-50', badgeText: 'text-emerald-700', dotColor: '#10b981', icon: <User className="w-3.5 h-3.5" />, desc: 'Atiende clientes, mostrador, sala o food truck.', tier: 'standard' },
   { id: 'Cocina', dot: 'bg-orange-500', badgeBg: 'bg-orange-50', badgeText: 'text-orange-700', dotColor: '#f97316', icon: <Wrench className="w-3.5 h-3.5" />, desc: 'Prepara pedidos y cocina.', tier: 'standard' },
@@ -439,10 +442,35 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const [payPeriodsPerYear, setPayPeriodsPerYear] = useState<string>('14');
   const [workCenterId, setWorkCenterId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [scheduleTemplateId, setScheduleTemplateId] = useState<string | null>(null);
+  const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
 
   useEffect(() => {
     setWorkCenterId(null);
+    setScheduleTemplateId(null);
   }, [selectedBusinessId]);
+
+  useEffect(() => {
+    const businessId = selectedBusinessId || currentBusinessId || inviteBusiness?.business_id || '';
+    if (!businessId) {
+      setShiftTemplates([]);
+      return;
+    }
+    let cancelled = false;
+    setTemplatesLoading(true);
+    listShiftTemplates(businessId)
+      .then((list) => {
+        if (!cancelled) setShiftTemplates(list);
+      })
+      .catch(() => {
+        if (!cancelled) setShiftTemplates([]);
+      })
+      .finally(() => {
+        if (!cancelled) setTemplatesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedBusinessId, currentBusinessId, inviteBusiness?.business_id]);
 
   // UI
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -594,6 +622,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
         grossMonthlySalary: salaryDigitsFromDisplay(grossSalary),
         payPeriodsPerYear: Number(payPeriodsPerYear) || resolvePayPeriodsPerYear(contractType!),
         workCenterId: workCenterId || '',
+        scheduleTemplateId: scheduleTemplateId || '',
         businessId: selectedBusinessId || undefined,
       });
       if (result) setInviteResult(result);
@@ -608,6 +637,18 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
 
   const selectedRoleConfig = role ? getRoleConfig(roleOptions.find((r) => r.id === role) || { id: role, description: '', permissions: [], users: 0 }) : null;
   const selectedContract = contractType ? CONTRACT_TYPES.find((c) => c.id === contractType) : null;
+  const selectedTemplate = scheduleTemplateId
+    ? shiftTemplates.find((t) => t._id === scheduleTemplateId)
+    : null;
+
+  const templateOptions = useMemo(
+    () =>
+      shiftTemplates.map((t) => ({
+        id: t._id,
+        label: `${t.name}${t.weeklyHours ? ` · ${t.weeklyHours}h` : ''}`,
+      })),
+    [shiftTemplates],
+  );
 
   const salaryPreview = useMemo(() => {
     const digits = salaryDigitsFromDisplay(grossSalary);
@@ -623,7 +664,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   function handleInviteAnother() {
     setName(''); setEmail(''); setPhonePrefix('+34'); setPhoneNumber('');
     setContractType(null); setGrossSalary(''); setPayPeriodsPerYear('14'); setWorkCenterId(null);
-    setRole(null);
+    setRole(null); setScheduleTemplateId(null);
     setSelectedBusinessId(currentBusinessId || businesses?.[0]?.business_id || null);
     setErrors({}); setTouched({}); setSuccess(false); setSubmitError(null);
     setInviteResult(null); setStep(1);
@@ -689,41 +730,20 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       {selectedContract.label}
                     </span>
                   )}
+                  {selectedTemplate && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
+                      <Clock className="w-3 h-3" />
+                      {selectedTemplate.name}
+                    </span>
+                  )}
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                     {t('team.inviteModal.successPending', 'Pendiente de aceptar')}
                   </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3 w-full text-left">
-                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800 rounded-2xl px-3 py-2.5">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <UserCheck className="w-4 h-4 text-blue-500 shrink-0" />
-                    <p className="text-xs font-bold text-blue-800 dark:text-blue-300">El trabajador debe completar</p>
-                  </div>
-                  <ul className="space-y-0.5">
-                    {getWorkerOwnedLabels().map((item) => (
-                      <li key={item} className="text-[10px] leading-snug text-blue-700 dark:text-blue-300 flex items-start gap-1.5">
-                        <span className="w-1 h-1 rounded-full bg-blue-400 shrink-0 mt-1.5" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-3 py-2.5">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <FileWarning className="w-4 h-4 text-violet-500 shrink-0" />
-                    <p className="text-xs font-bold text-violet-800 dark:text-violet-300">Gestoría / RRHH debe completar</p>
-                  </div>
-                  <ul className="space-y-0.5">
-                    {getHrOwnedLabels().map((item) => (
-                      <li key={item} className="text-[10px] leading-snug text-violet-700 dark:text-violet-300 flex items-start gap-1.5">
-                        <span className="w-1 h-1 rounded-full bg-violet-400 shrink-0 mt-1.5" />
-                        <span>{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+              <div className="mb-3 w-full text-left">
+                <HrGestorChecklist mode="invite" compact />
               </div>
 
               {/* Estado de la invitación (in-app) */}
@@ -894,6 +914,8 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                 </>
               ) : (
                 <>
+                  <HrGestorChecklist mode="invite" compact className="mb-1" />
+
                   {/* Funcion del trabajador (primera linea) */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
@@ -1060,6 +1082,37 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         <MapPin className="h-4 w-4 shrink-0 text-gray-300" />
                         <p className="text-xs text-gray-400 dark:text-gray-500">
                           {hrCopy.inviteNoWorkCenters}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Plantilla de horario */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                      Plantilla de horario
+                    </label>
+                    <p className="mb-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                      Al aceptar la invitación se le asignará este horario automáticamente (Control y semana).
+                    </p>
+                    {templatesLoading ? (
+                      <div className="flex items-center gap-2.5 rounded-xl border-2 border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />
+                        <p className="text-xs text-gray-500 dark:text-gray-400">Cargando plantillas…</p>
+                      </div>
+                    ) : shiftTemplates.length > 0 ? (
+                      <SelectDropdown
+                        value={scheduleTemplateId}
+                        onChange={setScheduleTemplateId}
+                        options={templateOptions}
+                        placeholder="Sin plantilla (asignar después)"
+                        icon={<Clock className="w-4 h-4" />}
+                      />
+                    ) : (
+                      <div className="flex items-start gap-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
+                        <Clock className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
+                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                          No hay plantillas. Créalas en Equipo → Horarios y vacaciones → Configuración.
                         </p>
                       </div>
                     )}

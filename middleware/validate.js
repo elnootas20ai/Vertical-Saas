@@ -113,6 +113,7 @@ export const inviteUserSchema = z.object({
   grossMonthlySalary: z.string().max(50).trim().optional().default(''),
   payPeriodsPerYear: z.coerce.number().int().min(12).max(16).optional(),
   workCenterId: z.string().max(100).trim().optional().default(''),
+  scheduleTemplateId: z.string().max(200).trim().optional().default(''),
   message: z.string().max(500).trim().optional().default(''),
 });
 
