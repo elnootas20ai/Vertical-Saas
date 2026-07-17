@@ -1,4 +1,4 @@
-import{a3 as z}from"./index-BYB0s6I5.js";var _={exports:{}};/*!
+import{a3 as z}from"./index-DX1QFqNN.js";var _={exports:{}};/*!
   * $script.js JS loader & dependency manager
   * https://github.com/ded/script.js
   * (c) Dustin Diaz 2014 | License MIT
