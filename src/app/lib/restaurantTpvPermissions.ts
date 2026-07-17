@@ -29,8 +29,10 @@ export type RestaurantTpvPermissions = {
 
 function isManagerLike(user: AuthUserLike): boolean {
   const role = String(user?.role || user?.employment?.role || '').toLowerCase();
-  if (['owner', 'admin', 'manager', 'gerente', 'encargado'].includes(role)) return true;
+  if (['owner', 'admin', 'manager', 'gerente', 'encargado', 'ceo'].includes(role)) return true;
   if (user?.isOwner || user?.isAdmin) return true;
+  // Cuenta empresa (dueño): puede cerrar caja aunque el rol no venga etiquetado.
+  if (user && !isInvitedWorkerLike(user)) return true;
   return false;
 }
 

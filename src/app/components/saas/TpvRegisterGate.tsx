@@ -1252,12 +1252,13 @@ function TpvGatePortal({ children }: { children: ReactNode }) {
 
 // ─── Closing Screen ─────────────────────────────────────────────────────────
 
-function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [] }: {
+function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [], busy = false }: {
   session: TpvRegisterSession;
   dataUserId: string;
   onClose: (counts: CashDenominationCount, notes: string, aggregatorRows: AggregatorCashRow[]) => void;
   onCancel: () => void;
   restaurantWarnings?: string[];
+  busy?: boolean;
 }) {
   const [counts, setCounts] = useState<CashDenominationCount>({});
   const [notes, setNotes] = useState('');
@@ -1462,10 +1463,21 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
         </div>
 
         <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
-          <button type="button" onClick={onCancel} className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancelar</button>
-          <button type="button" onClick={() => onClose(counts, notes, finalAggregatorRows)}
-            className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2">
-            <Lock className="w-4 h-4" /> Confirmar cierre de caja
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onClose(counts, notes, finalAggregatorRows)}
+            className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Lock className="w-4 h-4" /> {busy ? 'Cerrando…' : 'Confirmar cierre de caja'}
           </button>
         </div>
       </div>
@@ -2357,6 +2369,9 @@ export function TpvRegisterGate({
   const [loading, setLoading] = useState(() => !isTabletTpvBootstrapReady());
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
+  /** Snapshot de la caja a cerrar: el modal no debe desaparecer si activeSession parpadea. */
+  const [closingSession, setClosingSession] = useState<TpvRegisterSession | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
   const [restaurantCloseWarnings, setRestaurantCloseWarnings] = useState<string[]>([]);
   const [showCashCount, setShowCashCount] = useState(false);
   const [showCashOps, setShowCashOps] = useState(false);
@@ -3172,12 +3187,22 @@ export function TpvRegisterGate({
   };
 
   const handleClose = async (counts: CashDenominationCount, notes: string, aggregatorRows: AggregatorCashRow[] = []) => {
-    if (!dataUserId || !isTpvRegisterSessionOpen(activeSession)) {
+    const snapshotId = String(closingSession?._id || activeSession?._id || '').trim();
+    const live = snapshotId
+      ? sessions.find((s) => String(s._id || '').trim() === snapshotId)
+      : null;
+    const session =
+      (isTpvRegisterSessionOpen(live) ? live : null)
+      || (isTpvRegisterSessionOpen(closingSession) ? closingSession : null)
+      || (isTpvRegisterSessionOpen(activeSession) ? activeSession : null);
+    if (!dataUserId || !isTpvRegisterSessionOpen(session)) {
       toast.info('Abre la caja antes de cerrarla');
       setShowClosing(false);
+      setClosingSession(null);
       return;
     }
-    const session = activeSession;
+    if (closingBusy) return;
+    setClosingBusy(true);
     const finalAmount = calcDenominationTotal(counts);
     const expected = calcTpvExpectedCash(session);
     const diff = finalAmount - expected;
@@ -3215,6 +3240,7 @@ export function TpvRegisterGate({
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: updated }));
       setShowClosing(false);
+      setClosingSession(null);
       setPostCloseSession(updated);
       setPostCloseAggregatorRows(aggregatorRows);
       toast.success(
@@ -3227,15 +3253,18 @@ export function TpvRegisterGate({
         level: Math.abs(diff) >= 20 ? 'warning' : 'info',
         category: 'tpv',
         title: 'Cierre de caja pendiente de validación',
-        message: `${activeSession.workerName} cerró ${activeSession.pointOfSaleName || 'caja'} (${activeSession.terminalName || 'TPV'}). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
+        message: `${session.workerName} cerró ${session.pointOfSaleName || 'caja'} (${session.terminalName || 'TPV'}). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
         entityId: updated._id,
         entityType: 'tpv_register_session',
         route: '/saas/vertical/delivery/caja',
-        metadata: { difference: diff, pointOfSaleId: activeSession.pointOfSaleId },
+        metadata: { difference: diff, pointOfSaleId: session.pointOfSaleId },
         }).catch(() => null);
       }
-    } catch {
-      toast.error('Error al cerrar la caja');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al cerrar la caja';
+      toast.error(message || 'Error al cerrar la caja. Inténtalo de nuevo.');
+    } finally {
+      setClosingBusy(false);
     }
   };
 
@@ -3404,6 +3433,12 @@ export function TpvRegisterGate({
       toast.error('Solo encargado o gerente puede cerrar la caja');
       return;
     }
+    const session = activeSession;
+    if (!isTpvRegisterSessionOpen(session)) {
+      toast.info('No hay una caja abierta para cerrar');
+      return;
+    }
+    setClosingSession(session);
     if (isRestaurantVertical && dataUserId) {
       try {
         const check = await checkRestaurantRegisterClose(dataUserId);
@@ -3418,7 +3453,48 @@ export function TpvRegisterGate({
       setRestaurantCloseWarnings([]);
     }
     setShowClosing(true);
-  }, [isRestaurantVertical, restaurantTpvPermissions.canCloseRegister, dataUserId]);
+  }, [isRestaurantVertical, restaurantTpvPermissions.canCloseRegister, dataUserId, activeSession]);
+
+  const dismissClosing = useCallback(() => {
+    if (closingBusy) return;
+    setShowClosing(false);
+    setClosingSession(null);
+    setRestaurantCloseWarnings([]);
+  }, [closingBusy]);
+
+  const closingBusyRef = useRef(closingBusy);
+  closingBusyRef.current = closingBusy;
+
+  /** Evita que el botón/gesto Atrás de la tablet cierre el modal y salte al dashboard CEO. */
+  useEffect(() => {
+    if (!showClosing) return;
+    window.history.pushState({ tpvClosingModal: true }, '');
+    const onPopState = () => {
+      // Re-apilar para no abandonar la ruta TPV (evita dashboard CEO).
+      window.history.pushState({ tpvClosingModal: true }, '');
+      if (closingBusyRef.current) return;
+      setShowClosing(false);
+      setClosingSession(null);
+      setRestaurantCloseWarnings([]);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+    };
+  }, [showClosing]);
+
+  const leavePostCloseScreen = useCallback(() => {
+    setPostCloseSession(null);
+    setPostCloseAggregatorRows([]);
+    // En tablet nos quedamos en el TPV (pantalla de abrir caja), nunca history.back() al dashboard CEO.
+    if (isTabletSession) return;
+    try {
+      if (window.history.length > 1) window.history.back();
+      else navigate(opsHomePath);
+    } catch {
+      // ignore
+    }
+  }, [isTabletSession, navigate, opsHomePath]);
 
   const requestClockIn = useCallback(() => setShowClockIn(true), []);
 
@@ -3512,6 +3588,18 @@ export function TpvRegisterGate({
     <>
       {wrapRegisterContext(body)}
       {clockInModalEl}
+      {showClosing && closingSession ? (
+        <TpvGatePortal>
+          <ClosingScreen
+            session={closingSession}
+            dataUserId={dataUserId}
+            onClose={handleClose}
+            onCancel={dismissClosing}
+            restaurantWarnings={restaurantCloseWarnings}
+            busy={closingBusy}
+          />
+        </TpvGatePortal>
+      ) : null}
     </>
   );
 
@@ -3573,15 +3661,7 @@ export function TpvRegisterGate({
           <div className="p-6 border-b border-gray-200 dark:border-gray-700 text-center relative">
             <button
               type="button"
-              onClick={() => {
-                // Salir sin forzar apertura; volvemos a la vista anterior.
-                try {
-                  if (window.history.length > 1) window.history.back();
-                  else navigate(opsHomePath);
-                } catch {
-                  // ignore
-                }
-              }}
+              onClick={leavePostCloseScreen}
               className="absolute right-3 top-3 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
               aria-label="Cerrar"
               title="Cerrar"
@@ -3623,27 +3703,27 @@ export function TpvRegisterGate({
           </div>
           <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
             <button
-              onClick={() => setPostCloseSession(null)}
+              onClick={() => {
+                setPostCloseSession(null);
+                setPostCloseAggregatorRows([]);
+              }}
               className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
               Abrir otra caja
             </button>
+            {!isTabletSession && (
+              <button
+                onClick={() => navigate(cajaHomePath)}
+                className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+              >
+                Ir a Caja
+              </button>
+            )}
             <button
-              onClick={() => navigate(cajaHomePath)}
-              className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
-            >
-              Ir a Caja
-            </button>
-            <button
-              onClick={() => {
-                try {
-                  if (window.history.length > 1) window.history.back();
-                  else navigate(opsHomePath);
-                } catch { /* ignore */ }
-              }}
+              onClick={leavePostCloseScreen}
               className="flex-1 py-3 rounded-xl bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
-              Volver
+              {isTabletSession ? 'Seguir en TPV' : 'Volver'}
             </button>
           </div>
         </div>
@@ -3759,7 +3839,7 @@ export function TpvRegisterGate({
           isTabletMode={isTabletSession}
           minimal={compactRegisterChrome}
         />
-        {!compactRegisterChrome && registerSessionSpansMultipleDays(activeSession) && (
+        {(isTabletSession || !compactRegisterChrome) && registerSessionSpansMultipleDays(activeSession) && (
           <div className="relative z-20 bg-amber-100 dark:bg-amber-950/40 border-b border-amber-300 dark:border-amber-800 px-4 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3 flex-wrap">
             <span>
               Caja abierta desde el{' '}
@@ -3809,17 +3889,6 @@ export function TpvRegisterGate({
           {children}
         </div>
       </div>
-      {showClosing && (
-        <TpvGatePortal>
-          <ClosingScreen
-            session={activeSession}
-            dataUserId={dataUserId}
-            onClose={handleClose}
-            onCancel={() => setShowClosing(false)}
-            restaurantWarnings={restaurantCloseWarnings}
-          />
-        </TpvGatePortal>
-      )}
       {showCashCount && (
         <TpvGatePortal>
           <CashCountModal session={activeSession} onConfirm={(d, n) => performCashCount(activeSession.workerName, d, n)} onCancel={() => setShowCashCount(false)} />
