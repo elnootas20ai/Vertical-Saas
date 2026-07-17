@@ -5,6 +5,8 @@ type EposBuilder = {
   addTextAlign: (align: string) => void;
   addText: (text: string) => void;
   addTextStyle?: (reverse?: boolean, ul?: boolean, em?: boolean) => void;
+  addTextSize?: (width: number, height: number) => void;
+  addFeedLine?: (lines: number) => void;
   addCut?: (type: number) => void;
   CUT_FEED?: number;
 };
@@ -18,6 +20,11 @@ function row(left: string, right: string, width = 42): string {
   const r = sanitizeEscposText(right);
   const space = Math.max(1, width - l.length - r.length);
   return `${l}${' '.repeat(space)}${r}`.slice(0, width);
+}
+
+function colsForSize(paperWidthMm: 58 | 80, doubleWidth: boolean): number {
+  const base = paperWidthMm === 58 ? 32 : 42;
+  return doubleWidth ? Math.floor(base / 2) : base;
 }
 
 function line(builder: EposBuilder, text: string, width: number): void {
@@ -43,12 +50,22 @@ function sep(builder: EposBuilder, width: number): void {
   line(builder, '-'.repeat(Math.min(width, 32)), width);
 }
 
+function setTextSize(builder: EposBuilder, widthMul: number, heightMul: number): void {
+  if (typeof builder.addTextSize === 'function') {
+    builder.addTextSize(widthMul, heightMul);
+  }
+}
+
 function pushLineDetail(
   builder: EposBuilder,
   item: TicketDocument['lines'][number],
   width: number,
+  paperWidthMm: 58 | 80,
 ): void {
-  line(builder, `${item.qty}x ${item.name}`, width);
+  const tallCols = colsForSize(paperWidthMm, false);
+  setTextSize(builder, 1, 2);
+  line(builder, `${item.qty}x ${item.name}`, tallCols);
+  setTextSize(builder, 1, 1);
   for (const name of item.added || []) line(builder, `  + ${name}`, width);
   for (const name of item.removed || []) line(builder, `  SIN ${name}`, width);
   if (item.note) line(builder, `  NOTA: ${item.note}`, width);
@@ -71,22 +88,36 @@ export function buildEposTicket(
   doc: TicketDocument,
   paperWidthMm: 58 | 80 = 80,
 ): void {
-  const width = paperWidthMm === 58 ? 32 : 42;
+  const width = colsForSize(paperWidthMm, false);
+  const tallCols = colsForSize(paperWidthMm, false);
+  const titleCols = colsForSize(paperWidthMm, true);
+
+  if (typeof builder.addFeedLine === 'function') {
+    builder.addFeedLine(4);
+  } else {
+    builder.addText('\n\n\n\n');
+  }
 
   builder.addTextAlign('center');
-  line(builder, doc.issuer, width);
+  setTextSize(builder, 1, 2);
+  line(builder, doc.issuer, tallCols);
+  setTextSize(builder, 1, 1);
   if (doc.taxId) line(builder, `NIF/CIF: ${doc.taxId}`, width);
   if (doc.addressLine) line(builder, doc.addressLine, width);
   if (doc.phone) line(builder, `Tel: ${doc.phone}`, width);
 
   sep(builder, width);
-  boldLine(builder, doc.title, width);
+  setTextSize(builder, 2, 2);
+  boldLine(builder, doc.title, titleCols);
+  setTextSize(builder, 1, 1);
   line(builder, `${doc.ticketNo} · ${doc.dateLabel}`, width);
   sep(builder, width);
 
   builder.addTextAlign('left');
   if (doc.salesPointName) line(builder, `Tienda: ${doc.salesPointName}`, width);
-  line(builder, `Pedido: #${doc.orderNumber}`, width);
+  setTextSize(builder, 1, 2);
+  line(builder, `Pedido: #${doc.orderNumber}`, tallCols);
+  setTextSize(builder, 1, 1);
 
   if (doc.variant === 'kitchen') {
     if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
@@ -95,20 +126,26 @@ export function buildEposTicket(
     if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
-    for (const item of doc.lines) pushLineDetail(builder, item, width);
+    for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
     if (doc.orderNotes) {
       sep(builder, width);
-      line(builder, `NOTA: ${doc.orderNotes}`, width);
+      setTextSize(builder, 1, 2);
+      line(builder, `NOTA: ${doc.orderNotes}`, tallCols);
+      setTextSize(builder, 1, 1);
     }
   } else if (doc.variant === 'delivery') {
     if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
-    line(builder, doc.customerName, width);
+    setTextSize(builder, 1, 2);
+    line(builder, doc.customerName, tallCols);
+    setTextSize(builder, 1, 1);
     if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
     if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
     sep(builder, width);
-    for (const item of doc.lines) pushLineDetail(builder, item, width);
+    for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
     sep(builder, width);
-    boldMoneyRow(builder, 'TOTAL', money(doc.total), width);
+    setTextSize(builder, 1, 2);
+    boldMoneyRow(builder, 'TOTAL', money(doc.total), tallCols);
+    setTextSize(builder, 1, 1);
     line(builder, doc.paymentStatusLabel, width);
     if (doc.paymentLabel && doc.paymentLabel !== '-') line(builder, doc.paymentLabel, width);
     if (doc.orderNotes) line(builder, `NOTA: ${doc.orderNotes}`, width);
@@ -120,7 +157,9 @@ export function buildEposTicket(
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
     for (const item of doc.lines) {
-      moneyRow(builder, `${item.qty}x ${item.name}`, money(item.total), width);
+      setTextSize(builder, 1, 2);
+      moneyRow(builder, `${item.qty}x ${item.name}`, money(item.total), tallCols);
+      setTextSize(builder, 1, 1);
       for (const name of item.added || []) line(builder, `  + ${name}`, width);
       for (const name of item.removed || []) line(builder, `  SIN ${name}`, width);
       if (item.note) line(builder, `  NOTA: ${item.note}`, width);
@@ -129,12 +168,14 @@ export function buildEposTicket(
     moneyRow(builder, 'Base imponible', money(doc.base), width);
     moneyRow(builder, `IVA ${doc.vatRate}%`, money(doc.vat), width);
     sep(builder, width);
+    setTextSize(builder, 1, 2);
     boldMoneyRow(
       builder,
       doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL',
       `${doc.isRefund ? '-' : ''}${money(doc.total)}`,
-      width,
+      tallCols,
     );
+    setTextSize(builder, 1, 1);
     sep(builder, width);
     line(builder, `Metodo: ${doc.paymentLabel}`, width);
     if (doc.refundReason) line(builder, `Motivo: ${doc.refundReason}`, width);
@@ -143,8 +184,12 @@ export function buildEposTicket(
   builder.addTextAlign('center');
   line(builder, doc.footer, width);
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
-  // Margen corto antes del corte (no infinito)
-  builder.addText('\n\n');
+
+  if (typeof builder.addFeedLine === 'function') {
+    builder.addFeedLine(12);
+  } else {
+    builder.addText('\n\n\n\n\n\n');
+  }
 
   if (typeof builder.addCut === 'function') {
     builder.addCut(builder.CUT_FEED ?? 1);
