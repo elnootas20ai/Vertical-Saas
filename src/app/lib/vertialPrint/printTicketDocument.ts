@@ -1,15 +1,19 @@
 import { toast } from 'sonner';
 import { encodeTicketEscpos } from './escposEncode';
 import { resolveEffectivePrinterConfig } from './printerActiveScope';
-import { fetchBridgeHealth, sendEscposToBridge } from './printBridgeClient';
+import { fetchBridgeHealth, fetchBridgePingPrinter, sendEscposToBridge } from './printBridgeClient';
 import { printDeliveryTicketBrowser } from './printBrowser';
 import { isVertialNativeApp } from './isNativeApp';
+import { sendNativeEscpos } from './nativePrintClient';
+import {
+  NATIVE_PRINTER_PRINT_FAILED_MESSAGE,
+  resolveNativePrinterForPrint,
+} from './nativePrinterFlow';
 import { shouldBlockBrowserPrintOnNative, NATIVE_WIFI_PRINTER_SETUP_MESSAGE } from './nativePrintRouting';
 import { sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
 import type { VertialPrinterConfig } from './printerConfig';
 import type { TicketDocument } from './ticketDocument';
 import type { PrintDeliveryTicketResult } from './printDeliveryTicket';
-import { printNativeEscposWithUi } from './printNativeEscposWithUi';
 
 /**
  * Imprime un TicketDocument ya construido.
@@ -24,8 +28,27 @@ export async function printTicketDocument(
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
   if (isVertialNativeApp()) {
-    const result = await printNativeEscposWithUi(escpos, config, { timeoutMs: 8_000 });
-    return { method: 'native', ok: result.ok };
+    const prepared = resolveNativePrinterForPrint(config);
+    if (!prepared.ready) {
+      toast.error(prepared.error || NATIVE_WIFI_PRINTER_SETUP_MESSAGE, { duration: 12000 });
+      return { method: 'native', ok: false };
+    }
+    const printConfig = prepared.config;
+    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 8_000 });
+    if (result.ok) return { method: 'native', ok: true };
+    toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
+      duration: 12000,
+      action: {
+        label: 'Reintentar',
+        onClick: () => {
+          void sendNativeEscpos(escpos, printConfig, { retry: false, timeoutMs: 10_000 }).then((retry) => {
+            if (retry.ok) toast.success('Ticket impreso');
+            else toast.error(retry.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, { duration: 10000 });
+          });
+        },
+      },
+    });
+    return { method: 'native', ok: false };
   }
 
   if (shouldUseEposPrint(config)) {
@@ -48,9 +71,6 @@ export async function printTicketDocument(
     if (health.ok) {
       const result = await sendEscposToBridge(escpos, config);
       if (result.ok) return { method: 'bridge', ok: true };
-      toast.warning(result.error || 'Impresión directa fallida. Usando navegador…');
-    } else if (config.connectionType === 'network') {
-      toast.warning('Inicia Vertial Print en este PC y vuelve a probar.');
     }
   }
 

@@ -52,13 +52,6 @@ export {
 } from './nativePrintClient';
 export type { NativeNetworkPrinterInfo, NativeNetworkPrinterDiscoveryDiagnostics } from './nativePrintClient';
 export {
-  assertNativePrintTarget,
-  sanitizePrinterPort,
-  enqueueNativePrint,
-  DEFAULT_ESC_POS_PORT,
-} from './nativePrintGuard';
-export { printNativeEscposWithUi } from './printNativeEscposWithUi';
-export {
   hasAcknowledgedLocalNetworkPermission,
   hasUserCompletedLanPermissionFlow,
   markLanPermissionFlowCompleted,

@@ -23,7 +23,7 @@ import {
   savePrinterConfig,
   setActivePrinterScope,
 } from '../../lib/vertialPrint/printerActiveScope';
-import { loadLegacyPrinterConfig, type VertialPrinterConfig } from '../../lib/vertialPrint/printerConfig';
+import { loadLegacyPrinterConfig, cachePdvPrinterConfig, type VertialPrinterConfig } from '../../lib/vertialPrint/printerConfig';
 import { normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
 import { isValidIpv4, sanitizeIpv4Input } from '../../lib/vertialPrint/printerSetupStatus';
 import { savePrinterConfigToPdv, type PrinterConfigTarget } from '../../lib/vertialPrint/printerPdvSync';
@@ -58,14 +58,27 @@ function writeLanManualConfirmed(value: boolean): void {
 }
 
 function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
+  const local = loadLegacyPrinterConfig();
   const raw = scope?.pdv
     ? resolveEffectivePrinterConfig({
         pdv: scope.pdv,
         terminalId: scope.terminalId,
-        localFallback: loadLegacyPrinterConfig(),
+        localFallback: local,
       })
-    : loadLegacyPrinterConfig();
-  return normalizeVertialPrinterConfig({ ...raw, connectionType: 'network' });
+    : local;
+  const normalized = normalizeVertialPrinterConfig({ ...raw, connectionType: 'network' });
+  const host = String(normalized.networkHost || '').trim();
+  const localHost = String(local.networkHost || '').trim();
+  // No pisar una IP ya guardada en el dispositivo con un PDV vacío / sin config.
+  if (!isValidIpv4(host) && isValidIpv4(localHost)) {
+    return normalizeVertialPrinterConfig({
+      ...local,
+      connectionType: 'network',
+      networkHost: localHost,
+      networkPort: Number(local.networkPort || 9100) || 9100,
+    });
+  }
+  return normalized;
 }
 
 function SettingsSection({
@@ -137,10 +150,11 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const selectedHost = String(config.networkHost || '').trim();
   const selectedPort = Number(config.networkPort || 9100) || 9100;
   const isConfigured = isValidIpv4(selectedHost);
-  const stepsUnlocked = !isNative || lanConfirmed;
   const hasUnsavedIp =
     ipDirty && (manualIp.trim() !== selectedHost || manualPort !== selectedPort);
-  const canTest = isConfigured && !hasUnsavedIp && stepsUnlocked;
+  // Guardar IP no depende del permiso; solo comprobar / probar ticket en nativo.
+  const canProbeNetwork = !isNative || lanConfirmed;
+  const canTest = isConfigured && !hasUnsavedIp && canProbeNetwork;
 
   const refreshDiagnostics = useCallback(() => {
     if (!isNative) return;
@@ -216,7 +230,12 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
     setSavingIp(true);
     try {
+      // Persistencia local primero: se queda en el dispositivo hasta que la cambies.
       savePrinterConfig(next);
+      const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
+      if (pdvId) {
+        cachePdvPrinterConfig(pdvId, next);
+      }
       const readBack = loadLegacyPrinterConfig();
       const savedHostOk = String(readBack.networkHost || '').trim() === host;
       const savedPortOk = Number(readBack.networkPort || 0) === safePort;
@@ -232,7 +251,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setIpDirty(false);
       clearPrinterVerifiedHost();
       toast.success(`Impresora guardada: ${host}:${safePort}`, {
-        description: 'Ya puedes probar el ticket en el paso 3.',
+        description: 'Queda guardada en este dispositivo. Puedes probar el ticket cuando quieras.',
         duration: 6000,
       });
       syncToServerInBackground(next);
@@ -245,13 +264,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setPendingSaveHost('');
       setPendingSavePort(9100);
     }
-  }, [config, syncActiveScope, syncToServerInBackground, refreshDiagnostics]);
+  }, [config, pdv?._id, scope?.pdvId, syncActiveScope, syncToServerInBackground, refreshDiagnostics]);
 
   const handleRequestSave = useCallback(() => {
-    if (!stepsUnlocked) {
-      toast.error('Primero confirma que «Red local» está activado en Ajustes → Vertial.');
-      return;
-    }
     const host = manualIp.trim();
     if (!isValidIpv4(host)) {
       toast.error('Escribe una IP válida, por ejemplo 192.168.1.20');
@@ -260,7 +275,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     setPendingSaveHost(host);
     setPendingSavePort(sanitizePortInput(String(manualPort)));
     setConfirmSaveOpen(true);
-  }, [manualIp, manualPort, stepsUnlocked]);
+  }, [manualIp, manualPort]);
 
   const handleConfirmSave = useCallback(() => {
     const host = pendingSaveHost.trim();
@@ -274,8 +289,8 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   }, [commitSave, pendingSaveHost, pendingSavePort]);
 
   const handleCheckConnection = useCallback(() => {
-    if (!stepsUnlocked) {
-      toast.error('Primero confirma que «Red local» está activado en Ajustes → Vertial.');
+    if (!canProbeNetwork) {
+      toast.error('Para comprobar la conexión, confirma «Red local» en el paso 1 (Ajustes → Vertial).');
       return;
     }
     const host = manualIp.trim();
@@ -315,7 +330,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         setPingingIp(false);
       }
     })();
-  }, [manualIp, manualPort, stepsUnlocked, refreshDiagnostics]);
+  }, [manualIp, manualPort, canProbeNetwork, refreshDiagnostics]);
 
   const handleRequestLanPermission = useCallback(async () => {
     if (!isNative) return;
@@ -359,8 +374,8 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   }, [manualIp, selectedHost]);
 
   const handleTest = useCallback(async () => {
-    if (!stepsUnlocked) {
-      toast.error('Primero confirma que «Red local» está activado en Ajustes → Vertial.');
+    if (!canProbeNetwork) {
+      toast.error('Para imprimir la prueba, confirma «Red local» en el paso 1 (Ajustes → Vertial).');
       return;
     }
     if (hasUnsavedIp) {
@@ -397,7 +412,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     } finally {
       setTesting(false);
     }
-  }, [hasUnsavedIp, isConfigured, refreshDiagnostics, scope?.pdv, scope?.terminalId, stepsUnlocked]);
+  }, [hasUnsavedIp, isConfigured, refreshDiagnostics, scope?.pdv, scope?.terminalId, canProbeNetwork]);
 
   const handleManualIpChange = useCallback((raw: string) => {
     const value = sanitizeIpv4Input(raw);
@@ -515,14 +530,14 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           </SettingsSection>
 
           <SettingsSection
-            title="2. IP y puerto (obligatorios)"
-            description="Los dos hacen falta para conectar. Sin búsqueda automática."
+            title="2. IP y puerto"
+            description="Guárdalos y quedan en este dispositivo hasta que los cambies."
           >
-            {!stepsUnlocked ? (
+            {!canProbeNetwork ? (
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
                 <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p className="text-sm text-amber-900 dark:text-amber-100">
-                  Completa el paso 1 (Red local) antes de guardar o probar.
+                  Puedes guardar la IP ya. Para comprobar o imprimir prueba, completa el paso 1 (Red local).
                 </p>
               </div>
             ) : null}
@@ -553,7 +568,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             )}
             <label className="block">
               <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                IP <span className="text-red-600 dark:text-red-400">(obligatorio)</span>
+                IP
               </span>
               <div className="mt-2 flex gap-2">
                 <input
@@ -581,7 +596,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             </label>
             <label className="block mt-4">
               <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                Puerto <span className="text-red-600 dark:text-red-400">(obligatorio)</span>
+                Puerto
               </span>
               <input
                 type="text"
@@ -653,7 +668,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <button
                 type="button"
                 onClick={handleCheckConnection}
-                disabled={pingingIp || !manualIp.trim() || !stepsUnlocked}
+                disabled={pingingIp || !manualIp.trim() || !canProbeNetwork}
                 className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
               >
                 {pingingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
@@ -662,7 +677,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <button
                 type="button"
                 onClick={handleRequestSave}
-                disabled={savingIp || !manualIp.trim() || !stepsUnlocked}
+                disabled={savingIp || !manualIp.trim()}
                 className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold touch-manipulation active:opacity-80 disabled:opacity-60"
               >
                 {savingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
@@ -681,8 +696,12 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
           <SettingsSection
             title="3. Probar ticket"
-            description={stepsUnlocked ? 'Solo después de guardar la impresora en el paso 2.' : 'Completa los pasos 1 y 2 antes de probar.'}
-            disabled={!stepsUnlocked}
+            description={
+              canProbeNetwork
+                ? 'Solo después de guardar la impresora en el paso 2.'
+                : 'Guarda la IP en el paso 2. Para la prueba, confirma también Red local (paso 1).'
+            }
+            disabled={false}
           >
             <button
               type="button"
@@ -693,7 +712,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
               {testing ? 'Imprimiendo…' : 'Probar ticket'}
             </button>
-            {!canTest && stepsUnlocked && (
+            {!canTest && canProbeNetwork && (
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 {hasUnsavedIp
                   ? 'Guarda la IP antes de imprimir la prueba.'

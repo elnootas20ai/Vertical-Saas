@@ -31,7 +31,7 @@ describe('withNativeCallTimeout', () => {
 
     const result = pending.catch((error: Error) => error.message);
     await vi.advanceTimersByTimeAsync(1000);
-    await expect(result).resolves.toMatch(/no respondió a tiempo|tardó demasiado/i);
+    await expect(result).resolves.toMatch(/tardó demasiado/i);
   });
 
   it('resuelve si la promesa termina antes del timeout', async () => {
