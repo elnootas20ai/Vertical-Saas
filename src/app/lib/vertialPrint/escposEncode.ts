@@ -125,7 +125,8 @@ function pushLineDetail(
  * Sin este avance, el título/negocio salen cortados.
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  chunks.push(command([ESC, 0x64, 4]));
+  // 6 líneas: al imprimir Cocina + Cliente seguidos, el 2º no debe empezar cortado
+  chunks.push(command([ESC, 0x64, 6]));
 }
 
 /**
@@ -137,8 +138,9 @@ function pushFeedAndCut(chunks: Uint8Array[], width: number) {
   chunks.push(textLine('', width));
   chunks.push(textLine('', width));
   chunks.push(textLine('', width));
-  // ~12 líneas ≈ 30–40 mm en la mayoría de térmicas 80 mm (HPRT, Epson, etc.)
-  chunks.push(command([ESC, 0x64, 12]));
+  chunks.push(textLine('', width));
+  // ~14 líneas ≈ margen seguro hasta la cuchilla en HPRT / térmicas 80 mm
+  chunks.push(command([ESC, 0x64, 14]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
 }
@@ -200,31 +202,61 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
       chunks.push(setSize(SIZE_NORMAL));
     }
   } else if (doc.variant === 'delivery') {
-    if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
-    chunks.push(setSize(SIZE_TALL));
-    chunks.push(textLine(doc.customerName, tallCols));
+    // Hoja de fuera / rider: dirección y teléfono bien grandes
+    if (doc.deliveryTypeLabel) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(doc.deliveryTypeLabel, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    chunks.push(setSize(SIZE_TITLE));
+    chunks.push(textLine(doc.customerName, colsForSize(paperWidthMm, SIZE_TITLE)));
     chunks.push(setSize(SIZE_NORMAL));
-    if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
-    if (doc.customerAddress) chunks.push(textLine(`Dir: ${doc.customerAddress}`, width));
+    if (doc.customerPhone) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`Tel: ${doc.customerPhone}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    if (doc.customerAddress) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`Dir: ${doc.customerAddress}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
     chunks.push(textLine(sepLine(width), width));
     for (const line of doc.lines) {
       pushLineDetail(chunks, line, width, paperWidthMm);
     }
     chunks.push(textLine(sepLine(width), width));
-    chunks.push(setSize(SIZE_TALL));
+    chunks.push(setSize(SIZE_TITLE));
     chunks.push(command([ESC, 0x45, 1]));
-    pushMoneyRow(chunks, 'TOTAL', money(doc.total), tallCols);
+    pushMoneyRow(chunks, 'TOTAL', money(doc.total), colsForSize(paperWidthMm, SIZE_TITLE));
     chunks.push(command([ESC, 0x45, 0]));
     chunks.push(setSize(SIZE_NORMAL));
-    chunks.push(textLine(doc.paymentStatusLabel, width));
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(doc.paymentStatusLabel, tallCols));
+    chunks.push(setSize(SIZE_NORMAL));
     if (doc.paymentLabel && doc.paymentLabel !== '-') {
       chunks.push(textLine(doc.paymentLabel, width));
     }
-    if (doc.orderNotes) chunks.push(textLine(`NOTA: ${doc.orderNotes}`, width));
+    if (doc.orderNotes) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`NOTA: ${doc.orderNotes}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
   } else {
-    chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
-    if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
-    if (doc.customerAddress) chunks.push(textLine(`Dir: ${doc.customerAddress}`, width));
+    // Ticket cliente (el que va fuera con el pedido): legible y con total grande
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(`Cliente: ${doc.customerName}`, tallCols));
+    chunks.push(setSize(SIZE_NORMAL));
+    if (doc.customerPhone) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`Tel: ${doc.customerPhone}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    if (doc.customerAddress) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`Dir: ${doc.customerAddress}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
     if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
     if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
     chunks.push(textLine(sepLine(width), width));
@@ -248,18 +280,20 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     pushMoneyRow(chunks, 'Base imponible', money(doc.base), width);
     pushMoneyRow(chunks, `IVA ${doc.vatRate}%`, money(doc.vat), width);
     chunks.push(textLine(sepLine(width), width));
-    chunks.push(setSize(SIZE_TALL));
+    chunks.push(setSize(SIZE_TITLE));
     chunks.push(command([ESC, 0x45, 1]));
     pushMoneyRow(
       chunks,
-      doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL',
+      doc.isRefund ? 'TOTAL DEV.' : 'TOTAL',
       `${doc.isRefund ? '-' : ''}${money(doc.total)}`,
-      tallCols,
+      colsForSize(paperWidthMm, SIZE_TITLE),
     );
     chunks.push(command([ESC, 0x45, 0]));
     chunks.push(setSize(SIZE_NORMAL));
     chunks.push(textLine(sepLine(width), width));
-    chunks.push(textLine(`Metodo: ${doc.paymentLabel}`, width));
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(`Metodo: ${doc.paymentLabel}`, tallCols));
+    chunks.push(setSize(SIZE_NORMAL));
 
     if (doc.refundReason) chunks.push(textLine(`Motivo: ${doc.refundReason}`, width));
   }
@@ -302,7 +336,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
     textLine('', width),
     textLine('', width),
     textLine('', width),
-    command([ESC, 0x64, 12]),
+    command([ESC, 0x64, 14]),
     command([GS, 0x56, 0]),
   ]);
 }

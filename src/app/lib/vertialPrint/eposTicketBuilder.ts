@@ -93,9 +93,9 @@ export function buildEposTicket(
   const titleCols = colsForSize(paperWidthMm, true);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(4);
+    builder.addFeedLine(6);
   } else {
-    builder.addText('\n\n\n\n');
+    builder.addText('\n\n\n\n\n\n');
   }
 
   builder.addTextAlign('center');
@@ -134,25 +134,53 @@ export function buildEposTicket(
       setTextSize(builder, 1, 1);
     }
   } else if (doc.variant === 'delivery') {
-    if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
-    setTextSize(builder, 1, 2);
-    line(builder, doc.customerName, tallCols);
+    if (doc.deliveryTypeLabel) {
+      setTextSize(builder, 1, 2);
+      line(builder, doc.deliveryTypeLabel, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    setTextSize(builder, 2, 2);
+    line(builder, doc.customerName, titleCols);
     setTextSize(builder, 1, 1);
-    if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
-    if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
+    if (doc.customerPhone) {
+      setTextSize(builder, 1, 2);
+      line(builder, `Tel: ${doc.customerPhone}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    if (doc.customerAddress) {
+      setTextSize(builder, 1, 2);
+      line(builder, `Dir: ${doc.customerAddress}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
     sep(builder, width);
     for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
     sep(builder, width);
-    setTextSize(builder, 1, 2);
-    boldMoneyRow(builder, 'TOTAL', money(doc.total), tallCols);
+    setTextSize(builder, 2, 2);
+    boldMoneyRow(builder, 'TOTAL', money(doc.total), titleCols);
     setTextSize(builder, 1, 1);
-    line(builder, doc.paymentStatusLabel, width);
+    setTextSize(builder, 1, 2);
+    line(builder, doc.paymentStatusLabel, tallCols);
+    setTextSize(builder, 1, 1);
     if (doc.paymentLabel && doc.paymentLabel !== '-') line(builder, doc.paymentLabel, width);
-    if (doc.orderNotes) line(builder, `NOTA: ${doc.orderNotes}`, width);
+    if (doc.orderNotes) {
+      setTextSize(builder, 1, 2);
+      line(builder, `NOTA: ${doc.orderNotes}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
   } else {
-    line(builder, `Cliente: ${doc.customerName}`, width);
-    if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
-    if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
+    setTextSize(builder, 1, 2);
+    line(builder, `Cliente: ${doc.customerName}`, tallCols);
+    setTextSize(builder, 1, 1);
+    if (doc.customerPhone) {
+      setTextSize(builder, 1, 2);
+      line(builder, `Tel: ${doc.customerPhone}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    if (doc.customerAddress) {
+      setTextSize(builder, 1, 2);
+      line(builder, `Dir: ${doc.customerAddress}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
     if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
@@ -168,16 +196,18 @@ export function buildEposTicket(
     moneyRow(builder, 'Base imponible', money(doc.base), width);
     moneyRow(builder, `IVA ${doc.vatRate}%`, money(doc.vat), width);
     sep(builder, width);
-    setTextSize(builder, 1, 2);
+    setTextSize(builder, 2, 2);
     boldMoneyRow(
       builder,
-      doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL',
+      doc.isRefund ? 'TOTAL DEV.' : 'TOTAL',
       `${doc.isRefund ? '-' : ''}${money(doc.total)}`,
-      tallCols,
+      titleCols,
     );
     setTextSize(builder, 1, 1);
     sep(builder, width);
-    line(builder, `Metodo: ${doc.paymentLabel}`, width);
+    setTextSize(builder, 1, 2);
+    line(builder, `Metodo: ${doc.paymentLabel}`, tallCols);
+    setTextSize(builder, 1, 1);
     if (doc.refundReason) line(builder, `Motivo: ${doc.refundReason}`, width);
   }
 
@@ -186,9 +216,9 @@ export function buildEposTicket(
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(12);
+    builder.addFeedLine(14);
   } else {
-    builder.addText('\n\n\n\n\n\n');
+    builder.addText('\n\n\n\n\n\n\n\n');
   }
 
   if (typeof builder.addCut === 'function') {

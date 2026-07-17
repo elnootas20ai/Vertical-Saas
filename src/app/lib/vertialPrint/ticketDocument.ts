@@ -145,6 +145,6 @@ export function buildTicketDocument({
   return {
     ...shared,
     title: isRefund ? 'DEVOLUCION' : 'TICKET',
-    footer: isPaid ? 'Documento interno de venta' : 'Documento provisional (sin cobro)',
+    footer: isPaid ? 'Ticket para el cliente' : 'Documento provisional (sin cobro)',
   };
 }
