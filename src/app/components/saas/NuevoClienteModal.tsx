@@ -576,7 +576,7 @@ export function NuevoClienteModal({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label>Ciudad</Label>
+                <Label>Ciudad{contexto === 'tpv' ? ' (opcional)' : ''}</Label>
                 <input
                   type="text"
                   value={addresses[0]?.city || ''}
@@ -584,20 +584,21 @@ export function NuevoClienteModal({
                   placeholder="Madrid"
                   className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-800 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-900 dark:focus:border-gray-500 focus:bg-white dark:focus:bg-gray-700 focus:outline-none transition-all"
                 />
-                {addresses[0]?.street && !addresses[0]?.city && (
+                {contexto !== 'tpv' && addresses[0]?.street && !addresses[0]?.city && (
                   <FieldWarning message="Recomendado: añadir ciudad" />
                 )}
               </div>
               <div>
-                <Label>Código postal</Label>
+                <Label>Código postal{contexto === 'tpv' ? ' (opcional)' : ''}</Label>
                 <input
                   type="text"
                   value={addresses[0]?.postalCode || ''}
                   onChange={e => updateAddress(0, 'postalCode', e.target.value)}
                   placeholder="28001"
+                  autoComplete="off"
                   className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-800 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-900 dark:focus:border-gray-500 focus:bg-white dark:focus:bg-gray-700 focus:outline-none transition-all"
                 />
-                {addresses[0]?.street && !addresses[0]?.postalCode && (
+                {contexto !== 'tpv' && addresses[0]?.street && !addresses[0]?.postalCode && (
                   <FieldWarning message="Recomendado: añadir CP" />
                 )}
               </div>

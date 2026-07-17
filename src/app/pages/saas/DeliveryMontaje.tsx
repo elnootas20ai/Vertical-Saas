@@ -214,6 +214,7 @@ export function DeliveryMontaje() {
   // Destination selection
   const [showDestinationModal, setShowDestinationModal] = useState(false);
   const [destinationOrderId, setDestinationOrderId] = useState<string | null>(null);
+  const [completingOrderId, setCompletingOrderId] = useState<string | null>(null);
 
   // Config modal (gerente)
   const [showConfigModal, setShowConfigModal] = useState(false);
@@ -291,13 +292,21 @@ export function DeliveryMontaje() {
     return orders.filter((o) => deliveryOrderMatchesPdvFilter(o, filterPdv, { primaryPdvId }));
   }, [orders, filterPdv, primaryPdvId]);
 
+  // API canónica: listo = en montaje; cocina = aún en cocina.
+  // Tras completar montaje hacia reparto se marca assemblyCompletedAt y el pedido
+  // sale de esta cola (sigue en Reparto como "listo" hasta que salga el repartidor).
   const assemblyOrders = useMemo(
-    () => storeOrders.filter(o => o.status === 'assembly'),
+    () => storeOrders.filter((o) => o.status === 'listo' && !o.assemblyCompletedAt),
     [storeOrders],
   );
 
   const readyFromKitchen = useMemo(
-    () => storeOrders.filter(o => o.status === 'kitchen' && o.kitchenCompletedAt),
+    () =>
+      storeOrders.filter(
+        (o) =>
+          (o.status === 'cocina' && !!o.kitchenCompletedAt) ||
+          (o.status === 'listo' && !o.assemblyStartedAt && !o.assemblyCompletedAt),
+      ),
     [storeOrders],
   );
 
@@ -425,34 +434,52 @@ export function DeliveryMontaje() {
 
   const handleMoveToAssembly = async (order: DeliveryOrder) => {
     if (!user?.id) return;
+    if (completingOrderId) return;
+    setCompletingOrderId(order._id);
     try {
       const now = new Date().toISOString();
       const updated = await updateDeliveryOrderRequest(user.id, {
         ...order,
-        status: 'assembly' as DeliveryOrderStatus,
-        assemblyStartedAt: now,
+        status: 'listo',
+        assemblyStartedAt: order.assemblyStartedAt || now,
         kitchenCompletedAt: order.kitchenCompletedAt || now,
-        stageHistory: [...(order.stageHistory || []), { status: 'assembly' as DeliveryOrderStatus, date: now, user: user.fullName || 'Sistema' }],
+        stageHistory: [
+          ...(order.stageHistory || []),
+          { status: 'listo', date: now, user: user.fullName || 'Sistema', notes: 'Entrado en montaje' },
+        ],
       });
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
       toast.success(`Pedido ${order.orderNumber} movido a montaje`);
     } catch {
       toast.error('Error al mover el pedido');
+    } finally {
+      setCompletingOrderId(null);
     }
   };
 
   const handleCompleteAssembly = async (order: DeliveryOrder, destination: OrderDestination) => {
     if (!user?.id) return;
-    const nextStatus: DeliveryOrderStatus = destination === 'reparto' ? 'delivery' : 'delivered';
+    if (completingOrderId) return;
+    setCompletingOrderId(order._id);
+    // Reparto: seguir en `listo` con montaje cerrado → aparece en "Listos para salir".
+    // NO pasar a en_reparto aquí (eso marcaría departedAt y saltaría a "En ruta").
+    const nextStatus: DeliveryOrderStatus = destination === 'reparto' ? 'listo' : 'entregado';
     try {
       const now = new Date().toISOString();
+      const historyNote =
+        destination === 'reparto'
+          ? 'Montaje completado → listo para reparto'
+          : `Destino: ${DESTINATION_CONFIG[destination].label}`;
       const updated = await updateDeliveryOrderRequest(user.id, {
         ...order,
         status: nextStatus,
         assemblyCompletedAt: now,
+        ...(destination !== 'reparto'
+          ? { deliveredAt: order.deliveredAt || now, departedAt: order.departedAt || now }
+          : {}),
         stageHistory: [
           ...(order.stageHistory || []),
-          { status: nextStatus, date: now, user: user.fullName || 'Sistema', notes: `Destino: ${DESTINATION_CONFIG[destination].label}` },
+          { status: nextStatus, date: now, user: user.fullName || 'Sistema', notes: historyNote },
         ],
       });
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
@@ -483,6 +510,8 @@ export function DeliveryMontaje() {
       toast.success(`Pedido ${order.orderNumber} → ${DESTINATION_CONFIG[destination].label}`);
     } catch {
       toast.error('Error al completar el montaje');
+    } finally {
+      setCompletingOrderId(null);
     }
   };
 
@@ -1170,11 +1199,14 @@ export function DeliveryMontaje() {
               return (
                 <button
                   key={key}
+                  type="button"
+                  disabled={!!completingOrderId}
                   onClick={() => {
-                    handleCompleteAssembly(order, key);
+                    if (completingOrderId) return;
                     setShowDestinationModal(false);
+                    void handleCompleteAssembly(order, key);
                   }}
-                  className={`w-full p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-4 transition-all group`}
+                  className={`w-full p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center gap-4 transition-all group disabled:opacity-60`}
                 >
                   <div className={`w-12 h-12 ${config.bg} rounded-xl flex items-center justify-center text-white shrink-0 group-hover:scale-105 transition-transform`}>
                     <Icon className="w-6 h-6" />
@@ -1606,7 +1638,7 @@ export function DeliveryMontaje() {
               >
                 <Printer className="w-4 h-4" /> Imprimir ticket
               </button>
-              {detailOrder.status === 'assembly' && (
+              {detailOrder.status === 'listo' && !detailOrder.assemblyCompletedAt && (
                 <button
                   onClick={() => {
                     if (progress.allRequired) {

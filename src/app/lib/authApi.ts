@@ -447,6 +447,71 @@ type RefreshOutcome = 'refreshed' | 'rejected' | 'network';
 
 let _refreshPromise: Promise<RefreshOutcome> | null = null;
 
+/** Segundos restantes del access JWT (null si no hay token o no se puede leer). */
+export function getAccessTokenSecondsLeft(): number | null {
+  if (!_inMemoryToken) {
+    _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+  }
+  const token = _inMemoryToken;
+  if (!token) return null;
+  try {
+    const payloadPart = token.split('.')[1];
+    if (!payloadPart) return null;
+    const json = JSON.parse(atob(payloadPart.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number };
+    if (!json.exp) return null;
+    return Math.floor(json.exp - Date.now() / 1000);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Renueva el access token si está cerca de caducar (TPV: JWT suele ser 15m).
+ * Seguro llamar en paralelo: usa el mismo lock que tryRefreshToken.
+ */
+export async function ensureFreshAccessToken(minSecondsLeft = 120): Promise<RefreshOutcome | 'ok'> {
+  const left = getAccessTokenSecondsLeft();
+  if (left == null) {
+    // Sin exp legible: intentar refresh si hay refresh token guardado.
+    if (_inMemoryRefreshToken || localStorage.getItem(REFRESH_STORAGE_KEY)) {
+      return tryRefreshToken();
+    }
+    return 'ok';
+  }
+  if (left > minSecondsLeft) return 'ok';
+  return tryRefreshToken();
+}
+
+let _keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+let _keepaliveOnVis: (() => void) | null = null;
+
+/** Mantiene viva la sesión en TPV/tablet mientras la pestaña esté abierta. */
+export function startAuthSessionKeepalive() {
+  stopAuthSessionKeepalive();
+  const tick = () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    void ensureFreshAccessToken(180);
+  };
+  // Access típico 15m → renovar cada 5 min y al volver a primer plano.
+  _keepaliveTimer = setInterval(tick, 5 * 60 * 1000);
+  _keepaliveOnVis = tick;
+  tick();
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', tick);
+  }
+}
+
+export function stopAuthSessionKeepalive() {
+  if (_keepaliveTimer) {
+    clearInterval(_keepaliveTimer);
+    _keepaliveTimer = null;
+  }
+  if (_keepaliveOnVis && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', _keepaliveOnVis);
+    _keepaliveOnVis = null;
+  }
+}
+
 async function tryRefreshToken(): Promise<RefreshOutcome> {
   if (_refreshPromise) return _refreshPromise;
 
@@ -511,6 +576,11 @@ export async function authFetch(
   authRetried = false,
   options: AuthFetchOptions = {},
 ): Promise<Response> {
+  // Renovar antes de caducar para no interrumpir el TPV a los ~15 min.
+  if (!authRetried) {
+    await ensureFreshAccessToken(90);
+  }
+
   if (!_inMemoryToken) {
     _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
   }
@@ -541,7 +611,11 @@ export async function authFetch(
     if (refreshed === 'refreshed') {
       return authFetch(input, init, attempt, true, options);
     }
-    // Solo cerrar sesión si el servidor rechazó el refresh; un fallo de red no invalida la sesión.
+    // Fallo de red ≠ sesión muerta: no devolver 401 (los callers muestran "Sesión expirada").
+    if (refreshed === 'network') {
+      throw new TypeError('No hay conexión con el servidor. Inténtalo de nuevo en unos segundos.');
+    }
+    // Solo cerrar sesión si el servidor rechazó el refresh.
     if (refreshed === 'rejected' && !options.suppressLogout) {
       _onUnauthorized?.();
     }
@@ -570,6 +644,10 @@ async function request<T>(
   _retried = false,
   _networkAttempt = 0,
 ): Promise<ApiEnvelope<T>> {
+  if (!_retried) {
+    await ensureFreshAccessToken(90);
+  }
+
   if (!_inMemoryToken) {
     _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
   }

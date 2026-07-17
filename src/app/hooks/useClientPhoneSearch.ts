@@ -12,6 +12,33 @@ export interface ClientPhoneSearchResult {
   clearResults: () => void;
 }
 
+/** Cache corto en el navegador para no repetir la misma query en ráfaga. */
+const CLIENT_SEARCH_CACHE_TTL_MS = 45_000;
+const CLIENT_SEARCH_CACHE_MAX = 40;
+const clientSearchResultCache = new Map<string, { at: number; clients: Client[] }>();
+
+function cacheKey(userId: string, businessId: string | undefined, query: string, limit: number) {
+  return `${userId}|${businessId || ''}|${limit}|${query}`;
+}
+
+function readSearchCache(key: string): Client[] | null {
+  const entry = clientSearchResultCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > CLIENT_SEARCH_CACHE_TTL_MS) {
+    clientSearchResultCache.delete(key);
+    return null;
+  }
+  return entry.clients;
+}
+
+function writeSearchCache(key: string, clients: Client[]) {
+  clientSearchResultCache.set(key, { at: Date.now(), clients });
+  if (clientSearchResultCache.size > CLIENT_SEARCH_CACHE_MAX) {
+    const oldest = clientSearchResultCache.keys().next().value;
+    if (oldest) clientSearchResultCache.delete(oldest);
+  }
+}
+
 export function useClientPhoneSearch(params: {
   userId: string;
   phone: string;
@@ -45,6 +72,7 @@ export function useClientPhoneSearch(params: {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const requestSeqRef = useRef(0);
   const trimmed = phone.trim();
   const digits = phone.replace(/\D/g, '');
   const queryForApi = matchByName ? trimmed : digits;
@@ -57,14 +85,31 @@ export function useClientPhoneSearch(params: {
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (!shouldSearch) {
+      requestSeqRef.current += 1;
+      if (abortRef.current) abortRef.current.abort();
       setResults([]);
       setIsSearching(false);
       setSearchError(null);
       return;
     }
+
+    const key = cacheKey(userId, businessId, queryForApi, resultLimit);
+    const cached = readSearchCache(key);
+    if (cached) {
+      requestSeqRef.current += 1;
+      if (abortRef.current) abortRef.current.abort();
+      setResults(cached);
+      setIsSearching(false);
+      setSearchError(null);
+      return;
+    }
+
     setIsSearching(true);
     setSearchError(null);
+    const seq = ++requestSeqRef.current;
+
     timerRef.current = setTimeout(async () => {
+      if (seq !== requestSeqRef.current) return;
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -76,24 +121,24 @@ export function useClientPhoneSearch(params: {
           controller.signal,
           businessId,
         );
-        if (!controller.signal.aborted) {
-          setResults(clients);
-          setSearchError(null);
-          setIsSearching(false);
-        }
+        if (controller.signal.aborted || seq !== requestSeqRef.current) return;
+        writeSearchCache(key, clients);
+        setResults(clients);
+        setSearchError(null);
+        setIsSearching(false);
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
-        if (!controller.signal.aborted) {
-          setResults([]);
-          setSearchError(
-            err instanceof Error && err.message
-              ? err.message
-              : 'No se pudo buscar clientes. Inténtalo de nuevo.',
-          );
-          setIsSearching(false);
-        }
+        if (controller.signal.aborted || seq !== requestSeqRef.current) return;
+        setResults([]);
+        setSearchError(
+          err instanceof Error && err.message
+            ? err.message
+            : 'No se pudo buscar clientes. Inténtalo de nuevo.',
+        );
+        setIsSearching(false);
       }
     }, debounceMs);
+
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
       if (abortRef.current) abortRef.current.abort();
@@ -101,6 +146,8 @@ export function useClientPhoneSearch(params: {
   }, [shouldSearch, queryForApi, userId, businessId, debounceMs, resultLimit, selectedClient]);
 
   const selectClient = useCallback((client: Client) => {
+    requestSeqRef.current += 1;
+    if (abortRef.current) abortRef.current.abort();
     setSelectedClient(client);
     setResults([]);
     setIsSearching(false);
@@ -111,6 +158,8 @@ export function useClientPhoneSearch(params: {
   }, []);
 
   const clearResults = useCallback(() => {
+    requestSeqRef.current += 1;
+    if (abortRef.current) abortRef.current.abort();
     setResults([]);
     setIsSearching(false);
     setSearchError(null);

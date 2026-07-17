@@ -19,6 +19,8 @@ import {
   clearAuthTokens,
   deleteUserRequest,
   fetchCurrentUserRequest,
+  startAuthSessionKeepalive,
+  stopAuthSessionKeepalive,
   getBillingCardRequest,
   getUserActivityRequest,
   googleLoginRequest,
@@ -263,6 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadStoredTokens();
 
     setOnUnauthorized(() => {
+      stopAuthSessionKeepalive();
       setUser(null);
       setIsAuthenticated(false);
       persistSession(null);
@@ -353,12 +356,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Renueva el access JWT en segundo plano (TPV ~15–20 min sin esto → "sesión caducada").
+  useEffect(() => {
+    if (!isAuthenticated) {
+      stopAuthSessionKeepalive();
+      return;
+    }
+    startAuthSessionKeepalive();
+    return () => stopAuthSessionKeepalive();
+  }, [isAuthenticated]);
+
   // Otra pestaña inició/cerró sesión: alinear con localStorage + servidor.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onStorage = (event: StorageEvent) => {
       if (event.key !== SESSION_USER_STORAGE_KEY) return;
       if (!event.newValue) {
+        stopAuthSessionKeepalive();
         setUser(null);
         setIsAuthenticated(false);
         clearAuthTokens();
@@ -517,6 +531,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { clearAllDeliveryPdvSessionFlags } = await import('../lib/deliverySetup');
     clearAllDeliveryPdvSessionFlags();
     clearVertialClientCaches();
+    stopAuthSessionKeepalive();
     setUser(null);
     setIsAuthenticated(false);
     persistSession(null);

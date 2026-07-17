@@ -140,8 +140,6 @@ import {
   Home,
   Briefcase,
   Loader2,
-  ChevronDown,
-  ChevronUp,
   ArrowLeftRight,
   Split,
   Percent,
@@ -246,71 +244,6 @@ function getInitials(name: string): string {
 
 function formatPrice(n: number): string {
   return n.toFixed(2).replace('.', ',') + ' €';
-}
-
-function TpvRestaurantCartNotes({
-  notes,
-  expanded,
-  onToggle,
-  onChange,
-}: {
-  notes: string;
-  expanded: boolean;
-  onToggle: () => void;
-  onChange: (value: string) => void;
-}) {
-  const noteText = notes.trim();
-
-  if (!expanded) {
-    if (noteText) {
-      return (
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex w-full items-start gap-1 rounded-lg px-1 py-0.5 text-left hover:bg-amber-50/80 dark:hover:bg-amber-950/20"
-          title="Ver o editar nota"
-        >
-          <ChevronDown className="mt-0.5 h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
-          <span className="min-w-0 flex-1 truncate text-[10px] italic text-amber-800 dark:text-amber-300">
-            {noteText}
-          </span>
-        </button>
-      );
-    }
-    return (
-      <button
-        type="button"
-        onClick={onToggle}
-        className="text-[10px] font-medium text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-      >
-        + Añadir nota
-      </button>
-    );
-  }
-
-  return (
-    <div className="space-y-1">
-      <div className="flex items-start gap-1">
-        <input
-          type="text"
-          value={notes}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Notas (sin cebolla, poco hecho…)"
-          autoFocus
-          className="min-w-0 flex-1 px-2 py-1 text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder:text-gray-400 outline-none focus:border-amber-400 dark:focus:border-amber-600"
-        />
-        <button
-          type="button"
-          onClick={onToggle}
-          className="shrink-0 rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-          title="Ocultar nota"
-          aria-label="Ocultar nota"
-        >
-          <ChevronUp className="h-3 w-3" />
-        </button>
-      </div>
-    </div>
-  );
 }
 
 const LEGACY_ADDRESS_PREFIX = 'legacy-';
@@ -841,9 +774,9 @@ export function TpvRapidoOrderFlow({
       businessId: clientSearchBusinessId,
       enabled: !showCreateForm,
       matchByName: true,
-      minQueryLength: 1,
-      debounceMs: 250,
-      resultLimit: 40,
+      minQueryLength: 2,
+      debounceMs: 350,
+      resultLimit: 20,
     });
 
   // Step 2 - Delivery
@@ -879,7 +812,6 @@ export function TpvRapidoOrderFlow({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const brandInitRef = useRef(false);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [expandedCartNotes, setExpandedCartNotes] = useState<Set<string>>(() => new Set());
   const [cartShake, setCartShake] = useState(false);
   const restaurantTableMarkedRef = useRef(false);
   const [customizeTarget, setCustomizeTarget] = useState<{
@@ -1537,15 +1469,6 @@ export function TpvRapidoOrderFlow({
           : ci,
       ),
     );
-  }, []);
-
-  const toggleCartLineNotes = useCallback((lineId: string) => {
-    setExpandedCartNotes((prev) => {
-      const next = new Set(prev);
-      if (next.has(lineId)) next.delete(lineId);
-      else next.add(lineId);
-      return next;
-    });
   }, []);
 
   const getCartQty = useCallback(
@@ -2779,7 +2702,7 @@ export function TpvRapidoOrderFlow({
     );
   }
 
-  const clientSearchReady = phoneInput.trim().length >= 1;
+  const clientSearchReady = phoneInput.trim().length >= 2;
 
   const needsOpenRegister =
     currentStep === 'products' || currentStep === 'payment';
@@ -3350,8 +3273,8 @@ export function TpvRapidoOrderFlow({
                         <input value={editAddrCity} onChange={(e) => setEditAddrCity(e.target.value)} className={INPUT_CLASS} />
                       </div>
                       <div>
-                        <label className={LABEL_CLASS}>Código postal</label>
-                        <input value={editAddrPostal} onChange={(e) => setEditAddrPostal(e.target.value)} className={INPUT_CLASS} />
+                        <label className={LABEL_CLASS}>Código postal (opcional)</label>
+                        <input value={editAddrPostal} onChange={(e) => setEditAddrPostal(e.target.value)} className={INPUT_CLASS} autoComplete="off" />
                       </div>
                     </div>
                     <div>
@@ -3409,8 +3332,8 @@ export function TpvRapidoOrderFlow({
                         <input value={newAddrCity} onChange={(e) => setNewAddrCity(e.target.value)} className={INPUT_CLASS} />
                       </div>
                       <div>
-                        <label className={LABEL_CLASS}>Código postal</label>
-                        <input value={newAddrPostal} onChange={(e) => setNewAddrPostal(e.target.value)} className={INPUT_CLASS} />
+                        <label className={LABEL_CLASS}>Código postal (opcional)</label>
+                        <input value={newAddrPostal} onChange={(e) => setNewAddrPostal(e.target.value)} className={INPUT_CLASS} autoComplete="off" />
                       </div>
                     </div>
                     <div>
@@ -3636,22 +3559,13 @@ export function TpvRapidoOrderFlow({
                                 </div>
                               </div>
                               <div className="pl-4">
-                                {isRestaurantMode ? (
-                                  <TpvRestaurantCartNotes
-                                    notes={ci.customization.notes}
-                                    expanded={expandedCartNotes.has(ci.lineId)}
-                                    onToggle={() => toggleCartLineNotes(ci.lineId)}
-                                    onChange={(value) => updateCartLineNotes(ci.lineId, value)}
-                                  />
-                                ) : (
-                                  <input
-                                    type="text"
-                                    value={ci.customization.notes}
-                                    onChange={(e) => updateCartLineNotes(ci.lineId, e.target.value)}
-                                    placeholder="Notas (sin cebolla, para llevar…)"
-                                    className="w-full px-2 py-1 text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder:text-gray-400 outline-none focus:border-gray-500"
-                                  />
-                                )}
+                                <input
+                                  type="text"
+                                  value={ci.customization.notes}
+                                  onChange={(e) => updateCartLineNotes(ci.lineId, e.target.value)}
+                                  placeholder="Escribe una nota…"
+                                  className="w-full px-2 py-1 text-[10px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder:text-gray-400 outline-none focus:border-amber-400 dark:focus:border-amber-600"
+                                />
                                 {(customizable || lineUnit !== Number(ci.catalogItem.unitPrice || 0)) && (
                                   <p className="text-[9px] text-gray-400 mt-0.5 tabular-nums">
                                     {formatPrice(lineUnit)} / ud
@@ -3664,6 +3578,18 @@ export function TpvRapidoOrderFlow({
                       </div>
 
                       <div className="shrink-0 mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <div className="mb-2">
+                          <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">
+                            Nota del pedido
+                          </label>
+                          <textarea
+                            rows={tabletMode ? 2 : 2}
+                            value={orderNotes}
+                            onChange={(e) => setOrderNotes(e.target.value)}
+                            placeholder="Escribe aquí (alergias, sin cebolla, timbre…)"
+                            className="w-full px-2 py-1.5 text-[11px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder:text-gray-400 outline-none focus:border-amber-400 dark:focus:border-amber-600 resize-none"
+                          />
+                        </div>
                         {restaurantAccountMode && accountDue > 0 ? (
                           <div className="flex items-center justify-between text-xs mb-2">
                             <span className="font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wider text-[10px]">
@@ -3908,7 +3834,7 @@ export function TpvRapidoOrderFlow({
                 value={orderNotes}
                 onChange={(e) => setOrderNotes(e.target.value)}
                 className={`${INPUT_CLASS} resize-none`}
-                placeholder="Instrucciones especiales..."
+                placeholder="Escribe aquí (alergias, sin cebolla, timbre…)"
               />
             </div>
 

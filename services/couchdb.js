@@ -271,6 +271,72 @@ export async function getDocument(req, dbName, docId) {
   return payload;
 }
 
+/** Cache en memoria por titular (evita el tope 5MB del LRU global en cuentas grandes). */
+const CLIENT_DOCS_TTL_MS = 120_000;
+const clientDocumentsByUser = new Map();
+const clientsUserIndexReady = new Set();
+
+export function invalidateClientDocumentsForUser(userId) {
+  const uid = String(userId || '').trim();
+  if (!uid) return;
+  clientDocumentsByUser.delete(uid);
+  cacheService.invalidateByPrefix(`clients_user:${uid}:`);
+}
+
+function readClientDocumentsCache(uid) {
+  const entry = clientDocumentsByUser.get(uid);
+  if (!entry) return null;
+  if (Date.now() - entry.at > CLIENT_DOCS_TTL_MS) {
+    clientDocumentsByUser.delete(uid);
+    return null;
+  }
+  return entry.docs;
+}
+
+function writeClientDocumentsCache(uid, docs) {
+  clientDocumentsByUser.set(uid, { at: Date.now(), docs });
+}
+
+/**
+ * Lectura Mango paginada. Preferible a _all_docs cuando hay índice.
+ */
+export async function findDocuments(req, dbName, selector, options = {}) {
+  const encodedDbName = encodeURIComponent(dbName);
+  const pageSize = Math.min(Math.max(1, Number(options.pageSize) || 500), 1000);
+  const maxDocs = Math.min(Math.max(1, Number(options.maxDocs) || 50_000), 100_000);
+  const docs = [];
+  let bookmark;
+  let previousBookmark;
+
+  while (docs.length < maxDocs) {
+    const body = {
+      selector,
+      limit: Math.min(pageSize, maxDocs - docs.length),
+    };
+    if (bookmark) body.bookmark = bookmark;
+    if (options.use_index) body.use_index = options.use_index;
+
+    const response = await couchRequest(req, `/${encodedDbName}/_find`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.reason || payload?.error || `Error en _find de ${dbName}`);
+    }
+
+    const batch = Array.isArray(payload.docs) ? payload.docs : [];
+    docs.push(...batch);
+    if (batch.length < pageSize) break;
+
+    previousBookmark = bookmark;
+    bookmark = payload.bookmark;
+    if (!bookmark || bookmark === previousBookmark) break;
+  }
+
+  return docs;
+}
+
 export async function putDocument(req, dbName, docId, document) {
   const encodedDbName = encodeURIComponent(dbName);
   const encodedDocId = encodeURIComponent(docId);
@@ -288,7 +354,7 @@ export async function putDocument(req, dbName, docId, document) {
   cacheService.invalidateByPrefix('kpi:');
   cacheService.invalidateByPrefix('view:');
   if (document?.type === 'client' && document?.user_id) {
-    cacheService.invalidateByPrefix(`clients_user:${String(document.user_id)}:`);
+    invalidateClientDocumentsForUser(document.user_id);
   }
 
   return payload;
@@ -311,7 +377,7 @@ export async function bulkPutDocuments(req, dbName, docs) {
   cacheService.invalidateByPrefix('view:');
   for (const doc of docs || []) {
     if (doc?.type === 'client' && doc?.user_id) {
-      cacheService.invalidateByPrefix(`clients_user:${String(doc.user_id)}:`);
+      invalidateClientDocumentsForUser(doc.user_id);
     }
   }
 
@@ -358,7 +424,7 @@ export async function softDeleteDocument(req, dbName, docId) {
 
   // putDocument ya invalida clients_user si type=client; reforzar por si falta user_id en edge cases.
   if (doc?.type === 'client' && doc?.user_id) {
-    cacheService.invalidateByPrefix(`clients_user:${String(doc.user_id)}:`);
+    invalidateClientDocumentsForUser(doc.user_id);
   }
 
   return saved;
@@ -3697,13 +3763,26 @@ export function sanitizeClientSummary(client) {
 /** Índice en memoria por titular: evita releer notas/promos en cada búsqueda TPV con miles de clientes. */
 const clientDocumentsInflight = new Map();
 
+async function ensureClientsUserTypeIndex(req, dbName) {
+  if (clientsUserIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-type-user_id`).catch(() => null);
+  clientsUserIndexReady.add(dbName);
+}
+
 export async function getClientDocumentsForUser(req, userId) {
   const uid = String(userId || '').trim();
   if (!uid) return [];
 
-  const cacheKey = cacheService.buildKey('clients_user', uid, 'all');
-  const cached = cacheService.get(cacheKey);
+  const cached = readClientDocumentsCache(uid);
   if (cached) return cached;
+
+  const cacheKey = cacheService.buildKey('clients_user', uid, 'all');
+  const fromLru = cacheService.get(cacheKey);
+  if (fromLru) {
+    writeClientDocumentsCache(uid, fromLru);
+    return fromLru;
+  }
 
   if (clientDocumentsInflight.has(uid)) {
     return clientDocumentsInflight.get(uid);
@@ -3712,11 +3791,28 @@ export async function getClientDocumentsForUser(req, userId) {
   const promise = (async () => {
     const db = getClientsDbName();
     await ensureDatabase(req, db);
-    const docs = await getAllDocuments(req, db);
+    await ensureClientsUserTypeIndex(req, db);
+
+    let docs;
+    try {
+      // Solo clientes del titular (no _all_docs de toda la DB multi-tenant).
+      docs = await findDocuments(
+        req,
+        db,
+        { type: 'client', user_id: uid },
+        { pageSize: 500, maxDocs: 50_000 },
+      );
+    } catch {
+      const all = await getAllDocuments(req, db);
+      docs = all.filter((doc) => doc?.type === 'client' && doc?.user_id === uid);
+    }
+
     const clients = docs.filter(
       (doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === uid,
     );
-    cacheService.set(cacheKey, clients, cacheService.TTL_PRESETS.DOCS_LIST);
+    writeClientDocumentsCache(uid, clients);
+    // Puede fallar en silencio si el LRU rechaza por tamaño; el Map local ya cubre.
+    cacheService.set(cacheKey, clients, CLIENT_DOCS_TTL_MS);
     return clients;
   })().finally(() => {
     clientDocumentsInflight.delete(uid);
@@ -3758,14 +3854,23 @@ export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, 
   const bid = normalizeClientBusinessScopeId(options.businessId);
   const max = Math.min(50, Math.max(1, Number(limit) || 20));
 
-  return docs
-    .map((d) => {
-      if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) return null;
-      if (bid && !clientMatchesBusinessScope(d, bid, options)) return null;
-      const score = scoreClientSearchMatch(d, raw, qFold, qDigits, preferPhone);
-      return score > 0 ? { doc: d, score } : null;
-    })
-    .filter(Boolean)
+  const scored = [];
+  let exactPhoneHits = 0;
+
+  for (const d of docs) {
+    if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) continue;
+    if (bid && !clientMatchesBusinessScope(d, bid, options)) continue;
+    const score = scoreClientSearchMatch(d, raw, qFold, qDigits, preferPhone);
+    if (score <= 0) continue;
+    scored.push({ doc: d, score });
+    // Teléfono exacto: no hace falta recorrer el resto de la cartera.
+    if (preferPhone && score >= 200) {
+      exactPhoneHits += 1;
+      if (exactPhoneHits >= max) break;
+    }
+  }
+
+  return scored
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       return String(b.doc.updatedAt || '').localeCompare(String(a.doc.updatedAt || ''));
@@ -5481,13 +5586,18 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
   const stageHistory = Array.isArray(data.stageHistory)
     ? [...data.stageHistory]
     : [...(existing?.stageHistory || [])];
+  // Evita filas duplicadas cuando el cliente ya añadió la transición en stageHistory.
   if (statusChanged) {
-    stageHistory.push({
-      status: newStatus,
-      date: now,
-      user: data._transitionUser || userId,
-      notes: data._transitionNotes || '',
-    });
+    const last = stageHistory[stageHistory.length - 1];
+    const lastStatus = last ? normalizeDeliveryOrderStatus(last.status) : null;
+    if (lastStatus !== newStatus) {
+      stageHistory.push({
+        status: newStatus,
+        date: now,
+        user: data._transitionUser || userId,
+        notes: data._transitionNotes || '',
+      });
+    }
   }
 
   return {
@@ -10834,6 +10944,9 @@ export async function findAccountByRefreshToken(req, rawToken) {
     const sessions = normalizeSessions(a.sessions || []);
     const session = sessions.find((s) => s.refreshTokenHash === tokenHash);
     if (session) {
+      if (session.expiry && new Date(session.expiry) <= now) {
+        continue;
+      }
       return { account: a, session };
     }
     // Fallback legacy

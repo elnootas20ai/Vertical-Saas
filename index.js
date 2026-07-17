@@ -235,6 +235,7 @@ import {
   getCatalogDbName,
   getPartsDbName,
   getLeadsDbName as getLeadsDbNameFromService,
+  getClientsDbName,
   couchRequest,
   buildCouchAuthHeader,
 } from './services/couchdb.js';
@@ -3159,7 +3160,9 @@ async function initializeCouchDB() {
     return;
   }
 
-  const dbs = Array.from(new Set([VEHICLES_DB, LEGACY_VEHICLES_DB, ACCOUNTS_DB, NOTIFICATIONS_DB]));
+  const dbs = Array.from(
+    new Set([VEHICLES_DB, LEGACY_VEHICLES_DB, ACCOUNTS_DB, NOTIFICATIONS_DB, getClientsDbName()]),
+  );
   for (const db of dbs) {
     await setupDatabaseIndexes(initReq, db).catch((err) =>
       logger.error({ tag: 'INIT', db, err: err?.message }, `Índices fallaron en ${db}`),

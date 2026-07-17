@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate, useLocation } from 'react-router';
@@ -515,7 +515,7 @@ function OrderLane({
   onAdvance,
   onSelect,
   onDelete,
-  advancingId,
+  advancingIds,
   readOnly = false,
   compact = false,
 }: {
@@ -530,7 +530,7 @@ function OrderLane({
   onAdvance: (o: DeliveryOrder) => void;
   onSelect: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
-  advancingId: string | null;
+  advancingIds: ReadonlySet<string>;
   readOnly?: boolean;
   compact?: boolean;
 }) {
@@ -565,7 +565,7 @@ function OrderLane({
               onAdvance={onAdvance}
               onSelect={onSelect}
               onDelete={onDelete}
-              advancing={advancingId === order._id}
+              advancing={advancingIds.has(order._id)}
               readOnly={readOnly}
               compact={compact}
             />
@@ -935,7 +935,8 @@ export function WorkerTpvDelivery({
   const [view, setView] = useState<'board' | 'new-order' | 'staff-consumption'>('board');
   const [fulfillmentFilter, setFulfillmentFilter] = useState<FulfillmentFilter>('all');
   const [search, setSearch] = useState('');
-  const [advancingId, setAdvancingId] = useState<string | null>(null);
+  const [advancingIds, setAdvancingIds] = useState<ReadonlySet<string>>(() => new Set());
+  const advancingIdsRef = useRef<Set<string>>(new Set());
   const [correctingPaymentId, setCorrectingPaymentId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
   const [deliveryCompleteOrder, setDeliveryCompleteOrder] = useState<DeliveryOrder | null>(null);
@@ -1139,6 +1140,19 @@ export function WorkerTpvDelivery({
 
   const nowMs = useLiveClock(30_000);
 
+  const beginAdvancing = useCallback((orderId: string): boolean => {
+    if (advancingIdsRef.current.has(orderId)) return false;
+    advancingIdsRef.current.add(orderId);
+    setAdvancingIds(new Set(advancingIdsRef.current));
+    return true;
+  }, []);
+
+  const endAdvancing = useCallback((orderId: string) => {
+    if (!advancingIdsRef.current.has(orderId)) return;
+    advancingIdsRef.current.delete(orderId);
+    setAdvancingIds(new Set(advancingIdsRef.current));
+  }, []);
+
   const advanceOrder = useCallback(async (order: DeliveryOrder, paymentMethod?: DeliveryPaymentMethod) => {
     const next = TABLET_NEXT_STATUS[order.status];
     if (!next || !userId) return;
@@ -1152,7 +1166,7 @@ export function WorkerTpvDelivery({
       resolvedPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
     }
 
-    setAdvancingId(order._id);
+    if (!beginAdvancing(order._id)) return;
     try {
       const now = new Date().toISOString();
       const extras: Partial<DeliveryOrder> = {};
@@ -1248,9 +1262,19 @@ export function WorkerTpvDelivery({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al avanzar pedido');
     } finally {
-      setAdvancingId(null);
+      endAdvancing(order._id);
     }
-  }, [userId, selectedOrder, user?.fullName, user?.user_id, user?.id, currentBusiness, sessionOpenedAt]);
+  }, [
+    userId,
+    selectedOrder,
+    user?.fullName,
+    user?.user_id,
+    user?.id,
+    currentBusiness,
+    sessionOpenedAt,
+    beginAdvancing,
+    endAdvancing,
+  ]);
 
   const confirmCompleteDelivery = useCallback(
     (method: DeliveryPaymentMethod) => {
@@ -1267,7 +1291,7 @@ export function WorkerTpvDelivery({
 
   const handleDeleteOrder = useCallback(async (reason: string) => {
     if (!userId || !deleteOrder) return;
-    setAdvancingId(deleteOrder._id);
+    if (!beginAdvancing(deleteOrder._id)) return;
     try {
       const updated = await cancelDeliveryOrderRequest(userId, deleteOrder._id, reason);
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
@@ -1278,9 +1302,9 @@ export function WorkerTpvDelivery({
     } catch {
       toast.error('Error al eliminar el pedido');
     } finally {
-      setAdvancingId(null);
+      endAdvancing(deleteOrder._id);
     }
-  }, [userId, deleteOrder, selectedOrder, deliveryCompleteOrder]);
+  }, [userId, deleteOrder, selectedOrder, deliveryCompleteOrder, beginAdvancing, endAdvancing]);
 
   const handleCorrectPayment = useCallback(
     async (order: DeliveryOrder, method: DeliveryPaymentMethod) => {
@@ -1618,7 +1642,7 @@ export function WorkerTpvDelivery({
               onAdvance={advanceOrder}
               onSelect={setSelectedOrder}
               onDelete={requestDeleteOrder}
-              advancingId={advancingId}
+              advancingIds={advancingIds}
               compact={isTabletUi}
             />
             <OrderLane
@@ -1633,7 +1657,7 @@ export function WorkerTpvDelivery({
               onAdvance={advanceOrder}
               onSelect={setSelectedOrder}
               onDelete={requestDeleteOrder}
-              advancingId={advancingId}
+              advancingIds={advancingIds}
               compact={isTabletUi}
             />
           </div>
@@ -1773,7 +1797,7 @@ export function WorkerTpvDelivery({
           onAdvance={advanceOrder}
           onDelete={requestDeleteOrder}
           onCorrectPayment={handleCorrectPayment}
-          advancing={advancingId === selectedOrder._id}
+          advancing={advancingIds.has(selectedOrder._id)}
           correctingPayment={correctingPaymentId === selectedOrder._id}
         />
       )}
@@ -1784,7 +1808,7 @@ export function WorkerTpvDelivery({
           order={deliveryCompleteOrder}
           onConfirm={confirmCompleteDelivery}
           onClose={() => setDeliveryCompleteOrder(null)}
-          loading={advancingId === deliveryCompleteOrder._id}
+          loading={advancingIds.has(deliveryCompleteOrder._id)}
         />
       )}
 
@@ -1795,7 +1819,7 @@ export function WorkerTpvDelivery({
           mode="delete"
           onConfirm={handleDeleteOrder}
           onClose={() => setDeleteOrder(null)}
-          loading={advancingId === deleteOrder._id}
+          loading={advancingIds.has(deleteOrder._id)}
         />
       )}
     </div>
