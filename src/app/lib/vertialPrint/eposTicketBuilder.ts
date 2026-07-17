@@ -93,9 +93,9 @@ export function buildEposTicket(
   const titleCols = colsForSize(paperWidthMm, true);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(6);
+    builder.addFeedLine(3);
   } else {
-    builder.addText('\n\n\n\n\n\n');
+    builder.addText('\n\n\n');
   }
 
   builder.addTextAlign('center');
@@ -216,9 +216,9 @@ export function buildEposTicket(
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(14);
+    builder.addFeedLine(8);
   } else {
-    builder.addText('\n\n\n\n\n\n\n\n');
+    builder.addText('\n\n\n\n');
   }
 
   if (typeof builder.addCut === 'function') {

@@ -125,22 +125,19 @@ function pushLineDetail(
  * Sin este avance, el título/negocio salen cortados.
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  // 6 líneas: al imprimir Cocina + Cliente seguidos, el 2º no debe empezar cortado
-  chunks.push(command([ESC, 0x64, 6]));
+  // Poco margen arriba: evita cortar el título sin gastar papel de más
+  chunks.push(command([ESC, 0x64, 3]));
 }
 
 /**
- * Avance amplio + corte: el pie debe quedar por encima de la cuchilla.
- * Con ESC d 5 el pie del ticket anterior quedaba a medias en el siguiente.
+ * Avance + corte: suficiente para leer el pie, sin tirar media bobina.
  */
 function pushFeedAndCut(chunks: Uint8Array[], width: number) {
   chunks.push(setSize(SIZE_NORMAL));
   chunks.push(textLine('', width));
   chunks.push(textLine('', width));
-  chunks.push(textLine('', width));
-  chunks.push(textLine('', width));
-  // ~14 líneas ≈ margen seguro hasta la cuchilla en HPRT / térmicas 80 mm
-  chunks.push(command([ESC, 0x64, 14]));
+  // ~8 líneas ≈ margen hasta cuchilla en la mayoría de HPRT 80 mm
+  chunks.push(command([ESC, 0x64, 8]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
 }
@@ -315,7 +312,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
   const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   return concat([
     command([ESC, 0x40]),
-    command([ESC, 0x64, 4]),
+    command([ESC, 0x64, 3]),
     command([ESC, 0x61, 1]),
     command([ESC, 0x45, 1]),
     setSize(SIZE_TALL),
@@ -335,8 +332,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
     textLine('"Usar esta impresora"', width),
     textLine('', width),
     textLine('', width),
-    textLine('', width),
-    command([ESC, 0x64, 14]),
+    command([ESC, 0x64, 8]),
     command([GS, 0x56, 0]),
   ]);
 }
