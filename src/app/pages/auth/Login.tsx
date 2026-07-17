@@ -353,11 +353,8 @@ export function Login() {
               Acceso empresa
             </span>
             <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
-              Iniciar sesión — Empresa
+              Iniciar sesión
             </h1>
-            <p className="text-sm text-gray-600 dark:text-gray-400 leading-snug">
-              Para propietarios, gerentes y administración del negocio.
-            </p>
           </div>
 
           {/* S-03: Banner de cuenta bloqueada */}

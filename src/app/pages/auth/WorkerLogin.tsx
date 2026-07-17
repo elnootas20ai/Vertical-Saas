@@ -106,11 +106,8 @@ export function WorkerLogin() {
               Acceso trabajador
             </span>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              Iniciar sesión — Trabajador
+              Iniciar sesión
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">
-              Correo y contraseña que te dio tu empresa. Irás directo a tu panel operativo.
-            </p>
           </div>
 
           {lockInfo && (
