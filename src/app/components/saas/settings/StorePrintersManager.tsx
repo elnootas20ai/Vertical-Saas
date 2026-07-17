@@ -16,6 +16,8 @@ import type { Business } from '../../../lib/businessApi';
 import {
   DEFAULT_PRINTER_CONFIG,
   cachePdvPrinterConfig,
+  loadPdvPrinterCache,
+  saveLegacyPrinterConfig,
   type VertialPrinterConfig,
   type VertialPrinterConnectionType,
 } from '../../../lib/vertialPrint/printerConfig';
@@ -53,6 +55,21 @@ const CONNECTION_OPTIONS: Array<{
 ];
 
 function configFromPdv(pdv: PointOfSale): VertialPrinterConfig {
+  const fromServer = pdv.printerConfig
+    ? normalizeVertialPrinterConfig({
+        ...DEFAULT_PRINTER_CONFIG,
+        ...pdv.printerConfig,
+        connectionType: pdv.printerConfig.connectionType || 'network',
+      })
+    : null;
+  if (fromServer && isValidIpv4(String(fromServer.networkHost || '').trim())) {
+    return fromServer;
+  }
+  // Si se guardó en el TPV de esta tablet y el servidor aún no refleja, usar caché local.
+  const cached = loadPdvPrinterCache(pdv._id);
+  if (cached && isValidIpv4(String(cached.networkHost || '').trim())) {
+    return normalizeVertialPrinterConfig({ ...cached, connectionType: 'network' });
+  }
   return normalizeVertialPrinterConfig({
     ...DEFAULT_PRINTER_CONFIG,
     ...pdv.printerConfig,
@@ -221,11 +238,17 @@ export function StorePrintersManager({
       try {
         const saved = await savePrinterConfigToPdv(dataUserId, pdv, next, 'store');
         cachePdvPrinterConfig(saved._id, next);
+        // Misma config en el dispositivo: el TPV de esta tablet la ve al instante.
+        try {
+          saveLegacyPrinterConfig(next);
+        } catch {
+          /* ignore */
+        }
         setActivePrinterScope({ pdvId: saved._id, pdv: saved });
         setStores((prev) => prev.map((p) => (p._id === saved._id ? saved : p)));
         setDrafts((prev) => ({ ...prev, [saved._id]: configFromPdv(saved) }));
         toast.success(`Impresora guardada en «${pointOfSaleDisplayLabel(saved)}»`, {
-          description: 'Tablet y PC del TPV de esa tienda usarán esta configuración.',
+          description: 'Queda en Ajustes y en el TPV de esa misma tienda.',
         });
         void refreshScope().catch(() => undefined);
       } catch (error) {

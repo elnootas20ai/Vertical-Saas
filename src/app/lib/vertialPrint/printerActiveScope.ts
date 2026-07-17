@@ -92,10 +92,10 @@ export function loadPrinterConfig(): VertialPrinterConfig {
   return resolveEffectivePrinterConfig();
 }
 
-export function savePrinterConfig(config: VertialPrinterConfig): void {
+export function savePrinterConfig(config: VertialPrinterConfig, pdvId?: string | null): void {
   saveLegacyPrinterConfig(config);
-  const pdvId = String(activeScope.pdvId || activeScope.pdv?._id || '').trim();
-  if (pdvId) {
-    cachePdvPrinterConfig(pdvId, config);
+  const id = String(pdvId || activeScope.pdvId || activeScope.pdv?._id || '').trim();
+  if (id) {
+    cachePdvPrinterConfig(id, config);
   }
 }

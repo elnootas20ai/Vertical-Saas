@@ -90,6 +90,7 @@ export function cachePdvPrinterConfig(pdvId: string, config: VertialPrinterConfi
  * Así la app iOS/Android puede imprimir el ticket de un pedido aunque la
  * impresora se configurase desde otro dispositivo. Solo se cachea config de
  * red (IP): es la única que sirve para impresión directa desde el móvil.
+ * No pisa una IP local válida con un PDV vacío del servidor.
  */
 export function cacheServerPdvPrinterConfigs(
   pdvs: Array<{ _id: string; printerConfig?: Partial<VertialPrinterConfig> | null }>,
@@ -97,7 +98,9 @@ export function cacheServerPdvPrinterConfigs(
   for (const pdv of pdvs) {
     const cfg = pdv?.printerConfig;
     const pdvId = String(pdv?._id || '').trim();
-    if (!pdvId || !cfg || cfg.connectionType !== 'network') continue;
+    if (!pdvId || !cfg) continue;
+    const connectionType = cfg.connectionType || 'network';
+    if (connectionType !== 'network') continue;
     const host = String(cfg.networkHost || '').trim();
     if (!host) continue;
     try {

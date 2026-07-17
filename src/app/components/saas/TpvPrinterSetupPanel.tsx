@@ -34,7 +34,7 @@ import {
 } from '../../lib/vertialPrint/printerConfig';
 import { normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
 import { isValidIpv4, sanitizeIpv4Input } from '../../lib/vertialPrint/printerSetupStatus';
-import { savePrinterConfigToPdv, type PrinterConfigTarget } from '../../lib/vertialPrint/printerPdvSync';
+import { savePrinterConfigToPdv } from '../../lib/vertialPrint/printerPdvSync';
 
 const LAN_MANUAL_CONFIRM_KEY = 'vertial_lan_manual_confirmed_v1';
 
@@ -259,23 +259,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     }
   }, [pdv, scope?.pdvId, scope?.terminalId]);
 
-  const syncToServerInBackground = useCallback((next: VertialPrinterConfig) => {
-    if (!scope?.userId || !pdv?._id) return;
-    void (async () => {
-      try {
-        const target: PrinterConfigTarget = 'store';
-        const saved = await savePrinterConfigToPdv(scope.userId, pdv, next, target, undefined, {
-          suppressLogout: true,
-        });
-        syncActiveScope(next, saved);
-        scope.onPdvUpdated?.(saved);
-      } catch {
-        /* La impresora ya está guardada en el dispositivo; el sync al servidor puede esperar. */
-      }
-    })();
-  }, [pdv, scope, syncActiveScope]);
-
-  const commitSave = useCallback((host: string, port: number) => {
+  const commitSave = useCallback(async (host: string, port: number) => {
     const safePort = sanitizePortInput(String(port));
     const next = normalizeVertialPrinterConfig({
       ...config,
@@ -285,45 +269,82 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       paperWidthMm: 80,
     });
 
+    const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
+    const storeLabel = pdv ? pointOfSaleDisplayLabel(pdv) : '';
+
     setSavingIp(true);
     try {
-      // Persistencia local primero: se queda en el dispositivo hasta que la cambies.
-      savePrinterConfig(next);
-      const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
+      // 1) Dispositivo + caché por tienda (siempre)
       if (pdvId) {
-        cachePdvPrinterConfig(pdvId, next);
+        setActivePrinterScope({
+          pdvId,
+          pdv: pdv ? { ...pdv, printerConfig: next } : undefined,
+          terminalId: scope?.terminalId,
+        });
       }
-      const readBack = loadLegacyPrinterConfig();
-      const savedHostOk = String(readBack.networkHost || '').trim() === host;
-      const savedPortOk = Number(readBack.networkPort || 0) === safePort;
-      if (!savedHostOk || !savedPortOk) {
+      try {
+        savePrinterConfig(next, pdvId || undefined);
+        if (pdvId) cachePdvPrinterConfig(pdvId, next);
+      } catch {
+        toast.error('No se pudo guardar la impresora en este dispositivo. Inténtalo de nuevo.');
+        return;
+      }
+
+      const legacyHost = String(loadLegacyPrinterConfig().networkHost || '').trim();
+      const cacheHost = pdvId
+        ? String(loadPdvPrinterCache(pdvId)?.networkHost || '').trim()
+        : '';
+      if (legacyHost !== host && cacheHost !== host) {
         toast.error('IP o puerto no quedaron guardados. Inténtalo de nuevo.');
         return;
       }
-      syncActiveScope(next);
+
+      // 2) Misma tienda en servidor (Ajustes / Panel / otras tablets)
+      let syncedToStore = false;
+      if (scope?.userId && pdv?._id) {
+        try {
+          const saved = await savePrinterConfigToPdv(scope.userId, pdv, next, 'store', undefined, {
+            suppressLogout: true,
+          });
+          syncActiveScope(next, saved);
+          scope.onPdvUpdated?.(saved);
+          syncedToStore = true;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Error de red';
+          toast.warning(`Guardada en esta tablet, pero no llegó a la tienda: ${message}`, {
+            duration: 10000,
+            description: 'Reintenta «Guardar» o guárdala también en Ajustes → Impresora.',
+          });
+        }
+      } else if (!pdvId) {
+        toast.warning('Guardada en esta tablet. Elige una tienda para sincronizarla fuera del TPV.');
+      }
+
       setConfig(next);
       setManualIp(host);
       setManualPort(safePort);
       ipDirtyRef.current = false;
       setIpDirty(false);
       clearPrinterVerifiedHost();
-      toast.success(`Impresora guardada: ${host}:${safePort}`, {
-        description: pdv
-          ? `Queda en este dispositivo y en la tienda «${pointOfSaleDisplayLabel(pdv)}».`
-          : 'Queda guardada en este dispositivo. Puedes probar el ticket cuando quieras.',
-        duration: 6000,
-      });
-      syncToServerInBackground(next);
+      toast.success(
+        syncedToStore
+          ? `Impresora guardada en «${storeLabel}»: ${host}:${safePort}`
+          : `Impresora guardada en esta tablet: ${host}:${safePort}`,
+        {
+          description: syncedToStore
+            ? 'Queda en el TPV y también en Ajustes / Panel de esa misma tienda.'
+            : 'Sirve en este dispositivo. Si quieres verla fuera, vuelve a pulsar Guardar con la tienda seleccionada.',
+          duration: 7000,
+        },
+      );
       refreshDiagnostics();
-    } catch {
-      toast.error('No se pudo guardar la impresora en este dispositivo. Inténtalo de nuevo.');
     } finally {
       setSavingIp(false);
       setConfirmSaveOpen(false);
       setPendingSaveHost('');
       setPendingSavePort(9100);
     }
-  }, [config, pdv?._id, scope?.pdvId, syncActiveScope, syncToServerInBackground, refreshDiagnostics]);
+  }, [config, pdv, scope, syncActiveScope, refreshDiagnostics]);
 
   const handleRequestSave = useCallback(() => {
     const host = manualIp.trim();
@@ -344,7 +365,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       toast.error('La IP ya no es válida. Revísala e inténtalo de nuevo.');
       return;
     }
-    commitSave(host, pendingSavePort);
+    void commitSave(host, pendingSavePort);
   }, [commitSave, pendingSaveHost, pendingSavePort]);
 
   const handleCheckConnection = useCallback(() => {
