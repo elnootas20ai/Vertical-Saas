@@ -34,14 +34,14 @@ export async function printTicketDocument(
       return { method: 'native', ok: false };
     }
     const printConfig = prepared.config;
-    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 8_000 });
+    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 5_000 });
     if (result.ok) return { method: 'native', ok: true };
     toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
       duration: 12000,
       action: {
         label: 'Reintentar',
         onClick: () => {
-          void sendNativeEscpos(escpos, printConfig, { retry: false, timeoutMs: 10_000 }).then((retry) => {
+          void sendNativeEscpos(escpos, printConfig, { retry: false, timeoutMs: 5_000 }).then((retry) => {
             if (retry.ok) toast.success('Ticket impreso');
             else toast.error(retry.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, { duration: 10000 });
           });
