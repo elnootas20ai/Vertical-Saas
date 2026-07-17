@@ -116,7 +116,7 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
     vi.doUnmock('../src/app/lib/vertialPrint/isNativeApp');
   });
 
-  it('prioriza la IP guardada en el dispositivo sobre la IP de la tienda en el servidor', async () => {
+  it('prioriza la IP de la tienda sobre la del dispositivo (config admin → TPV)', async () => {
     vi.resetModules();
     vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
       isVertialNativeApp: () => true,
@@ -142,10 +142,10 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
       connectionType: 'network',
       networkHost: '192.168.1.20',
     } });
-    expect(cfg.networkHost).toBe('192.168.1.20');
+    expect(cfg.networkHost).toBe('192.168.1.99');
   });
 
-  it('en app nativa la IP del dispositivo manda sobre la del terminal', async () => {
+  it('en app nativa la IP del terminal manda sobre la del dispositivo', async () => {
     vi.resetModules();
     vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
       isVertialNativeApp: () => true,
@@ -178,6 +178,26 @@ describe('resolveEffectivePrinterConfig en app nativa', () => {
       }],
     });
     const cfg = resolveNative({ pdv, terminalId: 'term-1', localFallback: localCfg });
+    expect(cfg.networkHost).toBe('192.168.1.77');
+  });
+
+  it('usa la IP del dispositivo si la tienda no tiene impresora configurada', async () => {
+    vi.resetModules();
+    vi.doMock('../src/app/lib/vertialPrint/isNativeApp', () => ({
+      isVertialNativeApp: () => true,
+    }));
+    stubLocalStorage();
+    const localCfg = {
+      ...DEFAULT_PRINTER_CONFIG,
+      connectionType: 'network' as const,
+      networkHost: '192.168.1.20',
+    };
+    saveLegacyPrinterConfig(localCfg);
+    const { resolveEffectivePrinterConfig: resolveNative } = await import(
+      '../src/app/lib/vertialPrint/printerActiveScope'
+    );
+    const pdv = basePdv();
+    const cfg = resolveNative({ pdv, localFallback: localCfg });
     expect(cfg.networkHost).toBe('192.168.1.20');
   });
 });

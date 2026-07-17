@@ -85,7 +85,7 @@ public class VertialIosBridgePlugin: CAPPlugin, CAPBridgedPlugin {
       return
     }
 
-    TcpEscpos.send(ip: ip, port: port, payload: data, timeoutSeconds: 8) { success in
+    TcpEscpos.send(ip: ip, port: port, payload: data, timeoutSeconds: 20) { success in
       if success {
         call.resolve(["status": "printed"])
       } else {
@@ -139,7 +139,15 @@ private enum TcpEscpos {
       switch state {
       case .ready:
         connection.send(content: payload, completion: .contentProcessed { error in
-          finish(error == nil)
+          if error != nil {
+            finish(false)
+            return
+          }
+          // No cerrar el socket al instante: muchas térmicas cortan el ticket si
+          // se cierra TCP antes de vaciar el buffer (ticket entrecortado).
+          queue.asyncAfter(deadline: .now() + 0.6) {
+            finish(true)
+          }
         })
       case .failed, .cancelled:
         finish(false)

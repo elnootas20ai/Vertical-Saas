@@ -64,6 +64,7 @@ import {
   Timer,
   Hourglass,
   IdCard,
+  Printer,
 } from 'lucide-react';
 import { TpvIncidentsPanel } from '../../components/saas/restaurant/TpvIncidentsPanel';
 import { Layout } from '../../components/saas/Layout';
@@ -90,6 +91,7 @@ import {
 import { AdminCompanyVerificationPanel } from '../../components/saas/admin/AdminCompanyVerificationPanel';
 import { AdminClientUsagePanel } from '../../components/saas/admin/AdminClientUsagePanel';
 import { AdminWebAnalyticsTab } from '../../components/saas/admin/AdminWebAnalyticsTab';
+import { StorePrintersManager } from '../../components/saas/settings/StorePrintersManager';
 import {
   computeClientHealthFromLogin,
   healthBadgeClasses,
@@ -148,6 +150,7 @@ async function apiFetch(path: string, init?: RequestInit) {
 
 const TABS = [
   { id: 'clients', label: 'Clientes SaaS', icon: Users },
+  { id: 'printers', label: 'Impresoras', icon: Printer },
   { id: 'web', label: 'Web / Landing', icon: MousePointerClick },
   { id: 'payments', label: 'Pagos MONEI', icon: CreditCard },
   { id: 'plans', label: 'Planes y precios', icon: DollarSign },
@@ -3687,6 +3690,7 @@ export function AdminPanel() {
             accountSaveCallbackRef={accountSaveCallbackRef}
           />
         )}
+        {activeTab === 'printers' && <StorePrintersManager variant="admin" />}
         {activeTab === 'web' && <AdminWebAnalyticsTab />}
         {activeTab === 'payments' && <MoneiPaymentsTab />}
         {activeTab === 'plans' && <PlansTab userId={user?.id || user?.user_id || ''} />}

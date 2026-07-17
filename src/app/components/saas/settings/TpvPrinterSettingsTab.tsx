@@ -8,14 +8,17 @@ import { coerceSelectedPdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { setActivePrinterScope, getActivePrinterScope } from '../../../lib/vertialPrint/printerActiveScope';
 import { loadRetailStoresForBusiness } from '../../../verticals/retailScopeRegistry';
 import type { Business } from '../../../lib/businessApi';
+import { isVertialNativeApp } from '../../../lib/vertialPrint/isNativeApp';
+import { StorePrintersManager } from './StorePrintersManager';
 
 const TpvPrinterSetupPanel = lazy(() =>
   import('../TpvPrinterSetupPanel').then((m) => ({ default: m.TpvPrinterSetupPanel })),
 );
 
 /**
- * Ajustes → Empresa → Impresora. También accesible desde el icono de impresora en el TPV.
- * La IP se guarda en este dispositivo y se sincroniza con la tienda si hay PDV resuelto.
+ * Ajustes → Empresa → Impresora.
+ * En PC: gestión por tienda (tablet + PC).
+ * En tablet/app: además el asistente de Red local / IP de este dispositivo.
  */
 export function TpvPrinterSettingsTab() {
   const { user } = useAuth();
@@ -27,8 +30,10 @@ export function TpvPrinterSettingsTab() {
     allPointsOfSale,
     displayLabelForActive,
     refresh,
+    setActiveSalesPoint,
   } = useActiveStoreScope();
   const userId = resolveBusinessDataUserId(user, currentBusiness);
+  const isNative = isVertialNativeApp();
 
   const [fallbackStores, setFallbackStores] = useState<PointOfSale[]>([]);
   const fallbackAttemptRef = useRef<string | null>(null);
@@ -43,8 +48,6 @@ export function TpvPrinterSettingsTab() {
     return allPointsOfSale.filter((p) => p.active !== false);
   }, [pointsOfSale, allPointsOfSale]);
 
-  // Carga directa en segundo plano si el contexto global no trae tiendas.
-  // Nunca bloquea la UI: solo mejora el guardado (dispositivo → tienda).
   useEffect(() => {
     if (contextStores.length > 0) return;
     const bid = String(currentBusiness?.business_id || '').trim();
@@ -90,6 +93,23 @@ export function TpvPrinterSettingsTab() {
     void refresh();
   }, [refresh]);
 
+  const handleStoreSelect = useCallback(
+    (pdvId: string) => {
+      const id = String(pdvId || '').trim();
+      if (!id) return;
+      setActiveSalesPoint(id);
+      const next = activeStores.find((p) => p._id === id);
+      if (next) {
+        setActivePrinterScope({
+          pdvId: id,
+          pdv: next,
+          terminalId: getActivePrinterScope().terminalId,
+        });
+      }
+    },
+    [activeStores, setActiveSalesPoint],
+  );
+
   const scope = pdv
     ? {
         userId: userId || '',
@@ -97,13 +117,38 @@ export function TpvPrinterSettingsTab() {
         pdv,
         terminalId: getActivePrinterScope().terminalId,
         storeLabel: displayLabelForActive || pointOfSaleDisplayLabel(pdv),
+        availableStores: activeStores,
+        onStoreSelect: handleStoreSelect,
         onPdvUpdated: handlePdvUpdated,
       }
-    : undefined;
+    : activeStores.length > 0
+      ? {
+          userId: userId || '',
+          pdvId: '',
+          availableStores: activeStores,
+          onStoreSelect: handleStoreSelect,
+        }
+      : undefined;
 
   return (
-    <Suspense fallback={<p className="text-sm text-gray-500 dark:text-gray-400 p-4">Cargando impresora…</p>}>
-      <TpvPrinterSetupPanel scope={scope} />
-    </Suspense>
+    <div className="space-y-10">
+      <StorePrintersManager variant="settings" />
+
+      {isNative ? (
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">
+              Este dispositivo (tablet)
+            </h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Permiso de red local y prueba de ticket en esta tablet. La IP de la tienda se gestiona arriba.
+            </p>
+          </div>
+          <Suspense fallback={<p className="text-sm text-gray-500 dark:text-gray-400 p-4">Cargando…</p>}>
+            <TpvPrinterSetupPanel scope={scope} />
+          </Suspense>
+        </div>
+      ) : null}
+    </div>
   );
 }

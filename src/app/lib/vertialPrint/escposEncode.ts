@@ -24,9 +24,30 @@ function concat(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/** Parte texto largo en varias líneas (antes se cortaba y no se veía). */
+export function wrapEscposLines(value: string, width: number): string[] {
+  const text = sanitizeEscposText(value);
+  if (!text) return [''];
+  const safeWidth = Math.max(8, width);
+  const out: string[] = [];
+  let rest = text;
+  while (rest.length > safeWidth) {
+    let cut = rest.lastIndexOf(' ', safeWidth);
+    if (cut < Math.floor(safeWidth * 0.4)) cut = safeWidth;
+    out.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).trimStart();
+  }
+  if (rest.length) out.push(rest);
+  return out.length ? out : [''];
+}
+
 function textLine(value: string, width = 42): Uint8Array {
-  const line = sanitizeEscposText(value).slice(0, width);
-  return new Uint8Array([...line.split('').map((c) => c.charCodeAt(0)), LF]);
+  const lines = wrapEscposLines(value, width);
+  return concat(
+    lines.map(
+      (line) => new Uint8Array([...line.split('').map((c) => c.charCodeAt(0)), LF]),
+    ),
+  );
 }
 
 function command(bytes: number[]): Uint8Array {
@@ -44,6 +65,20 @@ function row(left: string, right: string, width = 42): string {
   return `${l}${' '.repeat(space)}${r}`.slice(0, width);
 }
 
+/** Fila importe: el nombre se envuelve; el precio va en la última línea. */
+function pushMoneyRow(chunks: Uint8Array[], left: string, right: string, width: number) {
+  const r = sanitizeEscposText(right);
+  const maxLeft = Math.max(8, width - r.length - 1);
+  const wrapped = wrapEscposLines(left, maxLeft);
+  for (let i = 0; i < wrapped.length; i += 1) {
+    if (i === wrapped.length - 1) {
+      chunks.push(textLine(row(wrapped[i], r, width), width));
+    } else {
+      chunks.push(textLine(wrapped[i], width));
+    }
+  }
+}
+
 function pushLineDetail(chunks: Uint8Array[], line: TicketDocument['lines'][number], width: number) {
   chunks.push(textLine(`${line.qty}x ${line.name}`, width));
   for (const name of line.added || []) {
@@ -55,6 +90,17 @@ function pushLineDetail(chunks: Uint8Array[], line: TicketDocument['lines'][numb
   if (line.note) {
     chunks.push(textLine(`  NOTA: ${line.note}`, width));
   }
+}
+
+/** Avance corto + corte: margen para que se lea el pie, sin gastar papel de más. */
+function pushFeedAndCut(chunks: Uint8Array[], width: number) {
+  // 2 líneas en blanco (margen visual bajo el pie)
+  chunks.push(textLine('', width));
+  chunks.push(textLine('', width));
+  // ESC d 5 — avanza ~5 líneas hasta pasar la cuchilla (ni corto ni infinito)
+  chunks.push(command([ESC, 0x64, 5]));
+  // GS V 0 — un solo corte completo
+  chunks.push(command([GS, 0x56, 0]));
 }
 
 export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 80): Uint8Array {
@@ -105,13 +151,11 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     for (const line of doc.lines) {
       pushLineDetail(chunks, line, width);
     }
-    chunks.push(
-      textLine('--------------------------------', width),
-      command([ESC, 0x45, 1]),
-      textLine(row('TOTAL', money(doc.total), width), width),
-      command([ESC, 0x45, 0]),
-      textLine(doc.paymentStatusLabel, width),
-    );
+    chunks.push(textLine('--------------------------------', width));
+    chunks.push(command([ESC, 0x45, 1]));
+    pushMoneyRow(chunks, 'TOTAL', money(doc.total), width);
+    chunks.push(command([ESC, 0x45, 0]));
+    chunks.push(textLine(doc.paymentStatusLabel, width));
     if (doc.paymentLabel && doc.paymentLabel !== '-') {
       chunks.push(textLine(doc.paymentLabel, width));
     }
@@ -125,7 +169,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     chunks.push(textLine('--------------------------------', width));
 
     for (const line of doc.lines) {
-      chunks.push(textLine(row(`${line.qty}x ${line.name}`, money(line.total), width), width));
+      pushMoneyRow(chunks, `${line.qty}x ${line.name}`, money(line.total), width);
       for (const name of line.added || []) {
         chunks.push(textLine(`  + ${name}`, width));
       }
@@ -137,32 +181,30 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
       }
     }
 
-    chunks.push(
-      textLine('--------------------------------', width),
-      textLine(row('Base imponible', money(doc.base), width), width),
-      textLine(row(`IVA ${doc.vatRate}%`, money(doc.vat), width), width),
-      textLine('--------------------------------', width),
-      command([ESC, 0x45, 1]),
-      textLine(
-        row(doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL', `${doc.isRefund ? '-' : ''}${money(doc.total)}`, width),
-        width,
-      ),
-      command([ESC, 0x45, 0]),
-      textLine('--------------------------------', width),
-      textLine(`Metodo: ${doc.paymentLabel}`, width),
+    chunks.push(textLine('--------------------------------', width));
+    pushMoneyRow(chunks, 'Base imponible', money(doc.base), width);
+    pushMoneyRow(chunks, `IVA ${doc.vatRate}%`, money(doc.vat), width);
+    chunks.push(textLine('--------------------------------', width));
+    chunks.push(command([ESC, 0x45, 1]));
+    pushMoneyRow(
+      chunks,
+      doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL',
+      `${doc.isRefund ? '-' : ''}${money(doc.total)}`,
+      width,
     );
+    chunks.push(command([ESC, 0x45, 0]));
+    chunks.push(textLine('--------------------------------', width));
+    chunks.push(textLine(`Metodo: ${doc.paymentLabel}`, width));
 
     if (doc.refundReason) chunks.push(textLine(`Motivo: ${doc.refundReason}`, width));
   }
 
-  chunks.push(
-    command([ESC, 0x61, 1]),
-    textLine(doc.footer, width),
-    textLine(doc.variant === 'customer' ? 'Gracias por su visita' : '', width),
-    textLine('', width),
-    textLine('', width),
-    command([GS, 0x56, 0]),
-  );
+  chunks.push(command([ESC, 0x61, 1]));
+  chunks.push(textLine(doc.footer, width));
+  if (doc.variant === 'customer') {
+    chunks.push(textLine('Gracias por su visita', width));
+  }
+  pushFeedAndCut(chunks, width);
 
   return concat(chunks);
 }
@@ -190,6 +232,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
     textLine('"Usar esta impresora"', width),
     textLine('', width),
     textLine('', width),
+    command([ESC, 0x64, 5]),
     command([GS, 0x56, 0]),
   ]);
 }

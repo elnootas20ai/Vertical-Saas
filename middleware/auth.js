@@ -37,13 +37,13 @@ function resolveAuthCookieDomain() {
 
 const AUTH_COOKIE_DOMAIN = resolveAuthCookieDomain();
 
-// S-01: Opciones base para cookies seguras
-// En desarrollo se usa sameSite:'lax' para evitar problemas con IP/cross-port.
-// En producción se mantiene 'strict' para máxima seguridad.
+// En producción las cookies deben poder enviarse desde la app Capacitor
+// (origen capacitor://localhost → API en vertialapp.com = cross-site).
+// SameSite=strict bloqueaba el refresh en tablet y expulsaba la sesión en minutos.
 export const AUTH_COOKIE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+  sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
   path: '/',
   ...(AUTH_COOKIE_DOMAIN ? { domain: AUTH_COOKIE_DOMAIN } : {}),
 };
@@ -75,12 +75,14 @@ export function verifyRefreshToken(token) {
 }
 
 function readAccessTokenFromRequest(req) {
-  let token = req.cookies?.access_token;
-  if (!token) {
-    const header = req.headers.authorization || '';
-    token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  // Preferir Bearer: en tablet/Capacitor una cookie vieja no debe pisar el JWT
+  // válido guardado en el dispositivo (si no, 401 → logout en minutos).
+  const header = req.headers.authorization || '';
+  if (header.startsWith('Bearer ')) {
+    const bearer = header.slice(7).trim();
+    if (bearer) return bearer;
   }
-  return token;
+  return String(req.cookies?.access_token || '').trim();
 }
 
 function verifyAccessTokenPayload(token) {

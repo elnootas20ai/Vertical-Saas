@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { CheckCircle2, CircleAlert, ExternalLink, Loader2, Network, Printer, Shield, Smartphone } from 'lucide-react';
-import type { PointOfSale } from '../../lib/deliveryApi';
+import { pointOfSaleDisplayLabel, type PointOfSale } from '../../lib/deliveryApi';
 import { IMPRESORA_SETTINGS_PATH } from '../../lib/vertialPrint/nativePrinterFlow';
 import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
 import {
@@ -23,7 +23,12 @@ import {
   savePrinterConfig,
   setActivePrinterScope,
 } from '../../lib/vertialPrint/printerActiveScope';
-import { loadLegacyPrinterConfig, cachePdvPrinterConfig, type VertialPrinterConfig } from '../../lib/vertialPrint/printerConfig';
+import {
+  loadLegacyPrinterConfig,
+  loadPdvPrinterCache,
+  cachePdvPrinterConfig,
+  type VertialPrinterConfig,
+} from '../../lib/vertialPrint/printerConfig';
 import { normalizeVertialPrinterConfig } from '../../lib/vertialPrint/printerConfigNormalize';
 import { isValidIpv4, sanitizeIpv4Input } from '../../lib/vertialPrint/printerSetupStatus';
 import { savePrinterConfigToPdv, type PrinterConfigTarget } from '../../lib/vertialPrint/printerPdvSync';
@@ -37,6 +42,9 @@ export interface TpvPrinterScope {
   terminalId?: string;
   storeLabel?: string;
   terminalLabel?: string;
+  /** Tiendas visibles en el selector (TPV / Ajustes). */
+  availableStores?: PointOfSale[];
+  onStoreSelect?: (pdvId: string) => void;
   onPdvUpdated?: (pdv: PointOfSale) => void;
 }
 
@@ -59,10 +67,27 @@ function writeLanManualConfirmed(value: boolean): void {
 
 function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
   const local = loadLegacyPrinterConfig();
-  const raw = scope?.pdv
+  const pdv = scope?.pdv;
+  const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
+
+  // En el panel de ajustes: priorizar lo de ESTA tienda (servidor → caché local por PDV).
+  if (pdvId) {
+    const fromStore = pdv?.printerConfig
+      ? normalizeVertialPrinterConfig({ ...pdv.printerConfig, connectionType: 'network' })
+      : null;
+    if (fromStore && isValidIpv4(String(fromStore.networkHost || '').trim())) {
+      return fromStore;
+    }
+    const cached = loadPdvPrinterCache(pdvId);
+    if (cached && isValidIpv4(String(cached.networkHost || '').trim())) {
+      return normalizeVertialPrinterConfig({ ...cached, connectionType: 'network' });
+    }
+  }
+
+  const raw = pdv
     ? resolveEffectivePrinterConfig({
-        pdv: scope.pdv,
-        terminalId: scope.terminalId,
+        pdv,
+        terminalId: scope?.terminalId,
         localFallback: local,
       })
     : local;
@@ -251,7 +276,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setIpDirty(false);
       clearPrinterVerifiedHost();
       toast.success(`Impresora guardada: ${host}:${safePort}`, {
-        description: 'Queda guardada en este dispositivo. Puedes probar el ticket cuando quieras.',
+        description: pdv
+          ? `Queda en este dispositivo y en la tienda «${pointOfSaleDisplayLabel(pdv)}».`
+          : 'Queda guardada en este dispositivo. Puedes probar el ticket cuando quieras.',
         duration: 6000,
       });
       syncToServerInBackground(next);
@@ -451,16 +478,69 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       ? `Vas a guardar ${pendingSaveHost}:${pendingSavePort} (antes ${selectedHost}:${selectedPort}).`
       : `Los tickets de este dispositivo se imprimirán en ${pendingSaveHost || '—'}:${pendingSavePort}.`;
 
+  const stores = (scope?.availableStores || []).filter((p) => p.active !== false);
+  const selectedStoreId = String(pdv?._id || scope?.pdvId || '').trim();
+  const storeFromList = stores.find((p) => p._id === selectedStoreId);
+  const selectedStoreLabel =
+    scope?.storeLabel
+    || (pdv ? pointOfSaleDisplayLabel(pdv) : '')
+    || (storeFromList ? pointOfSaleDisplayLabel(storeFromList) : '');
+
+  const handleStoreChange = useCallback(
+    (pdvId: string) => {
+      const id = String(pdvId || '').trim();
+      if (!id || id === selectedStoreId) return;
+      ipDirtyRef.current = false;
+      setIpDirty(false);
+      scope?.onStoreSelect?.(id);
+    },
+    [scope, selectedStoreId],
+  );
+
   return (
     <div className="space-y-6 max-w-3xl">
       <header>
         <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Impresora</h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {scope?.storeLabel
-            ? `Tickets del TPV en ${scope.storeLabel}.`
+          {selectedStoreLabel
+            ? `Configuras la impresora de la tienda «${selectedStoreLabel}».`
             : 'Impresora WiFi de tickets del TPV.'}
         </p>
       </header>
+
+      {stores.length > 0 ? (
+        <SettingsSection
+          title="Tienda"
+          description={
+            stores.length > 1
+              ? 'Elige la tienda. La IP se guarda en este dispositivo y en esa tienda.'
+              : 'Tienda a la que se asocia esta impresora.'
+          }
+        >
+          {stores.length === 1 ? (
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3">
+              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                {pointOfSaleDisplayLabel(stores[0])}
+              </p>
+            </div>
+          ) : (
+            <label className="block">
+              <span className="sr-only">Tienda</span>
+              <select
+                value={selectedStoreId || stores[0]?._id || ''}
+                onChange={(e) => handleStoreChange(e.target.value)}
+                className="w-full min-h-[52px] rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100 touch-manipulation"
+              >
+                {stores.map((store) => (
+                  <option key={store._id} value={store._id}>
+                    {pointOfSaleDisplayLabel(store)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </SettingsSection>
+      ) : null}
 
       {!isNative ? (
         <SettingsSection

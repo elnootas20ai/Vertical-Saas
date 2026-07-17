@@ -300,12 +300,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setSessionSyncedWithServer(true);
           return true;
         }
+        // Solo borrar sesión si el servidor confirma que ya no es válida.
+        // Errores de red / timeout no deben echar de la tablet a los 2 minutos.
         if (response.ok === false && Boolean(parsedFromStorage)) {
-          persistSession(null);
-          setUser(null);
-          setIsAuthenticated(false);
-          clearAuthTokens();
-          setSessionSyncedWithServer(true);
+          const msg = String(response.error || '').toLowerCase();
+          const definitive =
+            /ya no es válida|sesión inválida|refresh token|unauthorized|no autorizado/.test(msg);
+          if (definitive) {
+            persistSession(null);
+            setUser(null);
+            setIsAuthenticated(false);
+            clearAuthTokens();
+            setSessionSyncedWithServer(true);
+            return true;
+          }
+          // Mantener sesión local; se reintentará después.
+          setSessionSyncedWithServer(false);
           return true;
         }
         return false;

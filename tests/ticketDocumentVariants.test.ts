@@ -111,6 +111,17 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('Gracias por su visita');
   });
 
+  it('no trunca nombres largos: envuelve en varias lineas', () => {
+    const opts = baseOptions();
+    const longName =
+      'Hamburguesa gourmet doble carne con queso cheddar bacon y salsa especial de la casa';
+    opts.order.items = [{ quantity: 1, name: longName, total: 14.5 }];
+    const text = decodeEscpos(encodeTicketEscpos(buildTicketDocument({ ...opts, variant: 'customer' })));
+    expect(text).toContain('Hamburguesa gourmet');
+    expect(text).toContain('salsa especial');
+    expect(text).toContain('14.50');
+  });
+
   it('omite lineas vacias o cantidad 0', () => {
     const opts = baseOptions();
     opts.order.items = [

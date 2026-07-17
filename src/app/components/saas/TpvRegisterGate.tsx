@@ -2618,22 +2618,61 @@ export function TpvRegisterGate({
     tabletBinding?.workCenterId,
   ]);
 
+  const printerStores = useMemo(() => {
+    const active = pointsOfSale.filter((p) => p.active !== false);
+    const restricted = String(tabletRestrictedPdvId || '').trim();
+    if (restricted) {
+      return active.filter((p) => p._id === restricted);
+    }
+    return active;
+  }, [pointsOfSale, tabletRestrictedPdvId]);
+
+  const handlePrinterStoreSelect = useCallback(
+    (pdvId: string) => {
+      const id = String(pdvId || '').trim();
+      if (!id) return;
+      setManagerPdvPickId(id);
+      const pdv = pointsOfSale.find((p) => p._id === id);
+      if (pdv) {
+        setActivePrinterScope({
+          pdvId: id,
+          pdv,
+          terminalId: activeSession?.terminalId,
+        });
+      }
+    },
+    [pointsOfSale, activeSession?.terminalId],
+  );
+
   const printerModalScope = useMemo((): TpvPrinterScope | undefined => {
     if (!dataUserId) return undefined;
-    const pdvId = String(
+    const preferredId = String(
       activeSession?.pointOfSaleId || tabletRestrictedPdvId || managerPdvPickId || '',
     ).trim();
+    const pdv =
+      printerStores.find((p) => p._id === preferredId)
+      || printerStores[0]
+      || pointsOfSale.find((p) => p._id === preferredId)
+      || null;
+    if (!pdv) {
+      return {
+        userId: dataUserId,
+        pdvId: preferredId,
+        availableStores: printerStores,
+        onStoreSelect: handlePrinterStoreSelect,
+      };
+    }
     const terminalId = activeSession?.terminalId;
-    const pdv = pointsOfSale.find((p) => p._id === pdvId);
-    if (!pdvId || !pdv) return undefined;
     const terminal = terminalId ? pdv.terminals.find((t) => t.id === terminalId) : undefined;
     return {
       userId: dataUserId,
-      pdvId,
+      pdvId: pdv._id,
       pdv,
       terminalId,
       storeLabel: pointOfSaleDisplayLabel(pdv),
       terminalLabel: terminal ? (terminal.code || terminal.name) : undefined,
+      availableStores: printerStores,
+      onStoreSelect: handlePrinterStoreSelect,
       onPdvUpdated: (updated) => {
         setPointsOfSale((prev) => prev.map((p) => (p._id === updated._id ? updated : p)));
       },
@@ -2645,6 +2684,8 @@ export function TpvRegisterGate({
     tabletRestrictedPdvId,
     managerPdvPickId,
     pointsOfSale,
+    printerStores,
+    handlePrinterStoreSelect,
   ]);
 
   useEffect(() => {

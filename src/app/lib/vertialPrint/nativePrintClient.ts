@@ -6,8 +6,8 @@ import { getEscposPlugin, getNativeLocalNetworkInfo } from './escposPlugin';
 /** Puertos habituales de impresoras térmicas ESC/POS por red. */
 export const NATIVE_RAW_PRINT_PORTS = [9100, 9101, 9102] as const;
 
-const NATIVE_PRINT_TIMEOUT_MS = 8_000;
-const NATIVE_PRINT_RETRY_TIMEOUT_MS = 6_000;
+const NATIVE_PRINT_TIMEOUT_MS = 20_000;
+const NATIVE_PRINT_RETRY_TIMEOUT_MS = 12_000;
 const NATIVE_PRINT_RETRY_DELAY_MS = 400;
 const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 10_000;
 const NATIVE_DISCOVER_PLUGIN_RETRY_MS = 8_000;

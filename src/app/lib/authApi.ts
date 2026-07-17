@@ -376,8 +376,10 @@ const API_BASE = getApiBase();
 let _onUnauthorized: (() => void) | null = null;
 
 const TOKEN_STORAGE_KEY = 'vertial_access_token';
+const REFRESH_STORAGE_KEY = 'vertial_refresh_token';
 
 let _inMemoryToken: string | null = localStorage.getItem(TOKEN_STORAGE_KEY);
+let _inMemoryRefreshToken: string | null = localStorage.getItem(REFRESH_STORAGE_KEY);
 
 export function cacheAccessToken(token: string | null) {
   _inMemoryToken = token;
@@ -385,6 +387,15 @@ export function cacheAccessToken(token: string | null) {
     localStorage.setItem(TOKEN_STORAGE_KEY, token);
   } else {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
+  }
+}
+
+function cacheRefreshToken(token: string | null) {
+  _inMemoryRefreshToken = token;
+  if (token) {
+    localStorage.setItem(REFRESH_STORAGE_KEY, token);
+  } else {
+    localStorage.removeItem(REFRESH_STORAGE_KEY);
   }
 }
 
@@ -397,17 +408,22 @@ export function getAuthHeaders(): Record<string, string> {
 
 export function loadStoredTokens(): { accessToken: string | null; refreshToken: string | null } {
   _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
-  return { accessToken: _inMemoryToken, refreshToken: null };
+  _inMemoryRefreshToken = localStorage.getItem(REFRESH_STORAGE_KEY);
+  return { accessToken: _inMemoryToken, refreshToken: _inMemoryRefreshToken };
 }
 
-export function setAuthTokens(_tokens: { accessToken: string; refreshToken: string }) {
-  cacheAccessToken(_tokens.accessToken);
+export function setAuthTokens(tokens: { accessToken: string; refreshToken?: string }) {
+  cacheAccessToken(tokens.accessToken);
+  if (tokens.refreshToken) {
+    cacheRefreshToken(tokens.refreshToken);
+  }
 }
 
 export function clearAuthTokens() {
   _inMemoryToken = null;
+  _inMemoryRefreshToken = null;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
-  localStorage.removeItem('vertial_refresh_token');
+  localStorage.removeItem(REFRESH_STORAGE_KEY);
 }
 
 export function setOnUnauthorized(callback: () => void) {
@@ -416,12 +432,13 @@ export function setOnUnauthorized(callback: () => void) {
 
 export function triggerUnauthorized() {
   cacheAccessToken(null);
+  cacheRefreshToken(null);
   _onUnauthorized?.();
 }
 
-// S-01: El refresh se hace enviando la cookie automáticamente (no se necesita token en body)
-// Lock para evitar que múltiples peticiones simultáneas lancen varios refresh en paralelo,
-// lo que causaría que el token rotado invalide las demás solicitudes de refresh.
+// El refresh usa cookie httpOnly cuando existe; en tablet/Capacitor a menudo no llega
+// (cross-site) → enviamos también el refreshToken persistido en el dispositivo.
+// Lock para evitar refreshes paralelos que invalidan la sesión por rotación.
 //
 // 'refreshed'  → token renovado
 // 'rejected'   → el servidor rechazó el refresh: la sesión ya no es válida
@@ -435,6 +452,12 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
 
   _refreshPromise = (async () => {
     try {
+      if (!_inMemoryRefreshToken) {
+        _inMemoryRefreshToken = localStorage.getItem(REFRESH_STORAGE_KEY);
+      }
+      if (!_inMemoryToken) {
+        _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+      }
       const response = await fetch(`${API_BASE}/api/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
@@ -442,14 +465,24 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
           'Content-Type': 'application/json',
           ...(_inMemoryToken ? { Authorization: `Bearer ${_inMemoryToken}` } : {}),
         },
+        body: JSON.stringify(
+          _inMemoryRefreshToken ? { refreshToken: _inMemoryRefreshToken } : {},
+        ),
       });
       const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<AuthUser>;
       if (response.ok && payload.ok === true) {
-        if (payload.accessToken) cacheAccessToken(payload.accessToken);
+        if (payload.accessToken) {
+          setAuthTokens({
+            accessToken: payload.accessToken,
+            refreshToken: payload.refreshToken,
+          });
+        }
         return 'refreshed' as const;
       }
       // 5xx / gateway caído: no concluyente, mantener la sesión.
       if (response.status >= 500) return 'network' as const;
+      // Sin cookie ni body en tablet: no tratar como “sesión muerta” si aún hay access token local.
+      if (response.status === 400 && _inMemoryToken) return 'network' as const;
       return 'rejected' as const;
     } catch {
       return 'network' as const;
@@ -478,6 +511,9 @@ export async function authFetch(
   authRetried = false,
   options: AuthFetchOptions = {},
 ): Promise<Response> {
+  if (!_inMemoryToken) {
+    _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+  }
   const headers = new Headers(init?.headers || {});
   if (_inMemoryToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${_inMemoryToken}`);
@@ -534,6 +570,9 @@ async function request<T>(
   _retried = false,
   _networkAttempt = 0,
 ): Promise<ApiEnvelope<T>> {
+  if (!_inMemoryToken) {
+    _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
+  }
   const extraHeaders: Record<string, string> = {};
   if (_inMemoryToken) {
     extraHeaders['Authorization'] = `Bearer ${_inMemoryToken}`;
@@ -577,10 +616,9 @@ async function request<T>(
 
   if (response.status === 401) {
     const authErr = extractApiErrorMessage(payload as Record<string, unknown>);
-    const isExpired =
-      payload.code === 'TOKEN_EXPIRED' ||
-      /token expirado|sesión expirada|session expired/i.test(authErr);
-    if (isExpired && !_retried) {
+    // Intentar refresh en cualquier 401 (no solo TOKEN_EXPIRED): en tablet
+    // a veces llega un 401 genérico y antes se cerraba sesión sin renovar.
+    if (!_retried) {
       const refreshed = await tryRefreshToken();
       if (refreshed === 'refreshed') {
         return request<T>(path, init, true, _networkAttempt);
@@ -624,7 +662,10 @@ export async function loginRequest(email: string, password: string) {
     body: JSON.stringify({ email, password }),
   });
   if (result.accessToken) {
-    cacheAccessToken(result.accessToken);
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
   }
   return result;
 }
@@ -646,6 +687,7 @@ export interface GoogleLoginResult {
   googleUser?: GoogleUserProfile;
   redirectTo?: string;
   accessToken?: string;
+  refreshToken?: string;
 }
 
 const GOOGLE_LOGIN_FETCH_MS = 30_000;
@@ -717,7 +759,10 @@ export async function googleLoginRequest(credential: string): Promise<GoogleLogi
   }
 
   if (payload.accessToken) {
-    cacheAccessToken(payload.accessToken);
+    setAuthTokens({
+      accessToken: payload.accessToken,
+      refreshToken: payload.refreshToken,
+    });
   }
 
   return payload;
@@ -731,6 +776,7 @@ export interface AppleLoginResult {
   appleUser?: AppleUserProfile;
   redirectTo?: string;
   accessToken?: string;
+  refreshToken?: string;
 }
 
 export async function appleLoginRequest(
@@ -804,7 +850,10 @@ export async function appleLoginRequest(
   }
 
   if (payload.accessToken) {
-    cacheAccessToken(payload.accessToken);
+    setAuthTokens({
+      accessToken: payload.accessToken,
+      refreshToken: (payload as AppleLoginResult & { refreshToken?: string }).refreshToken,
+    });
   }
 
   return payload;
@@ -825,7 +874,10 @@ export async function teamLoginRequest(companyCode: string, username: string, pa
     body: JSON.stringify({ companyCode, username, password }),
   }) as TeamLoginResult;
   if (result.accessToken) {
-    cacheAccessToken(result.accessToken);
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
   }
   return result;
 }
@@ -845,7 +897,10 @@ export async function posSwitchUserRequest(username: string, password: string): 
     body: JSON.stringify({ username, password }),
   }) as PosSwitchResult;
   if (result.accessToken) {
-    cacheAccessToken(result.accessToken);
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
   }
   return result;
 }
@@ -870,7 +925,10 @@ export async function verifyLoginCodeRequest(email: string, code: string) {
     body: JSON.stringify({ email, code }),
   });
   if (result.accessToken) {
-    cacheAccessToken(result.accessToken);
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
   }
   return result;
 }
@@ -1100,7 +1158,10 @@ export async function acceptInviteRequest(token: string, email: string, newPassw
     body: JSON.stringify(body),
   });
   if (result.accessToken) {
-    cacheAccessToken(result.accessToken);
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
   }
   return result;
 }
@@ -1137,12 +1198,14 @@ export async function logActivityRequest(data: {
   });
 }
 
-// S-01: Logout — el backend lee el refreshToken de la cookie httpOnly y limpia las cookies
+// S-01: Logout — cookie httpOnly + refreshToken del dispositivo (tablet)
 export async function logoutRequest(_refreshToken?: string) {
+  const bodyToken = _refreshToken || _inMemoryRefreshToken || localStorage.getItem(REFRESH_STORAGE_KEY) || '';
   await fetch(`${API_BASE}/api/auth/logout`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bodyToken ? { refreshToken: bodyToken } : {}),
   }).catch(() => {});
 }
 
@@ -1151,7 +1214,10 @@ export async function verifyEmailRequest(token: string, email: string) {
   const params = new URLSearchParams({ token, email });
   const result = await request<AuthUser & { accessToken?: string }>(`/api/auth/verify-email?${params.toString()}`);
   if (result.accessToken) {
-    cacheAccessToken(result.accessToken);
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: (result as { refreshToken?: string }).refreshToken,
+    });
   }
   return result;
 }
@@ -1224,20 +1290,19 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
     const { response, payload, rawText } = await doFetch();
 
     if (response.status === 401) {
-      const authErr = extractApiErrorMessage(payload as Record<string, unknown>);
-      if (authErr) {
-        throw new Error(authErr);
-      }
-      if (payload.code === 'TOKEN_EXPIRED' && !_retried) {
+      // Intentar renovar siempre antes de dar la sesión por muerta (tablet/Capacitor).
+      if (!_retried) {
         const refreshed = await tryRefreshToken();
         if (refreshed === 'refreshed') return run(true);
         if (refreshed === 'network') {
-          // Sin red no se puede saber si la sesión sigue viva: lanzar para que el
-          // llamador reintente y NO borre la sesión en caché.
           throw new Error('Sin conexión con el servidor; se mantiene la sesión en caché.');
         }
       }
-      return { ok: false, error: 'No se pudo sincronizar el perfil; la sesión ya no es válida.' };
+      const authErr = extractApiErrorMessage(payload as Record<string, unknown>);
+      return {
+        ok: false,
+        error: authErr || 'No se pudo sincronizar el perfil; la sesión ya no es válida.',
+      };
     }
 
     if (response.status === 404) {

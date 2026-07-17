@@ -1,5 +1,5 @@
 import type { TicketDocument } from './ticketDocument';
-import { sanitizeEscposText } from './escposEncode';
+import { sanitizeEscposText, wrapEscposLines } from './escposEncode';
 
 type EposBuilder = {
   addTextAlign: (align: string) => void;
@@ -21,7 +21,22 @@ function row(left: string, right: string, width = 42): string {
 }
 
 function line(builder: EposBuilder, text: string, width: number): void {
-  builder.addText(`${sanitizeEscposText(text).slice(0, width)}\n`);
+  for (const part of wrapEscposLines(text, width)) {
+    builder.addText(`${part}\n`);
+  }
+}
+
+function moneyRow(builder: EposBuilder, left: string, right: string, width: number): void {
+  const r = sanitizeEscposText(right);
+  const maxLeft = Math.max(8, width - r.length - 1);
+  const wrapped = wrapEscposLines(left, maxLeft);
+  for (let i = 0; i < wrapped.length; i += 1) {
+    if (i === wrapped.length - 1) {
+      line(builder, row(wrapped[i], r, width), width);
+    } else {
+      line(builder, wrapped[i], width);
+    }
+  }
 }
 
 function sep(builder: EposBuilder, width: number): void {
@@ -42,6 +57,12 @@ function pushLineDetail(
 function boldLine(builder: EposBuilder, text: string, width: number): void {
   if (builder.addTextStyle) builder.addTextStyle(false, false, true);
   line(builder, text, width);
+  if (builder.addTextStyle) builder.addTextStyle(false, false, false);
+}
+
+function boldMoneyRow(builder: EposBuilder, left: string, right: string, width: number): void {
+  if (builder.addTextStyle) builder.addTextStyle(false, false, true);
+  moneyRow(builder, left, right, width);
   if (builder.addTextStyle) builder.addTextStyle(false, false, false);
 }
 
@@ -87,7 +108,7 @@ export function buildEposTicket(
     sep(builder, width);
     for (const item of doc.lines) pushLineDetail(builder, item, width);
     sep(builder, width);
-    boldLine(builder, row('TOTAL', money(doc.total), width), width);
+    boldMoneyRow(builder, 'TOTAL', money(doc.total), width);
     line(builder, doc.paymentStatusLabel, width);
     if (doc.paymentLabel && doc.paymentLabel !== '-') line(builder, doc.paymentLabel, width);
     if (doc.orderNotes) line(builder, `NOTA: ${doc.orderNotes}`, width);
@@ -99,18 +120,19 @@ export function buildEposTicket(
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
     for (const item of doc.lines) {
-      line(builder, row(`${item.qty}x ${item.name}`, money(item.total), width), width);
+      moneyRow(builder, `${item.qty}x ${item.name}`, money(item.total), width);
       for (const name of item.added || []) line(builder, `  + ${name}`, width);
       for (const name of item.removed || []) line(builder, `  SIN ${name}`, width);
       if (item.note) line(builder, `  NOTA: ${item.note}`, width);
     }
     sep(builder, width);
-    line(builder, row('Base imponible', money(doc.base), width), width);
-    line(builder, row(`IVA ${doc.vatRate}%`, money(doc.vat), width), width);
+    moneyRow(builder, 'Base imponible', money(doc.base), width);
+    moneyRow(builder, `IVA ${doc.vatRate}%`, money(doc.vat), width);
     sep(builder, width);
-    boldLine(
+    boldMoneyRow(
       builder,
-      row(doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL', `${doc.isRefund ? '-' : ''}${money(doc.total)}`, width),
+      doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL',
+      `${doc.isRefund ? '-' : ''}${money(doc.total)}`,
       width,
     );
     sep(builder, width);
@@ -121,6 +143,7 @@ export function buildEposTicket(
   builder.addTextAlign('center');
   line(builder, doc.footer, width);
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
+  // Margen corto antes del corte (no infinito)
   builder.addText('\n\n');
 
   if (typeof builder.addCut === 'function') {
