@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Vertial">
+  <rect width="128" height="128" fill="#000000"/>
+  <defs>
+    <linearGradient id="v_grad" x1="12" y1="10" x2="116" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22C55E"/>
+      <stop offset="0.55" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <path
+    fill="url(#v_grad)"
+    d="M16 26c0-5.523 4.477-10 10-10h12c4.12 0 7.84 2.52 9.34 6.35L64 64.2l16.66-41.85C82.16 18.52 85.88 16 90 16h12c5.523 0 10 4.477 10 10 0 1.305-.256 2.598-.755 3.804L76.6 112.4c-1.55 3.72-5.18 6.15-9.1 6.15s-7.55-2.43-9.1-6.15L16.755 29.804A10.01 10.01 0 0 1 16 26z"
+  />
+</svg>
