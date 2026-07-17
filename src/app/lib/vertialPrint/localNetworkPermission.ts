@@ -246,6 +246,56 @@ export async function completeLocalNetworkPermissionFlow(): Promise<LocalNetwork
   };
 }
 
+/** ¿El dispositivo ya pasó por el flujo de red local (o se detectó WiFi)? */
+export function isLocalNetworkFlowReady(): boolean {
+  return (
+    hasUserCompletedLanPermissionFlow()
+    || hasAcknowledgedLocalNetworkPermission()
+  );
+}
+
+/** Marca red local como lista (checkbox + ack) para no pedir el botón otra vez. */
+export function markLocalNetworkReady(): void {
+  markLanPermissionFlowCompleted();
+  acknowledgeLocalNetworkPermission();
+}
+
+/**
+ * Al abrir impresora: pide permiso al sistema si hace falta y deja la UI lista
+ * para escribir IP / probar sin pulsar «Pedir permiso» ni la casilla.
+ * Si el usuario ya concedió «Red local» en iOS, no vuelve a molestar.
+ */
+export async function ensureNativeLocalNetworkReady(options?: {
+  printerIp?: string;
+}): Promise<LocalNetworkPermissionFlowResult> {
+  if (!isVertialNativeApp()) {
+    return { acknowledged: true, onWifi: false, wifiIp: '', wifiPrefix: '' };
+  }
+
+  await requestNativeLocalNetworkAccess({ printerIp: options?.printerIp });
+  const networkInfo = await withNativeCallTimeout(getNativeLocalNetworkInfo(), 3000, 'Lectura WiFi').catch(
+    () => null,
+  );
+
+  markLanPermissionFlowCompleted();
+  if (networkInfo?.prefix) {
+    acknowledgeLocalNetworkPermission();
+  } else {
+    // Sin WiFi visible seguimos desbloqueando la UI: el usuario ya pudo conceder
+    // el permiso en Ajustes y solo quiere poner la IP.
+    markLocalNetworkReady();
+  }
+
+  dispatchLocalNetworkPermissionAttempted();
+
+  return {
+    acknowledged: true,
+    onWifi: Boolean(networkInfo?.prefix),
+    wifiIp: networkInfo?.ip || '',
+    wifiPrefix: networkInfo?.prefix || '',
+  };
+}
+
 /** Mensaje de ayuda cuando la búsqueda no encuentra impresoras. */
 export function buildPrinterDiscoveryHelpMessage(options?: {
   onWifi?: boolean;

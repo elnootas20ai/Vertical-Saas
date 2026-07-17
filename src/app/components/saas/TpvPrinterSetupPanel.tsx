@@ -6,6 +6,9 @@ import { pointOfSaleDisplayLabel, type PointOfSale } from '../../lib/deliveryApi
 import { IMPRESORA_SETTINGS_PATH } from '../../lib/vertialPrint/nativePrinterFlow';
 import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
 import {
+  ensureNativeLocalNetworkReady,
+  isLocalNetworkFlowReady,
+  markLocalNetworkReady,
   openNativeAppSettings,
   requestNativeLocalNetworkAccess,
 } from '../../lib/vertialPrint/localNetworkPermission';
@@ -50,16 +53,21 @@ export interface TpvPrinterScope {
 
 function readLanManualConfirmed(): boolean {
   try {
-    return localStorage.getItem(LAN_MANUAL_CONFIRM_KEY) === '1';
+    if (localStorage.getItem(LAN_MANUAL_CONFIRM_KEY) === '1') return true;
   } catch {
-    return false;
+    /* ignore */
   }
+  return isLocalNetworkFlowReady();
 }
 
 function writeLanManualConfirmed(value: boolean): void {
   try {
-    if (value) localStorage.setItem(LAN_MANUAL_CONFIRM_KEY, '1');
-    else localStorage.removeItem(LAN_MANUAL_CONFIRM_KEY);
+    if (value) {
+      localStorage.setItem(LAN_MANUAL_CONFIRM_KEY, '1');
+      markLocalNetworkReady();
+    } else {
+      localStorage.removeItem(LAN_MANUAL_CONFIRM_KEY);
+    }
   } catch {
     /* ignore */
   }
@@ -167,6 +175,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const [pendingSaveHost, setPendingSaveHost] = useState('');
   const [pendingSavePort, setPendingSavePort] = useState(9100);
   const [lanConfirmed, setLanConfirmed] = useState(() => readLanManualConfirmed());
+  const [lanDetecting, setLanDetecting] = useState(false);
   const [diagnostics, setDiagnostics] = useState<NativePrinterDiagnostics | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [requestingLan, setRequestingLan] = useState(false);
@@ -177,7 +186,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const isConfigured = isValidIpv4(selectedHost);
   const hasUnsavedIp =
     ipDirty && (manualIp.trim() !== selectedHost || manualPort !== selectedPort);
-  // Guardar IP no depende del permiso; solo comprobar / probar ticket en nativo.
+  // IP siempre editable. Tras detectar red local (o si ya estaba concedida) se puede comprobar/probar.
   const canProbeNetwork = !isNative || lanConfirmed;
   const canTest = isConfigured && !hasUnsavedIp && canProbeNetwork;
 
@@ -199,6 +208,34 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     ipDirtyRef.current = ipDirty;
   }, [ipDirty]);
 
+  /** Si ya diste «Permitir» en iOS, no hace falta el botón: lo detectamos al abrir. */
+  useEffect(() => {
+    if (!isNative) return;
+    let cancelled = false;
+    // Desbloquear IP / prueba de inmediato; el probe nativo corre en segundo plano.
+    writeLanManualConfirmed(true);
+    setLanConfirmed(true);
+    setLanDetecting(true);
+    void (async () => {
+      try {
+        await ensureNativeLocalNetworkReady({
+          printerIp: manualIp.trim() || selectedHost || undefined,
+        });
+        if (cancelled) return;
+        refreshDiagnostics();
+      } catch {
+        /* Ya desbloqueado arriba */
+      } finally {
+        if (!cancelled) setLanDetecting(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Solo al montar el panel nativo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-once
+  }, [isNative]);
+
   useEffect(() => {
     setPdv(scope?.pdv);
     if (ipDirtyRef.current) return;
@@ -207,11 +244,6 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     setManualIp(String(next.networkHost || '').trim());
     setManualPort(Number(next.networkPort || 9100) || 9100);
   }, [scope?.pdv?._id, scope?.pdv?._rev, scope?.pdvId, scope?.terminalId]);
-
-  const handleLanConfirmChange = useCallback((checked: boolean) => {
-    setLanConfirmed(checked);
-    writeLanManualConfirmed(checked);
-  }, []);
 
   const syncActiveScope = useCallback((next: VertialPrinterConfig, pdvDoc?: PointOfSale | null) => {
     const base = pdvDoc ?? pdv;
@@ -317,7 +349,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
   const handleCheckConnection = useCallback(() => {
     if (!canProbeNetwork) {
-      toast.error('Para comprobar la conexión, confirma «Red local» en el paso 1 (Ajustes → Vertial).');
+      toast.error('Espera un segundo a que se active la red local, o pulsa «Volver a pedir permiso».');
       return;
     }
     const host = manualIp.trim();
@@ -363,18 +395,23 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     if (!isNative) return;
     setRequestingLan(true);
     try {
-      await requestNativeLocalNetworkAccess({
+      await ensureNativeLocalNetworkReady({
         printerIp: manualIp.trim() || selectedHost || '192.168.1.20',
       });
+      writeLanManualConfirmed(true);
+      setLanConfirmed(true);
+      refreshDiagnostics();
+      toast.success('Red local lista. Ya puedes poner la IP y probar.', { duration: 6000 });
+    } catch {
+      writeLanManualConfirmed(true);
+      setLanConfirmed(true);
       toast.message('Si iOS muestra el aviso, pulsa Permitir. Luego debería aparecer «Red local» en Ajustes → Vertial.', {
         duration: 10000,
       });
-    } catch {
-      toast.error('No se pudo pedir el permiso. Prueba Abrir Ajustes o reinicia la app.');
     } finally {
       setRequestingLan(false);
     }
-  }, [isNative, manualIp, selectedHost]);
+  }, [isNative, manualIp, selectedHost, refreshDiagnostics]);
 
   const handleOpenSettings = useCallback(async () => {
     try {
@@ -402,7 +439,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
   const handleTest = useCallback(async () => {
     if (!canProbeNetwork) {
-      toast.error('Para imprimir la prueba, confirma «Red local» en el paso 1 (Ajustes → Vertial).');
+      toast.error('Espera un segundo a que se active la red local, o pulsa «Volver a pedir permiso».');
       return;
     }
     if (hasUnsavedIp) {
@@ -563,64 +600,65 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         <>
           <SettingsSection
             title="1. Red local"
-            description="iOS no muestra «Red local» en Ajustes hasta que Vertial lo pide. Sin Permitir, no imprime."
+            description="Si ya diste Permitir en iOS, la app lo detecta sola. Puedes escribir la IP abajo sin pulsar nada."
           >
-            <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-4 py-3">
-              <div className="flex items-start gap-3">
-                <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-                <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
-                  <p className="font-semibold">Orden correcto</p>
-                  <ol className="mt-2 space-y-1 list-decimal list-inside text-blue-800/90 dark:text-blue-200/90">
-                    <li>Pulsa <strong>Pedir permiso de red local</strong> (sale el aviso de iOS → Permitir)</li>
-                    <li>Opcional: <strong>Abrir Ajustes</strong> → Vertial → comprueba que «Red local» está ON</li>
-                    <li>Marca la casilla de abajo y sigue con la IP</li>
-                  </ol>
+            {lanConfirmed ? (
+              <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="text-sm text-emerald-900 dark:text-emerald-100 leading-relaxed">
+                    <p className="font-semibold">Red local lista</p>
+                    <p className="mt-1 text-emerald-800/90 dark:text-emerald-200/90">
+                      Puedes poner la IP y guardar. Si no imprime, revisa Ajustes → Vertial → Red local.
+                    </p>
+                  </div>
                 </div>
               </div>
+            ) : (
+              <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-4 py-3">
+                <div className="flex items-start gap-3">
+                  {lanDetecting || requestingLan ? (
+                    <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5 animate-spin" />
+                  ) : (
+                    <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                  )}
+                  <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
+                    <p className="font-semibold">
+                      {lanDetecting || requestingLan ? 'Detectando permiso de red…' : 'Activando acceso a la WiFi del local'}
+                    </p>
+                    <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
+                      Mientras tanto ya puedes escribir la IP abajo. Si iOS muestra un aviso, pulsa Permitir.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => void handleRequestLanPermission()}
+                disabled={requestingLan || lanDetecting}
+                className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
+              >
+                {requestingLan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
+                {requestingLan ? 'Pidiendo…' : 'Volver a pedir permiso'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleOpenSettings()}
+                disabled={requestingLan || lanDetecting}
+                className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
+              >
+                <ExternalLink className="w-4 h-4" />
+                Abrir Ajustes
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => void handleRequestLanPermission()}
-              disabled={requestingLan}
-              className="mt-4 w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold touch-manipulation active:opacity-80 disabled:opacity-60"
-            >
-              {requestingLan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
-              {requestingLan ? 'Pidiendo permiso…' : 'Pedir permiso de red local'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleOpenSettings()}
-              disabled={requestingLan}
-              className="mt-3 w-full inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
-            >
-              <ExternalLink className="w-4 h-4" />
-              Abrir Ajustes de Vertial
-            </button>
-            <label className="mt-4 flex items-start gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 cursor-pointer touch-manipulation">
-              <input
-                type="checkbox"
-                checked={lanConfirmed}
-                onChange={(e) => handleLanConfirmChange(e.target.checked)}
-                className="mt-1 h-5 w-5 rounded border-gray-300 text-gray-900 focus:ring-gray-500"
-              />
-              <span className="text-sm text-gray-800 dark:text-gray-200 leading-relaxed">
-                <strong>Ya pulsé Permitir</strong> (o activé «Red local» en Ajustes → Vertial).
-              </span>
-            </label>
           </SettingsSection>
 
           <SettingsSection
             title="2. IP y puerto"
             description="Guárdalos y quedan en este dispositivo hasta que los cambies."
           >
-            {!canProbeNetwork ? (
-              <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
-                <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <p className="text-sm text-amber-900 dark:text-amber-100">
-                  Puedes guardar la IP ya. Para comprobar o imprimir prueba, completa el paso 1 (Red local).
-                </p>
-              </div>
-            ) : null}
             {isConfigured && !hasUnsavedIp ? (
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
