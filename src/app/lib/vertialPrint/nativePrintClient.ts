@@ -6,9 +6,11 @@ import { getEscposPlugin, getNativeLocalNetworkInfo } from './escposPlugin';
 /** Puertos habituales de impresoras térmicas ESC/POS por red. */
 export const NATIVE_RAW_PRINT_PORTS = [9100, 9101, 9102] as const;
 
-const NATIVE_PRINT_TIMEOUT_MS = 20_000;
-const NATIVE_PRINT_RETRY_TIMEOUT_MS = 12_000;
-const NATIVE_PRINT_RETRY_DELAY_MS = 400;
+const NATIVE_PRINT_TIMEOUT_MS = 6_000;
+const NATIVE_PRINT_RETRY_TIMEOUT_MS = 5_000;
+const NATIVE_PRINT_RETRY_DELAY_MS = 250;
+/** Bridge iOS de respaldo: no esperar tanto si el proxy principal ya puede imprimir. */
+const NATIVE_BRIDGE_FALLBACK_TIMEOUT_MS = 3_000;
 const NATIVE_DISCOVER_PLUGIN_TIMEOUT_MS = 10_000;
 const NATIVE_DISCOVER_PLUGIN_RETRY_MS = 8_000;
 const NATIVE_DISCOVER_SUBNET_SWEEP_MS = 12_000;
@@ -257,17 +259,14 @@ async function sendEscposToHost(
   if (inflight) {
     try {
       // Nunca esperar sin tope: un print nativo colgado dejaba la cola bloqueada minutos.
-      await withNativeTimeout(inflight, Math.min(timeoutMs, 8_000), 'Impresión anterior');
+      await withNativeTimeout(inflight, Math.min(timeoutMs, 4_000), 'Impresión anterior');
     } catch {
       escposInFlight.delete(key);
     }
   }
 
   const run = (async () => {
-    // 1) Bridge propio primero (estable en iPad). 2) ESCPOSProxy de respaldo.
-    const viaBridge = await printViaVertialBridge(host, port, bytes, timeoutMs);
-    if (viaBridge.ok) return { ok: true as const };
-
+    // Primero ESCPOSProxy (rápido en tablet). Bridge iOS solo si falla.
     try {
       const ESCPOSProxy = await escposProxy();
       await withNativeTimeout(
@@ -277,6 +276,14 @@ async function sendEscposToHost(
       );
       return { ok: true as const };
     } catch (primaryError) {
+      const viaBridge = await printViaVertialBridge(
+        host,
+        port,
+        bytes,
+        Math.min(timeoutMs, NATIVE_BRIDGE_FALLBACK_TIMEOUT_MS),
+      );
+      if (viaBridge.ok) return { ok: true as const };
+
       const message =
         viaBridge.error ||
         (primaryError instanceof Error ? primaryError.message : 'No se pudo conectar con la impresora');

@@ -145,7 +145,7 @@ private enum TcpEscpos {
           }
           // No cerrar el socket al instante: muchas térmicas cortan el ticket si
           // se cierra TCP antes de vaciar el buffer (ticket entrecortado).
-          queue.asyncAfter(deadline: .now() + 0.6) {
+          queue.asyncAfter(deadline: .now() + 0.25) {
             finish(true)
           }
         })
