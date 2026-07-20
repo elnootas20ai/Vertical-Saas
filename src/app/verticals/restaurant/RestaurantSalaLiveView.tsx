@@ -1,12 +1,13 @@
 /**
  * Sala en servicio en vivo — datos reales de zonas/mesas (sin mocks).
- * Permite ampliar el mapa (zonas/mesas) sin rehacer todo.
+ * Modo normal: 1 clic → personas (si libre) → TPV.
+ * Modo editar: capacidad / comensales +/- y eliminar mesa.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { LayoutGrid, Plus, Trash2, Users, X } from 'lucide-react';
+import { LayoutGrid, Minus, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import { RestaurantSeatGuestsModal } from '../../components/saas/restaurant/RestaurantSeatGuestsModal';
 import {
   changeTableStatusRequest,
@@ -41,6 +42,11 @@ type Props = {
     roomId: string;
     count: number;
     capacity: number;
+  }) => Promise<void> | void;
+  onUpdateTablePeople?: (input: {
+    tableId: string;
+    capacity?: number;
+    currentGuests?: number;
   }) => Promise<void> | void;
   onRemoveTable?: (tableId: string) => Promise<void> | void;
   onRemoveZone?: (roomId: string) => Promise<void> | void;
@@ -129,6 +135,7 @@ export function RestaurantSalaLiveView({
   onTablesChange,
   onAddZone,
   onAddTables,
+  onUpdateTablePeople,
   onRemoveTable,
   onRemoveZone,
   onRemount,
@@ -141,7 +148,10 @@ export function RestaurantSalaLiveView({
   const [activeRoomId, setActiveRoomId] = useState(() => sortedRooms[0]?.id || '');
   const [seatTable, setSeatTable] = useState<DiningTable | null>(null);
   const [reservedTable, setReservedTable] = useState<DiningTable | null>(null);
-  const [manageTable, setManageTable] = useState<DiningTable | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editTable, setEditTable] = useState<DiningTable | null>(null);
+  const [editCapacity, setEditCapacity] = useState(4);
+  const [editGuests, setEditGuests] = useState(0);
   const [showAddZone, setShowAddZone] = useState(false);
   const [showAddTables, setShowAddTables] = useState(false);
   const [busyId, setBusyId] = useState('');
@@ -156,16 +166,28 @@ export function RestaurantSalaLiveView({
     }
   }, [sortedRooms, activeRoomId]);
 
+  useEffect(() => {
+    if (!editTable) return;
+    const id = String(editTable._id || editTable.id || '');
+    const live = tables.find((t) => String(t._id || t.id) === id);
+    if (!live) setEditTable(null);
+  }, [tables, editTable]);
+
   const activeRoom =
     sortedRooms.find((r) => r.id === activeRoomId) || sortedRooms[0] || null;
   const roomTables = activeRoom ? tablesForRoom(tables, activeRoom) : [];
   const freeCount = tables.filter((t) => t.status === 'available').length;
 
+  const openEditTable = (table: DiningTable) => {
+    setEditTable(table);
+    setEditCapacity(resolveTableCapacity(table));
+    setEditGuests(Math.max(0, Number(table.currentGuests) || 0));
+  };
+
   const openTpvForTable = (table: DiningTable, orderId?: string) => {
     const tableId = String(table._id || table.id || '').trim();
     if (!tableId) return;
     writeSalaTpvOpenTable({ tableId, orderId });
-    // TPV propio de sala (nunca /vertical/delivery/tpv).
     navigate(`/saas/caja/tpv?mesa=${encodeURIComponent(tableId)}`);
   };
 
@@ -195,10 +217,7 @@ export function RestaurantSalaLiveView({
       onTablesChange(patchTableList(tables, updated));
       setSeatTable(null);
       setReservedTable(null);
-      // Nos quedamos en Sala (no saltar a /caja/tpv): al recargar sigues en sala.
-      // Clic en mesa ocupada abre el TPV.
-      writeSalaTpvOpenTable({ tableId, orderId: order._id });
-      toast.success(`Mesa abierta · ${guests} comensal${guests === 1 ? '' : 'es'}`);
+      openTpvForTable(updated, order._id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo sentar en la mesa');
     } finally {
@@ -227,6 +246,11 @@ export function RestaurantSalaLiveView({
     const tableId = String(table._id || table.id || '').trim();
     if (!tableId || busyId === tableId) return;
 
+    if (editMode) {
+      openEditTable(table);
+      return;
+    }
+
     if (table.status === 'available') {
       setSeatTable(table);
       return;
@@ -244,10 +268,30 @@ export function RestaurantSalaLiveView({
     }
   };
 
-  const canManageFree =
+  const saveEditTable = async () => {
+    if (!editTable || !onUpdateTablePeople) return;
+    const tableId = String(editTable._id || editTable.id || '');
+    if (!tableId) return;
+    const occupied = isOccupiedStatus(editTable.status);
+    try {
+      await Promise.resolve(
+        onUpdateTablePeople({
+          tableId,
+          capacity: editCapacity,
+          currentGuests: occupied ? editGuests : undefined,
+        }),
+      );
+      setEditTable(null);
+      toast.success('Mesa actualizada');
+    } catch {
+      /* toast en el padre */
+    }
+  };
+
+  const canDeleteEdit =
     Boolean(onRemoveTable)
-    && manageTable
-    && (manageTable.status === 'available' || manageTable.status === 'unavailable');
+    && editTable
+    && (editTable.status === 'available' || editTable.status === 'unavailable');
 
   return (
     <div className="mx-auto min-h-[calc(100vh-4rem)] w-full max-w-5xl px-4 py-6">
@@ -363,6 +407,9 @@ export function RestaurantSalaLiveView({
               <p className="text-sm text-neutral-500">
                 {SALA_ROOM_TYPE_LABELS[activeRoom.roomType]} · {roomTables.length}{' '}
                 {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
+                {editMode ? (
+                  <span className="ml-2 font-medium text-amber-700">· Modo edición</span>
+                ) : null}
               </p>
               <div className="flex flex-wrap gap-2">
                 {onAddTables && (
@@ -374,6 +421,26 @@ export function RestaurantSalaLiveView({
                   >
                     <Plus className="h-3.5 w-3.5" strokeWidth={2} />
                     Añadir {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
+                  </button>
+                )}
+                {(onUpdateTablePeople || onRemoveTable) && (
+                  <button
+                    type="button"
+                    disabled={mapBusy}
+                    onClick={() => {
+                      setEditMode((v) => {
+                        if (v) setEditTable(null);
+                        return !v;
+                      });
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-[12px] border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${
+                      editMode
+                        ? 'border-amber-500 bg-amber-50 text-amber-900'
+                        : 'border-neutral-200 bg-white text-neutral-800 hover:border-neutral-300'
+                    }`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
+                    {editMode ? 'Listo' : 'Editar mesa'}
                   </button>
                 )}
                 {onRemoveZone && sortedRooms.length > 1 && (
@@ -397,6 +464,12 @@ export function RestaurantSalaLiveView({
                   </button>
                 )}
               </div>
+            </div>
+          )}
+
+          {editMode && (
+            <div className="mb-3 rounded-[12px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Toca una mesa para cambiar personas o eliminarla. Pulsa «Listo» para volver al servicio.
             </div>
           )}
 
@@ -429,53 +502,36 @@ export function RestaurantSalaLiveView({
                 const capacity = resolveTableCapacity(table);
                 const tableId = String(table._id || table.id || '');
                 const busy = busyId === tableId;
-                const canRemove =
-                  Boolean(onRemoveTable)
-                  && (table.status === 'available' || table.status === 'unavailable');
+                const selectedEdit =
+                  editMode && editTable && String(editTable._id || editTable.id) === tableId;
                 return (
-                  <div
+                  <button
                     key={tableId}
-                    className={`relative rounded-[12px] border p-4 text-left ${ui.card}`}
+                    type="button"
+                    disabled={busy || mapBusy}
+                    onClick={() => handleTableClick(table)}
+                    className={`relative rounded-[12px] border p-4 text-left transition-opacity hover:opacity-90 disabled:opacity-60 ${ui.card} ${
+                      selectedEdit ? 'ring-2 ring-amber-500 ring-offset-1' : ''
+                    } ${editMode ? 'cursor-pointer' : ''}`}
                   >
-                    <button
-                      type="button"
-                      disabled={busy || mapBusy}
-                      onClick={() => handleTableClick(table)}
-                      className="w-full text-left transition-opacity hover:opacity-90 disabled:opacity-60"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-base font-semibold">
-                            {table.name || `Mesa ${table.number}`}
-                          </p>
-                          <p className="mt-1 flex items-center gap-1 text-xs opacity-80">
-                            <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
-                            {capacity} pax
-                            {table.currentGuests > 0 ? ` · ${table.currentGuests} sentados` : ''}
-                          </p>
-                        </div>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ui.badge}`}
-                        >
-                          {ui.label}
-                        </span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-base font-semibold">
+                          {table.name || `Mesa ${table.number}`}
+                        </p>
+                        <p className="mt-1 flex items-center gap-1 text-xs opacity-80">
+                          <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
+                          {capacity} pax
+                          {table.currentGuests > 0 ? ` · ${table.currentGuests} sentados` : ''}
+                        </p>
                       </div>
-                    </button>
-                    {canRemove && (
-                      <button
-                        type="button"
-                        disabled={mapBusy}
-                        title="Quitar mesa"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setManageTable(table);
-                        }}
-                        className="absolute bottom-2 right-2 rounded-lg p-1.5 text-neutral-400 hover:bg-white/70 hover:text-neutral-700"
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ui.badge}`}
                       >
-                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
-                      </button>
-                    )}
-                  </div>
+                        {editMode ? 'Editar' : ui.label}
+                      </span>
+                    </div>
+                  </button>
                 );
               })}
               {onAddTables && (
@@ -496,7 +552,7 @@ export function RestaurantSalaLiveView({
         </>
       )}
 
-      {seatTable && (
+      {seatTable && !editMode && (
         <RestaurantSeatGuestsModal
           tableLabel={seatTable.name || `Mesa ${seatTable.number}`}
           capacity={resolveTableCapacity(seatTable)}
@@ -506,7 +562,7 @@ export function RestaurantSalaLiveView({
         />
       )}
 
-      {reservedTable && (
+      {reservedTable && !editMode && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 sm:items-center">
           <div className="w-full max-w-sm rounded-[12px] border border-neutral-200 bg-white p-5">
             <div className="mb-4 flex items-start justify-between gap-3">
@@ -549,37 +605,108 @@ export function RestaurantSalaLiveView({
         </div>
       )}
 
-      {manageTable && canManageFree && (
+      {editTable && editMode && (
         <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 sm:items-center">
           <div className="w-full max-w-sm rounded-[12px] border border-neutral-200 bg-white p-5">
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-base font-semibold text-neutral-900">
-                  {manageTable.name || `Mesa ${manageTable.number}`}
+                  {editTable.name || `Mesa ${editTable.number}`}
                 </h2>
-                <p className="text-sm text-neutral-500">Quitar del mapa (solo si está libre)</p>
+                <p className="text-sm text-neutral-500">Editar mesa</p>
               </div>
               <button
                 type="button"
-                onClick={() => setManageTable(null)}
+                onClick={() => setEditTable(null)}
                 className="rounded-lg p-1 text-neutral-500 hover:bg-neutral-100"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <button
-              type="button"
-              disabled={mapBusy}
-              onClick={() => {
-                const id = String(manageTable._id || manageTable.id || '');
-                setManageTable(null);
-                if (!id || !onRemoveTable) return;
-                void Promise.resolve(onRemoveTable(id)).catch(() => undefined);
-              }}
-              className="w-full rounded-[12px] bg-red-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              Eliminar mesa
-            </button>
+
+            <div className="space-y-4">
+              <div>
+                <p className="mb-2 text-xs font-medium text-neutral-500">Capacidad (máx. personas)</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setEditCapacity((n) => Math.max(1, n - 1))}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                  >
+                    <Minus className="h-4 w-4" />
+                  </button>
+                  <p className="min-w-[3rem] text-center text-2xl font-semibold tabular-nums">
+                    {editCapacity}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setEditCapacity((n) => Math.min(40, n + 1))}
+                    className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {isOccupiedStatus(editTable.status) && (
+                <div>
+                  <p className="mb-2 text-xs font-medium text-neutral-500">Comensales ahora</p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setEditGuests((n) => Math.max(0, n - 1))}
+                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                    <p className="min-w-[3rem] text-center text-2xl font-semibold tabular-nums">
+                      {editGuests}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditGuests((n) => Math.min(Math.max(editCapacity, 1), n + 1))
+                      }
+                      className="flex h-11 w-11 items-center justify-center rounded-xl border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={mapBusy || !onUpdateTablePeople}
+                onClick={() => void saveEditTable()}
+                className="w-full rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Guardar
+              </button>
+
+              {canDeleteEdit && (
+                <button
+                  type="button"
+                  disabled={mapBusy}
+                  onClick={() => {
+                    const id = String(editTable._id || editTable.id || '');
+                    if (
+                      !id
+                      || !onRemoveTable
+                      || !window.confirm('¿Eliminar esta mesa del mapa?')
+                    ) {
+                      return;
+                    }
+                    setEditTable(null);
+                    void Promise.resolve(onRemoveTable(id)).catch(() => undefined);
+                  }}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-[12px] border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" strokeWidth={1.5} />
+                  Eliminar mesa
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

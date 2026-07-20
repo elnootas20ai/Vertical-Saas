@@ -33,6 +33,8 @@ export const RESTAURANT_MODULE: VerticalModuleDefinition = {
     'src/app/lib/restaurantCloseWarnings',
     'src/app/lib/restaurantFloorReservations',
     'src/app/lib/restaurantReservationsApi',
+    'src/app/lib/restaurantWaitlistApi',
+    'src/app/lib/restaurantWaitlistTypes',
     'src/app/lib/salaApi',
     'src/app/lib/salaRoomPdv',
     'src/app/lib/salaRoomTerminal',

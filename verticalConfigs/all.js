@@ -229,7 +229,10 @@ export const restaurantConfig = {
     waitlist: {
       type: 'rst_waitlist',
       idPrefix: 'rsw',
-      fields: ['guestName', 'partySize', 'phone', 'estimatedWait', 'status', 'notes', 'zone', 'clientId'],
+      fields: [
+        'guestName', 'partySize', 'phone', 'estimatedWait', 'status', 'notes',
+        'zone', 'clientId', 'businessId',
+      ],
       required: ['guestName'],
     },
     reservations: {

@@ -35,6 +35,7 @@ import {
   addZoneWithTables,
   removeFreeTable,
   removeZoneIfIdle,
+  updateTablePeople,
 } from './restaurantSalaLiveEdit';
 import {
   clearRestaurantSalaRemountDone,
@@ -377,6 +378,30 @@ export function RestaurantSalaPage() {
     }
   };
 
+  const handleUpdateTablePeople = async (input: {
+    tableId: string;
+    capacity?: number;
+    currentGuests?: number;
+  }) => {
+    if (!userId) return;
+    setMapBusy(true);
+    try {
+      const next = await updateTablePeople({
+        userId,
+        tables,
+        tableId: input.tableId,
+        capacity: input.capacity,
+        currentGuests: input.currentGuests,
+      });
+      setTables(next);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo actualizar la mesa');
+      throw err;
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
   const handleRemoveZone = async (roomId: string) => {
     if (!userId || !businessId) return;
     setMapBusy(true);
@@ -477,6 +502,7 @@ export function RestaurantSalaPage() {
           onTablesChange={setTables}
           onAddZone={handleAddZone}
           onAddTables={handleAddTables}
+          onUpdateTablePeople={handleUpdateTablePeople}
           onRemoveTable={handleRemoveTable}
           onRemoveZone={handleRemoveZone}
           onRemount={() => {

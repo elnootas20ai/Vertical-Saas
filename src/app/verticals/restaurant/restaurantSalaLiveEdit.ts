@@ -8,6 +8,7 @@ import {
   deleteDiningTableRequest,
   getFloorConfigRequest,
   saveFloorConfigRequest,
+  updateDiningTableRequest,
   type DiningFloorConfig,
   type DiningTable,
 } from '../../lib/salaApi';
@@ -237,6 +238,39 @@ export async function removeFreeTable(params: {
     await deleteDiningTableRequest(userId, id);
   }
   return tables.filter((t) => String(t._id || t.id) !== tableId);
+}
+
+export async function updateTablePeople(params: {
+  userId: string;
+  tables: DiningTable[];
+  tableId: string;
+  capacity?: number;
+  currentGuests?: number;
+}): Promise<DiningTable[]> {
+  const { userId, tables, tableId, capacity, currentGuests } = params;
+  const table = tables.find((t) => String(t._id || t.id) === tableId);
+  if (!table) throw new Error('Mesa no encontrada');
+  const id = String(table._id || table.id || '').trim();
+  if (!id) throw new Error('Mesa no encontrada');
+
+  const patch: Partial<DiningTable> = {};
+  if (capacity !== undefined) {
+    const cap = Math.max(1, Math.min(40, Math.round(Number(capacity) || 1)));
+    patch.capacity = cap;
+    const preset = presetForCapacity(cap);
+    const dims = applyTableSizePreset(preset);
+    patch.sizePreset = preset;
+    patch.gridW = dims.gridW;
+    patch.gridH = dims.gridH;
+    patch.shape = cap <= 2 ? 'high' : 'square';
+  }
+  if (currentGuests !== undefined) {
+    const guests = Math.max(0, Math.min(40, Math.round(Number(currentGuests) || 0)));
+    patch.currentGuests = guests;
+  }
+
+  const updated = await updateDiningTableRequest(userId, id, patch);
+  return tables.map((t) => (String(t._id || t.id) === tableId ? { ...t, ...updated } : t));
 }
 
 export async function removeZoneIfIdle(params: {

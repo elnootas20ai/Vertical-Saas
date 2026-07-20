@@ -37,4 +37,5 @@ export { RestaurantSalaQuickSetup } from './RestaurantSalaQuickSetup';
 export { RestaurantSalaLiveView } from './RestaurantSalaLiveView';
 export { RestaurantSalaTpvPage } from './RestaurantSalaTpvPage';
 export { RestaurantReservationsPage } from './RestaurantReservationsPage';
+export { RestaurantWaitlistPage } from './RestaurantWaitlistPage';
 export { RestaurantCajaPage } from './RestaurantCajaPage';
