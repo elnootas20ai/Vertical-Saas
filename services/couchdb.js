@@ -1712,18 +1712,7 @@ export async function saveResetToken(req, account, rawToken) {
   });
 }
 
-export async function findAccountByResetToken(req, rawToken, emailHint) {
-  const email = String(emailHint || '').trim().toLowerCase();
-  if (email) {
-    const byEmail = await findAccountByEmail(req, email);
-    if (!byEmail?._id) return null;
-    return readFreshAccountForAuthToken(
-      req,
-      byEmail,
-      rawToken,
-      ACCOUNT_AUTH_TOKEN_FIELDS.passwordReset,
-    );
-  }
+export async function findAccountByResetToken(req, rawToken) {
   return findAccountByAuthTokenInList(req, rawToken, ACCOUNT_AUTH_TOKEN_FIELDS.passwordReset);
 }
 
@@ -1833,14 +1822,15 @@ export async function findAccountByInviteToken(req, rawToken) {
 }
 
 // S-03: Lógica de bloqueo progresivo de cuenta
-// El primer umbral es configurable vía env; los siguientes escalan automáticamente
+// Más permisivo: el cliente puede fallar varias veces (reset, typo) sin quedar bloqueado al momento.
+// El primer umbral es configurable vía env; los siguientes escalan automáticamente.
 function buildLockoutThresholds() {
-  const firstAttempts = Math.max(1, parseInt(process.env.MAX_LOGIN_ATTEMPTS || '5', 10));
-  const firstDurationMs = Math.max(60_000, parseInt(process.env.LOCK_DURATION_MINUTES || '5', 10) * 60 * 1000);
+  const firstAttempts = Math.max(8, parseInt(process.env.MAX_LOGIN_ATTEMPTS || '12', 10));
+  const firstDurationMs = Math.max(60_000, parseInt(process.env.LOCK_DURATION_MINUTES || '2', 10) * 60 * 1000);
   return [
     { attempts: firstAttempts,      durationMs: firstDurationMs },
-    { attempts: firstAttempts * 2,  durationMs: firstDurationMs * 4 },
-    { attempts: firstAttempts * 4,  durationMs: 24 * 60 * 60 * 1000 },
+    { attempts: firstAttempts + 8,  durationMs: firstDurationMs * 5 },
+    { attempts: firstAttempts + 20, durationMs: 60 * 60 * 1000 },
   ];
 }
 

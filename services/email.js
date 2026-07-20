@@ -25,23 +25,27 @@ export function getFormattedFromAddress() {
   return `"${safeName}" <${addr}>`;
 }
 
-/** Buzón público de soporte en plantillas al cliente (NUNCA el email personal de admin). */
-function getSupportMailto() {
-  const publicContact =
-    String(process.env.DEFAULT_CONTACT_EMAIL || '').trim()
-    || 'hola@vertialapp.com';
-  // Evitar filtrar ALERTS_ADMIN / EMAIL_REPLY_TO personales (p. ej. elnootas…) al cliente.
-  if (/elnootas/i.test(publicContact)) {
-    return 'hola@vertialapp.com';
-  }
-  return publicContact;
-}
-
-/** Reply-To de correos al cliente: contacto público, no buzón personal de alertas. */
+/** Reply-To por defecto. Preferir contacto público (no el buzón personal de alertas). */
 function resolveReplyTo(explicitReplyTo) {
   const ex = explicitReplyTo ? String(explicitReplyTo).trim() : '';
   if (ex) return ex;
-  return getSupportMailto();
+  return (
+    String(process.env.PUBLIC_SUPPORT_EMAIL || '').trim()
+    || String(process.env.DEFAULT_CONTACT_EMAIL || '').trim()
+    || String(process.env.EMAIL_REPLY_TO || '').trim()
+  );
+}
+
+/**
+ * Contacto visible en emails al cliente (código, recuperar, etc.).
+ * Nunca usar ALERTS_ADMIN_EMAIL / EMAIL_REPLY_TO personal (p. ej. elnootas…).
+ */
+function getSupportMailto() {
+  const publicMail =
+    String(process.env.PUBLIC_SUPPORT_EMAIL || '').trim()
+    || String(process.env.DEFAULT_CONTACT_EMAIL || '').trim();
+  if (publicMail && publicMail.includes('@')) return publicMail;
+  return 'hola@vertialapp.com';
 }
 
 /** Keys reales de Resend empiezan por re_; evita activar Resend con placeholders tipo CAMBIAR_… */
@@ -370,7 +374,8 @@ export function buildAccountLockedEmail(email, lockUntil, ipAddress) {
             </p>
           </div>
           <p style="color:#888;font-size:13px;margin:0;line-height:1.5;">
-            Puedes entrar con «Código por email» en la pantalla de acceso, o escribirnos a
+            Mientras tanto puedes entrar con un <strong>código por email</strong> desde la pantalla de acceso.
+            Si necesitas ayuda, escribe a
             <a href="mailto:hola@vertialapp.com" style="color:#111;font-weight:600;">hola@vertialapp.com</a>.
           </p>
         </td></tr>
@@ -891,8 +896,7 @@ export function buildPasswordResetEmail(email, token) {
   const supportBlock = support
     ? `<p style="color:#555;font-size:13px;margin:20px 0 0;line-height:1.5;">
             ¿Dudas o no fuiste tú? Escríbenos a
-            <a href="mailto:${encodeURIComponent(support)}" style="color:#111;font-weight:600;">${escapeHtml(support)}</a>
-            (también configurado como respuesta preferida de este mensaje).
+            <a href="mailto:${encodeURIComponent(support)}" style="color:#111;font-weight:600;">${escapeHtml(support)}</a>.
           </p>`
     : '';
 

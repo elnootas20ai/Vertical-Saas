@@ -4,9 +4,9 @@
  * Capas de protección:
  *
  *   1. Auth (por IP):
- *      Login          → 10 intentos / 15 min
+ *      Login          → 40 intentos fallidos / 15 min (LOGIN_RATE_LIMIT_MAX)
  *      Registro       → 5 cuentas   / 1 h
- *      Recuperación   → 5 solicitudes / 1 h
+ *      Recuperación   → 20 solicitudes / 1 h por email+IP (RECOVER_RATE_LIMIT_MAX)
  *
  *   2. Burst por usuario autenticado (I-06):
  *      Por defecto → 150 req / 10 s (ajustable: BURST_LIMIT_MAX)
@@ -116,7 +116,7 @@ function loginKeyGenerator(req) {
 /** Intentos de contraseña: por email+IP; los logins correctos no consumen cupo. */
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Math.max(10, parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '25', 10)),
+  max: Math.max(20, parseInt(process.env.LOGIN_RATE_LIMIT_MAX || '40', 10)),
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
@@ -214,11 +214,22 @@ export const registerLimiter = rateLimit({
 
 export const recoverLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 5,
+  max: Math.max(10, parseInt(process.env.RECOVER_RATE_LIMIT_MAX || '20', 10)),
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: getClientIp,
-  message: { ok: false, success: false, error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Demasiadas solicitudes de recuperación. Inténtalo en una hora.' } },
+  keyGenerator: (req) => {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const ip = getClientIp(req);
+    return email ? `recover:${ip}:${email}` : `recover-ip:${ip}`;
+  },
+  message: {
+    ok: false,
+    success: false,
+    error: {
+      code: 'RATE_LIMIT_EXCEEDED',
+      message: 'Demasiadas solicitudes de recuperación. Inténtalo en unos minutos.',
+    },
+  },
 });
 
 /** Verificación de email y reenvío (no compartir cupo con recuperación de contraseña). */

@@ -1394,6 +1394,8 @@ export async function updatePassword(req, res) {
       passwordHash: hashPassword(newPassword),
       refreshTokenHash: null,
       refreshTokenExpiry: null,
+      failedLoginAttempts: 0,
+      lockUntil: null,
       updatedAt: new Date().toISOString(),
     });
     await logAccountActivity(req, {
@@ -2680,7 +2682,7 @@ export async function resetPasswordWithToken(req, res) {
       return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
     }
 
-    const account = await findAccountByResetToken(req, token, email);
+    const account = await findAccountByResetToken(req, token);
     if (!account || account.email.toLowerCase() !== String(email).trim().toLowerCase()) {
       return res.status(400).json({ ok: false, error: 'Token inválido o expirado' });
     }
@@ -2693,7 +2695,7 @@ export async function resetPasswordWithToken(req, res) {
       refreshTokenHash: null,
       refreshTokenExpiry: null,
       sessions: [],
-      // Tras reset válido, levantar bloqueo por intentos fallidos (si no, el cliente sigue en 423).
+      // Tras resetear, no dejar el bloqueo por intentos fallidos previos
       failedLoginAttempts: 0,
       lockUntil: null,
       updatedAt: new Date().toISOString(),
