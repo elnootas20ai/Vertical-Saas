@@ -9,6 +9,12 @@ export const MONTHLY_HOURS_BY_WORKDAY = {
 
 export const DEFAULT_EMPLOYER_SS_RATE = 0.315;
 
+/** Cuota SS trabajador régimen general (aprox. contingencias comunes + desempleo + FP). */
+export const DEFAULT_EMPLOYEE_SS_RATE = 0.0635;
+
+/** IRPF medio orientativo si no hay % en ficha (no sustituye modelo formal). */
+export const DEFAULT_IRPF_RATE = 0.15;
+
 export const EMPLOYER_SS_RATE_BY_CONTRACT: Record<string, number> = {
   practicas: 0.236,
   formacion: 0.236,
@@ -35,12 +41,17 @@ export interface LaborCostBreakdown {
   annualGross: number;
   monthlyAverageGross: number;
   socialSecurityCost: number;
+  employeeSocialSecurity: number;
+  irpfWithholding: number;
+  estimatedNetMonthly: number;
   otherCosts: number;
   totalMonthlyEmployerCost: number;
   monthlyHours: number;
   hourlyGross: number;
   hourlyEmployerCost: number;
   employerRate: number;
+  employeeSsRate: number;
+  irpfRate: number;
   costCurrency: string;
   costPeriod: 'monthly' | 'annual';
 }
@@ -149,6 +160,23 @@ export function estimateMutualInsuranceCost(
   return String(mutualInsurance || '').trim() ? DEFAULT_MUTUAL_INSURANCE_MONTHLY : 0;
 }
 
+export function resolveEmployeeSocialSecurityRate(
+  explicit?: number | string,
+  contractType?: string,
+): number {
+  const n = Number(explicit);
+  if (Number.isFinite(n) && n >= 0 && n <= 0.2) return n;
+  const contract = String(contractType || '').trim().toLowerCase();
+  if (contract === 'autonomo') return 0;
+  return DEFAULT_EMPLOYEE_SS_RATE;
+}
+
+export function resolveIrpfRate(explicit?: number | string): number {
+  const n = Number(explicit);
+  if (Number.isFinite(n) && n >= 0 && n <= 0.5) return n;
+  return DEFAULT_IRPF_RATE;
+}
+
 export function computeLaborCostBreakdown(employment: Partial<EmploymentInfo> = {}): LaborCostBreakdown | null {
   const contractType = String(employment.contractType || '').trim().toLowerCase();
   const workday = String(employment.workday || '').trim().toLowerCase();
@@ -167,7 +195,12 @@ export function computeLaborCostBreakdown(employment: Partial<EmploymentInfo> = 
 
   const monthlyHours = resolveMonthlyHours(workday, contractType);
   const employerRate = resolveEmployerSocialSecurityRate(employment.contributionGroup, contractType);
+  const employeeSsRate = resolveEmployeeSocialSecurityRate(employment.employeeSsRate, contractType);
+  const irpfRate = resolveIrpfRate(employment.irpfRate);
   const socialSecurityCost = round2(grossMonthly * employerRate * prorrataFactor);
+  const employeeSocialSecurity = round2(grossMonthly * employeeSsRate);
+  const irpfWithholding = round2(grossMonthly * irpfRate);
+  const estimatedNetMonthly = round2(Math.max(0, grossMonthly - employeeSocialSecurity - irpfWithholding));
   const otherCosts = estimateMutualInsuranceCost(employment.mutualInsurance, employment.otherCosts);
   const totalMonthlyEmployerCost = round2(monthlyAverageGross + socialSecurityCost + otherCosts);
   const hourlyGross = monthlyHours > 0 ? round2(monthlyAverageGross / monthlyHours) : 0;
@@ -180,12 +213,17 @@ export function computeLaborCostBreakdown(employment: Partial<EmploymentInfo> = 
     annualGross,
     monthlyAverageGross,
     socialSecurityCost,
+    employeeSocialSecurity,
+    irpfWithholding,
+    estimatedNetMonthly,
     otherCosts,
     totalMonthlyEmployerCost,
     monthlyHours,
     hourlyGross,
     hourlyEmployerCost,
     employerRate,
+    employeeSsRate,
+    irpfRate,
     costCurrency: employment.costCurrency || 'EUR',
     costPeriod: 'monthly',
   };
@@ -202,6 +240,8 @@ export function applyLaborCostToEmployment<T extends Partial<EmploymentInfo>>(em
     grossSalary: breakdown.grossMonthly,
     payPeriodsPerYear: breakdown.payPeriodsPerYear,
     socialSecurityCost: breakdown.socialSecurityCost,
+    employeeSsRate: breakdown.employeeSsRate,
+    irpfRate: breakdown.irpfRate,
     otherCosts: breakdown.otherCosts,
     costCurrency: employment.costCurrency || breakdown.costCurrency,
     costPeriod: employment.costPeriod || breakdown.costPeriod,

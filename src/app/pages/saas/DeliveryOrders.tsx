@@ -4,6 +4,7 @@
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
+import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -198,6 +199,13 @@ export function DeliveryOrders() {
           dateTo,
           limit: 500,
           ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+          ...(String(currentBusiness?.business_id || currentBusiness?.id || '').replace(/^business:/, '').trim()
+            ? {
+                businessId: String(currentBusiness?.business_id || currentBusiness?.id || '')
+                  .replace(/^business:/, '')
+                  .trim(),
+              }
+            : {}),
         }),
         listCatalogItemsRequest(userId, 'catalog'),
       ]);
@@ -208,9 +216,19 @@ export function DeliveryOrders() {
     } finally {
       setLoading(false);
     }
-  }, [userId, selectedDay, filters.salesPointId, activeStoreScope.activeSalesPointId]);
+  }, [userId, selectedDay, filters.salesPointId, activeStoreScope.activeSalesPointId, currentBusiness?.business_id, currentBusiness?.id]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useDeliveryOrdersLive({
+    authUserId: user?.user_id || user?.id || null,
+    businessId: currentBusiness?.business_id || currentBusiness?.id || null,
+    onRefresh: () => {
+      void loadData();
+    },
+    enabled: !!userId,
+    fallbackPollMs: 30_000,
+  });
 
   useEffect(() => {
     const onStore = () => { loadData(); };

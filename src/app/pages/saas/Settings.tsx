@@ -104,7 +104,6 @@ import { DeleteAccountSection } from '../../components/saas/DeleteAccountSection
 import {
   IOS_PRIVACY_POLICY_URL,
   IOS_TERMS_URL,
-  IOS_WEB_BILLING_URL,
   shouldHideInAppSubscriptionPurchaseOnIos,
 } from '../../lib/appStoreCompliance';
 import type { Business } from '../../lib/businessApi';
@@ -800,19 +799,11 @@ function TabBilling() {
     <div className="space-y-6">
       {hideIosInAppBilling && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-900 dark:bg-amber-950/30">
-          <p className="text-sm font-bold text-amber-950 dark:text-amber-100">Suscripción en la app iOS</p>
+          <p className="text-sm font-bold text-amber-950 dark:text-amber-100">App iOS para clientes</p>
           <p className="mt-1 text-sm text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
-            Por las normas de Apple, contratar o cambiar de plan no está disponible dentro de la app iOS.
-            Si ya tienes cuenta, inicia sesión con tu plan activo. Para contratar o pagar, usa la web:
+            En iPhone/iPad no se contrata ni se paga la suscripción. El alta y la facturación se gestionan
+            en la web (vertialapp.com) desde un ordenador. Aquí solo usas Vertial si tu cuenta ya está activa.
           </p>
-          <a
-            href={IOS_WEB_BILLING_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-3 inline-flex items-center gap-2 text-sm font-semibold text-amber-950 underline underline-offset-2 dark:text-amber-100"
-          >
-            Gestionar suscripción en vertialapp.com
-          </a>
         </div>
       )}
 
@@ -836,10 +827,10 @@ function TabBilling() {
         billingMode={billingMode}
         annualDiscount={ANNUAL_DISCOUNT}
         statusStyle={sc}
-        onChangePlan={() => setShowPlanPicker(true)}
+        onChangePlan={hideIosInAppBilling ? undefined : () => setShowPlanPicker(true)}
       />
 
-      <MoneiConnectPanel />
+      {!hideIosInAppBilling && <MoneiConnectPanel />}
 
       {(showPlanPicker || accountBlocked) && !hideIosInAppBilling && (
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
@@ -3955,6 +3946,7 @@ export function Settings() {
   useEffect(() => {
     if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (activeTab === 'billing') return;
+    // iOS: la pantalla /saas/subscription ya es “solo clientes” (sin cobro).
     navigate('/saas/subscription', { replace: true });
   }, [subscription, subscription.status, activeTab, navigate]);
 

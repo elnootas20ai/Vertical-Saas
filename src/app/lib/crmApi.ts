@@ -13,6 +13,14 @@ const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env |
 
 const API_BASE = getApiBase();
 
+/** Dashboard / CRM: refrescar contadores de clientes tras alta/edición/baja. */
+export const CRM_CLIENTS_SYNC_EVENT = 'vertial:crm-clients-sync';
+
+function notifyCrmClientsSync() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(CRM_CLIENTS_SYNC_EVENT));
+}
+
 function getCouchHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   return headers;
@@ -223,6 +231,9 @@ function normalizeClientRecord(value: unknown): Client | null {
           favoriteAddressId: ((raw.stats as Record<string, unknown>).favoriteAddressId as string) || null,
           totalSpent: Number((raw.stats as Record<string, unknown>).totalSpent || 0),
           createdFrom: ((raw.stats as Record<string, unknown>).createdFrom as ClientStats['createdFrom']) || 'crm',
+          acquisitionKind: ((raw.stats as Record<string, unknown>).acquisitionKind as ClientStats['acquisitionKind']) || undefined,
+          excludeFromNewMetrics: Boolean((raw.stats as Record<string, unknown>).excludeFromNewMetrics)
+            || ((raw.stats as Record<string, unknown>).acquisitionKind === 'migration'),
         }
       : undefined,
     loyalty: raw.loyalty && typeof raw.loyalty === 'object'
@@ -516,8 +527,10 @@ export async function createClientRequest(
       body: JSON.stringify({ client }),
     },
   );
+  const normalized = normalizeClientRecord(result.client);
+  if (normalized) notifyCrmClientsSync();
   return {
-    client: normalizeClientRecord(result.client),
+    client: normalized,
     duplicates: (result.duplicates || []).map(normalizeClientRecord).filter((c): c is Client => Boolean(c)),
   };
 }
@@ -604,7 +617,9 @@ export async function updateClientRequest(userId: string, client: Client): Promi
       body: JSON.stringify({ client }),
     },
   );
-  return normalizeClientRecord(result.client);
+  const normalized = normalizeClientRecord(result.client);
+  if (normalized) notifyCrmClientsSync();
+  return normalized;
 }
 
 export interface ClientCLV {
@@ -640,6 +655,7 @@ export async function deleteClientRequest(userId: string, client: Client): Promi
     `/api/clients/${encodeURIComponent(userId)}/${encodeURIComponent(client.id)}`,
     { method: 'DELETE' },
   );
+  notifyCrmClientsSync();
 }
 
 // ─── MERGE DUPLICADOS ─────────────────────────────────────────────────────────
@@ -808,6 +824,56 @@ export async function bulkCreateClientsV2Request(
   return {
     created: (result.clients || []).map(normalizeClientRecord).filter((c): c is Client => Boolean(c)),
     errors: result.errors || [],
+  };
+}
+
+export async function previewClientAcquisitionPeakDayRequest(
+  userId: string,
+  options?: { businessId?: string },
+): Promise<{ peakDay: string | null; peakCount: number; suggestMigration: boolean }> {
+  const params = new URLSearchParams();
+  if (options?.businessId?.trim()) params.set('businessId', options.businessId.trim());
+  const qs = params.toString();
+  const result = await request<{
+    ok: boolean;
+    peakDay: string | null;
+    peakCount: number;
+    suggestMigration: boolean;
+  }>(
+    `/api/clients/${encodeURIComponent(userId)}/acquisition-peak-day${qs ? `?${qs}` : ''}`,
+  );
+  return {
+    peakDay: result.peakDay || null,
+    peakCount: Number(result.peakCount || 0),
+    suggestMigration: Boolean(result.suggestMigration),
+  };
+}
+
+export async function markClientsAcquisitionRequest(
+  userId: string,
+  body: {
+    businessId?: string;
+    acquisitionKind: 'migration' | 'organic';
+    createdDay: string;
+    onlyUnmarked?: boolean;
+    dryRun?: boolean;
+  },
+): Promise<{ matched: number; updated: number; createdDay: string; dryRun: boolean }> {
+  const result = await request<{
+    ok: boolean;
+    matched: number;
+    updated?: number;
+    createdDay: string;
+    dryRun: boolean;
+  }>(`/api/clients/${encodeURIComponent(userId)}/mark-acquisition`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return {
+    matched: Number(result.matched || 0),
+    updated: Number(result.updated || 0),
+    createdDay: String(result.createdDay || body.createdDay),
+    dryRun: Boolean(result.dryRun),
   };
 }
 

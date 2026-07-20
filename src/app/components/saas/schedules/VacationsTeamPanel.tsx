@@ -19,6 +19,8 @@ interface TeamMember {
   user_id: string;
   fullName: string;
   role: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 interface Props {
@@ -61,10 +63,15 @@ export function VacationsTeamPanel({
 
   const myStats = useMemo(() => {
     if (!userId || !vacSettings) return null;
+    const me = members.find((m) => m.user_id === userId);
     const used = getDaysUsed(vacations, userId, currentYear);
-    const allowed = getDaysAllowed(vacSettings, userId);
+    const allowed = getDaysAllowed(vacSettings, userId, {
+      startDate: me?.startDate,
+      endDate: me?.endDate,
+      year: currentYear,
+    });
     return { used, allowed, remaining: Math.max(0, allowed - used), pending: vacations.filter((v) => v.member_id === userId && v.status === 'pending').length };
-  }, [vacations, userId, vacSettings, currentYear]);
+  }, [vacations, userId, vacSettings, currentYear, members]);
 
   const pending = useMemo(() => vacations.filter((v) => v.status === 'pending'), [vacations]);
 
@@ -74,7 +81,11 @@ export function VacationsTeamPanel({
     return members
       .map((m) => {
         const used = getDaysUsed(vacations, m.user_id, currentYear);
-        const allowed = getDaysAllowed(vacSettings, m.user_id);
+        const allowed = getDaysAllowed(vacSettings, m.user_id, {
+          startDate: m.startDate,
+          endDate: m.endDate,
+          year: currentYear,
+        });
         const pendingCount = vacations.filter((v) => v.member_id === m.user_id && v.status === 'pending').length;
         const approvedUpcoming = vacations.filter(
           (v) => v.member_id === m.user_id && v.status === 'approved' && v.endDate >= new Date().toISOString().slice(0, 10),
@@ -95,7 +106,7 @@ export function VacationsTeamPanel({
       <div className="flex flex-wrap items-center justify-between gap-3">
         {myStats && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-1 min-w-[280px]">
-            <MiniKpi label="Asignados" value={String(myStats.allowed)} tone="blue" />
+            <MiniKpi label="Devengados" value={String(myStats.allowed)} tone="blue" />
             <MiniKpi label="Usados" value={String(myStats.used)} tone="amber" />
             <MiniKpi label="Restantes" value={String(myStats.remaining)} tone="green" />
             <MiniKpi label="Pendientes" value={String(myStats.pending)} tone="red" />

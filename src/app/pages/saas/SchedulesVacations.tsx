@@ -436,7 +436,13 @@ export function SchedulesVacations() {
         {/* VACACIONES */}
         {tab === 'vacations' && (
           <VacationsTeamPanel
-            members={visibleMembers}
+            members={visibleMembers.map((m) => ({
+              user_id: m.user_id,
+              fullName: m.fullName || m.name || m.email || m.user_id,
+              role: String(m.role || ''),
+              startDate: m.employment?.startDate,
+              endDate: m.employment?.endDate,
+            }))}
             vacations={vacations}
             vacSettings={vacSettings}
             currentYear={currentYear}

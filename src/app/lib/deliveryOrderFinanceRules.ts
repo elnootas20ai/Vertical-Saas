@@ -6,6 +6,7 @@ export function shouldSyncDeliveryOrderIncome(order: Pick<
 >): boolean {
   const status = String(order.status || '');
   if (status === 'cancelled' || status === 'devuelto') return false;
+  if (String(order.paymentStatus || '') === 'refunded') return false;
   const paid =
     order.paymentStatus === 'paid'
     || order.paymentCollected === true;

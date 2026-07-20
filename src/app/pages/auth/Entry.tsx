@@ -13,6 +13,7 @@ import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { AUTH_PATHS, type AuthAccountType } from '../../lib/authEntryPaths';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 type AccentKey = 'neutral' | 'blue' | 'violet';
 
@@ -23,6 +24,7 @@ const ACCENT_STYLES: Record<
     icon: string;
     primary: string;
     secondary: string;
+    cardHover: string;
   }
 > = {
   neutral: {
@@ -31,6 +33,7 @@ const ACCENT_STYLES: Record<
     primary: 'bg-[#0f1419] hover:bg-[#1a2029] text-white',
     secondary:
       'border-gray-200 dark:border-gray-600 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700/50',
+    cardHover: 'lg:hover:border-gray-300 lg:hover:shadow-md',
   },
   blue: {
     iconWrap: 'bg-blue-50 dark:bg-blue-900/30',
@@ -38,6 +41,7 @@ const ACCENT_STYLES: Record<
     primary: 'bg-blue-600 hover:bg-blue-700 text-white',
     secondary:
       'border-blue-200 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30',
+    cardHover: 'lg:hover:border-blue-200 lg:hover:shadow-md',
   },
   violet: {
     iconWrap: 'bg-violet-50 dark:bg-violet-900/30',
@@ -45,6 +49,7 @@ const ACCENT_STYLES: Record<
     primary: 'bg-violet-600 hover:bg-violet-700 text-white',
     secondary:
       'border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30',
+    cardHover: 'lg:hover:border-violet-200 lg:hover:shadow-md',
   },
 };
 
@@ -53,52 +58,93 @@ const BTN_PRIMARY =
 const BTN_SECONDARY =
   'w-full min-h-[2.5rem] px-4 py-2.5 rounded-xl border-2 font-medium text-sm leading-tight transition-colors flex items-center justify-center gap-2 text-center';
 
+function ResponsiveCopy({
+  short,
+  full,
+}: {
+  short: string;
+  full: string;
+}) {
+  return (
+    <>
+      <span className="lg:hidden">{short}</span>
+      <span className="hidden lg:inline">{full}</span>
+    </>
+  );
+}
+
 function EntryRoleCard({
   accent,
   icon: Icon,
-  title,
-  primaryLabel,
+  titleShort,
+  titleFull,
+  descriptionShort,
+  descriptionFull,
+  primaryShort,
+  primaryFull,
   onPrimary,
-  secondaryLabel,
+  secondaryShort,
+  secondaryFull,
   onSecondary,
   secondaryIcon: SecondaryIcon,
 }: {
   accent: AccentKey;
   icon: LucideIcon;
-  title: string;
-  primaryLabel: string;
+  titleShort: string;
+  titleFull: string;
+  descriptionShort: string;
+  descriptionFull: string;
+  primaryShort: string;
+  primaryFull: string;
   onPrimary: () => void;
-  secondaryLabel?: string;
+  secondaryShort?: string;
+  secondaryFull?: string;
   onSecondary?: () => void;
   secondaryIcon?: LucideIcon;
 }) {
   const styles = ACCENT_STYLES[accent];
 
   return (
-    <div className="flex flex-col h-full p-4 sm:p-5 bg-white dark:bg-gray-800 border border-gray-200/90 dark:border-gray-700 rounded-2xl shadow-sm">
-      <div className="flex items-center gap-3 mb-4">
+    <div
+      className={`flex flex-col h-full p-4 sm:p-5 lg:p-6 bg-white dark:bg-gray-800 border border-gray-200/90 dark:border-gray-700 rounded-2xl shadow-sm transition-shadow ${styles.cardHover}`}
+    >
+      <div className="flex items-start gap-3 mb-4 lg:mb-5">
         <div
-          className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${styles.iconWrap}`}
+          className={`w-11 h-11 lg:w-12 lg:h-12 rounded-xl flex items-center justify-center shrink-0 ${styles.iconWrap}`}
         >
-          <Icon className={`w-5 h-5 ${styles.icon}`} />
+          <Icon className={`w-5 h-5 lg:w-6 lg:h-6 ${styles.icon}`} />
         </div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 leading-tight">
-          {title}
-        </h2>
+        <div className="min-w-0 pt-0.5 lg:hidden">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+            {titleShort}
+          </h2>
+          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400 leading-snug">
+            {descriptionShort}
+          </p>
+        </div>
+        <div className="hidden lg:block min-w-0 pt-0.5 flex-1">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100 leading-tight">
+            {titleFull}
+          </h2>
+        </div>
       </div>
+
+      <p className="hidden lg:block mb-5 text-sm leading-relaxed text-gray-600 dark:text-gray-400">
+        {descriptionFull}
+      </p>
 
       <div className="mt-auto space-y-2 shrink-0">
         <button type="button" onClick={onPrimary} className={`${BTN_PRIMARY} ${styles.primary}`}>
-          {primaryLabel}
+          <ResponsiveCopy short={primaryShort} full={primaryFull} />
         </button>
-        {secondaryLabel && onSecondary ? (
+        {secondaryShort && secondaryFull && onSecondary ? (
           <button
             type="button"
             onClick={onSecondary}
             className={`${BTN_SECONDARY} ${styles.secondary}`}
           >
             {SecondaryIcon && <SecondaryIcon className="w-4 h-4 shrink-0" />}
-            {secondaryLabel}
+            <ResponsiveCopy short={secondaryShort} full={secondaryFull} />
           </button>
         ) : null}
       </div>
@@ -110,6 +156,7 @@ export function Entry() {
   const navigate = useNavigate();
   const [view, setView] = useState<'main' | 'register'>('main');
   const [selectedType, setSelectedType] = useState<AuthAccountType | null>(null);
+  const iosCustomersOnly = isIosCustomerAccessOnlyApp();
 
   if (view === 'register') {
     return (
@@ -125,6 +172,25 @@ export function Entry() {
             </h1>
           </div>
 
+          {iosCustomersOnly ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 p-5 mb-6 space-y-3">
+              <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">
+                Alta de empresa en la web
+              </p>
+              <p className="text-sm text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
+                En la app iOS solo pueden entrar clientes y trabajadores con cuenta ya activa.
+                Crea la empresa y la suscripción en vertialapp.com desde un ordenador; después inicia sesión aquí.
+              </p>
+              <button
+                type="button"
+                onClick={() => setView('main')}
+                className="w-full min-h-[2.75rem] px-4 py-3 rounded-xl font-semibold text-sm bg-[#0f1419] text-white"
+              >
+                Volver e iniciar sesión
+              </button>
+            </div>
+          ) : (
+          <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-6">
             <button
               type="button"
@@ -184,6 +250,8 @@ export function Entry() {
               ← Volver
             </WEB__Button>
           </div>
+          </>
+          )}
         </div>
         </div>
       </AccesoSplitLayout>
@@ -192,35 +260,57 @@ export function Entry() {
 
   return (
     <AccesoSplitLayout visualKey="entry">
-      <div className="flex flex-1 flex-col px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8 lg:px-10 lg:py-10">
+      <div className="flex flex-1 flex-col justify-center px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8 lg:px-10 lg:py-10">
       <div className="w-full max-w-3xl mx-auto">
-        <div className="text-center mb-6 sm:mb-8">
+        <div className="text-center mb-6 sm:mb-8 lg:mb-10">
           <div className="hidden lg:flex items-center justify-center mb-5">
             <VertialLogo size="xl" />
           </div>
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 dark:text-gray-100 tracking-tight">
-            Acceso a Vertial
+            <span className="lg:hidden">Acceso a Vertial</span>
+            <span className="hidden lg:inline">¿Cómo entras en Vertial?</span>
           </h1>
+          <p className="mt-2 text-sm sm:text-base text-gray-500 dark:text-gray-400 max-w-xl mx-auto leading-relaxed">
+            <span className="lg:hidden">Elige cómo quieres entrar.</span>
+            <span className="hidden lg:inline">
+              Tres accesos distintos: empresa, trabajador o panel de afiliado. Elige el tuyo.
+            </span>
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 items-stretch sm:[&>*:last-child]:col-span-2 sm:[&>*:last-child]:max-w-md sm:[&>*:last-child]:mx-auto">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 lg:gap-5 items-stretch sm:[&>*:last-child]:col-span-2 sm:[&>*:last-child]:max-w-md sm:[&>*:last-child]:mx-auto lg:[&>*:last-child]:max-w-lg">
           <EntryRoleCard
             accent="neutral"
             icon={Building2}
-            title="Empresa"
-            primaryLabel="Iniciar sesión"
+            titleShort="Empresa"
+            titleFull="Empresa / Gerente"
+            descriptionShort="Dueños y gerentes."
+            descriptionFull="Propietarios, administradores y responsables de gestión. Dashboard, CRM, facturación y equipo."
+            primaryShort="Iniciar sesión"
+            primaryFull="Iniciar sesión — Empresa"
             onPrimary={() => navigate(AUTH_PATHS.companyLogin)}
-            secondaryLabel="Crear cuenta"
-            onSecondary={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' as const } })}
+            {...(iosCustomersOnly
+              ? {}
+              : {
+                  secondaryShort: 'Crear cuenta',
+                  secondaryFull: 'Crear cuenta de empresa',
+                  onSecondary: () =>
+                    navigate(AUTH_PATHS.register, { state: { accountType: 'company' as const } }),
+                })}
           />
 
           <EntryRoleCard
             accent="blue"
             icon={User}
-            title="Trabajador"
-            primaryLabel="Iniciar sesión"
+            titleShort="Trabajador"
+            titleFull="Trabajador / Empleado"
+            descriptionShort="Equipo en tienda y TPV."
+            descriptionFull="Operativa en tienda: fichajes, tareas y módulos asignados. También puedes activar la tablet con el código del local."
+            primaryShort="Iniciar sesión"
+            primaryFull="Iniciar sesión — Trabajador"
             onPrimary={() => navigate(AUTH_PATHS.workerLogin)}
-            secondaryLabel="Tablet TPV"
+            secondaryShort="Tablet TPV"
+            secondaryFull="Tablet TPV — código de tienda"
             onSecondary={() => navigate(AUTH_PATHS.tpvTabletLogin)}
             secondaryIcon={Monitor}
           />
@@ -228,16 +318,28 @@ export function Entry() {
           <EntryRoleCard
             accent="violet"
             icon={Handshake}
-            title="Afiliado"
-            primaryLabel="Iniciar sesión"
+            titleShort="Afiliado"
+            titleFull="Afiliado / Partner"
+            descriptionShort="Partners y comisiones."
+            descriptionFull="Programa de partners: clientes referidos, comisiones y seguimiento de tu red comercial."
+            primaryShort="Iniciar sesión"
+            primaryFull="Iniciar sesión — Afiliado"
             onPrimary={() => navigate(AUTH_PATHS.affiliatePortal)}
-            secondaryLabel="Solicitar acceso"
+            secondaryShort="Solicitar acceso"
+            secondaryFull="Solicitar ser afiliado"
             onSecondary={() => navigate('/affiliados')}
           />
         </div>
 
-        <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">
-          ¿Primera vez?{' '}
+        {iosCustomersOnly ? (
+          <p className="mt-6 lg:mt-8 text-center text-sm text-gray-600 dark:text-gray-400 leading-relaxed px-2">
+            Alta de empresa y suscripción: en la web (<span className="font-medium">vertialapp.com</span>).
+            Esta app es para iniciar sesión con cuenta ya activa.
+          </p>
+        ) : (
+        <p className="mt-6 lg:mt-8 text-center text-sm text-gray-600 dark:text-gray-400">
+          <span className="lg:hidden">¿Primera vez? </span>
+          <span className="hidden lg:inline">¿Primera vez y no tienes invitación? </span>
           <button
             type="button"
             onClick={() => setView('register')}
@@ -246,6 +348,7 @@ export function Entry() {
             Crear cuenta
           </button>
         </p>
+        )}
 
         {!Capacitor.isNativePlatform() && (
           <div className="mt-4 text-center">

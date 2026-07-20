@@ -16,6 +16,8 @@ import {
   crossCheck,
   notifyClockinEvent,
   getDailySummary,
+  getMemberWorkBlock,
+  getMembersWorkBlocks,
 } from '../controllers/clockinsController.js';
 
 const clockinsRouter = Router();
@@ -31,6 +33,8 @@ clockinsRouter.get('/:businessId/labor-cost', getLaborCost);
 clockinsRouter.get('/:businessId/payroll-summary', getPayrollSummary);
 clockinsRouter.get('/:businessId/export', exportClockins);
 clockinsRouter.get('/:businessId/cross-check', crossCheck);
+clockinsRouter.get('/:businessId/work-blocks', getMembersWorkBlocks);
+clockinsRouter.get('/:businessId/work-block/:memberId', getMemberWorkBlock);
 clockinsRouter.put('/:businessId/adjust', adjustClockinEntry);
 clockinsRouter.post('/:businessId/check-in', checkInMember);
 clockinsRouter.put('/:businessId/record/:recordId/entry', appendClockinEntry);

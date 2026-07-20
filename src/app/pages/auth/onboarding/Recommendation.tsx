@@ -8,6 +8,9 @@ import {
   OnboardingStepShell,
 } from '../../../components/auth/onboarding/OnboardingStepShell';
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
+import { useAuth } from '../../../context/AuthContext';
+import { isIosCustomerAccessOnlyApp } from '../../../lib/appStoreCompliance';
+import { IosCustomerAccessOnlyScreen } from '../../../components/saas/IosCustomerAccessOnlyScreen';
 import {
   calculateOnboardingPricing,
   estimateSubscriptionTotals,
@@ -56,6 +59,19 @@ function formatPricingBreakdown(
 }
 
 export function Recommendation() {
+  const { logout } = useAuth();
+  if (isIosCustomerAccessOnlyApp()) {
+    return (
+      <IosCustomerAccessOnlyScreen
+        title="Alta y planes solo en la web"
+        onLogout={() => void logout()}
+      />
+    );
+  }
+  return <RecommendationWebFlow />;
+}
+
+function RecommendationWebFlow() {
   const navigate = useNavigate();
   const { data, updateData, advanceStep } = useOnboarding();
   const [billingMode, setBillingMode] = useState<'monthly' | 'annual'>(data.subscriptionSelection.billingMode);

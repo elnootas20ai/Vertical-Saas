@@ -1684,7 +1684,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [cFilterName,   setCFilterName]   = useState<string[]>([]);
   const [cFilterStatus, setCFilterStatus] = useState<string[]>([]);
   const [cFilterCity,   setCFilterCity]   = useState<string[]>([]);
-  const [cSort,         setCSort]         = useState<SortState>(null);
+  const [cSort,         setCSort]         = useState<SortState>({ key: 'name', dir: 'asc' });
 
   const {
     clients: serverClients,
@@ -1967,15 +1967,14 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         const q = searchQuery.toLowerCase();
         r = r.filter(c => c.name.toLowerCase().includes(q) || c.email.toLowerCase().includes(q) || c.phone.includes(q) || c.dni.toLowerCase().includes(q));
       }
-      if (cSort?.key) {
-        const { key, dir } = cSort; const mul = dir === 'asc' ? 1 : -1;
-        r = [...r].sort((a, b) => {
-          if (key === 'name')   return a.name.localeCompare(b.name, 'es') * mul;
-          if (key === 'status') return a.status.localeCompare(b.status) * mul;
-          if (key === 'city')   return (a.city || '').localeCompare(b.city || '', 'es') * mul;
-          return 0;
-        });
-      }
+      const sortKey = cSort?.key || 'name';
+      const mul = (cSort?.dir || 'asc') === 'asc' ? 1 : -1;
+      r = [...r].sort((a, b) => {
+        if (sortKey === 'name')   return a.name.localeCompare(b.name, 'es') * mul;
+        if (sortKey === 'status') return a.status.localeCompare(b.status) * mul;
+        if (sortKey === 'city')   return (a.city || '').localeCompare(b.city || '', 'es') * mul;
+        return a.name.localeCompare(b.name, 'es') * mul;
+      });
     }
 
     if (filterClientTag) {
@@ -2630,7 +2629,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const lActiveFilters = lFilterName.length + lFilterStatus.length + lFilterVehicle.length + lFilterResponsible.length + (filterBranch !== 'all' ? 1 : 0) + (filterWorkCenter !== 'all' ? 1 : 0);
   const cActiveFilters = cFilterName.length + cFilterStatus.length + cFilterCity.length + (filterBranch !== 'all' ? 1 : 0) + (filterWorkCenter !== 'all' ? 1 : 0);
   const clearLFilters  = () => { setLFilterName([]); setLFilterStatus([]); setLFilterVehicle([]); setLFilterResponsible([]); setLSort(null); setFilterBranch('all'); setFilterWorkCenter('all'); };
-  const clearCFilters  = () => { setCFilterName([]); setCFilterStatus([]); setCFilterCity([]); setCSort(null); setFilterBranch('all'); setFilterWorkCenter('all'); };
+  const clearCFilters  = () => { setCFilterName([]); setCFilterStatus([]); setCFilterCity([]); setCSort({ key: 'name', dir: 'asc' }); setFilterBranch('all'); setFilterWorkCenter('all'); };
 
   const { visibleColumns: visibleLeadCols, visibleIds: visibleLeadColIds, columnOrder: leadColOrder, toggleColumn: toggleLeadCol, reorderColumns: reorderLeadCols, resetToDefault: resetLeadCols } = useColumnPreferences('leads', LEAD_COL_DEFS);
   const clientColPrefsKey = isDeliveryBusiness ? 'clients-delivery-v2' : 'clients';
@@ -3233,13 +3232,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   {effectiveVisibleClientCols.includes('nombre') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Cliente" options={cNameOptions} selected={cFilterName} onChange={setCFilterName}
-                        sortKey="name" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : null)} />
+                        sortKey="name" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : { key: 'name', dir: 'asc' })} />
                     </th>
                   )}
                   {effectiveVisibleClientCols.includes('estado') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Estado" options={cStatusOptions} selected={cFilterStatus} onChange={setCFilterStatus}
-                        sortKey="status" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : null)}
+                        sortKey="status" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : { key: 'name', dir: 'asc' })}
                         renderOption={opt => <span className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${opt === 'Activo' ? 'bg-emerald-500' : 'bg-slate-400'}`} />{opt}</span>} />
                     </th>
                   )}
@@ -3281,7 +3280,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   {effectiveVisibleClientCols.includes('ciudad') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Ciudad" options={cCityOptions} selected={cFilterCity} onChange={setCFilterCity}
-                        sortKey="city" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : null)} />
+                        sortKey="city" currentSort={cSort} onSort={(k, d) => setCSort(k ? { key: k, dir: d } : { key: 'name', dir: 'asc' })} />
                     </th>
                   )}
                   {effectiveVisibleClientCols.includes('responsable') && <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Responsable</th>}
@@ -4205,8 +4204,11 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         onClientCreated={(client) => {
           toast.success(`Cliente "${client.name}" creado correctamente`);
           setShowAddClientModal(false);
+          if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
         }}
         contexto="crm"
+        businessId={businessScopeId || scopedClientsBusinessId}
+        dataUserId={clientsDataUserId}
       />
       {leadToConvert && (
         <SAAS__ConvertToClientModal isOpen={showConvertModal} onClose={() => { setShowConvertModal(false); setLeadToConvert(null); }}

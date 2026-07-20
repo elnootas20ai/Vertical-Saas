@@ -62,6 +62,7 @@ import {
   evaluateTpvRegisterLoadGate,
   resolveTpvRegisterBidAtStart,
   resolveTpvRegisterScope,
+  resolveRetailOpsWriteBusinessId,
   shouldApplyTpvRegisterLoadResult,
 } from '../../lib/tpvRegisterScope';
 import {
@@ -110,6 +111,8 @@ import {
   startBreak,
   endBreak,
   listClockins,
+  fetchMemberWorkBlock,
+  fetchMembersWorkBlocks,
   type ClockinRecord,
 } from '../../lib/clockinsApi';
 import type { WorkCenter } from '../../lib/workCentersApi';
@@ -378,6 +381,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     !isTabletMode && workerOptions.length === 1 ? workerOptions[0].id : ''
   ));
   const [tabletStep, setTabletStep] = useState<1 | 2>(1);
+  const [vacationBlockedById, setVacationBlockedById] = useState<Record<string, string>>({});
   const salaLaunchRef = useRef<string | null>(consumeSalaTpvLaunch());
   const lastRestrictedPdvRef = useRef('');
   const onOpeningPdvChangeRef = useRef(onOpeningPdvChange);
@@ -463,15 +467,56 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const hasResolvedPdv = Boolean(selectedPdv) || (isTabletMode && Boolean(restrictedToPdvId));
   // Bar/restaurante y tablet: si no hay terminal configurado, se usa uno sintético al abrir.
   const allowSyntheticTerminal = isTabletMode || restaurantOpening;
+  const selectedWorkerVacationMsg = selectedWorkerId
+    ? vacationBlockedById[selectedWorkerId] || vacationBlockedById[String(selectedWorkerId).trim()]
+    : '';
   const canOpen = hasWorkers
     && Boolean(effectiveWorkerName())
     && hasResolvedPdv
-    && (Boolean(selectedTerminal) || allowSyntheticTerminal);
+    && (Boolean(selectedTerminal) || allowSyntheticTerminal)
+    && !selectedWorkerVacationMsg;
+
+  const openingBusinessId = useMemo(
+    () => resolveBusinessScopeId(currentBusiness) || '',
+    [currentBusiness],
+  );
 
   const workerOptionsKey = useMemo(
     () => workerOptions.map((w) => `${w.id}:${w.name}`).join('|'),
     [workerOptions],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = workerOptions.map((w) => w.id).filter(Boolean);
+    if (!openingBusinessId || ids.length === 0) {
+      setVacationBlockedById({});
+      return;
+    }
+    void fetchMembersWorkBlocks(openingBusinessId, ids)
+      .then((blocks) => {
+        if (cancelled) return;
+        const next: Record<string, string> = {};
+        for (const [id, info] of Object.entries(blocks || {})) {
+          if (info?.blocked) {
+            next[id] = info.message || 'De vacaciones o baja — no puede abrir caja';
+          }
+        }
+        setVacationBlockedById(next);
+      })
+      .catch(() => {
+        if (!cancelled) setVacationBlockedById({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openingBusinessId, workerOptionsKey]);
+
+  useEffect(() => {
+    if (!selectedWorkerId || !vacationBlockedById[selectedWorkerId]) return;
+    const firstOk = workerOptions.find((w) => !vacationBlockedById[w.id]);
+    setSelectedWorkerId(firstOk?.id || '');
+  }, [vacationBlockedById, selectedWorkerId, workerOptions]);
 
   useEffect(() => {
     if (isTabletMode || workerOptions.length === 0) return;
@@ -583,6 +628,10 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     const syntheticTerminalId = allowSyntheticTerminal
       ? `${isTabletMode ? 'tablet' : 'tpv'}-${pdvId || 'default'}`
       : '';
+    if (selectedWorkerId && vacationBlockedById[selectedWorkerId]) {
+      toast.error(vacationBlockedById[selectedWorkerId]);
+      return;
+    }
     onOpen({
       workerId: selectedWorkerId || undefined,
       workerName: wName,
@@ -843,35 +892,46 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                 </label>
                 {hasWorkers ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {workerOptions.map((w) => (
+                    {workerOptions.map((w) => {
+                      const vacationMsg = vacationBlockedById[w.id];
+                      const blocked = Boolean(vacationMsg);
+                      return (
                       <button
                         key={w.id}
                         type="button"
-                        onClick={() => setSelectedWorkerId(w.id)}
+                        disabled={blocked}
+                        onClick={() => !blocked && setSelectedWorkerId(w.id)}
                         className={`p-3 min-h-[56px] rounded-xl border-2 text-left transition-all touch-manipulation ${
-                          selectedWorkerId === w.id
-                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm'
-                            : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-gray-800'
+                          blocked
+                            ? 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900/60 opacity-60 cursor-not-allowed'
+                            : selectedWorkerId === w.id
+                              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm'
+                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-gray-800'
                         }`}
                       >
                         <div className="flex items-center gap-3">
                           <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
-                            selectedWorkerId === w.id
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                            blocked
+                              ? 'bg-gray-300 dark:bg-gray-600 text-white'
+                              : selectedWorkerId === w.id
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
                           }`}>
                             <User className="w-5 h-5" />
                           </div>
                           <div className="min-w-0">
                             <div className="font-bold text-base text-gray-900 dark:text-gray-100 truncate">{w.name}</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">Toca para seleccionar</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">
+                              {blocked ? 'Vacaciones / baja' : 'Toca para seleccionar'}
+                            </div>
                           </div>
-                          {selectedWorkerId === w.id && (
+                          {selectedWorkerId === w.id && !blocked && (
                             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 ml-auto" />
                           )}
                         </div>
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-200">
@@ -942,19 +1002,26 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
             <div>
               <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Trabajador *</label>
               {hasWorkers ? (
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <select
-                    value={selectedWorkerId}
-                    onChange={(e) => setSelectedWorkerId(e.target.value)}
-                    className={`${inputCls} pl-10`}
-                    autoFocus
-                  >
-                    <option value="">Selecciona…</option>
-                    {workerOptions.map((w) => (
-                      <option key={w.id} value={w.id}>{w.name}</option>
-                    ))}
-                  </select>
+                <div className="relative space-y-2">
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <select
+                      value={selectedWorkerId}
+                      onChange={(e) => setSelectedWorkerId(e.target.value)}
+                      className={`${inputCls} pl-10`}
+                      autoFocus
+                    >
+                      <option value="">Selecciona…</option>
+                      {workerOptions.map((w) => (
+                        <option key={w.id} value={w.id} disabled={Boolean(vacationBlockedById[w.id])}>
+                          {vacationBlockedById[w.id] ? `${w.name} (vacaciones/baja)` : w.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {selectedWorkerVacationMsg ? (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">{selectedWorkerVacationMsg}</p>
+                  ) : null}
                 </div>
               ) : (
                 <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
@@ -1517,6 +1584,7 @@ function ClockInModal({
   const [clockins, setClockins] = useState<ClockinRecord[]>([]);
   const [error, setError] = useState('');
   const [actionMsg, setActionMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [vacationBlockedById, setVacationBlockedById] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -1549,6 +1617,21 @@ function ClockInModal({
       teamList.sort((a, b) => String(a.fullName || a.email || '').localeCompare(String(b.fullName || b.email || ''), 'es'));
       setTeam(teamList);
       setClockins(records);
+      const memberIds = teamList
+        .map((m) => normalizeClockinUserId(m.user_id || m.id))
+        .filter(Boolean);
+      try {
+        const blocks = await fetchMembersWorkBlocks(businessId, memberIds);
+        const next: Record<string, string> = {};
+        for (const [id, info] of Object.entries(blocks || {})) {
+          if (info?.blocked) {
+            next[id] = info.message || 'De vacaciones o baja — no puede fichar';
+          }
+        }
+        setVacationBlockedById(next);
+      } catch {
+        setVacationBlockedById({});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al cargar fichajes');
     } finally {
@@ -1587,6 +1670,12 @@ function ClockInModal({
     const mid = memberKey(member);
     if (!mid) {
       setActionMsg({ type: 'err', text: 'No se pudo identificar al trabajador.' });
+      return;
+    }
+    const vacationMsg = vacationBlockedById[mid];
+    if (vacationMsg) {
+      setActionMsg({ type: 'err', text: vacationMsg });
+      toast.error(vacationMsg);
       return;
     }
     setActingId(member.user_id);
@@ -1718,14 +1807,17 @@ function ClockInModal({
             </div>
           )}
           {!loading && team.map((member) => {
-            const record = todayRecords.get(memberKey(member));
+            const mid = memberKey(member);
+            const record = todayRecords.get(mid);
+            const vacationMsg = vacationBlockedById[mid];
+            const onVacation = Boolean(vacationMsg);
             const effectiveStatus = deriveEffectiveClockinStatus(record);
             const isActive = effectiveStatus === 'active';
             const isOnBreak = effectiveStatus === 'break';
             const isWorking = isClockinPresent(effectiveStatus);
             const isDone = effectiveStatus === 'completed';
-            const canFichar = !record || isDone;
-            const canBreak = isWorking;
+            const canFichar = !onVacation && (!record || isDone);
+            const canBreak = !onVacation && isWorking;
             const canFinish = isWorking;
             const clockInEntry = record?.entries.find((e) => e.type === 'clock_in');
             const clockInTime = clockInEntry
@@ -1737,7 +1829,9 @@ function ClockInModal({
               <div
                 key={member.user_id}
                 className={`p-3 sm:p-4 rounded-2xl border-2 ${
-                  canFichar && !isDone
+                  onVacation
+                    ? 'border-sky-200 bg-sky-50/70 dark:bg-sky-950/20 dark:border-sky-900'
+                    : canFichar && !isDone
                     ? 'border-violet-300 bg-violet-50/50 dark:bg-violet-950/20 dark:border-violet-800 ring-1 ring-violet-200/60 dark:ring-violet-900/40'
                     : isOnBreak
                       ? 'border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800'
@@ -1750,7 +1844,9 @@ function ClockInModal({
               >
                 <div className="flex items-start sm:items-center gap-3 mb-3">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                    isOnBreak
+                    onVacation
+                      ? 'bg-sky-500 text-white'
+                      : isOnBreak
                       ? 'bg-amber-500 text-white'
                       : isActive
                         ? 'bg-emerald-600 text-white'
@@ -1765,7 +1861,9 @@ function ClockInModal({
                       {member.fullName || member.email}
                     </div>
                     <div className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {isOnBreak && clockInTime
+                      {onVacation
+                        ? (vacationMsg || 'Vacaciones / baja — no puede fichar ni operar')
+                        : isOnBreak && clockInTime
                         ? `En descanso · entrada ${clockInTime}`
                         : isActive && clockInTime
                           ? `Trabajando · entrada ${clockInTime}`
@@ -1774,11 +1872,15 @@ function ClockInModal({
                             : 'Pulsa Fichar al entrar'}
                     </div>
                   </div>
-                  {canFichar && !isDone && (
+                  {onVacation ? (
+                    <span className="shrink-0 px-2 py-0.5 rounded-md bg-sky-600 text-white text-[10px] font-bold uppercase tracking-wide">
+                      Ausente
+                    </span>
+                  ) : canFichar && !isDone ? (
                     <span className="shrink-0 px-2 py-0.5 rounded-md bg-violet-600 text-white text-[10px] font-bold uppercase tracking-wide">
                       Pendiente
                     </span>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
@@ -1786,7 +1888,7 @@ function ClockInModal({
                     type="button"
                     disabled={busy || !canFichar}
                     onClick={() => void handleClockIn(member)}
-                    title={canFichar ? 'Registrar entrada' : 'Ya está en turno'}
+                    title={onVacation ? vacationMsg || 'De vacaciones' : canFichar ? 'Registrar entrada' : 'Ya está en turno'}
                     className={`${btnBase} ${canFichar && !busy ? 'bg-violet-600 text-white hover:bg-violet-700 shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'}`}
                   >
                     {busy && canFichar ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogIn className="w-4 h-4 shrink-0" />}
@@ -2392,6 +2494,7 @@ export function TpvRegisterGate({
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
   const [clockedInWorkers, setClockedInWorkers] = useState<TpvClockedInWorker[]>([]);
   const [clockedInWorkersLoading, setClockedInWorkersLoading] = useState(false);
+  const [vacationBlockedIds, setVacationBlockedIds] = useState<string[]>([]);
   const clockedInWorkersRef = useRef<TpvClockedInWorker[]>([]);
   clockedInWorkersRef.current = clockedInWorkers;
   const [selectedOrderTakerId, setSelectedOrderTakerId] = useState<string | null>(null);
@@ -2744,19 +2847,42 @@ export function TpvRegisterGate({
         workCenterId,
         activeSession?.openedAt,
       );
-      setClockedInWorkers(workers);
+      const openerId = normalizeClockinUserId(activeSession?.workerId);
+      const selfId = normalizeClockinUserId(user?.user_id || user?.id);
+      const idsToCheck = [
+        ...workers.map((w) => w.id),
+        ...(openerId ? [openerId] : []),
+        ...(selfId ? [selfId] : []),
+      ];
+      let blockedIds: string[] = [];
+      try {
+        const blocks = await fetchMembersWorkBlocks(businessId, idsToCheck);
+        blockedIds = Object.entries(blocks || {})
+          .filter(([, info]) => info?.blocked)
+          .map(([id]) => id);
+      } catch {
+        blockedIds = [];
+      }
+      setVacationBlockedIds(blockedIds);
+      const blockedSet = new Set(blockedIds.map((id) => normalizeClockinUserId(id)).filter(Boolean));
+      const filteredWorkers = workers.filter((w) => !blockedSet.has(normalizeClockinUserId(w.id)));
+      const sessionForStaff =
+        openerId && blockedSet.has(openerId)
+          ? { workerId: '', workerName: '' }
+          : activeSession;
+      setClockedInWorkers(filteredWorkers);
       setSelectedOrderTakerId((prev) => {
-        const staff = buildTpvActiveStaff(activeSession, workers);
+        const staff = buildTpvActiveStaff(sessionForStaff, filteredWorkers);
         const prevNorm = normalizeClockinUserId(prev);
         if (prevNorm && staff.some((w) => clockinIdsMatch(w.id, prevNorm))) return prevNorm;
-        return pickDefaultOrderTakerForSession(activeSession, workers);
+        return pickDefaultOrderTakerForSession(sessionForStaff, filteredWorkers);
       });
     } catch {
       if (!silent && clockedInWorkersRef.current.length === 0) setClockedInWorkers([]);
     } finally {
       if (!silent && clockedInWorkersRef.current.length === 0) setClockedInWorkersLoading(false);
     }
-  }, [businessId, scopeBusiness?.owner_user_id, currentBusiness?.owner_user_id, activeStoreScope, activeSession]);
+  }, [businessId, scopeBusiness?.owner_user_id, currentBusiness?.owner_user_id, activeStoreScope, activeSession, user?.user_id, user?.id]);
 
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession)) return;
@@ -3087,10 +3213,27 @@ export function TpvRegisterGate({
       toast.info(`Continuando con la caja ya abierta en ${localOpen.pointOfSaleName || 'esta tienda'}`);
       return;
     }
+    const openerId = normalizeClockinUserId(data.workerId);
+    const bidForVacation = resolveBusinessScopeId(currentBusiness);
+    if (bidForVacation && openerId) {
+      try {
+        const block = await fetchMemberWorkBlock(bidForVacation, openerId);
+        if (block.blocked) {
+          toast.error(block.message || 'No puedes abrir el TPV: estás de vacaciones o de baja.');
+          return;
+        }
+      } catch {
+        // Si falla la comprobación, el servidor vuelve a validar al crear la sesión.
+      }
+    }
     const total = calcDenominationTotal(data.counts);
     try {
+      const writeBusinessId = resolveRetailOpsWriteBusinessId(
+        scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
+        businesses,
+      );
       const created = await createTpvRegisterSessionRequest(dataUserId, {
-        business_id: scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
+        business_id: writeBusinessId || scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
         workerId: data.workerId || '',
         workerName: data.workerName,
         pointOfSaleId: data.pointOfSaleId,
@@ -3121,7 +3264,6 @@ export function TpvRegisterGate({
         skipManagerAutoPdvRef.current = false;
       }
       toast.success(`Caja abierta: ${data.pointOfSaleName ? `${data.pointOfSaleName} / ` : ''}${data.terminalName} — ${total.toFixed(2)}€`);
-      const openerId = normalizeClockinUserId(data.workerId);
       const bid = resolveBusinessScopeId(currentBusiness);
       const pdvDoc = pointsOfSale.find((p) => p._id === pdvId);
       const wcId = String(pdvDoc?.workCenterId || tabletBinding?.workCenterId || '').trim();
@@ -3399,10 +3541,19 @@ export function TpvRegisterGate({
     }
   }, [dataUserId, activeSession]);
 
-  const activeStaff = useMemo(
-    () => buildTpvActiveStaff(activeSession, clockedInWorkers),
-    [activeSession, clockedInWorkers],
-  );
+  const activeStaff = useMemo(() => {
+    const blockedSet = new Set(
+      vacationBlockedIds.map((id) => normalizeClockinUserId(id)).filter(Boolean),
+    );
+    const openerId = normalizeClockinUserId(activeSession?.workerId);
+    const sessionForStaff =
+      openerId && blockedSet.has(openerId)
+        ? { workerId: '', workerName: '' }
+        : activeSession;
+    return buildTpvActiveStaff(sessionForStaff, clockedInWorkers).filter(
+      (w) => !blockedSet.has(normalizeClockinUserId(w.id)),
+    );
+  }, [activeSession, clockedInWorkers, vacationBlockedIds]);
 
   const currentUserId = useMemo(
     () => normalizeClockinUserId(user?.user_id || user?.id) || '',
@@ -3416,8 +3567,9 @@ export function TpvRegisterGate({
       selectedOrderTakerId,
       currentUserId,
       isWorkerUser,
+      vacationBlockedIds,
     }),
-    [clockedInWorkersLoading, activeStaff, selectedOrderTakerId, currentUserId, isWorkerUser],
+    [clockedInWorkersLoading, activeStaff, selectedOrderTakerId, currentUserId, isWorkerUser, vacationBlockedIds],
   );
 
   const isRestaurantVertical = isRestaurantBusinessType(
@@ -3866,7 +4018,9 @@ export function TpvRegisterGate({
                   <LogIn className="w-6 h-6 text-violet-600 dark:text-violet-400" />
                 </div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Fichaje requerido</h2>
+                  <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">
+                    {clockInGate.reason === 'vacation_blocked' ? 'No disponible' : 'Fichaje requerido'}
+                  </h2>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     {tpvClockInBlockMessage(clockInGate.reason, isWorkerUser)}
                   </p>

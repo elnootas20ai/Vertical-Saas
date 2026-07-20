@@ -12,6 +12,7 @@ import {
   verifyPassword,
   BUSINESSES_DB,
 } from '../services/couchdb.js';
+import { cascadeSoftDeleteBusinessData } from '../services/businessDeleteCascade.js';
 import { seedAlertsConfigIfMissing } from './settingsController.js';
 import { assertCanCreateBusiness } from '../services/entitlementEnforcement.js';
 import { findLikelyDuplicateBusiness, normalizeLinkedBusinessId } from '../shared/billing/onboardingBusiness.js';
@@ -184,13 +185,23 @@ export async function deleteBusiness(req, res) {
     const business = await findBusinessById(req, businessId);
     if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
 
+    const deletedBusinessId = business.business_id || String(business._id || '').replace(/^business:/, '');
+    const ownerUserId = String(business.owner_user_id || '').trim();
+
     await softDeleteDocument(req, BUSINESSES_DB, business._id);
 
-    if (String(business.owner_user_id || '').trim() === userId) {
+    // Cascada: no dejar PDV/cajas/catálogo colgando de la empresa borrada
+    let cascade = null;
+    try {
+      cascade = await cascadeSoftDeleteBusinessData(req, deletedBusinessId, ownerUserId);
+    } catch (cascadeErr) {
+      console.error('[deleteBusiness] cascade error:', cascadeErr?.message || cascadeErr);
+    }
+
+    if (ownerUserId && ownerUserId === userId) {
       const ownerAccount = await findAccountByUserId(req, userId);
       if (ownerAccount) {
         const prevOnboarding = ownerAccount.onboardingData || {};
-        const deletedBusinessId = business.business_id || String(business._id || '').replace(/^business:/, '');
         await saveAccount(req, {
           ...ownerAccount,
           onboardingData: {
@@ -206,7 +217,7 @@ export async function deleteBusiness(req, res) {
       }
     }
 
-    return res.json({ ok: true });
+    return res.json({ ok: true, cascade: cascade || undefined });
   } catch (error) {
     return res.status(500).json({
       ok: false,

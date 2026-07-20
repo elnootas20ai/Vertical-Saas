@@ -109,6 +109,10 @@ import { assertCanCreatePointOfSale } from '../services/entitlementEnforcement.j
 import { recordMovement } from '../services/stockMovementService.js';
 import { deductOrderByRecipe, restoreDeliveryOrderStockFromMovements, deductStaffConsumptionStock } from '../services/recipeStockService.js';
 import { deductOrderChannelPackaging } from '../services/orderChannelStockService.js';
+import {
+  ensureDeliveryOrderIncomeServer,
+  ensureDeliveryOrderRefundServer,
+} from '../services/deliveryOrderFinanceService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
 import {
   canEmitCatalogStockAlerts,
@@ -127,6 +131,7 @@ import {
   normalizeDeliveryOrderStatus,
 } from '../services/deliveryAlertStatusUtils.js';
 import { notifyManagersOrderCancelled } from '../services/deliveryOrderNotifications.js';
+import { getApprovedVacationBlockingWork } from '../services/vacationClockinGate.js';
 import logger from '../services/logger.js';
 import {
   deliveryOrderMatchesClient,
@@ -204,6 +209,22 @@ function resolvePdvIdFromRef(pdvs, ref) {
   return byWc?._id || null;
 }
 
+/** Empresa real del PDV: prioriza la tienda/centro sobre un business_id del cliente (evita limpieza→delivery). */
+async function resolveBusinessIdForOrderPdv(req, pdv, orderBusinessId = '') {
+  const fromPdv = String(pdv?.businessId || pdv?.business_id || '').trim();
+  if (fromPdv) return fromPdv;
+  if (pdv?.workCenterId) {
+    try {
+      const wc = await findWorkCenterById(req, pdv.workCenterId);
+      const fromWc = String(wc?.business_id || wc?.businessId || '').trim();
+      if (fromWc) return fromWc;
+    } catch {
+      /* ignore */
+    }
+  }
+  return String(orderBusinessId || '').trim();
+}
+
 async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
   const pdvs = await listScopedPointsOfSaleForUser(req, userId);
   let salesPointId = String(order?.salesPointId || '').trim();
@@ -212,15 +233,7 @@ async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
     const resolved = resolvePdvIdFromRef(pdvs, salesPointId);
     if (resolved) salesPointId = resolved;
     const pdv = pdvs.find((p) => p._id === salesPointId);
-    let business_id = orderBusinessId;
-    if (!business_id && pdv?.workCenterId) {
-      try {
-        const wc = await findWorkCenterById(req, pdv.workCenterId);
-        business_id = String(wc?.business_id || wc?.businessId || '').trim();
-      } catch {
-        business_id = '';
-      }
-    }
+    const business_id = await resolveBusinessIdForOrderPdv(req, pdv, orderBusinessId);
     return {
       salesPointId,
       salesPointName: String(order?.salesPointName || pdv?.name || '').trim(),
@@ -232,15 +245,7 @@ async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
     const workerPdv = resolvePdvIdFromRef(pdvs, workerRef);
     if (workerPdv) {
       const pdv = pdvs.find((p) => p._id === workerPdv);
-      let business_id = orderBusinessId;
-      if (!business_id && pdv?.workCenterId) {
-        try {
-          const wc = await findWorkCenterById(req, pdv.workCenterId);
-          business_id = String(wc?.business_id || wc?.businessId || '').trim();
-        } catch {
-          business_id = '';
-        }
-      }
+      const business_id = await resolveBusinessIdForOrderPdv(req, pdv, orderBusinessId);
       return {
         salesPointId: workerPdv,
         salesPointName: String(order?.salesPointName || pdv?.name || '').trim(),
@@ -250,15 +255,7 @@ async function resolveOrderSalesPoint(req, userId, order, callerAccount) {
   }
   const active = (pdvs || []).filter((p) => p && p.active !== false);
   if (active.length === 1) {
-    let business_id = orderBusinessId;
-    if (!business_id && active[0].workCenterId) {
-      try {
-        const wc = await findWorkCenterById(req, active[0].workCenterId);
-        business_id = String(wc?.business_id || wc?.businessId || '').trim();
-      } catch {
-        business_id = '';
-      }
-    }
+    const business_id = await resolveBusinessIdForOrderPdv(req, active[0], orderBusinessId);
     return {
       salesPointId: active[0]._id,
       salesPointName: String(order?.salesPointName || active[0].name || '').trim(),
@@ -481,14 +478,23 @@ async function maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, pr
 }
 
 /**
- * Descuenta stock (receta o venta directa del ítem) cuando el pedido pasa a entregado.
- * - En UPDATE: solo si antes no estaba entregado (evita doble descuento).
- * - En CREATE: si ya llega como entregado (ej. TPV mostrador), descuenta una vez.
+ * Descuenta stock (receta + packaging) cuando el pedido está cobrado o entregado.
+ * Idempotente vía movimientos de referencia del pedido.
  */
+function orderIsPaidForStock(doc) {
+  if (!doc) return false;
+  if (String(doc.status || '') === 'cancelled' || String(doc.status || '') === 'devuelto') return false;
+  if (String(doc.paymentStatus || '') === 'refunded') return false;
+  return doc.paymentStatus === 'paid' || doc.paymentCollected === true;
+}
+
 async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previousStatus) {
-  if (!doc || doc.status !== 'entregado') return;
+  if (!doc) return;
+  const shouldDeduct = doc.status === 'entregado' || orderIsPaidForStock(doc);
+  if (!shouldDeduct) return;
+  // Si solo estaba entregado antes y sigue entregado sin cambio de pago, ya se descontó
   const prev = String(previousStatus || '').toLowerCase();
-  if (prev === 'entregado') return;
+  if (prev === 'entregado' && doc.status === 'entregado' && !orderIsPaidForStock(doc)) return;
   try {
     const orderItems = (doc.items || [])
       .filter((item) => (item.catalogItemId || item.productId) && item.quantity)
@@ -518,6 +524,19 @@ async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previou
     }
   } catch (err) {
     logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error descontando stock por receta delivery');
+  }
+}
+
+async function maybeSyncDeliveryOrderFinance(req, userId, doc) {
+  if (!doc) return;
+  try {
+    if (String(doc.status || '') === 'devuelto' || String(doc.paymentStatus || '') === 'refunded') {
+      await ensureDeliveryOrderRefundServer(req, userId, doc);
+      return;
+    }
+    await ensureDeliveryOrderIncomeServer(req, userId, doc);
+  } catch (err) {
+    logger.warn({ tag: 'DELIVERY_FINANCE', err: err?.message, orderId: doc?._id }, 'Sync finance pedido falló');
   }
 }
 
@@ -597,6 +616,7 @@ export async function createDeliveryOrder(req, res) {
     const saved = await putDocument(req, db, docWithTicket._id, docWithTicket);
     const savedDoc = { ...docWithTicket, _rev: saved.rev };
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, savedDoc, null);
+    await maybeSyncDeliveryOrderFinance(req, userId, savedDoc);
     let cajaRegistration = await maybeRegisterTpvSaleOnTpvChannelOrderCreate(
       req, userId, savedDoc, account,
     );
@@ -664,6 +684,7 @@ export async function updateDeliveryOrder(req, res) {
 
     await maybeRestoreRecipeStockAfterLeavingDelivered(req, userId, doc, existing.status);
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, existing.status);
+    await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
     const cajaRegistration = await maybeRegisterDeliveryPaymentInTpvSession(
       req, userId, doc, existing, account.fullName, req.callerAccount || account,
     );
@@ -913,6 +934,8 @@ export async function refundDeliveryOrder(req, res) {
       newStatus: 'devuelto',
       previousStatus: existing.status,
     }).catch(() => null);
+
+    await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
 
     return res.json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
@@ -1186,6 +1209,8 @@ export async function registerPayment(req, res) {
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastDeliveryPaymentLive(account, userId, { ...doc, _rev: saved.rev });
+    await maybeDeductRecipeStockForDeliveredOrder(req, userId, { ...doc, _rev: saved.rev }, existing.status);
+    await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
     return res.json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar cobro' });
@@ -1297,7 +1322,8 @@ export async function filterDeliveryOrders(req, res) {
     let orders = await listDeliveryOrdersByUser(req, userId);
     orders = orders.map(sanitizeDeliveryOrder).filter(Boolean);
 
-    let { channel, salesPointId, status, dateFrom, dateTo, clientId, deliveryType, search } = req.query;
+    let { channel, salesPointId, status, dateFrom, dateTo, clientId, deliveryType, search, businessId, business_id } = req.query;
+    const businessFilter = String(businessId || business_id || '').replace(/^business:/, '').trim();
     // Si el caller es un worker invitado: limitamos lo que ve.
     // - Si tiene PDV asignado en `employment.salesPointId`, forzamos ese PDV
     //   aunque el query haya pedido otro (no debe poder espiar otras tiendas).
@@ -1308,6 +1334,12 @@ export async function filterDeliveryOrders(req, res) {
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
       if (workerSalesPoint) salesPointId = workerSalesPoint;
       if (!dateFrom) dateFrom = new Date().toISOString().slice(0, 10);
+    }
+    if (businessFilter) {
+      orders = orders.filter((o) => {
+        const ob = String(o.business_id || o.businessId || '').replace(/^business:/, '').trim();
+        return ob === businessFilter;
+      });
     }
     if (channel) orders = orders.filter((o) => o.channel === channel);
     if (salesPointId) {
@@ -2712,6 +2744,18 @@ export async function createTpvRegisterSession(req, res) {
       });
     }
 
+    const openerWorkerId = String(session.workerId || session.openedByUserId || '').trim();
+    if (openerWorkerId && businessId) {
+      const vacationGate = await getApprovedVacationBlockingWork(req, businessId, openerWorkerId);
+      if (vacationGate.blocked) {
+        return res.status(403).json({
+          ok: false,
+          error: vacationGate.message || 'No puedes abrir el TPV: tienes vacaciones o baja aprobadas hoy.',
+          code: vacationGate.code || 'VACATION_BLOCK',
+        });
+      }
+    }
+
     const doc = buildTpvRegisterSessionDocument(userId, {
       ...session,
       business_id: businessId || session.business_id || session.businessId || '',
@@ -2873,14 +2917,12 @@ async function resolveTpvSessionBusinessScope(req, userId, pdvId, requestedBusin
     return { ok: false, error: 'Punto de venta no encontrado' };
   }
 
-  let businessId = normalizeBusinessScopeId(requestedBusinessId);
-  if (!businessId) {
-    businessId = normalizeBusinessScopeId(await resolveBusinessIdForPointOfSale(req, pdvDoc));
-  }
-  if (!businessId) {
-    const resolved = await resolveBusinessDocumentForPointOfSale(req, pdvDoc);
-    businessId = normalizeBusinessScopeId(resolved?.business_id);
-  }
+  // La tienda manda: evita abrir caja de "limpieza" en un PDV de delivery.
+  const fromPdv =
+    normalizeBusinessScopeId(await resolveBusinessIdForPointOfSale(req, pdvDoc)) ||
+    normalizeBusinessScopeId((await resolveBusinessDocumentForPointOfSale(req, pdvDoc))?.business_id);
+  const requested = normalizeBusinessScopeId(requestedBusinessId);
+  let businessId = fromPdv || requested;
 
   if (businessId) {
     await repairWorkCenterBusinessScopeForPdv(req, userId, pdvDoc, businessId).catch(() => false);
@@ -3920,12 +3962,21 @@ export async function getOpsCenter(req, res) {
 // ─── SSE BROADCASTING HELPERS ────────────────────────────────────────────────
 
 function resolveAccountBusinessId(account) {
-  return String(account?.business_id || account?.businessId || '').trim();
+  return String(account?.business_id || account?.businessId || '').replace(/^business:/, '').trim();
+}
+
+/** Empresa del pedido/sesión (multi-empresa): no usar solo la ficha de cuenta. */
+function resolveLiveBusinessId(account, doc) {
+  return (
+    String(doc?.business_id || doc?.businessId || '')
+      .replace(/^business:/, '')
+      .trim() || resolveAccountBusinessId(account)
+  );
 }
 
 function broadcastDeliveryOrderSse(account, ownerUserId, action, orderDoc, meta = {}) {
   const sanitized = sanitizeDeliveryOrder(orderDoc);
-  const businessId = resolveAccountBusinessId(account);
+  const businessId = resolveLiveBusinessId(account, orderDoc);
 
   if (action === 'created') {
     broadcastToUser(ownerUserId, 'delivery_order_created', sanitized);
@@ -3961,6 +4012,13 @@ function broadcastDeliveryOrderSse(account, ownerUserId, action, orderDoc, meta 
           newStatus,
         });
       }
+    } else if (businessId) {
+      // Cobros / cambios sin cambio de estado: ops y dashboard deben enterarse
+      broadcastToBusiness(businessId, 'delivery:order_updated', {
+        orderId: sanitized._id,
+        order: sanitized,
+        updatedBy: meta.updatedBy || ownerUserId,
+      });
     }
     return;
   }
@@ -3990,30 +4048,61 @@ function broadcastDeliveryOrderSse(account, ownerUserId, action, orderDoc, meta 
         updatedBy: ownerUserId,
       });
     }
+    return;
+  }
+
+  if (action === 'refunded') {
+    broadcastToUser(ownerUserId, 'delivery_order_updated', sanitized);
+    if (businessId) {
+      broadcastToBusiness(businessId, 'delivery:order_updated', {
+        orderId: sanitized._id,
+        order: sanitized,
+        updatedBy: ownerUserId,
+      });
+      broadcastToBusiness(businessId, 'delivery_payment_registered', sanitized);
+    }
   }
 }
 
 function emitDeliveryEvent(account, event, payload) {
-  const businessId = resolveAccountBusinessId(account);
+  const businessId =
+    resolveLiveBusinessId(account, payload?.order || payload) || resolveAccountBusinessId(account);
   if (!businessId) return;
-  try { broadcastToBusiness(businessId, event, payload); } catch { /* ignore */ }
+  try {
+    broadcastToBusiness(businessId, event, payload);
+  } catch {
+    /* ignore */
+  }
 }
 
 function broadcastTpvSessionLive(account, ownerUserId, sessionDoc) {
   const sanitized = sanitizeTpvRegisterSession(sessionDoc);
   broadcastToUser(ownerUserId, 'tpv_session_updated', sanitized);
-  const businessId = resolveAccountBusinessId(account);
+  const businessId = resolveLiveBusinessId(account, sessionDoc);
   if (businessId) {
-    try { broadcastToBusiness(businessId, 'tpv_session_updated', sanitized); } catch { /* ignore */ }
+    try {
+      broadcastToBusiness(businessId, 'tpv_session_updated', sanitized);
+    } catch {
+      /* ignore */
+    }
   }
 }
 
 function broadcastDeliveryPaymentLive(account, ownerUserId, orderDoc) {
   const sanitized = sanitizeDeliveryOrder(orderDoc);
   broadcastToUser(ownerUserId, 'delivery_payment_registered', sanitized);
-  const businessId = resolveAccountBusinessId(account);
+  const businessId = resolveLiveBusinessId(account, orderDoc);
   if (businessId) {
-    try { broadcastToBusiness(businessId, 'delivery_payment_registered', sanitized); } catch { /* ignore */ }
+    try {
+      broadcastToBusiness(businessId, 'delivery_payment_registered', sanitized);
+      // Alias para clientes que solo escuchan cambios de pedido
+      broadcastToBusiness(businessId, 'delivery:order_updated', {
+        orderId: sanitized._id,
+        order: sanitized,
+      });
+    } catch {
+      /* ignore */
+    }
   }
 }
 

@@ -32,6 +32,10 @@ import {
   canEmitWorkshopAlerts,
 } from './moduleAlertUtils.js';
 import {
+  buildWorkBlockedMemberIdSet,
+  getVacationsDatabaseName,
+} from './vacationClockinGate.js';
+import {
   ACCOUNTS_DB,
   BUSINESSES_DB,
   VEHICLES_DB,
@@ -1064,18 +1068,21 @@ async function checkPendingPurchaseOrders(ctx, purchaseOrders, config) {
 
 // ─── EQUIPO RULES ────────────────────────────────────────────────────────────
 
-async function checkWorkerNoClockIn(ctx, members, clockinDocs, config) {
+async function checkWorkerNoClockIn(ctx, members, clockinDocs, config, vacationDocs = []) {
   if (!config.noClockInEnabled) return [];
   const now = new Date();
   if (now.getHours() < config.noClockInCheckHour) return [];
 
   const todayStr = now.toISOString().slice(0, 10);
   const todayClockins = clockinDocs.filter((d) => d.type === 'clockin' && d.date === todayStr);
-  const clockedUserIds = new Set(todayClockins.map((d) => d.user_id));
+  const clockedUserIds = new Set(todayClockins.map((d) => d.user_id || d.member_id).filter(Boolean));
+  const onLeaveIds = buildWorkBlockedMemberIdSet(vacationDocs, ctx.businessId, todayStr);
   const alerts = [];
 
   for (const member of members) {
     if (!member.user_id || member.status === 'inactive') continue;
+    if (member.status === 'vacation' || member.status === 'sick_leave') continue;
+    if (onLeaveIds.has(String(member.user_id).trim())) continue;
     if (clockedUserIds.has(member.user_id)) continue;
 
     alerts.push(await emit({
@@ -1611,7 +1618,7 @@ async function runAlertsForBusiness(business) {
 
   const members = Array.isArray(business.members) ? business.members : [];
 
-  const [catalogItems, catalogInfraDocs, purchaseInvoices, parts, vehicles, webOrders, deliveryOrders, workOrders, purchaseOrders, clockinDocs, financeDocs, fleetDocs, prepExpenses, pointsOfSale] = await Promise.all([
+  const [catalogItems, catalogInfraDocs, purchaseInvoices, parts, vehicles, webOrders, deliveryOrders, workOrders, purchaseOrders, clockinDocs, financeDocs, fleetDocs, prepExpenses, pointsOfSale, vacationDocs] = await Promise.all([
     fetchAllDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocs(getCatalogDbName()).then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt && (i.type === 'warehouse' || i.type === 'stock_movement'))),
     fetchAllDocsOfType(getCatalogDbName(), 'purchase_invoice').then((d) => d.filter((i) => i.user_id === ownerId)),
@@ -1626,6 +1633,7 @@ async function runAlertsForBusiness(business) {
     fetchAllDocs(FLEET_DB).then((d) => d.filter((i) => i.type === 'fleet_vehicle' && i.user_id === ownerId)).catch(() => []),
     fetchAllDocs(VEHICLES_DB).then((d) => d.filter((i) => i.type === 'preparation_expense' && i.active !== false && !i.deletedAt && i.user_id === ownerId)).catch(() => []),
     fetchAllDocsOfType(getDeliveryDbName(), 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
+    fetchAllDocs(getVacationsDatabaseName()).then((d) => d.filter((i) => i.type === 'vacation_request' && !i.deletedAt)).catch(() => []),
   ]);
 
   const deliveryReady = canEmitDeliveryAlerts({ deliveryOrders, pointsOfSale, deliveryConfig: account?.deliveryConfig });
@@ -1690,7 +1698,7 @@ async function runAlertsForBusiness(business) {
 
   // Equipo
   if (hrReady) {
-    results.push(...await checkWorkerNoClockIn(ctx, members, clockinDocs, config));
+    results.push(...await checkWorkerNoClockIn(ctx, members, clockinDocs, config, vacationDocs));
     results.push(...await checkContractExpiring(ctx, members, config));
   }
 

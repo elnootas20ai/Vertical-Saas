@@ -57,6 +57,17 @@ export function resolveTpvCatalogBusinessId(
   return deliveryId || bid;
 }
 
+/**
+ * Id de empresa para ESCRIBIR en TPV/delivery (pedidos, clientes, caja).
+ * Misma regla que el catálogo: nunca mezclar limpieza/otra vertical con delivery.
+ */
+export function resolveRetailOpsWriteBusinessId(
+  scopeBusinessId: string,
+  businesses: BusinessScopeRef[],
+): string {
+  return resolveTpvCatalogBusinessId(scopeBusinessId, businesses);
+}
+
 /** Si el selector global no es delivery, devolver el id delivery de la cuenta (TPV / catálogo). */
 export function deliveryBusinessIdForTpv(businesses: BusinessScopeRef[]): string {
   const delivery = businesses.find((b) => isDeliveryBusinessType(b.businessType));

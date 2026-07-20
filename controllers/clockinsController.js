@@ -35,6 +35,7 @@ import {
   computeLaborCostBreakdown,
   computePeriodLaborCost,
 } from '../services/laborCost.js';
+import { getApprovedVacationBlockingClockin, getApprovedVacationBlockingWork, getApprovedVacationBlockingWorkBatch, buildWorkBlockedMemberIdSet, isApprovedLeaveBlockingWorkDoc } from '../services/vacationClockinGate.js';
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
@@ -911,6 +912,15 @@ export async function checkInMember(req, res) {
       return;
     }
 
+    const vacationGate = await getApprovedVacationBlockingWork(req, businessId, targetMemberId);
+    if (vacationGate.blocked) {
+      return res.status(409).json({
+        ok: false,
+        error: vacationGate.message || 'No puedes fichar: tienes vacaciones o baja aprobadas hoy',
+        code: 'VACATION_BLOCK',
+      });
+    }
+
     const date = new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
     const clockinsDb = getClockinsDbName();
@@ -982,6 +992,50 @@ export async function checkInMember(req, res) {
   }
 }
 
+/** Estado de bloqueo por vacaciones/baja (fichaje, TPV, operativa). */
+export async function getMemberWorkBlock(req, res) {
+  try {
+    const { businessId, memberId } = req.params;
+    if (!businessId || !memberId) return badRequest(res, 'Faltan businessId o memberId');
+    const requesterId = getAuthUserId(req);
+    if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const gate = await getApprovedVacationBlockingWork(req, businessId, memberId);
+    return res.json({
+      ok: true,
+      blocked: Boolean(gate.blocked),
+      code: gate.code || null,
+      message: gate.message || null,
+      startDate: gate.vacation?.startDate || null,
+      endDate: gate.vacation?.endDate || null,
+      leaveType: gate.vacation?.leaveType || null,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al comprobar bloqueo' });
+  }
+}
+
+/** Varios miembros (listado TPV). Query: ?memberIds=id1,id2 */
+export async function getMembersWorkBlocks(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    const requesterId = getAuthUserId(req);
+    if (!requesterId) return res.status(401).json({ ok: false, error: 'No autenticado' });
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    const raw = String(req.query.memberIds || '').trim();
+    const memberIds = raw
+      ? raw.split(',').map((s) => s.trim()).filter(Boolean)
+      : (business.members || []).map((m) => m.user_id).filter(Boolean);
+    const blocks = await getApprovedVacationBlockingWorkBatch(req, businessId, memberIds);
+    return res.json({ ok: true, blocks });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al comprobar bloqueos' });
+  }
+}
+
 export async function appendClockinEntry(req, res) {
   try {
     const { businessId, recordId } = req.params;
@@ -1017,6 +1071,18 @@ export async function appendClockinEntry(req, res) {
 
     if (sp && !(await assertMemberCanClockAtStore(req, res, business, doc.member_id, sp, ''))) {
       return;
+    }
+
+    // No reanudar jornada ni seguir operando si está de vacaciones/baja aprobada
+    if (entryType === 'break_end' || entryType === 'break_start') {
+      const vacationGate = await getApprovedVacationBlockingWork(req, businessId, doc.member_id);
+      if (vacationGate.blocked) {
+        return res.status(409).json({
+          ok: false,
+          error: vacationGate.message || 'No puedes operar: tienes vacaciones o baja aprobadas hoy',
+          code: 'VACATION_BLOCK',
+        });
+      }
     }
 
     const now = new Date().toISOString();
@@ -1135,6 +1201,7 @@ export async function getAbsenteeism(req, res) {
     const schedules = await loadSchedulesForDateRange(req, businessId, fromDate, toDate);
     let clockins = await listClockinsByBusiness(req, businessId);
     clockins = clockins.filter((r) => r.date >= fromDate && r.date <= toDate);
+    const vacationDocs = await loadVacationDocs(req, businessId);
 
     const clockinsByDate = {};
     for (const c of clockins) {
@@ -1153,10 +1220,12 @@ export async function getAbsenteeism(req, res) {
       const dateStr = current.toISOString().slice(0, 10);
       const dayName = WEEKDAYS_MAP[current.getDay()];
       const dayRecords = clockinsByDate[dateStr] || {};
+      const onLeave = buildWorkBlockedMemberIdSet(vacationDocs, businessId, dateStr);
 
       const expected = [];
       const present = [];
       const absent = [];
+      const onLeaveList = [];
 
       for (const schedule of schedules) {
         const shift = schedule.weekly?.[dayName];
@@ -1169,6 +1238,13 @@ export async function getAbsenteeism(req, res) {
           scheduled_start: shift.start,
           scheduled_end: shift.end,
         };
+
+        // Vacaciones/baja aprobadas: no cuentan como esperado ni como absentismo.
+        if (onLeave.has(String(mid || '').trim())) {
+          onLeaveList.push(info);
+          continue;
+        }
+
         expected.push(info);
 
         if (dayRecords[mid]) {
@@ -1188,12 +1264,13 @@ export async function getAbsenteeism(req, res) {
       totalExpected += expected.length;
       totalAbsent += absent.length;
 
-      if (expected.length > 0) {
+      if (expected.length > 0 || onLeaveList.length > 0) {
         report.push({
           date: dateStr,
           expected,
           present,
           absent,
+          onLeave: onLeaveList,
           rate: expected.length > 0 ? Math.round((absent.length / expected.length) * 10000) / 100 : 0,
         });
       }
@@ -1353,6 +1430,7 @@ export async function getPayrollSummary(req, res) {
     const schedules = await loadSchedulesForDateRange(req, businessId, fromDate, toDate);
     let clockins = await listClockinsByBusiness(req, businessId);
     clockins = clockins.filter((r) => r.date >= fromDate && r.date <= toDate);
+    const vacationDocs = await loadVacationDocs(req, businessId);
 
     const schedulesByMember = {};
     for (const s of schedules) schedulesByMember[s.member_id] = s;
@@ -1389,11 +1467,14 @@ export async function getPayrollSummary(req, res) {
         const dateStr = current.toISOString().slice(0, 10);
         const dayName = WEEKDAYS_MAP[current.getDay()];
         const shift = schedule?.weekly?.[dayName];
+        const onLeave = vacationDocs.some((v) =>
+          isApprovedLeaveBlockingWorkDoc(v, businessId, mid, dateStr),
+        );
 
-        if (shift?.enabled) daysScheduled.add(dateStr);
+        if (shift?.enabled && !onLeave) daysScheduled.add(dateStr);
 
         const clockin = memberClockins.find((r) => r.date === dateStr);
-        if (clockin) {
+        if (clockin && !onLeave) {
           daysWorked.add(dateStr);
           const worked = clockin.totalMinutes || 0;
           const brk = clockin.breakMinutes || 0;
@@ -1710,6 +1791,9 @@ export async function getDailySummary(req, res) {
     const date = (req.query?.date ? String(req.query.date) : new Date().toISOString()).slice(0, 10);
     const orgchart = await loadOrgChart(req, businessId);
     const visibleIds = await resolveVisibleMemberIds(req, business, orgchart, requesterId);
+    const memberMap = await enrichMemberMap(req, business);
+    const vacationDocs = await loadVacationDocs(req, businessId);
+    const onLeaveIds = buildWorkBlockedMemberIdSet(vacationDocs, businessId, date);
 
     // Trabajadores con turno habilitado para el día solicitado.
     const schedules = await loadScheduleDocs(req, businessId);
@@ -1728,7 +1812,10 @@ export async function getDailySummary(req, res) {
     }
     const scheduledIds = [];
     for (const [memberId, doc] of scheduledByMember) {
-      if (doc.weekly?.[weekday]?.enabled) scheduledIds.push(memberId);
+      if (!doc.weekly?.[weekday]?.enabled) continue;
+      // Vacaciones/baja: no cuentan como turno esperado ni como no-show.
+      if (onLeaveIds.has(String(memberId || '').trim())) continue;
+      scheduledIds.push(memberId);
     }
 
     // Fichajes del día (solo visibles).
@@ -1747,6 +1834,7 @@ export async function getDailySummary(req, res) {
     const offenders = [];
 
     for (const rec of dayClockins) {
+      if (onLeaveIds.has(String(rec.member_id || '').trim())) continue;
       const entry = (rec.entries || []).find((e) => e.type === 'clock_in');
       if (!entry) continue;
       const shift = scheduledByMember.get(rec.member_id)?.weekly?.[weekday];
@@ -1773,15 +1861,19 @@ export async function getDailySummary(req, res) {
       totalWorkedMinutes += rec.totalMinutes || 0;
     }
 
-    const clockedIds = new Set(dayClockins.map((r) => r.member_id));
+    const clockedIds = new Set(
+      dayClockins
+        .filter((r) => !onLeaveIds.has(String(r.member_id || '').trim()))
+        .map((r) => r.member_id),
+    );
     const noShow = scheduledIds.filter((id) => !clockedIds.has(id));
-    const memberMap = await enrichMemberMap(req, business);
 
     return res.json({
       ok: true,
       date,
       scheduled: scheduledIds.length,
       clocked: clockedIds.size,
+      onLeave: onLeaveIds.size,
       noShow: noShow.length,
       noShowMembers: noShow.map((id) => ({
         memberId: id,

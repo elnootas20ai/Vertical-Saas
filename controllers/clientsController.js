@@ -980,6 +980,160 @@ export async function bulkCreateClients(req, res) {
   }
 }
 
+/**
+ * Marca clientes de una importación Excel/base histórica.
+ * Solo actúa sobre un día concreto (createdDay) y, por defecto, no toca los ya marcados como organic.
+ * No hay reglas automáticas en el dashboard: esto es una corrección explícita.
+ */
+export async function markClientsAcquisition(req, res) {
+  try {
+    const { userId } = req.params;
+    const {
+      businessId,
+      acquisitionKind,
+      createdDay,
+      onlyUnmarked = true,
+      dryRun = false,
+    } = req.body || {};
+
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (acquisitionKind !== 'migration' && acquisitionKind !== 'organic') {
+      return badRequest(res, 'acquisitionKind debe ser migration u organic');
+    }
+    const day = String(createdDay || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      return badRequest(res, 'Falta createdDay (YYYY-MM-DD) del día de la importación Excel');
+    }
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const bid = normalizeBusinessScopeId(businessId || req.query?.businessId);
+    const listOptions = await resolveClientListOptions(req, userId, bid);
+    const clients = await listClientsByUser(req, userId, listOptions);
+
+    const matched = clients.filter((c) => {
+      const iso = String(c.createdAt || '');
+      if (!iso.startsWith(day)) return false;
+      if (onlyUnmarked) {
+        const kind = c.stats?.acquisitionKind;
+        if (kind === 'organic' || kind === 'migration') return false;
+      }
+      return true;
+    });
+
+    if (dryRun) {
+      return res.json({
+        ok: true,
+        dryRun: true,
+        createdDay: day,
+        matched: matched.length,
+        acquisitionKind,
+      });
+    }
+
+    const db = getClientsDbName();
+    await ensureDatabase(req, db);
+    const { batchSize } = resolveBulkImportLimits();
+    const docs = matched.map((existing) => buildClientDocument(
+      userId,
+      {
+        ...existing,
+        stats: {
+          ...(existing.stats || {}),
+          createdFrom: existing.stats?.createdFrom || 'import',
+          acquisitionKind,
+          excludeFromNewMetrics: acquisitionKind === 'migration',
+        },
+      },
+      existing,
+    ));
+
+    let updated = 0;
+    const errors = [];
+    for (const chunk of chunkDocs(docs, batchSize)) {
+      try {
+        const results = await bulkPutDocuments(req, db, chunk);
+        results.forEach((result) => {
+          if (result?.ok) updated += 1;
+          else errors.push(result?.error || result?.reason || 'Error al actualizar');
+        });
+      } catch (err) {
+        errors.push(err.message || 'Error en lote');
+      }
+    }
+
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'client',
+      action: `Marcó ${updated} clientes como ${acquisitionKind} (${day})`,
+      entityId: userId,
+      entityLabel: 'Origen de clientes',
+      metadata: { updated, matched: matched.length, createdDay: day, acquisitionKind, errors: errors.length },
+    });
+
+    return res.json({
+      ok: true,
+      dryRun: false,
+      createdDay: day,
+      matched: matched.length,
+      updated,
+      errors: errors.length,
+      acquisitionKind,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al marcar origen de clientes' });
+  }
+}
+
+/**
+ * Detecta el día con más altas sin acquisitionKind (candidato a Excel histórico).
+ * Solo informativo; no cambia datos.
+ */
+export async function previewClientAcquisitionPeakDay(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return badRequest(res, 'Falta userId');
+
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const bid = normalizeBusinessScopeId(req.query?.businessId || req.body?.businessId);
+    const listOptions = await resolveClientListOptions(req, userId, bid);
+    const clients = await listClientsByUser(req, userId, listOptions);
+
+    const byDay = new Map();
+    for (const c of clients) {
+      const kind = c.stats?.acquisitionKind;
+      if (kind === 'organic' || kind === 'migration') continue;
+      const day = String(c.createdAt || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+      byDay.set(day, (byDay.get(day) || 0) + 1);
+    }
+
+    let peakDay = '';
+    let peakCount = 0;
+    for (const [day, n] of byDay) {
+      if (n > peakCount) {
+        peakDay = day;
+        peakCount = n;
+      }
+    }
+
+    return res.json({
+      ok: true,
+      peakDay: peakDay || null,
+      peakCount,
+      thresholdHint: 500,
+      suggestMigration: peakCount >= 500,
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al analizar origen de clientes' });
+  }
+}
+
 /** Copia clientes de otra empresa (nuevos IDs; no enlaza registros). */
 export async function importClientsFromBusiness(req, res) {
   try {

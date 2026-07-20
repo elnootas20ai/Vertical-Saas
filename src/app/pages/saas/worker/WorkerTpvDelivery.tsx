@@ -1035,11 +1035,15 @@ export function WorkerTpvDelivery({
       return;
     }
     const bounds = orderLoadBoundsForOpenSession(sessionOpenedAt);
+    const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '')
+      .replace(/^business:/, '')
+      .trim();
     try {
       const data = await filterDeliveryOrdersRequest(userId, {
         dateFrom: bounds.from,
         dateTo: bounds.to,
         limit: 500,
+        ...(businessId ? { businessId } : {}),
       });
       const scoped = filterOrdersForActivePdv(
         data.orders,
@@ -1055,7 +1059,7 @@ export function WorkerTpvDelivery({
       setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [userId, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId, sessionOpenedAt]);
+  }, [userId, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId, sessionOpenedAt, currentBusiness?.business_id, currentBusiness?.id]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
 
@@ -1229,10 +1233,14 @@ export function WorkerTpvDelivery({
           const msg = err instanceof Error ? err.message : '';
           if (!/conflict|409|revision/i.test(msg)) throw err;
           const bounds = orderLoadBoundsForOpenSession(sessionOpenedAt);
+          const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '')
+            .replace(/^business:/, '')
+            .trim();
           const data = await filterDeliveryOrdersRequest(userId, {
             dateFrom: bounds.from,
             dateTo: bounds.to,
             limit: 500,
+            ...(businessId ? { businessId } : {}),
           });
           const fresh = data.orders.find((o) => o._id === body._id);
           if (!fresh?._rev || fresh._rev === body._rev) throw err;

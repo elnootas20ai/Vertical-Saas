@@ -159,7 +159,7 @@ Resumen de cumplimiento ya aplicado en código:
 |-----------------|---------------------|
 | 4.8 Sign in with Apple | Google oculto en iOS (`appStoreCompliance.ts`) |
 | 5.1.1(v) Eliminar cuenta | Ajustes → Seguridad + WorkerSecurity |
-| 3.1.1 IAP / suscripciones | Sin cobro MONEI en iOS; gestión en web |
+| 3.1.1 IAP / suscripciones | App iOS solo clientes; alta/pago en web (sin checkout en app) |
 | 5.1.1 Purpose strings | Info.plist (cámara, fotos, ubicación, LAN) |
 | Privacy manifest | `PrivacyInfo.xcprivacy` |
 | Export encryption | `ITSAppUsesNonExemptEncryption = false` |

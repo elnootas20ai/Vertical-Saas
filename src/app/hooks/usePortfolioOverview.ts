@@ -330,7 +330,10 @@ async function loadClientMetricsForBusiness(
   monthKey: string,
 ): Promise<PortfolioClientMetrics> {
   const prevMonthStart = `${prevCalendarMonthKey(monthKey)}-01T00:00:00.000Z`;
-  const collected: Array<{ createdAt?: Date | string }> = [];
+  const collected: Array<{
+    createdAt?: Date | string;
+    stats?: { acquisitionKind?: string; createdFrom?: string; excludeFromNewMetrics?: boolean } | null;
+  }> = [];
   let skip = 0;
   let totalClients = 0;
   const pageSize = 500;

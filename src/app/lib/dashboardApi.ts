@@ -70,12 +70,19 @@ export interface SalesClosureKpis {
   deliveredThisMonth: number;
 }
 
+export interface DeliveryAlertsKpi {
+  total: number;
+  critical: number;
+  warning: number;
+}
+
 export interface DashboardServerData {
   kpis: DashboardKpis;
   funnel: FunnelData;
   alerts: DashboardAlert[];
   quickFinance: QuickFinance;
   salesClosure?: SalesClosureKpis;
+  deliveryAlerts?: DeliveryAlertsKpi;
   updatedAt: string;
 }
 

@@ -427,6 +427,9 @@ export interface ClientAddress {
 
 export type ClientCreatedFrom = 'crm' | 'tpv' | 'pedido' | 'presupuesto' | 'factura' | 'vertical' | 'import' | 'web';
 
+/** migration = base histórica del negocio; organic = alta real en Vertial. */
+export type ClientAcquisitionKind = 'migration' | 'organic';
+
 export interface ClientStats {
   totalOrders: number;
   lastOrderDate: string | null;
@@ -434,6 +437,9 @@ export interface ClientStats {
   favoriteAddressId: string | null;
   totalSpent: number;
   createdFrom: ClientCreatedFrom;
+  /** Si 'migration', no cuenta como “cliente nuevo” en KPIs del mes. */
+  acquisitionKind?: ClientAcquisitionKind;
+  excludeFromNewMetrics?: boolean;
 }
 
 export type LoyaltyLevel = 'bronze' | 'silver' | 'gold' | 'platinum';
@@ -2054,19 +2060,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addClient = async (client: Omit<Client, 'id' | 'createdAt'>) => {
     const apiUserId = String(client.user_id || authUser?.user_id || '').trim();
+    const scopeBusinessId = String(
+      client.businessId || client.business_id || currentBusiness?.business_id || '',
+    ).replace(/^business:/, '').trim();
+    const now = new Date();
     const nextClient: Client = {
       ...client,
       id: `client-${uuidv4()}`,
       type: 'client',
       user_id: apiUserId,
+      ...(scopeBusinessId
+        ? { businessId: scopeBusinessId, business_id: scopeBusinessId }
+        : {}),
       consents: client.consents || { dataProcessing: false, commercial: false, thirdParty: false },
       vehiclesPurchased: client.vehiclesPurchased || [],
       vehiclesSold: client.vehiclesSold || [],
       documentsCount: client.documentsCount || 0,
       interactions: client.interactions || [],
       documentsList: client.documentsList || [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     };
 
     if (!apiUserId) {
@@ -2074,8 +2087,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return nextClient;
     }
 
-    const { client: createdClient } = await createClientRequest(apiUserId, nextClient);
-    if (createdClient) {
+    try {
+      const { client: createdClient } = await createClientRequest(apiUserId, nextClient);
+      if (!createdClient) {
+        throw new Error('El servidor no devolvió el cliente creado');
+      }
       setClients((prev) => [createdClient, ...prev].slice(0, 50));
       setClientsTotalCount((n) => n + 1);
       trackActivity({
@@ -2085,6 +2101,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         entityLabel: createdClient.name,
       });
       return createdClient;
+    } catch (error) {
+      throw error instanceof Error
+        ? error
+        : new Error('Error al guardar el cliente');
     }
   };
 

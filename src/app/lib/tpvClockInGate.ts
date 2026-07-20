@@ -6,6 +6,7 @@ export type TpvClockInBlockReason =
   | 'none_active'
   | 'worker_not_clocked'
   | 'taker_not_active'
+  | 'vacation_blocked'
   | 'ok';
 
 export function evaluateTpvClockInGate(params: {
@@ -14,13 +15,44 @@ export function evaluateTpvClockInGate(params: {
   selectedOrderTakerId: string | null;
   currentUserId: string;
   isWorkerUser: boolean;
+  /** IDs con vacaciones/baja aprobadas hoy (no pueden vender ni abrir caja). */
+  vacationBlockedIds?: ReadonlySet<string> | string[];
 }): { allowed: boolean; reason: TpvClockInBlockReason } {
-  const { loading, clockedInWorkers, selectedOrderTakerId, currentUserId, isWorkerUser } = params;
+  const {
+    loading,
+    clockedInWorkers,
+    selectedOrderTakerId,
+    currentUserId,
+    isWorkerUser,
+    vacationBlockedIds,
+  } = params;
+  const blockedSet = vacationBlockedIds instanceof Set
+    ? vacationBlockedIds
+    : new Set((vacationBlockedIds || []).map((id) => String(id).trim()).filter(Boolean));
+
+  const isVacationBlocked = (id: string | null | undefined) => {
+    const norm = String(id || '').trim();
+    if (!norm) return false;
+    if (blockedSet.has(norm)) return true;
+    for (const bid of blockedSet) {
+      if (clockinIdsMatch(bid, norm)) return true;
+    }
+    return false;
+  };
+
   // Durante refresco silencioso, no bloquear si ya hay personal en pantalla.
   if (loading && clockedInWorkers.length === 0) return { allowed: false, reason: 'loading' };
 
-  const presentWorkers = clockedInWorkers.filter((w) => w.status === 'active' || w.status === 'break');
-  const activeWorkers = clockedInWorkers.filter((w) => w.status === 'active');
+  if (isWorkerUser && isVacationBlocked(currentUserId)) {
+    return { allowed: false, reason: 'vacation_blocked' };
+  }
+
+  const presentWorkers = clockedInWorkers.filter(
+    (w) => (w.status === 'active' || w.status === 'break') && !isVacationBlocked(w.id),
+  );
+  const activeWorkers = clockedInWorkers.filter(
+    (w) => w.status === 'active' && !isVacationBlocked(w.id),
+  );
   if (presentWorkers.length === 0) {
     return { allowed: false, reason: 'none_active' };
   }
@@ -38,6 +70,9 @@ export function evaluateTpvClockInGate(params: {
   }
 
   const takerId = selectedOrderTakerId || activeWorkers[0]?.id || null;
+  if (takerId && isVacationBlocked(takerId)) {
+    return { allowed: false, reason: 'vacation_blocked' };
+  }
   if (!takerId || !activeWorkers.some((w) => clockinIdsMatch(w.id, takerId))) {
     return { allowed: false, reason: 'taker_not_active' };
   }
@@ -49,6 +84,10 @@ export function tpvClockInBlockMessage(reason: TpvClockInBlockReason, isWorkerUs
   switch (reason) {
     case 'loading':
       return 'Comprobando fichajes…';
+    case 'vacation_blocked':
+      return isWorkerUser
+        ? 'Estás de vacaciones o de baja. No puedes usar el TPV hoy.'
+        : 'Quien atiende está de vacaciones o de baja. Elige a otra persona fichada.';
     case 'none_active':
       return 'Hay que fichar la entrada en esta tienda antes de usar el TPV.';
     case 'worker_not_clocked':

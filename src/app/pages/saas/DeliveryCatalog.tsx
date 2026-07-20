@@ -5,6 +5,7 @@ import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBra
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion } from '../../lib/catalogBusinessScope';
 import { deleteCatalogItemsRelentlessly } from '../../lib/catalogBulkDelete';
@@ -2510,7 +2511,7 @@ export function CatalogPage() {
   const { currentBusiness, businessesFetchSettled, businesses } = useBusiness();
   const activeStore = useActiveStoreScope();
   const scopeBusinessId = resolveBusinessScopeId(currentBusiness);
-  const businessId = scopeBusinessId;
+  const businessId = resolveTpvCatalogBusinessId(scopeBusinessId, businesses);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const pageReady = businessesFetchSettled && Boolean(dataUserId);
   const catalogDataReady = pageReady && Boolean(businessId);

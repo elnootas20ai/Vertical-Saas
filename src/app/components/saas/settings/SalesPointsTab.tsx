@@ -2812,7 +2812,7 @@ export function SalesPointsTab() {
           forceFirstCenterAsPdv || forceCreatePdv || (usesRetailPdvFlow && !editingItem)
         }
         includeOpeningHours={
-          isDelivery &&
+          (isDelivery || isRestaurant) &&
           (forceFirstCenterAsPdv ||
             forceCreatePdv ||
             !editingItem ||

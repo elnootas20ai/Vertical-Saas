@@ -57,4 +57,33 @@ describe('evaluateTpvClockInGate', () => {
     });
     expect(r.allowed).toBe(true);
   });
+
+  it('blocks worker on approved vacation', () => {
+    const r = evaluateTpvClockInGate({
+      loading: false,
+      clockedInWorkers: [{ id: 'u1', name: 'Ana', status: 'active' }],
+      selectedOrderTakerId: null,
+      currentUserId: 'u1',
+      isWorkerUser: true,
+      vacationBlockedIds: ['u1'],
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('vacation_blocked');
+  });
+
+  it('blocks manager when selected taker is on vacation', () => {
+    const r = evaluateTpvClockInGate({
+      loading: false,
+      clockedInWorkers: [
+        { id: 'u1', name: 'Ana', status: 'active' },
+        { id: 'u2', name: 'Luis', status: 'active' },
+      ],
+      selectedOrderTakerId: 'u1',
+      currentUserId: 'mgr',
+      isWorkerUser: false,
+      vacationBlockedIds: ['u1'],
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('vacation_blocked');
+  });
 });

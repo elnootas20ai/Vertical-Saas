@@ -6,6 +6,8 @@ import {
   notifyTransferPayment,
   type TransferInstructionsResponse,
 } from '../../lib/subscriptionApi';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
+import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
 
 export function SubscriptionPaymentPage() {
   const { user, logout, refreshCurrentUser } = useAuth();
@@ -15,8 +17,10 @@ export function SubscriptionPaymentPage() {
   const [submitting, setSubmitting] = useState(false);
   const [doneMessage, setDoneMessage] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  const iosAccessOnly = isIosCustomerAccessOnlyApp();
 
   useEffect(() => {
+    if (iosAccessOnly) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -35,7 +39,16 @@ export function SubscriptionPaymentPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [iosAccessOnly]);
+
+  if (iosAccessOnly) {
+    return (
+      <IosCustomerAccessOnlyScreen
+        title="Suscripción no disponible en iOS"
+        onLogout={() => void logout()}
+      />
+    );
+  }
 
   const copyText = async (value: string, key: string) => {
     try {

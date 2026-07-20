@@ -6,8 +6,10 @@ import type { StoreIngredient, TpvBrandIngredientSelection, TpvBrandSupplements,
 import { cacheServerPdvPrinterConfigs, type VertialPrinterConfig } from './vertialPrint/printerConfig';
 import {
   ensureDeliveryOrderIncome,
+  ensureDeliveryOrderRefund,
   shouldSyncDeliveryOrderIncome,
 } from './deliveryOrderFinanceSync';
+import { notifyDeliveryOpsLive } from './deliveryOpsLive';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
 
@@ -17,6 +19,16 @@ const API_BASE = getApiBase();
 function normalizeUserId(userId: string): string {
   const value = String(userId || '').trim();
   return value.startsWith('account:') ? value.slice('account:'.length) : value;
+}
+
+function notifyOpsAfterOrderMutation(
+  reason: string,
+  order?: Partial<DeliveryOrder> | null,
+): void {
+  notifyDeliveryOpsLive({
+    reason,
+    businessId: String(order?.business_id || '').trim() || undefined,
+  });
 }
 
 function getCouchHeaders(): Record<string, string> {
@@ -392,6 +404,8 @@ export interface FilterDeliveryOrdersParams {
   clientId?: string;
   deliveryType?: string;
   search?: string;
+  /** Filtra por empresa: evita mezclar pedidos de varias empresas de la misma cuenta. */
+  businessId?: string;
   limit?: number;
   offset?: number;
 }
@@ -432,7 +446,10 @@ export async function createDeliveryOrderRequest(userId: string, data: Partial<D
     `/api/delivery/orders/${encodeURIComponent(id)}`,
     { method: 'POST', body: JSON.stringify({ order: data }) },
   );
-  return unwrapOrderResponse(result);
+  const order = unwrapOrderResponse(result);
+  queueDeliveryOrderFinanceSync(id, order);
+  notifyOpsAfterOrderMutation('order_created', order);
+  return order;
 }
 
 /** Igual que createDeliveryOrderRequest pero expone el estado de registro en caja (TPV). */
@@ -448,6 +465,7 @@ export async function createDeliveryOrderWithCajaStatus(
   const cajaStatus = notifyCajaRegistration(result.cajaRegistration);
   if (!result.order) throw new Error('Respuesta inválida del servidor');
   queueDeliveryOrderFinanceSync(id, result.order);
+  notifyOpsAfterOrderMutation('order_created', result.order);
   return { order: result.order, cajaStatus };
 }
 
@@ -459,6 +477,7 @@ export async function updateDeliveryOrderRequest(userId: string, order: Delivery
   );
   const updated = unwrapOrderResponse(result);
   queueDeliveryOrderFinanceSync(id, updated);
+  notifyOpsAfterOrderMutation('order_updated', updated);
   return updated;
 }
 
@@ -478,6 +497,7 @@ export async function registerPaymentRequest(userId: string, orderId: string, pa
   );
   const updated = unwrapOrderResponse(result);
   queueDeliveryOrderFinanceSync(id, updated);
+  notifyOpsAfterOrderMutation('payment_registered', updated);
   return updated;
 }
 
@@ -500,9 +520,9 @@ export async function refundDeliveryOrderRequest(
   refundReason: string,
   refundAmount?: number,
 ): Promise<DeliveryOrder> {
-  const id = normalizeUserId(userId);
+  const userKey = normalizeUserId(userId);
   const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
-    `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/refund`,
+    `/api/delivery/orders/${encodeURIComponent(userKey)}/${encodeURIComponent(orderId)}/refund`,
     {
       method: 'PUT',
       body: JSON.stringify({
@@ -511,7 +531,16 @@ export async function refundDeliveryOrderRequest(
       }),
     },
   );
-  return unwrapOrderResponse(result);
+  const order = unwrapOrderResponse(result);
+  notifyOpsAfterOrderMutation('order_refunded', order);
+  if (userKey && order?._id && Number(order.refundAmount || 0) > 0) {
+    void ensureDeliveryOrderRefund(userKey, order, {
+      businessId: String(order.business_id || '').trim() || undefined,
+      pointOfSaleId: order.salesPointId,
+      pointOfSaleName: order.salesPointName,
+    }).catch(() => { /* finanzas no debe tumbar la devolución */ });
+  }
+  return order;
 }
 
 export async function cancelDeliveryOrderRequest(
@@ -525,6 +554,7 @@ export async function cancelDeliveryOrderRequest(
     { method: 'PUT', body: JSON.stringify({ cancelReason: cancelReason.trim() }) },
   );
   if (!result.order) throw new Error('Respuesta inválida del servidor');
+  notifyOpsAfterOrderMutation('order_cancelled', result.order);
   return result.order;
 }
 

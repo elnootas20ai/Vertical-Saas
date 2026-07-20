@@ -56,10 +56,12 @@ Tras `npm run cap:sync`, `packageClassList` debe incluir Push, Apple Sign In, Ap
 - Trabajadores → Seguridad → eliminar cuenta (compacto)
 - Backend: `DELETE /api/auth/profile/:userId` (auto-borrado)
 
-### Guideline 3.1.1 — Suscripciones
-- **Sin cobro MONEI dentro de la app iOS**
-- Banner con enlace a https://vertialapp.com/saas/settings?tab=facturacion
-- Usuarios con plan activo pueden usar la app con login normal
+### Guideline 3.1.1 — Suscripciones (modelo clientes)
+- **App iOS = acceso para clientes** con cuenta/plan ya activos
+- **Alta de empresa + cobro solo en la web** (vertialapp.com), fuera de la app
+- Sin botones de pagar, planes, transferencia ni enlace a checkout en iOS
+- Sin «Crear cuenta de empresa» en la pantalla de entrada iOS
+- Usuarios con plan activo usan la app con login normal (email / Sign in with Apple / trabajador)
 
 ### API nativa
 - `getApiBase()` usa `https://vertialapp.com` en Capacitor cuando `VITE_API_URL=/api`
@@ -101,11 +103,60 @@ En el **servidor** (.env): `APNS_PRODUCTION=true` para TestFlight, más `APNS_KE
 
 Push al iPhone del **CEO**: solo críticas + dinero/caja (descuadre, caja sin cerrar, impagos…). Lista en `services/pushAlertPolicy.js` (`CEO_MOBILE_PUSH_RULE_IDS`). Suenan también en horario silencioso.
 
+## Respuesta al rechazo App Store (2.3.0 / 3.1.1 / 5.1.2)
+
+### 3.1.1 — Payments / In-App Purchase (hecho en código)
+
+**Modelo:** app iOS = acceso para clientes existentes. Alta + cobro de Vertial **solo en la web**.
+
+En iOS nativo ya no hay:
+- Crear cuenta de empresa
+- Onboarding de planes / tarjeta
+- Pantalla de pagar / transferencia
+- Banners «ir a facturación / pagar»
+- Botones «Subir a Pro» / precio de compra en upsell
+- Enlace a checkout web dentro de la app
+
+**Login, trabajador, tablet TPV y operativa (caja, pedidos, fichaje) no cambian.**
+
+Cuenta de revisión: debe tener **suscripción ya activa** (o `billingExempt` / trial admin).
+
+### 5.1.2 — Privacy / Data Use and Sharing
+
+**En App Store Connect → App Privacy**, declarar solo lo real (alineado con `PrivacyInfo.xcprivacy` y la política):
+
+| Tipo | Linked to user | Tracking | Purpose |
+|------|----------------|----------|---------|
+| Email | Sí | No | App Functionality |
+| Name | Sí | No | App Functionality |
+| User ID | Sí | No | App Functionality |
+| Device ID | Sí | No | App Functionality (push) |
+| Photos | Sí | No | App Functionality |
+| Precise Location | Sí | No | App Functionality (clock-in; while using) |
+
+- **Tracking:** No / `NSPrivacyTracking = false`
+- **No** declarar datos que no recogéis
+- Política pública: https://vertialapp.com/legal/privacidad (actualizada con app móvil, push, ubicación, fotos, red local, sin tracking)
+
+Tras deploy frontend, verifica que la página de privacidad en producción muestra la fecha **20 de julio de 2026** y la sección de app móvil.
+
+### 2.3.0 — Accurate Metadata
+
+En App Store Connect, alinear con la build:
+
+1. **Descripción:** B2B para negocios (restaurantes, retail, talleres…). Indica que es acceso para clientes con cuenta; **no** digas «contrata o paga desde la app».
+2. **Capturas:** pantallas reales de esta build (login, dashboard/TPV, fichaje). Sin precios de suscripción ni checkout.
+3. **Categoría:** Business. **Edad:** 4+.
+4. **Keywords / promo text:** sin prometer IAP ni compra in-app.
+5. **Review Notes** (pegar en el envío):
+
+> Vertial is a B2B multiplatform operations SaaS (web + iOS). The iOS app is for existing business customers and staff to sign in and operate (POS, clock-in, orders, thermal printers on LAN). Company signup and Vertial subscription billing are completed only on the website (vertialapp.com) — there is no in-app purchase and no payment UI for Vertial subscriptions on iOS. Privacy: we collect account data, photos, precise location while clocking in, and device tokens for push; no advertising tracking. Test account: [email] / [password] (active subscription). Account deletion: Settings → Security → Delete account.
+
 ## Notas para el revisor (Review Notes)
 
-Texto sugerido en inglés o español:
+Texto sugerido en inglés:
 
-> Vertial is a B2B operations platform for restaurants, retail and workshops. The iOS app uses native Capacitor plugins for camera capture and LAN thermal printer connectivity (ESC/POS). Digital subscriptions are purchased on our website (vertialapp.com); the iOS app is for authenticated business users. Account deletion: Settings → Security → Delete account. Test account: [email] / [password].
+> Vertial is a B2B multiplatform operations SaaS (web + iOS). The iOS app is for existing business customers and staff to sign in and operate (POS, clock-in, orders). Company signup and subscription billing are completed on the website (vertialapp.com) only — there is no in-app purchase or payment for Vertial subscriptions on iOS. Test account: [email] / [password] (active subscription). Account deletion: Settings → Security → Delete account.
 
 ## Codemagic — error exit 65 al compilar IPA
 

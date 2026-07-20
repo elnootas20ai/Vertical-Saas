@@ -1,0 +1,51 @@
+---
+description: Preguntar (o explicar motivos) antes de eliminar/mover datos — prod estricto, local también
+alwaysApply: true
+---
+
+# No eliminar a ciegas (producción y local)
+
+Hay (o habrá) **clientes reales**. No se improvisa con borrados ni mudanzas de datos.
+
+## Producción — prohibido sin OK explícito
+
+Antes de hacer cualquiera de esto en el VPS / CouchDB de prod / `vertialapp.com`, **parar y preguntar**:
+
+1. **Eliminar** empresas, cuentas, PDV, pedidos, catálogo, sesiones de caja, etc.
+2. **Soft-delete** (`deletedAt`) — cuenta como eliminar.
+3. **Mover o reasignar** datos entre empresas (`business_id`, pedidos, catálogo, PDV).
+4. **Reparar/aplicar scripts** con `--apply` u otras escrituras en prod.
+5. **Deploy** (frontend, backend, Docker, SCP de código a prod).
+
+“OK explícito” = el usuario dice algo claro tipo: *«borra X»*, *«aplica la reparación»*, *«haz deploy»*.  
+No vale asumir por el contexto del chat.
+
+## Local — también preguntar o explicar motivos
+
+En local **tampoco** borrar/mover datos a la ligera. Antes de hacerlo:
+
+1. **Explicar en castellano simple** qué se va a tocar, **por qué** y qué pasa si no se hace.
+2. **Preguntar** si el usuario no lo ha pedido ya con claridad.
+3. Si el usuario ya dijo “borra X en local”, se puede hacer, pero **sigue siendo obligatorio decir el motivo** en una frase (qué y por qué).
+
+Ejemplo:
+
+> En local quiero soft-delete de la empresa X porque está duplicada y mezcla pedidos con Y. ¿Lo hago?
+
+## Sí se puede sin preguntar
+
+- **Solo lectura**: auditar, listar, diagnosticar, leer logs (prod o local).
+- Cambiar **código** en local (no datos de negocio).
+- Preparar scripts o código de reparación **sin ejecutarlos** hasta tener OK.
+
+## Cómo preguntar
+
+En castellano simple, con motivo:
+
+> Voy a [borrar/mover/aplicar] **X** en [prod/local] porque **[razón]**. ¿Lo hago?
+
+Esperar respuesta. Si duda → no tocar.
+
+## Recordatorio
+
+Si se elimina o mueve mal un dato → se rompe el negocio (el tuyo o el del cliente). Mejor lento, con motivo y con permiso, que rápido e irreversible.

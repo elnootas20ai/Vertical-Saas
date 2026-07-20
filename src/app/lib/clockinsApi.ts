@@ -817,6 +817,8 @@ export interface DailySummary {
   clocked: number;
   noShow: number;
   noShowMembers: Array<{ memberId: string; memberName: string; role: string }>;
+  /** Miembros con vacaciones/baja aprobadas (no cuentan en no-show). */
+  onLeave?: number;
   onTime: number;
   late: number;
   earlyEntry: number;
@@ -832,6 +834,48 @@ export async function fetchDailySummary(
 ): Promise<DailySummary> {
   const qs = date ? `?date=${encodeURIComponent(date)}` : '';
   return req<DailySummary>(`/api/clockins/${encodeURIComponent(businessId)}/daily-summary${qs}`);
+}
+
+export type MemberWorkBlock = {
+  blocked: boolean;
+  code?: string | null;
+  message?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  leaveType?: string | null;
+};
+
+/** Vacaciones/baja aprobadas hoy → bloquea fichaje y TPV. */
+export async function fetchMemberWorkBlock(
+  businessId: string,
+  memberId: string,
+): Promise<MemberWorkBlock> {
+  const data = await req<MemberWorkBlock & { ok?: boolean }>(
+    `/api/clockins/${encodeURIComponent(businessId)}/work-block/${encodeURIComponent(memberId)}`,
+  );
+  return {
+    blocked: Boolean(data.blocked),
+    code: data.code ?? null,
+    message: data.message ?? null,
+    startDate: data.startDate ?? null,
+    endDate: data.endDate ?? null,
+    leaveType: data.leaveType ?? null,
+  };
+}
+
+/** Varios miembros (apertura TPV / listado fichaje). */
+export async function fetchMembersWorkBlocks(
+  businessId: string,
+  memberIds?: string[],
+): Promise<Record<string, { blocked: boolean; message?: string; code?: string }>> {
+  const qs =
+    memberIds && memberIds.length > 0
+      ? `?memberIds=${encodeURIComponent(memberIds.map((id) => String(id).trim()).filter(Boolean).join(','))}`
+      : '';
+  const data = await req<{ ok?: boolean; blocks?: Record<string, { blocked: boolean; message?: string; code?: string }> }>(
+    `/api/clockins/${encodeURIComponent(businessId)}/work-blocks${qs}`,
+  );
+  return data.blocks && typeof data.blocks === 'object' ? data.blocks : {};
 }
 
 export async function exportClockinsCsv(

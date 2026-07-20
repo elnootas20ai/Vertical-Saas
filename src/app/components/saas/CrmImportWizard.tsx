@@ -10,7 +10,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { useApp } from '../../context/AppContext';
 import type { Lead, Client } from '../../context/AppContext';
-import { bulkCreateLeadsRequest, bulkCreateClientsInChunks, fetchAllClientsForExport } from '../../lib/crmApi';
+import { bulkCreateLeadsRequest, bulkCreateClientsInChunks, fetchAllClientsForExport, previewClientAcquisitionPeakDayRequest, markClientsAcquisitionRequest } from '../../lib/crmApi';
 import { useAuth } from '../../context/AuthContext';
 import {
   autoDetectImportField,
@@ -33,6 +33,10 @@ import {
   type ClientExportRow,
 } from '../../lib/crmImportTemplates';
 import { isImportAbortError } from '../../lib/importAbort';
+import {
+  suggestClientImportAcquisitionKind,
+  type ClientAcquisitionKind,
+} from '../../lib/clientAcquisition';
 
 interface ImportError { row: number; field: string; message: string; value: unknown; }
 
@@ -115,6 +119,11 @@ export function CrmImportWizard({
   const [importResult, setImportResult] = useState<{ created: number; failed: number } | null>(null);
   const [parsingFile, setParsingFile] = useState(false);
   const [exportingClients, setExportingClients] = useState(false);
+  /** Solo clientes: migración vs altas reales (afecta KPIs de “nuevos”). */
+  const [acquisitionKind, setAcquisitionKind] = useState<ClientAcquisitionKind | null>(null);
+  const [peakPreview, setPeakPreview] = useState<{ peakDay: string; peakCount: number } | null>(null);
+  const [peakLoading, setPeakLoading] = useState(false);
+  const [peakFixing, setPeakFixing] = useState(false);
 
   useModalClose(isOpen && !importing, onClose);
 
@@ -348,6 +357,11 @@ export function CrmImportWizard({
     }
     const errs = validateRows();
     setErrors(errs);
+    if (mode === 'clients') {
+      setAcquisitionKind(suggestClientImportAcquisitionKind(validCount));
+    } else {
+      setAcquisitionKind(null);
+    }
     setStep(3);
   };
 
@@ -395,6 +409,13 @@ export function CrmImportWizard({
           }
         }
       } else {
+        if (!acquisitionKind) {
+          toast.error('Indica si son clientes existentes o nuevos antes de importar');
+          setImporting(false);
+          importAbortRef.current = null;
+          return;
+        }
+        const importAcquisitionKind = acquisitionKind;
         const clientsToCreate: Client[] = mappedRows
           // Backend solo exige nombre y teléfono; email es deseable pero no obligatorio para no bloquear filas válidas.
           .filter((row) => row.name && row.phone)
@@ -420,6 +441,16 @@ export function CrmImportWizard({
             documentsCount: 0,
             interactions: [],
             documentsList: [],
+            stats: {
+              totalOrders: 0,
+              lastOrderDate: null,
+              orderFrequencyDays: 0,
+              favoriteAddressId: null,
+              totalSpent: 0,
+              createdFrom: 'import',
+              acquisitionKind: importAcquisitionKind,
+              excludeFromNewMetrics: importAcquisitionKind === 'migration',
+            },
             createdAt: new Date(),
             updatedAt: new Date(),
           }));
@@ -483,6 +514,53 @@ export function CrmImportWizard({
     setFileName('');
     setImportProgress(null);
     setImportResult(null);
+    setAcquisitionKind(null);
+    setPeakPreview(null);
+  };
+
+  const handleDetectPreviousExcelImport = async () => {
+    if (!user?.user_id) return;
+    setPeakLoading(true);
+    try {
+      const dataOwnerId = String(exportUserId || user.user_id).trim();
+      const preview = await previewClientAcquisitionPeakDayRequest(dataOwnerId, {
+        businessId: importBusinessId || exportBusinessId,
+      });
+      if (!preview.peakDay || preview.peakCount < 500) {
+        setPeakPreview(null);
+        toast.message('No hay una carga masiva sin marcar (≥500 en un día)');
+        return;
+      }
+      setPeakPreview({ peakDay: preview.peakDay, peakCount: preview.peakCount });
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo analizar la base de clientes');
+    } finally {
+      setPeakLoading(false);
+    }
+  };
+
+  const handleMarkPreviousExcelAsMigration = async () => {
+    if (!user?.user_id || !peakPreview?.peakDay) return;
+    setPeakFixing(true);
+    try {
+      const dataOwnerId = String(exportUserId || user.user_id).trim();
+      const result = await markClientsAcquisitionRequest(dataOwnerId, {
+        businessId: importBusinessId || exportBusinessId,
+        acquisitionKind: 'migration',
+        createdDay: peakPreview.peakDay,
+        onlyUnmarked: true,
+      });
+      toast.success(`${result.updated} clientes marcados como base existente (ya no cuentan como nuevos)`);
+      setPeakPreview(null);
+      await refreshClients();
+      onImportComplete?.();
+    } catch (err) {
+      console.error(err);
+      toast.error('No se pudo corregir la importación anterior');
+    } finally {
+      setPeakFixing(false);
+    }
   };
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -609,6 +687,58 @@ export function CrmImportWizard({
                 )}
               </div>
               <input ref={fileRef} type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
+
+              {mode === 'clients' && (
+                <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      ¿El dashboard cuenta miles de “clientes nuevos” por un Excel anterior?
+                    </p>
+                    <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                      Esto no cambia altas normales: solo marca como base existente el día de una carga masiva sin origen.
+                      Las altas reales del día a día siguen sumando.
+                    </p>
+                  </div>
+                  {!peakPreview ? (
+                    <button
+                      type="button"
+                      onClick={handleDetectPreviousExcelImport}
+                      disabled={peakLoading || !user?.user_id}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+                    >
+                      {peakLoading ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
+                      Detectar importación anterior
+                    </button>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-amber-900 dark:text-amber-200">
+                        El <span className="font-semibold">{peakPreview.peakDay}</span> se crearon{' '}
+                        <span className="font-semibold">{peakPreview.peakCount}</span> clientes sin marcar.
+                        ¿Era la base del Excel (migración)?
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={handleMarkPreviousExcelAsMigration}
+                          disabled={peakFixing}
+                          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                        >
+                          {peakFixing ? <LoaderCircle className="w-4 h-4 animate-spin" /> : null}
+                          Sí, marcar como existentes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPeakPreview(null)}
+                          disabled={peakFixing}
+                          className="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -736,6 +866,46 @@ export function CrmImportWizard({
                     </div>
                   </div>
 
+                  {mode === 'clients' && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                      <div>
+                        <p className="text-sm font-semibold text-amber-900">
+                          ¿Estos clientes ya existían en el negocio o son nuevos?
+                        </p>
+                        <p className="text-xs text-amber-800 mt-1">
+                          Si importas una base histórica (p. ej. miles desde Excel), márcalos como existentes:
+                          cuentan en la cartera total, pero no como “clientes nuevos” del día/mes.
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setAcquisitionKind('migration')}
+                          className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                            acquisitionKind === 'migration'
+                              ? 'border-amber-500 bg-white shadow-sm'
+                              : 'border-amber-200 bg-white/60 hover:bg-white'
+                          }`}
+                        >
+                          <p className="text-sm font-semibold text-gray-900">Ya existían (migración)</p>
+                          <p className="text-xs text-gray-600 mt-0.5">Base previa / Excel histórico · no inflan altas del mes</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAcquisitionKind('organic')}
+                          className={`text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                            acquisitionKind === 'organic'
+                              ? 'border-emerald-500 bg-white shadow-sm'
+                              : 'border-amber-200 bg-white/60 hover:bg-white'
+                          }`}
+                        >
+                          <p className="text-sm font-semibold text-gray-900">Son nuevos (altas reales)</p>
+                          <p className="text-xs text-gray-600 mt-0.5">Clientes captados ahora · sí cuentan en “nuevos”</p>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {errors.length > 0 && (
                     <div className="border border-red-200 rounded-xl overflow-hidden">
                       <div className="bg-red-50 px-4 py-3 border-b border-red-200 flex items-center gap-2">
@@ -816,7 +986,7 @@ export function CrmImportWizard({
               {step === 3 && !importing && !importResult && (
                 <button
                   onClick={handleImport}
-                  disabled={importing}
+                  disabled={importing || (mode === 'clients' && !acquisitionKind)}
                   className="flex items-center gap-2 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                 >
                   {importing ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}

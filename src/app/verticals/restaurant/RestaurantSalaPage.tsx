@@ -23,13 +23,19 @@ import {
   type DiningTable,
 } from '../../lib/salaApi';
 import { isSalaQuickSetupComplete } from '../../lib/salaQuickSetup';
-import type { SalaRoom } from '../../lib/salaStudioTypes';
+import type { SalaRoom, SalaRoomType } from '../../lib/salaStudioTypes';
 import { RestaurantSalaQuickSetup } from './RestaurantSalaQuickSetup';
 import { RestaurantSalaLiveView } from './RestaurantSalaLiveView';
 import { applyRestaurantSalaQuickSetup } from './applyRestaurantSalaQuickSetup';
 import { clearRestaurantClientCaches } from './clearRestaurantClientCaches';
 import { clearOnboardingDraft } from './onboarding/draftStorage';
 import { wipeRestaurantSalaSetup } from './wipeRestaurantSalaSetup';
+import {
+  addTablesToZone,
+  addZoneWithTables,
+  removeFreeTable,
+  removeZoneIfIdle,
+} from './restaurantSalaLiveEdit';
 import {
   clearRestaurantSalaRemountDone,
   markRestaurantSalaRemountDone,
@@ -86,13 +92,15 @@ export function RestaurantSalaPage() {
 
   const [view, setView] = useState<ViewState>('loading');
   const [saving, setSaving] = useState(false);
+  const [mapBusy, setMapBusy] = useState(false);
   const [rooms, setRooms] = useState<SalaRoom[]>([]);
   const [tables, setTables] = useState<DiningTable[]>([]);
   const bootRef = useRef('');
 
+  // Solo refrescar tiendas: no vaciar caché de retail al abrir Sala
+  // (eso provocaba “Crear local” aunque el PDV ya existiera).
   useEffect(() => {
     if (!businessId) return;
-    clearRestaurantClientCaches(businessId);
     void refreshStore();
   }, [businessId, refreshStore]);
 
@@ -128,6 +136,13 @@ export function RestaurantSalaPage() {
     next.delete('reset');
     setSearchParams(next, { replace: true });
   }, [wantReset, searchParams, setSearchParams]);
+
+  const hasStoreInScope = useMemo(() => {
+    const hasPdv = allPointsOfSale.some((p) => p.active !== false);
+    const hasRetail = retailWorkCenters.some((wc) => !wc.deletedAt && wc.active !== false);
+    const hasPending = Boolean(pendingPdvId || urlPdvId || peekSalaSetupPending(businessId));
+    return hasPdv || hasRetail || hasPending;
+  }, [allPointsOfSale, retailWorkCenters, pendingPdvId, urlPdvId, businessId]);
 
   const runFreshStart = useCallback(async (opts?: { clearDraft?: boolean }) => {
     if (!userId || !businessId) return;
@@ -173,14 +188,8 @@ export function RestaurantSalaPage() {
         return;
       }
 
-      const hasPdvInScope = allPointsOfSale.some((p) => p.active !== false);
-      const hasPending = Boolean(pendingPdvId || urlPdvId || peekSalaSetupPending(businessId));
-
-      if (!hasPdvInScope && !hasPending && retailWorkCenters.length === 0) {
-        setView('no_pdv');
-        return;
-      }
-
+      // Primero el mapa: si ya hay zonas/mesas, entrar en vivo aunque el scope
+      // de tiendas aún no haya terminado de hidratarse.
       const [config, listed] = await Promise.all([
         getFloorConfigRequest(userId).catch(() => null),
         listDiningTablesRequest(userId).catch(() => []),
@@ -188,7 +197,6 @@ export function RestaurantSalaPage() {
 
       const tablesHere = tablesForBusiness(listed || [], businessId);
       const nextRooms = Array.isArray(config?.rooms) ? config.rooms : [];
-      // Ya tiene mapa (zonas o mesas) → servicio en vivo, sin asistente.
       const ready =
         isSalaQuickSetupComplete(config)
         || tablesHere.length > 0
@@ -198,18 +206,22 @@ export function RestaurantSalaPage() {
         enterLive(nextRooms, tablesHere);
         return;
       }
+
+      if (!hasStoreInScope) {
+        setView('no_pdv');
+        return;
+      }
+
       // Solo primera vez / local vacío → asistente.
       setView('setup');
     } catch {
-      setView(parentPdvId || pendingPdvId ? 'setup' : 'no_pdv');
+      setView(parentPdvId || pendingPdvId || hasStoreInScope ? 'setup' : 'no_pdv');
     }
   }, [
     userId,
     businessId,
-    allPointsOfSale,
-    retailWorkCenters.length,
+    hasStoreInScope,
     pendingPdvId,
-    urlPdvId,
     parentPdvId,
     wantReset,
     runFreshStart,
@@ -224,6 +236,14 @@ export function RestaurantSalaPage() {
     bootRef.current = bootKey;
     void reload();
   }, [storeLoading, businessId, wantReset, reload]);
+
+  // Si caímos en “Crear local” por scope vacío y luego aparece el PDV, reintentar.
+  useEffect(() => {
+    if (view !== 'no_pdv' || storeLoading || !businessId) return;
+    if (!hasStoreInScope) return;
+    bootRef.current = '';
+    void reload();
+  }, [view, storeLoading, businessId, hasStoreInScope, reload]);
 
   const handleSubmit = async (drafts: SalaQuickSetupRoomDraft[]) => {
     const effectivePdv = parentPdvId || pendingPdvId || urlPdvId;
@@ -256,6 +276,128 @@ export function RestaurantSalaPage() {
     }
   };
 
+  const tpvOptions = useMemo(
+    () => ({
+      parentPdvId: parentPdvId || pendingPdvId || urlPdvId || undefined,
+      business: currentBusiness,
+      businesses,
+      workCenters: retailWorkCenters,
+      pointsOfSale: allPointsOfSale,
+    }),
+    [
+      parentPdvId,
+      pendingPdvId,
+      urlPdvId,
+      currentBusiness,
+      businesses,
+      retailWorkCenters,
+      allPointsOfSale,
+    ],
+  );
+
+  const handleAddZone = async (input: {
+    name: string;
+    roomType: SalaRoomType;
+    tableCount: number;
+    defaultCapacity: number;
+  }) => {
+    if (!userId || !businessId) {
+      toast.error('Sesión no lista');
+      return;
+    }
+    setMapBusy(true);
+    try {
+      const result = await addZoneWithTables({
+        userId,
+        businessId,
+        rooms,
+        tables,
+        name: input.name,
+        roomType: input.roomType,
+        tableCount: input.tableCount,
+        defaultCapacity: input.defaultCapacity,
+        tpvOptions,
+      });
+      setRooms(result.rooms);
+      setTables(result.tables);
+      toast.success(
+        input.tableCount > 0
+          ? `Zona «${result.room.name}» · ${input.tableCount} mesas`
+          : `Zona «${result.room.name}» creada`,
+      );
+      return result.room;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear la zona');
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const handleAddTables = async (input: {
+    roomId: string;
+    count: number;
+    capacity: number;
+  }) => {
+    const room = rooms.find((r) => r.id === input.roomId);
+    if (!userId || !businessId || !room) {
+      toast.error('Zona no encontrada');
+      return;
+    }
+    setMapBusy(true);
+    try {
+      const next = await addTablesToZone({
+        userId,
+        businessId,
+        room,
+        tables,
+        count: input.count,
+        capacity: input.capacity,
+      });
+      setTables(next);
+      const unit = room.roomType === 'barra' ? 'puestos' : 'mesas';
+      toast.success(`+${input.count} ${unit} en «${room.name}»`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudieron añadir mesas');
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const handleRemoveTable = async (tableId: string) => {
+    if (!userId) return;
+    setMapBusy(true);
+    try {
+      const next = await removeFreeTable({ userId, tables, tableId });
+      setTables(next);
+      toast.success('Mesa eliminada');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo eliminar la mesa');
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
+  const handleRemoveZone = async (roomId: string) => {
+    if (!userId || !businessId) return;
+    setMapBusy(true);
+    try {
+      const result = await removeZoneIfIdle({
+        userId,
+        businessId,
+        rooms,
+        tables,
+        roomId,
+      });
+      setRooms(result.rooms);
+      setTables(result.tables);
+      toast.success('Zona eliminada');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo eliminar la zona');
+    } finally {
+      setMapBusy(false);
+    }
+  };
+
   if (view === 'loading' || storeLoading) {
     return (
       <Layout title="Sala" noPadding>
@@ -275,20 +417,32 @@ export function RestaurantSalaPage() {
             <Store className="h-7 w-7" />
           </div>
           <h1 className="text-xl font-semibold text-stone-900 dark:text-stone-50">
-            Primero crea el local
+            No encontramos el local
           </h1>
           <p className="mt-2 text-sm text-stone-500">
-            Ajustes → Tienda → crea el bar/restaurante. Al guardar te traemos al asistente de
-            zonas y mesas.
+            Si ya tienes tienda en Ajustes → Tienda, pulsa reintentar. Si aún no existe, créala
+            y vuelve a Sala.
           </p>
-          <button
-            type="button"
-            onClick={() => navigate('/saas/settings/tienda?action=new-pdv')}
-            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-semibold text-white dark:bg-stone-100 dark:text-stone-900"
-          >
-            Crear local
-            <ArrowRight className="h-4 w-4" />
-          </button>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                bootRef.current = '';
+                void refreshStore().then(() => reload());
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-5 py-2.5 text-sm font-semibold text-stone-800"
+            >
+              Reintentar
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/settings/tienda?action=new-pdv')}
+              className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-5 py-2.5 text-sm font-semibold text-white dark:bg-stone-100 dark:text-stone-900"
+            >
+              Crear local
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </Layout>
     );
@@ -319,11 +473,12 @@ export function RestaurantSalaPage() {
           userId={userId}
           businessId={businessId}
           actorName={user?.fullName || user?.email || 'Sala'}
+          mapBusy={mapBusy}
           onTablesChange={setTables}
-          onAddFirstTable={() => {
-            bootRef.current = '';
-            void runFreshStart({ clearDraft: true });
-          }}
+          onAddZone={handleAddZone}
+          onAddTables={handleAddTables}
+          onRemoveTable={handleRemoveTable}
+          onRemoveZone={handleRemoveZone}
           onRemount={() => {
             bootRef.current = '';
             void runFreshStart({ clearDraft: true });

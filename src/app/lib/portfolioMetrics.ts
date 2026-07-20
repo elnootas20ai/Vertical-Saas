@@ -1,5 +1,10 @@
 import type { DeliveryOrder, DeliveryOrderStatus, TpvRegisterSession } from './deliveryApi';
+import {
+  deliveryOrderIncomeAmount,
+  shouldSyncDeliveryOrderIncome,
+} from './deliveryOrderFinanceRules';
 import { dedupeOpenRegisterSessions } from './tpvCajaScope';
+import { countsTowardNewClientMetrics } from './clientAcquisition';
 
 export type PortfolioMetrics = {
   revenueToday: number;
@@ -86,13 +91,17 @@ export function emptyPortfolioClientMetrics(): PortfolioClientMetrics {
 }
 
 export function computePortfolioClientMetrics(
-  clients: Array<{ createdAt?: Date | string }>,
+  clients: Array<{
+    createdAt?: Date | string;
+    stats?: { acquisitionKind?: string; createdFrom?: string; excludeFromNewMetrics?: boolean } | null;
+  }>,
   monthKey: string,
 ): PortfolioClientMetrics {
   const prevKey = prevCalendarMonthKey(monthKey);
   let newClientsMonth = 0;
   let newClientsPrevMonth = 0;
   for (const client of clients) {
+    if (!countsTowardNewClientMetrics(client)) continue;
     const raw = client.createdAt;
     const iso = raw instanceof Date ? raw.toISOString() : String(raw || '');
     if (!iso) continue;
@@ -164,8 +173,8 @@ export function filterOrdersToPortfolioScope(
 
 export function sumDeliveredRevenueOnDay(orders: DeliveryOrder[], dayKey: string): number {
   return orders
-    .filter((o) => isDeliveredOnDay(o, dayKey))
-    .reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+    .filter((o) => isRevenueOnDay(o, dayKey))
+    .reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
 }
 
 export function countOrdersCreatedOnDay(orders: DeliveryOrder[], dayKey: string): number {
@@ -178,6 +187,33 @@ export function getDeliveryOrderDeliveredAtIso(order: DeliveryOrder): string {
 
 export function isDeliveryOrderDelivered(order: DeliveryOrder): boolean {
   return isDeliveredOrder(order);
+}
+
+/** Ingreso real: mismo criterio que el cobro financiero (pagado, no cancelado/devuelto). */
+export function isDeliveryOrderRevenue(order: DeliveryOrder): boolean {
+  return shouldSyncDeliveryOrderIncome(order);
+}
+
+export function deliveryOrderRevenueAmount(order: DeliveryOrder): number {
+  if (!isDeliveryOrderRevenue(order)) return 0;
+  return deliveryOrderIncomeAmount(order);
+}
+
+/** Día del cobro (ingresos); cae a entrega/creación si no hay paidAt. */
+function orderRevenueAtIso(order: DeliveryOrder): string {
+  return String(order.paidAt || order.deliveredAt || order.updatedAt || order.createdAt || '').trim();
+}
+
+function isRevenueOnDay(order: DeliveryOrder, dayKey: string): boolean {
+  if (!isDeliveryOrderRevenue(order)) return false;
+  const when = orderRevenueAtIso(order);
+  return when ? isToday(when, dayKey) : false;
+}
+
+function isRevenueInMonth(order: DeliveryOrder, monthKey: string): boolean {
+  if (!isDeliveryOrderRevenue(order)) return false;
+  const when = orderRevenueAtIso(order);
+  return when ? isInMonth(when, monthKey) : false;
 }
 
 export type StoreDeliveryMetrics = {
@@ -198,7 +234,9 @@ export function computeStoreDeliveryMetrics(
   const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, pdvId, pdvWorkCenterId));
   const deliveredMonth = scoped.filter((o) => isDeliveredInMonth(o, monthKey));
   const deliveredToday = scoped.filter((o) => isDeliveredOnDay(o, todayKey));
-  const revenueMonth = deliveredMonth.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+  const revenueMonth = scoped
+    .filter((o) => isRevenueInMonth(o, monthKey))
+    .reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
   const activeOrders = scoped.filter((o) => ACTIVE_STATUSES.includes(o.status)).length;
   return {
     deliveredToday: deliveredToday.length,
@@ -241,23 +279,33 @@ export function computePortfolioMetrics(
   const deliveredToday = scoped.filter((o) => isDeliveredOnDay(o, todayKey));
   const deliveredMonth = scoped.filter((o) => isDeliveredInMonth(o, monthKey));
   const deliveredPrevMonth = scoped.filter((o) => isDeliveredInMonth(o, prevMonthKey));
+  const revenueOrdersToday = scoped.filter((o) => isRevenueOnDay(o, todayKey));
+  const revenueOrdersMonth = scoped.filter((o) => isRevenueInMonth(o, monthKey));
+  const revenueOrdersPrevMonth = scoped.filter((o) => isRevenueInMonth(o, prevMonthKey));
 
-  const revenueToday = deliveredToday.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
-  const revenueMonth = deliveredMonth.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
-  const revenuePrevMonth = deliveredPrevMonth.reduce((s, o) => s + (Number(o.totalAmount) || 0), 0);
+  const revenueToday = revenueOrdersToday.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+  const revenueMonth = revenueOrdersMonth.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+  const revenuePrevMonth = revenueOrdersPrevMonth.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
 
   const revenueByChannel: Record<string, number> = {};
   const revenueByBrand: Record<string, number> = {};
 
-  for (const o of deliveredMonth) {
+  for (const o of revenueOrdersMonth) {
+    const orderRev = deliveryOrderRevenueAmount(o);
     const ch = channelLabel(o.channel);
-    revenueByChannel[ch] = (revenueByChannel[ch] || 0) + (Number(o.totalAmount) || 0);
-    for (const item of o.items || []) {
-      const share = (Number(item.total) || 0) > 0 ? Number(item.total) : Number(item.unitPrice) * Number(item.quantity);
+    revenueByChannel[ch] = (revenueByChannel[ch] || 0) + orderRev;
+    const items = o.items || [];
+    const itemsTotal = items.reduce((s, item) => {
+      const line = (Number(item.total) || 0) > 0 ? Number(item.total) : Number(item.unitPrice) * Number(item.quantity);
+      return s + (Number.isFinite(line) ? line : 0);
+    }, 0);
+    for (const item of items) {
+      const line = (Number(item.total) || 0) > 0 ? Number(item.total) : Number(item.unitPrice) * Number(item.quantity);
+      const shareBase = itemsTotal > 0 ? (line / itemsTotal) * orderRev : 0;
       const brands = item.brandIds?.length ? item.brandIds : ['_sin_marca'];
       for (const bid of brands) {
         const key = String(bid || '_sin_marca');
-        revenueByBrand[key] = (revenueByBrand[key] || 0) + share / brands.length;
+        revenueByBrand[key] = (revenueByBrand[key] || 0) + shareBase / brands.length;
       }
     }
   }
@@ -267,7 +315,7 @@ export function computePortfolioMetrics(
     (o) => o.status === 'cancelled' && isInMonth(String(o.updatedAt || o.createdAt || ''), monthKey),
   ).length;
   const avgTicketMonth =
-    deliveredMonth.length > 0 ? revenueMonth / deliveredMonth.length : 0;
+    revenueOrdersMonth.length > 0 ? revenueMonth / revenueOrdersMonth.length : 0;
 
   return {
     revenueToday,
@@ -579,20 +627,23 @@ export function computeCompanyBillingBreakdown(
   }
 
   for (const order of scoped) {
-    if (!isDeliveredInMonth(order, monthKey)) continue;
+    if (!isRevenueInMonth(order, monthKey)) continue;
 
     const storeId = resolveOrderWorkCenterId(order, primaryPdvId, pdvToWc, knownWcIds);
-    const orderTotal = Number(order.totalAmount) || 0;
+    const orderTotal = deliveryOrderRevenueAmount(order);
     totalRevenueMonth += orderTotal;
-    if (isDeliveredOnDay(order, todayKey)) totalRevenueToday += orderTotal;
+    if (isRevenueOnDay(order, todayKey)) totalRevenueToday += orderTotal;
     totalDeliveredMonth += 1;
 
     const items = order.items || [];
     const brandsInOrder = new Set<string>();
     let brandedAmount = 0;
+    const itemsTotal = items.reduce((s, item) => s + lineItemRevenue(item), 0);
 
     for (const item of items) {
-      const amount = lineItemRevenue(item);
+      const amountRaw = lineItemRevenue(item);
+      if (amountRaw <= 0) continue;
+      const amount = itemsTotal > 0 ? (amountRaw / itemsTotal) * orderTotal : 0;
       if (amount <= 0) continue;
 
       const itemBrandIds = (item.brandIds ?? [])
@@ -616,7 +667,7 @@ export function computeCompanyBillingBreakdown(
           if (!byStore.has(storeId)) byStore.set(storeId, emptyBillingCell());
           const cell = byStore.get(storeId)!;
           cell.revenueMonth += share;
-          if (isDeliveredOnDay(order, todayKey)) cell.revenueToday += share;
+          if (isRevenueOnDay(order, todayKey)) cell.revenueToday += share;
 
           if (!storeBrandMatrix.get(storeId)!.has(bid)) {
             storeBrandMatrix.get(storeId)!.set(bid, { revenueMonth: 0, deliveredMonth: 0 });
@@ -634,7 +685,7 @@ export function computeCompanyBillingBreakdown(
     if (storeId && storeTotals.has(storeId)) {
       const st = storeTotals.get(storeId)!;
       st.revenueMonth += orderTotal;
-      if (isDeliveredOnDay(order, todayKey)) st.revenueToday += orderTotal;
+      if (isRevenueOnDay(order, todayKey)) st.revenueToday += orderTotal;
       bumpDeliveredCount(st, order, todayKey);
     }
 

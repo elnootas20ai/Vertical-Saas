@@ -1,28 +1,41 @@
 import { useNavigate } from 'react-router';
 import { AlertTriangle, CreditCard, HelpCircle, Mail } from 'lucide-react';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
+import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
+import { useAuth } from '../../context/AuthContext';
 
 export function Suspended() {
   const navigate = useNavigate();
+  const { logout } = useAuth();
+
+  if (isIosCustomerAccessOnlyApp()) {
+    return (
+      <IosCustomerAccessOnlyScreen
+        title="Cuenta sin acceso activo"
+        onLogout={() => void logout()}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-50 flex items-center justify-center p-6">
       <div className="max-w-2xl w-full">
-        {/* Main Card */}
         <div className="bg-white dark:bg-gray-800 border-2 border-red-200 rounded-2xl p-8 mb-6 text-center">
           <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
             <AlertTriangle className="w-10 h-10 text-red-600" />
           </div>
-          
+
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
             Cuenta suspendida
           </h1>
           <p className="text-lg text-gray-700 dark:text-gray-300 mb-6">
             Tu suscripción ha sido suspendida debido a un problema con el pago.
           </p>
-          
+
           <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl mb-8">
             <p className="text-sm text-red-900">
-              <strong>¿Qué significa esto?</strong><br />
+              <strong>¿Qué significa esto?</strong>
+              <br />
               No puedes acceder a las funcionalidades de Vertial hasta que resuelvas el problema de pago.
               Tus datos están seguros y se mantendrán durante 30 días.
             </p>
@@ -37,7 +50,6 @@ export function Suspended() {
           </button>
         </div>
 
-        {/* Support Options */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <button
             onClick={() => navigate('/saas/help#contacto')}

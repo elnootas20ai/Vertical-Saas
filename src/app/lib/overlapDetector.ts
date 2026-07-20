@@ -332,7 +332,9 @@ export function detectUncoveredShifts(
 ): Conflict[] {
   const conflicts: Conflict[] = [];
   const dates = dateRange(options.dateRange.start, options.dateRange.end);
-  const approved = vacations.filter(v => v.status === 'approved');
+  // Vacaciones/baja aprobadas no generan “turno sin cubrir” (ausencia planificada).
+  // Se detectan aparte vía detectVacationVsSchedule si hace falta cobertura.
+  void vacations;
 
   for (const schedule of schedules) {
     for (const date of dates) {
@@ -340,14 +342,11 @@ export function detectUncoveredShifts(
       const shift = schedule.weekly[weekday];
       if (!shift?.enabled) continue;
 
-      const onVacation = approved.some(v =>
-        v.member_id === schedule.member_id && date >= v.startDate && date <= v.endDate,
-      );
       const blocked = blocks.some(b =>
         b.member_id === schedule.member_id && isBlockActiveOnDate(b, date),
       );
 
-      if (onVacation || blocked) {
+      if (blocked) {
         conflicts.push({
           id: nextId(),
           type: 'shift_uncovered',
@@ -355,8 +354,8 @@ export function detectUncoveredShifts(
           memberId: schedule.member_id,
           memberName: schedule.member_name,
           date,
-          description: `Turno ${shift.start}-${shift.end} de ${schedule.member_name} el ${date} sin cubrir (${onVacation ? 'vacaciones' : 'bloqueo'})`,
-          meta: { scheduleId: schedule._id, reason: onVacation ? 'vacation' : 'block' },
+          description: `Turno ${shift.start}-${shift.end} de ${schedule.member_name} el ${date} sin cubrir (bloqueo)`,
+          meta: { scheduleId: schedule._id, reason: 'block' },
         });
       }
     }

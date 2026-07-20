@@ -9,6 +9,7 @@ import { TpvProvider } from '../../../context/TpvContext';
 import { NuevoClienteModal } from '../../../components/saas/NuevoClienteModal';
 import type { Client } from '../../../context/AppContext';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
+import { resolveRetailOpsWriteBusinessId } from '../../../lib/tpvRegisterScope';
 import {
   filterDeliveryOrdersRequest,
   listCatalogItemsRequest,
@@ -20,6 +21,7 @@ import {
 import {
   pickDefaultActivePdvId,
 } from '../../../lib/deliveryOpsPdvSelection';
+import { notifyDeliveryOpsLive } from '../../../lib/deliveryOpsLive';
 import {
   resolvePdvIdFromStoreRef,
   filterOrdersForActivePdv,
@@ -105,7 +107,7 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ReactNode
 function SalesContent() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
   const {
     lines, activeWorker, ticketTotal, ticketCount,
@@ -130,6 +132,7 @@ function SalesContent() {
 
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = currentBusiness?.business_id || '';
+  const writeBusinessId = resolveRetailOpsWriteBusinessId(businessId, businesses);
 
   const workerPdv = useMemo(() => {
     const fromEmployment = resolvePdvIdFromStoreRef(
@@ -411,6 +414,7 @@ function SalesContent() {
         customerAddress: '',
         salesPointId: workerPdv.pdvId,
         salesPointName: workerPdv.pdvName || '',
+        business_id: writeBusinessId || businessId || '',
         deliveryType: 'sala',
         channel: 'tpv',
         status: 'entregado',
@@ -431,6 +435,10 @@ function SalesContent() {
             notes: 'Venta mostrador (trabajador)',
           },
         ],
+      });
+      notifyDeliveryOpsLive({
+        reason: 'worker_sale',
+        businessId: writeBusinessId || businessId,
       });
       await refreshOrdersPool();
       toast.success(`Venta de ${formatCurrency(ticketTotal)} registrada`);

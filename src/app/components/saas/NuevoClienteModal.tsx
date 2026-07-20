@@ -4,13 +4,17 @@ import {
   Trash2, AlertTriangle, Check, ChevronDown, Building2, Merge,
   Info, Trophy,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
+import { useBusinessOptional } from '../../context/BusinessContext';
 import { useApp, type Client, type ClientAddress, type PaymentMethod, type ClientCreatedFrom } from '../../context/AppContext';
 import { DuplicatesMergeModal } from './DuplicatesMergeModal';
 import { mergeClientRequest, mergeLeadRequest } from '../../lib/crmApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useClientDuplicateSearch } from '../../hooks/useClientDuplicateSearch';
 import { getDniOrNieError, getCifError } from '../../lib/dniCifValidator';
+import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -25,6 +29,12 @@ interface NuevoClienteModalProps {
   initialData?: Partial<Client>;
   vincularA?: { tipo: 'presupuesto' | 'pedido' | 'venta' | 'factura'; id?: string; label?: string };
   perfil?: Perfil;
+  /** @deprecated Ya no oculta campos; se mantiene por compatibilidad. */
+  variant?: 'full' | 'delivery';
+  /** Empresa activa (necesario con varias empresas). */
+  businessId?: string;
+  /** Titular del negocio (miembros del equipo deben crear bajo este user_id). */
+  dataUserId?: string;
 }
 
 interface AddressForm {
@@ -79,11 +89,6 @@ function FieldError({ message }: { message?: string }) {
   return <p className="mt-1 text-xs text-red-500 dark:text-red-400">{message}</p>;
 }
 
-function FieldWarning({ message }: { message?: string }) {
-  if (!message) return null;
-  return <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{message}</p>;
-}
-
 function InputWithIcon({
   icon: Icon, type = 'text', placeholder, value, onChange, error, suffix, disabled,
 }: {
@@ -119,10 +124,17 @@ function InputWithIcon({
 export function NuevoClienteModal({
   open, onClose, onClientCreated, contexto = 'crm',
   initialData, vincularA, perfil: perfilProp,
+  businessId: businessIdProp,
+  dataUserId: dataUserIdProp,
 }: NuevoClienteModalProps) {
   const { user } = useAuth();
+  const currentBusiness = useBusinessOptional()?.currentBusiness ?? null;
   const { addClient, clients, leads, updateClient, deleteClient } = useApp();
-  const userId = user?.user_id || '';
+  const authUserId = user?.user_id || '';
+  const dataUserId = String(dataUserIdProp || resolveBusinessDataUserId(user, currentBusiness) || authUserId).trim();
+  const resolvedBusinessId = String(
+    businessIdProp || resolveBusinessScopeId(currentBusiness) || '',
+  ).trim();
   const effectivePerfil: Perfil = perfilProp || (MANAGER_ROLES.includes(user?.role || '') ? 'gerente' : 'trabajador');
   const isGerente = effectivePerfil === 'gerente';
 
@@ -141,6 +153,7 @@ export function NuevoClienteModal({
   const [showMergeModal, setShowMergeModal] = useState(false);
 
   const nameRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   // ─── DNI validation ─────────────────────────────────────────────────────
   const dniValidation = (() => {
@@ -151,7 +164,7 @@ export function NuevoClienteModal({
 
   // ─── Duplicate search ───────────────────────────────────────────────────
   const { duplicates, isSearching, matchedField, dismissed, clearDuplicates, dismissDuplicates } =
-    useClientDuplicateSearch({ userId, phone, email, dni, enabled: open });
+    useClientDuplicateSearch({ userId: dataUserId || authUserId, phone, email, dni, enabled: open });
 
   const showDuplicateBanner = duplicates.length > 0 && !dismissed;
 
@@ -247,7 +260,16 @@ export function NuevoClienteModal({
     });
 
     setErrors(e);
-    return Object.keys(e).length === 0;
+    if (Object.keys(e).length > 0) {
+      const first = e.name || e.phone || e['address.0.street'] || e.email || Object.values(e)[0];
+      toast.error(first);
+      requestAnimationFrame(() => {
+        bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+        if (e.name) nameRef.current?.focus();
+      });
+      return false;
+    }
+    return true;
   }, [name, phone, email, addresses]);
 
   // ─── Use existing client ───────────────────────────────────────────────
@@ -258,10 +280,19 @@ export function NuevoClienteModal({
 
   // ─── Save ──────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    if (saving) return;
     if (!validate()) return;
     setSaving(true);
+    setErrors({});
 
     try {
+      if (!dataUserId && !authUserId) {
+        throw new Error('No hay sesión activa. Vuelve a iniciar sesión.');
+      }
+      if (!resolvedBusinessId) {
+        throw new Error('No hay empresa activa. Selecciona una empresa arriba e inténtalo de nuevo.');
+      }
+
       const clientAddresses: ClientAddress[] = addresses
         .filter(a => a.street.trim())
         .map((a, i) => ({
@@ -287,6 +318,9 @@ export function NuevoClienteModal({
         notes: notes.trim(),
         status: 'active',
         tags: [],
+        user_id: dataUserId || authUserId,
+        businessId: resolvedBusinessId,
+        business_id: resolvedBusinessId,
       };
 
       if (isGerente) {
@@ -301,6 +335,7 @@ export function NuevoClienteModal({
         favoriteAddressId: null,
         totalSpent: 0,
         createdFrom: contexto as ClientCreatedFrom,
+        acquisitionKind: 'organic',
       };
 
       const created = await addClient({
@@ -308,12 +343,20 @@ export function NuevoClienteModal({
         phonePrefix: '+34',
       } as Omit<Client, 'id' | 'createdAt'>);
 
-      if (created) {
-        onClientCreated(created);
-        onClose();
+      if (!created) {
+        throw new Error('No se pudo guardar el cliente. Inténtalo de nuevo.');
       }
-    } catch {
-      setErrors({ _form: 'Error al guardar el cliente. Inténtalo de nuevo.' });
+
+      toast.success(`Cliente "${created.name}" guardado`);
+      onClientCreated(created);
+      onClose();
+    } catch (err) {
+      const message = err instanceof Error && err.message
+        ? err.message
+        : 'Error al guardar el cliente. Inténtalo de nuevo.';
+      setErrors({ _form: message });
+      toast.error(message);
+      bodyRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setSaving(false);
     }
@@ -342,7 +385,7 @@ export function NuevoClienteModal({
             <div>
               <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">{ctx.title}</h2>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                Rellena los datos para dar de alta un nuevo cliente
+                Obligatorio: nombre, teléfono y calle. El resto es opcional.
               </p>
             </div>
             <button
@@ -355,7 +398,7 @@ export function NuevoClienteModal({
         </div>
 
         {/* ── Body (scrollable) ── */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
           {/* Error global */}
           {errors._form && (
@@ -412,6 +455,7 @@ export function NuevoClienteModal({
                   value={name}
                   onChange={e => setName(e.target.value)}
                   placeholder={clientType === 'empresa' ? 'Empresa S.L.' : 'Juan Pérez García'}
+                  autoComplete="name"
                   className={`w-full pl-10 pr-4 py-3 bg-gray-50 dark:bg-gray-800 border-2 ${
                     errors.name ? 'border-red-300 dark:border-red-700' : 'border-gray-100 dark:border-gray-800'
                   } rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-900 dark:focus:border-gray-500 focus:bg-white dark:focus:bg-gray-700 focus:outline-none transition-all`}
@@ -562,7 +606,6 @@ export function NuevoClienteModal({
               Dirección principal
             </p>
 
-            {/* Primary address */}
             <div>
               <Label required>Calle</Label>
               <InputWithIcon
@@ -576,7 +619,7 @@ export function NuevoClienteModal({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label>Ciudad{contexto === 'tpv' ? ' (opcional)' : ''}</Label>
+                <Label>Ciudad (opcional)</Label>
                 <input
                   type="text"
                   value={addresses[0]?.city || ''}
@@ -584,12 +627,9 @@ export function NuevoClienteModal({
                   placeholder="Madrid"
                   className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-800 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-900 dark:focus:border-gray-500 focus:bg-white dark:focus:bg-gray-700 focus:outline-none transition-all"
                 />
-                {contexto !== 'tpv' && addresses[0]?.street && !addresses[0]?.city && (
-                  <FieldWarning message="Recomendado: añadir ciudad" />
-                )}
               </div>
               <div>
-                <Label>Código postal{contexto === 'tpv' ? ' (opcional)' : ''}</Label>
+                <Label>Código postal (opcional)</Label>
                 <input
                   type="text"
                   value={addresses[0]?.postalCode || ''}
@@ -598,9 +638,6 @@ export function NuevoClienteModal({
                   autoComplete="off"
                   className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-800 rounded-2xl text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-300 dark:placeholder:text-gray-500 focus:border-gray-900 dark:focus:border-gray-500 focus:bg-white dark:focus:bg-gray-700 focus:outline-none transition-all"
                 />
-                {contexto !== 'tpv' && addresses[0]?.street && !addresses[0]?.postalCode && (
-                  <FieldWarning message="Recomendado: añadir CP" />
-                )}
               </div>
             </div>
 
@@ -615,7 +652,6 @@ export function NuevoClienteModal({
               />
             </div>
 
-            {/* Extra addresses (gerente only) */}
             {isGerente && (
               <>
                 {showExtraAddresses && addresses.slice(1).map((addr, rawIdx) => {
@@ -718,7 +754,7 @@ export function NuevoClienteModal({
           {contexto !== 'crm' && (
             <button
               type="button"
-              onClick={handleSave}
+              onClick={() => { void handleSave(); }}
               disabled={saving}
               className="px-5 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-2xl transition-colors disabled:opacity-50"
             >
@@ -727,7 +763,7 @@ export function NuevoClienteModal({
           )}
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => { void handleSave(); }}
             disabled={saving}
             className="px-5 py-2.5 text-sm font-semibold text-white bg-gray-900 dark:bg-gray-100 dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-200 rounded-2xl transition-colors disabled:opacity-50 flex items-center gap-2"
           >
@@ -736,20 +772,20 @@ export function NuevoClienteModal({
             ) : (
               <Check className="w-4 h-4" />
             )}
-            {ctx.primaryBtn}
+            {saving ? 'Guardando…' : ctx.primaryBtn}
           </button>
         </div>
       </div>
 
-      {showMergeModal && userId ? (
+      {showMergeModal && (dataUserId || authUserId) ? (
         <DuplicatesMergeModal
           leads={leads || []}
           clients={clients || []}
           onMergeLead={async (keepId, deleteId) => {
-            await mergeLeadRequest(userId, keepId, deleteId);
+            await mergeLeadRequest(dataUserId || authUserId, keepId, deleteId);
           }}
           onMergeClient={async (keepId, deleteId) => {
-            const merged = await mergeClientRequest(userId, keepId, deleteId);
+            const merged = await mergeClientRequest(dataUserId || authUserId, keepId, deleteId);
             if (merged) await updateClient(keepId, merged);
             await deleteClient(deleteId);
           }}

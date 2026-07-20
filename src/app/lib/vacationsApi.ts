@@ -1,5 +1,24 @@
 import { getApiBase } from './apiBase';
 import { ensureCouchDb } from './ensureCouchDb';
+import {
+  computeAccruedVacationDays,
+  computeVacationBalance,
+  resolveAccrualMode,
+  resolveDaysPerMonth,
+  type VacationAccrualMode,
+  type VacationBalance,
+} from './vacationAccrual';
+import { createNotificationRequest } from './notificationApi';
+
+export {
+  computeAccruedVacationDays,
+  computeVacationBalance,
+  resolveAccrualMode,
+  resolveDaysPerMonth,
+  type VacationAccrualMode,
+  type VacationBalance,
+} from './vacationAccrual';
+
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
 
@@ -58,7 +77,12 @@ export interface VacationSettings {
   type: 'vacation_settings';
   business_id: string;
   defaultDaysPerYear: number;
+  /** Override manual por trabajador (cupo fijo anual). */
   allowances: Record<string, number>;
+  /** annual_fixed = cupo entero al año; monthly = se van sumando días cada mes. */
+  accrualMode?: VacationAccrualMode;
+  /** Días que se suman por mes completo (p. ej. 1.83 ≈ 22/12, o 2). */
+  daysPerMonth?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -168,6 +192,30 @@ export async function reviewVacation(
     try {
       autoDisabledShifts = await disableShiftsDuringVacation(record.business_id, record.member_id, record.startDate, record.endDate);
     } catch { /* best-effort */ }
+    try {
+      await createNotificationRequest(record.member_id, {
+        level: 'info',
+        category: 'team',
+        title: 'Vacaciones aprobadas',
+        message: `Tu solicitud del ${record.startDate} al ${record.endDate} ha sido aprobada.`,
+        entityId: record._id,
+        entityType: 'vacation',
+        route: '/saas/vacations',
+        metadata: { startDate: record.startDate, endDate: record.endDate, leaveType: record.leaveType },
+      });
+    } catch { /* best-effort */ }
+  } else if (decision === 'rejected') {
+    try {
+      await createNotificationRequest(record.member_id, {
+        level: 'warning',
+        category: 'team',
+        title: 'Vacaciones rechazadas',
+        message: `Tu solicitud del ${record.startDate} al ${record.endDate} ha sido rechazada.`,
+        entityId: record._id,
+        entityType: 'vacation',
+        route: '/saas/vacations',
+      });
+    } catch { /* best-effort */ }
   }
   return { ...saved, autoDisabledShifts };
 }
@@ -241,6 +289,8 @@ export async function getSettings(businessId: string): Promise<VacationSettings>
     business_id: businessId,
     defaultDaysPerYear: 22,
     allowances: {},
+    accrualMode: 'monthly',
+    daysPerMonth: Math.round((22 / 12) * 100) / 100,
     createdAt: now,
     updatedAt: now,
   };
@@ -262,10 +312,46 @@ export async function saveSettings(settings: VacationSettings): Promise<Vacation
 
 export function getDaysUsed(requests: VacationRequest[], memberId: string, year: number): number {
   return requests
-    .filter(r => r.member_id === memberId && r.status === 'approved' && new Date(r.startDate).getFullYear() === year)
+    .filter(r => r.member_id === memberId && r.status === 'approved' && r.leaveType === 'vacation' && new Date(r.startDate).getFullYear() === year)
     .reduce((sum, r) => sum + r.totalDays, 0);
 }
 
-export function getDaysAllowed(settings: VacationSettings, memberId: string): number {
-  return settings.allowances[memberId] ?? settings.defaultDaysPerYear;
+export function getDaysPending(requests: VacationRequest[], memberId: string, year: number): number {
+  return requests
+    .filter(r => r.member_id === memberId && r.status === 'pending' && r.leaveType === 'vacation' && new Date(r.startDate).getFullYear() === year)
+    .reduce((sum, r) => sum + r.totalDays, 0);
+}
+
+/**
+ * Días disponibles este año.
+ * Con modo monthly: según meses de alta (pasa startDate del contrato).
+ * Con override en allowances: cupo fijo.
+ */
+export function getDaysAllowed(
+  settings: VacationSettings,
+  memberId: string,
+  options?: { startDate?: string; endDate?: string; year?: number; asOf?: Date | string },
+): number {
+  return computeAccruedVacationDays(settings, memberId, {
+    startDate: options?.startDate,
+    endDate: options?.endDate,
+    year: options?.year ?? new Date().getFullYear(),
+    asOf: options?.asOf,
+  });
+}
+
+export function getMemberVacationBalance(
+  settings: VacationSettings,
+  requests: VacationRequest[],
+  memberId: string,
+  options?: { startDate?: string; endDate?: string; year?: number; asOf?: Date | string },
+): VacationBalance {
+  const year = options?.year ?? new Date().getFullYear();
+  return computeVacationBalance(
+    settings,
+    memberId,
+    getDaysUsed(requests, memberId, year),
+    getDaysPending(requests, memberId, year),
+    { ...options, year },
+  );
 }

@@ -86,11 +86,15 @@ export function DeliveryReparto() {
       filterPdv?.trim() ||
       activeStoreScope.activeSalesPointId?.trim() ||
       undefined;
+    const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '')
+      .replace(/^business:/, '')
+      .trim();
     const today = new Date().toISOString().slice(0, 10);
     try {
       const [o, d, s, c] = await Promise.all([
         filterDeliveryOrdersRequest(uid, {
           ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+          ...(businessId ? { businessId } : {}),
           dateFrom: `${today}T00:00:00.000Z`,
           dateTo: `${today}T23:59:59.999Z`,
           limit: 500,
@@ -101,7 +105,7 @@ export function DeliveryReparto() {
       ]);
       setOrders(o); setDrivers(d); setStats(s); setCfg(c);
     } catch { /* silent */ } finally { setLoading(false); }
-  }, [uid, filterPdv, activeStoreScope.activeSalesPointId]);
+  }, [uid, filterPdv, activeStoreScope.activeSalesPointId, currentBusiness?.business_id, currentBusiness?.id]);
 
   useEffect(() => { load(); }, [load]);
 

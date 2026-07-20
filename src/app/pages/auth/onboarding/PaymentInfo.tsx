@@ -15,6 +15,8 @@ import {
   clampOnboardingPlanId,
 } from '../../../lib/onboardingPlanRecommendation';
 import { getBillingCapabilities } from '../../../lib/subscriptionApi';
+import { isIosCustomerAccessOnlyApp } from '../../../lib/appStoreCompliance';
+import { IosCustomerAccessOnlyScreen } from '../../../components/saas/IosCustomerAccessOnlyScreen';
 
 const inputClass = (hasError: boolean) =>
   `w-full px-3 py-2 text-sm border-2 rounded-xl outline-none transition-colors ${
@@ -27,18 +29,21 @@ const STEP_INDEX = 5;
 
 export function PaymentInfo() {
   const navigate = useNavigate();
-  const { user, isInitializing, refreshCurrentUser, saveBillingCard, activateOnboardingTrialWithoutCard } =
+  const { user, isInitializing, refreshCurrentUser, saveBillingCard, activateOnboardingTrialWithoutCard, logout } =
     useAuth();
   const { data, updateData, initializeTrial, advanceStep } = useOnboarding();
   const [skipMonei, setSkipMonei] = useState(false);
+  const iosAccessOnly = isIosCustomerAccessOnlyApp();
 
   useEffect(() => {
+    if (iosAccessOnly) return;
     getBillingCapabilities()
       .then((res) => setSkipMonei(Boolean(res.skipMonei)))
       .catch(() => setSkipMonei(false));
-  }, []);
+  }, [iosAccessOnly]);
 
   useEffect(() => {
+    if (iosAccessOnly) return;
     if (isInitializing) return;
     if (user?.user_id) return;
     void refreshCurrentUser().then((result) => {
@@ -46,13 +51,15 @@ export function PaymentInfo() {
         navigate('/auth/login', { replace: true, state: { from: '/auth/onboarding/payment-info' } });
       }
     });
-  }, [isInitializing, user?.user_id, refreshCurrentUser, navigate]);
+  }, [iosAccessOnly, isInitializing, user?.user_id, refreshCurrentUser, navigate]);
 
   useEffect(() => {
+    if (iosAccessOnly) return;
     if (data.completedStep < STEP_INDEX - 1) {
       navigate(ONBOARDING_ROUTES[data.completedStep + 1], { replace: true });
     }
-  }, [data.completedStep, navigate]);
+  }, [iosAccessOnly, data.completedStep, navigate]);
+
   const [formData, setFormData] = useState({
     cardNumber: data.paymentDetails.cardNumber,
     cardHolderName: data.paymentDetails.cardHolderName,
@@ -62,6 +69,7 @@ export function PaymentInfo() {
   });
 
   useEffect(() => {
+    if (iosAccessOnly) return;
     setFormData({
       cardNumber: data.paymentDetails.cardNumber,
       cardHolderName: data.paymentDetails.cardHolderName,
@@ -69,7 +77,7 @@ export function PaymentInfo() {
       cvv: data.paymentDetails.cvv,
       acceptTerms: data.paymentDetails.acceptTerms,
     });
-  }, [data.paymentDetails]);
+  }, [iosAccessOnly, data.paymentDetails]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState('');
@@ -108,6 +116,14 @@ export function PaymentInfo() {
     return { plan, selectedPlanId, billingMode, pricing };
   }, [data]);
 
+  if (iosAccessOnly) {
+    return (
+      <IosCustomerAccessOnlyScreen
+        title="Alta y pago solo en la web"
+        onLogout={() => void logout()}
+      />
+    );
+  }
   const formatCardNumber = (value: string) => {
     const cleaned = value.replace(/\s/g, '');
     const chunks = cleaned.match(/.{1,4}/g);

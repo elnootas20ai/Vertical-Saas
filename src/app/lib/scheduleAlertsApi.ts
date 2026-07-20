@@ -138,7 +138,8 @@ export function getShiftUncoveredAlerts(data: AlertGeneratorData): ScheduleAlert
   const alerts: ScheduleAlert[] = [];
   const weekEnd = weekEndFromStart(data.weekStart);
   const dates = dateRange(data.weekStart, weekEnd);
-  const approved = data.vacations.filter(v => v.status === 'approved');
+  // Vacaciones/baja aprobadas NO cuentan como “turno sin cubrir”: es ausencia planificada.
+  // Solo bloqueos de disponibilidad generan esta alerta.
   const uncoveredByDate: Record<string, string[]> = {};
 
   for (const schedule of data.schedules) {
@@ -148,14 +149,11 @@ export function getShiftUncoveredAlerts(data: AlertGeneratorData): ScheduleAlert
       const shift = schedule.weekly[weekday];
       if (!shift?.enabled) continue;
 
-      const onVacation = approved.some(v =>
-        v.member_id === schedule.member_id && date >= v.startDate && date <= v.endDate,
-      );
       const blocked = data.blocks.some(b =>
         b.member_id === schedule.member_id && isBlockActiveOnDate(b, date),
       );
 
-      if (onVacation || blocked) {
+      if (blocked) {
         if (!uncoveredByDate[date]) uncoveredByDate[date] = [];
         uncoveredByDate[date].push(schedule.member_name);
       }

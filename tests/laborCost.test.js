@@ -68,13 +68,18 @@ describe('laborCost', () => {
     expect(enriched.lastCostReview).toBeTruthy();
   });
 
-  it('computePeriodLaborCost cruza horas fichadas con coste hora', () => {
-    const period = computePeriodLaborCost(
-      { salary: '1740', contractType: 'indefinido', workday: 'completa', payPeriodsPerYear: 14 },
-      870,
-    );
-    expect(period).not.toBeNull();
-    expect(period.workedHours).toBe(14.5);
-    expect(period.actualEmployerCost).toBeGreaterThan(period.actualGrossCost);
+  it('estima neto con IRPF y SS trabajador', () => {
+    const breakdown = computeLaborCostBreakdown({
+      salary: '2000',
+      contractType: 'indefinido',
+      workday: 'completa',
+      payPeriodsPerYear: 12,
+      irpfRate: 0.15,
+      employeeSsRate: 0.0635,
+    });
+    expect(breakdown).not.toBeNull();
+    expect(breakdown.employeeSocialSecurity).toBe(127);
+    expect(breakdown.irpfWithholding).toBe(300);
+    expect(breakdown.estimatedNetMonthly).toBe(1573);
   });
 });

@@ -45,7 +45,7 @@ import {
   X,
 } from 'lucide-react';
 import { formatIbanInput } from '../../lib/employmentBankUtils';
-import { computeTotalLaborCost, formatLaborCurrency, computeLaborCostBreakdown } from '../../lib/laborCost';
+import { computeTotalLaborCost, formatLaborCurrency, computeLaborCostBreakdown, applyLaborCostToEmployment } from '../../lib/laborCost';
 import { Layout } from '../../components/saas/Layout';
 import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
 import { useAuth } from '../../context/AuthContext';
@@ -161,6 +161,8 @@ function buildEmploymentInfo(emp?: EmploymentInfo): EmploymentInfo {
     grossSalary: emp?.grossSalary,
     payPeriodsPerYear: emp?.payPeriodsPerYear,
     socialSecurityCost: emp?.socialSecurityCost,
+    employeeSsRate: emp?.employeeSsRate,
+    irpfRate: emp?.irpfRate,
     otherCosts: emp?.otherCosts,
     costCurrency: emp?.costCurrency || 'EUR',
     costPeriod: emp?.costPeriod || 'monthly',
@@ -181,6 +183,10 @@ const TERMINATION_LABELS: Record<string, string> = {
 function formatCurrency(value: number | undefined, currency = 'EUR'): string {
   if (value == null) return '—';
   return formatLaborCurrency(value, currency);
+}
+
+function roundPct(rate: number): string {
+  return String(Math.round(Number(rate) * 1000) / 10);
 }
 
 const CONTRACT_TYPE_LABELS: Record<string, string> = {
@@ -553,7 +559,7 @@ export function TeamMemberDetail() {
     if (!member) return;
     setSavingHr(true);
     try {
-      const employment = buildEmploymentInfo({
+      const employment = applyLaborCostToEmployment(buildEmploymentInfo({
         ...member.employment,
         ...hrForm,
         startDate: hrForm.startDate,
@@ -565,7 +571,13 @@ export function TeamMemberDetail() {
         department: hrForm.department?.trim() || '',
         position: hrForm.position?.trim() || '',
         schedule: hrForm.schedule?.trim() || '',
-      });
+        irpfRate: hrForm.irpfRate != null && Number(hrForm.irpfRate) >= 0
+          ? Number(hrForm.irpfRate)
+          : undefined,
+        employeeSsRate: hrForm.employeeSsRate != null && Number(hrForm.employeeSsRate) >= 0
+          ? Number(hrForm.employeeSsRate)
+          : undefined,
+      }));
       const result = await updateUser(member.user_id, { employment });
       if (!result.success || !result.user) {
         toast.error(result.error || 'No se pudo guardar el alta laboral');
@@ -728,14 +740,20 @@ export function TeamMemberDetail() {
   // ─── Computed vacation data ─────────────────────────────────────────────────
 
   const vacationSummary = useMemo(() => {
-    if (!vacationSettings || !userId) return { allowed: 0, used: 0, pending: 0, remaining: 0 };
-    const allowed = getDaysAllowed(vacationSettings, userId);
+    if (!vacationSettings || !userId || !member) return { allowed: 0, used: 0, pending: 0, remaining: 0 };
+    const startDate = member.employment?.startDate || '';
+    const endDate = member.employment?.endDate || '';
+    const allowed = getDaysAllowed(vacationSettings, userId, {
+      startDate,
+      endDate,
+      year: vacationYear,
+    });
     const used = getDaysUsed(vacations, userId, vacationYear);
     const pendingDays = vacations
-      .filter((v) => v.status === 'pending' && new Date(v.startDate).getFullYear() === vacationYear)
+      .filter((v) => v.status === 'pending' && v.leaveType === 'vacation' && new Date(v.startDate).getFullYear() === vacationYear)
       .reduce((sum, v) => sum + v.totalDays, 0);
-    return { allowed, used, pending: pendingDays, remaining: allowed - used };
-  }, [vacationSettings, vacations, userId, vacationYear]);
+    return { allowed, used, pending: pendingDays, remaining: Math.max(0, allowed - used) };
+  }, [vacationSettings, vacations, userId, vacationYear, member]);
 
   // ─── Clockin summary ───────────────────────────────────────────────────────
 
@@ -1069,6 +1087,44 @@ export function TeamMemberDetail() {
                       />
                     </div>
                     <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">IRPF % (estimado)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={50}
+                        step={0.5}
+                        className={inputClassName}
+                        value={hrForm.irpfRate != null ? roundPct(hrForm.irpfRate) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setHrForm((prev) => ({
+                            ...prev,
+                            irpfRate: v === '' ? undefined : Number(v) / 100,
+                          }));
+                        }}
+                        placeholder="15"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">SS trabajador % (estimado)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={20}
+                        step={0.1}
+                        className={inputClassName}
+                        value={hrForm.employeeSsRate != null ? roundPct(hrForm.employeeSsRate) : ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setHrForm((prev) => ({
+                            ...prev,
+                            employeeSsRate: v === '' ? undefined : Number(v) / 100,
+                          }));
+                        }}
+                        placeholder="6.35"
+                      />
+                    </div>
+                    <div>
                       <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Horario</label>
                       <input
                         className={inputClassName}
@@ -1253,6 +1309,32 @@ export function TeamMemberDetail() {
                 </p>
               </div>
             </div>
+
+            {laborBreakdown && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
+                  <p className="text-xs font-semibold text-gray-400 uppercase">SS trabajador/mes</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    {formatCurrency(laborBreakdown.employeeSocialSecurity)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">{(laborBreakdown.employeeSsRate * 100).toFixed(2)}%</p>
+                </div>
+                <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
+                  <p className="text-xs font-semibold text-gray-400 uppercase">IRPF estimado/mes</p>
+                  <p className="text-xl font-bold text-gray-900 dark:text-gray-100 mt-1">
+                    {formatCurrency(laborBreakdown.irpfWithholding)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">{(laborBreakdown.irpfRate * 100).toFixed(1)}%</p>
+                </div>
+                <div className="rounded-2xl border border-sky-200 dark:border-sky-800 bg-sky-50/50 dark:bg-sky-950/20 p-5">
+                  <p className="text-xs font-semibold text-sky-600 dark:text-sky-400 uppercase">Neto estimado/mes</p>
+                  <p className="text-xl font-bold text-sky-700 dark:text-sky-300 mt-1">
+                    {formatCurrency(laborBreakdown.estimatedNetMonthly)}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">Orientativo; no es nómina oficial</p>
+                </div>
+              </div>
+            )}
 
             {/* Cost review status */}
             {emp.nextCostReview && new Date(emp.nextCostReview) < new Date() && (

@@ -17,7 +17,8 @@ import { fetchAlertsSummary, type AlertsSummary } from '../../lib/clockinAlertsA
 import { fetchTeamDashboardSnapshot, type TeamDashboardSnapshot } from '../../lib/teamDashboardApi';
 import { TeamRrhhDashboardWidget } from '../../components/saas/TeamRrhhDashboardWidget';
 import { AlertSummaryWidget } from '../../components/saas/AlertSummaryWidget';
-import { listDeliveryOrdersRequest, filterDeliveryOrdersRequest, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
+import { listDeliveryOrdersRequest, filterDeliveryOrdersRequest, TPV_SESSION_SYNC_EVENT, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
+import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import {
   BarChart, Bar, Cell, ResponsiveContainer, Tooltip,
   LineChart, Line, XAxis, YAxis, CartesianGrid, Area, AreaChart,
@@ -48,6 +49,7 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
+import { listClientsPageRequest, CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
 import { computePortfolioMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, type PortfolioMetrics } from '../../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import { listFinanceMovements } from '../../lib/financeApi';
@@ -684,76 +686,140 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const isCompraventaVertical = vertical === 'carDealership';
   const isRestaurantVertical = vertical === 'restaurant' || isRestaurantBusinessType(currentBusiness?.businessType);
 
-  useEffect(() => {
+  const loadDeliveryDashboard = useCallback(async () => {
     if (!isDeliveryVertical || !authUser || !currentBusiness) {
       setDeliveryMetrics(null);
       setDeliveryScope(null);
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
-      if (!dataUserId) return;
-      const todayKey = localCalendarDayKey();
-      const monthKey = todayKey.slice(0, 7);
-      const monthStart = `${monthKey}-01T00:00:00.000Z`;
-      const lookbackMs = 45 * 24 * 60 * 60 * 1000;
-      const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
-      const monthEnd = `${todayKey}T23:59:59.999Z`;
-      try {
-        const [{ pointsOfSale, workCenters }, orderResult] = await Promise.all([
-          loadDeliveryStores(authUser, currentBusiness).catch(() => ({
-            dataUserId: '',
-            workCenters: [],
-            pointsOfSale: [],
-          })),
-          filterDeliveryOrdersRequest(dataUserId, {
-            dateFrom: orderFetchFrom,
-            dateTo: monthEnd,
-            limit: 3000,
-          }).catch(() => ({ orders: [], total: 0 })),
-        ]);
-        const pdvIds = pointsOfSale.filter((p) => p.active !== false).map((p) => p._id);
-        const storeIds = workCenters
-          .filter((wc) => !wc.deletedAt && (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'))
-          .map((wc) => wc._id);
-        const wcScope = new Set(storeIds);
-        if (pdvIds.length === 0 && wcScope.size === 0) {
-          if (!cancelled) {
-            setDeliveryMetrics(emptyPortfolioMetrics());
-            setDeliveryScope({ orders: orderResult.orders, pdvIds, primaryPdvId: null, wcScopeIds: [...wcScope] });
-          }
-          return;
-        }
-        const createdMap = new Map(pointsOfSale.map((p) => [p._id, String(p.createdAt || '')]));
-        const primaryPdv = pickPrimaryPdvIdFromList(pdvIds, createdMap);
-        const metrics = computePortfolioMetrics(
-          orderResult.orders,
-          pdvIds,
-          primaryPdv,
-          todayKey,
-          wcScope,
-        );
-        if (!cancelled) {
-          setDeliveryMetrics(metrics);
-          setDeliveryScope({
-            orders: orderResult.orders,
-            pdvIds,
-            primaryPdvId: primaryPdv,
-            wcScopeIds: [...wcScope],
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setDeliveryMetrics(null);
-          setDeliveryScope(null);
-        }
+    const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
+    if (!dataUserId) return;
+    const scopeBusinessId = String(currentBusiness.business_id || currentBusiness.id || '')
+      .replace(/^business:/, '')
+      .trim();
+    const todayKey = localCalendarDayKey();
+    const monthKey = todayKey.slice(0, 7);
+    const monthStart = `${monthKey}-01T00:00:00.000Z`;
+    const lookbackMs = 45 * 24 * 60 * 60 * 1000;
+    const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
+    const monthEnd = `${todayKey}T23:59:59.999Z`;
+    try {
+      const [{ pointsOfSale, workCenters }, orderResult] = await Promise.all([
+        loadDeliveryStores(authUser, currentBusiness).catch(() => ({
+          dataUserId: '',
+          workCenters: [],
+          pointsOfSale: [],
+        })),
+        filterDeliveryOrdersRequest(dataUserId, {
+          dateFrom: orderFetchFrom,
+          dateTo: monthEnd,
+          limit: 3000,
+          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
+        }).catch(() => ({ orders: [], total: 0 })),
+      ]);
+      const activePdvIds = pointsOfSale.filter((p) => p.active !== false).map((p) => p._id);
+      const orderPdvIds = [
+        ...new Set(
+          (orderResult.orders || [])
+            .map((o) => String(o.salesPointId || '').trim())
+            .filter(Boolean),
+        ),
+      ];
+      const pdvIds = [...new Set([...activePdvIds, ...orderPdvIds])];
+      const storeIds = workCenters
+        .filter((wc) => !wc.deletedAt && (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'))
+        .map((wc) => wc._id);
+      const wcScope = new Set(storeIds);
+      if (pdvIds.length === 0 && wcScope.size === 0 && (orderResult.orders || []).length === 0) {
+        setDeliveryMetrics(emptyPortfolioMetrics());
+        setDeliveryScope({ orders: orderResult.orders, pdvIds, primaryPdvId: null, wcScopeIds: [...wcScope] });
+        return;
       }
-    })();
+      const createdMap = new Map(pointsOfSale.map((p) => [p._id, String(p.createdAt || '')]));
+      const scopePdvIds = pdvIds.length ? pdvIds : orderPdvIds;
+      const primaryPdv = pickPrimaryPdvIdFromList(scopePdvIds, createdMap) || orderPdvIds[0] || null;
+      setDeliveryMetrics(
+        scopePdvIds.length === 0
+          ? emptyPortfolioMetrics()
+          : computePortfolioMetrics(
+              orderResult.orders,
+              scopePdvIds,
+              primaryPdv,
+              todayKey,
+              wcScope,
+            ),
+      );
+      setDeliveryScope({
+        orders: orderResult.orders,
+        pdvIds: scopePdvIds,
+        primaryPdvId: primaryPdv,
+        wcScopeIds: [...wcScope],
+      });
+    } catch {
+      setDeliveryMetrics(null);
+      setDeliveryScope(null);
+    }
+  }, [isDeliveryVertical, authUser, currentBusiness]);
+
+  useEffect(() => {
+    void loadDeliveryDashboard();
+  }, [loadDeliveryDashboard]);
+
+  const [crmClientsCount, setCrmClientsCount] = useState<number | null>(null);
+
+  const loadCrmClientsCount = useCallback(async () => {
+    if (!financeUserId || !(isDeliveryVertical || isRestaurantVertical)) {
+      setCrmClientsCount(null);
+      return;
+    }
+    try {
+      const { meta } = await listClientsPageRequest(financeUserId, {
+        limit: 1,
+        skip: 0,
+        lite: true,
+        businessId: businessId || undefined,
+      });
+      setCrmClientsCount(Number(meta?.total || 0));
+    } catch {
+      setCrmClientsCount(null);
+    }
+  }, [financeUserId, businessId, isDeliveryVertical, isRestaurantVertical]);
+
+  useEffect(() => {
+    void loadCrmClientsCount();
+  }, [loadCrmClientsCount]);
+
+  const refreshDashboardLive = useCallback(() => {
+    void loadDeliveryDashboard();
+    void loadCrmClientsCount();
+    if (authUser?.user_id) {
+      fetchDashboardData(authUser.user_id)
+        .then((data) => {
+          setServerData(data);
+          setServerUpdatedAt(data.updatedAt);
+        })
+        .catch(() => { /* noop */ });
+    }
+  }, [loadDeliveryDashboard, loadCrmClientsCount, authUser?.user_id]);
+
+  useDeliveryOrdersLive({
+    authUserId: authUser?.user_id || authUser?.id || null,
+    businessId: businessId || null,
+    onRefresh: refreshDashboardLive,
+    enabled: !!authUser && (isDeliveryVertical || isRestaurantVertical),
+    fallbackPollMs: 45_000,
+  });
+
+  useEffect(() => {
+    const onCajaSync = () => refreshDashboardLive();
+    const onClientsSync = () => { void loadCrmClientsCount(); };
+    window.addEventListener(TPV_SESSION_SYNC_EVENT, onCajaSync);
+    window.addEventListener(CRM_CLIENTS_SYNC_EVENT, onClientsSync);
     return () => {
-      cancelled = true;
+      window.removeEventListener(TPV_SESSION_SYNC_EVENT, onCajaSync);
+      window.removeEventListener(CRM_CLIENTS_SYNC_EVENT, onClientsSync);
     };
-  }, [isDeliveryVertical, authUser, currentBusiness?.business_id, currentBusiness?.businessType]);
+  }, [refreshDashboardLive, loadCrmClientsCount]);
 
   const [verticalKpi, setVerticalKpi] = useState<VerticalKpiSnapshot | null>(null);
   const [verticalKpiLoading, setVerticalKpiLoading] = useState(false);
@@ -979,12 +1045,18 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   const criticalStock    = sk?.criticalStockCount ?? 0;
   const activeWorkers    = sk?.activeWorkers ?? 0;
   const totalClockinsToday = sk?.totalClockinsToday ?? 0;
-  const openIncidents    = sk?.openIncidents ?? 0;
+  const openIncidents    = (isDeliveryVertical || isRestaurantVertical)
+    && serverData?.deliveryAlerts
+    ? Number(serverData.deliveryAlerts.total || 0)
+    : (sk?.openIncidents ?? 0);
+  const deliveryAlertsCritical = Number(serverData?.deliveryAlerts?.critical || 0);
   const pendingDeliveriesKpi = isDeliveryVertical && deliveryMetrics
     ? deliveryMetrics.activeOrders
     : (sk?.pendingDeliveries ?? 0);
   const stockCount       = sk?.stockCount ?? vehicles.filter(v => v.status === 'listo').length;
-  const oportunidades    = sk?.oportunidades ?? leads.filter(l => l.status !== 'won' && l.status !== 'lost').length;
+  const oportunidades    = (isDeliveryVertical || isRestaurantVertical) && crmClientsCount != null
+    ? crmClientsCount
+    : (sk?.oportunidades ?? leads.filter(l => l.status !== 'won' && l.status !== 'lost').length);
   const cobrosCount      = sk?.cobrosCount ?? sales.filter(s => s.status === 'pending').length;
   const cobrosPend       = sk?.cobrosPendientes ?? sales.filter(s => s.status === 'pending').reduce((sum, s) => sum + (s.salePrice || 0), 0);
 
@@ -1322,9 +1394,15 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   loading={serverLoading}
                 />
                 <KPICard
-                  title="Incidencias"
+                  title={isDeliveryVertical || isRestaurantVertical ? 'Alertas ops' : 'Incidencias'}
                   value={String(openIncidents)}
-                  sub={openIncidents > 0 ? 'Abiertas ahora' : 'Sin incidencias'}
+                  sub={
+                    isDeliveryVertical || isRestaurantVertical
+                      ? (openIncidents > 0
+                        ? `${deliveryAlertsCritical} crítica${deliveryAlertsCritical === 1 ? '' : 's'}`
+                        : 'Sin alertas')
+                      : (openIncidents > 0 ? 'Abiertas ahora' : 'Sin incidencias')
+                  }
                   icon={<ShieldAlert className="w-4 h-4" />}
                   iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
                   iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
@@ -1496,7 +1574,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   openIncidents={openIncidents}
                   cobrosCount={cobrosCount}
                   activeWorkers={activeWorkers}
-                  pendingDeliveries={serverData?.kpis?.pendingDeliveries ?? 0}
+                  pendingDeliveries={pendingDeliveriesKpi}
                   loading={serverLoading || verticalKpiLoading}
                   salesClosure={serverData?.salesClosure}
                   verticalKpi={verticalKpi}

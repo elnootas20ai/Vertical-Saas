@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getAuthHeaders } from '../lib/authApi';
+import { DELIVERY_OPS_LIVE_EVENT } from '../lib/deliveryOpsLive';
 import { useSSE } from './useSSE';
 
 interface UseDeliveryOrdersLiveOptions {
@@ -13,8 +14,7 @@ interface UseDeliveryOrdersLiveOptions {
 }
 
 /**
- * SSE en vivo para pedidos delivery (cocina, montaje, reparto).
- * Escucha eventos de negocio + legacy del owner.
+ * SSE + evento local para pedidos/cobros (cocina, ops, dashboard, ingresos).
  */
 export function useDeliveryOrdersLive({
   authUserId,
@@ -35,6 +35,7 @@ export function useDeliveryOrdersLive({
   const handlers = useMemo(
     () => ({
       'delivery:order_created': () => onRefresh(),
+      'delivery:order_updated': () => onRefresh(),
       'delivery:order_status_changed': () => onRefresh(),
       'delivery:incident_reported': () => onRefresh(),
       'delivery:incident_resolved': () => onRefresh(),
@@ -42,6 +43,8 @@ export function useDeliveryOrdersLive({
       delivery_order_updated: () => onRefresh(),
       delivery_order_cancelled: () => onRefresh(),
       delivery_order_reopened: () => onRefresh(),
+      delivery_payment_registered: () => onRefresh(),
+      tpv_session_updated: () => onRefresh(),
       connected: () => setSseOk(true),
       disconnected: () => setSseOk(false),
       reconnecting: () => setSseOk(false),
@@ -64,12 +67,18 @@ export function useDeliveryOrdersLive({
   }, [enabled, authUserId, fallbackPollMs, sseOk, onRefresh]);
 
   useEffect(() => {
+    if (!enabled) return;
     const onVisible = () => {
       if (!document.hidden) onRefresh();
     };
+    const onLocalLive = () => onRefresh();
     document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [onRefresh]);
+    window.addEventListener(DELIVERY_OPS_LIVE_EVENT, onLocalLive);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener(DELIVERY_OPS_LIVE_EVENT, onLocalLive);
+    };
+  }, [enabled, onRefresh]);
 
   return { sseOk };
 }

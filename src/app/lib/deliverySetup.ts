@@ -361,15 +361,34 @@ export async function tagOrphanRetailWorkCentersForBusiness(
 }
 
 /** PDV de caja enlazados a centros de la empresa activa (evita mezclar tiendas entre empresas). */
+/**
+ * PDV enlazados a tiendas del scope.
+ * Si un PDV es de la empresa activa pero su workCenterId está roto/huérfano,
+ * se conserva igual (si no, Modomio “desaparece” del dashboard con pedidos reales).
+ */
 export function filterPointsOfSaleForWorkCenters(
   pointsOfSale: PointOfSale[],
   workCenters: WorkCenter[],
+  options?: { businessId?: string | null },
 ): PointOfSale[] {
   const wcIds = new Set(workCenters.map((wc) => String(wc._id || '').trim()).filter(Boolean));
-  if (wcIds.size === 0) return [];
+  const businessId = normalizeBusinessScopeId(options?.businessId);
+  const pdvBusinessId = (p: PointOfSale) =>
+    normalizeBusinessScopeId(
+      String((p as PointOfSale & { business_id?: string }).business_id || p.businessId || ''),
+    );
+
+  if (wcIds.size === 0) {
+    // Sin tiendas en scope: si hay empresa, dejar sus PDV; si no, no inventar listado global.
+    if (!businessId) return [];
+    return pointsOfSale.filter((p) => pdvBusinessId(p) === businessId);
+  }
+
   return pointsOfSale.filter((p) => {
     const wcId = String(p.workCenterId || '').trim();
-    return wcId && wcIds.has(wcId);
+    if (wcId && wcIds.has(wcId)) return true;
+    if (businessId && pdvBusinessId(p) === businessId) return true;
+    return false;
   });
 }
 
@@ -518,7 +537,7 @@ export async function loadDeliveryStores(
         includeInactive: includeInactivePdvs,
       });
   const filteredByWc = dedupePointsOfSale(
-    filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters),
+    filterPointsOfSaleForWorkCenters(pointsOfSale, workCenters, { businessId }),
     dedupeOpts,
   );
   pointsOfSale = filteredByWc;
@@ -557,7 +576,9 @@ export async function loadTpvPointsOfSaleForBusiness(
       await listPointsOfSaleRequest(state.dataUserId).catch(() => [] as PointOfSale[]),
     ).filter((p) => p.active !== false);
     pointsOfSale = dedupePointsOfSale(
-      filterPointsOfSaleForWorkCenters(raw, state.workCenters),
+      filterPointsOfSaleForWorkCenters(raw, state.workCenters, {
+        businessId: resolveBusinessScopeId(business),
+      }),
     );
   }
   for (const wc of retail) {
@@ -581,7 +602,9 @@ export async function loadTpvPointsOfSaleForBusiness(
 
   const beforeScopeFilter = dedupePointsOfSale(pointsOfSale);
   pointsOfSale = dedupePointsOfSale(
-    filterPointsOfSaleForWorkCenters(beforeScopeFilter, state.workCenters),
+    filterPointsOfSaleForWorkCenters(beforeScopeFilter, state.workCenters, {
+      businessId: resolveBusinessScopeId(business),
+    }),
   );
 
   const priorityWcId = String(options?.priorityWorkCenterId || '').trim();

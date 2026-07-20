@@ -380,8 +380,8 @@ export function Login() {
 
           {loginMode === 'emailCode' ? (
             <form onSubmit={handleVerifyCode} className="space-y-4">
-              <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-                Código de <strong>6 dígitos</strong> que llega a tu correo. No es el código de la tablet.
+              <p className="text-sm text-gray-600 dark:text-gray-400 -mt-1 leading-snug">
+                Te enviamos un <strong className="font-semibold text-gray-800 dark:text-gray-200">código de 6 dígitos</strong> al correo. Escríbelo aquí para entrar.
               </p>
               <ACCESO__Input
                 label={t('auth.email')}
@@ -396,7 +396,7 @@ export function Login() {
                 error={errors.email}
               />
               <ACCESO__Input
-                label="Código del correo (6 dígitos)"
+                label="Código del correo"
                 type="text"
                 inputMode="numeric"
                 autoComplete="one-time-code"
@@ -409,7 +409,7 @@ export function Login() {
                 }}
                 error={errors.password}
               />
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3 pt-1">
                 <ACCESO__Button
                   type="submit"
                   variant="primary"
@@ -417,16 +417,18 @@ export function Login() {
                   size="md"
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? 'Verificando…' : 'Entrar con código'}
+                  {isSubmitting ? 'Verificando…' : 'Entrar'}
                 </ACCESO__Button>
-                <button
+                <ACCESO__Button
                   type="button"
-                  onClick={() => void handleRequestCode()}
+                  variant="outline"
+                  fullWidth
+                  size="md"
                   disabled={isSubmitting}
-                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
+                  onClick={() => void handleRequestCode()}
                 >
-                  Reenviar código al email
-                </button>
+                  No me ha llegado — reenviar
+                </ACCESO__Button>
                 <button
                   type="button"
                   onClick={() => {
@@ -435,26 +437,16 @@ export function Login() {
                     setCodeValue('');
                     setErrors({});
                   }}
-                  className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+                  className="pt-1 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
                 >
-                  Volver a contraseña
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginMode('tpvStore');
-                    setErrors({});
-                  }}
-                  className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  Tengo el código de tienda (tablet)
+                  {lockInfo ? 'Probar otra vez con contraseña' : 'Entrar con contraseña'}
                 </button>
               </div>
             </form>
           ) : loginMode === 'tpvStore' ? (
             <form onSubmit={handleTpvStoreLogin} className="space-y-4">
-              <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-                Código de <strong>tablet / tienda</strong> (Ajustes → Tienda → Código tablet). Letras y números.
+              <p className="text-sm text-gray-600 dark:text-gray-400 -mt-1 leading-snug">
+                Código de la <strong className="font-semibold text-gray-800 dark:text-gray-200">tablet de tienda</strong> (Ajustes → Tienda).
               </p>
               <ACCESO__Input
                 label="Código de tienda"
@@ -471,7 +463,7 @@ export function Login() {
                 error={errors.email}
                 className="font-mono uppercase tracking-widest"
               />
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3 pt-1">
                 <ACCESO__Button
                   type="submit"
                   variant="primary"
@@ -479,25 +471,28 @@ export function Login() {
                   size="md"
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? 'Activando…' : 'Entrar con código de tienda'}
+                  {isSubmitting ? 'Activando…' : 'Entrar en tablet'}
                 </ACCESO__Button>
-                <button
+                <ACCESO__Button
                   type="button"
-                  onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
-                  className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100"
-                >
-                  Pantalla completa tablet TPV
-                </button>
-                <button
-                  type="button"
+                  variant="outline"
+                  fullWidth
+                  size="md"
+                  disabled={isSubmitting}
                   onClick={() => {
                     setLoginMode('password');
                     setTpvStoreCode('');
                     setErrors({});
                   }}
-                  className="text-sm text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
                 >
-                  Volver a contraseña
+                  Entrar con email y contraseña
+                </ACCESO__Button>
+                <button
+                  type="button"
+                  onClick={() => navigate(AUTH_PATHS.tpvTabletLogin)}
+                  className="pt-1 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors"
+                >
+                  Abrir pantalla tablet completa
                 </button>
               </div>
             </form>
@@ -623,51 +618,55 @@ export function Login() {
           )}
 
           <nav
-            className="mt-2 pt-2.5 border-t border-gray-100 dark:border-gray-700/80 flex flex-col items-center gap-1.5 text-center w-full"
+            className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-3 w-full"
             aria-label="Otras opciones de acceso"
           >
-            <p className={AUTH_FOOTER_TEXT}>
-              {t('auth.noAccount')}{' '}
+            {loginMode === 'password' ? (
               <button
                 type="button"
-                onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
-                className={AUTH_FOOTER_LINK}
+                onClick={() => {
+                  setLoginMode('tpvStore');
+                  setErrors({});
+                }}
+                disabled={isSubmitting}
+                className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/40 px-3 py-2.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors text-left"
               >
-                Crear cuenta de empresa
+                <span className="font-medium text-gray-900 dark:text-gray-100">Tablet de tienda</span>
+                <span className="block text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Entra con el código de la caja / TPV
+                </span>
               </button>
-            </p>
-            <p className={AUTH_FOOTER_TEXT}>
-              ¿Eres trabajador?{' '}
-              <button
-                type="button"
-                onClick={() => navigate(AUTH_PATHS.workerLogin)}
-                className={AUTH_FOOTER_LINK}
-              >
-                Accede aquí
-              </button>
-            </p>
-            {loginMode !== 'tpvStore' ? (
+            ) : null}
+
+            <div className="flex flex-col gap-2 text-center">
               <p className={AUTH_FOOTER_TEXT}>
-                ¿TPV en tablet?{' '}
+                {t('auth.noAccount')}{' '}
                 <button
                   type="button"
-                  onClick={() => {
-                    setLoginMode('tpvStore');
-                    setErrors({});
-                  }}
-                  disabled={isSubmitting}
+                  onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
                   className={AUTH_FOOTER_LINK}
                 >
-                  Código de tienda
+                  Crear cuenta
                 </button>
               </p>
-            ) : null}
+              <p className={AUTH_FOOTER_TEXT}>
+                ¿Eres trabajador?{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate(AUTH_PATHS.workerLogin)}
+                  className={AUTH_FOOTER_LINK}
+                >
+                  Acceso empleado
+                </button>
+              </p>
+            </div>
+
             <button
               type="button"
               onClick={() => navigate(AUTH_PATHS.entry)}
-              className="mt-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+              className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors text-center"
             >
-              ← Elegir tipo de acceso
+              ← Volver al inicio
             </button>
           </nav>
         </div>

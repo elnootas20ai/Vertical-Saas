@@ -18,6 +18,7 @@ import { useSyncDeliveryPdvFilter } from '../../hooks/useSyncDeliveryPdvFilter';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
+import { resolveRetailOpsWriteBusinessId } from '../../lib/tpvRegisterScope';
 
 type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'online' | '';
 
@@ -93,9 +94,10 @@ interface Props {
 }
 
 export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit, onClose }: Props) {
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses } = useBusiness();
   const businessId = resolveBusinessScopeId(currentBusiness);
-  const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessId);
+  const writeBusinessId = resolveRetailOpsWriteBusinessId(businessId, businesses);
+  const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, writeBusinessId || businessId);
   const [step, setStep] = useState(0);
   const [data, setData] = useState<WizardData>(INITIAL_DATA);
   const [catalogSearch, setCatalogSearch] = useState('');
@@ -200,6 +202,7 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
       customerName: data.customerName, customerPhone: data.customerPhone,
       customerEmail: data.customerEmail, customerAddress,
       salesPointId: data.salesPointId, salesPointName: data.salesPointName,
+      business_id: writeBusinessId || businessId || '',
       items, paymentMethod: data.paymentMethod, observations: data.observations,
       notes: data.notes, priority: data.priority, status: 'nuevo',
     });

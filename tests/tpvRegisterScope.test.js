@@ -9,6 +9,7 @@ import {
   resolveTpvRegisterScope,
   shouldApplyTpvRegisterLoadResult,
   shouldAutoSwitchToDeliveryBusiness,
+  resolveRetailOpsWriteBusinessId,
 } from '../src/app/lib/tpvRegisterScope.ts';
 
 describe('tpvRegisterScope — regresión caja tablet', () => {
@@ -186,5 +187,15 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
     expect(shouldAutoSwitchToDeliveryBusiness({ business_id: 'clean-1', businessType: 'cleaning' }, businesses)).toBe('del-1');
     expect(shouldAutoSwitchToDeliveryBusiness({ business_id: 'del-1', businessType: 'delivery' }, businesses)).toBe(null);
     expect(shouldAutoSwitchToDeliveryBusiness(null, businesses)).toBe(null);
+  });
+
+  it('resolveRetailOpsWriteBusinessId no escribe en limpieza cuando hay delivery', () => {
+    const businesses = [
+      { business_id: 'clean-1', businessType: 'cleaning' },
+      { business_id: 'del-1', businessType: 'delivery' },
+    ];
+    expect(resolveRetailOpsWriteBusinessId('clean-1', businesses)).toBe('del-1');
+    expect(resolveRetailOpsWriteBusinessId('del-1', businesses)).toBe('del-1');
+    expect(resolveTpvCatalogBusinessId('clean-1', businesses)).toBe('del-1');
   });
 });

@@ -1,4 +1,3 @@
-import { Check } from 'lucide-react';
 import { VertialLogo } from '../VertialLogo';
 import {
   ONBOARDING_VISUALS,
@@ -34,29 +33,18 @@ export function AccesoCompactHero({
         }}
       />
 
-      <div className="relative z-10 flex flex-col gap-2 p-2.5 sm:gap-3 sm:p-5 md:flex-row md:items-center md:justify-between md:gap-6 lg:gap-8">
-        <div className="flex items-start gap-2.5 sm:gap-4 min-w-0">
-          <VertialLogo size="sm" className="shrink-0 [&_img]:brightness-0 [&_img]:invert mt-0.5 sm:hidden" />
-          <VertialLogo size="lg" className="shrink-0 [&_img]:brightness-0 [&_img]:invert mt-0.5 hidden sm:block" />
-          <div className="min-w-0">
-            <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide text-blue-100">
-              {content.badge}
-            </span>
-            <h2 className="mt-1 sm:mt-2 text-sm sm:text-xl md:text-2xl font-bold leading-tight text-white">{content.title}</h2>
-            <p className="mt-0.5 sm:mt-1 text-[11px] sm:text-sm text-blue-100/85 leading-snug max-w-xl line-clamp-2 md:line-clamp-none">{content.subtitle}</p>
-          </div>
+      <div className="relative z-10 flex items-start gap-2.5 p-2.5 sm:gap-4 sm:p-4">
+        <VertialLogo size="sm" className="shrink-0 [&_img]:brightness-0 [&_img]:invert mt-0.5 sm:hidden" />
+        <VertialLogo size="lg" className="shrink-0 [&_img]:brightness-0 [&_img]:invert mt-0.5 hidden sm:block" />
+        <div className="min-w-0">
+          <span className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-2 py-0.5 text-[9px] sm:text-[10px] font-semibold uppercase tracking-wide text-blue-100">
+            {content.badge}
+          </span>
+          <h2 className="mt-1 text-base sm:text-xl font-bold leading-tight text-white">{content.title}</h2>
+          <p className="mt-0.5 text-[11px] sm:text-sm text-blue-100/85 leading-snug line-clamp-1 sm:line-clamp-2">
+            {content.subtitle}
+          </p>
         </div>
-
-        <ul className="hidden sm:flex flex-wrap gap-x-3 gap-y-1.5 sm:gap-x-4 sm:gap-y-2 md:justify-end shrink-0 sm:pl-0">
-          {content.highlights.map((item) => (
-            <li key={item} className="flex items-center gap-1.5 text-xs sm:text-sm text-white/90">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/25 ring-1 ring-emerald-400/35">
-                <Check className="h-3 w-3 text-emerald-300" />
-              </span>
-              {item}
-            </li>
-          ))}
-        </ul>
       </div>
     </div>
   );

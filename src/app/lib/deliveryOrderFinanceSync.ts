@@ -202,3 +202,77 @@ export async function backfillDeliveryOrdersFinance(
 
   return { created, skipped };
 }
+
+export async function hasDeliveryOrderRefundMovement(
+  userId: string,
+  orderId: string,
+  existing?: FinanceMovementRecord[],
+): Promise<boolean> {
+  const id = String(orderId || '').trim();
+  if (!id) return false;
+  try {
+    const movements = existing || await listFinanceMovements(userId);
+    const ref = `DEVOLUCION-${id}`;
+    return movements.some(
+      (m) =>
+        (m.source === 'delivery_order_refund' && m.sourceRef === id)
+        || m.reference === ref
+        || String(m.notes || '').includes(`delivery_order_refund:${id}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Registra la devolución como pago (idempotente) para que ingresos netos del dashboard cuadren.
+ */
+export async function ensureDeliveryOrderRefund(
+  userId: string,
+  order: DeliveryOrder,
+  scope: FinanceMovementScope = {},
+  existingMovements?: FinanceMovementRecord[],
+): Promise<boolean> {
+  if (!userId || !order?._id) return false;
+  const refundAmount = Number(order.refundAmount || 0);
+  if (!(refundAmount > 0.009)) return false;
+  if (await hasDeliveryOrderRefundMovement(userId, order._id, existingMovements)) return true;
+
+  const businessId = String(
+    scope.businessId
+    || (order as DeliveryOrder & { business_id?: string }).business_id
+    || (order as DeliveryOrder & { businessId?: string }).businessId
+    || '',
+  ).trim();
+  const pointOfSaleId = String(scope.pointOfSaleId || order.salesPointId || '').trim();
+  const pointOfSaleName = String(scope.pointOfSaleName || order.salesPointName || '').trim();
+  const dateStr = String(
+    order.refundedAt || order.updatedAt || order.paidAt || order.createdAt || new Date().toISOString(),
+  ).slice(0, 10);
+  const base = Number((refundAmount / 1.21).toFixed(2));
+  const ticket = order.orderNumber || order.ticketNumber || order._id.slice(-6);
+
+  await createFinanceMovementInCouch(userId, {
+    type: 'pago',
+    user_id: userId,
+    concept: `Devolución pedido #${ticket}${pointOfSaleName ? ` · ${pointOfSaleName}` : ''}`,
+    reference: `DEVOLUCION-${order._id}`,
+    category: 'devoluciones',
+    amountBase: base,
+    taxRate: 21,
+    date: dateStr,
+    payMethod: String(order.paymentMethod || 'mixto'),
+    notes: `delivery_order_refund:${order._id}${order.refundReason ? ` · ${order.refundReason}` : ''}`,
+    status: 'paid',
+    source: 'delivery_order_refund',
+    sourceRef: order._id,
+    businessId: businessId || undefined,
+    businessName: String(scope.businessName || '').trim() || undefined,
+    workCenterId: String(scope.workCenterId || '').trim() || undefined,
+    workCenterName: String(scope.workCenterName || '').trim() || undefined,
+    pointOfSaleId: pointOfSaleId || undefined,
+    pointOfSaleName: pointOfSaleName || undefined,
+  });
+
+  return true;
+}

@@ -108,7 +108,9 @@ function scopeFromLoadState(
 ): { retail: WorkCenter[]; allPdvs: PointOfSale[] } {
   // loadTpvPointsOfSaleForBusiness ya filtra por empresa (incl. legacy sin businessId).
   let retail = pickRetailWorkCenters(workCenters);
-  let allPdvs = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(pointsOfSale, retail));
+  let allPdvs = dedupePointsOfSale(
+    filterPointsOfSaleForWorkCenters(pointsOfSale, retail, { businessId }),
+  );
 
   if (authUser && isInvitedWorkerUser(authUser)) {
     const scoped = filterStoresForWorkerAssignment(
@@ -253,7 +255,9 @@ function ActiveStoreScopeProviderImpl({
           buildRetailScopeCtx(biz, businessesRef.current, accountN),
         )
       : pickRetailWorkCenters(retail);
-    const scopedPdvs = dedupePointsOfSale(filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail));
+    const scopedPdvs = dedupePointsOfSale(
+      filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail, { businessId: bid }),
+    );
     const activePdvs = scopedPdvs.filter((p) => p.active !== false);
     setRetailWorkCenters(scopedRetail);
     setAllPointsOfSale(scopedPdvs);
@@ -286,7 +290,9 @@ function ActiveStoreScopeProviderImpl({
           pickRetailWorkCenters(retail),
           ctx,
         );
-        const scopedPdvs = filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail);
+        const scopedPdvs = filterPointsOfSaleForWorkCenters(allPdvs, scopedRetail, {
+          businessId: bid,
+        });
         writeRetailScopeCacheForBusiness(
           bid,
           { retailWorkCenters: scopedRetail, allPointsOfSale: scopedPdvs },

@@ -55,7 +55,7 @@ import {
   verifyEmail,
 } from '../controllers/authController.js';
 import { requireAuth, requireAuthAndEmailVerified, requireAuthForProfileUpdate, optionalAuth } from '../middleware/auth.js';
-import { authSessionLimiter, emailVerificationLimiter, loginCodeLimiter, loginLimiter, registerLimiter, recoverLimiter, teamLoginLimiter, tpvTabletAuthLimiter } from '../middleware/rateLimiter.js';
+import { authSessionLimiter, emailVerificationLimiter, loginCodeLimiter, loginLimiter, oauthLoginLimiter, registerLimiter, recoverLimiter, teamLoginLimiter, tpvTabletAuthLimiter } from '../middleware/rateLimiter.js';
 import {
   validate,
   validateParams,
@@ -88,8 +88,8 @@ const authRouter = Router();
 // Rutas públicas con rate limiting y validación de input
 authRouter.post('/register', registerLimiter, validate(registerSchema), register);
 authRouter.post('/login', loginLimiter, validate(loginSchema), login);
-authRouter.post('/google-login', loginLimiter, validate(googleLoginSchema), googleLogin);
-authRouter.post('/apple-login', loginLimiter, validate(appleLoginSchema), appleLogin);
+authRouter.post('/google-login', oauthLoginLimiter, validate(googleLoginSchema), googleLogin);
+authRouter.post('/apple-login', oauthLoginLimiter, validate(appleLoginSchema), appleLogin);
 authRouter.post('/logout', authSessionLimiter, logout);
 authRouter.post('/login-code/request', loginCodeLimiter, validate(recoverSchema), requestLoginCode);
 authRouter.post('/login-code/verify', loginCodeLimiter, validate(loginCodeVerifySchema), verifyLoginCode);

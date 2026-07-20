@@ -14,6 +14,7 @@ import {
   notifyDeliveryActiveStoreChanged,
 } from '../../lib/deliveryOpsPdvSelection';
 import { useSSE } from '../../hooks/useSSE';
+import { DELIVERY_OPS_LIVE_EVENT } from '../../lib/deliveryOpsLive';
 import { useLiveClock } from '../../hooks/useLiveClock';
 import {
   computeKitchenLiveStats,
@@ -1381,6 +1382,14 @@ export function DeliveryOpsCenter() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    const onLocalLive = () => {
+      void load();
+    };
+    window.addEventListener(DELIVERY_OPS_LIVE_EVENT, onLocalLive);
+    return () => window.removeEventListener(DELIVERY_OPS_LIVE_EVENT, onLocalLive);
+  }, [load]);
+
+  useEffect(() => {
     if (sseOk) {
       if (poll.current) {
         clearInterval(poll.current);
@@ -1412,9 +1421,13 @@ export function DeliveryOpsCenter() {
 
   const handlers = useMemo(() => ({
     'delivery:order_created': () => load(),
+    'delivery:order_updated': () => load(),
     'delivery:order_status_changed': () => load(),
     'delivery:incident_reported': () => load(),
     'delivery:incident_resolved': () => load(),
+    delivery_order_created: () => load(),
+    delivery_order_updated: () => load(),
+    delivery_order_cancelled: () => load(),
     tpv_session_updated: () => load(),
     delivery_payment_registered: () => load(),
     connected: () => setSseOk(true),

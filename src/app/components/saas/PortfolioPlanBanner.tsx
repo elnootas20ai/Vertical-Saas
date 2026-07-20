@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Building2, Lock, Sparkles } from 'lucide-react';
 import type { SubscriptionPlanTier } from '../../lib/pointOfSaleLimits';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 type PortfolioPlanBannerProps = {
   planLabel: string;
@@ -24,6 +25,8 @@ export function PortfolioPlanBanner({
   variant = 'dashboard',
   hideWhenActive = false,
 }: PortfolioPlanBannerProps) {
+  const hideUpgradeCta = isIosCustomerAccessOnlyApp();
+
   if (hideWhenActive && canUsePortfolioView) {
     return null;
   }
@@ -52,14 +55,17 @@ export function PortfolioPlanBanner({
           <p className="text-xs text-amber-900 dark:text-amber-100">
             <span className="font-semibold">Visión general en plan Pro.</span>{' '}
             Tienes {currentBusinesses} empresas; el plan {planLabel} incluye {maxBusinesses}.
+            {hideUpgradeCta ? ' Los cambios de plan se gestionan en la web.' : ''}
           </p>
         </div>
-        <Link
-          to="/saas/billing"
-          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-700 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-amber-800"
-        >
-          Ver plan Pro
-        </Link>
+        {!hideUpgradeCta ? (
+          <Link
+            to="/saas/billing"
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-700 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-amber-800"
+          >
+            Ver plan Pro
+          </Link>
+        ) : null}
       </div>
     );
   }
@@ -80,7 +86,7 @@ export function PortfolioPlanBanner({
               : 'Segunda empresa y portfolio consolidado en plan Pro.'}
           </p>
         </div>
-        {planTier !== 'pro' ? (
+        {planTier !== 'pro' && !hideUpgradeCta ? (
           <Link
             to="/saas/billing"
             className="inline-flex shrink-0 items-center justify-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:bg-gray-900 dark:text-indigo-300"

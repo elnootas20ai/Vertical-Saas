@@ -17,7 +17,7 @@ export interface UsePaginatedClientsOptions {
 }
 
 function sortToQuery(sort: { key: string; dir: 'asc' | 'desc' } | null | undefined): string | undefined {
-  if (!sort?.key) return '-createdAt';
+  if (!sort?.key) return 'name';
   const prefix = sort.dir === 'desc' ? '-' : '';
   const fieldMap: Record<string, string> = {
     name: 'name',

@@ -5,6 +5,7 @@ import { Tabs } from '../../components/saas/Tabs';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import { resolveRetailOpsWriteBusinessId } from '../../lib/tpvRegisterScope';
 import { useApp } from '../../context/AppContext';
 import {
   getDashboardRequest,
@@ -130,8 +131,11 @@ function KpiCard({ icon: Icon, label, value, sub, accent = 'amber' }: {
 
 export function DeliveryCrm() {
   const { user, isInitializing } = useAuth();
-  const { currentBusiness } = useBusiness();
-  const businessId = resolveBusinessScopeId(currentBusiness);
+  const { currentBusiness, businesses } = useBusiness();
+  const businessId = resolveRetailOpsWriteBusinessId(
+    resolveBusinessScopeId(currentBusiness),
+    businesses,
+  );
   const userId = user?.user_id || user?.id || '';
   const { addClient } = useApp();
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');

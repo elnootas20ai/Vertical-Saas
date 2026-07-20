@@ -717,19 +717,17 @@ export function DeliveryKitchen() {
       activeStoreScope.activeSalesPointId?.trim() ||
       undefined;
     const today = new Date().toISOString().slice(0, 10);
+    const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '')
+      .replace(/^business:/, '')
+      .trim();
     try {
-      const data = pdvForApi
-        ? await filterDeliveryOrdersRequest(userId, {
-            salesPointId: pdvForApi,
-            dateFrom: `${today}T00:00:00.000Z`,
-            dateTo: `${today}T23:59:59.999Z`,
-            limit: 500,
-          }).then((r) => r.orders)
-        : await filterDeliveryOrdersRequest(userId, {
-            dateFrom: `${today}T00:00:00.000Z`,
-            dateTo: `${today}T23:59:59.999Z`,
-            limit: 500,
-          }).then((r) => r.orders);
+      const data = await filterDeliveryOrdersRequest(userId, {
+        ...(pdvForApi ? { salesPointId: pdvForApi } : {}),
+        ...(businessId ? { businessId } : {}),
+        dateFrom: `${today}T00:00:00.000Z`,
+        dateTo: `${today}T23:59:59.999Z`,
+        limit: 500,
+      }).then((r) => r.orders);
       setOrders(data);
       if (prevOrderCountRef.current > 0) {
         const activeNew = data.filter((o) => o.status === 'nuevo').length;
@@ -755,7 +753,7 @@ export function DeliveryKitchen() {
     } finally {
       setLoading(false);
     }
-  }, [userId, filterPdv, activeStoreScope.activeSalesPointId, soundEnabled]);
+  }, [userId, filterPdv, activeStoreScope.activeSalesPointId, soundEnabled, currentBusiness?.business_id, currentBusiness?.id]);
 
   const pointsOfSale = activeStoreScope.pointsOfSale;
   const primaryPdvId = useMemo(

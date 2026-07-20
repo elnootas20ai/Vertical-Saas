@@ -67,7 +67,12 @@ import {
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
-import { resolveTpvRegisterScope, shouldAutoSwitchToDeliveryBusiness, resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
+import {
+  resolveTpvRegisterScope,
+  shouldAutoSwitchToDeliveryBusiness,
+  resolveTpvCatalogBusinessId,
+  resolveRetailOpsWriteBusinessId,
+} from '../../lib/tpvRegisterScope';
 import { isRestaurantBusinessType, isDeliveryOpsBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 import { changeTableStatusRequest, type DiningOrder } from '../../lib/salaApi';
@@ -118,6 +123,7 @@ import {
   readDeliveryOpsSelectedPdvId,
   writeDeliveryOpsSelectedPdvId,
 } from '../../lib/deliveryOpsPdvSelection';
+import { notifyDeliveryOpsLive } from '../../lib/deliveryOpsLive';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import {
   ArrowLeft,
@@ -687,7 +693,7 @@ export function TpvRapidoOrderFlow({
   const register = registerOverride ?? registerFromGate;
 
   const { addClient, clients, clientsTotalCount } = useApp();
-  const { currentBusiness, businesses } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled, switchBusiness } = useBusiness();
   const navigate = useNavigate();
   const location = useLocation();
   const tpvExitPath = resolveTpvCeoExitPath(location.pathname, currentBusiness?.businessType);
@@ -717,19 +723,36 @@ export function TpvRapidoOrderFlow({
     () => resolveTpvCatalogBusinessId(businessId, businesses),
     [businesses, businessId],
   );
+  const writeBusinessId = useMemo(
+    () => resolveRetailOpsWriteBusinessId(businessId, businesses),
+    [businesses, businessId],
+  );
   const clientSearchUserId = useMemo(
     () => userId || resolveBusinessDataUserId(user, currentBusiness),
     [userId, user, currentBusiness],
   );
-  const clientSearchBusinessId = resolveClientSearchBusinessId(currentBusiness, businessId);
+  const clientSearchBusinessId = resolveClientSearchBusinessId(
+    currentBusiness,
+    writeBusinessId || businessId,
+  );
+
+  /** Evita TPV sobre limpieza/otra vertical: cambia al delivery de la cuenta. */
+  const autoSwitchOrderFlowRef = useRef(false);
+  useEffect(() => {
+    if (!businessesFetchSettled || autoSwitchOrderFlowRef.current) return;
+    const targetId = shouldAutoSwitchToDeliveryBusiness(currentBusiness, businesses);
+    if (!targetId) return;
+    autoSwitchOrderFlowRef.current = true;
+    switchBusiness(targetId);
+  }, [businessesFetchSettled, businesses, currentBusiness, switchBusiness]);
 
   const isRestaurantMode = Boolean(
     restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType),
   );
 
   const walkInClient = useMemo(
-    () => buildRestaurantWalkInClient(userId || 'tpv', businessId || 'tpv'),
-    [userId, businessId],
+    () => buildRestaurantWalkInClient(userId || 'tpv', writeBusinessId || businessId || 'tpv'),
+    [userId, writeBusinessId, businessId],
   );
 
   const tableWalkInClient = useMemo(() => {
@@ -737,8 +760,8 @@ export function TpvRapidoOrderFlow({
     const label = restaurantTable.isCounter
       ? 'Mostrador'
       : restaurantTable.name || `Mesa ${restaurantTable.number}`;
-    return buildRestaurantWalkInClient(userId || 'tpv', businessId || 'tpv', label);
-  }, [restaurantTable, walkInClient, userId, businessId]);
+    return buildRestaurantWalkInClient(userId || 'tpv', writeBusinessId || businessId || 'tpv', label);
+  }, [restaurantTable, walkInClient, userId, writeBusinessId, businessId]);
 
   const [currentStep, setCurrentStep] = useState<Step>(() =>
     (restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType))
@@ -1635,7 +1658,9 @@ export function TpvRapidoOrderFlow({
       const clientData: Omit<Client, 'id' | 'createdAt'> = {
         type: 'client',
         user_id: userId,
-        ...(businessId ? { businessId, business_id: businessId } : {}),
+        ...((writeBusinessId || businessId)
+          ? { businessId: writeBusinessId || businessId, business_id: writeBusinessId || businessId }
+          : {}),
         clientType: 'particular',
         name: newClientName.trim(),
         phone: newClientPhone.replace(/\D/g, '') || newClientPhone.trim(),
@@ -1953,7 +1978,7 @@ export function TpvRapidoOrderFlow({
           ...(tabletMode ? { assemblyStartedAt: now, kitchenCompletedAt: now } : {}),
           salesPointId: pdvId,
           salesPointName: pdvName,
-          business_id: currentBusiness?.business_id || '',
+          business_id: writeBusinessId || tpvCatalogBusinessId || businessId || '',
           takenBy: takerId || user?.user_id || user?.id || '',
           takenByName: takerName,
           items,
@@ -2000,6 +2025,10 @@ export function TpvRapidoOrderFlow({
         }
 
         const { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+        notifyDeliveryOpsLive({
+          reason: 'order_created',
+          businessId: created.business_id || writeBusinessId || businessId,
+        });
 
         if (restaurantTable && !restaurantTable.isCounter && userId) {
           try {
@@ -2228,7 +2257,7 @@ export function TpvRapidoOrderFlow({
         status: 'entregado',
         salesPointId: pdvId,
         salesPointName: pdvName,
-        business_id: currentBusiness?.business_id || '',
+        business_id: writeBusinessId || tpvCatalogBusinessId || businessId || '',
         takenBy: effectiveOrderTakerId || userId,
         takenByName: takerName,
         items: [{
@@ -2251,6 +2280,10 @@ export function TpvRapidoOrderFlow({
       };
 
       const { order: cajaOrder } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+      notifyDeliveryOpsLive({
+        reason: 'order_paid',
+        businessId: cajaOrder.business_id || writeBusinessId || businessId,
+      });
       const closedOrder = await payAndCloseDiningOrder({
         userId,
         order: diningOrder,

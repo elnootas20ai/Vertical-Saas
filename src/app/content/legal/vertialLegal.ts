@@ -26,7 +26,7 @@ export type LegalDocument = {
   sections: LegalSection[];
 };
 
-const LAST_UPDATED = '22 de mayo de 2026';
+const LAST_UPDATED = '20 de julio de 2026';
 
 export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocument> = {
   'aviso-legal': {
@@ -205,8 +205,9 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocument> = {
         bullets: [
           'Identificación y contacto: nombre, email, teléfono, empresa.',
           'Credenciales y seguridad: contraseña (almacenada de forma segura), registros de acceso, IP aproximada.',
-          'Facturación: datos fiscales, historial de suscripción y pagos (los datos de tarjeta los procesa el proveedor de pagos).',
+          'Facturación: datos fiscales, historial de suscripción y pagos (los datos de tarjeta los procesa el proveedor de pagos; en la app iOS no se cobra la suscripción de Vertial).',
           'Uso del servicio: configuración, tiendas, marcas, catálogo, operaciones y logs técnicos necesarios para el funcionamiento.',
+          'App móvil (iOS/Android): fotos o imágenes que captures o adjuntes (p. ej. documentos, vehículos, TPV); ubicación precisa solo cuando usas funciones que la requieren (p. ej. fichaje geolocalizado), mientras la app está en uso; identificadores de dispositivo o tokens de notificaciones push para avisos operativos; acceso a la red local del dispositivo solo para conectar impresoras térmicas WiFi en el establecimiento.',
         ],
       },
       {
@@ -218,6 +219,7 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocument> = {
           'Facturación y obligaciones legales — cumplimiento legal (art. 6.1.c).',
           'Mejora del producto y seguridad (analítica agregada, logs) — interés legítimo, con salvaguardas.',
           'Comunicaciones comerciales sobre Vertial — consentimiento o interés legítimo según el caso; baja en cualquier momento.',
+          'Funciones de la app móvil (fichaje, cámara, push, impresora LAN) — prestación del servicio / interés legítimo técnico; no usamos estos datos para publicidad ni seguimiento entre apps de terceros.',
         ],
       },
       {
@@ -233,8 +235,9 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocument> = {
         id: 'destinatarios',
         title: '6. Destinatarios y transferencias',
         paragraphs: [
-          'Podemos compartir datos con proveedores que nos prestan servicios (hosting en la UE/EEE, email transaccional, pasarela de pago, soporte), bajo contrato que exige confidencialidad y tratamiento conforme al RGPD.',
-          'No vendemos datos personales. Si hubiera transferencias fuera del EEE, se aplicarán garantías adecuadas (cláusulas tipo, decisiones de adecuación).',
+          'Podemos compartir datos con proveedores que nos prestan servicios (hosting en la UE/EEE, email transaccional, pasarela de pago, envío de notificaciones push, soporte), bajo contrato que exige confidencialidad y tratamiento conforme al RGPD.',
+          'En la app iOS, Apple puede recibir tokens de dispositivo necesarios para entregar notificaciones push (APNs). El inicio de sesión con Apple se rige además por las condiciones de Apple.',
+          'No vendemos datos personales ni los usamos para seguimiento publicitario entre apps o sitios de terceros (App Tracking = no). Si hubiera transferencias fuera del EEE, se aplicarán garantías adecuadas (cláusulas tipo, decisiones de adecuación).',
         ],
       },
       {

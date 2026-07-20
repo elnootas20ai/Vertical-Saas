@@ -132,9 +132,9 @@ export const ONBOARDING_VISUALS: Record<OnboardingVisualKey, OnboardingVisual> =
     image: HERO_PHOTOS.coworking,
     gradientTheme: 'ocean',
     badge: 'Acceso empresa',
-    title: 'Tu panel de gestión',
-    subtitle: 'Operaciones, clientes y equipo en un solo lugar.',
-    highlights: ['Acceso seguro', 'Multi-vertical', 'Desde cualquier dispositivo'],
+    title: 'Bienvenido de nuevo',
+    subtitle: 'Entra y sigue con tu día.',
+    highlights: ['Seguro', 'Rápido', 'Siempre a mano'],
   },
   'register-user': {
     image: HERO_PHOTOS.tabletOps,
@@ -148,8 +148,8 @@ export const ONBOARDING_VISUALS: Record<OnboardingVisualKey, OnboardingVisual> =
     image: '',
     gradientTheme: 'vertial',
     badge: 'Acceso Vertial',
-    title: 'Control total de tu negocio',
-    subtitle: 'Empresa, trabajador o afiliado: elige tu puerta de entrada.',
+    title: '¿Cómo entras en Vertial?',
+    subtitle: 'Empresa, trabajador o afiliado: elige tu acceso.',
     highlights: ['Empresa y gerencia', 'Operativa en tienda', 'Programa de partners'],
   },
   confirmation: {

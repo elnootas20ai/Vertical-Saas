@@ -41,11 +41,28 @@ import {
 } from '../../lib/vacationsApi';
 import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
 import type { AuthUser } from '../../lib/authApi';
+import { toast } from 'sonner';
 
 type Tab = 'my' | 'team' | 'settings';
 type TeamView = 'requests' | 'balance';
 
 const HOURS_PER_DAY = 8;
+
+function memberStartDate(m: AuthUser | null | undefined): string | undefined {
+  return m?.employment?.startDate || undefined;
+}
+
+function memberEndDate(m: AuthUser | null | undefined): string | undefined {
+  return m?.employment?.endDate || undefined;
+}
+
+function allowedFor(settings: VacationSettings, m: AuthUser, year: number): number {
+  return getDaysAllowed(settings, m.user_id, {
+    startDate: memberStartDate(m),
+    endDate: memberEndDate(m),
+    year,
+  });
+}
 
 export function Vacations() {
   const { t, i18n } = useTranslation();
@@ -113,7 +130,13 @@ export function Vacations() {
   const myRequests = requests.filter(r => r.member_id === user?.user_id);
   const pendingRequests = requests.filter(r => r.status === 'pending');
   const myDaysUsed = user ? getDaysUsed(requests, user.user_id, currentYear) : 0;
-  const myDaysAllowed = user && settings ? getDaysAllowed(settings, user.user_id) : 22;
+  const myDaysAllowed = user && settings
+    ? getDaysAllowed(settings, user.user_id, {
+        startDate: memberStartDate(user),
+        endDate: memberEndDate(user),
+        year: currentYear,
+      })
+    : 22;
   const myDaysRemaining = Math.max(0, myDaysAllowed - myDaysUsed);
 
   const departments = useMemo(() => {
@@ -509,7 +532,7 @@ export function Vacations() {
                             <div className="px-4 pb-4 pt-0 border-t border-amber-100 dark:border-amber-800/30">
                               <div className="pt-3 space-y-3">
                                 {member && settings && (() => {
-                                  const allowed = getDaysAllowed(settings, member.user_id);
+                                  const allowed = allowedFor(settings, member, currentYear);
                                   const used = getDaysUsed(requests, member.user_id, currentYear);
                                   const remaining = Math.max(0, allowed - used);
                                   return (
@@ -659,7 +682,7 @@ export function Vacations() {
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
                         {filteredMembers.map(m => {
-                          const allowed = getDaysAllowed(settings, m.user_id);
+                          const allowed = allowedFor(settings, m, currentYear);
                           const used = getDaysUsed(requests, m.user_id, currentYear);
                           const remaining = Math.max(0, allowed - used);
                           const pending = requests.filter(r => r.member_id === m.user_id && r.status === 'pending').length;
@@ -711,10 +734,10 @@ export function Vacations() {
                         <tr className="border-t-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50">
                           <td className="px-4 py-3 text-sm font-bold text-gray-900 dark:text-white" colSpan={2}>Total</td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">
-                            {filteredMembers.reduce((sum, m) => sum + getDaysAllowed(settings, m.user_id), 0)}
+                            {filteredMembers.reduce((sum, m) => sum + allowedFor(settings, m, currentYear), 0)}
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">
-                            {filteredMembers.reduce((sum, m) => sum + getDaysAllowed(settings, m.user_id), 0) * HOURS_PER_DAY}
+                            {filteredMembers.reduce((sum, m) => sum + allowedFor(settings, m, currentYear), 0) * HOURS_PER_DAY}
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">
                             {filteredMembers.reduce((sum, m) => sum + getDaysUsed(requests, m.user_id, currentYear), 0)}
@@ -724,14 +747,14 @@ export function Vacations() {
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-green-600 dark:text-green-400">
                             {filteredMembers.reduce((sum, m) => {
-                              const a = getDaysAllowed(settings, m.user_id);
+                              const a = allowedFor(settings, m, currentYear);
                               const u = getDaysUsed(requests, m.user_id, currentYear);
                               return sum + Math.max(0, a - u);
                             }, 0)}
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-green-600 dark:text-green-400">
                             {filteredMembers.reduce((sum, m) => {
-                              const a = getDaysAllowed(settings, m.user_id);
+                              const a = allowedFor(settings, m, currentYear);
                               const u = getDaysUsed(requests, m.user_id, currentYear);
                               return sum + Math.max(0, a - u);
                             }, 0) * HOURS_PER_DAY}
@@ -753,8 +776,82 @@ export function Vacations() {
         {tab === 'settings' && settings && (
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-6">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Días de vacaciones por defecto</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Número de días laborables asignados por año a cada miembro</p>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Cómo se acumulan las vacaciones</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Con acumulación mensual, cada mes de alta suma días (p. ej. ~1,8 o 2). Sin alta en ficha, cuenta desde el 1 de enero.
+              </p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!settings) return;
+                    try {
+                      const updated = await saveSettings({
+                        ...settings,
+                        accrualMode: 'monthly',
+                        daysPerMonth: settings.daysPerMonth ?? Math.round((settings.defaultDaysPerYear / 12) * 100) / 100,
+                      });
+                      setSettings(updated);
+                      toast.success('Acumulación mensual activada');
+                    } catch {
+                      toast.error('No se pudo guardar');
+                    }
+                  }}
+                  className={`px-3 py-2 rounded-lg text-sm font-semibold border ${
+                    (settings.accrualMode || 'annual_fixed') === 'monthly'
+                      ? 'bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-900/40 dark:border-amber-700 dark:text-amber-100'
+                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600'
+                  }`}
+                >
+                  Mes a mes (recomendado)
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!settings) return;
+                    try {
+                      const updated = await saveSettings({ ...settings, accrualMode: 'annual_fixed' });
+                      setSettings(updated);
+                      toast.success('Cupo anual fijo');
+                    } catch {
+                      toast.error('No se pudo guardar');
+                    }
+                  }}
+                  className={`px-3 py-2 rounded-lg text-sm font-semibold border ${
+                    (settings.accrualMode || 'annual_fixed') === 'annual_fixed'
+                      ? 'bg-amber-100 border-amber-300 text-amber-900 dark:bg-amber-900/40 dark:border-amber-700 dark:text-amber-100'
+                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-600'
+                  }`}
+                >
+                  Cupo anual de golpe
+                </button>
+              </div>
+              {(settings.accrualMode || 'annual_fixed') === 'monthly' && (
+                <div className="flex items-center gap-3 mb-4">
+                  <input
+                    type="number"
+                    min={0.1}
+                    max={5}
+                    step={0.01}
+                    value={settings.daysPerMonth ?? Math.round((settings.defaultDaysPerYear / 12) * 100) / 100}
+                    onChange={async (e) => {
+                      const daysPerMonth = Number(e.target.value);
+                      if (!Number.isFinite(daysPerMonth) || daysPerMonth <= 0) return;
+                      try {
+                        const updated = await saveSettings({ ...settings, daysPerMonth, accrualMode: 'monthly' });
+                        setSettings(updated);
+                      } catch {}
+                    }}
+                    className="w-24 px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none"
+                  />
+                  <span className="text-sm text-gray-500 dark:text-gray-400">días / mes trabajado</span>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">Días de vacaciones por defecto (tope anual)</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Número máximo de días laborables al año (también tope si acumulas mes a mes)</p>
               <div className="flex items-center gap-3">
                 <input
                   type="number"

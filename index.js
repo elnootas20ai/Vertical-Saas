@@ -2165,32 +2165,61 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       .filter((d) => d.type === 'pago' && String(d.date || '').startsWith(monthStr))
       .reduce((s, d) => s + Number(d.totalAmount || 0), 0);
 
-    // ── Delivery revenue (delivery orders delivered) ──
+    // ── Delivery revenue (solo pedidos cobrados; evita contar a crédito) ──
     const userDeliveryOrders = deliveryDocs.filter((d) => d?.type === 'delivery_order' && d?.user_id === userId && !d?.deletedAt);
-    const deliveredDeliveryOrdersToday = userDeliveryOrders.filter((o) => o.status === 'entregado' && String(o.deliveredAt || '').startsWith(todayStr));
-    const deliveredDeliveryOrdersMonth = userDeliveryOrders.filter((o) => o.status === 'entregado' && String(o.deliveredAt || '').startsWith(monthStr));
-    const deliveryRevenueToday = deliveredDeliveryOrdersToday.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
-    const deliveryRevenueMonth = deliveredDeliveryOrdersMonth.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
-    const activeDeliveryOrders = userDeliveryOrders.filter((o) => !['entregado', 'cancelled'].includes(String(o.status || '')));
+    const isPaidDeliveryOrder = (o) => {
+      const status = String(o.status || '');
+      if (status === 'cancelled' || status === 'devuelto') return false;
+      if (String(o.paymentStatus || '') === 'refunded') return false;
+      return o.paymentStatus === 'paid' || o.paymentCollected === true;
+    };
+    const deliveryOrderNet = (o) => {
+      const gross = Number(o.paidAmount || o.totalAmount || 0);
+      const refunded = Number(o.refundAmount || 0);
+      return Math.max(0, gross - refunded);
+    };
+    const paidDeliveryOrdersToday = userDeliveryOrders.filter((o) => {
+      if (!isPaidDeliveryOrder(o)) return false;
+      const when = String(o.paidAt || o.deliveredAt || o.updatedAt || o.createdAt || '');
+      return when.startsWith(todayStr);
+    });
+    const paidDeliveryOrdersMonth = userDeliveryOrders.filter((o) => {
+      if (!isPaidDeliveryOrder(o)) return false;
+      const when = String(o.paidAt || o.deliveredAt || o.updatedAt || o.createdAt || '');
+      return when.startsWith(monthStr);
+    });
+    const deliveryRevenueToday = paidDeliveryOrdersToday.reduce((s, o) => s + deliveryOrderNet(o), 0);
+    const deliveryRevenueMonth = paidDeliveryOrdersMonth.reduce((s, o) => s + deliveryOrderNet(o), 0);
+    const activeDeliveryOrders = userDeliveryOrders.filter((o) => !['entregado', 'cancelled', 'devuelto'].includes(String(o.status || '')));
     if (businessType === 'delivery') {
       pendingDeliveries = activeDeliveryOrders.length;
     }
 
-    // Ventas hoy: vehicle sales + finance income today + delivery revenue today
+    // Cobros ya sincronizados desde pedidos delivery (source=delivery_order) — no sumar otra vez
+    const financeDeliveryIncomeToday = userFinance
+      .filter((d) => d.type === 'cobro' && d.source === 'delivery_order' && d.date === todayStr)
+      .reduce((s, d) => s + Number(d.totalAmount || 0), 0);
+    const financeDeliveryIncomeMonth = userFinance
+      .filter((d) => d.type === 'cobro' && d.source === 'delivery_order' && String(d.date || '').startsWith(monthStr))
+      .reduce((s, d) => s + Number(d.totalAmount || 0), 0);
+    const deliveryRevenueTodayGap = Math.max(0, deliveryRevenueToday - financeDeliveryIncomeToday);
+    const deliveryRevenueMonthGap = Math.max(0, deliveryRevenueMonth - financeDeliveryIncomeMonth);
+
+    // Ventas hoy: vehicle sales + finance income today + hueco delivery aún sin cobro financiero
     const soldToday = userVehicles.filter((v) => {
       if (v.status !== 'vendido' && v.status !== 'sold') return false;
       if (!v.soldAt) return false;
       return String(v.soldAt).startsWith(todayStr);
     });
     const vehicleSalesToday = soldToday.reduce((s, v) => s + Number(v.salePrice || 0), 0);
-    const salesToday = vehicleSalesToday + incomeToday + deliveryRevenueToday;
+    const salesToday = vehicleSalesToday + incomeToday + deliveryRevenueTodayGap;
     const salesTodayCount =
       soldToday.length +
       userFinance.filter((d) => d.type === 'cobro' && d.date === todayStr).length +
-      deliveredDeliveryOrdersToday.length;
+      Math.max(0, paidDeliveryOrdersToday.length - userFinance.filter((d) => d.type === 'cobro' && d.source === 'delivery_order' && d.date === todayStr).length);
 
-    // Ventas mes total (vehicle sales + finance income + delivery revenue month)
-    const salesMonthTotal = salesVolume + incomeMonth + deliveryRevenueMonth;
+    // Ventas mes: finance (incluye cobros delivery sync) + vehículos + hueco sin sync
+    const salesMonthTotal = salesVolume + incomeMonth + deliveryRevenueMonthGap;
 
     // Beneficio estimado
     const estimatedProfit = salesMonthTotal - expensesMonth;
@@ -2358,9 +2387,9 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       } catch { /* alertas delivery no bloquean el dashboard */ }
     }
 
-    // ── Quick Finance ──
+    // ── Quick Finance (incomeMonth ya incluye cobros delivery sync; solo sumar hueco) ──
     const quickFinance = {
-      incomeMonth: incomeMonth + salesVolume + deliveryRevenueMonth,
+      incomeMonth: incomeMonth + salesVolume + deliveryRevenueMonthGap,
       expensesMonth,
       estimatedProfit,
       pendingInvoices: cobrosCount,

@@ -4,6 +4,8 @@ import {
   checkClientDuplicates, getClientCLV,
   bulkCreateClients, mergeClient,
   importClientsFromBusiness,
+  markClientsAcquisition,
+  previewClientAcquisitionPeakDay,
   getClientDetail,
   getClientInvoices,
   updateClientContacts,
@@ -22,6 +24,8 @@ clientsRouter.get('/:userId/search-by-phone', searchByPhone);
 clientsRouter.post('/:userId', createClient);
 clientsRouter.post('/:userId/bulk', bulkCreateClients);
 clientsRouter.post('/:userId/import-from-business', importClientsFromBusiness);
+clientsRouter.post('/:userId/mark-acquisition', markClientsAcquisition);
+clientsRouter.get('/:userId/acquisition-peak-day', previewClientAcquisitionPeakDay);
 clientsRouter.post('/:userId/check-duplicates', checkClientDuplicates);
 clientsRouter.post('/:userId/merge', mergeClient);
 

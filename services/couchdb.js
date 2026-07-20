@@ -1235,6 +1235,8 @@ export function buildDefaultEmploymentInfo(overrides = {}) {
     grossSalary: base.grossSalary != null ? Number(base.grossSalary) : undefined,
     payPeriodsPerYear: base.payPeriodsPerYear != null ? Number(base.payPeriodsPerYear) : undefined,
     socialSecurityCost: base.socialSecurityCost != null ? Number(base.socialSecurityCost) : undefined,
+    employeeSsRate: base.employeeSsRate != null ? Number(base.employeeSsRate) : undefined,
+    irpfRate: base.irpfRate != null ? Number(base.irpfRate) : undefined,
     otherCosts: base.otherCosts != null ? Number(base.otherCosts) : undefined,
     costCurrency: base.costCurrency || undefined,
     costPeriod: base.costPeriod || undefined,
@@ -1851,8 +1853,34 @@ export function isAccountLocked(account) {
   return { locked: false, wasExpired: true };
 }
 
-export async function incrementFailedLoginAttempts(req, account) {
+/**
+ * Si entre el intento fallido y el incremento hubo un login correcto,
+ * no sumar (evita carrera: éxito resetea y el fallo tardío vuelve a bloquear).
+ */
+export function shouldSkipFailedLoginIncrement(freshAccount, attemptStartedAt) {
+  if (!attemptStartedAt) return false;
+  const lastLoginAt = freshAccount?.lastLoginAt;
+  if (!lastLoginAt) return false;
+  const last = new Date(lastLoginAt).getTime();
+  const started = new Date(attemptStartedAt).getTime();
+  if (Number.isNaN(last) || Number.isNaN(started)) return false;
+  return last >= started;
+}
+
+export async function incrementFailedLoginAttempts(req, account, options = {}) {
+  const attemptStartedAt = options.attemptStartedAt || null;
   const fresh = (await findAccountByUserId(req, account.user_id)) || account;
+
+  if (shouldSkipFailedLoginIncrement(fresh, attemptStartedAt)) {
+    return {
+      account: fresh,
+      justLocked: false,
+      lockUntil: fresh.lockUntil || null,
+      failedLoginAttempts: fresh.failedLoginAttempts || 0,
+      skipped: true,
+    };
+  }
+
   const currentAttempts = (fresh.failedLoginAttempts || 0) + 1;
 
   let lockUntil = fresh.lockUntil || null;
@@ -1873,7 +1901,7 @@ export async function incrementFailedLoginAttempts(req, account) {
     updatedAt: new Date().toISOString(),
   });
 
-  return { account: saved, justLocked, lockUntil, failedLoginAttempts: currentAttempts };
+  return { account: saved, justLocked, lockUntil, failedLoginAttempts: currentAttempts, skipped: false };
 }
 
 export async function resetFailedLoginAttempts(req, account) {
@@ -3619,14 +3647,22 @@ export function buildClientDocument(userId, data = {}, existing = null) {
     defaultPaymentMethod: normalizePaymentMethod(data.defaultPaymentMethod || existing?.defaultPaymentMethod),
     referralCode: String(data.referralCode || existing?.referralCode || '').trim(),
     referredByAffiliateId: String(data.referredByAffiliateId || existing?.referredByAffiliateId || '').trim(),
-    stats: {
-      totalOrders: Number(data.stats?.totalOrders ?? existing?.stats?.totalOrders ?? 0),
-      lastOrderDate: data.stats?.lastOrderDate ?? existing?.stats?.lastOrderDate ?? null,
-      orderFrequencyDays: Number(data.stats?.orderFrequencyDays ?? existing?.stats?.orderFrequencyDays ?? 0),
-      favoriteAddressId: data.stats?.favoriteAddressId ?? existing?.stats?.favoriteAddressId ?? null,
-      totalSpent: Number(data.stats?.totalSpent ?? existing?.stats?.totalSpent ?? 0),
-      createdFrom: data.stats?.createdFrom ?? existing?.stats?.createdFrom ?? 'crm',
-    },
+    stats: (() => {
+      const acquisitionKind = data.stats?.acquisitionKind ?? existing?.stats?.acquisitionKind ?? undefined;
+      const excludeExplicit = data.stats?.excludeFromNewMetrics ?? existing?.stats?.excludeFromNewMetrics;
+      return {
+        totalOrders: Number(data.stats?.totalOrders ?? existing?.stats?.totalOrders ?? 0),
+        lastOrderDate: data.stats?.lastOrderDate ?? existing?.stats?.lastOrderDate ?? null,
+        orderFrequencyDays: Number(data.stats?.orderFrequencyDays ?? existing?.stats?.orderFrequencyDays ?? 0),
+        favoriteAddressId: data.stats?.favoriteAddressId ?? existing?.stats?.favoriteAddressId ?? null,
+        totalSpent: Number(data.stats?.totalSpent ?? existing?.stats?.totalSpent ?? 0),
+        createdFrom: data.stats?.createdFrom ?? existing?.stats?.createdFrom ?? 'crm',
+        acquisitionKind,
+        excludeFromNewMetrics: excludeExplicit != null
+          ? Boolean(excludeExplicit)
+          : acquisitionKind === 'migration',
+      };
+    })(),
     loyalty: {
       enrolled: Boolean(data.loyalty?.enrolled ?? existing?.loyalty?.enrolled),
       enrolledAt: data.loyalty?.enrolledAt ?? existing?.loyalty?.enrolledAt ?? null,
@@ -3702,6 +3738,11 @@ export function sanitizeClient(client) {
       favoriteAddressId: client.stats?.favoriteAddressId || null,
       totalSpent: client.stats?.totalSpent || 0,
       createdFrom: client.stats?.createdFrom || 'crm',
+      acquisitionKind: client.stats?.acquisitionKind || undefined,
+      excludeFromNewMetrics: Boolean(
+        client.stats?.excludeFromNewMetrics
+        || client.stats?.acquisitionKind === 'migration',
+      ),
     },
     loyalty: {
       enrolled: Boolean(client.loyalty?.enrolled),
@@ -3747,6 +3788,12 @@ export function sanitizeClientSummary(client) {
       totalOrders: client.stats?.totalOrders || 0,
       lastOrderDate: client.stats?.lastOrderDate || null,
       totalSpent: client.stats?.totalSpent || 0,
+      createdFrom: client.stats?.createdFrom || 'crm',
+      acquisitionKind: client.stats?.acquisitionKind || undefined,
+      excludeFromNewMetrics: Boolean(
+        client.stats?.excludeFromNewMetrics
+        || client.stats?.acquisitionKind === 'migration',
+      ),
     },
     loyalty: {
       enrolled: Boolean(client.loyalty?.enrolled),

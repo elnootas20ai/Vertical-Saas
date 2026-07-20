@@ -148,6 +148,10 @@ export interface EmploymentInfo {
   grossSalary?: number;
   payPeriodsPerYear?: number;
   socialSecurityCost?: number;
+  /** Tipo SS trabajador (0–0.2), p. ej. 0.0635. */
+  employeeSsRate?: number;
+  /** Tipo IRPF estimado (0–0.5), p. ej. 0.15. */
+  irpfRate?: number;
   otherCosts?: number;
   costCurrency?: string;
   costPeriod?: 'monthly' | 'annual';
@@ -732,10 +736,71 @@ async function request<T>(
   return payload as ApiEnvelope<T>;
 }
 
+/**
+ * Login / registro público: NO reintenta con refresh de sesión.
+ * Si no, un 401 de contraseña incorrecta + token viejo reenviaba el login
+ * y el servidor contaba 2 fallos por cada intento (o ensuciaba el contador tras un acierto).
+ */
+export class AuthRequestError extends Error {
+  status: number;
+  code?: string;
+  lockUntil?: string;
+
+  constructor(message: string, opts?: { status?: number; code?: string; lockUntil?: string }) {
+    super(message);
+    this.name = 'AuthRequestError';
+    this.status = opts?.status ?? 400;
+    this.code = opts?.code;
+    this.lockUntil = opts?.lockUntil;
+  }
+}
+
+async function publicAuthRequest<T>(path: string, init?: RequestInit): Promise<ApiEnvelope<T>> {
+  const url = `${API_BASE}${path}`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+      ...init,
+    });
+  } catch (err) {
+    const hint =
+      API_BASE
+        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
+        : `No se pudo conectar con ${url}. Si usas Vite en dev, arranca el backend o revisa el proxy; en prod, VITE_API_URL / mismo origen.`;
+    throw new Error(err instanceof Error ? `${hint} (${err.message})` : hint);
+  }
+
+  const rawText = await response.text();
+  let payload = {} as ApiEnvelope<T>;
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText) as ApiEnvelope<T>;
+    } catch {
+      payload = { ok: false, error: rawText.slice(0, 300) } as ApiEnvelope<T>;
+    }
+  }
+
+  if (!response.ok || payload.ok === false) {
+    const fromPayload = extractApiErrorMessage(payload as Record<string, unknown>);
+    throw new AuthRequestError(fromPayload || `Error ${response.status}`, {
+      status: response.status,
+      code: typeof payload.code === 'string' ? payload.code : undefined,
+      lockUntil: typeof payload.lockUntil === 'string' ? payload.lockUntil : undefined,
+    });
+  }
+
+  return payload as ApiEnvelope<T>;
+}
+
 // ── Endpoints de autenticación ────────────────────────────────────────────────
 
 export async function loginRequest(email: string, password: string) {
-  const result = await request<AuthUser>('/api/auth/login', {
+  const result = await publicAuthRequest<AuthUser>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
@@ -947,7 +1012,7 @@ export interface TeamLoginResult extends ApiEnvelope<AuthUser> {
 }
 
 export async function teamLoginRequest(companyCode: string, username: string, password: string): Promise<TeamLoginResult> {
-  const result = await request<AuthUser>('/api/auth/team-login', {
+  const result = await publicAuthRequest<AuthUser>('/api/auth/team-login', {
     method: 'POST',
     body: JSON.stringify({ companyCode, username, password }),
   }) as TeamLoginResult;
@@ -991,14 +1056,14 @@ export async function recoverPasswordRequest(email: string) {
 }
 
 export async function requestLoginCodeRequest(email: string) {
-  return request<AuthUser>('/api/auth/login-code/request', {
+  return publicAuthRequest<AuthUser>('/api/auth/login-code/request', {
     method: 'POST',
     body: JSON.stringify({ email }),
   });
 }
 
 export async function verifyLoginCodeRequest(email: string, code: string) {
-  const result = await request<AuthUser>('/api/auth/login-code/verify', {
+  const result = await publicAuthRequest<AuthUser>('/api/auth/login-code/verify', {
     method: 'POST',
     body: JSON.stringify({ email, code }),
   });

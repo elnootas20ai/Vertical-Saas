@@ -9,6 +9,7 @@ import {
   isBannerDismissedForLocalToday,
 } from '../../lib/dayBannerDismiss';
 import { getTrialExpiringBannerContent } from '../../lib/trialBannerMessages';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 export function SubscriptionBanner() {
   const { subscription } = useApp();
@@ -17,6 +18,9 @@ export function SubscriptionBanner() {
   const location = useLocation();
   const [, rerender] = useReducer((x: number) => x + 1, 0);
   const [timeLeft, setTimeLeft] = useState('');
+
+  // iOS App Store: sin CTAs de pago / facturación (Guideline 3.1.1).
+  if (isIosCustomerAccessOnlyApp()) return null;
 
   const userId = user?.user_id ?? '';
   const trialDismissKey = userId ? `vertial.banner.dismissDay.${userId}.subscriptionTrial` : '';

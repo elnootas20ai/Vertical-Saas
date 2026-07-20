@@ -129,6 +129,22 @@ export const loginLimiter = rateLimit({
   },
 });
 
+/** Google/Apple: cupo aparte para no quemar el contador de contraseña. */
+export const oauthLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: getClientIp,
+  message: {
+    ok: false,
+    success: false,
+    code: 'RATE_LIMIT_EXCEEDED',
+    error: 'Demasiados intentos de acceso. Espera unos minutos e inténtalo de nuevo.',
+  },
+});
+
 /** Refresh / logout: no compartir cupo con login (el dashboard renueva token a menudo). */
 export const authSessionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

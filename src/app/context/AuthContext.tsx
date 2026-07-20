@@ -37,6 +37,7 @@ import {
   loadStoredTokens,
   loginRequest,
   logoutRequest,
+  AuthRequestError,
   posSwitchUserRequest,
   recoverPasswordRequest,
   requestLoginCodeRequest,
@@ -448,6 +449,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const message = error instanceof Error ? error.message : 'Error al iniciar sesión';
       if (!message.includes('bloqueada')) {
         console.warn('[auth/login]', message);
+      }
+      if (error instanceof AuthRequestError) {
+        return {
+          success: false,
+          error: message,
+          code: error.code || (message.includes('bloqueada') ? 'ACCOUNT_LOCKED' : undefined),
+          lockUntil: error.lockUntil,
+        };
       }
       if (message.includes('bloqueada')) {
         return { success: false, error: message, code: 'ACCOUNT_LOCKED' };

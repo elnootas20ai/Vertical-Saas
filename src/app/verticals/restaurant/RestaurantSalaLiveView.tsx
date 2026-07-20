@@ -1,11 +1,12 @@
 /**
  * Sala en servicio en vivo — datos reales de zonas/mesas (sin mocks).
+ * Permite ampliar el mapa (zonas/mesas) sin rehacer todo.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { LayoutGrid, Plus, Users, X } from 'lucide-react';
+import { LayoutGrid, Plus, Trash2, Users, X } from 'lucide-react';
 import { RestaurantSeatGuestsModal } from '../../components/saas/restaurant/RestaurantSeatGuestsModal';
 import {
   changeTableStatusRequest,
@@ -15,8 +16,10 @@ import {
 import { ensureOpenDiningOrder } from '../../lib/restaurantDiningTpv';
 import { tableStatusOnOpen } from '../../lib/restaurantTableStatus';
 import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
-import type { SalaRoom } from '../../lib/salaStudioTypes';
+import type { SalaRoom, SalaRoomType } from '../../lib/salaStudioTypes';
 import { SALA_ROOM_TYPE_LABELS } from '../../lib/salaStudioTypes';
+import { RestaurantAddTablesModal } from './RestaurantAddTablesModal';
+import { RestaurantAddZoneModal } from './RestaurantAddZoneModal';
 import { resolveTableCapacity } from './tableCapacity';
 
 type Props = {
@@ -26,8 +29,21 @@ type Props = {
   userId: string;
   businessId: string;
   actorName?: string;
+  mapBusy?: boolean;
   onTablesChange: (tables: DiningTable[]) => void;
-  onAddFirstTable?: (roomId: string) => void;
+  onAddZone?: (input: {
+    name: string;
+    roomType: SalaRoomType;
+    tableCount: number;
+    defaultCapacity: number;
+  }) => Promise<SalaRoom | void> | SalaRoom | void;
+  onAddTables?: (input: {
+    roomId: string;
+    count: number;
+    capacity: number;
+  }) => Promise<void> | void;
+  onRemoveTable?: (tableId: string) => Promise<void> | void;
+  onRemoveZone?: (roomId: string) => Promise<void> | void;
   onRemount?: () => void;
 };
 
@@ -109,8 +125,12 @@ export function RestaurantSalaLiveView({
   userId,
   businessId,
   actorName,
+  mapBusy = false,
   onTablesChange,
-  onAddFirstTable,
+  onAddZone,
+  onAddTables,
+  onRemoveTable,
+  onRemoveZone,
   onRemount,
 }: Props) {
   const navigate = useNavigate();
@@ -121,6 +141,9 @@ export function RestaurantSalaLiveView({
   const [activeRoomId, setActiveRoomId] = useState(() => sortedRooms[0]?.id || '');
   const [seatTable, setSeatTable] = useState<DiningTable | null>(null);
   const [reservedTable, setReservedTable] = useState<DiningTable | null>(null);
+  const [manageTable, setManageTable] = useState<DiningTable | null>(null);
+  const [showAddZone, setShowAddZone] = useState(false);
+  const [showAddTables, setShowAddTables] = useState(false);
   const [busyId, setBusyId] = useState('');
 
   useEffect(() => {
@@ -221,6 +244,11 @@ export function RestaurantSalaLiveView({
     }
   };
 
+  const canManageFree =
+    Boolean(onRemoveTable)
+    && manageTable
+    && (manageTable.status === 'available' || manageTable.status === 'unavailable');
+
   return (
     <div className="mx-auto min-h-[calc(100vh-4rem)] w-full max-w-5xl px-4 py-6">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
@@ -235,15 +263,28 @@ export function RestaurantSalaLiveView({
             {sortedRooms.length} zonas · {tables.length} mesas · {freeCount} libres
           </p>
         </div>
-        {onRemount && (
-          <button
-            type="button"
-            onClick={onRemount}
-            className="rounded-[12px] border border-neutral-200 px-3 py-2 text-xs font-semibold text-neutral-600"
-          >
-            Rehacer mapa
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {onAddZone && (
+            <button
+              type="button"
+              disabled={mapBusy}
+              onClick={() => setShowAddZone(true)}
+              className="inline-flex items-center gap-1.5 rounded-[12px] bg-neutral-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+              Nueva zona
+            </button>
+          )}
+          {onRemount && (
+            <button
+              type="button"
+              onClick={onRemount}
+              className="rounded-[12px] border border-neutral-200 px-3 py-2 text-xs font-semibold text-neutral-600"
+            >
+              Rehacer mapa
+            </button>
+          )}
+        </div>
       </header>
 
       {sortedRooms.length === 0 ? (
@@ -253,9 +294,19 @@ export function RestaurantSalaLiveView({
             Aún no hay zonas configuradas
           </p>
           <p className="mt-1 text-sm text-neutral-500">
-            Vuelve al asistente para crear la primera zona y sus mesas.
+            Crea la primera zona (salón, terraza, barra…) para empezar a servir.
           </p>
-          {onRemount && (
+          {onAddZone ? (
+            <button
+              type="button"
+              disabled={mapBusy}
+              onClick={() => setShowAddZone(true)}
+              className="mt-5 inline-flex items-center gap-2 rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" strokeWidth={1.5} />
+              Nueva zona
+            </button>
+          ) : onRemount ? (
             <button
               type="button"
               onClick={onRemount}
@@ -264,11 +315,11 @@ export function RestaurantSalaLiveView({
               <Plus className="h-4 w-4" strokeWidth={1.5} />
               Configurar sala
             </button>
-          )}
+          ) : null}
         </div>
       ) : (
         <>
-          <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
+          <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
             {sortedRooms.map((room) => {
               const count = tablesForRoom(tables, room).length;
               const selected = (activeRoom?.id || '') === room.id;
@@ -285,31 +336,89 @@ export function RestaurantSalaLiveView({
                 >
                   <p className="text-sm font-semibold">{room.name}</p>
                   <p className={`text-xs ${selected ? 'text-neutral-300' : 'text-neutral-500'}`}>
-                    {SALA_ROOM_TYPE_LABELS[room.roomType] || room.roomType} · {count} mesas
+                    {SALA_ROOM_TYPE_LABELS[room.roomType] || room.roomType} · {count}{' '}
+                    {room.roomType === 'barra' ? 'puestos' : 'mesas'}
                   </p>
                 </button>
               );
             })}
+            {onAddZone && (
+              <button
+                type="button"
+                disabled={mapBusy}
+                onClick={() => setShowAddZone(true)}
+                className="shrink-0 rounded-[12px] border border-dashed border-neutral-300 bg-white px-4 py-2.5 text-left text-neutral-600 hover:border-neutral-400 disabled:opacity-50"
+              >
+                <p className="inline-flex items-center gap-1 text-sm font-semibold">
+                  <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                  Zona
+                </p>
+                <p className="text-xs text-neutral-400">Terraza, barra…</p>
+              </button>
+            )}
           </div>
+
+          {activeRoom && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-neutral-500">
+                {SALA_ROOM_TYPE_LABELS[activeRoom.roomType]} · {roomTables.length}{' '}
+                {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {onAddTables && (
+                  <button
+                    type="button"
+                    disabled={mapBusy}
+                    onClick={() => setShowAddTables(true)}
+                    className="inline-flex items-center gap-1.5 rounded-[12px] border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold text-neutral-800 hover:border-neutral-300 disabled:opacity-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                    Añadir {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
+                  </button>
+                )}
+                {onRemoveZone && sortedRooms.length > 1 && (
+                  <button
+                    type="button"
+                    disabled={mapBusy}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `¿Eliminar la zona «${activeRoom.name}»? Solo si todas sus mesas están libres.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      void Promise.resolve(onRemoveZone(activeRoom.id)).catch(() => undefined);
+                    }}
+                    className="inline-flex items-center gap-1.5 rounded-[12px] border border-neutral-200 px-3 py-2 text-xs font-semibold text-neutral-500 hover:border-red-200 hover:text-red-600 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+                    Quitar zona
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {roomTables.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-[12px] border border-neutral-200 bg-white px-6 py-16 text-center">
               <LayoutGrid className="h-8 w-8 text-neutral-300" strokeWidth={1.5} />
               <p className="mt-3 text-sm font-medium text-neutral-800">
-                Aún no hay mesas en esta zona
+                Aún no hay {activeRoom?.roomType === 'barra' ? 'puestos' : 'mesas'} en esta zona
               </p>
               <p className="mt-1 max-w-sm text-sm text-neutral-500">
-                «{activeRoom?.name}» está creada, pero sin mesas. Añade la primera para
-                empezar a servir.
+                «{activeRoom?.name}» está lista. Añade mesas o puestos de barra para empezar
+                a sentar.
               </p>
-              {onAddFirstTable && activeRoom && (
+              {onAddTables && activeRoom && (
                 <button
                   type="button"
-                  onClick={() => onAddFirstTable(activeRoom.id)}
-                  className="mt-5 inline-flex items-center gap-2 rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white"
+                  disabled={mapBusy}
+                  onClick={() => setShowAddTables(true)}
+                  className="mt-5 inline-flex items-center gap-2 rounded-[12px] bg-neutral-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" strokeWidth={1.5} />
-                  Añadir la primera
+                  Añadir {activeRoom.roomType === 'barra' ? 'puestos' : 'mesas'}
                 </button>
               )}
             </div>
@@ -320,34 +429,68 @@ export function RestaurantSalaLiveView({
                 const capacity = resolveTableCapacity(table);
                 const tableId = String(table._id || table.id || '');
                 const busy = busyId === tableId;
+                const canRemove =
+                  Boolean(onRemoveTable)
+                  && (table.status === 'available' || table.status === 'unavailable');
                 return (
-                  <button
+                  <div
                     key={tableId}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => handleTableClick(table)}
-                    className={`rounded-[12px] border p-4 text-left transition-opacity hover:opacity-90 disabled:opacity-60 ${ui.card}`}
+                    className={`relative rounded-[12px] border p-4 text-left ${ui.card}`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-base font-semibold">
-                          {table.name || `Mesa ${table.number}`}
-                        </p>
-                        <p className="mt-1 flex items-center gap-1 text-xs opacity-80">
-                          <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
-                          {capacity} pax
-                          {table.currentGuests > 0 ? ` · ${table.currentGuests} sentados` : ''}
-                        </p>
+                    <button
+                      type="button"
+                      disabled={busy || mapBusy}
+                      onClick={() => handleTableClick(table)}
+                      className="w-full text-left transition-opacity hover:opacity-90 disabled:opacity-60"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-base font-semibold">
+                            {table.name || `Mesa ${table.number}`}
+                          </p>
+                          <p className="mt-1 flex items-center gap-1 text-xs opacity-80">
+                            <Users className="h-3.5 w-3.5" strokeWidth={1.5} />
+                            {capacity} pax
+                            {table.currentGuests > 0 ? ` · ${table.currentGuests} sentados` : ''}
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ui.badge}`}
+                        >
+                          {ui.label}
+                        </span>
                       </div>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${ui.badge}`}
+                    </button>
+                    {canRemove && (
+                      <button
+                        type="button"
+                        disabled={mapBusy}
+                        title="Quitar mesa"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setManageTable(table);
+                        }}
+                        className="absolute bottom-2 right-2 rounded-lg p-1.5 text-neutral-400 hover:bg-white/70 hover:text-neutral-700"
                       >
-                        {ui.label}
-                      </span>
-                    </div>
-                  </button>
+                        <Trash2 className="h-3.5 w-3.5" strokeWidth={1.5} />
+                      </button>
+                    )}
+                  </div>
                 );
               })}
+              {onAddTables && (
+                <button
+                  type="button"
+                  disabled={mapBusy}
+                  onClick={() => setShowAddTables(true)}
+                  className="flex min-h-[88px] flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed border-neutral-300 bg-white/60 px-4 py-4 text-neutral-500 hover:border-neutral-400 hover:text-neutral-700 disabled:opacity-50"
+                >
+                  <Plus className="h-5 w-5" strokeWidth={1.5} />
+                  <span className="text-xs font-semibold">
+                    Añadir {activeRoom?.roomType === 'barra' ? 'puesto' : 'mesa'}
+                  </span>
+                </button>
+              )}
             </div>
           )}
         </>
@@ -404,6 +547,70 @@ export function RestaurantSalaLiveView({
             </div>
           </div>
         </div>
+      )}
+
+      {manageTable && canManageFree && (
+        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+          <div className="w-full max-w-sm rounded-[12px] border border-neutral-200 bg-white p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-neutral-900">
+                  {manageTable.name || `Mesa ${manageTable.number}`}
+                </h2>
+                <p className="text-sm text-neutral-500">Quitar del mapa (solo si está libre)</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setManageTable(null)}
+                className="rounded-lg p-1 text-neutral-500 hover:bg-neutral-100"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <button
+              type="button"
+              disabled={mapBusy}
+              onClick={() => {
+                const id = String(manageTable._id || manageTable.id || '');
+                setManageTable(null);
+                if (!id || !onRemoveTable) return;
+                void Promise.resolve(onRemoveTable(id)).catch(() => undefined);
+              }}
+              className="w-full rounded-[12px] bg-red-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Eliminar mesa
+            </button>
+          </div>
+        </div>
+      )}
+
+      {onAddZone && (
+        <RestaurantAddZoneModal
+          open={showAddZone}
+          busy={mapBusy}
+          onClose={() => setShowAddZone(false)}
+          onCreate={(input) => {
+            void Promise.resolve(onAddZone(input)).then((created) => {
+              setShowAddZone(false);
+              if (created?.id) setActiveRoomId(created.id);
+            });
+          }}
+        />
+      )}
+
+      {onAddTables && (
+        <RestaurantAddTablesModal
+          open={showAddTables}
+          room={activeRoom}
+          busy={mapBusy}
+          onClose={() => setShowAddTables(false)}
+          onConfirm={(input) => {
+            if (!activeRoom) return;
+            void Promise.resolve(
+              onAddTables({ roomId: activeRoom.id, ...input }),
+            ).then(() => setShowAddTables(false));
+          }}
+        />
       )}
     </div>
   );

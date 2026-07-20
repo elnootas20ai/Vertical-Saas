@@ -23,6 +23,7 @@ import {
   pointOfSaleDisplayLabel,
   type OpsCenterData,
 } from '../../lib/deliveryApi';
+import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import {
   fetchAlertSummary,
   normalizeAlertSummary,
@@ -101,6 +102,16 @@ export function CeoMobileHome() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useDeliveryOrdersLive({
+    authUserId: user?.user_id || user?.id || null,
+    businessId,
+    onRefresh: () => {
+      void load();
+    },
+    enabled: !!businessId && isDeliveryLike,
+    fallbackPollMs: 45_000,
+  });
 
   const unpaidOrders = useMemo(() => {
     if (!ops?.activeOrders?.length) return [];

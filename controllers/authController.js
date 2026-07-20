@@ -751,20 +751,19 @@ export async function login(req, res) {
     // A-02: Limpieza lazy — el bloqueo expiró; resetear contador para dar inicio fresco
     if (lockStatus.wasExpired) {
       try {
-        account = await saveAccount(req, {
-          ...account,
-          failedLoginAttempts: 0,
-          lockUntil: null,
-          updatedAt: new Date().toISOString(),
-        });
+        account = await resetFailedLoginAttempts(req, account);
       } catch (cleanupErr) {
         console.error('[AUTH] Error en limpieza lazy de bloqueo:', cleanupErr?.message);
       }
     }
 
+    const attemptStartedAt = new Date().toISOString();
+
     // S-03: Verificar contraseña — si falla, incrementar contador
     if (!verifyPassword(password, account.passwordHash)) {
-      const { justLocked, lockUntil, failedLoginAttempts } = await incrementFailedLoginAttempts(req, account);
+      const { justLocked, lockUntil, failedLoginAttempts } = await incrementFailedLoginAttempts(req, account, {
+        attemptStartedAt,
+      });
 
       if (justLocked) {
         try {
@@ -789,7 +788,7 @@ export async function login(req, res) {
       return res.status(401).json({ ok: false, error: 'Email o contraseña incorrectos' });
     }
 
-    // S-03: Login exitoso → resetear contador
+    // S-03: Login exitoso → resetear contador (un acierto no debe dejar bloqueo)
     const savedAccount = await saveAccount(req, {
       ...account,
       status: 'active',
@@ -3511,19 +3510,16 @@ export async function teamLogin(req, res) {
 
     if (lockStatus.wasExpired) {
       try {
-        await saveAccount(req, {
-          ...account,
-          failedLoginAttempts: 0,
-          lockUntil: null,
-          updatedAt: new Date().toISOString(),
-        });
+        await resetFailedLoginAttempts(req, account);
       } catch (cleanupErr) {
         console.error('[AUTH] Error en limpieza lazy de bloqueo (team):', cleanupErr?.message);
       }
     }
 
+    const attemptStartedAt = new Date().toISOString();
+
     if (!verifyPassword(password, account.passwordHash)) {
-      await incrementFailedLoginAttempts(req, account);
+      await incrementFailedLoginAttempts(req, account, { attemptStartedAt });
       return res.status(401).json({ ok: false, error: 'Código de empresa, usuario o contraseña incorrectos' });
     }
 

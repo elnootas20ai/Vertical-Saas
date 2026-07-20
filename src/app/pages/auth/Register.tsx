@@ -10,7 +10,8 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
-import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
+import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable, isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
+import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
 import { signInWithAppleNative } from '../../lib/appleSignInNative';
 import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
 import type { AppleUserProfile, GoogleUserProfile } from '../../lib/authApi';
@@ -277,6 +278,15 @@ export function Register() {
     setGoogleAvatar('');
     setFormData((prev) => ({ ...prev, firstName: '', lastName: '', email: '' }));
   };
+
+  if (isIosCustomerAccessOnlyApp() && !isUserAccount) {
+    return (
+      <IosCustomerAccessOnlyScreen
+        title="Alta de empresa solo en la web"
+        onLogout={() => navigate('/auth/login')}
+      />
+    );
+  }
 
   return (
     <AccesoSplitLayout visualKey={isUserAccount ? 'register-user' : 'register-company'} scrollable>

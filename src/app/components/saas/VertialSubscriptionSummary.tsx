@@ -34,7 +34,7 @@ export interface VertialSubscriptionSummaryProps {
   billingMode: 'monthly' | 'annual';
   annualDiscount?: number;
   statusStyle: StatusStyle;
-  onChangePlan: () => void;
+  onChangePlan?: () => void;
 }
 
 function formatPrice(plan: PlanDefinition, mode: 'monthly' | 'annual', discount: number) {
@@ -149,6 +149,7 @@ export function VertialSubscriptionSummary({
               </p>
             ) : null}
           </div>
+          {onChangePlan ? (
           <button
             type="button"
             onClick={onChangePlan}
@@ -157,6 +158,7 @@ export function VertialSubscriptionSummary({
             <Sparkles className="h-4 w-4" />
             Cambiar plan
           </button>
+          ) : null}
         </div>
       </div>
 

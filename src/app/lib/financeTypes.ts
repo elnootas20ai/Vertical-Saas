@@ -9,6 +9,8 @@ export type FinanceMovementSource =
   | 'sale'
   | 'tpv_session'
   | 'delivery_order'
+  | 'delivery_order_refund'
+  | 'labor_month'
   | 'supplier_invoice'
   | 'rent_contract';
 
