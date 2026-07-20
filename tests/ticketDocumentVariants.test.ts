@@ -51,7 +51,7 @@ function decodeEscpos(bytes: Uint8Array): string {
 }
 
 describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => {
-  it('cocina: productos + mods + notas, sin importes', () => {
+  it('cocina: productos + mods + notas, sin importes ni datos de cliente', () => {
     const doc = buildTicketDocument({ ...baseOptions(), variant: 'kitchen' });
     expect(doc.title).toBe('COMANDA');
     expect(doc.total).toBe(0);
@@ -61,16 +61,24 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(doc.lines[0].removed).toEqual(['cebolla']);
     expect(doc.lines[0].note).toBe('Bien hecha');
     expect(doc.orderNotes).toContain('Sin timbre');
-    expect(doc.customerAddress).toContain('Av. Principal');
 
     const text = decodeEscpos(encodeTicketEscpos(doc));
     expect(text).toContain('COMANDA');
+    expect(text).toContain('Pedido: #1042');
+    expect(text).toContain('Envio a domicilio');
     expect(text).toContain('Pizza Margarita');
     expect(text).toContain('Extra queso');
     expect(text).toContain('SIN cebolla');
     expect(text).toContain('Bien hecha');
+    expect(text).toContain('Sin timbre');
     expect(text).not.toMatch(/TOTAL/);
     expect(text).not.toMatch(/Base imponible/);
+    expect(text).not.toMatch(/Cliente:/);
+    expect(text).not.toMatch(/666123456/);
+    expect(text).not.toMatch(/Dir:/);
+    expect(text).not.toMatch(/Atendido:/);
+    expect(text).not.toMatch(/NIF\/CIF/);
+    expect(text).not.toMatch(/Tienda:/);
   });
 
   it('reparto: dirección, productos, total y cobro', () => {

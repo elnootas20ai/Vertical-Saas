@@ -98,6 +98,39 @@ export function buildEposTicket(
     builder.addText('\n');
   }
 
+  // Comanda cocina: solo pedido + productos + notas (sin cliente ni datos fiscales)
+  if (doc.variant === 'kitchen') {
+    builder.addTextAlign('center');
+    setTextSize(builder, 2, 2);
+    boldLine(builder, doc.title, titleCols);
+    setTextSize(builder, 1, 1);
+    line(builder, `${doc.ticketNo} - ${doc.dateLabel}`, width);
+    sep(builder, width);
+    builder.addTextAlign('left');
+    setTextSize(builder, 1, 2);
+    line(builder, `Pedido: #${doc.orderNumber}`, tallCols);
+    setTextSize(builder, 1, 1);
+    if (doc.deliveryTypeLabel) {
+      setTextSize(builder, 1, 2);
+      line(builder, doc.deliveryTypeLabel, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    sep(builder, width);
+    for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
+    if (doc.orderNotes) {
+      sep(builder, width);
+      setTextSize(builder, 1, 2);
+      line(builder, `NOTA: ${doc.orderNotes}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    builder.addTextAlign('center');
+    line(builder, doc.footer, width);
+    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(3);
+    else builder.addText('\n\n');
+    if (typeof builder.addCut === 'function') builder.addCut(builder.CUT_FEED ?? 1);
+    return;
+  }
+
   builder.addTextAlign('center');
   setTextSize(builder, 1, 2);
   line(builder, doc.issuer, tallCols);
@@ -127,21 +160,7 @@ export function buildEposTicket(
     setTextSize(builder, 1, 1);
   };
 
-  if (doc.variant === 'kitchen') {
-    if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
-    line(builder, `Cliente: ${doc.customerName}`, width);
-    if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
-    pushDir();
-    if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
-    sep(builder, width);
-    for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
-    if (doc.orderNotes) {
-      sep(builder, width);
-      setTextSize(builder, 1, 2);
-      line(builder, `NOTA: ${doc.orderNotes}`, tallCols);
-      setTextSize(builder, 1, 1);
-    }
-  } else if (doc.variant === 'delivery') {
+  if (doc.variant === 'delivery') {
     if (doc.deliveryTypeLabel) {
       setTextSize(builder, 1, 2);
       line(builder, doc.deliveryTypeLabel, tallCols);
@@ -216,9 +235,9 @@ export function buildEposTicket(
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(5);
+    builder.addFeedLine(3);
   } else {
-    builder.addText('\n\n\n');
+    builder.addText('\n\n');
   }
 
   if (typeof builder.addCut === 'function') {

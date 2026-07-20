@@ -126,7 +126,7 @@ function pushLineDetail(
  * Sin este avance, el título/negocio salen cortados.
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  // Ajustado: suficiente para no cortar el nombre, menos blanco arriba
+  // Mínimo para no cortar el título
   chunks.push(command([ESC, 0x64, 1]));
 }
 
@@ -135,9 +135,8 @@ function pushTopMargin(chunks: Uint8Array[]) {
  */
 function pushFeedAndCut(chunks: Uint8Array[], width: number) {
   chunks.push(setSize(SIZE_NORMAL));
-  chunks.push(textLine('', width));
-  // ~5 líneas ≈ margen hasta cuchilla (antes 8 + 2 vacías)
-  chunks.push(command([ESC, 0x64, 5]));
+  // ~3 líneas hasta cuchilla (ajustado más compacto)
+  chunks.push(command([ESC, 0x64, 3]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
 }
@@ -179,6 +178,39 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     command([ESC, 0x40]),
   ];
   pushTopMargin(chunks);
+
+  // Comanda cocina: solo lo operativo (pedido, tipo, productos, notas). Sin datos fiscales ni cliente.
+  if (doc.variant === 'kitchen') {
+    pushCenteredTitle(chunks, doc.title, paperWidthMm);
+    chunks.push(command([ESC, 0x61, 1]));
+    chunks.push(textLine(`${doc.ticketNo} - ${doc.dateLabel}`, width));
+    chunks.push(textLine(sepLine(width), width));
+    chunks.push(command([ESC, 0x61, 0]));
+
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(`Pedido: #${doc.orderNumber}`, tallCols));
+    chunks.push(setSize(SIZE_NORMAL));
+    if (doc.deliveryTypeLabel) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(doc.deliveryTypeLabel, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    chunks.push(textLine(sepLine(width), width));
+    for (const line of doc.lines) {
+      pushLineDetail(chunks, line, width, paperWidthMm);
+    }
+    if (doc.orderNotes) {
+      chunks.push(textLine(sepLine(width), width));
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`NOTA: ${doc.orderNotes}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    chunks.push(command([ESC, 0x61, 1]));
+    chunks.push(textLine(doc.footer, width));
+    pushFeedAndCut(chunks, width);
+    return concat(chunks);
+  }
+
   chunks.push(command([ESC, 0x61, 1]));
 
   // Emisor más grande
@@ -202,23 +234,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
   chunks.push(textLine(`Pedido: #${doc.orderNumber}`, tallCols));
   chunks.push(setSize(SIZE_NORMAL));
 
-  if (doc.variant === 'kitchen') {
-    if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
-    chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
-    if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
-    pushCustomerDir(chunks, doc, width, paperWidthMm);
-    if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
-    chunks.push(textLine(sepLine(width), width));
-    for (const line of doc.lines) {
-      pushLineDetail(chunks, line, width, paperWidthMm);
-    }
-    if (doc.orderNotes) {
-      chunks.push(textLine(sepLine(width), width));
-      chunks.push(setSize(SIZE_TALL));
-      chunks.push(textLine(`NOTA: ${doc.orderNotes}`, tallCols));
-      chunks.push(setSize(SIZE_NORMAL));
-    }
-  } else if (doc.variant === 'delivery') {
+  if (doc.variant === 'delivery') {
     // Hoja de fuera / rider: dirección y teléfono bien grandes
     if (doc.deliveryTypeLabel) {
       chunks.push(setSize(SIZE_TALL));
@@ -343,7 +359,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
     textLine('Vuelve a la app y pulsa', width),
     textLine('"Usar esta impresora"', width),
     textLine('', width),
-    command([ESC, 0x64, 5]),
+    command([ESC, 0x64, 3]),
     command([GS, 0x56, 0]),
   ]);
 }

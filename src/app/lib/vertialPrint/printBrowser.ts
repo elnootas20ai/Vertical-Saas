@@ -11,11 +11,11 @@ function escapeHtml(value: string): string {
 
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:6px 12px 12px;font-size:14px;color:#000;line-height:1.4}
+body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:4px 10px 8px;font-size:14px;color:#000;line-height:1.35}
 .c{text-align:center}.hr{border-top:1px dashed #333;margin:10px 0}
 table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .t td{font-size:16px;font-weight:bold;padding-top:6px}
-.f{margin-top:10px;font-size:12px;text-align:center;color:#666;line-height:1.4}
+.f{margin-top:6px;font-size:12px;text-align:center;color:#666;line-height:1.3}
 .small{font-size:12px;color:#444}
 .note{color:#b45309;font-size:12px;font-weight:bold}
 .add{color:#047857;font-size:12px;font-weight:bold}
@@ -68,14 +68,13 @@ function buildKitchenTicketHtml(doc: TicketDocument): string {
 
   return `<!DOCTYPE html><html><head><title>Comanda ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}</style></head><body>
-${buildHeaderHtml(doc)}
-${doc.salesPointName ? `<p>Tienda: ${escapeHtml(doc.salesPointName)}</p>` : ''}
+<div class="c">
+  <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
+  <span class="small">${escapeHtml(doc.ticketNo)} - ${escapeHtml(doc.dateLabel)}</span>
+</div>
+<div class="hr"></div>
 <p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>
 ${doc.deliveryTypeLabel ? `<p class="b">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
-<p>Cliente: ${escapeHtml(doc.customerName)}</p>
-${doc.customerPhone ? `<p>Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
-${doc.customerAddress ? `<p${doc.emphasizeCustomerAddress ? ' class="b"' : ''}>Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
-${doc.cashierName ? `<p>Atendido por: ${escapeHtml(doc.cashierName)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
 ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}
