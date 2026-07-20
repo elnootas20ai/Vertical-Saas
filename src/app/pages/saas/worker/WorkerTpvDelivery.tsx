@@ -26,6 +26,7 @@ import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpv
 import { useTpvRegisterBoardReady, useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
+import { useTpvOrderFlowChrome, useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
 import {
   isDeliveredBoardOrder,
   isTpvMontajeBoardOrder,
@@ -82,7 +83,6 @@ import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOf
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
 import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
 import { resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
-import { useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
 import { useTpvIncomingOrderSounds } from '../../../hooks/useTpvIncomingOrderSounds';
 import { useDeliveryOrdersLive } from '../../../hooks/useDeliveryOrdersLive';
 import {
@@ -977,6 +977,7 @@ export function WorkerTpvDelivery({
     [currentBusiness, businesses, registerScope.scopeBusinessId, businessesFetchSettled, isTabletSession, tabletVertical],
   );
 
+  useTpvOrderFlowChrome(view === 'new-order');
   useTpvSuppressBottomBar(view !== 'board');
   const isTabletUi = Boolean(tabletBinding) && !ceoMode;
   const workerPdv = useMemo(
@@ -1263,6 +1264,7 @@ export function WorkerTpvDelivery({
             salesPointName: updated.salesPointName,
             cashierName: user?.fullName,
             variant: 'customer',
+            accountEmail: user?.email,
           });
         }
       } else {

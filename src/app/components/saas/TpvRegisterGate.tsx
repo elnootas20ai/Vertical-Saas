@@ -30,7 +30,14 @@ import {
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
-import { localCalendarDayKey, registerSessionSpansMultipleDays, tpvSessionBelongsToBusiness } from '../../lib/tpvCajaScope';
+import {
+  localCalendarDayKey,
+  mergeTpvRegisterSessionsPreservingOpen,
+  registerSessionSpansMultipleDays,
+  resolveActiveTpvRegisterSession,
+  tpvSessionBelongsToBusiness,
+  tpvSessionMatchesStoreRef,
+} from '../../lib/tpvCajaScope';
 import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
   buildAggregatorCashRows,
@@ -187,22 +194,6 @@ function findLastClosedTpvSession(
         - new Date(a.closedAt || a.updatedAt || 0).getTime(),
     );
   return matches[0] || null;
-}
-
-function tpvSessionMatchesStoreRef(
-  session: TpvRegisterSession,
-  refId: string,
-  pointsOfSale: PointOfSale[],
-): boolean {
-  const pick = String(refId || '').trim();
-  const sp = String(session.pointOfSaleId || '').trim();
-  if (!pick || !sp) return false;
-  if (sp === pick) return true;
-  const pdv = pointsOfSale.find((p) => p._id === pick);
-  if (pdv && sp === String(pdv.workCenterId || '').trim()) return true;
-  const byWc = pointsOfSale.find((p) => String(p.workCenterId || '').trim() === sp);
-  if (byWc && byWc._id === pick) return true;
-  return false;
 }
 
 function shouldKeepTpvSessionInList(
@@ -2637,9 +2628,14 @@ export function TpvRegisterGate({
     if (id) setManagerPdvPickId(id);
   }, [initialManagerPdvId, isWorkerUser, managerPdvPickId, sessions, pointsOfSale, dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
 
+  const orderFlowActiveRef = useRef(orderFlowActive);
+  orderFlowActiveRef.current = orderFlowActive;
+
   useEffect(() => {
     if (isWorkerUser || isTabletSession) return;
     const syncManagerPdvFromStorage = () => {
+      // No cambiar de tienda a mitad de un pedido: evita volver a «Abrir caja».
+      if (orderFlowActiveRef.current) return;
       const bid = resolveBusinessScopeId(currentBusiness);
       if (!bid || !dataUserId) return;
       const saved = readDeliveryOpsSelectedPdvId(bid, dataUserId);
@@ -2668,13 +2664,12 @@ export function TpvRegisterGate({
             if (isTabletSessionRef.current && tabletPdvId) {
               next = sessData.filter((s) => {
                 const pid = String(s.pointOfSaleId || '').trim();
-                return !pid || pid === tabletPdvId;
+                return !pid || tpvSessionMatchesStoreRef(s, tabletPdvId, pointsOfSaleRef.current);
               });
             } else if (pointsOfSaleRef.current.length > 0) {
               next = sessData.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSaleRef.current, bid));
             }
-            if (next.length === 0 && prev.length > 0) return prev;
-            return next;
+            return mergeTpvRegisterSessionsPreservingOpen(prev, next);
           });
         })
         .catch(() => null);
@@ -2688,23 +2683,40 @@ export function TpvRegisterGate({
     };
   }, [dataUserId, pointsOfSaleScopeKey, scopeBusinessId]);
 
+  /** Última caja abierta conocida: no perder el tablero si el pick de tienda parpadea. */
+  const stickyOpenSessionRef = useRef<TpvRegisterSession | null>(null);
+
   const activeSession = useMemo(() => {
-    const open = sessions.filter((s) => isTpvRegisterSessionOpen(s));
-    if (isTabletSession && tabletRestrictedPdvId) {
-      return open.find((s) => tpvSessionMatchesStoreRef(s, tabletRestrictedPdvId, pointsOfSale)) || null;
-    }
-    if (isWorkerUser) {
-      if (workerAssignedPdvId) {
-        return open.find((s) => tpvSessionMatchesStoreRef(s, workerAssignedPdvId, pointsOfSale)) || null;
-      }
-      return open[0] || null;
-    }
-    if (managerPdvPickId) {
-      return open.find((s) => tpvSessionMatchesStoreRef(s, managerPdvPickId, pointsOfSale)) || null;
-    }
-    if (open.length === 1) return open[0];
-    return null;
-  }, [sessions, isTabletSession, tabletRestrictedPdvId, isWorkerUser, workerAssignedPdvId, managerPdvPickId, pointsOfSale]);
+    const pickId = isTabletSession
+      ? tabletRestrictedPdvId
+      : isWorkerUser
+        ? workerAssignedPdvId
+        : managerPdvPickId;
+
+    const holdStickyWhileOpen = Boolean(
+      isTabletSession || isWorkerUser || orderFlowActive,
+    );
+
+    const { session, nextSticky } = resolveActiveTpvRegisterSession({
+      sessions,
+      sticky: stickyOpenSessionRef.current,
+      pickId,
+      pointsOfSale,
+      holdStickyWhileOpen,
+    });
+    // Ref en el mismo render: si el pick parpadea en el siguiente update, sticky ya está.
+    stickyOpenSessionRef.current = nextSticky;
+    return session;
+  }, [
+    sessions,
+    isTabletSession,
+    tabletRestrictedPdvId,
+    isWorkerUser,
+    workerAssignedPdvId,
+    managerPdvPickId,
+    pointsOfSale,
+    orderFlowActive,
+  ]);
 
   const activeSessionIdRef = useRef<string | null>(null);
   activeSessionIdRef.current = isTpvRegisterSessionOpen(activeSession) ? activeSession?._id ?? null : null;
@@ -2956,6 +2968,9 @@ export function TpvRegisterGate({
     layoutScopeKeyRef.current = scopeKey;
 
     if (!scopeBusinessId) {
+      if (sessionsRef.current.some((s) => isTpvRegisterSessionOpen(s)) || orderFlowActiveRef.current) {
+        return;
+      }
       hasDisplayedStoresRef.current = false;
       setPointsOfSale([]);
       setWorkCenters([]);
@@ -2965,7 +2980,9 @@ export function TpvRegisterGate({
 
     if (scopeChanged) {
       loadInflightRef.current = null;
-      if (!isTabletSession) {
+      // No resetear tiendas si ya hay caja abierta: evita spinner/OpeningScreen a mitad de pedido.
+      const hasOpen = sessionsRef.current.some((s) => isTpvRegisterSessionOpen(s));
+      if (!isTabletSession && !hasOpen) {
         hasDisplayedStoresRef.current = false;
       }
     }
@@ -2979,7 +2996,7 @@ export function TpvRegisterGate({
         setPointsOfSale(stubPdvs);
         setWorkCenters([]);
         hasDisplayedStoresRef.current = stubPdvs.length > 0;
-      } else if (scopeChanged) {
+      } else if (scopeChanged && !sessionsRef.current.some((s) => isTpvRegisterSessionOpen(s))) {
         setLoading(true);
       }
     }
@@ -2991,7 +3008,11 @@ export function TpvRegisterGate({
           setManagerPdvPickId(id);
           skipManagerAutoPdvRef.current = true;
         }
-      } else if (scopeChanged) {
+      } else if (
+        scopeChanged
+        && !orderFlowActiveRef.current
+        && !sessionsRef.current.some((s) => isTpvRegisterSessionOpen(s))
+      ) {
         setManagerPdvPickId(null);
         skipManagerAutoPdvRef.current = false;
       }
@@ -3108,11 +3129,14 @@ export function TpvRegisterGate({
         }
 
         if (tabletFastPath) {
-          setSessions(
-            sessData.filter((s) => {
-              const pid = String(s.pointOfSaleId || '').trim();
-              return !pid || pid === tabletPdvId;
-            }),
+          setSessions((prev) =>
+            mergeTpvRegisterSessionsPreservingOpen(
+              prev,
+              sessData.filter((s) => {
+                const pid = String(s.pointOfSaleId || '').trim();
+                return !pid || tpvSessionMatchesStoreRef(s, tabletPdvId, pointsOfSaleRef.current);
+              }),
+            ),
           );
         } else {
           let scopedPdvs = storeState.pointsOfSale.filter((p) => p.active !== false);
@@ -3148,10 +3172,19 @@ export function TpvRegisterGate({
             );
             hasDisplayedStoresRef.current = true;
           }
-          setSessions(sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs, bidAtStart)));
+          setSessions((prev) =>
+            mergeTpvRegisterSessionsPreservingOpen(
+              prev,
+              sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs, bidAtStart)),
+            ),
+          );
         }
       } catch {
-        if (seq === loadSeqRef.current && !hasDisplayedStoresRef.current) {
+        if (
+          seq === loadSeqRef.current
+          && !hasDisplayedStoresRef.current
+          && !sessionsRef.current.some((s) => isTpvRegisterSessionOpen(s))
+        ) {
           setPointsOfSale([]);
           setWorkCenters([]);
           setSessions([]);
@@ -3379,6 +3412,7 @@ export function TpvRegisterGate({
     };
     try {
       const updated = await updateTpvRegisterSessionRequest(dataUserId, closedPayload as TpvRegisterSession);
+      stickyOpenSessionRef.current = null;
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: updated }));
       setShowClosing(false);
@@ -3470,7 +3504,14 @@ export function TpvRegisterGate({
               const refreshed = await listTpvRegisterSessionsRequest(uid, {
                 businessId: scopeBusinessIdRef.current || undefined,
               });
-              setSessions(refreshed.filter((s) => shouldKeepTpvSessionInList(s, pointsOfSale, scopeBusinessIdRef.current)));
+              setSessions((prev) =>
+                mergeTpvRegisterSessionsPreservingOpen(
+                  prev,
+                  refreshed.filter((s) =>
+                    shouldKeepTpvSessionInList(s, pointsOfSale, scopeBusinessIdRef.current),
+                  ),
+                ),
+              );
             } catch {
               /* reintento con copia local */
             }
@@ -3769,7 +3810,7 @@ export function TpvRegisterGate({
     );
   }
 
-  if (loading) {
+  if (loading && !isTpvRegisterSessionOpen(activeSession)) {
     return wrapShell(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
         <div className="text-center max-w-sm">

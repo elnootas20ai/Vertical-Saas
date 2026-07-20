@@ -3,7 +3,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -12,6 +14,9 @@ type TpvChromeContextValue = {
   setSuppressBottomBar: (suppress: boolean) => void;
   orderFlowActive: boolean;
   setOrderFlowActive: (active: boolean) => void;
+  /** Contador: varios hijos (tablero + OrderFlow) pueden pedir el lock a la vez. */
+  acquireOrderFlowLock: () => void;
+  releaseOrderFlowLock: () => void;
 };
 
 const TpvChromeContext = createContext<TpvChromeContextValue | null>(null);
@@ -29,15 +34,39 @@ export function TpvChromeScope({
 }) {
   const [suppressBottomBar, setSuppressBottomBarState] = useState(false);
   const [orderFlowActive, setOrderFlowActiveState] = useState(false);
+  const orderFlowLockCountRef = useRef(0);
   const setSuppressBottomBar = useCallback((suppress: boolean) => {
     setSuppressBottomBarState(suppress);
   }, []);
   const setOrderFlowActive = useCallback((active: boolean) => {
     setOrderFlowActiveState(active);
   }, []);
+  const syncOrderFlowLock = useCallback(() => {
+    const active = orderFlowLockCountRef.current > 0;
+    setOrderFlowActiveState(active);
+    setSuppressBottomBarState(active);
+    try {
+      if (active) sessionStorage.setItem('vertial.tpv.orderFlowLock', '1');
+      else sessionStorage.removeItem('vertial.tpv.orderFlowLock');
+    } catch { /* ignore */ }
+  }, []);
+  const acquireOrderFlowLock = useCallback(() => {
+    orderFlowLockCountRef.current += 1;
+    syncOrderFlowLock();
+  }, [syncOrderFlowLock]);
+  const releaseOrderFlowLock = useCallback(() => {
+    orderFlowLockCountRef.current = Math.max(0, orderFlowLockCountRef.current - 1);
+    syncOrderFlowLock();
+  }, [syncOrderFlowLock]);
   const value = useMemo(
-    () => ({ setSuppressBottomBar, orderFlowActive, setOrderFlowActive }),
-    [setSuppressBottomBar, orderFlowActive, setOrderFlowActive],
+    () => ({
+      setSuppressBottomBar,
+      orderFlowActive,
+      setOrderFlowActive,
+      acquireOrderFlowLock,
+      releaseOrderFlowLock,
+    }),
+    [setSuppressBottomBar, orderFlowActive, setOrderFlowActive, acquireOrderFlowLock, releaseOrderFlowLock],
   );
 
   return (
@@ -70,13 +99,22 @@ export function useTpvSuppressBottomBar(active: boolean) {
 /** Modo pedido activo: barra de caja mínima, más espacio al catálogo y sin barra inferior duplicada. */
 export function useTpvOrderFlowChrome(active: boolean) {
   const ctx = useContext(TpvChromeContext);
-  useEffect(() => {
+  const heldRef = useRef(false);
+  // useLayoutEffect: el gate debe ver orderFlowActive antes del paint (evita OpeningScreen a mitad de pedido).
+  useLayoutEffect(() => {
     if (!ctx) return;
-    ctx.setOrderFlowActive(active);
-    ctx.setSuppressBottomBar(active);
+    if (active && !heldRef.current) {
+      ctx.acquireOrderFlowLock();
+      heldRef.current = true;
+    } else if (!active && heldRef.current) {
+      ctx.releaseOrderFlowLock();
+      heldRef.current = false;
+    }
     return () => {
-      ctx.setOrderFlowActive(false);
-      ctx.setSuppressBottomBar(false);
+      if (heldRef.current) {
+        ctx.releaseOrderFlowLock();
+        heldRef.current = false;
+      }
     };
   }, [active, ctx]);
 }

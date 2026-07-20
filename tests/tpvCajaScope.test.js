@@ -6,12 +6,86 @@ import {
   isTpvMontajeBoardOrder,
   isTpvRepartoBoardOrder,
   localCalendarDayKey,
+  mergeTpvRegisterSessionsPreservingOpen,
   orderInRegisterSession,
   orderLoadBoundsForOpenSession,
   orderOnOpenTpvOpsBoard,
+  resolveActiveTpvRegisterSession,
   sessionActiveOnCalendarDay,
   tpvSessionBelongsToBusiness,
 } from '../src/app/lib/tpvCajaScope.js';
+
+describe('mergeTpvRegisterSessionsPreservingOpen', () => {
+  const openA = { _id: 's-open', status: 'open', pointOfSaleId: 'pdv-1', openedAt: '2026-07-20T08:00:00.000Z' };
+  const closedA = { _id: 's-open', status: 'closed', pointOfSaleId: 'pdv-1', openedAt: '2026-07-20T08:00:00.000Z' };
+  const closedOther = { _id: 's-old', status: 'closed', pointOfSaleId: 'pdv-1', openedAt: '2026-07-19T08:00:00.000Z' };
+
+  it('keeps previous list when next is empty', () => {
+    expect(mergeTpvRegisterSessionsPreservingOpen([openA], [])).toEqual([openA]);
+  });
+
+  it('keeps a locally open session missing from next (API/filter glitch)', () => {
+    const merged = mergeTpvRegisterSessionsPreservingOpen([openA], [closedOther]);
+    expect(merged).toEqual([closedOther, openA]);
+  });
+
+  it('respects server close when the same id comes back closed', () => {
+    const merged = mergeTpvRegisterSessionsPreservingOpen([openA], [closedA, closedOther]);
+    expect(merged.find((s) => s._id === 's-open')?.status).toBe('closed');
+    expect(merged.filter((s) => s._id === 's-open')).toHaveLength(1);
+  });
+});
+
+describe('resolveActiveTpvRegisterSession', () => {
+  const pdvs = [{ _id: 'pdv-1', workCenterId: 'wc-1' }, { _id: 'pdv-2', workCenterId: 'wc-2' }];
+  const openPdv1 = { _id: 's1', status: 'open', pointOfSaleId: 'pdv-1', openedAt: '2026-07-20T08:00:00.000Z' };
+  const openWc1 = { _id: 's1', status: 'open', pointOfSaleId: 'wc-1', openedAt: '2026-07-20T08:00:00.000Z' };
+
+  it('holds sticky on tablet even when pick momentarily fails to match', () => {
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [openPdv1],
+      sticky: openPdv1,
+      pickId: 'pdv-missing',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: true,
+    });
+    expect(r.session?._id).toBe('s1');
+  });
+
+  it('matches workCenterId ↔ pdvId', () => {
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [openWc1],
+      sticky: null,
+      pickId: 'pdv-1',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: false,
+    });
+    expect(r.session?._id).toBe('s1');
+  });
+
+  it('CEO without order flow: other store without open caja → null session', () => {
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [openPdv1],
+      sticky: openPdv1,
+      pickId: 'pdv-2',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: false,
+    });
+    expect(r.session).toBeNull();
+    expect(r.nextSticky?._id).toBe('s1');
+  });
+
+  it('CEO mid-order (holdSticky): keeps caja when pick flickers to another store', () => {
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [openPdv1],
+      sticky: openPdv1,
+      pickId: 'pdv-2',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: true,
+    });
+    expect(r.session?._id).toBe('s1');
+  });
+});
 
 describe('sessionActiveOnCalendarDay', () => {
   const session = {

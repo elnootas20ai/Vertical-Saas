@@ -457,14 +457,19 @@ function TpvRapidoCeoBoard() {
   /** Misma tienda que Ops / sidebar / última elección — sin pedir de nuevo salvo "Cambiar tienda". */
   useEffect(() => {
     if (forceStorePicker || !businessId || !dataUserId) return;
+    try {
+      if (sessionStorage.getItem('vertial.tpv.orderFlowLock') === '1') return;
+    } catch { /* ignore */ }
     const pdvId = coerceSelectedPdvId(
       activePdvs,
       readDeliveryOpsSelectedPdvId(businessId, dataUserId) || activeSalesPointId,
     );
     if (!pdvId) return;
-    setSelectedPdvId((prev) => (prev === pdvId ? prev : pdvId));
+    setSelectedPdvId((prev) => (prev === pdvId ? prev : (prev || pdvId)));
     if (lastSyncedStorePdvRef.current === pdvId && activeSalesPointId === pdvId) return;
     if (activeSalesPointId !== pdvId) {
+      // Solo auto-sync si aún no hay tienda fija en el TPV.
+      if (selectedPdvId) return;
       lastSyncedStorePdvRef.current = pdvId;
       setActiveSalesPoint(pdvId);
       return;
@@ -477,14 +482,26 @@ function TpvRapidoCeoBoard() {
     activePdvs,
     activeSalesPointId,
     setActiveSalesPoint,
+    selectedPdvId,
   ]);
 
   useEffect(() => {
     const onStore = () => {
       if (forceStorePicker || !businessId || !dataUserId) return;
+      // No cambiar tienda mientras hay un pedido en curso (desmontaría el gate → Abrir caja).
+      try {
+        if (sessionStorage.getItem('vertial.tpv.orderFlowLock') === '1') return;
+      } catch { /* ignore */ }
       const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
       const pdvId = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
-      if (pdvId) setSelectedPdvId(pdvId);
+      // No borrar la tienda si el listado PDV aún no cargó (evita desmontar el gate a mitad de pedido).
+      if (!pdvId) return;
+      setSelectedPdvId((prev) => {
+        if (prev && prev === pdvId) return prev;
+        // Si ya hay tienda operativa, no saltar a otra por un evento de fondo.
+        if (prev && pdvId !== prev) return prev;
+        return pdvId;
+      });
     };
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
@@ -691,6 +708,8 @@ export function TpvRapidoOrderFlow({
   const { user } = useAuth();
   const registerFromGate = useTpvRegisterIfOpen();
   const register = registerOverride ?? registerFromGate;
+  const registerStickyRef = useRef(register);
+  if (register) registerStickyRef.current = register;
 
   const { addClient, clients, clientsTotalCount } = useApp();
   const { currentBusiness, businesses, businessesFetchSettled, switchBusiness } = useBusiness();
@@ -2317,6 +2336,7 @@ export function TpvRapidoOrderFlow({
             salesPointName: cajaOrder.salesPointName || pdvName,
             cashierName: takerName,
             variant: 'customer',
+            accountEmail: user?.email,
           });
         } catch {
           /* el ticket es opcional; no bloquear el cobro */
@@ -2362,6 +2382,8 @@ export function TpvRapidoOrderFlow({
     showTpvError,
     tipInput,
     currentBusiness,
+    user?.email,
+    pdvName,
   ]);
 
   const handlePayFullAccount = useCallback(async () => {
@@ -2740,13 +2762,17 @@ export function TpvRapidoOrderFlow({
   const needsOpenRegister =
     currentStep === 'products' || currentStep === 'payment';
 
+  // No exigir caja abierta solo por un parpadeo del contexto: si el gate la pierde
+  // un instante, el flujo de pedido no debe saltar a «Abre la caja».
+  const registerStable = register || (needsOpenRegister ? registerStickyRef.current : null);
+
   const allowProductsWithoutRegister =
     embeddedInRestaurantTpv
     && isRestaurantMode
     && currentStep === 'products'
     && !restaurantTable?.isCounter;
 
-  if (needsOpenRegister && !register && !allowProductsWithoutRegister) {
+  if (needsOpenRegister && !registerStable && !allowProductsWithoutRegister) {
     return (
       <div className="min-h-[50vh] flex flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-sm text-gray-600 dark:text-gray-400">

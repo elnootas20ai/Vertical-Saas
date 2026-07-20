@@ -252,6 +252,118 @@ export function registerSessionSpansMultipleDays(
   return openKey !== endKey;
 }
 
+/**
+ * Al refrescar/recargar sesiones de caja, no tirar una caja abierta local
+ * si el servidor la omite un momento (filtro businessId, PDVs aún vacíos, glitch de red).
+ * Si el servidor la devuelve cerrada, se respeta el cierre.
+ */
+export function mergeTpvRegisterSessionsPreservingOpen(
+  prev: TpvRegisterSession[],
+  next: TpvRegisterSession[],
+): TpvRegisterSession[] {
+  const prevList = Array.isArray(prev) ? prev : [];
+  const nextList = Array.isArray(next) ? next : [];
+  if (nextList.length === 0 && prevList.length > 0) return prevList;
+
+  const nextById = new Map(
+    nextList
+      .filter((s) => s && String(s._id || '').trim())
+      .map((s) => [String(s._id).trim(), s] as const),
+  );
+  const merged = [...nextList];
+
+  for (const prevSession of prevList) {
+    if (!prevSession || !isTpvRegisterSessionOpenStatus(prevSession)) continue;
+    const id = String(prevSession._id || '').trim();
+    if (!id) continue;
+    if (nextById.has(id)) continue;
+    merged.push(prevSession);
+  }
+  return merged;
+}
+
+function isTpvRegisterSessionOpenStatus(session: Pick<TpvRegisterSession, 'status'> | null | undefined): boolean {
+  return Boolean(session && String(session.status || '').toLowerCase() === 'open');
+}
+
+/** PDV id o workCenterId de la sesión ↔ tienda elegida (tablet/CEO). */
+export function tpvSessionMatchesStoreRef(
+  session: Pick<TpvRegisterSession, 'pointOfSaleId'>,
+  refId: string,
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }>,
+): boolean {
+  const pick = String(refId || '').trim();
+  const sp = String(session.pointOfSaleId || '').trim();
+  if (!pick || !sp) return false;
+  if (sp === pick) return true;
+  const pdv = pointsOfSale.find((p) => p._id === pick);
+  if (pdv && sp === String(pdv.workCenterId || '').trim()) return true;
+  const byWc = pointsOfSale.find((p) => String(p.workCenterId || '').trim() === sp);
+  if (byWc && byWc._id === pick) return true;
+  return false;
+}
+
+/**
+ * Resuelve la caja activa del TPV.
+ * Si el pick de tienda parpadea o no matchea un instante, conserva la última caja abierta
+ * (sobre todo en tablet / a mitad de pedido) para no volver a «Abrir caja».
+ */
+export function resolveActiveTpvRegisterSession(params: {
+  sessions: TpvRegisterSession[];
+  sticky: TpvRegisterSession | null;
+  pickId: string | null | undefined;
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }>;
+  /** tablet, trabajador o pedido en curso: no soltar la caja abierta por un pick raro. */
+  holdStickyWhileOpen: boolean;
+}): { session: TpvRegisterSession | null; nextSticky: TpvRegisterSession | null } {
+  const sessions = Array.isArray(params.sessions) ? params.sessions : [];
+  const open = sessions.filter((s) => isTpvRegisterSessionOpenStatus(s));
+  const pick = String(params.pickId || '').trim();
+  const pdvs = params.pointsOfSale || [];
+
+  let found: TpvRegisterSession | null = null;
+  if (pick) {
+    found = open.find((s) => tpvSessionMatchesStoreRef(s, pick, pdvs)) || null;
+  } else if (open.length === 1) {
+    found = open[0];
+  } else if (open.length > 1 && params.sticky?._id) {
+    found = open.find((s) => s._id === params.sticky?._id) || null;
+  }
+
+  if (found) {
+    return { session: found, nextSticky: found };
+  }
+
+  const sticky = params.sticky;
+  if (!sticky?._id) {
+    return { session: null, nextSticky: null };
+  }
+
+  const live = sessions.find((s) => s._id === sticky._id) || null;
+  if (live && !isTpvRegisterSessionOpenStatus(live)) {
+    return { session: null, nextSticky: null };
+  }
+
+  const candidate = isTpvRegisterSessionOpenStatus(live)
+    ? live
+    : isTpvRegisterSessionOpenStatus(sticky)
+      ? sticky
+      : null;
+  if (!candidate) {
+    return { session: null, nextSticky: null };
+  }
+
+  if (params.holdStickyWhileOpen) {
+    return { session: candidate, nextSticky: candidate };
+  }
+  if (!pick || tpvSessionMatchesStoreRef(candidate, pick, pdvs)) {
+    return { session: candidate, nextSticky: candidate };
+  }
+
+  // Pick apunta a otra tienda sin caja abierta → OpeningScreen, pero no olvidar la sticky.
+  return { session: null, nextSticky: candidate };
+}
+
 /** Una caja abierta por tienda (la más reciente si hay duplicados). */
 export function dedupeOpenRegisterSessions(sessions: TpvRegisterSession[]): TpvRegisterSession[] {
   const byPdv = new Map<string, TpvRegisterSession>();
