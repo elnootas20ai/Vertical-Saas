@@ -9,7 +9,6 @@ import {
   Send,
   Trash2,
 } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { submitBugReportRequest, type BugReportCategory } from '../../lib/supportApi';
 
@@ -37,7 +36,6 @@ interface BugReportFormProps {
 }
 
 export function BugReportForm({ onSubmitted, compact = false }: BugReportFormProps) {
-  const { user } = useAuth();
   const businessCtx = useBusinessOptional();
   const currentBusiness = businessCtx?.currentBusiness ?? null;
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -108,15 +106,16 @@ export function BugReportForm({ onSubmitted, compact = false }: BugReportFormPro
       });
 
       if (!result.ok) {
-        toast.error(result.error || 'No se pudo enviar el reporte');
+        const raw = String(result.error || '');
+        const safe =
+          /@|ALERTS_|BUG_REPORT|SMTP|email|correo/i.test(raw) || raw.length > 120
+            ? 'No se pudo enviar el reporte'
+            : (raw || 'No se pudo enviar el reporte');
+        toast.error(safe);
         return;
       }
 
-      toast.success(
-        result.reportId
-          ? `Reporte enviado (${result.reportId}). Lo revisaremos pronto.`
-          : 'Reporte enviado. Lo revisaremos pronto.',
-      );
+      toast.success('Reporte enviado. Lo revisaremos pronto.');
       setDescription('');
       setStepsToReproduce('');
       setScreenshot(null);
@@ -133,9 +132,8 @@ export function BugReportForm({ onSubmitted, compact = false }: BugReportFormPro
         <div className="flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
           <p>
-            Este canal va directo al equipo de Vertial para detectar bugs y errores.
-            Incluye captura o pasos para reproducir el fallo y te responderemos al correo{' '}
-            <strong>{user?.email || 'de tu cuenta'}</strong>.
+            Este canal va directo al equipo de Vertial. Incluye captura o pasos para reproducir
+            el fallo si puedes; lo revisamos nosotros.
           </p>
         </div>
       </div>

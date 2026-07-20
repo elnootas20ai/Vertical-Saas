@@ -61,6 +61,7 @@ Variables habituales:
 - `COUCHDB_USER`, `COUCHDB_PASSWORD`, `COUCHDB_DB`
 - `JWT_SECRET`, `JWT_REFRESH_SECRET`
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (login Google en backend)
+- Sign in with Apple web: `APPLE_CLIENT_ID=com.vertial.app`, `APPLE_SERVICES_ID=com.vertial.app.web`
 - Opcional bootstrap: `SAAS_AUTO_BOOTSTRAP`, `SAAS_LOGIN_*`, `SAAS_BOOTSTRAP_FORCE_SYNC`
 - Opcional: `OPENAI_*`, email (`RESEND_*` / `SMTP_*`), `MONEI_*`, etc.
 - Estabilidad (5+ usuarios concurrentes): `NODE_MAX_OLD_SPACE_MB=1024`, `BURST_LIMIT_MAX=150`, `PLAN_TRIAL_MAX_PER_MIN=400`, `SSE_MAX_CONNECTIONS_PER_USER=3`
@@ -84,6 +85,8 @@ Desde tu PC, aplicar en el VPS sin editar a mano: `node scripts/remote-config-al
 Se incrustan en `dist/` en el momento de `npm run build`:
 
 - `VITE_GOOGLE_CLIENT_ID` — **debe ser el mismo Client ID** que `GOOGLE_CLIENT_ID`
+- `VITE_APPLE_CLIENT_ID` — Services ID web (mismo que `APPLE_SERVICES_ID`, p. ej. `com.vertial.app.web`)
+- `VITE_APPLE_REDIRECT_URI` — Return URL del Services ID (p. ej. `https://vertialapp.com`)
 - `VITE_GOOGLE_MAPS_API_KEY` (si usáis Maps)
 - Couch headers si aplica: `VITE_COUCHDB_*` (solo si el front los necesita)
 - Para API same-origin: **`VITE_API_URL` vacío** (el front usa `/api/...` en el mismo dominio)

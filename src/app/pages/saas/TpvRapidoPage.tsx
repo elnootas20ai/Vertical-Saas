@@ -2382,7 +2382,10 @@ export function TpvRapidoOrderFlow({
     tipInput,
     currentBusiness,
     user?.email,
-    pdvName,
+    writeBusinessId,
+    tpvCatalogBusinessId,
+    businessId,
+    phonePrefix,
   ]);
 
   const handlePayFullAccount = useCallback(async () => {

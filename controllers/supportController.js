@@ -96,7 +96,7 @@ export async function submitBugReport(req, res) {
       logger.error({ tag: 'BUG_REPORT', userId }, 'Falta BUG_REPORT_EMAIL o ALERTS_ADMIN_EMAIL');
       return res.status(503).json({
         ok: false,
-        error: 'El canal de reportes no está configurado en el servidor.',
+        error: 'No se pudo enviar ahora. Inténtalo más tarde.',
       });
     }
 
@@ -162,7 +162,7 @@ export async function submitBugReport(req, res) {
     logger.error({ tag: 'BUG_REPORT', err: error?.message }, 'Fallo enviando reporte de bug');
     return res.status(500).json({
       ok: false,
-      error: error?.message || 'No se pudo enviar el reporte. Inténtalo de nuevo.',
+      error: 'No se pudo enviar el reporte. Inténtalo de nuevo.',
     });
   }
 }

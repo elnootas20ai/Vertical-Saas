@@ -12,7 +12,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable, isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
-import { signInWithAppleNative } from '../../lib/appleSignInNative';
+import { signInWithApple } from '../../lib/appleSignIn';
 import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
 import type { AppleUserProfile, GoogleUserProfile } from '../../lib/authApi';
 import { LegalAgreementsModal } from '../../components/legal/LegalAgreementsModal';
@@ -148,10 +148,10 @@ export function Register() {
     setIsSubmitting(true);
     setErrors({});
     try {
-      const native = await signInWithAppleNative();
-      const result = await appleLogin(native.identityToken, {
-        givenName: native.givenName || undefined,
-        familyName: native.familyName || undefined,
+      const apple = await signInWithApple();
+      const result = await appleLogin(apple.identityToken, {
+        givenName: apple.givenName || undefined,
+        familyName: apple.familyName || undefined,
       });
 
       if (result.success) {
@@ -166,14 +166,14 @@ export function Register() {
       }
 
       if (result.code === 'APPLE_ACCOUNT_NOT_FOUND' && result.appleUser) {
-        setAppleCredential(native.identityToken);
+        setAppleCredential(apple.identityToken);
         setGoogleCredential('');
         setGoogleAvatar('');
         setFormData((prev) => ({
           ...prev,
-          firstName: result.appleUser!.firstName || native.givenName || prev.firstName,
-          lastName: result.appleUser!.lastName || native.familyName || prev.lastName,
-          email: result.appleUser!.email || native.email || prev.email,
+          firstName: result.appleUser!.firstName || apple.givenName || prev.firstName,
+          lastName: result.appleUser!.lastName || apple.familyName || prev.lastName,
+          email: result.appleUser!.email || apple.email || prev.email,
         }));
         return;
       }
@@ -558,7 +558,7 @@ export function Register() {
                   </div>
                 </div>
 
-                <div className="flex justify-center w-full">
+                <div className="flex flex-col items-center gap-2.5 w-full">
                   {!showGoogleAuth ? null : !googleReady && !googleTimedOut ? (
                     <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border border-gray-200 dark:border-gray-600 py-2 px-3 text-xs text-gray-500 dark:text-gray-400">
                       <span className="inline-block w-4 h-4 shrink-0 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" aria-hidden />
@@ -571,16 +571,21 @@ export function Register() {
                   ) : (
                     <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
                   )}
+                  {!showGoogleAuth && (
+                    <div className="w-full max-w-sm py-1.5 px-2 border border-gray-200 dark:border-gray-600 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 text-center">
+                      Google no disponible (revisa VITE_GOOGLE_CLIENT_ID en build).
+                    </div>
+                  )}
+                  {showAppleAuth ? (
+                    <div className="w-full max-w-sm">
+                      <AppleSignInButton label="Registrarse con Apple" disabled={isSubmitting} onPress={handleAppleSignIn} />
+                    </div>
+                  ) : null}
                 </div>
-                {!showGoogleAuth && (
-                  <div className="w-full py-1.5 px-2 border border-gray-200 dark:border-gray-600 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 text-center">
-                    Google no disponible (revisa VITE_GOOGLE_CLIENT_ID en build).
-                  </div>
-                )}
               </>
             )}
 
-            {!isSocialFlow && showAppleAuth && (
+            {!isSocialFlow && hideGoogleOnIos && showAppleAuth && (
               <>
                 <div className="relative my-2">
                   <div className="absolute inset-0 flex items-center">

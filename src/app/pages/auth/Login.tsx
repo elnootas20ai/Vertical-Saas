@@ -10,7 +10,7 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
-import { signInWithAppleNative } from '../../lib/appleSignInNative';
+import { signInWithApple } from '../../lib/appleSignIn';
 import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
@@ -285,10 +285,10 @@ export function Login() {
     setErrors({});
     setIsSubmitting(true);
     try {
-      const native = await signInWithAppleNative();
-      const result = await appleLogin(native.identityToken, {
-        givenName: native.givenName || undefined,
-        familyName: native.familyName || undefined,
+      const apple = await signInWithApple();
+      const result = await appleLogin(apple.identityToken, {
+        givenName: apple.givenName || undefined,
+        familyName: apple.familyName || undefined,
       });
       if (result.success) {
         navigate(result.redirectTo || '/saas/dashboard');
@@ -299,7 +299,7 @@ export function Login() {
           state: {
             accountType: 'company' as const,
             appleUser: result.appleUser,
-            appleCredential: native.identityToken,
+            appleCredential: apple.identityToken,
           },
         });
         return;
@@ -573,7 +573,7 @@ export function Login() {
               </div>
             </div>
 
-            <div className="flex justify-center w-full">
+            <div className="flex flex-col items-center gap-2.5 w-full">
               {!showGoogleAuth ? null : !googleReady && !googleTimedOut ? (
                 <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-2 px-3 text-sm text-gray-500 dark:text-gray-400">
                   <svg className="w-5 h-5 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -589,19 +589,24 @@ export function Login() {
               ) : (
                 <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
               )}
+              {!showGoogleAuth && (
+                <div className="w-full max-w-sm py-3 px-4 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
+                  Inicio con Google no está activo en este sitio: falta{' '}
+                  <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> en el{' '}
+                  <strong>build</strong> del frontend (debe ser el mismo Client ID que{' '}
+                  <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">GOOGLE_CLIENT_ID</code> en el servidor).
+                </div>
+              )}
+              {showAppleAuth ? (
+                <div className="w-full max-w-sm">
+                  <AppleSignInButton disabled={isSubmitting} onPress={handleAppleSignIn} />
+                </div>
+              ) : null}
             </div>
-            {!showGoogleAuth && !hideGoogleOnIos && (
-              <div className="w-full py-3 px-4 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
-                Inicio con Google no está activo en este sitio: falta{' '}
-                <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> en el{' '}
-                <strong>build</strong> del frontend (debe ser el mismo Client ID que{' '}
-                <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">GOOGLE_CLIENT_ID</code> en el servidor).
-              </div>
-            )}
             </>
             )}
 
-            {showAppleAuth && (
+            {hideGoogleOnIos && showAppleAuth && (
               <>
                 <div className="relative my-2">
                   <div className="absolute inset-0 flex items-center">

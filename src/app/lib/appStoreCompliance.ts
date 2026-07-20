@@ -17,9 +17,15 @@ export function shouldHideThirdPartyAuthOnIos(): boolean {
   return isIosNativeApp();
 }
 
-/** Sign in with Apple disponible solo en app iOS nativa. */
+/**
+ * Sign in with Apple: app iOS nativa, o web con Services ID (`VITE_APPLE_CLIENT_ID`).
+ */
 export function isAppleSignInAvailable(): boolean {
-  return isIosNativeApp();
+  if (isIosNativeApp()) return true;
+  if (Capacitor.isNativePlatform()) return false;
+  const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
+  const clientId = String(env.VITE_APPLE_CLIENT_ID || 'com.vertial.app.web').trim();
+  return Boolean(clientId);
 }
 
 /**
