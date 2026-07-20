@@ -10,8 +10,9 @@ import {
 } from '../../../lib/deliveryApi';
 import {
   filterPointsOfSaleForWorkCenters,
+  filterWorkCentersForBusinessScope,
+  repairMissingRetailDeliveryPdvs,
   resolveBusinessScopeId,
-  workCentersStrictlyForBusiness,
 } from '../../../lib/deliverySetup';
 import { coerceSelectedPdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { setActivePrinterScope, getActivePrinterScope } from '../../../lib/vertialPrint/printerActiveScope';
@@ -25,7 +26,8 @@ const TpvPrinterSetupPanel = lazy(() =>
 
 /**
  * Ajustes → Empresa → Impresora.
- * Empresas de la cuenta + tiendas reales de cada una (sin PDVs huérfanos de otras).
+ * Misma fuente que Empresa → Tienda: todas las tiendas/PDV de cada empresa
+ * (incluye legacy; no usa el filtro «strict» que ocultaba PDVs).
  */
 export function TpvPrinterSettingsTab() {
   const { user } = useAuth();
@@ -70,26 +72,39 @@ export function TpvPrinterSettingsTab() {
             return { businessId: '', businessName, stores: [] as PointOfSale[] };
           }
           try {
-            const state = await loadRetailStoresForBusiness(
+            // Igual que SalesPoints: merge + repair para que cada tienda tenga PDV.
+            let state = await loadRetailStoresForBusiness(
               user,
               biz as Business,
               businesses as Business[],
               {
                 includeInactivePdvs: false,
                 tpvBootstrap: false,
-                skipPdvMerge: true,
+                skipPdvMerge: false,
                 ensureTabletCodes: false,
                 accountBusinessCount: businessList.length,
                 knownBusinessIds,
               },
             );
-            // Multi-empresa: solo centros etiquetados a esta empresa (no huérfanos legacy).
-            const strictCenters =
-              businessList.length > 1
-                ? workCentersStrictlyForBusiness(state.workCenters || [], businessId)
-                : state.workCenters || [];
+            if (state.dataUserId) {
+              state = {
+                ...state,
+                pointsOfSale: await repairMissingRetailDeliveryPdvs(
+                  state.dataUserId,
+                  state.workCenters,
+                  state.pointsOfSale,
+                  biz as Business,
+                ),
+              };
+            }
+            // Scope de empresa (con legacy), no «strict» — si no, faltan PDVs reales.
+            const centers = filterWorkCentersForBusinessScope(
+              state.workCenters || [],
+              businessId,
+              { accountBusinessCount: businessList.length },
+            );
             const stores = dedupePointsOfSale(
-              filterPointsOfSaleForWorkCenters(state.pointsOfSale || [], strictCenters, {
+              filterPointsOfSaleForWorkCenters(state.pointsOfSale || [], centers, {
                 businessId,
               }).filter((p) => p.active !== false),
             );
