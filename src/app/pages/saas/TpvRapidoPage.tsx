@@ -64,6 +64,7 @@ import {
   defaultTpvSectionId,
   parseTpvSectionId,
   tpvSectionProductCount,
+  isTpvSellableCatalogItem,
 } from '../../lib/tpvCatalogNavigation';
 import { TpvRegisterGate, TpvRegisterProvider, useTpvRegisterIfOpen, type TpvRegisterContextType } from '../../components/saas/TpvRegisterGate';
 import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
@@ -1200,8 +1201,7 @@ export function TpvRapidoOrderFlow({
       catalog
         .filter(
           (p) =>
-            (p.itemType === 'product' || p.itemType === 'combo') &&
-            p.active !== false &&
+            isTpvSellableCatalogItem(p) &&
             (clientProductScores[p._id] || 0) > 0,
         )
         .sort((a, b) => (clientProductScores[b._id] || 0) - (clientProductScores[a._id] || 0))
@@ -1230,9 +1230,8 @@ export function TpvRapidoOrderFlow({
 
     const isSellable = (item: CatalogItem | undefined) =>
       !!item &&
-      item.active &&
       Number(item.unitPrice || 0) > 0 &&
-      (item.itemType === 'product' || item.itemType === 'combo');
+      isTpvSellableCatalogItem(item);
 
     const ranked = [...merged.entries()].sort((a, b) => b[1] - a[1]);
     const picked: CatalogItem[] = [];

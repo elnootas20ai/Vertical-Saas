@@ -5,18 +5,21 @@ export type {
   DeliveryTicketVariant,
 } from './deliveryTicketTypes';
 
-/** Evita solapar impresiones: cola ligera (no descarta el siguiente ticket). */
-let printChain: Promise<void> = Promise.resolve();
+/** Evita doble tap: un ticket a la vez desde la UI. (BLINDADO build 33 / 112127f) */
+let printInFlight: Promise<void> | null = null;
 
-/**
- * Imprime en segundo plano. No bloquea el botón «Continuar» del TPV:
- * la UI puede seguir mientras el ticket sale por la térmica.
- */
-export function printDeliveryTicket(
+export async function printDeliveryTicket(
   options: import('./deliveryTicketTypes').DeliveryTicketPrintOptions,
 ): Promise<void> {
-  const job = printChain.then(async () => {
-    const { toast } = await import('sonner');
+  const { toast } = await import('sonner');
+
+  if (printInFlight) {
+    toast.message('Espera: hay un ticket imprimiéndose…');
+    await printInFlight.catch(() => undefined);
+    return;
+  }
+
+  printInFlight = (async () => {
     try {
       const { printDeliveryTicket: printUnified } = await import('./vertialPrint/printDeliveryTicket');
       const result = await printUnified(options);
@@ -32,9 +35,11 @@ export function printDeliveryTicket(
           : `No se pudo imprimir el ticket${detail}`,
       );
     }
-  });
+  })();
 
-  // Encadena el siguiente sin romper la cola si este falla
-  printChain = job.catch(() => undefined);
-  return job;
+  try {
+    await printInFlight;
+  } finally {
+    printInFlight = null;
+  }
 }

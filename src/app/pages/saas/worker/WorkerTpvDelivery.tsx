@@ -82,7 +82,7 @@ import {
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
 import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
-import { resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
+import { resolveRetailOpsWriteBusinessId, resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
 import { useTpvIncomingOrderSounds } from '../../../hooks/useTpvIncomingOrderSounds';
 import { useDeliveryOrdersLive } from '../../../hooks/useDeliveryOrdersLive';
 import {
@@ -1037,7 +1037,11 @@ export function WorkerTpvDelivery({
       return;
     }
     const bounds = orderLoadBoundsForOpenSession(sessionOpenedAt);
-    const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '')
+    // Misma empresa que al crear el pedido en TPV (registerScope), NO currentBusiness
+    // (puede diferir en tablet / multi-empresa y vaciar montaje-reparto).
+    const filterBusinessId = String(
+      resolveRetailOpsWriteBusinessId(businessId, businesses) || businessId || '',
+    )
       .replace(/^business:/, '')
       .trim();
     try {
@@ -1045,7 +1049,7 @@ export function WorkerTpvDelivery({
         dateFrom: bounds.from,
         dateTo: bounds.to,
         limit: 500,
-        ...(businessId ? { businessId } : {}),
+        ...(filterBusinessId ? { businessId: filterBusinessId } : {}),
       });
       const scoped = filterOrdersForActivePdv(
         data.orders,
@@ -1061,13 +1065,13 @@ export function WorkerTpvDelivery({
       setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [userId, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId, sessionOpenedAt, currentBusiness?.business_id, currentBusiness?.id]);
+  }, [userId, businessId, businesses, scopedPdvId, primaryPdvId, scopedPdvName, scopedPdvWorkCenterId, sessionOpenedAt]);
 
   useEffect(() => { void loadOrders(); }, [loadOrders]);
 
   useDeliveryOrdersLive({
     authUserId: user?.user_id || user?.id || null,
-    businessId: currentBusiness?.business_id || currentBusiness?.id || null,
+    businessId: resolveRetailOpsWriteBusinessId(businessId, businesses) || businessId || null,
     onRefresh: () => void loadOrders({ silent: true }),
     enabled: Boolean(userId) && Boolean(sessionOpenedAt),
     fallbackPollMs: 30_000,
@@ -1098,7 +1102,7 @@ export function WorkerTpvDelivery({
         return;
       }
       if (session.status === 'open') {
-        setOrders([]);
+        // No vaciar el tablero antes del reload: evita el flash vacío tras crear pedido.
         setDayKey(localCalendarDayKey());
         void loadOrders({ silent: true });
       }
@@ -1235,14 +1239,16 @@ export function WorkerTpvDelivery({
           const msg = err instanceof Error ? err.message : '';
           if (!/conflict|409|revision/i.test(msg)) throw err;
           const bounds = orderLoadBoundsForOpenSession(sessionOpenedAt);
-          const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '')
+          const filterBusinessId = String(
+            resolveRetailOpsWriteBusinessId(businessId, businesses) || businessId || '',
+          )
             .replace(/^business:/, '')
             .trim();
           const data = await filterDeliveryOrdersRequest(userId, {
             dateFrom: bounds.from,
             dateTo: bounds.to,
             limit: 500,
-            ...(businessId ? { businessId } : {}),
+            ...(filterBusinessId ? { businessId: filterBusinessId } : {}),
           });
           const fresh = data.orders.find((o) => o._id === body._id);
           if (!fresh?._rev || fresh._rev === body._rev) throw err;

@@ -24,57 +24,40 @@ import { TpvReorderableChipRow } from './TpvReorderableChipRow';
 function BrandSectionChip({
   section,
   active,
-  compact,
   onSelect,
 }: {
   section: TpvCatalogSection;
   active: boolean;
-  compact: boolean;
+  compact?: boolean;
   onSelect: () => void;
 }) {
   const color =
     section.color && /^#[0-9A-Fa-f]{6}$/.test(section.color) ? section.color : '#374151';
-  const tileSize = compact ? 'w-12 h-12' : 'w-11 h-11';
-  const chipWidth = compact ? 'w-[3.75rem]' : 'w-14';
 
   return (
     <button
       type="button"
       onClick={onSelect}
       title={section.label}
-      className={`shrink-0 flex flex-col items-center gap-px focus:outline-none touch-manipulation ${chipWidth}`}
+      className={`shrink-0 inline-flex items-center gap-1.5 rounded-full border px-2.5 h-7 text-[11px] font-semibold touch-manipulation transition-colors focus:outline-none ${
+        active
+          ? 'border-transparent text-white'
+          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-700 dark:text-gray-200'
+      }`}
+      style={
+        active
+          ? { backgroundColor: color }
+          : { color, backgroundColor: brandTint(color, '10') }
+      }
     >
       {section.logo ? (
-        <span
-          className={`${tileSize} rounded-lg overflow-hidden border transition-all ${
-            active ? 'border-gray-900 dark:border-gray-100 ring-1 ring-gray-900/20' : 'border-gray-200 dark:border-gray-700'
-          }`}
-        >
-          <img src={section.logo} alt="" className="w-full h-full object-cover" />
-        </span>
-      ) : (
-        <span
-          className={`${tileSize} rounded-lg flex items-center justify-center font-bold border transition-all ${
-            compact ? 'text-[10px]' : 'text-[10px]'
-          } ${
-            active ? 'text-white border-transparent' : 'border-gray-200 dark:border-gray-700'
-          }`}
-          style={
-            active
-              ? { backgroundColor: color }
-              : { color, backgroundColor: brandTint(color, '14') }
-          }
-        >
-          {section.shortCode || section.label.slice(0, 2).toUpperCase()}
-        </span>
-      )}
-      <span
-        className={`text-center leading-tight line-clamp-2 w-full font-medium ${
-          compact ? 'text-[9px]' : 'text-[9px]'
-        } ${active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}
-      >
-        {section.label}
-      </span>
+        <img
+          src={section.logo}
+          alt=""
+          className="w-4 h-4 rounded-full object-cover shrink-0"
+        />
+      ) : null}
+      <span className="max-w-[7rem] truncate">{section.label}</span>
     </button>
   );
 }
@@ -107,13 +90,6 @@ type TpvProductPickerProps = {
   userId?: string;
   businessId?: string;
 };
-
-function categoryShortLabel(label: string): string {
-  const words = label.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '?';
-  if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
-  return (words[0][0] + words[1][0]).toUpperCase();
-}
 
 const ProductTile = memo(function ProductTile({
   item,
@@ -446,12 +422,12 @@ export function TpvProductPicker({
         </div>
 
         {!isSearchMode && topBarSections.length > 0 && (
-          <div className={`shrink-0 border-b border-gray-200 dark:border-gray-800 bg-gray-100/80 dark:bg-gray-950/50 ${compact ? 'px-2 py-1' : 'px-2 py-2'}`}>
+          <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 ${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'}`}>
             <TpvReorderableChipRow
               itemIds={orderedTopBarSections.map((section) => section.id)}
               onReorder={handleSectionReorder}
-              gapClassName={compact ? 'gap-1.5' : 'gap-2'}
-              alignClassName="items-end"
+              gapClassName="gap-1.5"
+              alignClassName="items-center"
               renderItem={(sectionId) => {
                 const section = sectionById.get(sectionId);
                 if (!section) return null;
@@ -459,7 +435,6 @@ export function TpvProductPicker({
                   <BrandSectionChip
                     section={section}
                     active={selectedSectionId === section.id}
-                    compact={compact}
                     onSelect={() => {
                       onSelectedSectionChange(section.id);
                       onSelectedCategoryChange(null);
@@ -474,33 +449,24 @@ export function TpvProductPicker({
         {!isSearchMode && (
           <>
             {categories.length > 0 && (
-              <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-900/40 ${compact ? 'px-2 py-1' : 'px-2 py-2'}`}>
+              <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 ${compact ? 'px-2 py-1' : 'px-2.5 py-1.5'}`}>
                 <TpvReorderableChipRow
                   itemIds={orderedCategories}
                   onReorder={handleCategoryReorder}
-                  gapClassName={compact ? 'gap-1.5' : 'gap-2'}
-                  alignClassName="items-start"
+                  gapClassName="gap-1.5"
+                  alignClassName="items-center"
                   prefix={(
                     <button
                       type="button"
                       onClick={() => onSelectedCategoryChange(null)}
-                      className={`flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-12' : 'gap-1 w-14'}`}
+                      className={`shrink-0 inline-flex items-center rounded-full border px-2.5 h-7 text-[11px] font-semibold touch-manipulation ${
+                        !selectedCategory
+                          ? 'border-transparent text-white'
+                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300'
+                      }`}
+                      style={!selectedCategory ? { backgroundColor: accentColor } : undefined}
                     >
-                      <span
-                        className={`rounded-xl flex items-center justify-center font-bold transition-all ${
-                          compact ? 'w-11 h-11 text-[10px]' : 'w-11 h-11 text-[10px]'
-                        } ${
-                          !selectedCategory
-                            ? 'text-white shadow-md scale-105'
-                            : 'bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
-                        }`}
-                        style={!selectedCategory ? { backgroundColor: accentColor } : undefined}
-                      >
-                        ALL
-                      </span>
-                      <span className={`font-medium text-center leading-tight ${compact ? 'text-[9px]' : 'text-[9px]'} ${!selectedCategory ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500'}`}>
-                        Todas
-                      </span>
+                      Todas
                     </button>
                   )}
                   renderItem={(cat) => {
@@ -509,33 +475,19 @@ export function TpvProductPicker({
                       <button
                         type="button"
                         onClick={() => onSelectedCategoryChange(active ? null : cat)}
-                        className={`flex flex-col items-center focus:outline-none ${compact ? 'gap-0.5 w-12' : 'gap-1 w-14'}`}
+                        title={cat}
+                        className={`shrink-0 inline-flex items-center rounded-full border px-2.5 h-7 text-[11px] font-semibold touch-manipulation max-w-[9rem] ${
+                          active
+                            ? 'border-transparent text-white'
+                            : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300'
+                        }`}
+                        style={
+                          active
+                            ? { backgroundColor: accentColor }
+                            : { color: accentColor, backgroundColor: brandTint(accentColor, '10') }
+                        }
                       >
-                        <span
-                          className={`rounded-xl flex items-center justify-center font-bold transition-all ${
-                            compact ? 'w-11 h-11 text-[10px]' : 'w-11 h-11 text-[10px]'
-                          } ${
-                            active
-                              ? 'text-white shadow-md scale-105'
-                              : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
-                          }`}
-                          style={
-                            active
-                              ? { backgroundColor: accentColor }
-                              : { color: accentColor, backgroundColor: brandTint(accentColor, '14') }
-                          }
-                        >
-                          {categoryShortLabel(cat)}
-                        </span>
-                        <span
-                          className={`font-medium text-center leading-tight line-clamp-2 w-full ${
-                            compact ? 'text-[9px]' : 'text-[9px]'
-                          } ${
-                            active ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'
-                          }`}
-                        >
-                          {cat}
-                        </span>
+                        <span className="truncate">{cat}</span>
                       </button>
                     );
                   }}

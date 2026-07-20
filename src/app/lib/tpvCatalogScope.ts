@@ -97,14 +97,25 @@ export function filterTpvCatalogItems(
     activeBusinessType: scope.activeBusinessType,
   };
 
+  // Solo carta vendible: nunca ingredientes/stock en el TPV.
+  const sellableRaw = rawItems.filter((item) => {
+    if ((item.module || 'catalog') !== 'catalog') return false;
+    if (item.module === 'stock' || item.isStockItem === true) return false;
+    if (item.stockCategory && item.stockCategory !== 'finished_product') {
+      const stockLike = ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable'];
+      if (stockLike.includes(item.stockCategory)) return false;
+    }
+    return item.itemType === 'product' || item.itemType === 'combo';
+  });
+
   let items = filterCatalogItemsForBusinessScope(
-    rawItems,
+    sellableRaw,
     scope.catalogBusinessId,
     brands,
     options,
   );
 
-  if (items.length > 0 || rawItems.length === 0 || brands.length === 0) {
+  if (items.length > 0 || sellableRaw.length === 0 || brands.length === 0) {
     return items;
   }
 
@@ -112,7 +123,7 @@ export function filterTpvCatalogItems(
   if (isRestaurantBusinessType(scope.activeBusinessType)) {
     const bid = scope.catalogBusinessId;
     const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
-    const relaxed = rawItems.filter((item) => {
+    const relaxed = sellableRaw.filter((item) => {
       const v = String(item.vertical || '').trim().toLowerCase();
       if (v === 'delivery') return false;
       if (v === 'restaurant') return true;
@@ -129,7 +140,7 @@ export function filterTpvCatalogItems(
 
   // Legacy sin business_id: conservar productos cuya línea comercial pertenece a esta cuenta.
   const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
-  return rawItems.filter((item) =>
+  return sellableRaw.filter((item) =>
     (item.brandIds ?? []).some((id) => brandIds.has(String(id).trim())),
   );
 }

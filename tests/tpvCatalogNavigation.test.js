@@ -87,13 +87,56 @@ describe('categoriesForTpvScope', () => {
       { _id: 'd1', itemType: 'product', category: 'Bebidas', active: true, brandIds: [], unitPrice: 2 },
     ];
     const sections = buildTpvCatalogSections(brands, catalog);
-    expect(sections.map((s) => s.label)).toEqual(['Todos', 'modomio', 'blackburger', 'Bebidas']);
+    expect(sections.map((s) => s.label)).toEqual(['Todos', 'Bebidas', 'modomio', 'blackburger']);
     expect(defaultTpvSectionId(sections)).toBe('brand:mod');
     expect(defaultTpvSectionId(sections, catalog)).toBe('all');
     const modCats = categoriesForTpvScope({ kind: 'brand', brandId: 'mod' }, brands, catalog);
     expect(modCats).toEqual(['Pizzas']);
     const bbCats = categoriesForTpvScope({ kind: 'brand', brandId: 'bb' }, brands, catalog);
     expect(bbCats).toEqual(['Burgers']);
+  });
+
+  it('no muestra ingredientes de inventario (module stock) en el TPV', () => {
+    const brands = [
+      { _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] },
+    ];
+    const catalog = [
+      {
+        _id: 'pizza-1',
+        itemType: 'product',
+        category: 'Pizzas',
+        active: true,
+        brandIds: ['mod'],
+        module: 'catalog',
+        unitPrice: 10,
+      },
+      {
+        _id: 'tomate',
+        itemType: 'product',
+        category: 'Ingredientes',
+        active: true,
+        brandIds: [],
+        module: 'stock',
+        stockCategory: 'ingredient',
+        isStockItem: true,
+        unitPrice: 0,
+      },
+      {
+        _id: 'bebida-1',
+        itemType: 'product',
+        category: 'Bebidas',
+        active: true,
+        brandIds: [],
+        module: 'catalog',
+        unitPrice: 2,
+      },
+    ];
+    const sections = buildTpvCatalogSections(brands, catalog);
+    expect(sections.map((s) => s.label)).toEqual(['Todos', 'Bebidas', 'modomio']);
+    const index = buildTpvProductSearchIndex(catalog);
+    const visible = searchTpvProducts(index, catalog, '', { kind: 'all' }, null, {});
+    expect(visible.map((i) => i._id).sort()).toEqual(['bebida-1', 'pizza-1']);
+    expect(visible.some((i) => i._id === 'tomate')).toBe(false);
   });
 
   it('muestra modomio y blackburger aunque aún no tengan productos asignados', () => {

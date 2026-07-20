@@ -4,6 +4,7 @@ import { isDefaultBrandNamePlaceholder, isDefaultCommercialBrand, sortBrandsForD
 import { resolveBrandLogo } from './brandPlaceholders';
 import { UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
 import { shouldClearBrandForCategory, allCommercialLineBrands } from './deliveryCatalogImportLogic';
+import { isStockInventoryItem } from './stockInventoryScope';
 
 export type TpvCatalogScope =
   | { kind: 'all' }
@@ -46,8 +47,21 @@ export function parseTpvSectionId(id: string): TpvCatalogScope | null {
   return null;
 }
 
+/**
+ * Vendible en TPV: productos/combos de carta.
+ * Excluye inventario (ingredientes, envases…) aunque tengan itemType=product.
+ */
+export function isTpvSellableCatalogItem(item: CatalogItem | null | undefined): boolean {
+  if (!item) return false;
+  if (item.active === false) return false;
+  if (item.itemType !== 'product' && item.itemType !== 'combo') return false;
+  if (isStockInventoryItem(item)) return false;
+  if ((item.module || 'catalog') !== 'catalog') return false;
+  return true;
+}
+
 function isSellable(item: CatalogItem): boolean {
-  return (item.itemType === 'product' || item.itemType === 'combo') && item.active !== false;
+  return isTpvSellableCatalogItem(item);
 }
 
 function isUnbranded(item: CatalogItem): boolean {
@@ -115,7 +129,7 @@ export function commercialBrandsForTpvTabs(brands: Brand[], catalog: CatalogItem
   );
 }
 
-/** Pestañas superiores: Todos + líneas comerciales + bloques compartidos (una fila). */
+/** Pestañas superiores: Todos + genéricos/compartidos + líneas comerciales (marcas). */
 export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[]): TpvCatalogSection[] {
   const sections: TpvCatalogSection[] = [];
   const brandTabs = commercialBrandsForTpvTabs(brands, catalog);
@@ -131,17 +145,7 @@ export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[])
     });
   }
 
-  for (const brand of brandTabs) {
-    sections.push({
-      id: formatTpvSectionId({ kind: 'brand', brandId: brand._id }),
-      scope: { kind: 'brand', brandId: brand._id },
-      label: brand.name,
-      color: brand.primaryColor,
-      shortCode: brand.shortCode,
-      logo: resolveBrandLogo(brand),
-    });
-  }
-
+  // Genéricos (Bebidas, Complementos…) arriba, junto a las marcas.
   const sharedKeys = new Set<string>();
   for (const item of catalog) {
     if (!isSellable(item) || !isUnbranded(item)) continue;
@@ -157,6 +161,17 @@ export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[])
       label: sharedGroupLabel(groupKey),
       color: groupKey === 'bebidas' ? '#2563EB' : groupKey === 'complementos' ? '#7C3AED' : '#4B5563',
       shortCode: groupKey.slice(0, 3).toUpperCase(),
+    });
+  }
+
+  for (const brand of brandTabs) {
+    sections.push({
+      id: formatTpvSectionId({ kind: 'brand', brandId: brand._id }),
+      scope: { kind: 'brand', brandId: brand._id },
+      label: brand.name,
+      color: brand.primaryColor,
+      shortCode: brand.shortCode,
+      logo: resolveBrandLogo(brand),
     });
   }
 

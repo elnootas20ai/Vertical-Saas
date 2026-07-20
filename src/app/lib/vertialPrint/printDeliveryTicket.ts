@@ -53,7 +53,8 @@ export async function printDeliveryTicket(
       return { method: 'native', ok: false };
     }
     const printConfig = prepared.config;
-    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 5_000 });
+    // BLINDADO build 33 (112127f): no bajar de 8s.
+    const result = await sendNativeEscpos(escpos, printConfig, { timeoutMs: 8_000 });
     if (result.ok) return { method: 'native', ok: true };
     toast.error(result.error || NATIVE_PRINTER_PRINT_FAILED_MESSAGE, {
       duration: 12000,

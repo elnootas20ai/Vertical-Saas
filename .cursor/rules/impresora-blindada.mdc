@@ -1,0 +1,46 @@
+---
+description: Impresión térmica blindada (TestFlight build 33) — no tocar el funcionamiento
+globs: src/app/lib/vertialPrint/**,src/app/lib/deliveryTicketPrint.ts,src/app/components/saas/TpvPrinter*.tsx,src/app/components/saas/settings/StorePrintersManager.tsx,src/app/components/saas/settings/TpvPrinterSettingsTab.tsx,ios/App/App/VertialIosBridgePlugin.swift
+alwaysApply: true
+---
+
+# Impresora blindada — build 33
+
+## Referencia que funciona
+
+- **TestFlight:** Vertial 1.0 **(33)**
+- **Codemagic:** build index **#33**, workflow `iOS Release (TestFlight)`
+- **Commit:** `112127f` (`chore: rebuild dist for printer, auth and admin deploy`)
+- **Ruta nativa buena (en ese árbol):** Bridge **primero** + timeouts largos en `nativePrintClient.ts`
+
+## Regla del dueño (Uriel)
+
+- **Sí** se puede tocar impresora **si el usuario lo pide** (textos, pantallas, ayuda, build/deploy).
+- **NO** se cambia **absolutamente nada** del **funcionamiento** que ya imprime bien, salvo OK explícito («restaura», «cambia X», «dale»).
+- Lo que funciona se **blinda**: no “mejoras de velocidad”, no acortar timeouts, no invertir orden de plugins, no refactors “por si acaso”.
+
+## Contrato técnico (no romper)
+
+En `src/app/lib/vertialPrint/nativePrintClient.ts` (`sendEscposToHost`):
+
+1. **Orden:** `VertialIosBridge` **primero** → `ESCPOSProxy` solo de respaldo.
+2. **Timeouts:** `20_000` / reintento `12_000` / delay `400` (como build 33).
+3. **Cola UI tickets:** `deliveryTicketPrint.ts` = un ticket a la vez (no “fire-and-forget” que adelgaza timeouts).
+4. **Ticket delivery nativo:** `timeoutMs: 8_000` en `printDeliveryTicket.ts` (como build 33).
+
+## Qué SÍ se puede sin OK de print
+
+- UI de Ajustes Impresora (padding, textos, layout) **si no cambia** guardado/resolución de IP ni llama distinto a print.
+- Commits de dist / Codemagic / TestFlight **usando** este código blindado.
+
+## Qué NUNCA hacer sin OK explícito
+
+- Invertir Bridge ↔ ESCPOSProxy.
+- Bajar timeouts “para Continuar más rápido”.
+- Sustituir Bridge por otro plugin.
+- Cambiar `VertialIosBridgePlugin.swift` de impresión/ping.
+- Reintroducir cola asíncrona que dispare print con timeouts cortos.
+
+## Tras tocar print (solo con OK)
+
+Explicar en castellano: qué archivo, por qué, y que hace falta **nuevo TestFlight** para la tablet.

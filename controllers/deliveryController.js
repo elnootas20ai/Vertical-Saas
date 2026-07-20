@@ -1423,8 +1423,20 @@ export async function listCatalogItems(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const filterModule = req.query.module || undefined;
-    const items = await listCatalogItemsByUser(req, userId, { module: filterModule });
     const view = String(req.query.view || '').trim().toLowerCase();
+    let items = await listCatalogItemsByUser(req, userId, { module: filterModule });
+    // TPV: nunca devolver inventario/ingredientes como vendibles.
+    if (view === 'tpv') {
+      items = items.filter((doc) => {
+        if ((doc.module || 'catalog') !== 'catalog') return false;
+        if (doc.isStockItem === true) return false;
+        const sc = String(doc.stockCategory || '');
+        if (sc && sc !== 'finished_product' && ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable'].includes(sc)) {
+          return false;
+        }
+        return doc.itemType === 'product' || doc.itemType === 'combo';
+      });
+    }
     const sanitizer = view === 'tpv' ? sanitizeCatalogItemForTpv : sanitizeCatalogItem;
     return res.json({ ok: true, items: items.map(sanitizer).filter(Boolean) });
   } catch (error) {

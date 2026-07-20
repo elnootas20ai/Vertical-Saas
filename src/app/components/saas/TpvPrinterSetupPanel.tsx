@@ -157,12 +157,12 @@ function SettingsSection({
 }) {
   return (
     <div
-      className={`bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
+      className={`bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-3.5 ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
     >
-      <div className="mb-4">
-        <h3 className="font-bold text-gray-900 dark:text-gray-100">{title}</h3>
+      <div className="mb-2.5">
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
         {description ? (
-          <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">{description}</p>
+          <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400 leading-snug">{description}</p>
         ) : null}
       </div>
       {children}
@@ -617,10 +617,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         key={store._id}
         type="button"
         onClick={() => handleStoreChange(store._id)}
-        className={`min-h-[44px] w-full px-4 rounded-xl text-sm font-semibold touch-manipulation transition-colors text-left ${
+        className={`h-8 w-full px-2.5 rounded-lg text-xs font-semibold touch-manipulation transition-colors text-left truncate ${
           selected
             ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-            : 'border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 hover:border-gray-500 dark:hover:border-gray-400'
+            : 'border border-gray-200 dark:border-gray-700 text-gray-800 dark:text-gray-100 hover:border-gray-400 dark:hover:border-gray-500 bg-white dark:bg-gray-900'
         }`}
       >
         {pointOfSaleDisplayLabel(store)}
@@ -629,12 +629,12 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   };
 
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-3 max-w-3xl">
       <header>
-        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Impresora</h2>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Impresora</h2>
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
           {selectedStoreLabel
-            ? `Configuras la impresora de la tienda «${selectedStoreLabel}».`
+            ? `Tienda «${selectedStoreLabel}».`
             : 'Impresora WiFi de tickets del TPV.'}
         </p>
       </header>
@@ -642,9 +642,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       {storeGroups.length > 0 ? (
         <SettingsSection
           title="Empresa y tienda"
-          description="Pulsa una empresa para ver sus tiendas. La IP se guarda solo en la tienda elegida."
+          description="Elige empresa y tienda. La IP se guarda solo en esa tienda."
         >
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {storeGroups.map((group) => {
               const activeStores = group.stores.filter((p) => p.active !== false);
               const expanded = expandedBusinessId === group.businessId;
@@ -652,7 +652,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               return (
                 <div
                   key={group.businessId}
-                  className={`rounded-xl border overflow-hidden ${
+                  className={`rounded-lg border overflow-hidden ${
                     hasSelected || expanded
                       ? 'border-gray-300 dark:border-gray-600'
                       : 'border-gray-200 dark:border-gray-700'
@@ -665,32 +665,32 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                         prev === group.businessId ? '' : group.businessId,
                       )
                     }
-                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left touch-manipulation hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                    className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left touch-manipulation hover:bg-gray-50 dark:hover:bg-gray-800/60"
                     aria-expanded={expanded}
                   >
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
+                    <div className="min-w-0 flex items-baseline gap-2">
+                      <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
                         {group.businessName}
                       </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      <p className="text-[10px] text-gray-500 dark:text-gray-400 shrink-0">
                         {activeStores.length === 0
                           ? 'Sin tiendas'
                           : `${activeStores.length} tienda${activeStores.length === 1 ? '' : 's'}`}
-                        {hasSelected ? ' · seleccionada' : ''}
+                        {hasSelected ? ' · sel.' : ''}
                       </p>
                     </div>
                     <ChevronDown
-                      className={`h-5 w-5 shrink-0 text-gray-500 transition-transform ${
+                      className={`h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform ${
                         expanded ? 'rotate-180' : ''
                       }`}
                     />
                   </button>
                   {expanded && (
-                    <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/40 px-3 py-3 space-y-2">
+                    <div className="border-t border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-900/40 px-2 py-1.5 space-y-1">
                       {activeStores.length > 0 ? (
                         activeStores.map((store) => renderStoreButton(store))
                       ) : (
-                        <p className="text-sm text-gray-500 dark:text-gray-400 px-1">
+                        <p className="text-[11px] text-gray-500 dark:text-gray-400 px-0.5">
                           Sin tiendas. Créala en Ajustes → Empresa → Tienda.
                         </p>
                       )}
@@ -704,9 +704,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       ) : stores.length > 0 ? (
         <SettingsSection
           title="Tienda"
-          description="Pulsa la tienda. La IP se guarda solo en esa (no se mezcla con otras)."
+          description="Pulsa la tienda. La IP se guarda solo en esa."
         >
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1">
             {stores.map((store) => renderStoreButton(store))}
           </div>
         </SettingsSection>
@@ -718,53 +718,53 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           description="Si ya diste Permitir en iOS, la app lo detecta sola. Puedes escribir la IP abajo sin pulsar nada."
         >
           {lanConfirmed ? (
-            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-                <div className="text-sm text-emerald-900 dark:text-emerald-100 leading-relaxed">
+            <div className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-2.5 py-2">
+              <div className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-emerald-900 dark:text-emerald-100 leading-snug">
                   <p className="font-semibold">Red local lista</p>
-                  <p className="mt-1 text-emerald-800/90 dark:text-emerald-200/90">
+                  <p className="mt-0.5 text-emerald-800/90 dark:text-emerald-200/90">
                     Puedes poner la IP y guardar. Si no imprime, revisa Ajustes → Vertial → Red local.
                   </p>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-4 py-3">
-              <div className="flex items-start gap-3">
+            <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-2.5 py-2">
+              <div className="flex items-start gap-2">
                 {lanDetecting || requestingLan ? (
-                  <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5 animate-spin" />
+                  <Loader2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5 animate-spin" />
                 ) : (
-                  <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                  <Shield className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                 )}
-                <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
+                <div className="text-xs text-blue-900 dark:text-blue-100 leading-snug">
                   <p className="font-semibold">
                     {lanDetecting || requestingLan ? 'Detectando permiso de red…' : 'Activando acceso a la WiFi del local'}
                   </p>
-                  <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
+                  <p className="mt-0.5 text-blue-800/90 dark:text-blue-200/90">
                     Mientras tanto ya puedes escribir la IP abajo. Si iOS muestra un aviso, pulsa Permitir.
                   </p>
                 </div>
               </div>
             </div>
           )}
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-2 flex flex-col gap-1.5 sm:flex-row">
             <button
               type="button"
               onClick={() => void handleRequestLanPermission()}
               disabled={requestingLan || lanDetecting}
-              className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-xs font-semibold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
             >
-              {requestingLan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
+              {requestingLan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Network className="w-3.5 h-3.5" />}
               {requestingLan ? 'Pidiendo…' : 'Volver a pedir permiso'}
             </button>
             <button
               type="button"
               onClick={() => void handleOpenSettings()}
               disabled={requestingLan || lanDetecting}
-              className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
+              className="flex-1 inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-xs font-semibold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
             >
-              <ExternalLink className="w-4 h-4" />
+              <ExternalLink className="w-3.5 h-3.5" />
               Abrir Ajustes
             </button>
           </div>
@@ -774,9 +774,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           title="Tablet / móvil"
           description={`Para imprimir y probar el ticket usa la app en la tablet (${IMPRESORA_SETTINGS_PATH}). Aquí puedes guardar la IP de la tienda.`}
         >
-          <div className="flex items-start gap-3">
-            <Smartphone className="w-5 h-5 text-gray-500 shrink-0 mt-0.5" />
-            <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+          <div className="flex items-start gap-2">
+            <Smartphone className="w-4 h-4 text-gray-500 shrink-0 mt-0.5" />
+            <p className="text-xs text-gray-600 dark:text-gray-300 leading-snug">
               Guarda la IP por tienda abajo. La prueba de impresión WiFi sale mejor desde la tablet del local.
             </p>
           </div>
@@ -788,35 +788,35 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         description="Se guardan en la tienda seleccionada arriba (no se mezclan con otras tiendas)."
       >
             {isConfigured && !hasUnsavedIp ? (
-              <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-2.5 py-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">Impresora guardada</p>
-                  <p className="text-sm text-emerald-800/90 dark:text-emerald-200/90 font-mono mt-0.5">
+                  <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-100">Impresora guardada</p>
+                  <p className="text-xs text-emerald-800/90 dark:text-emerald-200/90 font-mono">
                     {selectedHost}:{selectedPort}
                   </p>
                 </div>
               </div>
             ) : hasUnsavedIp ? (
-              <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
-                <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <p className="text-sm text-amber-900 dark:text-amber-100">
+              <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-2.5 py-1.5">
+                <CircleAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <p className="text-xs text-amber-900 dark:text-amber-100">
                   Cambios sin guardar. Pulsa «Guardar impresora».
                 </p>
               </div>
             ) : (
-              <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-4 py-3">
-                <CircleAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
-                <p className="text-sm text-amber-900 dark:text-amber-100">
+              <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-2.5 py-1.5">
+                <CircleAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <p className="text-xs text-amber-900 dark:text-amber-100">
                   HPRT: IP del ticket SELF-TEST y puerto <strong>9100</strong>.
                 </p>
               </div>
             )}
             <label className="block">
-              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+              <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                 IP
               </span>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-1 flex gap-1.5">
                 <input
                   type="text"
                   inputMode="text"
@@ -828,20 +828,20 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                   placeholder="192.168.1.20"
                   value={manualIp}
                   onChange={(e) => handleManualIpChange(e.target.value)}
-                  className="min-w-0 flex-1 min-h-[52px] rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 text-lg font-semibold text-gray-900 dark:text-gray-100 font-mono"
+                  className="min-w-0 flex-1 h-9 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 font-mono"
                 />
                 <button
                   type="button"
                   onClick={handleInsertIpDot}
                   aria-label="Insertar punto"
-                  className="shrink-0 min-h-[52px] min-w-[52px] rounded-xl border-2 border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-2xl font-bold text-gray-800 dark:text-gray-100 touch-manipulation active:bg-gray-100 dark:active:bg-gray-700"
+                  className="shrink-0 h-9 w-9 rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-lg font-bold text-gray-800 dark:text-gray-100 touch-manipulation active:bg-gray-100 dark:active:bg-gray-700"
                 >
                   .
                 </button>
               </div>
             </label>
-            <label className="block mt-4">
-              <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">
+            <label className="block mt-2.5">
+              <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                 Puerto
               </span>
               <input
@@ -851,15 +851,15 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 placeholder="9100"
                 value={String(manualPort)}
                 onChange={(e) => handleManualPortChange(e.target.value)}
-                className="mt-2 w-full min-h-[52px] rounded-xl border-2 border-gray-900 dark:border-gray-100 bg-white dark:bg-gray-900 px-4 text-lg font-semibold text-gray-900 dark:text-gray-100 font-mono"
+                className="mt-1 w-full h-9 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 font-mono"
               />
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {PRINTER_PORT_OPTIONS.map((port) => (
                   <button
                     key={port}
                     type="button"
                     onClick={() => handleManualPortChange(String(port))}
-                    className={`min-h-[44px] px-4 rounded-xl border-2 text-sm font-bold font-mono touch-manipulation ${
+                    className={`h-8 px-2.5 rounded-lg border text-xs font-semibold font-mono touch-manipulation ${
                       manualPort === port
                         ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
                         : 'border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100'
@@ -869,12 +869,12 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                   </button>
                 ))}
               </div>
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                Por defecto <strong>9100</strong> (casi todas las térmicas ESC/POS). Si no conecta, prueba 9101 o 9102.
+              <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                Por defecto <strong>9100</strong>. Si no conecta, prueba 9101 o 9102.
               </p>
             </label>
             {isNative && (diagLoading || diagnostics) ? (
-              <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 text-xs text-gray-700 dark:text-gray-300 space-y-1.5">
+              <div className="mt-2.5 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-2.5 py-2 text-[11px] text-gray-700 dark:text-gray-300 space-y-1">
                 <p className="font-semibold text-gray-900 dark:text-gray-100">Estado de red en esta tablet</p>
                 {diagLoading ? (
                   <p className="text-gray-500">Leyendo WiFi del dispositivo…</p>
@@ -905,36 +905,36 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 type="button"
                 onClick={refreshDiagnostics}
                 disabled={diagLoading}
-                className="mt-4 w-full min-h-[44px] rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-700 dark:text-gray-300 touch-manipulation"
+                className="mt-2.5 w-full h-8 rounded-lg border border-gray-200 dark:border-gray-700 text-[11px] font-semibold text-gray-700 dark:text-gray-300 touch-manipulation"
               >
                 Ver estado de red de la tablet
               </button>
             ) : null}
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               <button
                 type="button"
                 onClick={handleCheckConnection}
                 disabled={pingingIp || !manualIp.trim() || !canProbeNetwork}
-                className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
+                className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-xs font-semibold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
               >
-                {pingingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
+                {pingingIp ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Network className="w-3.5 h-3.5" />}
                 {pingingIp ? 'Comprobando…' : 'Comprobar conexión'}
               </button>
               <button
                 type="button"
                 onClick={handleRequestSave}
                 disabled={savingIp || !manualIp.trim()}
-                className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold touch-manipulation active:opacity-80 disabled:opacity-60"
+                className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-semibold touch-manipulation active:opacity-80 disabled:opacity-60"
               >
-                {savingIp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+                {savingIp ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
                 {savingIp ? 'Guardando…' : 'Guardar impresora'}
               </button>
             </div>
-            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 font-mono">
+            <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400 font-mono">
               Se guardará: {(manualIp.trim() || '—')}:{manualPort}
             </p>
             {pingingIp ? (
-              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
                 La comprobación puede fallar por la red; igual puedes pulsar «Guardar impresora» con la IP del ticket.
               </p>
             ) : null}
@@ -955,9 +955,9 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               type="button"
               onClick={() => void handleTest()}
               disabled={testing || !canTest}
-              className="w-full inline-flex items-center justify-center gap-2 min-h-[52px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-50"
+              className="w-full inline-flex items-center justify-center gap-1.5 h-9 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-xs font-semibold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-50"
             >
-              {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Printer className="w-4 h-4" />}
+              {testing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Printer className="w-3.5 h-3.5" />}
               {testing ? 'Imprimiendo…' : 'Probar ticket'}
             </button>
             {!canTest && canProbeNetwork && (

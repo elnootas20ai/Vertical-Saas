@@ -17,7 +17,6 @@ import {
   DEFAULT_PRINTER_CONFIG,
   cachePdvPrinterConfig,
   loadPdvPrinterCache,
-  saveLegacyPrinterConfig,
   type VertialPrinterConfig,
   type VertialPrinterConnectionType,
 } from '../../../lib/vertialPrint/printerConfig';
@@ -238,17 +237,12 @@ export function StorePrintersManager({
       try {
         const saved = await savePrinterConfigToPdv(dataUserId, pdv, next, 'store');
         cachePdvPrinterConfig(saved._id, next);
-        // Misma config en el dispositivo: el TPV de esta tablet la ve al instante.
-        try {
-          saveLegacyPrinterConfig(next);
-        } catch {
-          /* ignore */
-        }
+        // Solo caché por tienda — NO pisar la config legacy del dispositivo (mezclaba IPs entre PDVs).
         setActivePrinterScope({ pdvId: saved._id, pdv: saved });
         setStores((prev) => prev.map((p) => (p._id === saved._id ? saved : p)));
         setDrafts((prev) => ({ ...prev, [saved._id]: configFromPdv(saved) }));
         toast.success(`Impresora guardada en «${pointOfSaleDisplayLabel(saved)}»`, {
-          description: 'Queda en Ajustes y en el TPV de esa misma tienda.',
+          description: 'Queda en esa tienda. El TPV de esa tienda usa esta IP.',
         });
         void refreshScope().catch(() => undefined);
       } catch (error) {
