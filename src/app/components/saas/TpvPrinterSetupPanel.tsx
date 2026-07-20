@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { CheckCircle2, CircleAlert, ExternalLink, Loader2, Network, Printer, Shield, Smartphone } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  CircleAlert,
+  ExternalLink,
+  Loader2,
+  Network,
+  Printer,
+  Shield,
+  Smartphone,
+} from 'lucide-react';
 import { pointOfSaleDisplayLabel, type PointOfSale } from '../../lib/deliveryApi';
 import { IMPRESORA_SETTINGS_PATH } from '../../lib/vertialPrint/nativePrinterFlow';
 import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
@@ -27,6 +37,7 @@ import {
   setActivePrinterScope,
 } from '../../lib/vertialPrint/printerActiveScope';
 import {
+  DEFAULT_PRINTER_CONFIG,
   loadLegacyPrinterConfig,
   loadPdvPrinterCache,
   cachePdvPrinterConfig,
@@ -38,6 +49,13 @@ import { savePrinterConfigToPdv } from '../../lib/vertialPrint/printerPdvSync';
 
 const LAN_MANUAL_CONFIRM_KEY = 'vertial_lan_manual_confirmed_v1';
 
+/** Empresa + sus tiendas (Ajustes → Impresora). */
+export interface TpvPrinterStoreGroup {
+  businessId: string;
+  businessName: string;
+  stores: PointOfSale[];
+}
+
 export interface TpvPrinterScope {
   userId: string;
   pdvId: string;
@@ -47,6 +65,8 @@ export interface TpvPrinterScope {
   terminalLabel?: string;
   /** Tiendas visibles en el selector (TPV / Ajustes). */
   availableStores?: PointOfSale[];
+  /** Si viene, se muestra por empresa (evita mezclar PDVs fantasma). */
+  availableStoreGroups?: TpvPrinterStoreGroup[];
   onStoreSelect?: (pdvId: string) => void;
   onPdvUpdated?: (pdv: PointOfSale) => void;
 }
@@ -78,10 +98,14 @@ function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
   const pdv = scope?.pdv;
   const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
 
-  // En el panel de ajustes: priorizar lo de ESTA tienda (servidor → caché local por PDV).
+  // Con tienda elegida: SOLO config de esa tienda (servidor → caché PDV). Nunca pedir prestada la IP de otra.
   if (pdvId) {
     const fromStore = pdv?.printerConfig
-      ? normalizeVertialPrinterConfig({ ...pdv.printerConfig, connectionType: 'network' })
+      ? normalizeVertialPrinterConfig({
+          ...DEFAULT_PRINTER_CONFIG,
+          ...pdv.printerConfig,
+          connectionType: 'network',
+        })
       : null;
     if (fromStore && isValidIpv4(String(fromStore.networkHost || '').trim())) {
       return fromStore;
@@ -90,6 +114,13 @@ function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
     if (cached && isValidIpv4(String(cached.networkHost || '').trim())) {
       return normalizeVertialPrinterConfig({ ...cached, connectionType: 'network' });
     }
+    return normalizeVertialPrinterConfig({
+      ...DEFAULT_PRINTER_CONFIG,
+      connectionType: 'network',
+      networkHost: '',
+      networkPort: 9100,
+      paperWidthMm: 80,
+    });
   }
 
   const raw = pdv
@@ -102,7 +133,6 @@ function initialConfig(scope?: TpvPrinterScope): VertialPrinterConfig {
   const normalized = normalizeVertialPrinterConfig({ ...raw, connectionType: 'network' });
   const host = String(normalized.networkHost || '').trim();
   const localHost = String(local.networkHost || '').trim();
-  // No pisar una IP ya guardada en el dispositivo con un PDV vacío / sin config.
   if (!isValidIpv4(host) && isValidIpv4(localHost)) {
     return normalizeVertialPrinterConfig({
       ...local,
@@ -536,13 +566,38 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       ? `Vas a guardar ${pendingSaveHost}:${pendingSavePort} (antes ${selectedHost}:${selectedPort}).`
       : `Los tickets de este dispositivo se imprimirán en ${pendingSaveHost || '—'}:${pendingSavePort}.`;
 
-  const stores = (scope?.availableStores || []).filter((p) => p.active !== false);
+  const storeGroups = (scope?.availableStoreGroups || []).filter((g) => g.businessId);
+  const stores = (
+    storeGroups.length > 0
+      ? storeGroups.flatMap((g) => g.stores)
+      : scope?.availableStores || []
+  ).filter((p) => p.active !== false);
   const selectedStoreId = String(pdv?._id || scope?.pdvId || '').trim();
   const storeFromList = stores.find((p) => p._id === selectedStoreId);
   const selectedStoreLabel =
     scope?.storeLabel
     || (pdv ? pointOfSaleDisplayLabel(pdv) : '')
     || (storeFromList ? pointOfSaleDisplayLabel(storeFromList) : '');
+
+  const selectedBusinessId = useMemo(() => {
+    if (!selectedStoreId) return storeGroups[0]?.businessId || '';
+    const hit = storeGroups.find((g) =>
+      g.stores.some((s) => s._id === selectedStoreId && s.active !== false),
+    );
+    return hit?.businessId || storeGroups[0]?.businessId || '';
+  }, [selectedStoreId, storeGroups]);
+
+  const [expandedBusinessId, setExpandedBusinessId] = useState('');
+  useEffect(() => {
+    if (!storeGroups.length) {
+      setExpandedBusinessId('');
+      return;
+    }
+    setExpandedBusinessId((prev) => {
+      if (prev && storeGroups.some((g) => g.businessId === prev)) return prev;
+      return selectedBusinessId || storeGroups[0].businessId;
+    });
+  }, [storeGroups, selectedBusinessId]);
 
   const handleStoreChange = useCallback(
     (pdvId: string) => {
@@ -555,6 +610,24 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     [scope, selectedStoreId],
   );
 
+  const renderStoreButton = (store: PointOfSale) => {
+    const selected = store._id === (selectedStoreId || stores[0]?._id);
+    return (
+      <button
+        key={store._id}
+        type="button"
+        onClick={() => handleStoreChange(store._id)}
+        className={`min-h-[44px] w-full px-4 rounded-xl text-sm font-semibold touch-manipulation transition-colors text-left ${
+          selected
+            ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
+            : 'border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 hover:border-gray-500 dark:hover:border-gray-400'
+        }`}
+      >
+        {pointOfSaleDisplayLabel(store)}
+      </button>
+    );
+  };
+
   return (
     <div className="space-y-6 max-w-3xl">
       <header>
@@ -566,120 +639,154 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         </p>
       </header>
 
-      {stores.length > 0 ? (
+      {storeGroups.length > 0 ? (
+        <SettingsSection
+          title="Empresa y tienda"
+          description="Pulsa una empresa para ver sus tiendas. La IP se guarda solo en la tienda elegida."
+        >
+          <div className="space-y-2">
+            {storeGroups.map((group) => {
+              const activeStores = group.stores.filter((p) => p.active !== false);
+              const expanded = expandedBusinessId === group.businessId;
+              const hasSelected = activeStores.some((s) => s._id === selectedStoreId);
+              return (
+                <div
+                  key={group.businessId}
+                  className={`rounded-xl border overflow-hidden ${
+                    hasSelected || expanded
+                      ? 'border-gray-300 dark:border-gray-600'
+                      : 'border-gray-200 dark:border-gray-700'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedBusinessId((prev) =>
+                        prev === group.businessId ? '' : group.businessId,
+                      )
+                    }
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left touch-manipulation hover:bg-gray-50 dark:hover:bg-gray-800/60"
+                    aria-expanded={expanded}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">
+                        {group.businessName}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        {activeStores.length === 0
+                          ? 'Sin tiendas'
+                          : `${activeStores.length} tienda${activeStores.length === 1 ? '' : 's'}`}
+                        {hasSelected ? ' · seleccionada' : ''}
+                      </p>
+                    </div>
+                    <ChevronDown
+                      className={`h-5 w-5 shrink-0 text-gray-500 transition-transform ${
+                        expanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+                  {expanded && (
+                    <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/40 px-3 py-3 space-y-2">
+                      {activeStores.length > 0 ? (
+                        activeStores.map((store) => renderStoreButton(store))
+                      ) : (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 px-1">
+                          Sin tiendas. Créala en Ajustes → Empresa → Tienda.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </SettingsSection>
+      ) : stores.length > 0 ? (
         <SettingsSection
           title="Tienda"
-          description={
-            stores.length > 1
-              ? 'Elige la tienda. La IP se guarda en este dispositivo y en esa tienda.'
-              : 'Tienda a la que se asocia esta impresora.'
-          }
+          description="Pulsa la tienda. La IP se guarda solo en esa (no se mezcla con otras)."
         >
-          {stores.length === 1 ? (
-            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                {pointOfSaleDisplayLabel(stores[0])}
-              </p>
-            </div>
-          ) : (
-            <label className="block">
-              <span className="sr-only">Tienda</span>
-              <select
-                value={selectedStoreId || stores[0]?._id || ''}
-                onChange={(e) => handleStoreChange(e.target.value)}
-                className="w-full min-h-[52px] rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-4 text-sm font-semibold text-gray-900 dark:text-gray-100 touch-manipulation"
-              >
-                {stores.map((store) => (
-                  <option key={store._id} value={store._id}>
-                    {pointOfSaleDisplayLabel(store)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          <div className="flex flex-col gap-2">
+            {stores.map((store) => renderStoreButton(store))}
+          </div>
         </SettingsSection>
       ) : null}
 
-      {!isNative ? (
+      {isNative ? (
         <SettingsSection
-          title="Usa la app en la tablet o el móvil"
-          description="La impresora WiFi solo se configura desde la app instalada, no desde el navegador."
+          title="1. Red local"
+          description="Si ya diste Permitir en iOS, la app lo detecta sola. Puedes escribir la IP abajo sin pulsar nada."
+        >
+          {lanConfirmed ? (
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                <div className="text-sm text-emerald-900 dark:text-emerald-100 leading-relaxed">
+                  <p className="font-semibold">Red local lista</p>
+                  <p className="mt-1 text-emerald-800/90 dark:text-emerald-200/90">
+                    Puedes poner la IP y guardar. Si no imprime, revisa Ajustes → Vertial → Red local.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-4 py-3">
+              <div className="flex items-start gap-3">
+                {lanDetecting || requestingLan ? (
+                  <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5 animate-spin" />
+                ) : (
+                  <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                )}
+                <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
+                  <p className="font-semibold">
+                    {lanDetecting || requestingLan ? 'Detectando permiso de red…' : 'Activando acceso a la WiFi del local'}
+                  </p>
+                  <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
+                    Mientras tanto ya puedes escribir la IP abajo. Si iOS muestra un aviso, pulsa Permitir.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => void handleRequestLanPermission()}
+              disabled={requestingLan || lanDetecting}
+              className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
+            >
+              {requestingLan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
+              {requestingLan ? 'Pidiendo…' : 'Volver a pedir permiso'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleOpenSettings()}
+              disabled={requestingLan || lanDetecting}
+              className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
+            >
+              <ExternalLink className="w-4 h-4" />
+              Abrir Ajustes
+            </button>
+          </div>
+        </SettingsSection>
+      ) : (
+        <SettingsSection
+          title="Tablet / móvil"
+          description={`Para imprimir y probar el ticket usa la app en la tablet (${IMPRESORA_SETTINGS_PATH}). Aquí puedes guardar la IP de la tienda.`}
         >
           <div className="flex items-start gap-3">
             <Smartphone className="w-5 h-5 text-gray-500 shrink-0 mt-0.5" />
             <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
-              Abre Vertial en la tablet del local. En el TPV pulsa el icono de impresora, o ve a {IMPRESORA_SETTINGS_PATH}.
+              Guarda la IP por tienda abajo. La prueba de impresión WiFi sale mejor desde la tablet del local.
             </p>
           </div>
-          {selectedHost && (
-            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500 font-mono">
-              Guardada en este dispositivo: {selectedHost}:{selectedPort}
-            </p>
-          )}
         </SettingsSection>
-      ) : (
-        <>
-          <SettingsSection
-            title="1. Red local"
-            description="Si ya diste Permitir en iOS, la app lo detecta sola. Puedes escribir la IP abajo sin pulsar nada."
-          >
-            {lanConfirmed ? (
-              <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
-                  <div className="text-sm text-emerald-900 dark:text-emerald-100 leading-relaxed">
-                    <p className="font-semibold">Red local lista</p>
-                    <p className="mt-1 text-emerald-800/90 dark:text-emerald-200/90">
-                      Puedes poner la IP y guardar. Si no imprime, revisa Ajustes → Vertial → Red local.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 px-4 py-3">
-                <div className="flex items-start gap-3">
-                  {lanDetecting || requestingLan ? (
-                    <Loader2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5 animate-spin" />
-                  ) : (
-                    <Shield className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-                  )}
-                  <div className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
-                    <p className="font-semibold">
-                      {lanDetecting || requestingLan ? 'Detectando permiso de red…' : 'Activando acceso a la WiFi del local'}
-                    </p>
-                    <p className="mt-1 text-blue-800/90 dark:text-blue-200/90">
-                      Mientras tanto ya puedes escribir la IP abajo. Si iOS muestra un aviso, pulsa Permitir.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <button
-                type="button"
-                onClick={() => void handleRequestLanPermission()}
-                disabled={requestingLan || lanDetecting}
-                className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
-              >
-                {requestingLan ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
-                {requestingLan ? 'Pidiendo…' : 'Volver a pedir permiso'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleOpenSettings()}
-                disabled={requestingLan || lanDetecting}
-                className="flex-1 inline-flex items-center justify-center gap-2 min-h-[48px] rounded-xl border-2 border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-100 text-sm font-bold touch-manipulation active:bg-gray-50 dark:active:bg-gray-700 disabled:opacity-60"
-              >
-                <ExternalLink className="w-4 h-4" />
-                Abrir Ajustes
-              </button>
-            </div>
-          </SettingsSection>
+      )}
 
-          <SettingsSection
-            title="2. IP y puerto"
-            description="Guárdalos y quedan en este dispositivo hasta que los cambies."
-          >
+      <SettingsSection
+        title={isNative ? '2. IP y puerto' : 'IP y puerto'}
+        description="Se guardan en la tienda seleccionada arriba (no se mezclan con otras tiendas)."
+      >
             {isConfigured && !hasUnsavedIp ? (
               <div className="mb-4 flex items-center gap-3 rounded-xl border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-4 py-3">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -766,7 +873,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 Por defecto <strong>9100</strong> (casi todas las térmicas ESC/POS). Si no conecta, prueba 9101 o 9102.
               </p>
             </label>
-            {(diagLoading || diagnostics) ? (
+            {isNative && (diagLoading || diagnostics) ? (
               <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 px-4 py-3 text-xs text-gray-700 dark:text-gray-300 space-y-1.5">
                 <p className="font-semibold text-gray-900 dark:text-gray-100">Estado de red en esta tablet</p>
                 {diagLoading ? (
@@ -793,7 +900,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                   </>
                 ) : null}
               </div>
-            ) : (
+            ) : isNative ? (
               <button
                 type="button"
                 onClick={refreshDiagnostics}
@@ -802,7 +909,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               >
                 Ver estado de red de la tablet
               </button>
-            )}
+            ) : null}
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 type="button"
@@ -834,11 +941,13 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           </SettingsSection>
 
           <SettingsSection
-            title="3. Probar ticket"
+            title={isNative ? '3. Probar ticket' : 'Probar ticket'}
             description={
-              canProbeNetwork
-                ? 'Solo después de guardar la impresora en el paso 2.'
-                : 'Guarda la IP en el paso 2. Para la prueba, confirma también Red local (paso 1).'
+              isNative
+                ? (canProbeNetwork
+                  ? 'Solo después de guardar la impresora.'
+                  : 'Guarda la IP. Para la prueba, confirma también Red local.')
+                : 'Mejor desde la tablet del local (misma WiFi que la impresora).'
             }
             disabled={false}
           >
@@ -855,7 +964,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 {hasUnsavedIp
                   ? 'Guarda la IP antes de imprimir la prueba.'
-                  : 'Guarda primero la impresora en el paso 2.'}
+                  : 'Guarda primero la impresora.'}
               </p>
             )}
             {diagnostics?.ready && diagnostics.savedHost === readPrinterVerifiedHost() && (
@@ -906,8 +1015,6 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             </div>,
             document.body,
           )}
-        </>
-      )}
     </div>
   );
 }
