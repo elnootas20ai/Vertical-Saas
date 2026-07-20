@@ -25,20 +25,23 @@ export function getFormattedFromAddress() {
   return `"${safeName}" <${addr}>`;
 }
 
-/** Reply-To por defecto (p. ej. buzón “notas”); si sendEmail recibe replyTo explícito, gana ese. */
+/** Buzón público de soporte en plantillas al cliente (NUNCA el email personal de admin). */
+function getSupportMailto() {
+  const publicContact =
+    String(process.env.DEFAULT_CONTACT_EMAIL || '').trim()
+    || 'hola@vertialapp.com';
+  // Evitar filtrar ALERTS_ADMIN / EMAIL_REPLY_TO personales (p. ej. elnootas…) al cliente.
+  if (/elnootas/i.test(publicContact)) {
+    return 'hola@vertialapp.com';
+  }
+  return publicContact;
+}
+
+/** Reply-To de correos al cliente: contacto público, no buzón personal de alertas. */
 function resolveReplyTo(explicitReplyTo) {
   const ex = explicitReplyTo ? String(explicitReplyTo).trim() : '';
   if (ex) return ex;
-  return String(process.env.EMAIL_REPLY_TO || '').trim();
-}
-
-/** Buzón de contacto visible en plantillas (Reply-To a veces no se muestra claro en Gmail). */
-function getSupportMailto() {
-  return (
-    String(process.env.EMAIL_REPLY_TO || '').trim()
-    || String(process.env.DEFAULT_CONTACT_EMAIL || '').trim()
-    || ''
-  );
+  return getSupportMailto();
 }
 
 /** Keys reales de Resend empiezan por re_; evita activar Resend con placeholders tipo CAMBIAR_… */
@@ -367,7 +370,8 @@ export function buildAccountLockedEmail(email, lockUntil, ipAddress) {
             </p>
           </div>
           <p style="color:#888;font-size:13px;margin:0;line-height:1.5;">
-            Si necesitas ayuda, contacta con el administrador del sistema.
+            Puedes entrar con «Código por email» en la pantalla de acceso, o escribirnos a
+            <a href="mailto:hola@vertialapp.com" style="color:#111;font-weight:600;">hola@vertialapp.com</a>.
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">

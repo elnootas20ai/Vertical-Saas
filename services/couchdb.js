@@ -1712,7 +1712,18 @@ export async function saveResetToken(req, account, rawToken) {
   });
 }
 
-export async function findAccountByResetToken(req, rawToken) {
+export async function findAccountByResetToken(req, rawToken, emailHint) {
+  const email = String(emailHint || '').trim().toLowerCase();
+  if (email) {
+    const byEmail = await findAccountByEmail(req, email);
+    if (!byEmail?._id) return null;
+    return readFreshAccountForAuthToken(
+      req,
+      byEmail,
+      rawToken,
+      ACCOUNT_AUTH_TOKEN_FIELDS.passwordReset,
+    );
+  }
   return findAccountByAuthTokenInList(req, rawToken, ACCOUNT_AUTH_TOKEN_FIELDS.passwordReset);
 }
 

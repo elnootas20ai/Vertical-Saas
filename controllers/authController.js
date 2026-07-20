@@ -1091,9 +1091,9 @@ export async function updateProfile(req, res) {
     const userId = String(rawUserId || '').trim().replace(/^account:/, '');
     const authUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
     const targetUserId = userId;
+    const actorEmail = String(req.authUser?.email || '').trim();
 
     if (authUserId && targetUserId && authUserId !== targetUserId) {
-      const actorEmail = req.authUser?.email || '';
       if (!isVertialSuperAdminEmail(actorEmail)) {
         const actor = authUserId ? await findAccountByUserId(req, authUserId) : null;
         const isManager = actor && ['Admin', 'Gerente', 'Administrador', 'Encargado'].includes(String(actor.role || ''));
@@ -1163,7 +1163,6 @@ export async function updateProfile(req, res) {
     let nextSubscription = account.subscription || null;
     if (subscription !== undefined) {
       let merged = { ...(account.subscription || {}), ...subscription };
-      const actorEmail = req.authUser?.email || '';
       if (isVertialSuperAdminEmail(actorEmail)) {
         if (Object.prototype.hasOwnProperty.call(subscription, 'extraPointOfSaleSlots')) {
           const extra = Math.floor(Number(subscription.extraPointOfSaleSlots) || 0);
@@ -2681,7 +2680,7 @@ export async function resetPasswordWithToken(req, res) {
       return badRequest(res, 'La contraseña debe tener al menos 8 caracteres');
     }
 
-    const account = await findAccountByResetToken(req, token);
+    const account = await findAccountByResetToken(req, token, email);
     if (!account || account.email.toLowerCase() !== String(email).trim().toLowerCase()) {
       return res.status(400).json({ ok: false, error: 'Token inválido o expirado' });
     }
@@ -2694,6 +2693,9 @@ export async function resetPasswordWithToken(req, res) {
       refreshTokenHash: null,
       refreshTokenExpiry: null,
       sessions: [],
+      // Tras reset válido, levantar bloqueo por intentos fallidos (si no, el cliente sigue en 423).
+      failedLoginAttempts: 0,
+      lockUntil: null,
       updatedAt: new Date().toISOString(),
     });
     // S-01: Limpiar cookies al resetear contraseña

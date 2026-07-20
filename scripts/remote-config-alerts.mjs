@@ -7,6 +7,7 @@ import { loadLocalValues } from './deploy-env.mjs';
 import { sshRunScript } from './remote-ssh.mjs';
 
 const ADMIN_EMAIL = 'elnootas2.0@gmail.com';
+const PUBLIC_CONTACT = 'hola@vertialapp.com';
 
 const values = loadLocalValues();
 if (!values) process.exit(1);
@@ -23,11 +24,13 @@ if (!user || !host || !repo) {
 
 const vars = {
   EMAIL_FROM_NAME: 'Vertial',
-  EMAIL_REPLY_TO: ADMIN_EMAIL,
+  // Reply-To y contacto visibles al cliente: dominio Vertial (nunca email personal).
+  EMAIL_REPLY_TO: PUBLIC_CONTACT,
+  DEFAULT_CONTACT_EMAIL: PUBLIC_CONTACT,
+  // Alertas internas sí van al buzón personal.
   ALERTS_ADMIN_EMAIL: ADMIN_EMAIL,
   BUG_REPORT_EMAIL: ADMIN_EMAIL,
   AFFILIATE_EMAIL: ADMIN_EMAIL,
-  DEFAULT_CONTACT_EMAIL: 'hola@vertialapp.com',
   ALERTS_ADMIN_ENABLED: 'true',
   ALERT_RSS_MB: '1500',
   ALERT_HEAP_MB: '1100',
@@ -64,7 +67,7 @@ grep -E '^(EMAIL_FROM_NAME|EMAIL_REPLY_TO|ALERTS_|BUG_|AFFILIATE_|DEFAULT_CONTAC
 docker compose -f deploy/docker-compose.scaleway.yml --env-file .env up -d --force-recreate app
 sleep 12
 curl -sS http://127.0.0.1:3000/health | head -c 200; echo
-echo "=== Test alerta admin (SMTP) ==="
+echo "=== Test alerta admin (SMTP/Resend) ==="
 docker exec deploy-app-1 node scripts/test-email.mjs '${ADMIN_EMAIL.replace(/'/g, `'\\''`)}'
 `;
 
