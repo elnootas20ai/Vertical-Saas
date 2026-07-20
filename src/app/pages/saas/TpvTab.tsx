@@ -224,6 +224,7 @@ function tpvOrderToTicketDoc(
     customerName: `Mesa ${order.tableNumber}`,
     customerPhone: '',
     customerAddress: '',
+    emphasizeCustomerAddress: false,
     deliveryTypeLabel: '',
     cashierName: order.createdBy,
     lines: order.items.map((i) => ({

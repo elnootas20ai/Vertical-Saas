@@ -123,6 +123,7 @@ export async function sendEposTestTicket(
     customerName: 'Impresion de prueba',
     customerPhone: '',
     customerAddress: '',
+    emphasizeCustomerAddress: false,
     deliveryTypeLabel: '',
     cashierName: '',
     lines: [{ qty: 1, name: 'Producto demo', total: 9.99 }],

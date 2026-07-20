@@ -737,6 +737,7 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
     customerName: sale.clienteNombre || 'Cliente',
     customerPhone: '',
     customerAddress: '',
+    emphasizeCustomerAddress: false,
     deliveryTypeLabel: '',
     cashierName: sale.workerName,
     lines: sale.lines.map((l) => ({

@@ -98,6 +98,7 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(doc.vat).toBeGreaterThan(0);
     expect(doc.base).toBeGreaterThan(0);
     expect(doc.paymentLabel.toLowerCase()).toContain('efectivo');
+    expect(doc.emphasizeCustomerAddress).toBe(true);
 
     const text = decodeEscpos(encodeTicketEscpos(doc));
     expect(text).toContain('TICKET');
@@ -109,6 +110,34 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('TOTAL');
     expect(text).toContain('Extra queso');
     expect(text).toContain('Gracias por su visita');
+  });
+
+  it('recogida: no imprime calle del cliente', () => {
+    const opts = baseOptions();
+    opts.order.deliveryType = 'recogida';
+    const doc = buildTicketDocument({ ...opts, variant: 'customer' });
+    expect(doc.customerAddress).toBe('');
+    expect(doc.emphasizeCustomerAddress).toBe(false);
+    expect(doc.deliveryTypeLabel).toMatch(/recogida/i);
+
+    const text = decodeEscpos(encodeTicketEscpos(doc));
+    expect(text).toContain('Recogida en local');
+    expect(text).not.toContain('Dir:');
+    expect(text).not.toContain('Av. Principal');
+  });
+
+  it('DISARMINK / Pau: issuer del ticket es hoypecamos', () => {
+    const opts = baseOptions();
+    opts.business = {
+      name: 'DISARMINK SL',
+      legalName: 'disarmink sl',
+      taxId: 'B67284315',
+    };
+    const doc = buildTicketDocument({ ...opts, variant: 'customer' });
+    expect(doc.issuer).toBe('hoypecamos');
+    const text = decodeEscpos(encodeTicketEscpos(doc));
+    expect(text).toContain('hoypecamos');
+    expect(text).not.toMatch(/disarmink/i);
   });
 
   it('no trunca nombres largos: envuelve en varias lineas', () => {

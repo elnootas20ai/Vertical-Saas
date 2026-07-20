@@ -17,6 +17,7 @@ export function sanitizeEscposText(value: string): string {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/€/g, 'EUR')
+    .replace(/[·•]/g, '-') // punto medio → guion (si no, sale "?")
     .replace(/[^\x09\x0a\x0d\x20-\x7e]/g, '?');
 }
 
@@ -125,8 +126,8 @@ function pushLineDetail(
  * Sin este avance, el título/negocio salen cortados.
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  // Poco margen arriba: evita cortar el título sin gastar papel de más
-  chunks.push(command([ESC, 0x64, 3]));
+  // Ajustado: suficiente para no cortar el nombre, menos blanco arriba
+  chunks.push(command([ESC, 0x64, 1]));
 }
 
 /**
@@ -135,11 +136,30 @@ function pushTopMargin(chunks: Uint8Array[]) {
 function pushFeedAndCut(chunks: Uint8Array[], width: number) {
   chunks.push(setSize(SIZE_NORMAL));
   chunks.push(textLine('', width));
-  chunks.push(textLine('', width));
-  // ~8 líneas ≈ margen hasta cuchilla en la mayoría de HPRT 80 mm
-  chunks.push(command([ESC, 0x64, 8]));
+  // ~5 líneas ≈ margen hasta cuchilla (antes 8 + 2 vacías)
+  chunks.push(command([ESC, 0x64, 5]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
+}
+
+/** Dirección del cliente: en domicilio un poco más marcada (negrita). */
+function pushCustomerDir(
+  chunks: Uint8Array[],
+  doc: TicketDocument,
+  width: number,
+  paperWidthMm: 58 | 80,
+) {
+  if (!doc.customerAddress) return;
+  const tallCols = colsForSize(paperWidthMm, SIZE_TALL);
+  chunks.push(setSize(SIZE_TALL));
+  if (doc.emphasizeCustomerAddress) {
+    chunks.push(command([ESC, 0x45, 1]));
+  }
+  chunks.push(textLine(`Dir: ${doc.customerAddress}`, tallCols));
+  if (doc.emphasizeCustomerAddress) {
+    chunks.push(command([ESC, 0x45, 0]));
+  }
+  chunks.push(setSize(SIZE_NORMAL));
 }
 
 function pushCenteredTitle(chunks: Uint8Array[], title: string, paperWidthMm: 58 | 80) {
@@ -173,7 +193,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
   chunks.push(textLine(sepLine(width), width));
   pushCenteredTitle(chunks, doc.title, paperWidthMm);
   chunks.push(command([ESC, 0x61, 1]));
-  chunks.push(textLine(`${doc.ticketNo} · ${doc.dateLabel}`, width));
+  chunks.push(textLine(`${doc.ticketNo} - ${doc.dateLabel}`, width));
   chunks.push(textLine(sepLine(width), width));
   chunks.push(command([ESC, 0x61, 0]));
 
@@ -186,7 +206,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
     chunks.push(textLine(`Cliente: ${doc.customerName}`, width));
     if (doc.customerPhone) chunks.push(textLine(`Tel: ${doc.customerPhone}`, width));
-    if (doc.customerAddress) chunks.push(textLine(`Dir: ${doc.customerAddress}`, width));
+    pushCustomerDir(chunks, doc, width, paperWidthMm);
     if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
     chunks.push(textLine(sepLine(width), width));
     for (const line of doc.lines) {
@@ -213,11 +233,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
       chunks.push(textLine(`Tel: ${doc.customerPhone}`, tallCols));
       chunks.push(setSize(SIZE_NORMAL));
     }
-    if (doc.customerAddress) {
-      chunks.push(setSize(SIZE_TALL));
-      chunks.push(textLine(`Dir: ${doc.customerAddress}`, tallCols));
-      chunks.push(setSize(SIZE_NORMAL));
-    }
+    pushCustomerDir(chunks, doc, width, paperWidthMm);
     chunks.push(textLine(sepLine(width), width));
     for (const line of doc.lines) {
       pushLineDetail(chunks, line, width, paperWidthMm);
@@ -249,11 +265,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
       chunks.push(textLine(`Tel: ${doc.customerPhone}`, tallCols));
       chunks.push(setSize(SIZE_NORMAL));
     }
-    if (doc.customerAddress) {
-      chunks.push(setSize(SIZE_TALL));
-      chunks.push(textLine(`Dir: ${doc.customerAddress}`, tallCols));
-      chunks.push(setSize(SIZE_NORMAL));
-    }
+    pushCustomerDir(chunks, doc, width, paperWidthMm);
     if (doc.deliveryTypeLabel) chunks.push(textLine(doc.deliveryTypeLabel, width));
     if (doc.cashierName) chunks.push(textLine(`Atendido: ${doc.cashierName}`, width));
     chunks.push(textLine(sepLine(width), width));
@@ -312,7 +324,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
   const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   return concat([
     command([ESC, 0x40]),
-    command([ESC, 0x64, 3]),
+    command([ESC, 0x64, 1]),
     command([ESC, 0x61, 1]),
     command([ESC, 0x45, 1]),
     setSize(SIZE_TALL),
@@ -331,8 +343,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
     textLine('Vuelve a la app y pulsa', width),
     textLine('"Usar esta impresora"', width),
     textLine('', width),
-    textLine('', width),
-    command([ESC, 0x64, 8]),
+    command([ESC, 0x64, 5]),
     command([GS, 0x56, 0]),
   ]);
 }
@@ -353,6 +364,7 @@ export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
     customerName: 'Impresion de prueba',
     customerPhone: '',
     customerAddress: '',
+    emphasizeCustomerAddress: false,
     deliveryTypeLabel: '',
     cashierName: '',
     lines: [{ qty: 1, name: 'Producto demo', total: 9.99 }],

@@ -24,6 +24,8 @@ export interface TicketDocument {
   customerName: string;
   customerPhone: string;
   customerAddress: string;
+  /** true = envío a domicilio → dirección un poco más marcada en el ticket */
+  emphasizeCustomerAddress: boolean;
   deliveryTypeLabel: string;
   cashierName: string;
   lines: TicketLine[];
@@ -52,6 +54,34 @@ const DELIVERY_TYPE_LABELS: Record<string, string> = {
   recogida: 'Recogida en local',
 };
 
+/**
+ * Nombre que sale arriba del ticket (marca / comercial).
+ * Caso Pau Royo / DISARMINK: en ticket debe verse "hoypecamos", no la razón social.
+ */
+export function resolveTicketIssuer(business: {
+  name?: string;
+  legalName?: string;
+  taxId?: string;
+}): string {
+  const name = String(business.name || '').trim();
+  const legal = String(business.legalName || '').trim();
+  const taxId = String(business.taxId || '')
+    .replace(/\s/g, '')
+    .toUpperCase();
+  if (
+    taxId === 'B67284315' ||
+    /disarmink/i.test(name) ||
+    /disarmink/i.test(legal)
+  ) {
+    return 'hoypecamos';
+  }
+  // Preferir nombre comercial si difiere de la razón social
+  if (name && legal && name.toLowerCase() !== legal.toLowerCase()) {
+    return name;
+  }
+  return legal || name || 'Negocio';
+}
+
 export function splitTicketVat(total: number, vatRate: number) {
   const gross = Number(total || 0);
   const base = gross / (1 + vatRate / 100);
@@ -77,7 +107,10 @@ export function buildTicketDocument({
   const { base, vat } = splitTicketVat(amount, vatRate);
   const date = new Date(isRefund ? (order.refundedAt || order.updatedAt) : (order.paidAt || order.createdAt))
     .toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
-  const deliveryTypeLabel = DELIVERY_TYPE_LABELS[order.deliveryType || ''] || order.deliveryType || '';
+  const deliveryType = String(order.deliveryType || '').trim().toLowerCase();
+  const deliveryTypeLabel = DELIVERY_TYPE_LABELS[deliveryType] || order.deliveryType || '';
+  const isPickup = deliveryType === 'recogida';
+  const isHomeDelivery = deliveryType === 'domicilio';
   const paymentMethodLabel = PAYMENT_LABELS[order.paymentMethod || ''] || order.paymentMethod || '';
   const isPaid = order.paymentStatus === 'paid';
   const paymentStatusLabel = isPaid ? 'Cobrado' : 'Pendiente de cobro';
@@ -99,11 +132,16 @@ export function buildTicketDocument({
     })
     .filter((line) => line.name && line.qty > 0);
 
+  // Recogida: no imprimir calle del cliente. Domicilio: sí, un poco más marcada.
+  const customerAddress = isPickup
+    ? ''
+    : String(order.customerAddress || '').trim();
+
   const shared = {
     variant,
     ticketNo: order.ticketNumber || order.orderNumber || order._id.slice(-8),
     dateLabel: date,
-    issuer: business.legalName || business.name || 'Negocio',
+    issuer: resolveTicketIssuer(business),
     taxId: business.taxId || '',
     addressLine: [business.address, business.city].filter(Boolean).join(', '),
     phone: business.phone || '',
@@ -111,7 +149,8 @@ export function buildTicketDocument({
     orderNumber: order.orderNumber || '',
     customerName: order.customerName || '-',
     customerPhone: String(order.customerPhone || '').trim(),
-    customerAddress: String(order.customerAddress || '').trim(),
+    customerAddress,
+    emphasizeCustomerAddress: Boolean(isHomeDelivery && customerAddress),
     deliveryTypeLabel,
     cashierName: cashierName || order.takenByName || '',
     lines,

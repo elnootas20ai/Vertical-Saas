@@ -11,11 +11,11 @@ function escapeHtml(value: string): string {
 
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:16px 12px 28px;font-size:14px;color:#000;line-height:1.4}
+body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:6px 12px 12px;font-size:14px;color:#000;line-height:1.4}
 .c{text-align:center}.hr{border-top:1px dashed #333;margin:10px 0}
 table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .t td{font-size:16px;font-weight:bold;padding-top:6px}
-.f{margin-top:20px;font-size:12px;text-align:center;color:#666;line-height:1.4}
+.f{margin-top:10px;font-size:12px;text-align:center;color:#666;line-height:1.4}
 .small{font-size:12px;color:#444}
 .note{color:#b45309;font-size:12px;font-weight:bold}
 .add{color:#047857;font-size:12px;font-weight:bold}
@@ -55,7 +55,7 @@ function buildHeaderHtml(doc: TicketDocument): string {
 <div class="hr"></div>
 <div class="c">
   <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
-  <span class="small">${escapeHtml(doc.ticketNo)} · ${escapeHtml(doc.dateLabel)}</span>
+  <span class="small">${escapeHtml(doc.ticketNo)} - ${escapeHtml(doc.dateLabel)}</span>
 </div>
 <div class="hr"></div>`;
 }
@@ -74,7 +74,7 @@ ${doc.salesPointName ? `<p>Tienda: ${escapeHtml(doc.salesPointName)}</p>` : ''}
 ${doc.deliveryTypeLabel ? `<p class="b">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
 <p>Cliente: ${escapeHtml(doc.customerName)}</p>
 ${doc.customerPhone ? `<p>Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
-${doc.customerAddress ? `<p>Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
+${doc.customerAddress ? `<p${doc.emphasizeCustomerAddress ? ' class="b"' : ''}>Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
 ${doc.cashierName ? `<p>Atendido por: ${escapeHtml(doc.cashierName)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
@@ -97,7 +97,7 @@ ${doc.deliveryTypeLabel ? `<p class="b">${escapeHtml(doc.deliveryTypeLabel)}</p>
 <div class="hr"></div>
 <p class="big">${escapeHtml(doc.customerName)}</p>
 ${doc.customerPhone ? `<p class="big">Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
-${doc.customerAddress ? `<p class="big">Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
+${doc.customerAddress ? `<p class="big${doc.emphasizeCustomerAddress ? ' b' : ''}">Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
 <div class="hr"></div>
@@ -121,7 +121,7 @@ ${doc.salesPointName ? `<p>Tienda: ${escapeHtml(doc.salesPointName)}</p>` : ''}
 <p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>
 <p>Cliente: ${escapeHtml(doc.customerName)}</p>
 ${doc.customerPhone ? `<p>Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
-${doc.customerAddress ? `<p>Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
+${doc.customerAddress ? `<p${doc.emphasizeCustomerAddress ? ' class="b"' : ''}>Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
 ${doc.deliveryTypeLabel ? `<p>${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
 ${doc.cashierName ? `<p>Atendido por: ${escapeHtml(doc.cashierName)}</p>` : ''}
 <div class="hr"></div>
@@ -229,6 +229,7 @@ export function printTestTicketBrowser(paperWidthMm: 58 | 80 = 80) {
     customerName: 'Impresion de prueba',
     customerPhone: '',
     customerAddress: '',
+    emphasizeCustomerAddress: false,
     deliveryTypeLabel: '',
     cashierName: '',
     lines: [{ qty: 1, name: 'Producto demo', total: 9.99 }],

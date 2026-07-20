@@ -93,9 +93,9 @@ export function buildEposTicket(
   const titleCols = colsForSize(paperWidthMm, true);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(3);
+    builder.addFeedLine(1);
   } else {
-    builder.addText('\n\n\n');
+    builder.addText('\n');
   }
 
   builder.addTextAlign('center');
@@ -110,7 +110,7 @@ export function buildEposTicket(
   setTextSize(builder, 2, 2);
   boldLine(builder, doc.title, titleCols);
   setTextSize(builder, 1, 1);
-  line(builder, `${doc.ticketNo} · ${doc.dateLabel}`, width);
+  line(builder, `${doc.ticketNo} - ${doc.dateLabel}`, width);
   sep(builder, width);
 
   builder.addTextAlign('left');
@@ -119,11 +119,19 @@ export function buildEposTicket(
   line(builder, `Pedido: #${doc.orderNumber}`, tallCols);
   setTextSize(builder, 1, 1);
 
+  const pushDir = () => {
+    if (!doc.customerAddress) return;
+    setTextSize(builder, 1, 2);
+    if (doc.emphasizeCustomerAddress) boldLine(builder, `Dir: ${doc.customerAddress}`, tallCols);
+    else line(builder, `Dir: ${doc.customerAddress}`, tallCols);
+    setTextSize(builder, 1, 1);
+  };
+
   if (doc.variant === 'kitchen') {
     if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
     line(builder, `Cliente: ${doc.customerName}`, width);
     if (doc.customerPhone) line(builder, `Tel: ${doc.customerPhone}`, width);
-    if (doc.customerAddress) line(builder, `Dir: ${doc.customerAddress}`, width);
+    pushDir();
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
     for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
@@ -147,11 +155,7 @@ export function buildEposTicket(
       line(builder, `Tel: ${doc.customerPhone}`, tallCols);
       setTextSize(builder, 1, 1);
     }
-    if (doc.customerAddress) {
-      setTextSize(builder, 1, 2);
-      line(builder, `Dir: ${doc.customerAddress}`, tallCols);
-      setTextSize(builder, 1, 1);
-    }
+    pushDir();
     sep(builder, width);
     for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
     sep(builder, width);
@@ -176,11 +180,7 @@ export function buildEposTicket(
       line(builder, `Tel: ${doc.customerPhone}`, tallCols);
       setTextSize(builder, 1, 1);
     }
-    if (doc.customerAddress) {
-      setTextSize(builder, 1, 2);
-      line(builder, `Dir: ${doc.customerAddress}`, tallCols);
-      setTextSize(builder, 1, 1);
-    }
+    pushDir();
     if (doc.deliveryTypeLabel) line(builder, doc.deliveryTypeLabel, width);
     if (doc.cashierName) line(builder, `Atendido: ${doc.cashierName}`, width);
     sep(builder, width);
@@ -216,9 +216,9 @@ export function buildEposTicket(
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(8);
+    builder.addFeedLine(5);
   } else {
-    builder.addText('\n\n\n\n');
+    builder.addText('\n\n\n');
   }
 
   if (typeof builder.addCut === 'function') {
