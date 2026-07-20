@@ -117,15 +117,16 @@ export async function listClients(req, res) {
       query.limit = '50';
       query.skip = '0';
     }
-    const { items, meta } = applyQueryOptions(raw.map(sanitizer), query);
+    // Paginar/filtrar sobre docs crudos; sanitizar solo la página (miles de clientes).
+    const { items: pageDocs, meta } = applyQueryOptions(raw, query);
+    let clients = pageDocs.map(sanitizer).filter(Boolean);
     const enrichLiveStats = req.query.liveStats === '1' || req.query.liveStats === 'true';
-    let clients = items;
-    if (enrichLiveStats && items.length > 0) {
+    if (enrichLiveStats && clients.length > 0) {
       const allOrders = await listDeliveryOrdersByUser(req, userId);
       const deliveryOrders = businessId
         ? await scopeDeliveryOrdersToBusinessId(req, userId, businessId, allOrders)
         : allOrders;
-      clients = items.map((row) => enrichClientRowWithLiveDeliveryStats(row, deliveryOrders));
+      clients = clients.map((row) => enrichClientRowWithLiveDeliveryStats(row, deliveryOrders));
     }
     return res.json({ ok: true, clients, meta });
   } catch (error) {

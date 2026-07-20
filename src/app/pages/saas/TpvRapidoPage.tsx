@@ -22,7 +22,7 @@ import {
   type TpvPaymentMethod,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
-import { updateClientRequest, getClientDetailRequest } from '../../lib/crmApi';
+import { updateClientRequest, getClientDetailRequest, listClientsPageRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
@@ -755,6 +755,17 @@ export function TpvRapidoOrderFlow({
     currentBusiness,
     writeBusinessId || businessId,
   );
+
+  // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
+  useEffect(() => {
+    if (!clientSearchUserId) return;
+    void listClientsPageRequest(clientSearchUserId, {
+      limit: 1,
+      skip: 0,
+      lite: true,
+      businessId: clientSearchBusinessId || undefined,
+    }).catch(() => undefined);
+  }, [clientSearchUserId, clientSearchBusinessId]);
 
   /** Evita TPV sobre limpieza/otra vertical: cambia al delivery de la cuenta. */
   const autoSwitchOrderFlowRef = useRef(false);

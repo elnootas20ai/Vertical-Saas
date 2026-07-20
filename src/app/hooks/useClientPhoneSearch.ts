@@ -60,7 +60,7 @@ export function useClientPhoneSearch(params: {
     phone,
     businessId,
     enabled = true,
-    debounceMs = 400,
+    debounceMs = 280,
     resultLimit = 15,
     minDigits = 3,
     matchByName = false,

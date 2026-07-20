@@ -271,8 +271,12 @@ export async function getDocument(req, dbName, docId) {
   return payload;
 }
 
-/** Cache en memoria por titular (evita el tope 5MB del LRU global en cuentas grandes). */
-const CLIENT_DOCS_TTL_MS = 120_000;
+/**
+ * Cache en memoria por titular (evita el tope 5MB del LRU global en cuentas grandes).
+ * TTL largo + sliding: cuentas con miles de clientes (TPV/CRM) no vuelven a leer Couch
+ * en cada búsqueda si el TPV está en uso.
+ */
+const CLIENT_DOCS_TTL_MS = 600_000;
 const clientDocumentsByUser = new Map();
 const clientsUserIndexReady = new Set();
 
@@ -290,6 +294,8 @@ function readClientDocumentsCache(uid) {
     clientDocumentsByUser.delete(uid);
     return null;
   }
+  // Sliding TTL: mientras se use el TPV/CRM, no caduca en frío.
+  entry.at = Date.now();
   return entry.docs;
 }
 
@@ -3844,11 +3850,12 @@ export async function getClientDocumentsForUser(req, userId) {
     let docs;
     try {
       // Solo clientes del titular (no _all_docs de toda la DB multi-tenant).
+      // pageSize 1000 → menos idas a Couch en carteras grandes (~6k docs ≈ 7 páginas).
       docs = await findDocuments(
         req,
         db,
         { type: 'client', user_id: uid },
-        { pageSize: 500, maxDocs: 50_000 },
+        { pageSize: 1000, maxDocs: 50_000 },
       );
     } catch {
       const all = await getAllDocuments(req, db);

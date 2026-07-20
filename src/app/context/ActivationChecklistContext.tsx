@@ -48,10 +48,25 @@ import { createVerticalApi } from '../lib/verticalApiFactory';
 import { listWorkOrdersRequest } from '../lib/workshopApi';
 import { listPartsRequest } from '../lib/partsApi';
 import { WORKSHOP_DATA_CHANGED } from '../lib/workshopEvents';
-import { listClientsRequest } from '../lib/crmApi';
+import { listClientsPageRequest } from '../lib/crmApi';
 import { loadCompraventaStores } from '../lib/compraventaSetup';
 import { listCleaningServicesRequest } from '../lib/cleaningApi';
 import { listUsersRequest } from '../lib/authApi';
+
+/** Solo necesita saber si hay ≥1 cliente (no cargar 100). También precalienta caché servidor. */
+async function peekHasClients(userId: string, businessId?: string): Promise<boolean> {
+  try {
+    const r = await listClientsPageRequest(userId, {
+      limit: 1,
+      skip: 0,
+      lite: true,
+      businessId,
+    });
+    return r.meta.total > 0 || r.clients.length > 0;
+  } catch {
+    return false;
+  }
+}
 import { listVehiclesRequest } from '../lib/vehicleApi';
 import { resolveVehicleListBusinessId } from '../lib/vehicleVertical';
 import {
@@ -386,9 +401,9 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         }
 
         if (businessType === 'carDealership') {
-          const [storeState, clients, vehiclesRes] = await Promise.all([
+          const [storeState, hasClient, vehiclesRes] = await Promise.all([
             loadCompraventaStores(user, currentBusiness, { includeInactivePdvs: true }),
-            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+            peekHasClients(dataUserId, businessId),
             listVehiclesRequest(dataUserId, resolveVehicleListBusinessId(currentBusiness)).catch(
               () => ({ vehicles: [] as Array<{ salePrice?: number }> }),
             ),
@@ -406,7 +421,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
               ...companyFlags,
               hasActiveRetailStore,
               hasActivePdv,
-              hasClient: clients.length > 0,
+              hasClient,
               hasVehicle: vehicles.length > 0,
               hasPricedVehicle: pricedVehicles.length > 0,
             },
@@ -417,9 +432,9 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         }
 
         if (businessType === 'cleaning') {
-          const [services, clients, usersRes] = await Promise.all([
+          const [services, hasClient, usersRes] = await Promise.all([
             listCleaningServicesRequest(dataUserId).catch(() => []),
-            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+            peekHasClients(dataUserId, businessId),
             businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
           ]);
 
@@ -435,7 +450,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
               ...companyFlags,
               hasService: activeServices.length > 0,
               hasPricedService: pricedServices.length > 0,
-              hasClient: clients.length > 0,
+              hasClient,
               hasTeamMember: teamUsers.length >= 2,
             },
           };
@@ -473,8 +488,8 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         }
 
         if (businessType === 'workshop') {
-          const [clients, orders, parts, usersRes] = await Promise.all([
-            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+          const [hasClient, orders, parts, usersRes] = await Promise.all([
+            peekHasClients(dataUserId, businessId),
             listWorkOrdersRequest(dataUserId, { businessId }).catch(() => []),
             listPartsRequest(dataUserId, { businessId }).catch(() => []),
             businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
@@ -486,7 +501,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
             kind: 'workshop',
             flags: {
               ...companyFlags,
-              hasClient: clients.length > 0,
+              hasClient,
               hasWorkOrder: orders.length > 0,
               hasPart: parts.length > 0,
               hasTeamMember: (usersRes.users || []).length >= 2,
@@ -498,9 +513,9 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         }
 
         if (businessType === 'events') {
-          const [services, clients, events, usersRes] = await Promise.all([
+          const [services, hasClient, events, usersRes] = await Promise.all([
             loadEventServices(dataUserId, false).catch(() => []),
-            listClientsRequest(dataUserId, { businessId }).catch(() => []),
+            peekHasClients(dataUserId, businessId),
             loadEvents(dataUserId).catch(() => []),
             businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
           ]);
@@ -516,7 +531,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
               ...companyFlags,
               hasService: activeServices.length > 0,
               hasPricedService: pricedServices.length > 0,
-              hasClient: clients.length > 0,
+              hasClient,
               hasEvent: events.length > 0,
               hasTeamMember: (usersRes.users || []).length >= 2,
             },
