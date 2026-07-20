@@ -82,6 +82,19 @@ export function resolveTicketIssuer(business: {
   return legal || name || 'Negocio';
 }
 
+/**
+ * En ticket solo el nombre de pila (sin apellidos).
+ * "pau royo del amor" → "pau"; "María García" → "María".
+ */
+export function ticketFirstName(value: string | undefined | null): string {
+  const raw = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!raw || raw === '-') return raw || '-';
+  const first = raw.split(' ')[0] || raw;
+  return first;
+}
+
 export function splitTicketVat(total: number, vatRate: number) {
   const gross = Number(total || 0);
   const base = gross / (1 + vatRate / 100);
@@ -147,12 +160,12 @@ export function buildTicketDocument({
     phone: business.phone || '',
     salesPointName: salesPointName || order.salesPointName || '',
     orderNumber: order.orderNumber || '',
-    customerName: order.customerName || '-',
+    customerName: ticketFirstName(order.customerName || '-'),
     customerPhone: String(order.customerPhone || '').trim(),
     customerAddress,
     emphasizeCustomerAddress: Boolean(isHomeDelivery && customerAddress),
     deliveryTypeLabel,
-    cashierName: cashierName || order.takenByName || '',
+    cashierName: ticketFirstName(cashierName || order.takenByName || ''),
     lines,
     base: variant === 'kitchen' ? 0 : base,
     vat: variant === 'kitchen' ? 0 : vat,

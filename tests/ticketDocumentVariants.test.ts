@@ -102,7 +102,8 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
 
     const text = decodeEscpos(encodeTicketEscpos(doc));
     expect(text).toContain('TICKET');
-    expect(text).toContain('Cliente: Maria Garcia');
+    expect(text).toContain('Cliente: Maria');
+    expect(text).not.toContain('Garcia');
     expect(text).toContain('Tel: 666123456');
     expect(text).toContain('Dir: Av. Principal');
     expect(text).toContain('Base imponible');
@@ -110,6 +111,20 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('TOTAL');
     expect(text).toContain('Extra queso');
     expect(text).toContain('Gracias por su visita');
+    expect(text).toContain('Atendido: Ana');
+  });
+
+  it('ticket: solo nombre de pila, sin apellidos', () => {
+    const opts = baseOptions();
+    opts.order.customerName = 'María García López';
+    opts.cashierName = 'pau royo del amor';
+    const doc = buildTicketDocument({ ...opts, variant: 'customer' });
+    expect(doc.customerName).toBe('María');
+    expect(doc.cashierName).toBe('pau');
+    const text = decodeEscpos(encodeTicketEscpos(doc));
+    expect(text).toContain('Cliente: Maria');
+    expect(text).toContain('Atendido: pau');
+    expect(text).not.toMatch(/Garcia|Lopez|royo|amor/i);
   });
 
   it('recogida: no imprime calle del cliente', () => {
