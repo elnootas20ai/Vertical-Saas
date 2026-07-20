@@ -107,7 +107,7 @@ export async function printDeliveryTicket(
       if (result.ok) return { method: 'bridge', ok: true };
       toast.warning(result.error || 'Impresión directa fallida. Usando navegador…');
     } else if (config.connectionType === 'network') {
-      toast.warning('Inicia Vertial Print en este PC (npm run print-bridge) y vuelve a probar.');
+      toast.warning('Abre Vertial Print en este PC y vuelve a probar.');
     } else if (config.connectionType !== 'browser') {
       toast.warning('No se detectó el servicio de impresión. Usando ventana del dispositivo…');
     }
@@ -131,7 +131,7 @@ async function bridgeTestPrint(
     return {
       ok: false,
       error: config.connectionType === 'network'
-        ? 'Inicia Vertial Print en este PC (npm run dev:local o VertialPrint.exe).'
+        ? 'Abre Vertial Print en este PC y vuelve a probar.'
         : 'No se detectó el servicio de impresión en este PC.',
     };
   }

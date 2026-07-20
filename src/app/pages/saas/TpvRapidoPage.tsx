@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
-import { toastActionError } from '../../lib/userFacingError';
+import { toastActionError, toUserFacingMessage } from '../../lib/userFacingError';
 import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
 import { DecimalNumpadField } from '../../components/saas/DecimalNumpadField';
 import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
@@ -1741,7 +1741,7 @@ export function TpvRapidoOrderFlow({
       setPhonePrefix(created.phonePrefix || phonePrefix);
       handleSelectClient(created);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error al crear cliente');
+      toast.error(toUserFacingMessage(err, 'No se pudo crear el cliente'));
     } finally {
       setCreatingClient(false);
     }

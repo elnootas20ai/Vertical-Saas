@@ -23,6 +23,10 @@ function looksTechnical(raw: string): boolean {
     || /\bat\s+\w+/i.test(raw)
     || /\[object Object\]/i.test(raw)
     || /^Error:\s*Failed/i.test(raw)
+    || /\bnpm\s+run\b/i.test(raw)
+    || /\bnode_modules\b/i.test(raw)
+    || /\.tsx?\b|\.jsx?\b/i.test(raw)
+    || /\bstack\s*trace\b/i.test(raw)
   );
 }
 

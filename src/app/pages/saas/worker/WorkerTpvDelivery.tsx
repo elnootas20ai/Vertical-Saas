@@ -377,7 +377,7 @@ function OrderCard({
   return (
     <div
       className={`relative rounded-lg border ${cfg.bg} transition-all hover:shadow-md ${
-        compact ? 'p-1' : 'rounded-xl p-2'
+        compact ? 'p-1.5' : 'rounded-xl p-2'
       } ${
         waitMinutes >= LATE_MINUTES ? 'border-red-300 dark:border-red-800' : 'border-gray-200/80 dark:border-gray-600/50'
       }`}
@@ -388,23 +388,23 @@ function OrderCard({
           onClick={() => onDelete(order)}
           title="Eliminar pedido"
           className={`absolute z-10 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors ${
-            compact ? 'top-0.5 right-0.5 p-0.5' : 'top-1 right-1 p-1'
+            compact ? 'top-0.5 right-0.5 p-1' : 'top-1 right-1 p-1'
           }`}
         >
-          <Trash2 className={compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+          <Trash2 className={compact ? 'w-3 h-3' : 'w-3 h-3'} />
         </button>
       )}
-      <div className={`flex items-stretch ${compact ? 'gap-1 pr-4' : 'gap-2 pr-5'}`}>
+      <div className={`flex items-stretch ${compact ? 'gap-1.5 pr-5' : 'gap-2 pr-5'}`}>
         {/* Tiempo de espera */}
         <div
           className={`shrink-0 flex flex-col items-center justify-center rounded-md border ${waitBadgeClasses(waitMinutes)} ${
-            compact ? 'w-[2.35rem] px-0.5 py-1' : 'w-[3.25rem] px-1 py-1.5 rounded-lg'
+            compact ? 'w-[2.75rem] px-0.5 py-1.5' : 'w-[3.25rem] px-1 py-1.5 rounded-lg'
           }`}
           title="Tiempo de espera desde el pedido"
         >
           {!compact && <Timer className="w-3 h-3 mb-0.5 opacity-80" />}
-          <span className={`font-bold leading-none tabular-nums ${compact ? 'text-sm' : 'text-base'}`}>{waitMinutes}</span>
-          <span className={`font-semibold uppercase tracking-wide opacity-80 ${compact ? 'text-[7px]' : 'text-[9px]'}`}>min</span>
+          <span className={`font-bold leading-none tabular-nums ${compact ? 'text-base' : 'text-base'}`}>{waitMinutes}</span>
+          <span className={`font-semibold uppercase tracking-wide opacity-80 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>min</span>
         </div>
 
         {/* Info principal */}
@@ -414,20 +414,20 @@ function OrderCard({
           className="flex-1 min-w-0 text-left"
         >
           <div className="flex items-center gap-1 flex-wrap">
-            <span className={`font-mono font-bold text-gray-900 dark:text-gray-100 ${compact ? 'text-[10px]' : 'text-xs'}`}>
+            <span className={`font-mono font-bold text-gray-900 dark:text-gray-100 ${compact ? 'text-xs' : 'text-xs'}`}>
               #{order.orderNumber}
             </span>
-            <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded font-bold ${typeBadge.className} ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
-              <TypeIcon className={compact ? 'w-2.5 h-2.5' : 'w-3 h-3'} />
+            <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded font-bold ${typeBadge.className} ${compact ? 'text-[9px]' : 'text-[9px]'}`}>
+              <TypeIcon className={compact ? 'w-3 h-3' : 'w-3 h-3'} />
               {typeBadge.label}
             </span>
             <OrderChannelBadge channel={order.channel} compact={compact} />
             {isUrgent && (
-              <span className={`px-1 py-px bg-red-100 text-red-700 font-bold rounded ${compact ? 'text-[8px]' : 'text-[9px]'}`}>!</span>
+              <span className={`px-1 py-px bg-red-100 text-red-700 font-bold rounded ${compact ? 'text-[9px]' : 'text-[9px]'}`}>!</span>
             )}
           </div>
           {order.customerName && (
-            <p className={`font-medium text-gray-800 dark:text-gray-200 truncate ${compact ? 'text-[10px] mt-px' : 'text-xs mt-0.5'}`}>
+            <p className={`font-medium text-gray-800 dark:text-gray-200 truncate ${compact ? 'text-xs mt-0.5' : 'text-xs mt-0.5'}`}>
               {order.customerName}
             </p>
           )}
@@ -448,7 +448,7 @@ function OrderCard({
               {order.items.length > 2 ? ` +${order.items.length - 2}` : ''}
             </p>
           )}
-          <div className={`flex items-center gap-1 flex-wrap ${compact ? 'mt-px text-[10px]' : 'mt-0.5 text-[11px]'}`}>
+          <div className={`flex items-center gap-1 flex-wrap ${compact ? 'mt-0.5 text-xs' : 'mt-0.5 text-[11px]'}`}>
             <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">
               {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
             </span>
@@ -483,17 +483,17 @@ function OrderCard({
             onClick={() => onAdvance(order)}
             disabled={advancing}
             title={nextLabel}
-            className={`shrink-0 self-center flex flex-col items-center justify-center rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
+            className={`shrink-0 self-center flex flex-col items-center justify-center rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
               compact
-                ? 'min-w-[2.25rem] min-h-[2rem] px-1 py-0.5 gap-0 text-[8px]'
+                ? 'min-w-[3.25rem] min-h-[2.75rem] px-1.5 py-1 gap-0.5 text-[10px]'
                 : 'min-w-[3.5rem] min-h-[44px] px-2 py-2 gap-0.5 rounded-lg text-[10px]'
             }`}
           >
             {advancing ? (
-              <Loader2 className={compact ? 'w-3 h-3 animate-spin' : 'w-4 h-4 animate-spin'} />
+              <Loader2 className={compact ? 'w-4 h-4 animate-spin' : 'w-4 h-4 animate-spin'} />
             ) : (
               <>
-                <ArrowRight className={compact ? 'w-3 h-3' : 'w-4 h-4'} />
+                <ArrowRight className={compact ? 'w-4 h-4' : 'w-4 h-4'} />
                 <span className="leading-tight text-center">{nextLabel}</span>
               </>
             )}
@@ -537,26 +537,26 @@ function OrderLane({
 }) {
   return (
     <section className={`flex flex-col min-h-0 flex-1 overflow-hidden bg-white dark:bg-gray-900 shadow-sm ${
-      compact ? 'rounded-lg border' : 'rounded-2xl border-2'
+      compact ? 'rounded-xl border' : 'rounded-2xl border-2'
     } ${borderClass} ${compact ? 'min-h-0' : 'min-h-[220px] md:min-h-0'}`}>
       <header className={`shrink-0 border-b flex items-center justify-between gap-1.5 ${
-        compact ? 'px-2 py-1' : 'px-3 py-2.5'
+        compact ? 'px-2.5 py-1.5' : 'px-3 py-2.5'
       } ${headerClass}`}>
-        <div className={`flex items-center gap-1.5 font-bold text-gray-900 dark:text-gray-100 min-w-0 ${compact ? 'text-[11px]' : 'text-sm'}`}>
+        <div className={`flex items-center gap-1.5 font-bold text-gray-900 dark:text-gray-100 min-w-0 ${compact ? 'text-xs' : 'text-sm'}`}>
           <span className="shrink-0">{icon}</span>
           <span className="truncate">{title}</span>
         </div>
         <span className={`shrink-0 rounded-full flex items-center justify-center font-bold ${badgeClass} ${
-          compact ? 'min-w-[1.25rem] h-5 px-1.5 text-[10px]' : 'min-w-[1.75rem] h-7 px-2 text-xs'
+          compact ? 'min-w-[1.5rem] h-6 px-1.5 text-[11px]' : 'min-w-[1.75rem] h-7 px-2 text-xs'
         }`}>
           {count}
         </span>
       </header>
-      <div className={`flex-1 min-h-0 overflow-y-auto touch-pan-y ${compact ? 'p-1 space-y-1' : 'p-1.5 sm:p-2 space-y-1.5'}`}>
+      <div className={`flex-1 min-h-0 overflow-y-auto touch-pan-y ${compact ? 'p-1.5 space-y-1.5' : 'p-1.5 sm:p-2 space-y-1.5'}`}>
         {orders.length === 0 ? (
-          <div className={`flex flex-col items-center justify-center text-center text-gray-400 ${compact ? 'py-4 px-2' : 'py-10 px-4'}`}>
-            <Package className={`mb-1 opacity-40 ${compact ? 'w-5 h-5' : 'w-8 h-8 mb-2'}`} />
-            <p className={`font-medium ${compact ? 'text-[10px]' : 'text-xs'}`}>{emptyLabel}</p>
+          <div className={`flex flex-col items-center justify-center text-center text-gray-400 h-full min-h-[4rem] ${compact ? 'px-2' : 'py-10 px-4'}`}>
+            <Package className={`mb-1 opacity-40 ${compact ? 'w-6 h-6' : 'w-8 h-8 mb-2'}`} />
+            <p className={`font-medium ${compact ? 'text-xs' : 'text-xs'}`}>{emptyLabel}</p>
           </div>
         ) : (
           orders.map((order) => (
@@ -1010,6 +1010,7 @@ export function WorkerTpvDelivery({
 
   const [dayKey, setDayKey] = useState(() => localCalendarDayKey());
   const [showDelivered, setShowDelivered] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => isTpvBoardSoundEnabled());
   const sessionOpenedAt = register?.session?.openedAt ?? null;
 
@@ -1422,12 +1423,6 @@ export function WorkerTpvDelivery({
   );
 
   useEffect(() => {
-    if (isTabletUi && completedShiftOrders.length > 0) {
-      setShowDelivered(true);
-    }
-  }, [isTabletUi, completedShiftOrders.length]);
-
-  useEffect(() => {
     if (view !== 'board') return;
     window.scrollTo(0, 0);
   }, [view, boardReady, scopedPdvId]);
@@ -1488,167 +1483,237 @@ export function WorkerTpvDelivery({
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      {/* Header — mínimo en tablet para dejar espacio a pedidos */}
+      {/* Toolbar */}
       <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 ${isTabletUi ? 'px-2 py-1.5' : 'px-4 py-3'}`}>
-        <div className={`flex items-center gap-2 ${isTabletUi ? 'mb-1.5' : 'mb-3 justify-between'}`}>
-          {!isTabletUi && (
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center shrink-0">
-                <Package className="w-5 h-5 text-indigo-600" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
-                  {ceoMode ? (scopedPdvName || 'Pedidos activos') : 'Pedidos activos'}
-                </h1>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {ceoMode ? 'TPV operativo · ' : ''}Montaje y reparto · {visibleCount} visibles
-                </p>
-              </div>
-            </div>
-          )}
-          <div className={`flex items-center gap-1.5 shrink-0 ${isTabletUi ? 'flex-1 min-w-0' : ''}`}>
-            {isTabletUi && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setView('new-order')}
-                  title="Nuevo pedido"
-                  className="flex flex-1 items-center justify-center gap-1 min-h-[30px] px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition-colors touch-manipulation"
-                >
-                  <Plus className="w-3.5 h-3.5" strokeWidth={2.5} />
-                  Nuevo
-                </button>
-                {staffConsumptionEnabled && (
-                  <button
-                    type="button"
-                    onClick={() => setView('staff-consumption')}
-                    title="Consumo equipo"
-                    className="flex items-center justify-center min-h-[30px] px-2 py-1 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold text-[11px] touch-manipulation"
-                  >
-                    <UtensilsCrossed className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </>
-            )}
-            {ceoMode && onChangeStore && (
-              <button type="button" onClick={onChangeStore} className={`rounded-lg border border-indigo-200 dark:border-indigo-800 text-indigo-700 ${isTabletUi ? 'p-1.5' : 'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/40'}`} title="Cambiar tienda">
-                <Store className={isTabletUi ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
-                {!isTabletUi && 'Cambiar tienda'}
-              </button>
-            )}
-            {tabletBinding && !ceoMode && (
-              <button type="button" onClick={exitTabletTpv} className={`rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 ${isTabletUi ? 'p-1.5' : 'inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold'}`} title="Salir">
-                <LogOut className={isTabletUi ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
-                {!isTabletUi && 'Salir'}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setSoundEnabled((v) => !v)}
-              className={`rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${isTabletUi ? 'p-1.5' : 'p-2'} ${soundEnabled ? 'text-indigo-600' : 'text-gray-400'}`}
-              title={soundEnabled ? 'Silenciar avisos de pedidos externos' : 'Activar avisos (web, Glovo…)'}
-            >
-              {soundEnabled ? (
-                <Volume2 className={isTabletUi ? 'w-3.5 h-3.5' : 'w-5 h-5'} />
-              ) : (
-                <VolumeX className={isTabletUi ? 'w-3.5 h-3.5' : 'w-5 h-5'} />
-              )}
-            </button>
-            <button type="button" onClick={() => void loadOrders()} className={`rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${isTabletUi ? 'p-1.5' : 'p-2'}`} title="Refrescar">
-              <RefreshCw className={`text-gray-500 ${refreshing ? 'animate-spin' : ''} ${isTabletUi ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
-            </button>
-          </div>
-        </div>
-
-        {!isTabletUi && (
-          <div className={`grid gap-2 mb-3 ${staffConsumptionEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-            <button
-              type="button"
-              onClick={() => setView('new-order')}
-              className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25"
-            >
-              <Plus className="w-5 h-5" strokeWidth={2.5} />
-              Nuevo pedido
-            </button>
-            {staffConsumptionEnabled && (
+        {isTabletUi ? (
+          <>
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setView('staff-consumption')}
-                className="w-full flex items-center justify-center gap-2 min-h-[48px] py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm sm:text-base shadow-lg"
+                onClick={() => setView('new-order')}
+                title="Nuevo pedido"
+                className="flex items-center justify-center gap-1 min-h-[40px] min-w-[5.5rem] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors touch-manipulation shrink-0"
               >
-                <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
-                Consumo equipo
+                <Plus className="w-4 h-4" strokeWidth={2.5} />
+                Nuevo
+              </button>
+              {staffConsumptionEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setView('staff-consumption')}
+                  title="Consumo equipo"
+                  className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl bg-violet-600 hover:bg-violet-700 text-white touch-manipulation shrink-0"
+                >
+                  <UtensilsCrossed className="w-4 h-4" />
+                </button>
+              )}
+              <div className="flex flex-1 min-w-0 rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5 gap-0.5">
+                {FULFILLMENT_FILTERS.map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setFulfillmentFilter(f.id)}
+                    className={`flex-1 flex items-center justify-center gap-0.5 min-h-[36px] px-1 rounded-lg font-semibold text-[11px] transition-all touch-manipulation ${
+                      fulfillmentFilter === f.id
+                        ? f.id === 'recogida'
+                          ? 'bg-violet-600 text-white shadow-sm'
+                          : f.id === 'domicilio'
+                            ? 'bg-sky-600 text-white shadow-sm'
+                            : 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 shadow-sm'
+                        : 'text-gray-600 dark:text-gray-400'
+                    }`}
+                  >
+                    <span className="truncate">{f.label}</span>
+                    <span className={`min-w-[1.1rem] h-4 px-0.5 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                      fulfillmentFilter === f.id ? 'bg-white/20' : 'bg-gray-300/80 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                    }`}>
+                      {filterCounts[f.id]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSearch((v) => !v)}
+                className={`flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl touch-manipulation shrink-0 ${
+                  showSearch || search
+                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'
+                }`}
+                title="Buscar"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+              {ceoMode && onChangeStore && (
+                <button type="button" onClick={onChangeStore} className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl border border-indigo-200 dark:border-indigo-800 text-indigo-700 touch-manipulation shrink-0" title="Cambiar tienda">
+                  <Store className="w-4 h-4" />
+                </button>
+              )}
+              {tabletBinding && !ceoMode && (
+                <button type="button" onClick={exitTabletTpv} className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 touch-manipulation shrink-0" title="Salir">
+                  <LogOut className="w-4 h-4" />
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setSoundEnabled((v) => !v)}
+                className={`flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl touch-manipulation shrink-0 ${soundEnabled ? 'text-indigo-600' : 'text-gray-400'} hover:bg-gray-100 dark:hover:bg-gray-800`}
+                title={soundEnabled ? 'Silenciar avisos' : 'Activar avisos'}
+              >
+                {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </button>
+              <button type="button" onClick={() => void loadOrders()} className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation shrink-0" title="Refrescar">
+                <RefreshCw className={`w-4 h-4 text-gray-500 ${refreshing ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+            {(showSearch || search) && (
+              <div className="relative mt-1.5">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar nº, cliente…"
+                  autoFocus={showSearch}
+                  className="w-full pl-8 pr-8 py-2 min-h-[36px] text-xs rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 placeholder:text-gray-400 focus:ring-1 focus:ring-indigo-500 outline-none"
+                />
+                {search && (
+                  <button type="button" onClick={() => { setSearch(''); setShowSearch(false); }} className="absolute right-2 top-1/2 -translate-y-1/2">
+                    <X className="w-3.5 h-3.5 text-gray-400" />
+                  </button>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 mb-3 justify-between">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 bg-indigo-100 dark:bg-indigo-900/30 rounded-xl flex items-center justify-center shrink-0">
+                  <Package className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100 truncate">
+                    {ceoMode ? (scopedPdvName || 'Pedidos activos') : 'Pedidos activos'}
+                  </h1>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {ceoMode ? 'TPV operativo · ' : ''}Montaje y reparto · {visibleCount} visibles
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {ceoMode && onChangeStore && (
+                  <button type="button" onClick={onChangeStore} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-indigo-200 dark:border-indigo-800 text-indigo-700 bg-indigo-50 dark:bg-indigo-950/40" title="Cambiar tienda">
+                    <Store className="w-4 h-4" />
+                    Cambiar tienda
+                  </button>
+                )}
+                {tabletBinding && !ceoMode && (
+                  <button type="button" onClick={exitTabletTpv} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500" title="Salir">
+                    <LogOut className="w-4 h-4" />
+                    Salir
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSoundEnabled((v) => !v)}
+                  className={`p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${soundEnabled ? 'text-indigo-600' : 'text-gray-400'}`}
+                  title={soundEnabled ? 'Silenciar avisos de pedidos externos' : 'Activar avisos (web, Glovo…)'}
+                >
+                  {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                </button>
+                <button type="button" onClick={() => void loadOrders()} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800" title="Refrescar">
+                  <RefreshCw className={`w-5 h-5 text-gray-500 ${refreshing ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className={`grid gap-2 mb-3 ${staffConsumptionEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+              <button
+                type="button"
+                onClick={() => setView('new-order')}
+                className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25"
+              >
+                <Plus className="w-5 h-5" strokeWidth={2.5} />
+                Nuevo pedido
+              </button>
+              {staffConsumptionEnabled && (
+                <button
+                  type="button"
+                  onClick={() => setView('staff-consumption')}
+                  className="w-full flex items-center justify-center gap-2 min-h-[48px] py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm sm:text-base shadow-lg"
+                >
+                  <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
+                  Consumo equipo
+                </button>
+              )}
+            </div>
+
+            <div className="flex rounded-xl bg-gray-100 dark:bg-gray-800 p-1 gap-1.5">
+              {FULFILLMENT_FILTERS.map((f) => {
+                const FilterIcon = f.Icon;
+                return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => setFulfillmentFilter(f.id)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 min-h-[44px] py-2 px-2 text-xs rounded-lg font-semibold transition-all touch-manipulation ${
+                    fulfillmentFilter === f.id
+                      ? f.id === 'recogida'
+                        ? 'bg-violet-600 text-white shadow-sm'
+                        : f.id === 'domicilio'
+                          ? 'bg-sky-600 text-white shadow-sm'
+                          : 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 shadow-sm'
+                      : 'text-gray-600 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-gray-700/60'
+                  }`}
+                >
+                  <FilterIcon className="w-4 h-4" />
+                  {f.label}
+                  <span className={`min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${
+                    fulfillmentFilter === f.id ? 'bg-white/20' : 'bg-gray-300/80 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                  }`}>
+                    {filterCounts[f.id]}
+                  </span>
+                </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Búsqueda (solo escritorio; tablet va en toolbar) */}
+      {!isTabletUi && (
+        <div className="shrink-0 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700 px-4 py-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar nº pedido, cliente..."
+              className="w-full pl-9 pr-7 py-2.5 min-h-[44px] text-sm rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 placeholder:text-gray-400 focus:ring-1 focus:ring-indigo-500 outline-none"
+            />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2">
+                <X className="w-4 h-4 text-gray-400" />
               </button>
             )}
           </div>
-        )}
-
-        {/* Filtro recogida / envío */}
-        <div className={`flex rounded-md bg-gray-100 dark:bg-gray-800 ${isTabletUi ? 'p-0.5 gap-0.5' : 'p-1 gap-1.5 rounded-xl'}`}>
-          {FULFILLMENT_FILTERS.map((f) => {
-            const FilterIcon = f.Icon;
-            return (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => setFulfillmentFilter(f.id)}
-              className={`flex-1 flex items-center justify-center gap-0.5 rounded-md font-semibold transition-all touch-manipulation ${
-                isTabletUi ? 'min-h-[26px] py-0.5 px-1 text-[10px]' : 'min-h-[44px] py-2 px-2 text-xs gap-1.5 rounded-lg'
-              } ${
-                fulfillmentFilter === f.id
-                  ? f.id === 'recogida'
-                    ? 'bg-violet-600 text-white shadow-sm'
-                    : f.id === 'domicilio'
-                      ? 'bg-sky-600 text-white shadow-sm'
-                      : 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-gray-700/60'
-              }`}
-            >
-              {!isTabletUi && <FilterIcon className="w-4 h-4" />}
-              {f.label}
-              <span className={`rounded-full font-bold flex items-center justify-center ${
-                isTabletUi ? 'min-w-[1rem] h-4 px-0.5 text-[9px]' : 'min-w-[1.25rem] h-5 px-1 text-[10px]'
-              } ${fulfillmentFilter === f.id ? 'bg-white/20' : 'bg-gray-300/80 dark:bg-gray-600 text-gray-700 dark:text-gray-200'}`}>
-                {filterCounts[f.id]}
-              </span>
-            </button>
-            );
-          })}
         </div>
-      </div>
-
-      {/* Búsqueda compacta */}
-      <div className={`shrink-0 bg-gray-50 dark:bg-gray-950 border-b border-gray-200 dark:border-gray-700 ${isTabletUi ? 'px-2 py-1' : 'px-4 py-2'}`}>
-        <div className="relative">
-          <Search className={`absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 ${isTabletUi ? 'w-3 h-3' : 'w-4 h-4 left-2.5'}`} />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={isTabletUi ? 'Buscar…' : 'Buscar nº pedido, cliente...'}
-            className={`w-full pr-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 placeholder:text-gray-400 focus:ring-1 focus:ring-indigo-500 outline-none ${
-              isTabletUi ? 'pl-7 py-1 min-h-[28px] text-[11px]' : 'pl-9 py-2.5 min-h-[44px] text-sm rounded-xl'
-            }`}
-          />
-          {search && (
-            <button type="button" onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2">
-              <X className={`text-gray-400 ${isTabletUi ? 'w-3 h-3' : 'w-4 h-4'}`} />
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* Columnas Montaje | Reparto */}
-      <div className={`flex-1 min-h-0 overflow-hidden ${isTabletUi ? 'p-1.5' : 'p-3 sm:p-4'}`}>
+      <div className={`flex-1 min-h-0 overflow-hidden ${isTabletUi ? 'p-2' : 'p-3 sm:p-4'}`}>
         {initialLoading ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
           </div>
         ) : (
-          <div className={`flex h-full min-h-0 gap-1.5 ${isTabletUi ? 'flex-row' : 'flex-col md:flex-row gap-3'}`}>
+          <div className={`flex h-full min-h-0 ${isTabletUi ? 'flex-row gap-2' : 'flex-col md:flex-row gap-3'}`}>
             <OrderLane
               title="Montaje"
-              icon={<Package className={isTabletUi ? 'w-3 h-3 text-indigo-600' : 'w-4 h-4 text-indigo-600'} />}
+              icon={<Package className={isTabletUi ? 'w-3.5 h-3.5 text-indigo-600' : 'w-4 h-4 text-indigo-600'} />}
               count={assemblyOrders.length}
               borderClass="border-indigo-200 dark:border-indigo-800"
               headerClass="bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-100 dark:border-indigo-900"
@@ -1663,7 +1728,7 @@ export function WorkerTpvDelivery({
             />
             <OrderLane
               title="Reparto"
-              icon={<Truck className={isTabletUi ? 'w-3 h-3 text-cyan-600' : 'w-4 h-4 text-cyan-600'} />}
+              icon={<Truck className={isTabletUi ? 'w-3.5 h-3.5 text-cyan-600' : 'w-4 h-4 text-cyan-600'} />}
               count={deliveryOrders.length}
               borderClass="border-cyan-200 dark:border-cyan-800"
               headerClass="bg-cyan-50/80 dark:bg-cyan-950/40 border-cyan-100 dark:border-cyan-900"
@@ -1681,13 +1746,13 @@ export function WorkerTpvDelivery({
       </div>
 
       {/* Resumen + completados colapsables */}
-      <div className={`shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 ${isTabletUi ? 'px-2 py-1' : 'px-3 py-2.5 pb-3'}`}>
+      <div className={`shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 ${isTabletUi ? 'px-2 py-1.5' : 'px-3 py-2.5 pb-3'}`}>
         {!isTabletUi && (
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2 px-1">
             Resumen del día
           </p>
         )}
-        <div className={`grid grid-cols-4 ${isTabletUi ? 'gap-1' : 'gap-1.5 sm:gap-2'}`}>
+        <div className={`grid grid-cols-4 ${isTabletUi ? 'gap-1.5' : 'gap-1.5 sm:gap-2'}`}>
           {[
             { label: 'Montaje', value: stats.montaje, color: 'text-indigo-700 bg-indigo-50 border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-300' },
             { label: 'Reparto', value: stats.delivery, color: 'text-cyan-700 bg-cyan-50 border-cyan-200 dark:bg-cyan-950/30 dark:border-cyan-900 dark:text-cyan-300' },
@@ -1709,8 +1774,8 @@ export function WorkerTpvDelivery({
           ].map((s) => {
             const Tile = (
               <>
-                <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-sm' : 'text-lg sm:text-xl'}`}>{s.value}</p>
-                <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[8px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>{s.label}</p>
+                <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>{s.value}</p>
+                <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>{s.label}</p>
               </>
             );
             if ('onClick' in s && s.onClick) {
@@ -1719,7 +1784,7 @@ export function WorkerTpvDelivery({
                   key={s.label}
                   type="button"
                   onClick={s.onClick}
-                  className={`rounded-lg border text-center touch-manipulation ${s.color} ${isTabletUi ? 'px-1 py-1' : 'rounded-xl px-1.5 py-2'}`}
+                  className={`rounded-xl border text-center touch-manipulation ${s.color} ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}
                   aria-expanded={showDelivered}
                   title="Ver pedidos completados del turno"
                 >
@@ -1728,7 +1793,7 @@ export function WorkerTpvDelivery({
               );
             }
             return (
-              <div key={s.label} className={`rounded-lg border text-center ${s.color} ${isTabletUi ? 'px-1 py-1' : 'rounded-xl px-1.5 py-2'}`}>
+              <div key={s.label} className={`rounded-xl border text-center ${s.color} ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}>
                 {Tile}
               </div>
             );
@@ -1756,7 +1821,7 @@ export function WorkerTpvDelivery({
         )}
 
         {showDelivered && (
-          <div className={`mt-2 overflow-y-auto space-y-1 ${isTabletUi ? 'max-h-32' : 'max-h-44'}`}>
+          <div className={`mt-1.5 overflow-y-auto space-y-1 ${isTabletUi ? 'max-h-[22vh]' : 'max-h-44'}`}>
             {completedShiftOrders.length === 0 ? (
               <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-3">Sin entregas en turno</p>
             ) : (
@@ -1770,11 +1835,11 @@ export function WorkerTpvDelivery({
                     key={order._id}
                     type="button"
                     onClick={() => setSelectedOrder(order)}
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left touch-manipulation ${
+                    className={`w-full flex items-center justify-between gap-2 rounded-lg text-left touch-manipulation ${
                       dimmed
                         ? 'bg-gray-50/70 dark:bg-gray-800/70 opacity-60'
                         : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
-                    } ${isTabletUi ? 'py-1.5 px-2' : ''}`}
+                    } ${isTabletUi ? 'py-1.5 px-2' : 'px-3 py-2'}`}
                   >
                     <div className="min-w-0 flex items-center gap-1.5">
                       <OrderChannelBadge channel={order.channel} compact={isTabletUi} />

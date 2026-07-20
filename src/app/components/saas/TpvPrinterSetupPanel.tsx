@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { toUserFacingMessage } from '../../lib/userFacingError';
 import {
   CheckCircle2,
   ChevronDown,
@@ -340,7 +341,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
           scope.onPdvUpdated?.(saved);
           syncedToStore = true;
         } catch (error) {
-          const message = error instanceof Error ? error.message : 'Error de red';
+          const message = toUserFacingMessage(error, 'sin conexión con la tienda');
           toast.warning(`Guardada en esta tablet, pero no llegó a la tienda: ${message}`, {
             duration: 10000,
             description: 'Reintenta «Guardar» o guárdala también en Ajustes → Impresora.',
@@ -523,7 +524,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         });
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'No se pudo imprimir la prueba', { duration: 8000 });
+      toast.error(toUserFacingMessage(error, 'No se pudo imprimir la prueba'), { duration: 8000 });
     } finally {
       setTesting(false);
     }

@@ -21,6 +21,7 @@ export function WorkerTpvBottomBar({
   const tabletBound = isTpvTabletBound();
   const showStock = config.features?.stock !== false;
   const showExit = tabletBound || ceoMode;
+  const compact = tabletBound || ceoMode;
 
   if (!showStock && !showExit) return null;
 
@@ -36,25 +37,35 @@ export function WorkerTpvBottomBar({
     navigate(resolveTpvCeoExitPath(window.location.pathname, currentBusiness?.businessType), { replace: true });
   };
 
+  const btnBase = compact
+    ? 'flex flex-1 items-center justify-center gap-1.5 min-h-[40px] touch-manipulation rounded-xl font-semibold text-xs transition-colors'
+    : 'w-full flex items-center justify-center gap-2 min-h-[44px] touch-manipulation rounded-xl font-bold text-sm transition-colors';
+
   return (
-    <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] flex flex-col gap-2">
+    <div
+      className={`shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 pb-[max(0.375rem,env(safe-area-inset-bottom))] ${
+        compact
+          ? 'px-2 py-1.5 flex flex-row items-stretch gap-1.5'
+          : 'px-3 py-2.5 flex flex-col gap-2'
+      }`}
+    >
       {showStock && (
         <button
           type="button"
           onClick={() => requestTpvStockReviewOpen()}
-          className="w-full flex items-center justify-center gap-2 min-h-[44px] touch-manipulation rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors"
+          className={`${btnBase} bg-emerald-600 hover:bg-emerald-700 text-white`}
         >
-          <ClipboardCheck className="w-5 h-5" />
-          Revisión de stock
+          <ClipboardCheck className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
+          {compact ? 'Stock' : 'Revisión de stock'}
         </button>
       )}
       {showExit && (
         <button
           type="button"
           onClick={ceoMode ? handleExitCeo : handleExitTablet}
-          className="w-full flex items-center justify-center gap-2 min-h-[44px] touch-manipulation rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold text-sm hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          className={`${btnBase} border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800`}
         >
-          <LogOut className="w-5 h-5" />
+          <LogOut className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
           Salir del TPV
         </button>
       )}

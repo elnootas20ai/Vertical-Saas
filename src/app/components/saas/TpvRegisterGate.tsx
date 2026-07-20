@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, createContext, useContext, lazy, Suspense, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { toUserFacingMessage } from '../../lib/userFacingError';
 import { useAuth } from '../../context/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useBusiness } from '../../context/BusinessContext';
@@ -598,7 +599,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
         }
       } catch (err) {
         toast.error(
-          err instanceof Error ? err.message : 'No se pudo activar el PDV de esta tienda',
+          toUserFacingMessage(err, 'No se pudo activar el PDV de esta tienda'),
         );
         return;
       }
@@ -2423,7 +2424,7 @@ export function TpvRegisterGate({
   const isTabletSession = registerScope.isTabletSession;
   const orderFlowActive = useTpvOrderFlowActive();
   const isRestaurantVerticalChrome = isRestaurantBusinessType(currentBusiness?.businessType);
-  const compactRegisterChrome = orderFlowActive || isRestaurantVerticalChrome;
+  const compactRegisterChrome = isTabletSession || orderFlowActive || isRestaurantVerticalChrome;
   const scopeBusinessId = registerScope.scopeBusinessId;
   const dataUserId = registerScope.effectiveDataUserId;
 
@@ -3357,7 +3358,7 @@ export function TpvRegisterGate({
         toast.info(`Continuando con la caja ya abierta en ${existing.pointOfSaleName || 'esta tienda'}`);
         return;
       }
-      toast.error(err instanceof Error ? err.message : 'Error al abrir la caja');
+      toast.error(toUserFacingMessage(err, 'No se pudo abrir la caja'));
     }
   };
 
@@ -3437,8 +3438,7 @@ export function TpvRegisterGate({
         }).catch(() => null);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Error al cerrar la caja';
-      toast.error(message || 'Error al cerrar la caja. Inténtalo de nuevo.');
+      toast.error(toUserFacingMessage(error, 'Error al cerrar la caja. Inténtalo de nuevo.'));
     } finally {
       setClosingBusy(false);
     }

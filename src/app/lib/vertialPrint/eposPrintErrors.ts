@@ -39,7 +39,7 @@ export function normalizeEposPrintError(raw: string | undefined, printerHost?: s
     return [
       'No se llega a la impresora. ¿Estás en la misma WiFi que la Epson (192.168.1.x)?',
       'Desde casa no funciona: la IP 192.168.1.200 solo existe dentro del local.',
-      'En el PC del local: npm run print-bridge, recarga Vertial (Ctrl+F5) y prueba otra vez.',
+      'En el PC del local: abre Vertial Print, recarga Vertial y prueba otra vez.',
     ].join(' ');
   }
 
@@ -53,6 +53,14 @@ export function normalizeEposPrintError(raw: string | undefined, printerHost?: s
 
   if (lower.includes('paper') || lower.includes('papel')) {
     return 'No hay papel en la impresora.';
+  }
+
+  if (
+    text.length > 160
+    || /\bnpm\s+run\b/i.test(text)
+    || /TypeError|ReferenceError|SyntaxError/i.test(text)
+  ) {
+    return 'No se pudo imprimir en la impresora Epson.';
   }
 
   return text || 'No se pudo imprimir en la impresora Epson.';
