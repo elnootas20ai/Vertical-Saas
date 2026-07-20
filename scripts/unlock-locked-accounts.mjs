@@ -10,10 +10,8 @@
  */
 import '../config/env.js';
 import {
-  ensureDatabase,
-  getAllDocuments,
-  getAccountsDbName,
-  saveAccount,
+  listAccounts,
+  resetFailedLoginAttempts,
 } from '../services/couchdb.js';
 
 const args = process.argv.slice(2);
@@ -21,14 +19,12 @@ const apply = args.includes('--apply');
 const emailArg = args.find((a) => a.startsWith('--email='));
 const onlyEmail = emailArg ? String(emailArg.split('=')[1] || '').trim().toLowerCase() : '';
 
-const req = { headers: {} };
-const db = getAccountsDbName();
-await ensureDatabase(req, db);
-const docs = await getAllDocuments(req, db);
+const req = {};
+const docs = await listAccounts(req);
 const now = Date.now();
 
 const locked = (docs || []).filter((d) => {
-  if (!d || d.type !== 'account' || d.deletedAt) return false;
+  if (!d || d.deletedAt) return false;
   if (onlyEmail && String(d.email || '').trim().toLowerCase() !== onlyEmail) return false;
   if (!d.lockUntil) return false;
   const until = new Date(d.lockUntil).getTime();
@@ -46,13 +42,8 @@ if (!apply) {
 }
 
 for (const a of locked) {
-  await saveAccount(req, {
-    ...a,
-    failedLoginAttempts: 0,
-    lockUntil: null,
-    updatedAt: new Date().toISOString(),
-  });
-  console.log(`[unlock] OK ${a.email}`);
+  const saved = await resetFailedLoginAttempts(req, a);
+  console.log(`[unlock] OK ${saved.email}`);
 }
 
 console.log(`[unlock] Desbloqueadas: ${locked.length}`);
