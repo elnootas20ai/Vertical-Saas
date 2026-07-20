@@ -979,7 +979,8 @@ export function WorkerTpvDelivery({
 
   useTpvOrderFlowChrome(view === 'new-order');
   useTpvSuppressBottomBar(view !== 'board');
-  const isTabletUi = Boolean(tabletBinding) && !ceoMode;
+  // CEO TPV rápido = misma UI compacta que tablet (antes !ceoMode forzaba el layout grande "antiguo").
+  const isTabletUi = ceoMode || Boolean(tabletBinding);
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
     [activeStoreScope.pointsOfSale, user?.employment?.salesPointId],
