@@ -232,15 +232,76 @@ async function main() {
 
   await couchJson('PUT', `/${BUSINESSES_DB}/${encodeURIComponent(business._id)}`, business);
 
+  // ── Afiliado demo (Apple 2.1: acceso Empresa + Afiliado) ───────────────────
+  const AFFILIATES_DB = 'affiliates';
+  try {
+    await couchJson('PUT', `/${AFFILIATES_DB}`);
+  } catch (e) {
+    if (!/already exists|file_exists/i.test(String(e.message))) throw e;
+  }
+
+  const AFFILIATE_CODE = String(process.env.APPLE_REVIEW_AFFILIATE_CODE || 'APPLEAFF').trim().toUpperCase();
+  const REFERRAL_CODE = String(process.env.APPLE_REVIEW_REFERRAL_CODE || 'REFAPPLE').trim().toUpperCase();
+  const AFFILIATE_EMAIL = String(process.env.APPLE_REVIEW_AFFILIATE_EMAIL || 'apple-affiliate@vertialapp.com')
+    .trim()
+    .toLowerCase();
+
+  const existingAffByCode = await couchJson('POST', `/${AFFILIATES_DB}/_find`, {
+    selector: { type: 'affiliate', affiliateCode: AFFILIATE_CODE },
+    limit: 1,
+  }).then((d) => d?.docs?.[0] || null).catch(() => null);
+
+  const existingAffByEmail = existingAffByCode
+    ? null
+    : await couchJson('POST', `/${AFFILIATES_DB}/_find`, {
+        selector: { type: 'affiliate', email: AFFILIATE_EMAIL },
+        limit: 1,
+      }).then((d) => d?.docs?.[0] || null).catch(() => null);
+
+  const existingAff = existingAffByCode || existingAffByEmail;
+  const affiliateId = existingAff?._id || `affiliate:apple-review:${AFFILIATE_CODE.toLowerCase()}`;
+
+  const affiliateDoc = {
+    _id: affiliateId,
+    _rev: existingAff?._rev,
+    type: 'affiliate',
+    user_id: ownerId,
+    name: 'Apple Affiliate Reviewer',
+    email: AFFILIATE_EMAIL,
+    phone: '+34600000001',
+    whatsapp: '+34600000001',
+    company: 'Vertial Demo Partners',
+    website: 'https://vertialapp.com',
+    verticals: ['restaurant', 'delivery'],
+    affiliateCode: AFFILIATE_CODE,
+    referralCode: REFERRAL_CODE,
+    commissionRate: 20,
+    status: 'accepted',
+    notes: 'Cuenta demo App Store Review',
+    message: 'apple-review-seed',
+    linkedAccountUserId: ownerId,
+    portalAccessMode: 'code',
+    accountLinked: true,
+    createdAt: existingAff?.createdAt || now,
+    updatedAt: now,
+  };
+
+  await couchJson('PUT', `/${AFFILIATES_DB}/${encodeURIComponent(affiliateDoc._id)}`, affiliateDoc);
+
   console.log('\n=== Cuenta Apple Review lista ===\n');
+  console.log('— Empresa —');
   console.log(`Email:       ${REVIEW_EMAIL}`);
   console.log(`Contraseña:  ${REVIEW_PASSWORD}`);
   console.log(`Plan:        Pro (subscription_active)`);
-  console.log(`Vertical:    restaurant → /saas/dashboard`);
+  console.log(`Vertical:    restaurant → Entry → Empresa → login → dashboard`);
   console.log(`business_id: ${businessId}`);
   console.log(`user_id:     ${ownerId}`);
   console.log(`rev cuenta:  ${savedOwner.rev}`);
-  console.log('\nPega email + contraseña en TestFlight → Notas para la revisión.\n');
+  console.log('\n— Afiliado —');
+  console.log(`Código:      ${AFFILIATE_CODE}`);
+  console.log(`Email (info): ${AFFILIATE_EMAIL}`);
+  console.log(`Path:        Entry → Afiliado → Iniciar sesión → código ${AFFILIATE_CODE}`);
+  console.log('\nPega esto en App Store Connect → App Review Information / Notes.\n');
 }
 
 main().catch((e) => {
