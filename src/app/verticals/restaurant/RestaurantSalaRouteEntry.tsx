@@ -1,8 +1,8 @@
 import { RestaurantSalaPage } from './RestaurantSalaPage';
 
 /**
- * Entrada Sala del vertical bar/restaurante.
- * Pantalla nueva (asistente de zonas/mesas) — sin SalaManager legacy.
+ * Entrada Sala — bar/restaurante y delivery (mapa zonas/mesas).
+ * Pantalla nueva (asistente) — sin SalaManager legacy.
  */
 export function RestaurantSalaRouteEntry() {
   return <RestaurantSalaPage />;

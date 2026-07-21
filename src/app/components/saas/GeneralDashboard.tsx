@@ -39,6 +39,8 @@ import { PortfolioBrandStoreBilling } from './PortfolioBrandStoreBilling';
 import { PortfolioCompanyLeague } from './PortfolioCompanyLeague';
 import { PortfolioAlertsPanel } from './PortfolioAlertsPanel';
 import { getRetailOpsUiCopyForRows, getRetailOpsUiCopy } from '../../lib/retailUiCopy';
+import { VertialBillingUpgradeLink } from './VertialBillingUpgradeLink';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
@@ -57,16 +59,19 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   const [businessFilter, setBusinessFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  /** Solo la 1ª carga abre todas; si el usuario las pliega (Set vacío), no las reabrimos. */
+  const didInitExpandRef = useRef(false);
 
   useEffect(() => {
+    if (didInitExpandRef.current) return;
     const ids = new Set([
       ...rows.map((r) => r.businessId),
       ...businesses.map((b) => b.business_id).filter(Boolean),
     ]);
-    if (ids.size > 0 && expandedIds.size === 0) {
-      setExpandedIds(ids);
-    }
-  }, [rows, businesses, expandedIds.size]);
+    if (ids.size === 0) return;
+    setExpandedIds(ids);
+    didInitExpandRef.current = true;
+  }, [rows, businesses]);
 
   const filteredRows = useMemo(() => {
     let list = rows;
@@ -143,6 +148,9 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       totalClients: filteredRows.reduce((s, r) => s + r.clients.totalClients, 0),
       newClientsMonth: filteredRows.reduce((s, r) => s + r.clients.newClientsMonth, 0),
       newClientsPrevMonth: filteredRows.reduce((s, r) => s + r.clients.newClientsPrevMonth, 0),
+      pizzasToday: filteredRows.reduce((s, r) => s + (r.metrics.pizzasToday || 0), 0),
+      burgersToday: filteredRows.reduce((s, r) => s + (r.metrics.burgersToday || 0), 0),
+      tacosToday: filteredRows.reduce((s, r) => s + (r.metrics.tacosToday || 0), 0),
     };
   }, [filteredRows, businessFilter, search, businesses.length]);
 
@@ -292,10 +300,17 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           </div>
           {isBasicPlan && (
             <p className="text-[11px] text-indigo-600 dark:text-indigo-400 mt-3">
-              Plan {planLabel}: EBITDA consolidado disponible desde Normal.{' '}
-              <button type="button" onClick={() => navigate('/saas/billing')} className="font-semibold underline">
-                Ver planes
-              </button>
+              Plan {planLabel}: EBITDA consolidado disponible desde Normal.
+              {!isIosCustomerAccessOnlyApp() ? (
+                <>
+                  {' '}
+                  <VertialBillingUpgradeLink className="font-semibold underline">
+                    Ver planes
+                  </VertialBillingUpgradeLink>
+                </>
+              ) : (
+                ' En iOS no se cambian planes.'
+              )}
             </p>
           )}
         </section>
@@ -313,6 +328,11 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           <StatCard label="Fichados ahora" value={String(filteredTotals.clockedInNow)} icon={<Clock className="w-4 h-4" />} tone="violet" sub="Equipo en turno" />
           <StatCard label="Vac. pendientes" value={String(filteredTotals.pendingVacations)} icon={<Users className="w-4 h-4" />} tone="rose" sub="Por revisar" />
           <StatCard label="Nóminas mes" value={String(filteredTotals.payslipsThisMonth)} icon={<FileText className="w-4 h-4" />} tone="slate" sub="Subidas este mes" />
+          </div>
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            <StatCard label="Pizzas hoy" value={String(filteredTotals.pizzasToday)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Conteo del día" />
+            <StatCard label="Burgers hoy" value={String(filteredTotals.burgersToday)} icon={<Package className="w-4 h-4" />} tone="rose" sub="Conteo del día" />
+            <StatCard label="Tacos hoy" value={String(filteredTotals.tacosToday)} icon={<Package className="w-4 h-4" />} tone="emerald" sub="Conteo del día" />
           </div>
         </div>
 
@@ -779,14 +799,21 @@ function BusinessCard({
             </div>
 
             {row.isDelivery ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
-                <MetricPill label={rowCopy.ingresosOperativa} value={fmtEuro(revenue)} highlight />
-                <MetricPill label={rowCopy.deliveredMonthLabel} value={String(m.deliveredMonth)} highlight />
-                <MetricPill label="Entregados hoy" value={String(m.deliveredToday)} />
-                <MetricPill label="Ticket medio" value={fmtEuro(m.avgTicketMonth)} />
-                <MetricPill label="Activos" value={String(m.activeOrders)} />
-                <MetricPill label="Cancelados" value={String(m.cancelledMonth)} />
-                <MetricPill label="Cajas abiertas" value={String(m.openCashRegisters)} />
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                  <MetricPill label={rowCopy.ingresosOperativa} value={fmtEuro(revenue)} highlight />
+                  <MetricPill label={rowCopy.deliveredMonthLabel} value={String(m.deliveredMonth)} highlight />
+                  <MetricPill label="Entregados hoy" value={String(m.deliveredToday)} />
+                  <MetricPill label="Ticket medio" value={fmtEuro(m.avgTicketMonth)} />
+                  <MetricPill label="Activos" value={String(m.activeOrders)} />
+                  <MetricPill label="Cancelados" value={String(m.cancelledMonth)} />
+                  <MetricPill label="Cajas abiertas" value={String(m.openCashRegisters)} />
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <MetricPill label="Pizzas hoy" value={String(m.pizzasToday || 0)} highlight={(m.pizzasToday || 0) > 0} />
+                  <MetricPill label="Burgers hoy" value={String(m.burgersToday || 0)} highlight={(m.burgersToday || 0) > 0} />
+                  <MetricPill label="Tacos hoy" value={String(m.tacosToday || 0)} highlight={(m.tacosToday || 0) > 0} />
+                </div>
               </div>
             ) : row.isRestaurant ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -835,7 +862,9 @@ function BusinessCard({
             <div className="flex flex-wrap gap-3 pt-1">
               {row.isDelivery ? (
                 <button type="button" onClick={onOpenOps} className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline">
-                  Centro operativo →
+                  {m.activeOrders > 0
+                    ? `Centro ops · ${m.activeOrders} activos (tiempos montaje/reparto) →`
+                    : 'Centro operativo →'}
                 </button>
               ) : null}
               <button type="button" onClick={onOpenSettings} className="text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 underline underline-offset-2">

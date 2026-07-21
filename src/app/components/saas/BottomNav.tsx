@@ -85,6 +85,7 @@ function ownerNavItemsForVertical(businessType?: string | null): BottomNavItem[]
         label: 'Operativa',
         matchPaths: ['/saas/vertical/delivery/pedidos', '/saas/vertical/delivery'],
       },
+      { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
       {
         id: 'caja',
         path: '/saas/vertical/delivery/caja',
@@ -160,6 +161,7 @@ function workerNavItemsForVertical(
     const items: BottomNavItem[] = [HOME_ITEM];
     if (hasWorkerPermission(permissions, 'delivery')) {
       items.push(
+        { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
         { id: 'cocina', path: '/saas/delivery-kitchen', icon: ChefHat, label: 'Cocina' },
         {
           id: 'reparto',

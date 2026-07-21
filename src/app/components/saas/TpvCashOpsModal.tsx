@@ -116,12 +116,18 @@ export function TpvCashOpsModal({
           inputClassName="w-full mb-3 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-lg font-semibold tabular-nums"
         />
 
-        <label className="block text-xs font-semibold text-gray-500 mb-1">Motivo</label>
+        <label className="block text-xs font-semibold text-gray-500 mb-1">
+          {opType === 'cash_out' ? 'Motivo de la salida' : opType === 'return' ? 'Motivo de la devolución' : 'Motivo'}
+        </label>
         <input
           type="text"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Ej. cambio de monedas, devolución pedido #123"
+          placeholder={
+            opType === 'cash_out'
+              ? 'Ej. compra de hielo, pagar proveedor, cambio…'
+              : 'Ej. cambio de monedas, devolución pedido #123'
+          }
           disabled={busy}
           className="w-full mb-4 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
         />

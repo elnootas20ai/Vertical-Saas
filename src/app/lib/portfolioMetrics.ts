@@ -5,6 +5,10 @@ import {
 } from './deliveryOrderFinanceRules';
 import { dedupeOpenRegisterSessions } from './tpvCajaScope';
 import { countsTowardNewClientMetrics } from './clientAcquisition';
+import {
+  foodFamilyCountsFromOrdersToday,
+  sumProductClosingCountsForDay,
+} from './shiftFoodFamilyCounts';
 
 export type PortfolioMetrics = {
   revenueToday: number;
@@ -23,6 +27,10 @@ export type PortfolioMetrics = {
   cashInRegisters: number;
   revenueByChannel: Record<string, number>;
   revenueByBrand: Record<string, number>;
+  /** Conteo diario pizzas / burgers / tacos (cierres o pedidos del día). */
+  pizzasToday: number;
+  burgersToday: number;
+  tacosToday: number;
 };
 
 export type PortfolioClientMetrics = {
@@ -63,6 +71,9 @@ export function emptyPortfolioMetrics(): PortfolioMetrics {
     cashInRegisters: 0,
     revenueByChannel: {},
     revenueByBrand: {},
+    pizzasToday: 0,
+    burgersToday: 0,
+    tacosToday: 0,
   };
 }
 
@@ -317,6 +328,8 @@ export function computePortfolioMetrics(
   const avgTicketMonth =
     revenueOrdersMonth.length > 0 ? revenueMonth / revenueOrdersMonth.length : 0;
 
+  const foodToday = foodFamilyCountsFromOrdersToday(scoped, todayKey);
+
   return {
     revenueToday,
     revenueMonth,
@@ -334,6 +347,9 @@ export function computePortfolioMetrics(
     cashInRegisters: 0,
     revenueByChannel,
     revenueByBrand,
+    pizzasToday: foodToday.pizza,
+    burgersToday: foodToday.burger,
+    tacosToday: foodToday.taco,
   };
 }
 
@@ -341,6 +357,7 @@ export function applyTpvCashMetrics(
   metrics: PortfolioMetrics,
   sessions: TpvRegisterSession[],
   pdvIds: string[],
+  todayKey?: string,
 ): PortfolioMetrics {
   const pdvSet = new Set(pdvIds);
   const open = dedupeOpenRegisterSessions(
@@ -352,10 +369,21 @@ export function applyTpvCashMetrics(
       .reduce((a, t) => a + (Number(t.amount) || 0), 0);
     return sum + (Number(s.initialCashAmount) || 0) + sales;
   }, 0);
+
+  const day = todayKey || new Date().toISOString().slice(0, 10);
+  const fromClosings = sumProductClosingCountsForDay(sessions, day, pdvIds);
+
   return {
     ...metrics,
     openCashRegisters: open.length,
     cashInRegisters: Math.round(cashIn * 100) / 100,
+    ...(fromClosings
+      ? {
+          pizzasToday: fromClosings.pizza,
+          burgersToday: fromClosings.burger,
+          tacosToday: fromClosings.taco,
+        }
+      : {}),
   };
 }
 

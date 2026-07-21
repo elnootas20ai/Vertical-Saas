@@ -80,6 +80,8 @@ export function getAggregatorCajaPlatforms(integrations: DeliveryIntegrations | 
 export interface AggregatorCashRow {
   platform: AggregatorPlatformDef;
   totalSales: number;
+  /** Efectivo declarado del integrador (entra en arqueo de caja). */
+  cashSales: number;
   orderCount: number;
   avgTicket: number;
   manualOverride?: boolean;
@@ -96,14 +98,27 @@ export function parseAggregatorAmount(raw: string): number | null {
 export function applyManualAggregatorTotals(
   rows: AggregatorCashRow[],
   manualByChannel: Record<string, string>,
+  manualCashByChannel: Record<string, string> = {},
 ): AggregatorCashRow[] {
   return rows.map((row) => {
-    const parsed = parseAggregatorAmount(manualByChannel[row.platform.channel] ?? '');
-    if (parsed != null) {
-      return { ...row, totalSales: parsed, manualOverride: true };
-    }
-    return { ...row, manualOverride: false };
+    const ch = row.platform.channel;
+    const parsedTotal = parseAggregatorAmount(manualByChannel[ch] ?? '');
+    const parsedCash = parseAggregatorAmount(manualCashByChannel[ch] ?? '');
+    const totalSales = parsedTotal != null ? parsedTotal : row.totalSales;
+    let cashSales = parsedCash != null ? parsedCash : row.cashSales;
+    // El efectivo no puede superar el total del integrador.
+    if (cashSales > totalSales) cashSales = totalSales;
+    return {
+      ...row,
+      totalSales,
+      cashSales,
+      manualOverride: parsedTotal != null || parsedCash != null,
+    };
   });
+}
+
+export function sumAggregatorCash(rows: AggregatorCashRow[]): number {
+  return Math.round(rows.reduce((s, r) => s + (Number(r.cashSales) || 0), 0) * 100) / 100;
 }
 
 function sessionWindowMs(session: TpvRegisterSession): { from: number; to: number } {
@@ -194,6 +209,7 @@ export function buildAggregatorCashRows(
     return {
       platform,
       totalSales,
+      cashSales: 0,
       orderCount,
       avgTicket: orderCount > 0 ? totalSales / orderCount : 0,
     };
@@ -203,12 +219,15 @@ export function buildAggregatorCashRows(
 export function aggregatorRowsFromClosingTotals(
   platforms: AggregatorPlatformDef[],
   totals: Record<string, number> | undefined,
+  cashByChannel?: Record<string, number> | undefined,
 ): AggregatorCashRow[] {
   return platforms.map((platform) => {
     const totalSales = Number(totals?.[platform.channel] || 0);
+    const cashSales = Math.min(totalSales, Math.max(0, Number(cashByChannel?.[platform.channel] || 0)));
     return {
       platform,
       totalSales,
+      cashSales,
       orderCount: totalSales > 0 ? 1 : 0,
       avgTicket: totalSales,
       manualOverride: true,
@@ -254,6 +273,7 @@ export function buildDailyAggregatorRows(
     return {
       platform,
       totalSales,
+      cashSales: 0,
       orderCount,
       avgTicket: orderCount > 0 ? totalSales / orderCount : 0,
     };

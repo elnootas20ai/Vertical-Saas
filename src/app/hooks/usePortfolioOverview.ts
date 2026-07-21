@@ -137,6 +137,9 @@ export type PortfolioTotals = {
   totalClients: number;
   newClientsMonth: number;
   newClientsPrevMonth: number;
+  pizzasToday: number;
+  burgersToday: number;
+  tacosToday: number;
 };
 
 const EMPTY_FINANCE: PortfolioFinanceTotals = {
@@ -648,7 +651,7 @@ export function usePortfolioOverview(
                 activeByStore,
               );
             }
-            metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds);
+            metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds, todayKey);
           }
 
           const storeNameById = new Map(stores.map((st) => [st.id, st.name]));
@@ -805,6 +808,9 @@ export function usePortfolioOverview(
     totalClients: rows.reduce((s, r) => s + r.clients.totalClients, 0),
     newClientsMonth: rows.reduce((s, r) => s + r.clients.newClientsMonth, 0),
     newClientsPrevMonth: rows.reduce((s, r) => s + r.clients.newClientsPrevMonth, 0),
+    pizzasToday: rows.reduce((s, r) => s + (r.metrics.pizzasToday || 0), 0),
+    burgersToday: rows.reduce((s, r) => s + (r.metrics.burgersToday || 0), 0),
+    tacosToday: rows.reduce((s, r) => s + (r.metrics.tacosToday || 0), 0),
   };
 
   return { rows, totals, finance, loading, isRefreshing, lastUpdatedAt, liveSseOk, error, reload };

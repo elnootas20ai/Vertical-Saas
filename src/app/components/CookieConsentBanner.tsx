@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Cookie, ChevronDown, ChevronUp, Shield, BarChart2, Target, Settings2 } from 'lucide-react';
+import { shouldHideCookieConsentBannerOnIos } from '../lib/appStoreCompliance';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,20 @@ export function CookieConsentBanner() {
   });
 
   useEffect(() => {
+    // iOS nativo: sin banner ni cookies de analytics/marketing (Guideline 5.1.2(i) / ATT).
+    if (shouldHideCookieConsentBannerOnIos()) {
+      const necessaryOnly: CookiePreferences = {
+        necessary: true,
+        analytics: false,
+        marketing: false,
+        preferences: false,
+      };
+      if (!loadStoredConsent()) {
+        saveConsent(necessaryOnly);
+      }
+      setVisible(false);
+      return;
+    }
     const stored = loadStoredConsent();
     if (!stored) {
       // Delay para no interrumpir el render inicial
@@ -110,7 +125,7 @@ export function CookieConsentBanner() {
     }
   }, []);
 
-  if (!visible) return null;
+  if (!visible || shouldHideCookieConsentBannerOnIos()) return null;
 
   const handleAcceptAll = () => {
     const prefs: CookiePreferences = {

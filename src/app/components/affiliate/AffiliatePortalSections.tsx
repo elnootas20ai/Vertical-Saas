@@ -168,6 +168,7 @@ export function AffiliateDashboardSection({
   commissions,
   onGoClients,
   onGoReferral,
+  allowRegisterClients = true,
 }: {
   affiliate: PortalAffiliate;
   stats: PortalStats;
@@ -175,6 +176,7 @@ export function AffiliateDashboardSection({
   commissions: PortalCommission[];
   onGoClients: () => void;
   onGoReferral: () => void;
+  allowRegisterClients?: boolean;
 }) {
   const recentClients = clients.slice(0, 3);
   const recentCommissions = commissions.slice(0, 3);
@@ -209,14 +211,24 @@ export function AffiliateDashboardSection({
             <Rocket className="w-4 h-4 text-blue-600" /> Acciones rápidas
           </h2>
           <div className="grid gap-2">
-            <button type="button" onClick={onGoClients}
-              className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left">
-              <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center"><Users className="w-4 h-4 text-blue-700" /></div>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Registrar cliente</p>
-                <p className="text-xs text-slate-500">Añade un lead y haz seguimiento del pipeline</p>
+            {allowRegisterClients ? (
+              <button type="button" onClick={onGoClients}
+                className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left">
+                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center"><Users className="w-4 h-4 text-blue-700" /></div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Registrar cliente</p>
+                  <p className="text-xs text-slate-500">Añade un lead y haz seguimiento del pipeline</p>
+                </div>
+              </button>
+            ) : (
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-slate-50 text-left">
+                <div className="w-9 h-9 rounded-lg bg-slate-200 flex items-center justify-center"><Users className="w-4 h-4 text-slate-500" /></div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">Altas de clientes Vertial</p>
+                  <p className="text-xs text-slate-500">En iOS solo consulta; no se dan de alta cuentas nuevas.</p>
+                </div>
               </div>
-            </button>
+            )}
             <button type="button" onClick={onGoReferral}
               className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-amber-300 hover:bg-amber-50/50 transition-colors text-left">
               <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center"><Share2 className="w-4 h-4 text-amber-700" /></div>
@@ -286,33 +298,47 @@ export function AffiliateClientsSection({
   clients,
   commissionRate,
   onAddClient,
+  allowRegisterClients = true,
 }: {
   clients: PortalClient[];
   commissionRate: number;
   onAddClient: () => void;
+  allowRegisterClients?: boolean;
 }) {
   return (
     <div className="space-y-4 max-w-5xl">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-black text-slate-900">Mis clientes</h1>
-          <p className="text-sm text-slate-500 mt-1">Registra leads y sigue el avance hasta que paguen.</p>
+          <p className="text-sm text-slate-500 mt-1">
+            {allowRegisterClients
+              ? 'Registra leads y sigue el avance hasta que paguen.'
+              : 'Consulta tus leads (en iOS no se dan de alta cuentas nuevas).'}
+          </p>
         </div>
-        <button type="button" onClick={onAddClient}
-          className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
-          <Plus className="w-4 h-4" /> Nuevo cliente
-        </button>
+        {allowRegisterClients ? (
+          <button type="button" onClick={onAddClient}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
+            <Plus className="w-4 h-4" /> Nuevo cliente
+          </button>
+        ) : null}
       </div>
 
       {clients.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
           <Users className="w-12 h-12 text-slate-300 mx-auto mb-3" />
           <p className="font-medium text-slate-500 mb-1">No tienes clientes registrados</p>
-          <p className="text-sm text-slate-400 mb-4">Empieza registrando clientes desde aquí para hacer seguimiento.</p>
-          <button type="button" onClick={onAddClient}
-            className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors inline-flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Registrar primer cliente
-          </button>
+          <p className="text-sm text-slate-400 mb-4">
+            {allowRegisterClients
+              ? 'Empieza registrando clientes desde aquí para hacer seguimiento.'
+              : 'Las altas de clientes Vertial no están disponibles en la app iOS.'}
+          </p>
+          {allowRegisterClients ? (
+            <button type="button" onClick={onAddClient}
+              className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors inline-flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Registrar primer cliente
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="space-y-3">
@@ -449,13 +475,20 @@ export function AffiliateCommissionsSection({
   );
 }
 
-export function AffiliateReferralSection({ affiliate }: { affiliate: PortalAffiliate }) {
+export function AffiliateReferralSection({
+  affiliate,
+  allowRegisterClients = true,
+}: {
+  affiliate: PortalAffiliate;
+  allowRegisterClients?: boolean;
+}) {
   const [copiedReferral, setCopiedReferral] = React.useState(false);
   const [showQr, setShowQr] = React.useState(false);
 
-  const referralUrl = affiliate.referralCode
-    ? `${window.location.origin}/auth/register?ref=${encodeURIComponent(affiliate.referralCode)}`
-    : '';
+  const referralUrl =
+    allowRegisterClients && affiliate.referralCode
+      ? `${window.location.origin}/auth/register?ref=${encodeURIComponent(affiliate.referralCode)}`
+      : '';
   const qrImageUrl = referralUrl
     ? `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(referralUrl)}`
     : '';
@@ -470,7 +503,11 @@ export function AffiliateReferralSection({ affiliate }: { affiliate: PortalAffil
     <div className="space-y-4 max-w-3xl">
       <div>
         <h1 className="text-2xl font-black text-slate-900">Referir clientes</h1>
-        <p className="text-sm text-slate-500 mt-1">Comparte tu código para que se registren y queden vinculados a ti.</p>
+        <p className="text-sm text-slate-500 mt-1">
+          {allowRegisterClients
+            ? 'Comparte tu código para que se registren y queden vinculados a ti.'
+            : 'En iOS puedes consultar tu código; el enlace de registro de empresas no está disponible en la app.'}
+        </p>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
@@ -480,7 +517,11 @@ export function AffiliateReferralSection({ affiliate }: { affiliate: PortalAffil
           </div>
           <div>
             <p className="font-bold text-slate-900">Código de referido</p>
-            <p className="text-sm text-slate-500 mt-1">Dáselo a tus contactos o comparte el enlace de registro.</p>
+            <p className="text-sm text-slate-500 mt-1">
+              {allowRegisterClients
+                ? 'Dáselo a tus contactos o comparte el enlace de registro.'
+                : 'Comparte el código fuera de la app iOS si tus contactos se dan de alta en la web.'}
+            </p>
           </div>
         </div>
 
@@ -490,11 +531,13 @@ export function AffiliateReferralSection({ affiliate }: { affiliate: PortalAffil
             {copiedReferral ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
             {affiliate.referralCode || '—'}
           </button>
-          <button type="button" onClick={() => setShowQr((v) => !v)}
-            className="flex items-center gap-2 px-4 py-3 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
-            <QrCode className="w-4 h-4" />
-            {showQr ? 'Ocultar QR' : 'Ver QR'}
-          </button>
+          {referralUrl ? (
+            <button type="button" onClick={() => setShowQr((v) => !v)}
+              className="flex items-center gap-2 px-4 py-3 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors">
+              <QrCode className="w-4 h-4" />
+              {showQr ? 'Ocultar QR' : 'Ver QR'}
+            </button>
+          ) : null}
         </div>
 
         {referralUrl && (
@@ -521,8 +564,9 @@ export function AffiliateReferralSection({ affiliate }: { affiliate: PortalAffil
           <BookOpen className="w-4 h-4" /> Consejo
         </p>
         <p className="text-sm text-blue-800/80 leading-relaxed">
-          Puedes registrar clientes manualmente en «Mis clientes» o dejar que se registren solos con tu enlace.
-          Las altas automáticas aparecen en «Altas referidas».
+          {allowRegisterClients
+            ? 'Puedes registrar clientes manualmente en «Mis clientes» o dejar que se registren solos con tu enlace. Las altas automáticas aparecen en «Altas referidas».'
+            : 'En iOS solo puedes ver tu código y tu panel. Las altas de empresas Vertial no se hacen desde esta app.'}
         </p>
       </div>
     </div>

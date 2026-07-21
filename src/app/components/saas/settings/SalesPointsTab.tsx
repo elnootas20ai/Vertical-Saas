@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
+import { isIosCustomerAccessOnlyApp } from '../../../lib/appStoreCompliance';
 import {
   isDeliveryAccountFromSources,
   bootstrapRetailStoreAfterCreate,
@@ -2035,6 +2036,12 @@ export function SalesPointsTab() {
   ]);
 
   const goToProAccess = () => {
+    if (isIosCustomerAccessOnlyApp()) {
+      setShowProAccessModal(false);
+      setForceCreatePdv(false);
+      toast.info('En iOS no se contrata PRO ni ampliaciones de PDV.');
+      return;
+    }
     if (dataUserId) {
       writeBillingSelection(dataUserId, {
         selectedPlanId: 'pro',
@@ -2862,8 +2869,12 @@ export function SalesPointsTab() {
                 onClick={goToProAccess}
                 className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
               >
-                {proAccessReason === 'pdv-extra' ? `Contratar ampliación (${formatAddonPriceShort('extra_pdv')})` : 'Solicitar PRO'}
-                <ArrowRight className="h-4 w-4" />
+                {isIosCustomerAccessOnlyApp()
+                  ? 'Entendido'
+                  : proAccessReason === 'pdv-extra'
+                    ? `Contratar ampliación (${formatAddonPriceShort('extra_pdv')})`
+                    : 'Solicitar PRO'}
+                {!isIosCustomerAccessOnlyApp() ? <ArrowRight className="h-4 w-4" /> : null}
               </button>
             </div>
           </div>

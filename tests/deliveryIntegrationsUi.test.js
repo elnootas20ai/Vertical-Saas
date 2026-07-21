@@ -132,14 +132,21 @@ describe('deliveryIntegrationsUi', () => {
     expect(rows.find((r) => r.platform.channel === 'ubereats')?.orderCount).toBe(1);
   });
 
-  it('applies manual aggregator totals override', () => {
+  it('applies manual aggregator totals and cash override', () => {
     const rows = buildAggregatorCashRows(getClosingAggregatorPlatforms(), {
       openedAt: '2026-06-08T10:00:00.000Z',
       pointOfSaleId: 'pdv-1',
       transactions: [],
     }, []);
-    const manual = applyManualAggregatorTotals(rows, { glovo: '123.45', ubereats: '50' });
+    const manual = applyManualAggregatorTotals(
+      rows,
+      { glovo: '123.45', ubereats: '50' },
+      { glovo: '20', ubereats: '60' },
+    );
     expect(manual.find((r) => r.platform.channel === 'glovo')?.totalSales).toBe(123.45);
+    expect(manual.find((r) => r.platform.channel === 'glovo')?.cashSales).toBe(20);
+    // cash cannot exceed total
     expect(manual.find((r) => r.platform.channel === 'ubereats')?.totalSales).toBe(50);
+    expect(manual.find((r) => r.platform.channel === 'ubereats')?.cashSales).toBe(50);
   });
 });

@@ -2,6 +2,7 @@ import { ReactNode, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { AlertTriangle } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 interface CriticalActionButtonProps {
   children: ReactNode;
@@ -21,6 +22,7 @@ export function CriticalActionButton({
   const { canPerformCriticalAction, getAccessRestrictionMessage, subscription } = useApp();
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   useModalClose(showBlockedModal, () => setShowBlockedModal(false));
+  const iosAccessOnly = isIosCustomerAccessOnlyApp();
 
   const handleClick = () => {
     if (!canPerformCriticalAction()) {
@@ -43,7 +45,6 @@ export function CriticalActionButton({
         {children}
       </button>
 
-      {/* Blocked Modal */}
       {showBlockedModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setShowBlockedModal(false)}>
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6" onClick={e => e.stopPropagation()}>
@@ -75,12 +76,22 @@ export function CriticalActionButton({
               >
                 Cancelar
               </button>
-              <a
-                href="/saas/billing"
-                className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-center transition-colors"
-              >
-                Ir a facturación
-              </a>
+              {!iosAccessOnly ? (
+                <a
+                  href="/saas/billing"
+                  className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-center transition-colors"
+                >
+                  Ir a facturación
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowBlockedModal(false)}
+                  className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-xl font-medium"
+                >
+                  Entendido
+                </button>
+              )}
             </div>
           </div>
         </div>

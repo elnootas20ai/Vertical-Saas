@@ -7,6 +7,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -731,6 +732,14 @@ export function CalendarView() {
                     ))}
                   </select>
                 </div>
+              ) : isIosCustomerAccessOnlyApp() ? (
+                <span
+                  className="text-xs px-3 py-1.5 rounded-lg font-bold text-amber-800 bg-amber-50 border border-amber-200 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-800 flex items-center gap-1.5"
+                  title="Multi-tienda requiere plan Pro (no disponible contratar en iOS)"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  Multi-tienda (PRO)
+                </span>
               ) : (
                 <button
                   type="button"

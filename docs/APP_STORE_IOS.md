@@ -103,19 +103,65 @@ En el **servidor** (.env): `APNS_PRODUCTION=true` para TestFlight, más `APNS_KE
 
 Push al iPhone del **CEO**: solo críticas + dinero/caja (descuadre, caja sin cerrar, impagos…). Lista en `services/pushAlertPolicy.js` (`CEO_MOBILE_PUSH_RULE_IDS`). Suenan también en horario silencioso.
 
-## Respuesta al rechazo App Store (2.3.0 / 3.1.1 / 5.1.2)
+## Respuesta al rechazo App Store (julio 2026 — Submission a51496f4)
+
+### Qué marcó Apple y qué hacer
+
+| Guideline | Qué pidieron | Acción |
+|-----------|--------------|--------|
+| **3.1.1** | Quitar registro de empresa/organización | En iOS: sin «Crear cuenta de empresa», sin solicitud de afiliado, sin alta de clientes Vertial desde panel afiliado. Solo login. |
+| **5.1.2(i)** | Banner de cookies / tracking sin ATT | En iOS nativo: **no** se muestra el banner de cookies; solo cookies necesarias; sin analytics/marketing. |
+| **2.3** | No encuentran «Sign in with Google» | En iOS Google está **oculto a propósito** (Guideline 4.8 → Sign in with Apple). **Quitar Google** de descripción, capturas y keywords en App Store Connect. |
+| **2.1(a)** | No pueden entrar en Empresa ni Afiliado | Pegar **dos** cuentas demo en App Review Information (ver abajo). |
+
+### Cuentas demo (App Review Information)
+
+```
+Empresa (owner / dashboard):
+Email: apple-review@vertialapp.com
+Password: [la de seed / APPLE_REVIEW_PASSWORD]
+→ Entry → Empresa → Iniciar sesión
+
+Afiliado:
+Email / código: [cuenta afiliado de prueba activa]
+Password: [si login por cuenta]
+→ Entry → Afiliado → Iniciar sesión
+```
+
+Asegura que la cuenta empresa tenga **suscripción activa** (script `scripts/seed-apple-review-account.mjs` en prod con OK).
+
+### Review Notes (pegar en inglés)
+
+> Vertial is a B2B multiplatform operations SaaS. The iOS app is login-only for existing accounts (company staff, workers, affiliates). There is NO business/organization registration and NO in-app purchase for Vertial subscriptions on iOS.
+>
+> Sign in with Google is intentionally NOT available on iOS (we use Sign in with Apple per Guideline 4.8). Please ignore any older metadata mentioning Google — Sign in with Apple + email/password are the iOS methods.
+>
+> Cookies: the iOS app does not show a cookie consent banner and does not use advertising/analytics cookies or tracking. No App Tracking Transparency prompt is required because we do not track users.
+>
+> Demo — Company: [email] / [password] (active Pro). Path: Entry → Empresa → Iniciar sesión.
+> Demo — Affiliate: [email or code] / [password]. Path: Entry → Afiliado → Iniciar sesión.
+> Account deletion: Settings → Security → Delete account.
+
+### Checklist App Store Connect (metadatos 2.3)
+
+1. Descripción / What’s New / keywords: **sin** «Google» / «Sign in with Google».
+2. Capturas: login con Apple o email, TPV, fichaje — sin Google ni precios de suscripción.
+3. App Privacy: Tracking = **No**. Cookies de marketing no aplican en iOS.
+
+## Respuesta al rechazo App Store (2.3.0 / 3.1.1 / 5.1.2) — notas previas
 
 ### 3.1.1 — Payments / In-App Purchase (hecho en código)
 
 **Modelo:** app iOS = acceso para clientes existentes. Alta + cobro de Vertial **solo en la web**.
 
 En iOS nativo ya no hay:
-- Crear cuenta de empresa
+- Crear cuenta de empresa / organización / solicitud de afiliado
 - Onboarding de planes / tarjeta
 - Pantalla de pagar / transferencia
 - Banners «ir a facturación / pagar»
 - Botones «Subir a Pro» / precio de compra en upsell
 - Enlace a checkout web dentro de la app
+- Banner de cookies de marketing/analítica
 
 **Login, trabajador, tablet TPV y operativa (caja, pedidos, fichaje) no cambian.**
 
@@ -137,6 +183,7 @@ Cuenta de revisión: debe tener **suscripción ya activa** (o `billingExempt` / 
 - **Tracking:** No / `NSPrivacyTracking = false`
 - **No** declarar datos que no recogéis
 - Política pública: https://vertialapp.com/legal/privacidad (actualizada con app móvil, push, ubicación, fotos, red local, sin tracking)
+- Cookies: en iOS nativo no hay banner ni cookies de tracking (Guideline 5.1.2(i))
 
 Tras deploy frontend, verifica que la página de privacidad en producción muestra la fecha **20 de julio de 2026** y la sección de app móvil.
 
@@ -144,19 +191,15 @@ Tras deploy frontend, verifica que la página de privacidad en producción muest
 
 En App Store Connect, alinear con la build:
 
-1. **Descripción:** B2B para negocios (restaurantes, retail, talleres…). Indica que es acceso para clientes con cuenta; **no** digas «contrata o paga desde la app».
-2. **Capturas:** pantallas reales de esta build (login, dashboard/TPV, fichaje). Sin precios de suscripción ni checkout.
+1. **Descripción:** B2B para negocios. Acceso para clientes con cuenta; **sin** Google Sign-In en iOS; **sin** «contrata o paga desde la app».
+2. **Capturas:** pantallas reales (login Apple/email, dashboard/TPV, fichaje). Sin Google ni checkout.
 3. **Categoría:** Business. **Edad:** 4+.
-4. **Keywords / promo text:** sin prometer IAP ni compra in-app.
-5. **Review Notes** (pegar en el envío):
-
-> Vertial is a B2B multiplatform operations SaaS (web + iOS). The iOS app is for existing business customers and staff to sign in and operate (POS, clock-in, orders, thermal printers on LAN). Company signup and Vertial subscription billing are completed only on the website (vertialapp.com) — there is no in-app purchase and no payment UI for Vertial subscriptions on iOS. Privacy: we collect account data, photos, precise location while clocking in, and device tokens for push; no advertising tracking. Test account: [email] / [password] (active subscription). Account deletion: Settings → Security → Delete account.
+4. **Keywords / promo text:** sin IAP ni Google.
+5. **Review Notes:** usar el bloque de arriba (julio 2026).
 
 ## Notas para el revisor (Review Notes)
 
-Texto sugerido en inglés:
-
-> Vertial is a B2B multiplatform operations SaaS (web + iOS). The iOS app is for existing business customers and staff to sign in and operate (POS, clock-in, orders). Company signup and subscription billing are completed on the website (vertialapp.com) only — there is no in-app purchase or payment for Vertial subscriptions on iOS. Test account: [email] / [password] (active subscription). Account deletion: Settings → Security → Delete account.
+Ver sección «Review Notes (pegar en inglés)» más arriba.
 
 ## Codemagic — error exit 65 al compilar IPA
 

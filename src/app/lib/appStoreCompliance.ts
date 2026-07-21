@@ -42,6 +42,22 @@ export function isIosCustomerAccessOnlyApp(): boolean {
   return shouldHideInAppSubscriptionPurchaseOnIos();
 }
 
+/**
+ * Apple 3.1.1 (julio 2026): en iOS no hay alta de empresa, organización ni afiliado.
+ * Solo login de cuentas ya existentes.
+ */
+export function shouldHideBusinessOrganizationRegistrationOnIos(): boolean {
+  return isIosNativeApp();
+}
+
+/**
+ * Apple 5.1.2(i): no mostrar banner de cookies de tracking en iOS
+ * (evita ATT; la app no hace publicidad ni tracking entre apps).
+ */
+export function shouldHideCookieConsentBannerOnIos(): boolean {
+  return isIosNativeApp();
+}
+
 /** Soporte (sin deep-link a checkout). */
 export const IOS_SUPPORT_URL = 'https://vertialapp.com';
 export const IOS_SUPPORT_EMAIL = 'soporte@vertialapp.com';

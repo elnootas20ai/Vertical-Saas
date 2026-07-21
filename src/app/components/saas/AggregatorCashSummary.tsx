@@ -58,6 +58,11 @@ export function AggregatorCashSummary({ rows, title = 'Cajas agregadores', compa
             <div className="text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums">
               {fmtMoney(row.totalSales)}€
             </div>
+            {(Number(row.cashSales) || 0) > 0 ? (
+              <div className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 mt-0.5 tabular-nums">
+                Efectivo en caja: {fmtMoney(row.cashSales)}€
+              </div>
+            ) : null}
             <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
               {row.orderCount} pedido{row.orderCount === 1 ? '' : 's'}
               {row.orderCount > 0 ? ` · ticket ${fmtMoney(row.avgTicket)}€` : ''}
@@ -66,7 +71,7 @@ export function AggregatorCashSummary({ rows, title = 'Cajas agregadores', compa
         ))}
       </div>
       <p className="text-[10px] text-gray-400 dark:text-gray-500">
-        Cobros gestionados por la plataforma; no entran en el arqueo de efectivo del TPV.
+        El efectivo declarado de cada plataforma suma al arqueo de la caja TPV.
       </p>
     </div>
   );

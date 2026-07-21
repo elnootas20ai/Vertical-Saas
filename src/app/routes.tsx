@@ -113,6 +113,7 @@ import { RestaurantCajaRouteEntry } from './verticals/restaurant/RestaurantCajaR
 import { RestaurantCeoTpvPage } from './verticals/restaurant/RestaurantCeoTpvPage';
 import { RestaurantSalaRouteEntry } from './verticals/restaurant/RestaurantSalaRouteEntry';
 import { RequireRestaurantVertical } from './components/saas/RequireRestaurantVertical';
+import { RequireSalaAccess } from './components/saas/RequireSalaAccess';
 import { DeliveryReparto } from './pages/saas/DeliveryReparto';
 import { DeliveryMontaje } from './pages/saas/DeliveryMontaje';
 import { DeliveryKitchen } from './pages/saas/DeliveryKitchen';
@@ -613,8 +614,8 @@ export const router = createBrowserRouter([
           { path: 'tech', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
           { path: 'payroll', element: <RequireTeamManager><PayrollPage /></RequireTeamManager> },
-          { path: 'sala/setup', element: <RequireRestaurantVertical><RestaurantSalaRouteEntry /></RequireRestaurantVertical> },
-          { path: 'sala', element: <RequireRestaurantVertical><RestaurantSalaRouteEntry /></RequireRestaurantVertical> },
+          { path: 'sala/setup', element: <RequireSalaAccess><RestaurantSalaRouteEntry /></RequireSalaAccess> },
+          { path: 'sala', element: <RequireSalaAccess><RestaurantSalaRouteEntry /></RequireSalaAccess> },
           { path: 'lista-espera', element: <RequireRestaurantVertical><RequireWorkerPermission permission="delivery"><RestaurantWaitlistPage /></RequireWorkerPermission></RequireRestaurantVertical> },
           { path: 'cocina', element: <RequireRestaurantVertical><RequireWorkerPermission permission="delivery"><RestaurantKitchenRouteEntry /></RequireWorkerPermission></RequireRestaurantVertical> },
           { path: 'vertical/restaurant/informes', element: <RequireBusinessOwner><RequireRestaurantVertical><RestaurantReportsPage /></RequireRestaurantVertical></RequireBusinessOwner> },

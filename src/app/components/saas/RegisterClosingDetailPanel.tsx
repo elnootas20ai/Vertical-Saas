@@ -97,11 +97,19 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
   const aggregatorRows = useMemo(() => {
     if (aggregatorRowsProp?.length) return aggregatorRowsProp;
     const totals = session.aggregatorClosingTotals || summary.salesByChannel;
-    return aggregatorRowsFromClosingTotals(getClosingAggregatorPlatforms(), totals);
-  }, [aggregatorRowsProp, session.aggregatorClosingTotals, summary.salesByChannel]);
+    return aggregatorRowsFromClosingTotals(
+      getClosingAggregatorPlatforms(),
+      totals,
+      session.aggregatorClosingCash,
+    );
+  }, [aggregatorRowsProp, session.aggregatorClosingTotals, session.aggregatorClosingCash, summary.salesByChannel]);
 
   const cashReturns = sumCashReturns(session);
   const cashStaffConsumption = sumCashStaffConsumption(session);
+  const aggregatorCashTotal = useMemo(
+    () => aggregatorRows.reduce((s, r) => s + (Number(r.cashSales) || 0), 0),
+    [aggregatorRows],
+  );
 
   return (
     <div className="space-y-4">
@@ -158,6 +166,19 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         registerSummary={summary}
       />
 
+      {(session.productClosingCounts || shiftOrders.length > 0) && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20 p-3">
+          <p className="text-[11px] font-bold text-amber-800 dark:text-amber-200 uppercase tracking-wider mb-2">
+            Conteo pizzas / burgers / tacos
+          </p>
+          <div className="flex flex-wrap gap-2 text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
+            <span>🍕 {session.productClosingCounts?.pizza ?? '—'}</span>
+            <span>🍔 {session.productClosingCounts?.burger ?? '—'}</span>
+            <span>🌮 {session.productClosingCounts?.taco ?? '—'}</span>
+          </div>
+        </div>
+      )}
+
       <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
         <p className="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Arqueo de efectivo</p>
         <div className="flex justify-between"><span className="text-gray-500">Fondo de apertura</span><span className="font-semibold">{fmtMoney(session.initialCashAmount)}€</span></div>
@@ -168,10 +189,45 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         <div className="flex justify-between"><span className="text-blue-600">+ Entradas de efectivo</span><span className="font-semibold text-blue-700">{fmtMoney(summary.totalCashIn)}€</span></div>
         <div className="flex justify-between"><span className="text-red-600">− Devoluciones efectivo</span><span className="font-semibold text-red-700">{fmtMoney(cashReturns)}€</span></div>
         <div className="flex justify-between"><span className="text-orange-600">− Salidas de efectivo</span><span className="font-semibold text-orange-700">{fmtMoney(summary.totalCashOut)}€</span></div>
+        {(() => {
+          const cashOuts = transactions
+            .filter((t) => t.type === 'cash_out' || t.type === 'expense')
+            .slice()
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          if (cashOuts.length === 0) return null;
+          return (
+            <div className="mt-2 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50/80 dark:bg-orange-950/30 p-2.5 space-y-1.5">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:text-orange-300">
+                Detalle salidas (motivo)
+              </p>
+              {cashOuts.map((tx) => (
+                <div key={tx.id} className="flex items-start justify-between gap-2 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-medium text-gray-900 dark:text-gray-100 break-words">
+                      {tx.description?.trim() || 'Sin motivo indicado'}
+                    </p>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                      {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                      {tx.registeredBy ? ` · ${tx.registeredBy}` : ''}
+                    </p>
+                  </div>
+                  <span className="font-bold tabular-nums text-orange-700 dark:text-orange-300 shrink-0">
+                    −{fmtMoney(tx.amount)}€
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
         <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between">
           <span className="text-gray-700 dark:text-gray-300 font-medium">Efectivo esperado</span>
           <span className="font-bold text-emerald-700 dark:text-emerald-400">{fmtMoney(session.expectedCash)}€</span>
         </div>
+        {aggregatorCashTotal > 0 ? (
+          <p className="text-[10px] text-purple-600 dark:text-purple-300">
+            Incluye {fmtMoney(aggregatorCashTotal)}€ de efectivo de integradores
+          </p>
+        ) : null}
         <div className="flex justify-between">
           <span className="text-gray-700 dark:text-gray-300 font-medium">Efectivo contado</span>
           <span className="font-bold text-gray-900 dark:text-gray-100">{fmtMoney(session.finalCashAmount)}€</span>

@@ -11,6 +11,8 @@ import {
   orderLoadBoundsForOpenSession,
   orderOnOpenTpvOpsBoard,
   resolveActiveTpvRegisterSession,
+  findLastClosedTpvSession,
+  resolvePreviousCloseCashAmount,
   sessionActiveOnCalendarDay,
   tpvSessionBelongsToBusiness,
 } from '../src/app/lib/tpvCajaScope.js';
@@ -209,5 +211,43 @@ describe('isLocalCalendarDay', () => {
   it('matches local calendar day key', () => {
     const key = localCalendarDayKey(new Date(2026, 5, 17, 15, 0, 0));
     expect(isLocalCalendarDay(new Date(2026, 5, 17, 1, 0, 0).toISOString(), key)).toBe(true);
+  });
+});
+
+describe('findLastClosedTpvSession', () => {
+  const pdvs = [{ _id: 'pdv-1', workCenterId: 'wc-1' }];
+  const closedTablet = {
+    _id: 'c1',
+    status: 'closed',
+    pointOfSaleId: 'pdv-1',
+    terminalId: 'tablet-pdv-1',
+    closedAt: '2026-07-20T22:00:00.000Z',
+    finalCashAmount: 50,
+  };
+  const closedTpv = {
+    _id: 'c2',
+    status: 'closed',
+    pointOfSaleId: 'pdv-1',
+    terminalId: 'term-1',
+    closedAt: '2026-07-21T08:00:00.000Z',
+    finalCashAmount: 80,
+  };
+
+  it('prefers same terminal when available', () => {
+    const last = findLastClosedTpvSession([closedTablet, closedTpv], 'pdv-1', 'tablet-pdv-1', pdvs);
+    expect(last?._id).toBe('c1');
+    expect(resolvePreviousCloseCashAmount(last)).toBe(50);
+  });
+
+  it('falls back to latest close of the same store if terminal differs', () => {
+    const last = findLastClosedTpvSession([closedTablet], 'pdv-1', 'term-1', pdvs);
+    expect(last?._id).toBe('c1');
+    expect(resolvePreviousCloseCashAmount(last)).toBe(50);
+  });
+
+  it('picks most recent store close when no terminal match', () => {
+    const last = findLastClosedTpvSession([closedTablet, closedTpv], 'pdv-1', 'other-term', pdvs);
+    expect(last?._id).toBe('c2');
+    expect(resolvePreviousCloseCashAmount(last)).toBe(80);
   });
 });

@@ -11,6 +11,7 @@ import { GlobalSearchModal } from './GlobalSearchModal';
 import { BusinessCarousel } from './BusinessCarousel';
 import { useDashboardViewOptional } from '../../context/DashboardViewContext';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import { useSwitchActiveBusiness } from '../../hooks/useSwitchActiveBusiness';
 import { PageLayoutProvider, usePageLayoutConfig, useRegisterPageLayout } from '../../context/PageLayoutContext';
 import { isChromelessSaasRoute } from '../../lib/saasChromelessRoute';
@@ -170,7 +171,9 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
 
   const handlePortfolioTabClick = useCallback(() => {
     if (!portfolioPlan.canUsePortfolioView) {
-      navigate('/saas/billing');
+      if (!isIosCustomerAccessOnlyApp()) {
+        navigate('/saas/billing');
+      }
       return;
     }
     dashboardView?.setPortfolioView(true);

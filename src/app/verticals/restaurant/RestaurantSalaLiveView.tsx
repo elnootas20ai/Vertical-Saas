@@ -9,13 +9,16 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { LayoutGrid, Minus, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import { RestaurantSeatGuestsModal } from '../../components/saas/restaurant/RestaurantSeatGuestsModal';
+import { useBusiness } from '../../context/BusinessContext';
 import {
   changeTableStatusRequest,
   type DiningTable,
   type DiningTableStatus,
 } from '../../lib/salaApi';
+import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
 import { ensureOpenDiningOrder } from '../../lib/restaurantDiningTpv';
 import { tableStatusOnOpen } from '../../lib/restaurantTableStatus';
+import { DELIVERY_CEO_TPV_PATH, RESTAURANT_CEO_TPV_PATH } from '../../lib/retailOpsPaths';
 import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
 import type { SalaRoom, SalaRoomType } from '../../lib/salaStudioTypes';
 import { SALA_ROOM_TYPE_LABELS } from '../../lib/salaStudioTypes';
@@ -141,6 +144,8 @@ export function RestaurantSalaLiveView({
   onRemount,
 }: Props) {
   const navigate = useNavigate();
+  const { currentBusiness } = useBusiness();
+  const isDeliverySala = isStrictDeliveryBusinessType(currentBusiness?.businessType);
   const sortedRooms = useMemo(
     () => [...rooms].sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)),
     [rooms],
@@ -188,7 +193,12 @@ export function RestaurantSalaLiveView({
     const tableId = String(table._id || table.id || '').trim();
     if (!tableId) return;
     writeSalaTpvOpenTable({ tableId, orderId });
-    navigate(`/saas/caja/tpv?mesa=${encodeURIComponent(tableId)}`);
+    if (isDeliverySala) {
+      // Delivery: TPV delivery (mostrador / recogida). Sin comanda de sala bar.
+      navigate(`${DELIVERY_CEO_TPV_PATH}?mesa=${encodeURIComponent(tableId)}`);
+      return;
+    }
+    navigate(`${RESTAURANT_CEO_TPV_PATH}?mesa=${encodeURIComponent(tableId)}`);
   };
 
   const seatAndOpen = async (table: DiningTable, guests: number) => {
@@ -199,6 +209,19 @@ export function RestaurantSalaLiveView({
     }
     setBusyId(tableId);
     try {
+      const nextStatus = tableStatusOnOpen(table.status);
+      const updated = await changeTableStatusRequest(userId, tableId, nextStatus, {
+        currentGuests: guests,
+      });
+      onTablesChange(patchTableList(tables, updated));
+      setSeatTable(null);
+      setReservedTable(null);
+
+      if (isDeliverySala) {
+        openTpvForTable(updated);
+        return;
+      }
+
       const order = await ensureOpenDiningOrder({
         userId,
         businessId,
@@ -210,13 +233,6 @@ export function RestaurantSalaLiveView({
         createdByName: actorName || 'Sala',
         zone: table.zone || activeRoom?.name || '',
       });
-      const nextStatus = tableStatusOnOpen(table.status);
-      const updated = await changeTableStatusRequest(userId, tableId, nextStatus, {
-        currentGuests: guests,
-      });
-      onTablesChange(patchTableList(tables, updated));
-      setSeatTable(null);
-      setReservedTable(null);
       openTpvForTable(updated, order._id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo sentar en la mesa');

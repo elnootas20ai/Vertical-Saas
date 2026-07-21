@@ -2,11 +2,13 @@ import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { ScrollRestoration } from 'react-router-dom';
 import { CookieConsentBanner } from './CookieConsentBanner';
+import { shouldHideCookieConsentBannerOnIos } from '../lib/appStoreCompliance';
 
 export function RootLayout() {
   const location = useLocation();
   const isStandaloneMechanicView = location.pathname === '/mecanico';
   const isLandingPage = location.pathname === '/';
+  const hideCookieBanner = shouldHideCookieConsentBannerOnIos();
 
   useEffect(() => {
     if (!isLandingPage) return;
@@ -30,7 +32,7 @@ export function RootLayout() {
       {/* Necesario para que navigate(..., { preventScrollReset: true }) evite subir el scroll al cambiar de ruta */}
       <ScrollRestoration />
       <Outlet />
-      {!isStandaloneMechanicView && <CookieConsentBanner />}
+      {!isStandaloneMechanicView && !hideCookieBanner && <CookieConsentBanner />}
     </>
   );
 }

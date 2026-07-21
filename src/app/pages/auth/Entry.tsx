@@ -13,7 +13,7 @@ import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { AUTH_PATHS, type AuthAccountType } from '../../lib/authEntryPaths';
-import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
+import { isIosCustomerAccessOnlyApp, shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appStoreCompliance';
 
 type AccentKey = 'neutral' | 'blue' | 'violet';
 
@@ -157,6 +157,33 @@ export function Entry() {
   const [view, setView] = useState<'main' | 'register'>('main');
   const [selectedType, setSelectedType] = useState<AuthAccountType | null>(null);
   const iosCustomersOnly = isIosCustomerAccessOnlyApp();
+  const hideOrgRegistration = shouldHideBusinessOrganizationRegistrationOnIos();
+
+  // iOS: nunca mostrar flujo de alta Empresa/organización (Apple 3.1.1).
+  if (view === 'register' && hideOrgRegistration) {
+    return (
+      <AccesoSplitLayout visualKey="entry">
+        <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
+          <div className="w-full max-w-md rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 p-6 space-y-4 text-center">
+            <h1 className="text-lg font-bold text-amber-950 dark:text-amber-100">
+              Solo inicio de sesión
+            </h1>
+            <p className="text-sm text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
+              En la app iOS no se crean cuentas de empresa ni de organización.
+              Si ya tienes cuenta activa, vuelve e inicia sesión.
+            </p>
+            <button
+              type="button"
+              onClick={() => setView('main')}
+              className="w-full min-h-[2.75rem] px-4 py-3 rounded-xl font-semibold text-sm bg-[#0f1419] text-white"
+            >
+              Volver al acceso
+            </button>
+          </div>
+        </div>
+      </AccesoSplitLayout>
+    );
+  }
 
   if (view === 'register') {
     return (
@@ -273,7 +300,9 @@ export function Entry() {
           <p className="mt-2 text-sm sm:text-base text-gray-500 dark:text-gray-400 max-w-xl mx-auto leading-relaxed">
             <span className="lg:hidden">Elige cómo quieres entrar.</span>
             <span className="hidden lg:inline">
-              Tres accesos distintos: empresa, trabajador o panel de afiliado. Elige el tuyo.
+              {hideOrgRegistration
+                ? 'Inicia sesión con tu cuenta de empresa, trabajador o afiliado ya activa.'
+                : 'Tres accesos distintos: empresa, trabajador o panel de afiliado. Elige el tuyo.'}
             </span>
           </p>
         </div>
@@ -289,7 +318,7 @@ export function Entry() {
             primaryShort="Iniciar sesión"
             primaryFull="Iniciar sesión — Empresa"
             onPrimary={() => navigate(AUTH_PATHS.companyLogin)}
-            {...(iosCustomersOnly
+            {...(hideOrgRegistration
               ? {}
               : {
                   secondaryShort: 'Crear cuenta',
@@ -325,16 +354,20 @@ export function Entry() {
             primaryShort="Iniciar sesión"
             primaryFull="Iniciar sesión — Afiliado"
             onPrimary={() => navigate(AUTH_PATHS.affiliatePortal)}
-            secondaryShort="Solicitar acceso"
-            secondaryFull="Solicitar ser afiliado"
-            onSecondary={() => navigate('/affiliados')}
+            {...(hideOrgRegistration
+              ? {}
+              : {
+                  secondaryShort: 'Solicitar acceso',
+                  secondaryFull: 'Solicitar ser afiliado',
+                  onSecondary: () => navigate('/affiliados'),
+                })}
           />
         </div>
 
-        {iosCustomersOnly ? (
+        {hideOrgRegistration ? (
           <p className="mt-6 lg:mt-8 text-center text-sm text-gray-600 dark:text-gray-400 leading-relaxed px-2">
-            Alta de empresa y suscripción: en la web (<span className="font-medium">vertialapp.com</span>).
-            Esta app es para iniciar sesión con cuenta ya activa.
+            Esta app es para iniciar sesión con una cuenta ya activa.
+            Soporte: soporte@vertialapp.com
           </p>
         ) : (
         <p className="mt-6 lg:mt-8 text-center text-sm text-gray-600 dark:text-gray-400">

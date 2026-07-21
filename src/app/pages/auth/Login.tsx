@@ -9,7 +9,7 @@ import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbo
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
-import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
+import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable, shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appStoreCompliance';
 import { signInWithApple } from '../../lib/appleSignIn';
 import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
@@ -295,6 +295,13 @@ export function Login() {
         return;
       }
       if (result.code === 'APPLE_ACCOUNT_NOT_FOUND' && result.appleUser) {
+        if (shouldHideBusinessOrganizationRegistrationOnIos()) {
+          setErrors({
+            email:
+              'No hay una cuenta Vertial vinculada a este Apple ID. En iOS solo pueden entrar cuentas ya existentes.',
+          });
+          return;
+        }
         navigate(AUTH_PATHS.register, {
           state: {
             accountType: 'company' as const,
@@ -318,6 +325,7 @@ export function Login() {
   }, [appleLogin, navigate]);
 
   const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
+  const hideOrgRegistration = shouldHideBusinessOrganizationRegistrationOnIos();
   const showGoogleAuth = googleClientConfigured && !hideGoogleOnIos;
   const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
   const googleBtnRef = useRef<HTMLDivElement>(null);
@@ -644,16 +652,22 @@ export function Login() {
             ) : null}
 
             <div className="flex flex-col gap-2 text-center">
-              <p className={AUTH_FOOTER_TEXT}>
-                {t('auth.noAccount')}{' '}
-                <button
-                  type="button"
-                  onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
-                  className={AUTH_FOOTER_LINK}
-                >
-                  Crear cuenta
-                </button>
-              </p>
+              {!hideOrgRegistration ? (
+                <p className={AUTH_FOOTER_TEXT}>
+                  {t('auth.noAccount')}{' '}
+                  <button
+                    type="button"
+                    onClick={() => navigate(AUTH_PATHS.register, { state: { accountType: 'company' } })}
+                    className={AUTH_FOOTER_LINK}
+                  >
+                    Crear cuenta
+                  </button>
+                </p>
+              ) : (
+                <p className={AUTH_FOOTER_TEXT}>
+                  En iOS solo inicio de sesión con cuenta ya activa.
+                </p>
+              )}
               <p className={AUTH_FOOTER_TEXT}>
                 ¿Eres trabajador?{' '}
                 <button

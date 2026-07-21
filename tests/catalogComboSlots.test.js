@@ -214,11 +214,24 @@ describe('catalogComboSlots', () => {
     expect(comboMenuHasMainFamilyChoice(sections)).toBe(true);
     expect(mainFamilyForCatalogCategory('Pizzas')).toBe('pizza');
     expect(mainFamilyForCatalogCategory('Top Burgers')).toBe('burger');
+    expect(mainFamilyForCatalogCategory('Smash Burgers')).toBe('burger');
     const pizzaOnly = filterComboMenuSectionsForMainFamily(sections, 'pizza');
     expect(pizzaOnly.some((s) => s.catalogCategory === 'Pizzas')).toBe(true);
     expect(pizzaOnly.some((s) => s.catalogCategory === 'Burgers')).toBe(false);
     expect(pizzaOnly.some((s) => s.catalogCategory === 'Bebidas')).toBe(true);
     const picks = [{ productId: 'b1', productName: 'Classic', quantity: 1, slotKind: 'main' }];
     expect(inferMainFamilyFromComboSelections(picks, catalog)).toBe('burger');
+  });
+
+  it('Top Burgers y productos con burger en el nombre cuentan como main', () => {
+    expect(inferComboSlotKind('Top Burgers')).toBe('main');
+    expect(inferComboSlotKind('Principales', 'Smash Burger')).toBe('main');
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 't1', name: 'Double', category: 'Top Burgers' }),
+    ];
+    const sections = buildComboMenuSections('estandar', catalog);
+    expect(sections.some((s) => s.catalogCategory === 'Top Burgers')).toBe(true);
+    expect(comboMenuHasMainFamilyChoice(sections)).toBe(true);
   });
 });

@@ -98,6 +98,49 @@ export function getOrderPhaseStartIso(order: DeliveryOrder): string {
   return order.createdAt;
 }
 
+/** Reloj del TPV tablet: montaje hasta repartidor, o reparto hasta cierre. Misma ancla que ops. */
+export type TpvPhaseTimerKind = 'montaje' | 'reparto' | 'espera';
+
+export type TpvPhaseTimer = {
+  kind: TpvPhaseTimerKind;
+  /** Etiqueta corta para badge (Montaje / Reparto). */
+  label: string;
+  minutes: number;
+  startIso: string;
+};
+
+export function getTpvPhaseTimer(order: DeliveryOrder, nowMs: number = Date.now()): TpvPhaseTimer {
+  const status = normalizeOrderStatus(order.status);
+
+  if (status === 'en_reparto') {
+    const startIso = order.departedAt || getOrderPhaseStartIso(order);
+    return {
+      kind: 'reparto',
+      label: 'Reparto',
+      minutes: Math.floor(minutesSinceIso(startIso, nowMs)),
+      startIso,
+    };
+  }
+
+  if (status === 'listo' || status === 'cocina' || status === 'nuevo') {
+    const startIso = getOrderPhaseStartIso(order);
+    return {
+      kind: 'montaje',
+      label: status === 'cocina' ? 'Cocina' : 'Montaje',
+      minutes: Math.floor(minutesSinceIso(startIso, nowMs)),
+      startIso,
+    };
+  }
+
+  const startIso = order.createdAt;
+  return {
+    kind: 'espera',
+    label: 'Espera',
+    minutes: Math.floor(minutesSinceIso(startIso, nowMs)),
+    startIso,
+  };
+}
+
 export function minutesSinceIso(iso: string | undefined, nowMs: number): number {
   if (!iso) return 0;
   const t = new Date(iso).getTime();

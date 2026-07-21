@@ -6,8 +6,9 @@ import { DELIVERY_CAJA_PATH, DELIVERY_OPS_HOME_PATH } from '../../lib/retailOpsP
 import { AuthRouteLoading } from '../AuthRouteLoading';
 
 /**
- * Bloquea rutas de bar/restaurante si la empresa activa no es restaurant.
- * Delivery va a su propia caja/ops — no comparte /saas/caja ni /saas/sala.
+ * Bloquea rutas de bar/restaurante (caja sala, cocina, lista espera…) si no es restaurant.
+ * Sala (mapa) usa RequireSalaAccess — delivery también puede entrar.
+ * Delivery tiene caja/ops propios: /saas/vertical/delivery/*.
  */
 export function RequireRestaurantVertical({ children }: { children: React.ReactNode }) {
   const businessCtx = useBusinessOptional();

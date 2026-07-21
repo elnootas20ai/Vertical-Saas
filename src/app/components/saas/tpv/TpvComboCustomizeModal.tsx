@@ -161,13 +161,30 @@ export function TpvComboCustomizeModal({
   );
 
   const [selections, setSelections] = useState<CatalogComboRef[]>(() => {
-    const seed = initialSelections?.length ? initialSelections : item.comboItems ?? [];
-    return normalizeComboItemsForSave(seed, catalogItems);
+    // Al abrir un menú nuevo, no precargar pizza/burger del combo: primero preguntar familia.
+    if (!initialSelections?.length) {
+      const seed = item.comboItems ?? [];
+      const sections = resolveTpvComboMenuSections(item, catalogItems);
+      if (comboMenuHasMainFamilyChoice(sections.filter((s) => s.slotQuota > 0 || s.expectedCount > 0))) {
+        return normalizeComboItemsForSave(
+          seed.filter((ref) => resolveComboRefSlotKind(ref, catalogItems) !== 'main'),
+          catalogItems,
+        );
+      }
+      return normalizeComboItemsForSave(seed, catalogItems);
+    }
+    return normalizeComboItemsForSave(initialSelections, catalogItems);
   });
 
   const [mainFamily, setMainFamily] = useState<ComboMainFamily | null>(() => {
-    const fromSelections = inferMainFamilyFromComboSelections(selections, catalogItems);
-    if (fromSelections) return fromSelections;
+    if (initialSelections?.length) {
+      return (
+        inferMainFamilyFromComboSelections(initialSelections, catalogItems) ??
+        defaultMainFamily(visibleSections)
+      );
+    }
+    // Menú nuevo con pizza y burger en catálogo → siempre preguntar (no saltar a pizza).
+    if (needsMainFamilyPick) return null;
     return defaultMainFamily(visibleSections);
   });
 

@@ -51,6 +51,7 @@ import { useDeliveryStorePdvGate } from '../../../hooks/useDeliveryStorePdvGate'
 import { notifyDeliveryBrandsChanged } from '../../../lib/deliverySetup';
 import { readImageFileAsDataUrl } from '../../../lib/readImageAsDataUrl';
 import { resolveBusinessDataUserId } from '../../../lib/tenantUserId';
+import { isIosCustomerAccessOnlyApp } from '../../../lib/appStoreCompliance';
 import {
   DELIVERY_BRAND_LINE_ICON_BOX,
   DELIVERY_BRAND_LINE_PHOTOS,
@@ -1720,6 +1721,10 @@ export function CompanyMarcaSettings() {
                 type="button"
                 onClick={() => {
                   setShowUpgradeModal(false);
+                  if (isIosCustomerAccessOnlyApp()) {
+                    toast.info('En iOS no se contratan ampliaciones de plan.');
+                    return;
+                  }
                   if (dataUserId) {
                     writeBillingSelection(dataUserId, {
                       selectedPlanId: 'pro',
@@ -1731,10 +1736,12 @@ export function CompanyMarcaSettings() {
                 }}
                 className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-sm font-semibold text-white hover:bg-violet-700"
               >
-                {entitlements.needsCommercialBrandAddon
-                  ? `Contratar ampliación (${formatAddonPriceShort('extra_brand')})`
-                  : 'Ver planes'}
-                <ArrowRight className="h-4 w-4" />
+                {isIosCustomerAccessOnlyApp()
+                  ? 'Entendido'
+                  : entitlements.needsCommercialBrandAddon
+                    ? `Contratar ampliación (${formatAddonPriceShort('extra_brand')})`
+                    : 'Ver planes'}
+                {!isIosCustomerAccessOnlyApp() ? <ArrowRight className="h-4 w-4" /> : null}
               </button>
             </div>
           </div>

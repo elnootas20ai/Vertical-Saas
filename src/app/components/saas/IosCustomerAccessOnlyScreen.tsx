@@ -7,8 +7,8 @@ type Props = {
 };
 
 /**
- * Pantalla App Store: la app iOS no vende suscripciones.
- * Alta y cobro solo en la web; aquí solo login de clientes con plan.
+ * Pantalla App Store: la app iOS no vende suscripciones ni registra empresas.
+ * Solo login de clientes/trabajadores/afiliados con cuenta ya activa.
  */
 export function IosCustomerAccessOnlyScreen({
   title = 'App para clientes Vertial',
@@ -23,15 +23,12 @@ export function IosCustomerAccessOnlyScreen({
         <div>
           <h1 className="text-xl font-bold tracking-tight">{title}</h1>
           <p className="mt-3 text-sm text-white/75 leading-relaxed">
-            Esta app es para <span className="text-white font-medium">clientes con cuenta activa</span>.
-            El alta de empresa y la suscripción se gestionan primero en la web
-            ({' '}
-            <span className="text-emerald-200">vertialapp.com</span>
-            ), desde un ordenador o el navegador.
+            Esta app es para <span className="text-white font-medium">iniciar sesión</span> con una
+            cuenta ya activa (empresa, trabajador o afiliado). En iOS no se crean cuentas nuevas de
+            empresa ni de organización.
           </p>
           <p className="mt-3 text-sm text-white/65 leading-relaxed">
-            Si ya tienes plan activo, cierra esta pantalla e inicia sesión con tu email.
-            Si tu acceso está pendiente, tu administrador o el equipo Vertial lo activan en la web.
+            Si tu acceso está pendiente, contacta con tu administrador o con soporte Vertial.
           </p>
         </div>
         <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left text-xs text-white/70 space-y-1">
@@ -42,7 +39,7 @@ export function IosCustomerAccessOnlyScreen({
             </a>
           </p>
           <p>
-            Web:{' '}
+            Información:{' '}
             <a
               className="text-emerald-300 underline underline-offset-2"
               href={IOS_SUPPORT_URL}
@@ -51,7 +48,6 @@ export function IosCustomerAccessOnlyScreen({
             >
               vertialapp.com
             </a>
-            {' '}(información general, no checkout en la app)
           </p>
         </div>
         {onLogout ? (

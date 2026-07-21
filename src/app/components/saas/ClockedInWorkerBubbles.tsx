@@ -13,6 +13,8 @@ interface ClockedInWorkerBubblesProps {
   compact?: boolean;
   ultraCompact?: boolean;
   label?: string;
+  /** Si no hay fichados y el control es seleccionable, se muestra este aviso. */
+  emptyHint?: string;
 }
 
 export function ClockedInWorkerBubbles({
@@ -23,16 +25,30 @@ export function ClockedInWorkerBubbles({
   compact = false,
   ultraCompact = false,
   label = 'En tienda',
+  emptyHint,
 }: ClockedInWorkerBubblesProps) {
   const selectable = Boolean(onSelect);
 
   if (workers.length === 0) {
+    if (selectable && emptyHint) {
+      return (
+        <div className="rounded-xl border border-dashed border-amber-300 dark:border-amber-700 bg-amber-50/80 dark:bg-amber-950/30 px-3 py-3 text-xs text-amber-900 dark:text-amber-100 font-medium">
+          {loading ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando fichajes…
+            </span>
+          ) : (
+            emptyHint
+          )}
+        </div>
+      );
+    }
     return null;
   }
 
   return (
     <div className={`${compact ? 'min-w-0' : 'space-y-1.5'} ${loading ? 'opacity-80' : ''}`}>
-      {!compact && (
+      {!compact && label ? (
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 min-h-[1.125rem]">
           <UserCheck className="w-3.5 h-3.5" />
           {label}
@@ -40,7 +56,7 @@ export function ClockedInWorkerBubbles({
             <Loader2 className="w-3 h-3 animate-spin opacity-60" aria-hidden />
           )}
         </div>
-      )}
+      ) : null}
       <div className={`flex items-center flex-wrap min-h-[2rem] ${ultraCompact ? 'gap-0.5' : 'gap-1.5'}`}>
         {workers.map((worker) => {
           const isSelected = normalizeClockinUserId(selectedId) === worker.id;

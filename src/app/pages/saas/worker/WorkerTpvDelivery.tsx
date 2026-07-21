@@ -38,6 +38,10 @@ import {
   orderLoadBoundsForOpenSession,
   orderOnOpenTpvOpsBoard,
 } from '../../../lib/tpvCajaScope';
+import {
+  formatElapsedMinutes,
+  getTpvPhaseTimer,
+} from '../../../lib/deliveryOpsLiveTimes';
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
@@ -260,10 +264,6 @@ const LANE_STATUS_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
 const WARN_MINUTES = 15;
 const LATE_MINUTES = 25;
 
-function elapsedMinutes(dateStr: string): number {
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 60000);
-}
-
 function timerTone(minutes: number): string {
   if (minutes >= LATE_MINUTES) return 'text-red-600 dark:text-red-400 font-bold';
   if (minutes >= WARN_MINUTES) return 'text-amber-600 dark:text-amber-400 font-semibold';
@@ -280,16 +280,9 @@ function waitBadgeClasses(minutes: number): string {
   return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600';
 }
 
-/** Tiempo de espera del pedido (desde creación). */
-function orderWaitMinutes(order: DeliveryOrder): number {
-  return elapsedMinutes(order.createdAt);
-}
-
-function formatElapsed(minutes: number): string {
-  if (minutes < 1) return 'Ahora';
-  if (minutes < 60) return `${minutes} min`;
-  const h = Math.floor(minutes / 60);
-  return `${h}h ${minutes % 60}m`;
+/** Minutos de la fase actual (montaje o reparto), misma lógica que centro de ops. */
+function orderPhaseMinutes(order: DeliveryOrder, nowMs: number): number {
+  return getTpvPhaseTimer(order, nowMs).minutes;
 }
 
 const DELIVERY_TYPE_BADGE: Record<DeliveryType, { label: string; className: string; Icon: LucideIcon }> = {
@@ -351,6 +344,7 @@ function OrderCard({
   advancing,
   readOnly = false,
   compact = false,
+  nowMs,
 }: {
   order: DeliveryOrder;
   onAdvance: (o: DeliveryOrder) => void;
@@ -359,11 +353,12 @@ function OrderCard({
   advancing: boolean;
   readOnly?: boolean;
   compact?: boolean;
+  nowMs: number;
 }) {
   const cfg = STATUS_CONFIG[order.status];
   const nextLabel = TABLET_NEXT_LABEL[order.status];
-  const waitMinutes = orderWaitMinutes(order);
-  const routeMinutes = order.departedAt ? elapsedMinutes(order.departedAt) : null;
+  const phaseTimer = getTpvPhaseTimer(order, nowMs);
+  const waitMinutes = phaseTimer.minutes;
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
   const TypeIcon = typeBadge.Icon;
   const isUrgent = order.priority === 'urgent' || order.priority === 'high';
@@ -373,6 +368,12 @@ function OrderCard({
     .map((i) => `${i.quantity}× ${i.name}`)
     .join(' · ');
   const paymentBadge = orderPaymentBoardBadge(order);
+  const timerTitle =
+    phaseTimer.kind === 'reparto'
+      ? 'Tiempo en reparto (desde salida)'
+      : phaseTimer.kind === 'montaje'
+        ? 'Tiempo en montaje (hasta repartidor)'
+        : 'Tiempo de espera';
 
   return (
     <div
@@ -395,16 +396,18 @@ function OrderCard({
         </button>
       )}
       <div className={`flex items-stretch ${compact ? 'gap-1.5 pr-5' : 'gap-2 pr-5'}`}>
-        {/* Tiempo de espera */}
+        {/* Temporizador de fase (montaje → reparto / reparto → cierre) */}
         <div
           className={`shrink-0 flex flex-col items-center justify-center rounded-md border ${waitBadgeClasses(waitMinutes)} ${
             compact ? 'w-[2.75rem] px-0.5 py-1.5' : 'w-[3.25rem] px-1 py-1.5 rounded-lg'
           }`}
-          title="Tiempo de espera desde el pedido"
+          title={timerTitle}
         >
           {!compact && <Timer className="w-3 h-3 mb-0.5 opacity-80" />}
           <span className={`font-bold leading-none tabular-nums ${compact ? 'text-base' : 'text-base'}`}>{waitMinutes}</span>
-          <span className={`font-semibold uppercase tracking-wide opacity-80 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>min</span>
+          <span className={`font-semibold uppercase tracking-wide opacity-80 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
+            {phaseTimer.kind === 'reparto' ? 'ruta' : 'min'}
+          </span>
         </div>
 
         {/* Info principal */}
@@ -458,10 +461,18 @@ function OrderCard({
                 <span className="text-gray-500">{itemCount} uds</span>
               </>
             )}
-            {routeMinutes != null && !compact && (
+            {!compact && (
               <>
                 <span className="text-gray-300">·</span>
-                <span className="text-cyan-600 dark:text-cyan-400">En ruta {routeMinutes}m</span>
+                <span
+                  className={
+                    phaseTimer.kind === 'reparto'
+                      ? 'text-cyan-600 dark:text-cyan-400'
+                      : 'text-indigo-600 dark:text-indigo-400'
+                  }
+                >
+                  {phaseTimer.label} {formatElapsedMinutes(waitMinutes)}
+                </span>
               </>
             )}
           </div>
@@ -519,6 +530,7 @@ function OrderLane({
   advancingIds,
   readOnly = false,
   compact = false,
+  nowMs,
 }: {
   title: string;
   icon: ReactNode;
@@ -534,6 +546,7 @@ function OrderLane({
   advancingIds: ReadonlySet<string>;
   readOnly?: boolean;
   compact?: boolean;
+  nowMs: number;
 }) {
   return (
     <section className={`flex flex-col min-h-0 flex-1 overflow-hidden bg-white dark:bg-gray-900 shadow-sm ${
@@ -569,6 +582,7 @@ function OrderLane({
               advancing={advancingIds.has(order._id)}
               readOnly={readOnly}
               compact={compact}
+              nowMs={nowMs}
             />
           ))
         )}
@@ -704,7 +718,16 @@ function DeliverPaymentModal({
   );
 }
 
-function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, advancing, correctingPayment }: {
+function OrderDetail({
+  order,
+  onClose,
+  onAdvance,
+  onDelete,
+  onCorrectPayment,
+  advancing,
+  correctingPayment,
+  nowMs,
+}: {
   order: DeliveryOrder;
   onClose: () => void;
   onAdvance: (o: DeliveryOrder) => void;
@@ -712,6 +735,7 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
   onCorrectPayment?: (o: DeliveryOrder, method: DeliveryPaymentMethod) => void;
   advancing: boolean;
   correctingPayment?: boolean;
+  nowMs: number;
 }) {
   useModalClose(true, onClose);
   const { currentBusiness, businesses } = useBusiness();
@@ -727,6 +751,7 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
   const canCorrectPayment =
     Boolean(onCorrectPayment) && isCompletedBoardOrder(order) && orderAlreadyCobrado(order);
   const currentPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
+  const phaseTimer = getTpvPhaseTimer(order, nowMs);
 
   return (
     <div className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center ${compact ? 'p-0 sm:p-2' : 'p-4 sm:p-6'}`}>
@@ -752,8 +777,20 @@ function OrderDetail({ order, onClose, onAdvance, onDelete, onCorrectPayment, ad
                 </span>
                 <OrderChannelBadge channel={order.channel} compact={compact} />
                 <span className={`inline-flex items-center rounded-full font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 ${compact ? 'px-1.5 py-px text-[10px]' : 'px-2 py-0.5 text-xs'}`}>
-                  {compact ? formatElapsed(orderWaitMinutes(order)) : (
-                    <>Espera <span className={`ml-1 tabular-nums font-bold ${timerTone(orderWaitMinutes(order))}`}>{formatElapsed(orderWaitMinutes(order))}</span></>
+                  {compact ? (
+                    <>
+                      {phaseTimer.label}{' '}
+                      <span className={`ml-0.5 tabular-nums font-bold ${timerTone(phaseTimer.minutes)}`}>
+                        {formatElapsedMinutes(phaseTimer.minutes)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      {phaseTimer.label}{' '}
+                      <span className={`ml-1 tabular-nums font-bold ${timerTone(phaseTimer.minutes)}`}>
+                        {formatElapsedMinutes(phaseTimer.minutes)}
+                      </span>
+                    </>
                   )}
                 </span>
               </div>
@@ -1009,7 +1046,8 @@ export function WorkerTpvDelivery({
   }, [scopedPdvId, activeStoreScope.pointsOfSale]);
 
   const [dayKey, setDayKey] = useState(() => localCalendarDayKey());
-  const [showDelivered, setShowDelivered] = useState(false);
+  /** Abierto por defecto: en tablet si va cerrado parece que “desaparecieron”. */
+  const [showDelivered, setShowDelivered] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => isTpvBoardSoundEnabled());
   const sessionOpenedAt = register?.session?.openedAt ?? null;
@@ -1219,6 +1257,32 @@ export function WorkerTpvDelivery({
         ],
       };
 
+      // Calle 1: ticket (no await). Calle 2: guardar estado.
+      if (next === 'en_reparto' && currentBusiness && order.deliveryType === 'domicilio') {
+        void printDeliveryTicket({
+          order: payload,
+          business: businessTicketInfoFrom(currentBusiness),
+          salesPointName: payload.salesPointName,
+          cashierName: user?.fullName,
+          variant: 'customer',
+          accountEmail: user?.email,
+        });
+      }
+      if (
+        next === 'entregado'
+        && currentBusiness
+        && (payload.paymentStatus === 'paid' || orderAlreadyCobrado(payload))
+      ) {
+        void printDeliveryTicket({
+          order: payload,
+          business: businessTicketInfoFrom(currentBusiness),
+          salesPointName: payload.salesPointName,
+          cashierName: user?.fullName,
+          variant: 'customer',
+          accountEmail: user?.email,
+        });
+      }
+
       if (!isBrowserOnline()) {
         enqueueTpvOfflineItem('order_update', { userId, order: payload });
         setOrders(prev => prev.map(o => o._id === payload._id ? payload : o));
@@ -1265,16 +1329,6 @@ export function WorkerTpvDelivery({
         toast.success(
           `Pedido #${order.orderNumber} entregado · ${PAYMENT_LABELS[resolvedPayment!]}`,
         );
-        if (updated.paymentStatus === 'paid' && currentBusiness) {
-          void printDeliveryTicket({
-            order: updated,
-            business: businessTicketInfoFrom(currentBusiness),
-            salesPointName: updated.salesPointName,
-            cashierName: user?.fullName,
-            variant: 'customer',
-            accountEmail: user?.email,
-          });
-        }
       } else {
         if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
         const label = LANE_STATUS_LABEL[next] || STATUS_CONFIG[next].label;
@@ -1291,10 +1345,13 @@ export function WorkerTpvDelivery({
     user?.fullName,
     user?.user_id,
     user?.id,
+    user?.email,
     currentBusiness,
     sessionOpenedAt,
     beginAdvancing,
     endAdvancing,
+    businessId,
+    businesses,
   ]);
 
   const confirmCompleteDelivery = useCallback(
@@ -1370,7 +1427,7 @@ export function WorkerTpvDelivery({
     const activeWait = [...montaje, ...enReparto];
     const avgWait =
       activeWait.length > 0
-        ? Math.round(activeWait.reduce((s, o) => s + orderWaitMinutes(o), 0) / activeWait.length)
+        ? Math.round(activeWait.reduce((s, o) => s + orderPhaseMinutes(o, nowMs), 0) / activeWait.length)
         : null;
     return {
       montaje: montaje.length,
@@ -1492,7 +1549,7 @@ export function WorkerTpvDelivery({
                 type="button"
                 onClick={() => setView('new-order')}
                 title="Nuevo pedido"
-                className="flex items-center justify-center gap-1 min-h-[40px] min-w-[5.5rem] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors touch-manipulation shrink-0"
+                className="flex items-center justify-center gap-1 min-h-[40px] min-w-[5.5rem] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm shadow-emerald-900/20 transition-colors touch-manipulation shrink-0"
               >
                 <Plus className="w-4 h-4" strokeWidth={2.5} />
                 Nuevo
@@ -1502,9 +1559,10 @@ export function WorkerTpvDelivery({
                   type="button"
                   onClick={() => setView('staff-consumption')}
                   title="Consumo equipo"
-                  className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl bg-violet-600 hover:bg-violet-700 text-white touch-manipulation shrink-0"
+                  className="flex items-center justify-center gap-1 min-h-[40px] min-w-[5.5rem] px-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm shadow-amber-900/15 transition-colors touch-manipulation shrink-0"
                 >
                   <UtensilsCrossed className="w-4 h-4" />
+                  Consumo
                 </button>
               )}
               <div className="flex flex-1 min-w-0 rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5 gap-0.5">
@@ -1641,7 +1699,7 @@ export function WorkerTpvDelivery({
                 <button
                   type="button"
                   onClick={() => setView('staff-consumption')}
-                  className="w-full flex items-center justify-center gap-2 min-h-[48px] py-3.5 rounded-2xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm sm:text-base shadow-lg"
+                  className="w-full flex items-center justify-center gap-2 min-h-[48px] py-3.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm sm:text-base shadow-lg shadow-amber-900/20"
                 >
                   <UtensilsCrossed className="w-5 h-5" strokeWidth={2.5} />
                   Consumo equipo
@@ -1725,6 +1783,7 @@ export function WorkerTpvDelivery({
               onDelete={requestDeleteOrder}
               advancingIds={advancingIds}
               compact={isTabletUi}
+              nowMs={nowMs}
             />
             <OrderLane
               title="Reparto"
@@ -1740,6 +1799,7 @@ export function WorkerTpvDelivery({
               onDelete={requestDeleteOrder}
               advancingIds={advancingIds}
               compact={isTabletUi}
+              nowMs={nowMs}
             />
           </div>
         )}
@@ -1749,81 +1809,79 @@ export function WorkerTpvDelivery({
       <div className={`shrink-0 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 ${isTabletUi ? 'px-2 py-1.5' : 'px-3 py-2.5 pb-3'}`}>
         {!isTabletUi && (
           <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2 px-1">
-            Resumen del día
+            Resumen del turno
           </p>
         )}
         <div className={`grid grid-cols-4 ${isTabletUi ? 'gap-1.5' : 'gap-1.5 sm:gap-2'}`}>
-          {[
-            { label: 'Montaje', value: stats.montaje, color: 'text-indigo-700 bg-indigo-50 border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-300' },
-            { label: 'Reparto', value: stats.delivery, color: 'text-cyan-700 bg-cyan-50 border-cyan-200 dark:bg-cyan-950/30 dark:border-cyan-900 dark:text-cyan-300' },
-            {
-              label: 'Completados',
-              value: stats.delivered,
-              color: showDelivered
-                ? 'text-green-800 bg-green-100 border-green-300 dark:bg-green-950/50 dark:border-green-700 dark:text-green-200 ring-1 ring-green-400/40'
-                : 'text-green-700 bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300',
-              onClick: () => setShowDelivered((v) => !v),
-            },
-            {
-              label: isTabletUi ? 'Espera' : 'Espera media',
-              value: stats.avgWait != null ? `${stats.avgWait}m` : '—',
-              color: stats.avgWait != null && stats.avgWait >= WARN_MINUTES
-                ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300'
-                : 'text-gray-700 bg-gray-50 border-gray-200 dark:bg-gray-800/50 dark:border-gray-700 dark:text-gray-300',
-            },
-          ].map((s) => {
-            const Tile = (
-              <>
-                <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>{s.value}</p>
-                <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>{s.label}</p>
-              </>
-            );
-            if ('onClick' in s && s.onClick) {
-              return (
-                <button
-                  key={s.label}
-                  type="button"
-                  onClick={s.onClick}
-                  className={`rounded-xl border text-center touch-manipulation ${s.color} ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}
-                  aria-expanded={showDelivered}
-                  title="Ver pedidos completados del turno"
-                >
-                  {Tile}
-                </button>
-              );
-            }
-            return (
-              <div key={s.label} className={`rounded-xl border text-center ${s.color} ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}>
-                {Tile}
-              </div>
-            );
-          })}
-        </div>
-
-        {!isTabletUi && (
+          <div className={`rounded-xl border text-center text-indigo-700 bg-indigo-50 border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-300 ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}>
+            <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>{stats.montaje}</p>
+            <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>Montaje</p>
+          </div>
+          <div className={`rounded-xl border text-center text-cyan-700 bg-cyan-50 border-cyan-200 dark:bg-cyan-950/30 dark:border-cyan-900 dark:text-cyan-300 ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}>
+            <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>{stats.delivery}</p>
+            <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>Reparto</p>
+          </div>
           <button
             type="button"
             onClick={() => setShowDelivered((v) => !v)}
-            className="mt-2.5 w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 text-left touch-manipulation"
+            className={`rounded-xl border text-center touch-manipulation transition-colors ${
+              showDelivered
+                ? 'text-emerald-900 bg-emerald-100 border-emerald-400 dark:bg-emerald-950/50 dark:border-emerald-600 dark:text-emerald-100'
+                : 'text-emerald-800 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-300'
+            } ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}
+            aria-expanded={showDelivered}
+            title="Ver pedidos completados del turno"
           >
-            <div className="flex items-center gap-2 min-w-0">
-              <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
-              <span className="text-xs sm:text-sm font-bold text-green-800 dark:text-green-300 truncate">
-                Completados en turno ({completedShiftOrders.length})
-              </span>
-            </div>
-            {showDelivered ? (
-              <ChevronUp className="w-4 h-4 text-green-700 shrink-0" />
-            ) : (
-              <ChevronDown className="w-4 h-4 text-green-700 shrink-0" />
-            )}
+            <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>{stats.delivered}</p>
+            <p className={`font-semibold uppercase tracking-wide opacity-80 flex items-center justify-center gap-0.5 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>
+              Completados
+              {showDelivered ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </p>
           </button>
-        )}
+          <div
+            className={`rounded-xl border text-center ${
+              stats.avgWait != null && stats.avgWait >= WARN_MINUTES
+                ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300'
+                : 'text-gray-700 bg-gray-50 border-gray-200 dark:bg-gray-800/50 dark:border-gray-700 dark:text-gray-300'
+            } ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}
+          >
+            <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>
+              {stats.avgWait != null ? `${stats.avgWait}m` : '—'}
+            </p>
+            <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>
+              {isTabletUi ? 'Fase' : 'Tiempo fase'}
+            </p>
+          </div>
+        </div>
+
+        {/* Siempre visible: si solo va en casilla colapsada parece que “desapareció”. */}
+        <button
+          type="button"
+          onClick={() => setShowDelivered((v) => !v)}
+          className={`w-full flex items-center justify-between gap-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-left touch-manipulation ${
+            isTabletUi ? 'mt-1.5 px-2.5 py-2 min-h-[44px]' : 'mt-2.5 px-3 py-2'
+          }`}
+          aria-expanded={showDelivered}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <CheckCircle2 className={`text-emerald-600 shrink-0 ${isTabletUi ? 'w-5 h-5' : 'w-4 h-4'}`} />
+            <span className={`font-bold text-emerald-800 dark:text-emerald-300 truncate ${isTabletUi ? 'text-sm' : 'text-xs sm:text-sm'}`}>
+              Completados del turno ({completedShiftOrders.length})
+            </span>
+          </div>
+          {showDelivered ? (
+            <ChevronUp className="w-4 h-4 text-emerald-700 shrink-0" />
+          ) : (
+            <ChevronDown className="w-4 h-4 text-emerald-700 shrink-0" />
+          )}
+        </button>
 
         {showDelivered && (
-          <div className={`mt-1.5 overflow-y-auto space-y-1 ${isTabletUi ? 'max-h-[22vh]' : 'max-h-44'}`}>
+          <div className={`mt-1.5 overflow-y-auto space-y-1 rounded-xl border border-emerald-100 dark:border-emerald-900 bg-emerald-50/30 dark:bg-emerald-950/10 ${isTabletUi ? 'max-h-[26vh] p-1.5' : 'max-h-44 p-2'}`}>
             {completedShiftOrders.length === 0 ? (
-              <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-3">Sin entregas en turno</p>
+              <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-3">
+                Sin entregas en este turno. Cuando marques un pedido como entregado, saldrá aquí.
+              </p>
             ) : (
               completedShiftOrders.map((order) => {
                 const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
@@ -1837,8 +1895,8 @@ export function WorkerTpvDelivery({
                     onClick={() => setSelectedOrder(order)}
                     className={`w-full flex items-center justify-between gap-2 rounded-lg text-left touch-manipulation ${
                       dimmed
-                        ? 'bg-gray-50/70 dark:bg-gray-800/70 opacity-60'
-                        : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        ? 'bg-white/70 dark:bg-gray-800/70 opacity-60'
+                        : 'bg-white dark:bg-gray-900 hover:bg-emerald-50/80 dark:hover:bg-gray-800'
                     } ${isTabletUi ? 'py-1.5 px-2' : 'px-3 py-2'}`}
                   >
                     <div className="min-w-0 flex items-center gap-1.5">
@@ -1880,6 +1938,7 @@ export function WorkerTpvDelivery({
           onCorrectPayment={handleCorrectPayment}
           advancing={advancingIds.has(selectedOrder._id)}
           correctingPayment={correctingPaymentId === selectedOrder._id}
+          nowMs={nowMs}
         />
       )}
 

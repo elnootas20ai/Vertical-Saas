@@ -160,6 +160,20 @@ import {
 import { StoreIngredientsPanel } from '../../components/saas/StoreIngredientsPanel';
 import { CatalogItemDetailModal } from '../../components/saas/CatalogItemDetailModal';
 import { CatalogComboCompositionEditor } from '../../components/saas/CatalogComboCompositionEditor';
+import {
+  CatalogProductRecipePicker,
+  recipePicksToLines,
+  recipePicksToTpvIngredientsText,
+  type CatalogRecipePick,
+} from '../../components/saas/CatalogProductRecipePicker';
+import {
+  calculateRecipeTotalCost,
+  readProductRecipeLines,
+  storeIngredientsById,
+  withProductCosting,
+} from '../../lib/catalogCosting';
+import { syncInventoryCatalogFromSources } from '../../lib/inventorySync';
+import { syncRecipesFromCostingCatalog } from '../../lib/recipeSyncFromCosting';
 import { COMBO_SLOT_META, DEFAULT_COMBO_STRUCTURE, comboStructureFromCustomFields, isComboStructureConfirmed, resolveComboRefSlotKind, type ComboStructureSlot } from '../../lib/catalogComboSlots';
 import { buildCatalogSalesIndex, computeCatalogItemSalesStats } from '../../lib/catalogItemSalesStats';
 import {
@@ -195,7 +209,7 @@ const ALLERGEN_OPTIONS = [
   'Lácteos', 'Frutos de cáscara', 'Apio', 'Mostaza', 'Sésamo', 'Sulfitos', 'Moluscos', 'Altramuces',
 ];
 
-const CREATE_STEP_LABELS = ['Marca y producto', 'Precios e inventario', 'Publicación'];
+const CREATE_STEP_LABELS = ['Marca y producto', 'Precio, escandallo y stock', 'Publicación'];
 
 function CatalogEmptyActions({
   onManualAdd,
@@ -318,6 +332,7 @@ function CreateCatalogItemModal({
   const [comboItems, setComboItems] = useState<CatalogComboRef[]>([]);
   const [comboStructure, setComboStructure] = useState<ComboStructureSlot[]>(DEFAULT_COMBO_STRUCTURE);
   const [comboStructureConfirmed, setComboStructureConfirmed] = useState(false);
+  const [recipePicks, setRecipePicks] = useState<CatalogRecipePick[]>([]);
   const [form, setForm] = useState({
     itemType: 'product' as CatalogItem['itemType'],
     name: '',
@@ -360,6 +375,28 @@ function CreateCatalogItemModal({
       const items = Array.isArray(editItem.comboItems) ? editItem.comboItems.length : 0;
       setComboStructure(comboStructureFromCustomFields(editItem.customFields, items));
       setComboStructureConfirmed(isComboStructureConfirmed(editItem.customFields, items));
+      const existingRecipe = readProductRecipeLines(editItem);
+      const removableNames = new Set(
+        parseIngredientsBulkText(
+          typeof editItem.customFields?.ingredients === 'string'
+            ? editItem.customFields.ingredients
+            : '',
+        ).map((n) => n.toLowerCase()),
+      );
+      setRecipePicks(
+        existingRecipe
+          .filter((line) => line.storeIngredientId)
+          .map((line) => ({
+            storeIngredientId: String(line.storeIngredientId),
+            name: line.name,
+            quantity: line.quantity,
+            unit: line.unit || 'ud',
+            tpvRemovable:
+              removableNames.size === 0
+                ? true
+                : removableNames.has(line.name.toLowerCase()),
+          })),
+      );
       setForm({
         itemType: editItem.itemType || 'product',
         name: editItem.name,
@@ -404,6 +441,7 @@ function CreateCatalogItemModal({
     setComboItems([]);
     setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
     setComboStructureConfirmed(true);
+    setRecipePicks([]);
     const defaultId = defaultBrandIdForCatalog(brands);
     setForm({
       itemType: 'product', name: '', description: '', category: '', unit: 'ud',
@@ -476,6 +514,25 @@ function CreateCatalogItemModal({
     Object.keys(modalBrandIngredientSelection).length > 0
       ? modalBrandIngredientSelection
       : brandIngredientSelection;
+
+  useEffect(() => {
+    if (recipePicks.length === 0) return;
+    const byId = storeIngredientsById(effectiveStoreIngredients);
+    const cost = calculateRecipeTotalCost(recipePicksToLines(recipePicks), byId, brands);
+    const tpvText = recipePicksToTpvIngredientsText(recipePicks);
+    setForm((f) => {
+      const prev = Number(f.costPrice) || 0;
+      const nextCost = cost > 0 ? cost.toFixed(2) : f.costPrice;
+      const costChanged = Math.abs(prev - cost) >= 0.005 && cost > 0;
+      const ingredientsChanged = f.ingredients !== tpvText;
+      if (!costChanged && !ingredientsChanged) return f;
+      return {
+        ...f,
+        ...(costChanged ? { costPrice: nextCost } : {}),
+        ...(ingredientsChanged ? { ingredients: tpvText } : {}),
+      };
+    });
+  }, [recipePicks, effectiveStoreIngredients, brands]);
 
   const categorySuggestions = useMemo(
     () => catalogCategorySuggestions(brands, form.selectedBrandIds, catalogCategoriesInUse),
@@ -566,8 +623,6 @@ function CreateCatalogItemModal({
   };
 
   useModalClose(isOpen, onClose);
-
-  if (!isOpen) return null;
 
   const totalSteps = 3;
   const isEditMode = Boolean(editItem);
@@ -662,7 +717,10 @@ function CreateCatalogItemModal({
         ...(editItem?.customFields || {}),
         ...(customizable && !form.buildYourOwn
           ? {
-              ingredients: normalizedIngredients,
+              ingredients:
+                recipePicks.length > 0
+                  ? recipePicksToTpvIngredientsText(recipePicks)
+                  : normalizedIngredients,
               supplements: normalizeCatalogSupplementsForSave(form.supplements),
             }
           : {}),
@@ -706,7 +764,8 @@ function CreateCatalogItemModal({
       if (customFields.buildYourOwnAllowedIngredientIds === undefined) {
         delete customFields.buildYourOwnAllowedIngredientIds;
       }
-      await onCreate({
+
+      let payload: Partial<CatalogItem> = {
         ...editItem,
         name: form.name,
         description: form.description,
@@ -727,7 +786,19 @@ function CreateCatalogItemModal({
         active: editItem?.active ?? true,
         webVisible: form.webVisible,
         available: form.available,
-      }, keepOpen && !isEditMode ? { keepOpen: true } : undefined);
+      };
+
+      if (recipePicks.length > 0 && form.itemType !== 'service') {
+        const byId = storeIngredientsById(effectiveStoreIngredients);
+        payload = withProductCosting(
+          payload as CatalogItem,
+          { costingType: 'recipe', recipeLines: recipePicksToLines(recipePicks) },
+          byId,
+          brands,
+        );
+      }
+
+      await onCreate(payload, keepOpen ? { keepOpen: true } : undefined);
 
       if (keepOpen && !isEditMode) {
         const savedName = form.name.trim();
@@ -736,6 +807,7 @@ function CreateCatalogItemModal({
         setComboItems([]);
         setComboStructure(DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s })));
         setComboStructureConfirmed(true);
+        setRecipePicks([]);
         setForm((f) => ({
           ...f,
           name: '',
@@ -1317,98 +1389,93 @@ function CreateCatalogItemModal({
   };
 
   const renderCustomizationSection = () => {
-    if (!showCustomization) return null;
+    if (form.itemType === 'service' || form.buildYourOwn) return null;
     return (
       <section className="space-y-4 border-t border-gray-200 dark:border-gray-700 pt-6">
-        <div>
-          <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-            Ingredientes TPV (quitar en venta)
-          </h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Lo que el cliente puede quitar sin coste. Extras de pago (+) → pestaña Ingredientes TPV del catálogo.
-          </p>
-        </div>
-        <div>
-          <label className={labelClass}>Ingredientes incluidos</label>
-          <textarea
-            rows={3}
-            className={`${inputClass} resize-none`}
-            placeholder="Tomate, Mozzarella, Albahaca (separados por comas)"
-            value={form.ingredients}
-            onChange={(e) => setForm((f) => ({ ...f, ingredients: e.target.value }))}
-          />
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className={labelClass}>Suplementos de pago (solo web)</label>
-            <button
-              type="button"
-              onClick={() =>
-                setForm((f) => ({
-                  ...f,
-                  supplements: [
-                    ...f.supplements,
-                    { id: `sup-${Date.now()}`, name: '', price: '' },
-                  ],
-                }))
-              }
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900"
-            >
-              <Plus className="w-3 h-3" />
-              Añadir
-            </button>
-          </div>
-          {form.supplements.length === 0 ? (
-            <p className="text-xs text-gray-400">Sin suplementos. Ej: Extra queso 1,50€</p>
-          ) : (
-            <div className="space-y-2">
-              {form.supplements.map((row, idx) => (
-                <div key={row.id || idx} className="flex gap-2 items-center">
-                  <input
-                    className={`${inputClass} flex-1`}
-                    placeholder="Nombre suplemento"
-                    value={row.name}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        supplements: f.supplements.map((s, i) =>
-                          i === idx ? { ...s, name: e.target.value } : s,
-                        ),
-                      }))
-                    }
-                  />
-                  <input
-                    type="number"
-                    step="0.01"
-                    className={`${inputClass} w-24`}
-                    placeholder="€"
-                    value={row.price}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        supplements: f.supplements.map((s, i) =>
-                          i === idx ? { ...s, price: e.target.value } : s,
-                        ),
-                      }))
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm((f) => ({
-                        ...f,
-                        supplements: f.supplements.filter((_, i) => i !== idx),
-                      }))
-                    }
-                    className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+        <CatalogProductRecipePicker
+          picks={recipePicks}
+          onChange={setRecipePicks}
+          storeIngredients={effectiveStoreIngredients}
+          brands={brands}
+          brandIds={form.selectedBrandIds}
+          salePrice={Number(form.unitPrice) || 0}
+          compact
+        />
+        {showCustomization ? (
+          <div className="space-y-3 pt-2">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className={labelClass}>Suplementos de pago (solo web)</label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      supplements: [
+                        ...f.supplements,
+                        { id: `sup-${Date.now()}`, name: '', price: '' },
+                      ],
+                    }))
+                  }
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900"
+                >
+                  <Plus className="w-3 h-3" />
+                  Añadir
+                </button>
+              </div>
+              {form.supplements.length === 0 ? (
+                <p className="text-xs text-gray-400">Sin suplementos. Ej: Extra queso 1,50€</p>
+              ) : (
+                <div className="space-y-2">
+                  {form.supplements.map((row, idx) => (
+                    <div key={row.id || idx} className="flex gap-2 items-center">
+                      <input
+                        className={`${inputClass} flex-1`}
+                        placeholder="Nombre suplemento"
+                        value={row.name}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            supplements: f.supplements.map((s, i) =>
+                              i === idx ? { ...s, name: e.target.value } : s,
+                            ),
+                          }))
+                        }
+                      />
+                      <input
+                        type="number"
+                        step="0.01"
+                        className={`${inputClass} w-24`}
+                        placeholder="€"
+                        value={row.price}
+                        onChange={(e) =>
+                          setForm((f) => ({
+                            ...f,
+                            supplements: f.supplements.map((s, i) =>
+                              i === idx ? { ...s, price: e.target.value } : s,
+                            ),
+                          }))
+                        }
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((f) => ({
+                            ...f,
+                            supplements: f.supplements.filter((_, i) => i !== idx),
+                          }))
+                        }
+                        className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        ) : null}
       </section>
     );
   };
@@ -1423,6 +1490,8 @@ function CreateCatalogItemModal({
       }),
     [form.name, form.category, form.itemType, form.image, editItem],
   );
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={onClose}>
@@ -1688,7 +1757,9 @@ function CreateCatalogItemModal({
             <div className="space-y-5">
               <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border-2 border-green-200 dark:border-green-800 rounded-xl">
                 <DollarSign className="w-6 h-6 text-green-600 shrink-0" />
-                <p className="text-sm text-green-800 dark:text-green-300">Precio de venta y coste para calcular el margen del artículo.</p>
+                <p className="text-sm text-green-800 dark:text-green-300">
+                  Precio de venta y escandallo: el coste se calcula solo al elegir ingredientes con + / −.
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1700,8 +1771,18 @@ function CreateCatalogItemModal({
                   <input type="number" step="0.01" className={inputClass} placeholder="Opcional" value={form.staffPrice} onChange={(e) => setForm((f) => ({ ...f, staffPrice: e.target.value }))} />
                 </div>
                 <div>
-                  <label className={labelClass}>Precio coste (€)</label>
-                  <input type="number" step="0.01" className={inputClass} placeholder="0.00" value={form.costPrice} onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))} />
+                  <label className={labelClass}>
+                    Precio coste (€){recipePicks.length > 0 ? ' · auto escandallo' : ''}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className={inputClass}
+                    placeholder="0.00"
+                    value={form.costPrice}
+                    readOnly={recipePicks.length > 0}
+                    onChange={(e) => setForm((f) => ({ ...f, costPrice: e.target.value }))}
+                  />
                 </div>
               </div>
               {(Number(form.unitPrice) > 0 || Number(form.costPrice) > 0) && (
@@ -3303,6 +3384,30 @@ export function CatalogPage() {
       if (businessId && savedItem && normalizeCatalogIngredientsForSave(savedItem.customFields?.ingredients)) {
         await syncStoreIngredientsFromCatalogImport(dataUserId, businessId, [savedItem]).catch(() => null);
       }
+      // Escandallo → inventario de ingredientes + receta (para descontar stock al vender).
+      if (
+        savedItem &&
+        savedItem.customFields?.costingType === 'recipe' &&
+        Array.isArray(savedItem.customFields?.costingRecipe) &&
+        (savedItem.customFields.costingRecipe as unknown[]).length > 0
+      ) {
+        try {
+          const bizType = currentBusiness?.businessType || 'delivery';
+          await syncInventoryCatalogFromSources(dataUserId, {
+            businessType: String(bizType),
+            businessId: businessId || undefined,
+            storeIngredients,
+            catalogItems: [savedItem, ...allCatalogItems],
+            brands,
+          });
+          const refreshed = await listCatalogItemsRequest(dataUserId).catch(() => allCatalogItems);
+          const inventory = filterStockInventoryItems(refreshed);
+          await syncRecipesFromCostingCatalog(dataUserId, [savedItem], inventory);
+          setAllCatalogItems(refreshed);
+        } catch {
+          /* el producto ya está guardado; el stock/receta se puede regenerar en Escandallo */
+        }
+      }
       notifyDeliveryCatalogChanged(dataUserId, businessId);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar el artículo');
@@ -3460,7 +3565,11 @@ export function CatalogPage() {
     }
   };
 
-  const handleSaveDetailTpvConfig = async (payload: {
+  const handleSaveDetailItem = async (payload: {
+    name: string;
+    unitPrice: number;
+    costPrice: number;
+    active: boolean;
     ingredients: string;
     comboItems: CatalogComboRef[];
     comboStructure?: ComboStructureSlot[];
@@ -3475,6 +3584,10 @@ export function CatalogPage() {
     }
     const updated = await updateCatalogItemRequest(dataUserId, {
       ...detailItem,
+      name: payload.name,
+      unitPrice: payload.unitPrice,
+      costPrice: payload.costPrice,
+      active: payload.active,
       itemType:
         detailItem.itemType === 'combo' || /combo/i.test(category)
           ? detailItem.itemType || 'combo'
@@ -3497,6 +3610,9 @@ export function CatalogPage() {
     }
     notifyDeliveryCatalogChanged(dataUserId, businessId);
   };
+
+  /** Alias por si queda alguna referencia antigua al guardado TPV de la ficha. */
+  const handleSaveDetailTpvConfig = handleSaveDetailItem;
 
   const handleStockAdjust = async (item: CatalogItem, newQuantity: number) => {
     if (!dataUserId) return;
@@ -4778,11 +4894,7 @@ export function CatalogPage() {
           stats={catalogSalesIndex.get(detailItem._id) || computeCatalogItemSalesStats(detailItem, deliveryOrders)}
           statsLoading={ordersLoading}
           onClose={() => setDetailItem(null)}
-          onEdit={() => {
-            setEditingItem(detailItem);
-            setShowCreateItem(true);
-          }}
-          onSaveTpvConfig={handleSaveDetailTpvConfig}
+          onSave={handleSaveDetailItem}
         />
       )}
 

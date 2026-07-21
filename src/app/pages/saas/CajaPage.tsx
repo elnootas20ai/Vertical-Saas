@@ -714,7 +714,11 @@ function ValidationModal({ session, shiftOrders, onValidate, onReject, onCancel 
   );
   const aggregatorRows = useMemo(() => {
     if (session.aggregatorClosingTotals && Object.keys(session.aggregatorClosingTotals).length > 0) {
-      return aggregatorRowsFromClosingTotals(closingPlatforms, session.aggregatorClosingTotals);
+      return aggregatorRowsFromClosingTotals(
+        closingPlatforms,
+        session.aggregatorClosingTotals,
+        session.aggregatorClosingCash,
+      );
     }
     return autoAggregatorRows;
   }, [session, closingPlatforms, autoAggregatorRows]);

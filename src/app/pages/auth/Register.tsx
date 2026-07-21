@@ -10,7 +10,7 @@ import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
-import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable, isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
+import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable, shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appStoreCompliance';
 import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
 import { signInWithApple } from '../../lib/appleSignIn';
 import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
@@ -279,10 +279,10 @@ export function Register() {
     setFormData((prev) => ({ ...prev, firstName: '', lastName: '', email: '' }));
   };
 
-  if (isIosCustomerAccessOnlyApp() && !isUserAccount) {
+  if (shouldHideBusinessOrganizationRegistrationOnIos() && !isUserAccount) {
     return (
       <IosCustomerAccessOnlyScreen
-        title="Alta de empresa solo en la web"
+        title="Alta de empresa no disponible en iOS"
         onLogout={() => navigate('/auth/login')}
       />
     );

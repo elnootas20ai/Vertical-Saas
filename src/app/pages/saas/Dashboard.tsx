@@ -57,6 +57,8 @@ import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
 import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
 import { Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 // ─── Widget personalización ────────────────────────────────────────────────────
 
@@ -1261,12 +1263,16 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 </p>
               </div>
             </div>
-            <Link
-              to="/saas/billing"
+            <VertialBillingUpgradeLink
               className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-bold shrink-0"
+              fallback={
+                <span className="text-[11px] text-gray-500 dark:text-gray-400 shrink-0">
+                  En iOS no se cambian planes
+                </span>
+              }
             >
               Ver planes
-            </Link>
+            </VertialBillingUpgradeLink>
           </div>
         )}
 
@@ -1335,7 +1341,15 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                       ? { value: `${ebitdaMonth.margin.toFixed(1)}%`, up: ebitdaMonth.value > 0 ? true : ebitdaMonth.value < 0 ? false : null }
                       : (salesMonth > 0 ? { value: `${quickFinance?.marginPct ?? 0}%`, up: estimatedProfit > 0 ? true : estimatedProfit < 0 ? false : null } : undefined)
                   }
-                  onClick={() => navigate(canViewEbitda ? '/saas/ebitda' : '/saas/billing')}
+                  onClick={() => {
+                    if (canViewEbitda) {
+                      navigate('/saas/ebitda');
+                      return;
+                    }
+                    if (!isIosCustomerAccessOnlyApp()) {
+                      navigate('/saas/billing');
+                    }
+                  }}
                   loading={serverLoading}
                 />
                 <KPICard

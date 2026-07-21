@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   DELIVERY_ACTIVE_STORE_CHANGED,
   coerceSelectedPdvId,
@@ -128,6 +129,10 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
   const pointOfSaleAccess = usePointOfSaleAccess(pdvs.length);
 
   const goToPdvBilling = () => {
+    if (isIosCustomerAccessOnlyApp()) {
+      toast.info('En iOS no se amplía el plan de PDV.');
+      return;
+    }
     const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
     if (resolvedUserId) {
       writeBillingSelection(resolvedUserId, {

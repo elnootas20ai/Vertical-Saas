@@ -8,6 +8,7 @@ import { useModalClose } from '../../hooks/useModalClose';
 import { InviteUserModal, type InviteUserPayload } from '../saas/InviteUserModal';
 import { getInvitePermissionsForUser } from '../../lib/roleCatalog';
 import type { RoleDefinition } from '../../lib/authApi';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 interface Props {
   isOpen: boolean;
@@ -101,8 +102,13 @@ export function SAAS__ProfileModal({ isOpen, onClose }: Props) {
     {
       icon: CreditCard,
       label: 'Facturación y suscripción',
-      description: 'Plan actual y métodos de pago',
-      action: () => handleNavigation('/saas/billing'),
+      description: isIosCustomerAccessOnlyApp()
+        ? 'Consulta de plan (sin cobro en iOS)'
+        : 'Plan actual y métodos de pago',
+      action: () =>
+        handleNavigation(
+          isIosCustomerAccessOnlyApp() ? '/saas/settings' : '/saas/billing',
+        ),
       color: 'text-green-600',
       bgColor: 'bg-green-100',
     },

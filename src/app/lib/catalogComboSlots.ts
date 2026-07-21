@@ -519,6 +519,8 @@ const SLOT_CATALOG_CATEGORIES: Record<Exclude<ComboSlotKind, 'other'>, Set<strin
     'burger',
     'hamburguesas',
     'hamburguesa',
+    'top burgers',
+    'top burger',
     'rolls',
     'bowls',
     'principales',
@@ -699,8 +701,26 @@ export type ComboMainFamily = 'pizza' | 'burger';
 /** Pizza vs burger según categoría de catálogo (TPV menú). */
 export function mainFamilyForCatalogCategory(category: string): ComboMainFamily {
   const key = foldCategory(normalizeImportCategory(category));
-  if (/burger|hamburg|top burger/.test(key)) return 'burger';
+  if (/burger|hamburg|smash|black\s*burger/.test(key)) return 'burger';
   return 'pizza';
+}
+
+/** Familia pizza/burger: categoría primero; si es ambigua, mira el nombre del producto. */
+export function mainFamilyForProduct(
+  category: string,
+  productName = '',
+): ComboMainFamily {
+  const fromCat = mainFamilyForCatalogCategory(category);
+  if (fromCat === 'burger') return 'burger';
+  const name = foldCategory(productName);
+  if (/burger|hamburg|smash/.test(name)) return 'burger';
+  if (/pizza|calzone/.test(name)) return 'pizza';
+  // Categorías genéricas (Principales, Carta…): solo burger si el nombre lo dice.
+  const key = foldCategory(normalizeImportCategory(category));
+  if (/principal|carta|platos?|especialidad/.test(key) && !/pizza/.test(key)) {
+    if (/burger|hamburg|smash/.test(name)) return 'burger';
+  }
+  return fromCat;
 }
 
 export function comboMenuSectionKey(section: ComboMenuCatalogSection): string {
@@ -729,7 +749,7 @@ export function inferMainFamilyFromComboSelections(
   if (mains.length === 0) return null;
   const product = catalog.find((c) => c._id === mains[0].productId);
   if (!product) return null;
-  return mainFamilyForCatalogCategory(product.category || '');
+  return mainFamilyForProduct(product.category || '', product.name || mains[0].productName);
 }
 
 export function comboMenuHasMainFamilyChoice(sections: ComboMenuCatalogSection[]): boolean {

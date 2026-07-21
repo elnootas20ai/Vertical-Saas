@@ -41,6 +41,7 @@ import {
 } from '../../lib/reportPlanCatalog';
 import { Lock, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -1823,12 +1824,16 @@ export function Reports() {
                 </p>
               </div>
             </div>
-            <Link
-              to="/saas/billing"
+            <VertialBillingUpgradeLink
               className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-colors shrink-0"
+              fallback={
+                <span className="text-[11px] text-indigo-700/80 dark:text-indigo-300 shrink-0">
+                  En iOS no se cambian planes
+                </span>
+              }
             >
               Ver planes
-            </Link>
+            </VertialBillingUpgradeLink>
           </div>
         )}
 

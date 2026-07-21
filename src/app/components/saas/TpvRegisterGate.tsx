@@ -10,6 +10,7 @@ import { useApp } from '../../context/AppContext';
 import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { writeBillingSelection } from '../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
@@ -36,6 +37,8 @@ import {
   mergeTpvRegisterSessionsPreservingOpen,
   registerSessionSpansMultipleDays,
   resolveActiveTpvRegisterSession,
+  findLastClosedTpvSession,
+  resolvePreviousCloseCashAmount,
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
 } from '../../lib/tpvCajaScope';
@@ -45,8 +48,13 @@ import {
   applyManualAggregatorTotals,
   getClosingAggregatorPlatforms,
   aggregatorRowsFromClosingTotals,
+  sumAggregatorRows,
+  sumAggregatorCash,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
+import {
+  buildShiftFoodFamilyReportForSession,
+} from '../../lib/shiftFoodFamilyCounts';
 import { AggregatorClosingEditor } from './AggregatorClosingEditor';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
@@ -176,25 +184,6 @@ function buildDenominationFromAmount(amount: number): CashDenominationCount {
     }
   }
   return counts;
-}
-
-function findLastClosedTpvSession(
-  sessions: TpvRegisterSession[],
-  pdvId: string,
-  terminalId: string,
-): TpvRegisterSession | null {
-  const pid = String(pdvId || '').trim();
-  const tid = String(terminalId || '').trim();
-  if (!pid) return null;
-  const matches = sessions
-    .filter((s) => s.status === 'closed' && String(s.pointOfSaleId || '').trim() === pid)
-    .filter((s) => !tid || String(s.terminalId || '').trim() === tid)
-    .sort(
-      (a, b) =>
-        new Date(b.closedAt || b.updatedAt || 0).getTime()
-        - new Date(a.closedAt || a.updatedAt || 0).getTime(),
-    );
-  return matches[0] || null;
 }
 
 function shouldKeepTpvSessionInList(
@@ -421,17 +410,19 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   const previousCloseCash = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
-    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId);
+    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
+    const fromFinal = resolvePreviousCloseCashAmount(last);
+    if (fromFinal != null) return fromFinal;
     if (!last) return null;
-    const amount = Number(last.finalCashAmount ?? calcDenominationTotal(last.closingCashCount || {}));
+    const amount = calcDenominationTotal(last.closingCashCount || {});
     if (!Number.isFinite(amount) || amount < 0) return null;
     return amount;
-  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode]);
+  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
 
   const previousCloseLabel = useMemo(() => {
     const pdvId = selectedPdv?._id || restrictedToPdvId || '';
     const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
-    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId);
+    const last = findLastClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
     if (!last?.closedAt) return '';
     try {
       return new Date(last.closedAt).toLocaleDateString('es-ES', {
@@ -442,7 +433,19 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
     } catch {
       return '';
     }
-  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode]);
+  }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
+
+  const didPrefillFromPreviousCloseRef = useRef(false);
+  useEffect(() => {
+    didPrefillFromPreviousCloseRef.current = false;
+  }, [selectedPdvId, selectedTerminalId, previousCloseCash]);
+
+  useEffect(() => {
+    if (previousCloseCash == null) return;
+    if (didPrefillFromPreviousCloseRef.current) return;
+    didPrefillFromPreviousCloseRef.current = true;
+    setCounts(buildDenominationFromAmount(previousCloseCash));
+  }, [previousCloseCash]);
 
   const effectiveTerminalName = selectedTerminal
     ? (selectedTerminal.code || selectedTerminal.name)
@@ -654,6 +657,10 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   };
 
   const goToPdvBilling = () => {
+    if (isIosCustomerAccessOnlyApp()) {
+      toast.info('En iOS no se amplía el plan. Contacta con soporte si necesitas más PDV.');
+      return;
+    }
     const resolvedUserId = user?.id || (user as { user_id?: string } | null)?.user_id || '';
     if (resolvedUserId) {
       writeBillingSelection(resolvedUserId, {
@@ -1314,7 +1321,12 @@ function TpvGatePortal({ children }: { children: ReactNode }) {
 function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [], busy = false }: {
   session: TpvRegisterSession;
   dataUserId: string;
-  onClose: (counts: CashDenominationCount, notes: string, aggregatorRows: AggregatorCashRow[]) => void;
+  onClose: (
+    counts: CashDenominationCount,
+    notes: string,
+    aggregatorRows: AggregatorCashRow[],
+    productClosingCounts: NonNullable<TpvRegisterSession['productClosingCounts']>,
+  ) => void;
   onCancel: () => void;
   restaurantWarnings?: string[];
   busy?: boolean;
@@ -1324,10 +1336,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [shiftOrders, setShiftOrders] = useState<DeliveryOrder[]>([]);
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
   const [manualAggregatorTotals, setManualAggregatorTotals] = useState<Record<string, string>>({});
+  const [manualAggregatorCash, setManualAggregatorCash] = useState<Record<string, string>>({});
   const [manualInitialized, setManualInitialized] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
-  const expected = calcTpvExpectedCash(session);
-  const diff = countedTotal - expected;
+  const expectedTpv = calcTpvExpectedCash(session);
   const summary = buildTpvRegisterSummary(session);
   const cashStaffConsumption = sumCashStaffConsumption(session);
   const cashReturnsTotal = sumCashReturns(session);
@@ -1337,22 +1349,44 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     [closingPlatforms, session, shiftOrders],
   );
   const finalAggregatorRows = useMemo(
-    () => applyManualAggregatorTotals(aggregatorRows, manualAggregatorTotals),
-    [aggregatorRows, manualAggregatorTotals],
+    () => applyManualAggregatorTotals(aggregatorRows, manualAggregatorTotals, manualAggregatorCash),
+    [aggregatorRows, manualAggregatorTotals, manualAggregatorCash],
   );
+  const foodReport = useMemo(
+    () => buildShiftFoodFamilyReportForSession(session, shiftOrders),
+    [session, shiftOrders],
+  );
+  const aggregatorEuroTotal = useMemo(
+    () => sumAggregatorRows(finalAggregatorRows).totalSales,
+    [finalAggregatorRows],
+  );
+  const aggregatorCashTotal = useMemo(
+    () => sumAggregatorCash(finalAggregatorRows),
+    [finalAggregatorRows],
+  );
+  const expected = Math.round((expectedTpv + aggregatorCashTotal) * 100) / 100;
+  const diff = countedTotal - expected;
+  const grandEuroTotal = Math.round((expectedTpv + aggregatorEuroTotal) * 100) / 100;
 
   useEffect(() => {
     if (manualInitialized || aggregatorRows.length === 0) return;
-    const initial: Record<string, string> = {};
+    const initialTotals: Record<string, string> = {};
+    const initialCash: Record<string, string> = {};
     for (const row of aggregatorRows) {
-      initial[row.platform.channel] = row.totalSales > 0 ? row.totalSales.toFixed(2) : '';
+      initialTotals[row.platform.channel] = row.totalSales > 0 ? row.totalSales.toFixed(2) : '';
+      initialCash[row.platform.channel] = '';
     }
-    setManualAggregatorTotals(initial);
+    setManualAggregatorTotals(initialTotals);
+    setManualAggregatorCash(initialCash);
     setManualInitialized(true);
   }, [aggregatorRows, manualInitialized]);
 
   const handleManualAggregatorChange = useCallback((channel: string, value: string) => {
     setManualAggregatorTotals((prev) => ({ ...prev, [channel]: value }));
+  }, []);
+
+  const handleManualAggregatorCashChange = useCallback((channel: string, value: string) => {
+    setManualAggregatorCash((prev) => ({ ...prev, [channel]: value }));
   }, []);
 
   useEffect(() => {
@@ -1432,44 +1466,150 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             registerSummary={summary}
           />
 
-          {/* Cash flow summary */}
-          <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-gray-500">Fondo de apertura</span><span className="font-semibold text-gray-900 dark:text-gray-100">{session.initialCashAmount.toFixed(2)}€</span></div>
-            <div className="flex justify-between"><span className="text-green-600">+ Cobros en efectivo</span><span className="font-semibold text-green-700">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
-            {cashStaffConsumption > 0 && (
-              <div className="flex justify-between"><span className="text-green-600">+ Consumo equipo (efectivo)</span><span className="font-semibold text-green-700">{cashStaffConsumption.toFixed(2)}€</span></div>
-            )}
-            <div className="flex justify-between"><span className="text-blue-600">+ Entradas de efectivo</span><span className="font-semibold text-blue-700">{summary.totalCashIn.toFixed(2)}€</span></div>
-            <div className="flex justify-between"><span className="text-red-600">− Devoluciones efectivo</span><span className="font-semibold text-red-700">{cashReturnsTotal.toFixed(2)}€</span></div>
-            <div className="flex justify-between"><span className="text-orange-600">− Salidas de efectivo</span><span className="font-semibold text-orange-700">{summary.totalCashOut.toFixed(2)}€</span></div>
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
-              <span className="text-gray-900 dark:text-gray-100">= Efectivo esperado</span>
-              <span className="text-emerald-700 dark:text-emerald-400 text-base">{expected.toFixed(2)}€</span>
+          {/* Caja + integradores juntos: conteos y totales que suman */}
+          <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cierre: caja + integradores</h3>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                Efectivo del TPV e importes de Glovo / Uber / Just Eat / Flipdish. Al rellenar, el total general suma todo.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 tabular-nums">
+                  Pizzas {foodReport.total.pizza}
+                </span>
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-orange-100 text-orange-900 dark:bg-orange-950/50 dark:text-orange-200 tabular-nums">
+                  Burgers {foodReport.total.burger}
+                </span>
+                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-lime-100 text-lime-900 dark:bg-lime-950/50 dark:text-lime-200 tabular-nums">
+                  Tacos {foodReport.total.taco}
+                </span>
+              </div>
             </div>
-          </div>
 
-          {/* Cash count */}
-          <div>
-            <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Conteo de efectivo de cierre</h4>
-            <CashCountGrid counts={counts} onChange={setCounts} />
-          </div>
-
-          {/* Difference */}
-          {countedTotal > 0 && (
-            <div className={`p-4 rounded-xl border-2 ${diff === 0 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : diff > 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-bold text-gray-900 dark:text-gray-100">Diferencia</div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{countedTotal.toFixed(2)}€ contado − {expected.toFixed(2)}€ esperado</div>
+            <div className="p-4 space-y-4">
+              {/* Cash flow summary */}
+              <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">Fondo de apertura</span><span className="font-semibold text-gray-900 dark:text-gray-100">{session.initialCashAmount.toFixed(2)}€</span></div>
+                <div className="flex justify-between"><span className="text-green-600">+ Cobros en efectivo</span><span className="font-semibold text-green-700">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
+                {cashStaffConsumption > 0 && (
+                  <div className="flex justify-between"><span className="text-green-600">+ Consumo equipo (efectivo)</span><span className="font-semibold text-green-700">{cashStaffConsumption.toFixed(2)}€</span></div>
+                )}
+                <div className="flex justify-between"><span className="text-blue-600">+ Entradas de efectivo</span><span className="font-semibold text-blue-700">{summary.totalCashIn.toFixed(2)}€</span></div>
+                <div className="flex justify-between"><span className="text-red-600">− Devoluciones efectivo</span><span className="font-semibold text-red-700">{cashReturnsTotal.toFixed(2)}€</span></div>
+                <div className="flex justify-between"><span className="text-orange-600">− Salidas de efectivo</span><span className="font-semibold text-orange-700">{summary.totalCashOut.toFixed(2)}€</span></div>
+                {(() => {
+                  const cashOuts = (session.transactions || [])
+                    .filter((t) => t.type === 'cash_out' || t.type === 'expense')
+                    .slice()
+                    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                  if (cashOuts.length === 0) return null;
+                  return (
+                    <div className="mt-2 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50/80 dark:bg-orange-950/30 p-2.5 space-y-1.5">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:text-orange-300">
+                        Detalle salidas (motivo)
+                      </p>
+                      {cashOuts.map((tx) => (
+                        <div key={tx.id} className="flex items-start justify-between gap-2 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 dark:text-gray-100 break-words">
+                              {tx.description?.trim() || 'Sin motivo indicado'}
+                            </p>
+                            <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                              {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                              {tx.registeredBy ? ` · ${tx.registeredBy}` : ''}
+                            </p>
+                          </div>
+                          <span className="font-bold tabular-nums text-orange-700 dark:text-orange-300 shrink-0">
+                            −{Number(tx.amount || 0).toFixed(2)}€
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
+                  <span className="text-gray-900 dark:text-gray-100">= Efectivo TPV</span>
+                  <span className="text-emerald-700 dark:text-emerald-400 text-base">{expectedTpv.toFixed(2)}€</span>
                 </div>
-                <div className={`text-2xl font-bold ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                  {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+                {aggregatorCashTotal > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-purple-600 dark:text-purple-300">+ Efectivo integradores</span>
+                    <span className="font-semibold text-purple-700 dark:text-purple-300">{aggregatorCashTotal.toFixed(2)}€</span>
+                  </div>
+                )}
+                <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
+                  <span className="text-gray-900 dark:text-gray-100">= Efectivo esperado (arqueo)</span>
+                  <span className="text-emerald-700 dark:text-emerald-400 text-base">{expected.toFixed(2)}€</span>
                 </div>
               </div>
-              {diff === 0 && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> La caja cuadra perfectamente</p>}
-              {diff !== 0 && <p className="text-xs mt-1 flex items-center gap-1 {diff > 0 ? 'text-blue-600' : 'text-red-600'}"><AlertTriangle className="w-3 h-3" /> {diff > 0 ? 'Hay un sobrante de efectivo' : 'Falta efectivo en la caja'}</p>}
+
+              {/* Cash count */}
+              <div>
+                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Conteo de efectivo de cierre</h4>
+                <CashCountGrid counts={counts} onChange={setCounts} />
+              </div>
+
+              {/* Difference */}
+              {countedTotal > 0 && (
+                <div className={`p-4 rounded-xl border-2 ${diff === 0 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : diff > 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-gray-900 dark:text-gray-100">Diferencia efectivo</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{countedTotal.toFixed(2)}€ contado − {expected.toFixed(2)}€ esperado</div>
+                    </div>
+                    <div className={`text-2xl font-bold ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                      {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+                    </div>
+                  </div>
+                  {diff === 0 && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> La caja cuadra perfectamente</p>}
+                  {diff !== 0 && <p className="text-xs mt-1 flex items-center gap-1 {diff > 0 ? 'text-blue-600' : 'text-red-600'}"><AlertTriangle className="w-3 h-3" /> {diff > 0 ? 'Hay un sobrante de efectivo' : 'Falta efectivo en la caja'}</p>}
+                </div>
+              )}
+
+              <AggregatorClosingEditor
+                autoRows={aggregatorRows}
+                manualByChannel={manualAggregatorTotals}
+                manualCashByChannel={manualAggregatorCash}
+                onManualChange={handleManualAggregatorChange}
+                onManualCashChange={handleManualAggregatorCashChange}
+                title="4 integradores (turno)"
+                foodReport={foodReport}
+              />
+
+              <div className="rounded-xl border-2 border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 p-4 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                  Total general del cierre
+                </p>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-300">Efectivo TPV</span>
+                  <span className="font-semibold tabular-nums">{expectedTpv.toFixed(2)}€</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-300">Efectivo integradores (entra en caja)</span>
+                  <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{aggregatorCashTotal.toFixed(2)}€</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-300">Total 4 integradores</span>
+                  <span className="font-semibold tabular-nums text-purple-700 dark:text-purple-300">{aggregatorEuroTotal.toFixed(2)}€</span>
+                </div>
+                <div className="border-t border-emerald-200 dark:border-emerald-800 pt-2 flex justify-between font-bold text-base">
+                  <span className="text-gray-900 dark:text-gray-100">Arqueo esperado (TPV + efectivo integradores)</span>
+                  <span className="text-emerald-700 dark:text-emerald-400 tabular-nums">{expected.toFixed(2)}€</span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold">
+                  <span className="text-gray-700 dark:text-gray-200">Total negocio (TPV + tot. integradores)</span>
+                  <span className="tabular-nums">{grandEuroTotal.toFixed(2)}€</span>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
+                  <span>🍕 {foodReport.total.pizza} pizzas</span>
+                  <span>·</span>
+                  <span>🍔 {foodReport.total.burger} burgers</span>
+                  <span>·</span>
+                  <span>🌮 {foodReport.total.taco} tacos</span>
+                </div>
+              </div>
             </div>
-          )}
+          </div>
 
           {session.cashCounts.length > 0 && (
             <div>
@@ -1512,13 +1652,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             <textarea rows={2} className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm resize-none"
               placeholder="Observaciones del cierre..." value={notes} onChange={e => setNotes(e.target.value)} />
           </div>
-
-          <AggregatorClosingEditor
-            autoRows={aggregatorRows}
-            manualByChannel={manualAggregatorTotals}
-            onManualChange={handleManualAggregatorChange}
-            title="Cajas agregadores (turno)"
-          />
         </div>
 
         <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
@@ -1533,7 +1666,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           <button
             type="button"
             disabled={busy}
-            onClick={() => onClose(counts, notes, finalAggregatorRows)}
+            onClick={() => onClose(counts, notes, finalAggregatorRows, {
+              pizza: foodReport.total.pizza,
+              burger: foodReport.total.burger,
+              taco: foodReport.total.taco,
+              byChannel: foodReport.byAggregator,
+            })}
             className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
             <Lock className="w-4 h-4" /> {busy ? 'Cerrando…' : 'Confirmar cierre de caja'}
@@ -3362,7 +3500,12 @@ export function TpvRegisterGate({
     }
   };
 
-  const handleClose = async (counts: CashDenominationCount, notes: string, aggregatorRows: AggregatorCashRow[] = []) => {
+  const handleClose = async (
+    counts: CashDenominationCount,
+    notes: string,
+    aggregatorRows: AggregatorCashRow[] = [],
+    productClosingCounts?: TpvRegisterSession['productClosingCounts'],
+  ) => {
     const snapshotId = String(closingSession?._id || activeSession?._id || '').trim();
     const live = snapshotId
       ? sessions.find((s) => String(s._id || '').trim() === snapshotId)
@@ -3380,16 +3523,23 @@ export function TpvRegisterGate({
     if (closingBusy) return;
     setClosingBusy(true);
     const finalAmount = calcDenominationTotal(counts);
-    const expected = calcTpvExpectedCash(session);
-    const diff = finalAmount - expected;
+    const expectedTpv = calcTpvExpectedCash(session);
     const summary = buildTpvRegisterSummary(session);
     const aggregatorClosingTotals: Record<string, number> = {};
+    const aggregatorClosingCash: Record<string, number> = {};
+    let aggregatorCashSum = 0;
     for (const row of aggregatorRows) {
       aggregatorClosingTotals[row.platform.channel] = row.totalSales;
+      const cash = Math.max(0, Number(row.cashSales) || 0);
+      aggregatorClosingCash[row.platform.channel] = cash;
+      aggregatorCashSum += cash;
       summary.salesByChannel[row.platform.channel] = row.totalSales;
     }
+    aggregatorCashSum = Math.round(aggregatorCashSum * 100) / 100;
+    const expected = Math.round((expectedTpv + aggregatorCashSum) * 100) / 100;
+    const diff = finalAmount - expected;
     const saleOps = session.transactions.filter((t) => t.type === 'sale').length;
-    const autoValidated = saleOps === 0 && Math.abs(diff) < 0.01;
+    const autoValidated = saleOps === 0 && Math.abs(diff) < 0.01 && aggregatorCashSum === 0;
     const closedPayload: Partial<TpvRegisterSession> = {
       ...session,
       status: 'closed',
@@ -3402,6 +3552,8 @@ export function TpvRegisterGate({
       closingNotes: notes,
       summary,
       aggregatorClosingTotals,
+      aggregatorClosingCash,
+      ...(productClosingCounts ? { productClosingCounts } : {}),
       closingValidationStatus: autoValidated ? 'validated' : 'pending',
       ...(autoValidated
         ? {
@@ -3890,6 +4042,7 @@ export function TpvRegisterGate({
                 : aggregatorRowsFromClosingTotals(
                   getClosingAggregatorPlatforms(),
                   postCloseSession.aggregatorClosingTotals || postCloseSession.summary?.salesByChannel,
+                  postCloseSession.aggregatorClosingCash,
                 )}
               title="Cajas agregadores"
             />

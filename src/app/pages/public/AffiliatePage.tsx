@@ -9,6 +9,8 @@ import {
 import { getApiBase } from '../../lib/apiBase';
 import { listAffiliateVerticals, DEFAULT_AFFILIATE_COMMISSION_RATE } from '../../lib/affiliatesApi';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
+import { shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appStoreCompliance';
+import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
 
 const STEPS = [
   { icon: Rocket, title: 'Solicita tu acceso', desc: 'Rellena el formulario con tus datos. En menos de 48h tendrás tu código de afiliado.' },
@@ -73,6 +75,7 @@ interface FieldErrors {
 
 export function AffiliatePage() {
   const navigate = useNavigate();
+  const hideOrgRegistration = shouldHideBusinessOrganizationRegistrationOnIos();
   const [verticalOptions, setVerticalOptions] = useState<string[]>([]);
   const [verticalsLoadError, setVerticalsLoadError] = useState(false);
   const [formState, setFormState] = useState<FormState>('idle');
@@ -87,6 +90,7 @@ export function AffiliatePage() {
   });
 
   useEffect(() => {
+    if (hideOrgRegistration) return;
     listAffiliateVerticals()
       .then((verticals) => {
         setVerticalOptions(verticals);
@@ -96,7 +100,16 @@ export function AffiliatePage() {
         setVerticalOptions([]);
         setVerticalsLoadError(true);
       });
-  }, []);
+  }, [hideOrgRegistration]);
+
+  if (hideOrgRegistration) {
+    return (
+      <IosCustomerAccessOnlyScreen
+        title="Alta de afiliado no disponible en iOS"
+        onLogout={() => navigate(AUTH_PATHS.affiliatePortal)}
+      />
+    );
+  }
 
   const toggleVertical = (v: string) => {
     setForm((prev) => ({

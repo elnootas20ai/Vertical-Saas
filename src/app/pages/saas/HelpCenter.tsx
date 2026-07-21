@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
 import { BugReportForm } from '../../components/saas/BugReportModal';
+import { isIosCustomerAccessOnlyApp, IOS_SUPPORT_EMAIL } from '../../lib/appStoreCompliance';
 
 type Accent = {
   badge: string;
@@ -499,13 +500,23 @@ export function HelpCenter() {
                     <h4 className="mt-3 text-2xl font-bold text-gray-900 dark:text-gray-100">{guide.title}</h4>
                     <p className="mt-2 text-sm leading-7 text-gray-600 dark:text-gray-400">{guide.description}</p>
                   </div>
-                  <Link
-                    to={guide.route}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-black"
-                  >
-                    {guide.routeLabel}
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
+                  {guide.id === 'facturacion' && isIosCustomerAccessOnlyApp() ? (
+                    <a
+                      href={`mailto:${IOS_SUPPORT_EMAIL}`}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-black"
+                    >
+                      Contactar soporte
+                      <Mail className="h-4 w-4" />
+                    </a>
+                  ) : (
+                    <Link
+                      to={guide.route}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-black"
+                    >
+                      {guide.routeLabel}
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  )}
                 </div>
 
                 <div className="mt-6 grid gap-4 lg:grid-cols-[1.45fr_1fr]">

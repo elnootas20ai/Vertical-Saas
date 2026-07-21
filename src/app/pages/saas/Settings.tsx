@@ -627,7 +627,7 @@ function TabBilling() {
 
   const handlePurchaseAddon = async (addonId: PlanAddonId) => {
     if (hideIosInAppBilling) {
-      setBillingFeedback('Contrata ampliaciones desde vertialapp.com en tu navegador.');
+      setBillingFeedback('En iOS no se gestionan ampliaciones. Contacta con soporte@vertialapp.com.');
       return;
     }
     if (!user?.user_id) {
@@ -670,7 +670,7 @@ function TabBilling() {
 
   const handlePaySubscription = async () => {
     if (hideIosInAppBilling) {
-      setBillingFeedback('En la app iOS gestiona tu suscripción en vertialapp.com (Ajustes → Facturación).');
+      setBillingFeedback('En iOS no se paga la suscripción. Contacta con soporte@vertialapp.com.');
       return;
     }
     if (!user?.user_id) {
@@ -713,7 +713,7 @@ function TabBilling() {
 
   const handleCancelSubscription = async () => {
     if (hideIosInAppBilling) {
-      setBillingFeedback('Cancela tu suscripción desde vertialapp.com (Ajustes → Facturación).');
+      setBillingFeedback('En iOS no se cancela la suscripción. Contacta con soporte@vertialapp.com.');
       return;
     }
     if (!confirm('¿Estás seguro de que deseas cancelar tu suscripción? Perderás el acceso al final del periodo actual.')) {
@@ -801,13 +801,13 @@ function TabBilling() {
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 dark:border-amber-900 dark:bg-amber-950/30">
           <p className="text-sm font-bold text-amber-950 dark:text-amber-100">App iOS para clientes</p>
           <p className="mt-1 text-sm text-amber-900/90 dark:text-amber-200/90 leading-relaxed">
-            En iPhone/iPad no se contrata ni se paga la suscripción. El alta y la facturación se gestionan
-            en la web (vertialapp.com) desde un ordenador. Aquí solo usas Vertial si tu cuenta ya está activa.
+            En iPhone/iPad no se contrata ni se paga la suscripción Vertial. Aquí solo usas Vertial
+            si tu cuenta ya está activa. Soporte: soporte@vertialapp.com
           </p>
         </div>
       )}
 
-      {accountBlocked && (
+      {accountBlocked && !hideIosInAppBilling && (
         <div className="rounded-2xl border-2 border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/30">
           <p className="text-sm font-bold text-red-900 dark:text-red-100">
             {isSuspended ? 'Cuenta suspendida' : 'Suscripción pendiente de pago'}
@@ -816,6 +816,17 @@ function TabBilling() {
             {isSuspended
               ? 'Regulariza tu suscripción mensual para recuperar el acceso. Elige tu plan abajo y pulsa «Pagar y reactivar».'
               : 'Tu acceso puede estar limitado hasta que confirmes el pago del plan.'}
+          </p>
+        </div>
+      )}
+
+      {accountBlocked && hideIosInAppBilling && (
+        <div className="rounded-2xl border-2 border-red-200 bg-red-50 px-5 py-4 dark:border-red-900 dark:bg-red-950/30">
+          <p className="text-sm font-bold text-red-900 dark:text-red-100">
+            Cuenta sin acceso activo
+          </p>
+          <p className="mt-1 text-sm text-red-800 dark:text-red-200">
+            En iOS no se puede reactivar el plan. Contacta con soporte@vertialapp.com o tu administrador.
           </p>
         </div>
       )}
@@ -974,6 +985,7 @@ function TabBilling() {
       </div>
       )}
 
+      {!hideIosInAppBilling && (
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="mb-5">
           <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Ampliaciones</p>
@@ -1076,7 +1088,9 @@ function TabBilling() {
           })}
         </div>
       </div>
+      )}
 
+      {!hideIosInAppBilling && (
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center justify-between mb-5 gap-3">
           <div>
@@ -1194,16 +1208,24 @@ function TabBilling() {
           </div>
         </div>
       </div>
+      )}
 
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Historial de facturas</p>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
-              Las facturas de suscripción se crean <span className="font-medium text-gray-700 dark:text-gray-300">automáticamente al pagar</span>
-              (pasarela o modo prueba). Más adelante el backend / webhooks MONEI sustituirán la generación local.
+              {hideIosInAppBilling
+                ? 'Consulta de facturas de suscripción (solo lectura en iOS).'
+                : (
+                  <>
+                    Las facturas de suscripción se crean <span className="font-medium text-gray-700 dark:text-gray-300">automáticamente al pagar</span>
+                    (pasarela o modo prueba). Más adelante el backend / webhooks MONEI sustituirán la generación local.
+                  </>
+                )}
             </p>
           </div>
+          {!hideIosInAppBilling ? (
           <details className="group rounded-xl border border-dashed border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2 text-xs text-gray-600 dark:text-gray-400 sm:max-w-xs shrink-0">
             <summary className="cursor-pointer font-semibold text-gray-700 dark:text-gray-300 list-none flex items-center justify-between gap-2">
               <span>Factura manual (solo pruebas)</span>
@@ -1218,11 +1240,14 @@ function TabBilling() {
               Añadir factura a mano
             </button>
           </details>
+          ) : null}
         </div>
         <div className="divide-y divide-gray-50">
           {invoices.length === 0 && (
             <div className="px-6 py-8 text-sm text-gray-500 dark:text-gray-400">
-              No hay facturas todavía. Tras un pago (o una simulación desde «Ir a pagar») aparecerá aquí la primera en CouchDB `invoice`.
+              {hideIosInAppBilling
+                ? 'No hay facturas todavía.'
+                : 'No hay facturas todavía. Tras un pago (o una simulación desde «Ir a pagar») aparecerá aquí la primera en CouchDB `invoice`.'}
             </div>
           )}
           {invoices.map((invoice) => (
@@ -2103,6 +2128,7 @@ function TabBusinesses() {
   const isOwner = (business: Business) => business.owner_user_id === user?.user_id;
 
   const openBillingForMoreBusinesses = useCallback(() => {
+    if (shouldHideInAppSubscriptionPurchaseOnIos()) return;
     if (!user?.user_id) return;
     if (entitlements.needsBusinessUpgrade) {
       writeBillingSelection(user.user_id, {
@@ -2158,6 +2184,10 @@ function TabBusinesses() {
               <Plus className="w-4 h-4" />
               Nueva empresa
             </button>
+          ) : shouldHideInAppSubscriptionPurchaseOnIos() ? (
+            <span className="text-xs text-gray-500 dark:text-gray-400 max-w-[12rem] text-right">
+              Límite de empresas del plan. En iOS no se amplía el plan.
+            </span>
           ) : entitlements.needsBusinessUpgrade ? (
             <button
               type="button"
@@ -2172,7 +2202,7 @@ function TabBusinesses() {
               type="button"
               onClick={openBillingForMoreBusinesses}
               title={`Plan ${entitlements.planLabel}: ${businesses.length} de ${entitlements.businesses} empresas`}
-              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-colors bg-emerald-600 hover:bg-emerald-700"
+              className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition-colors bg-emerald-600 hover:bg-emerald-700"
             >
               <Plus className="w-4 h-4" />
               Añadir empresa extra

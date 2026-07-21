@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { VertialBillingUpgradeLink } from '../VertialBillingUpgradeLink';
 import {
   ShoppingBag, Receipt, Hash, TrendingUp, Calendar, MapPin, Phone, Mail,
   ChevronDown, ChevronRight, Package, Truck, Store, Clock, Euro,
@@ -299,12 +300,14 @@ function AnalyticsUpgradeTeaser() {
       <p className="mx-auto mt-2 max-w-md text-sm text-gray-500 dark:text-gray-400">
         Gráficos de gasto, top productos, canales y segmentación VIP en plan Normal o Pro.
       </p>
-      <Link
-        to="/saas/billing"
+      <VertialBillingUpgradeLink
         className="mt-4 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+        fallback={
+          <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">En iOS no se cambian planes.</p>
+        }
       >
         Ver planes
-      </Link>
+      </VertialBillingUpgradeLink>
     </div>
   );
 }
@@ -833,12 +836,12 @@ export function DeliveryClientPedidosTab({
           <p className="text-sm text-indigo-900 dark:text-indigo-200">
             Mostrando {visibleOrders.length} de {totalOrdersCount ?? orders.length} pedidos en plan Básico.
           </p>
-          <Link
-            to="/saas/billing"
+          <VertialBillingUpgradeLink
             className="inline-flex shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+            fallback={null}
           >
             Ver planes
-          </Link>
+          </VertialBillingUpgradeLink>
         </div>
       )}
 

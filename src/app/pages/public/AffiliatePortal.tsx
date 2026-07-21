@@ -39,6 +39,7 @@ import {
   type PortalCommission,
   type PortalStats,
 } from '../../components/affiliate/AffiliatePortalSections';
+import { shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appStoreCompliance';
 
 // ── Login Screen ───────────────────────────────────────────────────────────────
 
@@ -317,6 +318,7 @@ function AddClientModal({ onSave, onClose, loading, verticalOptions }: {
 export function AffiliatePortal() {
   const { code: urlCode } = useParams<{ code: string }>();
   const navigate = useNavigate();
+  const allowRegisterClients = !shouldHideBusinessOrganizationRegistrationOnIos();
   const [affiliateCode, setAffiliateCode] = useState(urlCode || '');
   const [affiliate, setAffiliate] = useState<PortalAffiliate | null>(null);
   const [clients, setClients] = useState<PortalClient[]>([]);
@@ -515,6 +517,7 @@ export function AffiliatePortal() {
             commissions={commissions}
             onGoClients={() => setSection('clients')}
             onGoReferral={() => setSection('referral')}
+            allowRegisterClients={allowRegisterClients}
           />
         )}
         {section === 'clients' && (
@@ -522,6 +525,7 @@ export function AffiliatePortal() {
             clients={clients}
             commissionRate={affiliate.commissionRate}
             onAddClient={() => setShowAddClient(true)}
+            allowRegisterClients={allowRegisterClients}
           />
         )}
         {section === 'referred' && (
@@ -534,7 +538,10 @@ export function AffiliatePortal() {
           <AffiliateCommissionsSection commissions={commissions} stats={stats} />
         )}
         {section === 'referral' && (
-          <AffiliateReferralSection affiliate={affiliate} />
+          <AffiliateReferralSection
+            affiliate={affiliate}
+            allowRegisterClients={allowRegisterClients}
+          />
         )}
         {section === 'resources' && (
           <AffiliateResourcesSection />
@@ -547,7 +554,7 @@ export function AffiliatePortal() {
         )}
       </AffiliateBackofficeLayout>
 
-      {showAddClient && (
+      {showAddClient && allowRegisterClients && (
         <AddClientModal
           onSave={handleAddClient}
           onClose={() => setShowAddClient(false)}

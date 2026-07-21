@@ -4,6 +4,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useBusiness } from '../../context/BusinessContext';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   Building2,
   Store,
@@ -261,21 +262,33 @@ function computeAlerts(biz: Business | null, subscription: { status: string }): 
         : subscription.status === 'suspended'
           ? 'Cuenta suspendida por impago. Actualiza el método de pago para recuperar el acceso.'
           : 'Periodo de prueba finalizado o plan sin activar. Elige un plan o renueva para continuar.';
-    alerts.push({
-      id: 'plan-expired',
-      type: 'critical',
-      message: billingMsg,
-      action: subscription.status === 'trial_expired' ? 'Elegir plan' : 'Ir a facturación',
-      route: '/saas/settings/facturacion',
-    });
+    if (!isIosCustomerAccessOnlyApp()) {
+      alerts.push({
+        id: 'plan-expired',
+        type: 'critical',
+        message: billingMsg,
+        action: subscription.status === 'trial_expired' ? 'Elegir plan' : 'Ir a facturación',
+        route: '/saas/settings/facturacion',
+      });
+    } else {
+      alerts.push({
+        id: 'plan-expired',
+        type: 'critical',
+        message: `${billingMsg} En iOS no se gestiona el cobro: contacta con soporte@vertialapp.com.`,
+        action: 'Entendido',
+        route: '/saas/dashboard',
+      });
+    }
   } else if (['trial_expiring', 'grace_period'].includes(subscription.status)) {
-    alerts.push({
-      id: 'plan-expiring',
-      type: 'high',
-      message: 'Tu plan expira pronto',
-      action: 'Revisar plan',
-      route: '/saas/settings/facturacion',
-    });
+    if (!isIosCustomerAccessOnlyApp()) {
+      alerts.push({
+        id: 'plan-expiring',
+        type: 'high',
+        message: 'Tu plan expira pronto',
+        action: 'Revisar plan',
+        route: '/saas/settings/facturacion',
+      });
+    }
   }
 
   if (biz.onboardingImportPending) {

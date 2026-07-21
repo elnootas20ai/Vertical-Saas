@@ -1910,6 +1910,20 @@ export interface TpvRegisterSession {
   /** Totales agregador declarados al cierre (Glovo, Uber Eats, etc.). */
   aggregatorClosingTotals?: Record<string, number>;
 
+  /** Efectivo declarado por integrador al cierre (suma al arqueo de caja). */
+  aggregatorClosingCash?: Record<string, number>;
+
+  /**
+   * Conteo de pizzas / burgers / tacos del turno al cerrar caja.
+   * `byChannel` opcional por integrador (glovo, ubereats…).
+   */
+  productClosingCounts?: {
+    pizza: number;
+    burger: number;
+    taco: number;
+    byChannel?: Record<string, { pizza: number; burger: number; taco: number }>;
+  };
+
   incidents: TpvIncident[];
 
   salesByChannel?: Record<string, number>;

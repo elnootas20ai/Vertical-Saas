@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { Navigate } from 'react-router';
 import { useApp, SubscriptionStatus } from '../../context/AppContext';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 
 interface SubscriptionGuardProps {
   children: ReactNode;
@@ -16,6 +17,7 @@ export function SubscriptionGuard({
   showBlockedScreen = false
 }: SubscriptionGuardProps) {
   const { subscription } = useApp();
+  const iosAccessOnly = isIosCustomerAccessOnlyApp();
 
   const isAllowed = allowedStatuses.includes(subscription.status);
 
@@ -31,12 +33,18 @@ export function SubscriptionGuard({
             <p className="text-gray-600 dark:text-gray-400 mb-6">
               Esta funcionalidad no está disponible con tu estado de suscripción actual.
             </p>
-            <a
-              href="/saas/billing"
-              className="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors"
-            >
-              Ver facturación
-            </a>
+            {!iosAccessOnly ? (
+              <a
+                href="/saas/billing"
+                className="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors"
+              >
+                Ver facturación
+              </a>
+            ) : (
+              <p className="text-sm text-gray-500">
+                En iOS no se gestiona el cobro. Contacta con soporte@vertialapp.com
+              </p>
+            )}
           </div>
         </div>
       );

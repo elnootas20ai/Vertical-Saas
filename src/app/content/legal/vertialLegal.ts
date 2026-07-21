@@ -285,8 +285,9 @@ export const LEGAL_DOCUMENTS: Record<LegalDocId, LegalDocument> = {
         id: 'gestion',
         title: '3. Gestión del consentimiento',
         paragraphs: [
-          'Al entrar por primera vez puede aceptar, rechazar o configurar cookies no necesarias desde el banner inferior.',
-          'Puede cambiar su elección en cualquier momento borrando cookies del navegador o desde la configuración del banner si vuelve a mostrarse.',
+          'Al entrar por primera vez en la web puede aceptar, rechazar o configurar cookies no necesarias desde el banner inferior.',
+          'En la aplicación nativa iOS no mostramos el banner de cookies de marketing/analítica: no hacemos seguimiento publicitario (tracking) ni usamos App Tracking Transparency porque no rastreamos usuarios entre apps o con data brokers.',
+          'Puede cambiar su elección en cualquier momento borrando cookies del navegador o desde la configuración del banner si vuelve a mostrarse en la web.',
         ],
       },
       {

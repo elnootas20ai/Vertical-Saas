@@ -6929,6 +6929,30 @@ function normalizeTpvRegisterStatus(value) {
   return ['open', 'closed'].includes(String(value || '')) ? String(value) : 'open';
 }
 
+function sanitizeProductClosingCounts(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const pizza = Math.max(0, Math.floor(Number(raw.pizza) || 0));
+  const burger = Math.max(0, Math.floor(Number(raw.burger) || 0));
+  const taco = Math.max(0, Math.floor(Number(raw.taco) || 0));
+  const byChannel = {};
+  if (raw.byChannel && typeof raw.byChannel === 'object') {
+    for (const [ch, counts] of Object.entries(raw.byChannel)) {
+      if (!counts || typeof counts !== 'object') continue;
+      byChannel[String(ch)] = {
+        pizza: Math.max(0, Math.floor(Number(counts.pizza) || 0)),
+        burger: Math.max(0, Math.floor(Number(counts.burger) || 0)),
+        taco: Math.max(0, Math.floor(Number(counts.taco) || 0)),
+      };
+    }
+  }
+  return {
+    pizza,
+    burger,
+    taco,
+    ...(Object.keys(byChannel).length > 0 ? { byChannel } : {}),
+  };
+}
+
 export function buildTpvRegisterSessionDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `tpvreg-${uuidv4()}`;
@@ -6979,6 +7003,17 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
 
     incidents: Array.isArray(data.incidents) ? data.incidents : (existing?.incidents || []),
     salesByChannel: data.salesByChannel || existing?.salesByChannel || {},
+    aggregatorClosingTotals:
+      data.aggregatorClosingTotals
+      || existing?.aggregatorClosingTotals
+      || undefined,
+    aggregatorClosingCash:
+      data.aggregatorClosingCash
+      || existing?.aggregatorClosingCash
+      || undefined,
+    productClosingCounts: sanitizeProductClosingCounts(
+      data.productClosingCounts ?? existing?.productClosingCounts,
+    ),
     linkedOrderIds: Array.isArray(data.linkedOrderIds) ? data.linkedOrderIds : (existing?.linkedOrderIds || []),
 
     business_id: String(
@@ -7037,6 +7072,9 @@ export function sanitizeTpvRegisterSession(doc) {
 
     incidents: Array.isArray(doc.incidents) ? doc.incidents : [],
     salesByChannel: doc.salesByChannel || {},
+    aggregatorClosingTotals: doc.aggregatorClosingTotals || undefined,
+    aggregatorClosingCash: doc.aggregatorClosingCash || undefined,
+    productClosingCounts: sanitizeProductClosingCounts(doc.productClosingCounts),
     linkedOrderIds: Array.isArray(doc.linkedOrderIds) ? doc.linkedOrderIds : [],
 
     business_id: String(doc.business_id || doc.businessId || '').trim(),

@@ -394,3 +394,48 @@ export function sortRegisterSessionsForDisplay(sessions: TpvRegisterSession[]): 
     return String(b.openedAt).localeCompare(String(a.openedAt));
   });
 }
+
+/**
+ * Último cierre de caja de una tienda.
+ * Prefiere el mismo terminal; si no hay, usa el cierre más reciente de esa PDV
+ * (tablet vs TPV-1 suelen diferir de terminal pero el cajón es el mismo).
+ */
+export function findLastClosedTpvSession(
+  sessions: TpvRegisterSession[],
+  pdvId: string,
+  terminalId?: string | null,
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+): TpvRegisterSession | null {
+  const pid = String(pdvId || '').trim();
+  const tid = String(terminalId || '').trim();
+  if (!pid) return null;
+
+  const closedForStore = (Array.isArray(sessions) ? sessions : [])
+    .filter((s) => String(s.status || '') === 'closed')
+    .filter((s) => {
+      if (pointsOfSale.length > 0) return tpvSessionMatchesStoreRef(s, pid, pointsOfSale);
+      return String(s.pointOfSaleId || '').trim() === pid;
+    })
+    .sort(
+      (a, b) =>
+        new Date(b.closedAt || b.updatedAt || 0).getTime()
+        - new Date(a.closedAt || a.updatedAt || 0).getTime(),
+    );
+
+  if (closedForStore.length === 0) return null;
+  if (tid) {
+    const sameTerminal = closedForStore.find((s) => String(s.terminalId || '').trim() === tid);
+    if (sameTerminal) return sameTerminal;
+  }
+  return closedForStore[0];
+}
+
+/** Efectivo contado al cerrar (para sugerir fondo del día siguiente). */
+export function resolvePreviousCloseCashAmount(session: TpvRegisterSession | null | undefined): number | null {
+  if (!session || String(session.status || '') !== 'closed') return null;
+  const fromFinal = Number(session.finalCashAmount);
+  if (Number.isFinite(fromFinal) && fromFinal >= 0) {
+    return Math.round(fromFinal * 100) / 100;
+  }
+  return null;
+}

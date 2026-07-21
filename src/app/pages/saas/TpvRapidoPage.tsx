@@ -910,6 +910,7 @@ export function TpvRapidoOrderFlow({
   const [splitBillOpen, setSplitBillOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
   const actionBusyRef = useRef(false);
+  const cashCalculatorRef = useRef<HTMLDivElement>(null);
 
   const tpvErrorMeta = useMemo(
     () => ({
@@ -1349,11 +1350,17 @@ export function TpvRapidoOrderFlow({
     [cart],
   );
 
+  const cashGivenAmount = useMemo(() => parseDecimalPadValue(cashGiven), [cashGiven]);
   const changeAmount = useMemo(() => {
-    const given = parseDecimalPadValue(cashGiven);
-    if (isNaN(given) || given < finalTotal) return null;
-    return given - finalTotal;
-  }, [cashGiven, finalTotal]);
+    if (isNaN(cashGivenAmount) || cashGivenAmount <= 0) return null;
+    return cashGivenAmount - finalTotal;
+  }, [cashGivenAmount, finalTotal]);
+  const cashQuickAmounts = useMemo(() => {
+    const base = [5, 10, 20, 50, 100].filter((v) => v >= finalTotal);
+    const exact = Math.ceil(finalTotal * 100) / 100;
+    const uniq = Array.from(new Set([exact, ...base])).filter((v) => v > 0).slice(0, 6);
+    return uniq;
+  }, [finalTotal]);
 
   const applyPromoCode = useCallback(() => {
     const code = promoCodeInput.trim();
@@ -2059,6 +2066,26 @@ export function TpvRapidoOrderFlow({
           businessId: created.business_id || writeBusinessId || businessId,
         });
 
+        // Calle 1: ticket cliente al instante (no esperar a la impresora).
+        // Calle 2: liberar mesa / pantalla de éxito en paralelo.
+        if (currentBusiness && !collectOnDelivery) {
+          void printDeliveryTicket({
+            order: created,
+            business: businessTicketInfoFrom(currentBusiness),
+            salesPointName: created.salesPointName || pdvName,
+            cashierName: takerName,
+            variant: 'customer',
+            accountEmail: user?.email,
+          });
+        }
+
+        setCreatedOrder(created);
+        if (cajaStatus && !isCajaRegistrationOk(cajaStatus)) {
+          toast.success('Pedido creado, pero no quedó en caja — revisa que esté abierta');
+        } else {
+          toast.success('Pedido creado y registrado en caja');
+        }
+
         if (restaurantTable && !restaurantTable.isCounter && userId) {
           try {
             await changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnPaid(), {
@@ -2069,20 +2096,13 @@ export function TpvRapidoOrderFlow({
             showTpvError(releaseErr, 'liberar_mesa');
           }
         }
-
-        setCreatedOrder(created);
-        if (cajaStatus && !isCajaRegistrationOk(cajaStatus)) {
-          toast.success('Pedido creado, pero no quedó en caja — revisa que esté abierta');
-        } else {
-          toast.success('Pedido creado y registrado en caja');
-        }
       } catch (err: unknown) {
         showTpvError(err, 'crear_pedido', 'Error al crear el pedido');
       } finally {
         setSubmitting(false);
       }
     },
-    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register?.session, user?.fullName, user?.user_id, user?.id, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete],
+    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError],
   );
 
   const accountDue = useMemo(
@@ -2313,6 +2333,27 @@ export function TpvRapidoOrderFlow({
         reason: 'order_paid',
         businessId: cajaOrder.business_id || writeBusinessId || businessId,
       });
+
+      // Calle 1: imprimir ya (no await). Calle 2: cerrar cuenta / liberar mesa.
+      if (currentBusiness) {
+        const ticketItems = splitLabel
+          ? cajaOrder.items
+          : flattenDiningAccountLines(diningOrder).map((line) => ({
+              quantity: line.quantity,
+              name: line.name,
+              total: line.lineTotal,
+              notes: line.notes,
+            }));
+        void printDeliveryTicket({
+          order: { ...cajaOrder, items: ticketItems as DeliveryOrder['items'] },
+          business: businessTicketInfoFrom(currentBusiness),
+          salesPointName: cajaOrder.salesPointName || pdvName,
+          cashierName: takerName,
+          variant: 'customer',
+          accountEmail: user?.email,
+        });
+      }
+
       const closedOrder = await payAndCloseDiningOrder({
         userId,
         order: diningOrder,
@@ -2327,31 +2368,6 @@ export function TpvRapidoOrderFlow({
       });
       onRestaurantDiningOrderUpdated?.(closedOrder);
       setTipInput('');
-
-      // Ticket de cliente al cobrar la mesa; con las líneas reales de la
-      // cuenta al cobro completo o la línea de la parte en cobro dividido.
-      if (currentBusiness) {
-        try {
-          const ticketItems = splitLabel
-            ? cajaOrder.items
-            : flattenDiningAccountLines(closedOrder).map((line) => ({
-                quantity: line.quantity,
-                name: line.name,
-                total: line.lineTotal,
-                notes: line.notes,
-              }));
-          void printDeliveryTicket({
-            order: { ...cajaOrder, items: ticketItems as DeliveryOrder['items'] },
-            business: businessTicketInfoFrom(currentBusiness),
-            salesPointName: cajaOrder.salesPointName || pdvName,
-            cashierName: takerName,
-            variant: 'customer',
-            accountEmail: user?.email,
-          });
-        } catch {
-          /* el ticket es opcional; no bloquear el cobro */
-        }
-      }
 
       const stillDue = diningOrderDueAmount(closedOrder);
       if (stillDue <= 0.02 || closedOrder.status === 'closed') {
@@ -3027,7 +3043,7 @@ export function TpvRapidoOrderFlow({
       hideBack={!embeddedInRestaurantTpv}
       compactTop={!tabletMode && orderFlowChrome}
     >
-      <div className={`w-full min-w-0 ${tabletMode ? 'flex-1 min-h-0 flex flex-col pb-0 px-1' : isProductsFocus ? 'max-w-[1320px] mx-auto pb-4 px-2 md:px-4' : 'max-w-[920px] mx-auto pb-3 px-2 sm:px-3 md:px-4'}`}>
+      <div className={`w-full min-w-0 ${tabletMode && isProductsFocus ? 'flex-1 min-h-0 flex flex-col pb-0 px-1' : tabletMode ? 'pb-2 px-1' : isProductsFocus ? 'max-w-[1320px] mx-auto pb-4 px-2 md:px-4' : 'max-w-[920px] mx-auto pb-3 px-2 sm:px-3 md:px-4'}`}>
         {!tabletMode && !orderFlowChrome && register && register.clockedInWorkers.length > 0 && (
           <div className="sticky top-0 z-20 -mx-2 md:-mx-4 px-2 md:px-4 py-2 mb-3 bg-gray-50/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-200 dark:border-gray-800">
             <ClockedInWorkerBubbles
@@ -3821,7 +3837,14 @@ export function TpvRapidoOrderFlow({
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setPaymentMethod(key)}
+                  onClick={() => {
+                    setPaymentMethod(key);
+                    if (key === 'efectivo' && deliveryType !== 'domicilio') {
+                      requestAnimationFrame(() => {
+                        cashCalculatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                      });
+                    }
+                  }}
                   className={`flex flex-col items-center gap-1.5 rounded-xl border-2 transition-all touch-manipulation ${
                     tabletMode ? 'p-2.5 min-h-[56px]' : 'p-4 min-h-[80px] gap-2'
                   } ${
@@ -3837,7 +3860,10 @@ export function TpvRapidoOrderFlow({
             </div>
 
             {paymentMethod === 'efectivo' && deliveryType !== 'domicilio' && (
-              <div className="mt-4 p-4 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+              <div
+                ref={cashCalculatorRef}
+                className="mt-4 p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/20"
+              >
                 <label className={LABEL_CLASS}>El cliente paga con</label>
                 <DecimalNumpadField
                   value={cashGiven}
@@ -3850,11 +3876,37 @@ export function TpvRapidoOrderFlow({
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
                   }
                 />
-                {changeAmount !== null && changeAmount >= 0 && (
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-sm text-gray-500 dark:text-gray-400">Cambio</span>
-                    <span className="text-lg font-bold text-green-600 dark:text-green-400 tabular-nums">
-                      {formatPrice(changeAmount)}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {cashQuickAmounts.map((amount) => {
+                    const label = Math.abs(amount - finalTotal) < 0.001 ? 'Exacto' : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
+                    const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
+                    return (
+                      <button
+                        key={label + String(amount)}
+                        type="button"
+                        onClick={() => setCashGiven(amount.toFixed(2))}
+                        className={`min-h-[36px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation ${
+                          selected
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-white dark:bg-gray-800 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {changeAmount !== null && (
+                  <div
+                    className={`mt-3 flex items-center justify-between rounded-xl px-3 py-2 ${
+                      changeAmount >= 0
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                        : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                    }`}
+                  >
+                    <span className="text-sm font-semibold">{changeAmount >= 0 ? 'Cambio' : 'Falta'}</span>
+                    <span className="text-lg font-bold tabular-nums">
+                      {formatPrice(Math.abs(changeAmount))}
                     </span>
                   </div>
                 )}
@@ -3884,7 +3936,8 @@ export function TpvRapidoOrderFlow({
                       value={tipInput}
                       onChange={setTipInput}
                       placeholder="Otra cantidad"
-                      showNumpad
+                      /* Con efectivo visible, un 2.º pad ocupa y corta el scroll; tip = teclado/atajos. */
+                      showNumpad={paymentMethod !== 'efectivo'}
                       compactNumpad={tabletMode}
                       inputClassName={`${INPUT_CLASS} pr-8 text-sm font-semibold`}
                       suffix={
@@ -4098,9 +4151,13 @@ function TpvFullscreenShell({
         <div className={`flex-1 min-h-0 min-w-0 w-full ${contentClass}`}>
           <div
             className={`w-full min-w-0 ${
-              minimalHeader
-                ? 'flex-1 min-h-0 flex flex-col h-full px-1 pt-0.5'
-                : `max-w-[1320px] mx-auto px-2 md:px-3 pt-1.5 ${tabletMode && contentFill ? 'flex-1 min-h-0 flex flex-col h-full' : ''}`
+              contentFill
+                ? minimalHeader
+                  ? 'flex-1 min-h-0 flex flex-col h-full px-1 pt-0.5'
+                  : 'max-w-[1320px] mx-auto px-2 md:px-3 pt-1.5 flex-1 min-h-0 flex flex-col h-full'
+                : minimalHeader
+                  ? 'px-1 pt-0.5 pb-2'
+                  : 'max-w-[1320px] mx-auto px-2 md:px-3 pt-1.5 pb-2'
             }`}
           >
             {children}

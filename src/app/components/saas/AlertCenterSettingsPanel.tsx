@@ -21,6 +21,7 @@ import { useAlertDepartments } from '../../hooks/useAlertDepartments';
 import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
 import { getDepartmentLabel, isRuleVisibleForVertical } from '../../lib/alertDepartments';
 import { PLAN_TIER_LABELS, type SubscriptionPlanTier } from '../../lib/pointOfSaleLimits';
+import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   ALERT_PLAN_TIER_LABELS,
   alertTierDescription,
@@ -702,7 +703,10 @@ export function AlertCenterSettingsPanel({
               ruleCount={tierTotal}
               vertical={vertical}
               featured={featured}
-              onUpgrade={() => navigate('/saas/billing')}
+              onUpgrade={() => {
+                if (isIosCustomerAccessOnlyApp()) return;
+                navigate('/saas/billing');
+              }}
             />
           )}
 
@@ -879,6 +883,7 @@ function AlertPlanUpgradeCta({
           </p>
         </div>
       </div>
+      {!isIosCustomerAccessOnlyApp() ? (
       <button
         type="button"
         onClick={onUpgrade}
@@ -898,6 +903,11 @@ function AlertPlanUpgradeCta({
           <>Desbloquear plan {tierLabel}</>
         )}
       </button>
+      ) : (
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400 text-center">
+          En iOS no se cambian planes.
+        </p>
+      )}
     </div>
   );
 }

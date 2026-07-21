@@ -1,10 +1,10 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
 import { Lock, Sparkles } from 'lucide-react';
 import type { ClientDetailFeatureId } from '../../../lib/clientDetailPlanCatalog';
 import { getClientDetailFeature } from '../../../lib/clientDetailPlanCatalog';
 import { PLAN_TIER_LABELS } from '../../../lib/pointOfSaleLimits';
 import type { SubscriptionPlanTier } from '../../../lib/pointOfSaleLimits';
+import { VertialBillingUpgradeLink } from '../VertialBillingUpgradeLink';
 
 export function ClientDetailPlanBanner({
   planLabel,
@@ -31,12 +31,16 @@ export function ClientDetailPlanBanner({
           </p>
         </div>
       </div>
-      <Link
-        to="/saas/billing"
+      <VertialBillingUpgradeLink
         className="inline-flex shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-indigo-700"
+        fallback={
+          <span className="text-[11px] text-indigo-700/80 dark:text-indigo-300">
+            En iOS no se cambian planes
+          </span>
+        }
       >
         Ver planes
-      </Link>
+      </VertialBillingUpgradeLink>
     </div>
   );
 }
@@ -61,14 +65,16 @@ export function ClientDetailLockedPanel({
       </p>
       <p className="mx-auto mt-2 max-w-md text-sm text-gray-500 dark:text-gray-400">
         {entry?.description || 'Disponible en un plan superior.'}
-        {planTier === 'basic' ? ' Sube a Normal o Pro para desbloquearla.' : ' Disponible en plan Pro.'}
+        {planTier === 'basic' ? ' Disponible en Normal o Pro.' : ' Disponible en plan Pro.'}
       </p>
-      <Link
-        to="/saas/billing"
+      <VertialBillingUpgradeLink
         className="mt-5 inline-flex items-center justify-center rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900"
+        fallback={
+          <p className="mt-5 text-xs text-gray-500 dark:text-gray-400">En iOS no se cambian planes.</p>
+        }
       >
         Mejorar plan
-      </Link>
+      </VertialBillingUpgradeLink>
     </div>
   );
 }

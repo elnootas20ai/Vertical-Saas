@@ -4,6 +4,7 @@ import {
   Phone, Mail, MapPin, Eye, Lock, Trash2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { VertialBillingUpgradeLink } from '../VertialBillingUpgradeLink';
 
 export type DeliveryListClientStats = {
   totalOrders: number;
@@ -100,12 +101,16 @@ export function ClientsListPlanBanner({
         </div>
       </div>
       {!isFull && (
-        <Link
-          to="/saas/billing"
+        <VertialBillingUpgradeLink
           className="inline-flex shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-indigo-700"
+          fallback={
+            <span className="text-[11px] text-indigo-700/80 dark:text-indigo-300">
+              En iOS no se cambian planes
+            </span>
+          }
         >
           Ver planes
-        </Link>
+        </VertialBillingUpgradeLink>
       )}
     </div>
   );
