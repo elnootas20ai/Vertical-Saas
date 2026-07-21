@@ -30,7 +30,7 @@ import {
   type DeliveryOrder,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
-import { calcTpvExpectedCash, buildTpvRegisterSummary, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
+import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import {
   localCalendarDayKey,
@@ -76,6 +76,8 @@ import { checkRestaurantRegisterClose } from '../../lib/restaurantCloseWarnings'
 import { resolveRestaurantTpvPermissions } from '../../lib/restaurantTpvPermissions';
 import { evaluateTpvClockInGate, tpvClockInBlockMessage } from '../../lib/tpvClockInGate';
 import type { Business } from '../../lib/businessApi';
+import { useSSE } from '../../hooks/useSSE';
+import { getAuthHeaders } from '../../lib/authApi';
 import {
   evaluateTpvRegisterLoadGate,
   resolveTpvRegisterBidAtStart,
@@ -2300,8 +2302,20 @@ function RegisterStatusBar({
   minimal?: boolean;
 }) {
   const expected = calcTpvExpectedCash(session);
+  const collections = calcTpvShiftCollectionsTotal(session);
   const txCount = session.transactions.length;
   const incidentCount = session.incidents?.filter(i => !i.resolvedAt).length || 0;
+  const storeLabel = String(session.pointOfSaleName || '').trim();
+  const terminalLabel = String(session.terminalName || '').trim();
+  const collectionsTitle = [
+    `Efectivo: ${collections.efectivo.toFixed(2)}€`,
+    `Tarjeta: ${collections.tarjeta.toFixed(2)}€`,
+    collections.cashIn > 0 ? `Entradas: +${collections.cashIn.toFixed(2)}€` : '',
+    collections.cashOut > 0 ? `Salidas: −${collections.cashOut.toFixed(2)}€` : '',
+    `Caja efectivo (arqueo): ${expected.toFixed(2)}€`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const opsBtn = minimal
     ? 'shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-stone-200 bg-white text-stone-700 transition-colors touch-manipulation hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700'
     : isTabletMode
@@ -2316,23 +2330,36 @@ function RegisterStatusBar({
 
   if (minimal) {
     return (
-      <div className="relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 px-2 py-1.5 flex items-center gap-2 text-[11px] min-h-[44px] pt-[max(0.375rem,env(safe-area-inset-top))]">
-        <span className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
+      <div className="relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 px-2 py-1.5 flex items-center gap-1.5 text-[11px] min-h-[48px] pt-[max(0.375rem,env(safe-area-inset-top))]">
+        <span className="flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
           <CheckCircle2 className="w-3.5 h-3.5" />
-          <span className="hidden xs:inline">Caja</span>
+          <span className="sr-only">Caja abierta</span>
         </span>
-        {session.pointOfSaleName && (
-          <span className="text-stone-600 dark:text-stone-400 truncate max-w-[6rem] shrink min-w-0 font-medium" title={session.pointOfSaleName}>
-            {session.pointOfSaleName}
+        <div className="min-w-0 flex-1 flex flex-col justify-center leading-tight">
+          <span className="text-stone-800 dark:text-stone-100 font-semibold truncate" title={[storeLabel, terminalLabel].filter(Boolean).join(' · ')}>
+            {storeLabel || 'Tienda'}
+            {terminalLabel ? (
+              <span className="font-normal text-stone-500 dark:text-stone-400"> · {terminalLabel}</span>
+            ) : null}
           </span>
-        )}
-        <span className="font-bold text-stone-900 dark:text-stone-100 tabular-nums shrink-0">{expected.toFixed(2)}€</span>
+          <span
+            className="font-bold text-stone-900 dark:text-stone-50 tabular-nums text-sm tracking-tight"
+            title={collectionsTitle}
+          >
+            {collections.total.toFixed(2)}€
+            <span className="ml-1.5 font-medium text-[10px] text-stone-500 dark:text-stone-400">
+              Ef {collections.efectivo.toFixed(0)} · Tj {collections.tarjeta.toFixed(0)}
+              {(collections.cashIn > 0 || collections.cashOut > 0)
+                ? ` · Mov ${(collections.cashIn - collections.cashOut).toFixed(0)}`
+                : ''}
+            </span>
+          </span>
+        </div>
         {incidentCount > 0 && (
           <span className="text-amber-600 font-semibold flex items-center shrink-0" title={`${incidentCount} incidencia(s)`}>
             <AlertTriangle className="w-3.5 h-3.5" />
           </span>
         )}
-        <div className="flex-1 min-w-0" />
         <div className="flex items-center gap-1 shrink-0 overflow-x-auto scrollbar-hide">
           <ClockedInWorkerBubbles
             workers={clockedInWorkers}
@@ -2381,15 +2408,17 @@ function RegisterStatusBar({
         <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
           <CheckCircle2 className="w-3.5 h-3.5" /> Caja abierta
         </span>
-        {session.pointOfSaleName && (
+        {storeLabel && (
           <span className="text-stone-600 dark:text-stone-400 flex items-center gap-1 min-w-0 font-medium">
             <MapPin className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate max-w-[140px] sm:max-w-none">{session.pointOfSaleName}</span>
+            <span className="truncate max-w-[180px] sm:max-w-[240px]" title={storeLabel}>{storeLabel}</span>
           </span>
         )}
-        <span className="text-stone-500 dark:text-stone-400 flex items-center gap-1">
-          <Monitor className="w-3.5 h-3.5" /> {session.terminalName}
-        </span>
+        {terminalLabel && (
+          <span className="text-stone-500 dark:text-stone-400 flex items-center gap-1 shrink-0">
+            <Monitor className="w-3.5 h-3.5" /> {terminalLabel}
+          </span>
+        )}
         <span className="text-stone-500 dark:text-stone-400 flex items-center gap-1 tabular-nums">
           <Clock className="w-3.5 h-3.5" /> {new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
         </span>
@@ -2398,9 +2427,18 @@ function RegisterStatusBar({
             <BarChart3 className="w-3.5 h-3.5" /> {txCount} ops
           </span>
         )}
-        <span className="font-bold text-stone-900 dark:text-stone-100 tabular-nums">
-          <Banknote className="w-3.5 h-3.5 inline mr-0.5 text-stone-500" />
-          {expected.toFixed(2)}€
+        <span
+          className="inline-flex items-center gap-1.5 rounded-md bg-stone-100 dark:bg-stone-800 px-2 py-1 font-bold text-stone-900 dark:text-stone-100 tabular-nums"
+          title={collectionsTitle}
+        >
+          <Banknote className="w-3.5 h-3.5 text-stone-500" />
+          {collections.total.toFixed(2)}€
+          <span className="font-medium text-[10px] text-stone-500 dark:text-stone-400">
+            Ef {collections.efectivo.toFixed(2)} · Tj {collections.tarjeta.toFixed(2)}
+            {(collections.cashIn > 0 || collections.cashOut > 0)
+              ? ` · Mov ${(collections.cashIn - collections.cashOut).toFixed(2)}`
+              : ''}
+          </span>
         </span>
         {incidentCount > 0 && (
           <span className="text-amber-700 font-semibold flex items-center gap-1 dark:text-amber-400">
@@ -3016,11 +3054,42 @@ export function TpvRegisterGate({
     const onSessionSync = (event: Event) => {
       const session = (event as CustomEvent<TpvRegisterSession>).detail;
       if (!session?._id) return;
-      setSessions((prev) => prev.map((s) => (s._id === session._id ? session : s)));
+      setSessions((prev) => {
+        const idx = prev.findIndex((s) => s._id === session._id);
+        if (idx < 0) return [session, ...prev];
+        return prev.map((s) => (s._id === session._id ? session : s));
+      });
     };
     window.addEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
     return () => window.removeEventListener(TPV_SESSION_SYNC_EVENT, onSessionSync);
   }, []);
+
+  const sseAuthUserId = String(user?.user_id || user?.id || '').trim() || null;
+  const sseToken = useMemo(() => {
+    const headers = getAuthHeaders();
+    const authHeader = headers.Authorization || headers.authorization;
+    if (!authHeader) return null;
+    return authHeader.replace(/^Bearer\s+/i, '').trim() || null;
+  }, [sseAuthUserId]);
+
+  const applyLiveSession = useCallback((raw: unknown) => {
+    const session = raw as TpvRegisterSession | null;
+    if (!session?._id) return;
+    window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: session }));
+  }, []);
+
+  useSSE({
+    userId: sseAuthUserId,
+    token: sseToken,
+    businessId: scopeBusinessId || null,
+    enabled: Boolean(sseAuthUserId && dataUserId),
+    handlers: useMemo(
+      () => ({
+        tpv_session_updated: applyLiveSession,
+      }),
+      [applyLiveSession],
+    ),
+  });
 
   const activeStoreScope = useMemo(() => {
     const pdvId = String(

@@ -185,3 +185,11 @@ export function buildOrderTicketOptions(
     isRefund: options?.isRefund,
   };
 }
+
+/** Pedidos a domicilio (o sin tipo) → ticket cliente al salir a repartidor. */
+export function shouldPrintCustomerTicketOnDispatch(
+  order: Pick<DeliveryOrderLike, 'deliveryType'> | null | undefined,
+): boolean {
+  const t = String(order?.deliveryType || 'domicilio').trim().toLowerCase();
+  return t !== 'recogida' && t !== 'sala';
+}

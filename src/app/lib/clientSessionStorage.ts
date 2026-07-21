@@ -15,6 +15,21 @@ const KEEP_ON_ACCOUNT_SWITCH = new Set([
 ]);
 
 /**
+ * Impresora WiFi por tienda: una vez guardada debe sobrevivir logout y update de app.
+ * Prefijos (no solo claves exactas): cada PDV tiene `vertial_printer_config_pdv_<id>`.
+ */
+const KEEP_PREFIXES_ON_ACCOUNT_SWITCH = [
+  'vertial_printer_config_',
+  'vertial_printer_verified',
+  'vertial_lan_manual_confirmed',
+];
+
+function shouldKeepLocalStorageKey(key: string, keepExact: Set<string>): boolean {
+  if (keepExact.has(key)) return true;
+  return KEEP_PREFIXES_ON_ACCOUNT_SWITCH.some((prefix) => key.startsWith(prefix));
+}
+
+/**
  * Limpia cachés locales de Vertial al cerrar sesión o antes de iniciar con otra cuenta.
  * Evita mezclar empresa/PDV/datos de un usuario con la cookie de otro en el mismo PC.
  */
@@ -147,7 +162,7 @@ export function clearVertialClientCaches(extraKeepKeys: string[] = []): void {
   const lsRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i += 1) {
     const key = localStorage.key(i);
-    if (!key || keep.has(key)) continue;
+    if (!key || shouldKeepLocalStorageKey(key, keep)) continue;
     if (LOCAL_PREFIXES.some((p) => key.startsWith(p))) lsRemove.push(key);
   }
   for (const key of lsRemove) localStorage.removeItem(key);
@@ -159,4 +174,29 @@ export function clearVertialClientCaches(extraKeepKeys: string[] = []): void {
     if (LOCAL_PREFIXES.some((p) => key.startsWith(p))) ssRemove.push(key);
   }
   for (const key of ssRemove) sessionStorage.removeItem(key);
+}
+
+/**
+ * Tras actualizar la app (TestFlight / nueva build): logout total en el dispositivo.
+ * Borra sesión, tokens y “recordarme”; conserva impresoras por tienda y consentimiento.
+ */
+export function clearVertialClientCachesForAppUpdate(): void {
+  if (typeof window === 'undefined') return;
+
+  const keep = new Set(['vertial_cookie_consent', 'vertial_app_install_stamp']);
+  clearAuthTokens();
+
+  const lsRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    if (!key || shouldKeepLocalStorageKey(key, keep)) continue;
+    if (LOCAL_PREFIXES.some((p) => key.startsWith(p))) lsRemove.push(key);
+  }
+  for (const key of lsRemove) localStorage.removeItem(key);
+
+  try {
+    sessionStorage.clear();
+  } catch {
+    /* ignore */
+  }
 }

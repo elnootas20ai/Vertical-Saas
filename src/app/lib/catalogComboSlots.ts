@@ -451,21 +451,42 @@ export function comboItemsInCatalogSection(
   });
 }
 
+/** Lista blanca opcional por hueco (`customFields.comboSlotAllowlists.side = [id…]`). */
+export function resolveComboSlotAllowlist(
+  customFields: Record<string, unknown> | undefined,
+  slotKind: ComboSlotKind,
+): string[] | null {
+  const raw = customFields?.comboSlotAllowlists;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const ids = (raw as Record<string, unknown>)[slotKind];
+  if (!Array.isArray(ids)) return null;
+  const cleaned = ids.map((id) => String(id || '').trim()).filter(Boolean);
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 export function catalogProductsForComboSection(
   section: ComboMenuCatalogSection,
   catalog: CatalogItem[],
   excludeItemId?: string,
+  options?: { allowlistIds?: string[] | null },
 ): CatalogItem[] {
+  let products: CatalogItem[];
   if (section.groupByMainFamily) {
     const family = section.groupByMainFamily;
-    return catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId).filter(
+    products = catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId).filter(
       (p) => mainFamilyForProduct(p.category || '', p.name) === family,
     );
+  } else if (section.groupBySlotKind) {
+    products = catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId);
+  } else {
+    products = catalogProductsForCategory(section.catalogCategory, catalog, excludeItemId);
   }
-  if (section.groupBySlotKind) {
-    return catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId);
+  const allow = options?.allowlistIds;
+  if (allow && allow.length > 0) {
+    const set = new Set(allow);
+    products = products.filter((p) => set.has(p._id));
   }
-  return catalogProductsForCategory(section.catalogCategory, catalog, excludeItemId);
+  return products;
 }
 
 export function totalUnitsInCatalogSection(

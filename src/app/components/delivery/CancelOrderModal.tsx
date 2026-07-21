@@ -24,7 +24,7 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'c
   const [reason, setReason] = useState('');
   const [selectedPreset, setSelectedPreset] = useState('');
   const finalReason = selectedPreset === 'otro' ? reason : (selectedPreset || reason);
-  const isValid = finalReason.trim().length >= 10;
+  const isValid = finalReason.trim().length >= 4;
   const isDelete = mode === 'delete';
 
   return (
@@ -69,12 +69,12 @@ export function CancelOrderModal({ order, onConfirm, onClose, loading, mode = 'c
 
           {selectedPreset === 'otro' && (
             <textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)}
-              placeholder="Describe el motivo (mínimo 10 caracteres)..."
+              placeholder="Describe el motivo (mínimo 4 caracteres)..."
               className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-red-500 focus:outline-none resize-none" />
           )}
 
           {!isValid && finalReason.length > 0 && (
-            <p className="text-xs text-red-500 mt-1">El motivo debe tener al menos 10 caracteres</p>
+            <p className="text-xs text-red-500 mt-1">El motivo debe tener al menos 4 caracteres</p>
           )}
         </div>
 

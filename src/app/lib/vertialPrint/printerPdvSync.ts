@@ -72,6 +72,50 @@ export async function savePrinterConfigToPdv(
   const saved = await updatePointOfSaleRequest(userId, payload as PointOfSale, {
     suppressLogout: options?.suppressLogout,
   });
-  cachePdvPrinterConfig(saved._id, normalized);
+  // Preferir lo que devolvió el servidor; si viniera sin IP, conservar la que acabamos de guardar.
+  const fromServer = saved?.printerConfig;
+  const host = String(fromServer?.networkHost || normalized.networkHost || '').trim();
+  if (!host) {
+    throw new Error('El servidor no conservó la IP de la impresora. Reintenta guardar.');
+  }
+  cachePdvPrinterConfig(saved._id, {
+    ...normalized,
+    ...(fromServer || {}),
+    connectionType: 'network',
+    networkHost: host,
+    networkPort: Number(fromServer?.networkPort || normalized.networkPort || 9100) || 9100,
+  });
+
+  // Misma marca/nombre sin IP: copiar para que Badalona/Tiana duplicados no queden a ciegas.
+  try {
+    const nameKey = String(pdv.name || '').trim().toLowerCase();
+    if (nameKey && target === 'store') {
+      const all = await listPointsOfSaleRequest(userId, {
+        includeInactive: false,
+        suppressLogout: options?.suppressLogout,
+      });
+      const siblings = all.filter(
+        (p) =>
+          p._id !== saved._id
+          && String(p.name || '').trim().toLowerCase() === nameKey
+          && !String(p.printerConfig?.networkHost || '').trim(),
+      );
+      for (const sib of siblings) {
+        try {
+          const mirrored = await updatePointOfSaleRequest(
+            userId,
+            { _id: sib._id, printerConfig: normalized } as PointOfSale,
+            { suppressLogout: options?.suppressLogout },
+          );
+          cachePdvPrinterConfig(mirrored._id, normalized);
+        } catch {
+          /* no bloquear el guardado principal */
+        }
+      }
+    }
+  } catch {
+    /* ignore mirror errors */
+  }
+
   return saved;
 }

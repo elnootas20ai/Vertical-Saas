@@ -743,8 +743,8 @@ export async function cancelDeliveryOrder(req, res) {
     const { userId, orderId } = req.params;
     const { cancelReason } = req.body || {};
     if (!assertUserScope(req, res, userId)) return;
-    if (!cancelReason || String(cancelReason).trim().length < 10) {
-      return badRequest(res, 'El motivo de cancelación es obligatorio (mínimo 10 caracteres)');
+    if (!cancelReason || String(cancelReason).trim().length < 4) {
+      return badRequest(res, 'El motivo de cancelación es obligatorio (mínimo 4 caracteres)');
     }
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
@@ -1267,13 +1267,35 @@ export async function correctDeliveryOrderPayment(req, res) {
     }, existing);
 
     let sessionsUpdated = 0;
+    let primarySession = null;
+    const orderKey = String(orderId || '').trim();
+    const orderNumber = String(existing.orderNumber || '').trim();
     const allSessions = await listTpvRegisterSessionsByUser(req, userId);
-    for (const sess of allSessions) {
+
+    const sessionHasOrderSale = (sess) =>
+      (sess.transactions || []).some((t) => {
+        if (t?.type !== 'sale') return false;
+        const linked = String(t.linkedDeliveryOrderId || t.orderId || '').trim();
+        if (linked && linked === orderKey) return true;
+        if (orderNumber && String(t.orderNumber || '').trim() === orderNumber) return true;
+        return false;
+      });
+
+    // Solo sesiones que tienen la venta de este pedido (prioridad: caja abierta).
+    const withSale = (allSessions || []).filter((s) => s && !s.deletedAt && sessionHasOrderSale(s));
+    const openWithSale = withSale.filter((s) => String(s.status || '') === 'open');
+    const targets = openWithSale.length > 0 ? openWithSale : withSale.slice(0, 5);
+
+    for (const sess of targets) {
       let changed = false;
       const txs = (sess.transactions || []).map((t) => {
-        const linkedId = String(t?.linkedDeliveryOrderId || t?.orderId || '').trim();
-        if (linkedId !== orderId || t?.type !== 'sale') return t;
-        if (String(t.paymentMethod || '').toLowerCase() === pm) return t;
+        if (t?.type !== 'sale') return t;
+        const linked = String(t.linkedDeliveryOrderId || t.orderId || '').trim();
+        const sameOrder =
+          (linked && linked === orderKey) ||
+          (orderNumber && String(t.orderNumber || '').trim() === orderNumber);
+        if (!sameOrder) return t;
+        if (normalizeTpvPaymentMethod(t.paymentMethod) === pm) return t;
         changed = true;
         return {
           ...t,
@@ -1286,8 +1308,12 @@ export async function correctDeliveryOrderPayment(req, res) {
       if (!changed) continue;
       const sessionDoc = buildTpvRegisterSessionDocument(userId, { ...sess, transactions: txs }, sess);
       const savedSess = await putDocument(req, db, sessionDoc._id, sessionDoc);
-      broadcastTpvSessionLive(account, userId, { ...sessionDoc, _rev: savedSess.rev });
+      const sanitizedSess = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: savedSess.rev });
+      broadcastTpvSessionLive(account, userId, sanitizedSess);
       sessionsUpdated += 1;
+      if (String(sess.status || '') === 'open' || !primarySession) {
+        primarySession = sanitizedSess;
+      }
     }
 
     const saved = await putDocument(req, db, doc._id, doc);
@@ -1304,7 +1330,12 @@ export async function correctDeliveryOrderPayment(req, res) {
 
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastDeliveryOrderSse(account, userId, 'updated', { ...doc, _rev: saved.rev });
-    return res.json({ ok: true, order: sanitized, sessionsUpdated });
+    return res.json({
+      ok: true,
+      order: sanitized,
+      sessionsUpdated,
+      ...(primarySession ? { session: primarySession } : {}),
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al corregir método de pago' });
   }

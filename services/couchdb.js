@@ -15,6 +15,8 @@ import {
   hashAuthToken,
 } from './accountAuthTokens.js';
 import {
+  buildClientSearchIndex,
+  candidateIndicesForClientSearch,
   clientMatchesBusinessScope,
   clientSearchPrefersPhone,
   normalizeClientBusinessScopeId,
@@ -299,8 +301,27 @@ function readClientDocumentsCache(uid) {
   return entry.docs;
 }
 
+function readClientSearchBundle(uid) {
+  const entry = clientDocumentsByUser.get(uid);
+  if (!entry) return null;
+  if (Date.now() - entry.at > CLIENT_DOCS_TTL_MS) {
+    clientDocumentsByUser.delete(uid);
+    return null;
+  }
+  entry.at = Date.now();
+  if (!entry.searchIndex) {
+    entry.searchIndex = buildClientSearchIndex(entry.docs);
+  }
+  return entry;
+}
+
 function writeClientDocumentsCache(uid, docs) {
-  clientDocumentsByUser.set(uid, { at: Date.now(), docs });
+  const list = Array.isArray(docs) ? docs : [];
+  clientDocumentsByUser.set(uid, {
+    at: Date.now(),
+    docs: list,
+    searchIndex: buildClientSearchIndex(list),
+  });
 }
 
 /**
@@ -3897,41 +3918,93 @@ function foldSearchText(s) {
     .toLowerCase();
 }
 
+/**
+ * Filtra clientes por texto usando índice en memoria (prefijos tel/nombre).
+ * @param {number} [options.limit]
+ * @param {boolean} [options.earlyStopExactPhone]
+ */
+export function filterClientDocsBySearch(docs, searchIndex, phoneQuery, userId, options = {}) {
+  const raw = String(phoneQuery || '').trim();
+  if (raw.length < 1) return [];
+
+  const list = Array.isArray(docs) ? docs : [];
+  const qFold = foldSearchText(raw);
+  const qDigits = raw.replace(/\D/g, '');
+  const preferPhone = clientSearchPrefersPhone(raw, qDigits);
+  const bid = normalizeClientBusinessScopeId(options.businessId);
+  const hasLimit = options.limit != null && Number.isFinite(Number(options.limit));
+  const max = hasLimit ? Math.min(50_000, Math.max(1, Number(options.limit))) : Number.POSITIVE_INFINITY;
+  const earlyStopExactPhone = Boolean(options.earlyStopExactPhone && hasLimit);
+  // Email / forzar: el índice es por prefijos.
+  const forceScan = raw.includes('@') || Boolean(options.forceScan);
+
+  const candidates = forceScan ? null : candidateIndicesForClientSearch(searchIndex, qFold, qDigits);
+  const useIndex = Boolean(searchIndex) && !forceScan && candidates != null;
+
+  const scored = [];
+  let exactPhoneHits = 0;
+
+  const consider = (d) => {
+    if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) return false;
+    if (bid && !clientMatchesBusinessScope(d, bid, options)) return false;
+    const score = scoreClientSearchMatch(d, raw, qFold, qDigits, preferPhone);
+    if (score <= 0) return false;
+    scored.push({ doc: d, score });
+    if (earlyStopExactPhone && preferPhone && score >= 200) {
+      exactPhoneHits += 1;
+      if (exactPhoneHits >= max) return 'stop';
+    }
+    return true;
+  };
+
+  if (useIndex) {
+    for (const idx of candidates || []) {
+      const d = list[idx];
+      if (!d) continue;
+      if (consider(d) === 'stop') break;
+    }
+  } else {
+    for (const d of list) {
+      if (consider(d) === 'stop') break;
+    }
+  }
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return String(b.doc.updatedAt || '').localeCompare(String(a.doc.updatedAt || ''));
+  });
+
+  if (hasLimit) return scored.slice(0, max).map((row) => row.doc);
+  return scored.map((row) => row.doc);
+}
+
 /** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
 export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, options = {}) {
   const raw = String(phoneQuery || '').trim();
   if (raw.length < 1) return [];
 
   const docs = await getClientDocumentsForUser(req, userId);
-  const qFold = foldSearchText(raw);
-  const qDigits = raw.replace(/\D/g, '');
-  const preferPhone = clientSearchPrefersPhone(raw, qDigits);
-  const bid = normalizeClientBusinessScopeId(options.businessId);
+  const bundle = readClientSearchBundle(userId);
+  const searchIndex = bundle?.searchIndex || null;
   const max = Math.min(50, Math.max(1, Number(limit) || 20));
 
-  const scored = [];
-  let exactPhoneHits = 0;
+  return filterClientDocsBySearch(docs, searchIndex, raw, userId, {
+    ...options,
+    limit: max,
+    earlyStopExactPhone: true,
+  });
+}
 
-  for (const d of docs) {
-    if (d?.type !== 'client' || d?.deletedAt || d?.user_id !== userId) continue;
-    if (bid && !clientMatchesBusinessScope(d, bid, options)) continue;
-    const score = scoreClientSearchMatch(d, raw, qFold, qDigits, preferPhone);
-    if (score <= 0) continue;
-    scored.push({ doc: d, score });
-    // Teléfono exacto: no hace falta recorrer el resto de la cartera.
-    if (preferPhone && score >= 200) {
-      exactPhoneHits += 1;
-      if (exactPhoneHits >= max) break;
-    }
-  }
+/** Igual que searchClientsByPhone pero sin tope (listado CRM con paginación). */
+export async function searchClientsForList(req, userId, phoneQuery, options = {}) {
+  const raw = String(phoneQuery || '').trim();
+  if (raw.length < 1) return [];
 
-  return scored
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return String(b.doc.updatedAt || '').localeCompare(String(a.doc.updatedAt || ''));
-    })
-    .slice(0, max)
-    .map((row) => row.doc);
+  const docs = await getClientDocumentsForUser(req, userId);
+  const bundle = readClientSearchBundle(userId);
+  const searchIndex = bundle?.searchIndex || null;
+
+  return filterClientDocsBySearch(docs, searchIndex, raw, userId, options);
 }
 
 // ─── CLIENT NOTES ────────────────────────────────────────────────────────────
@@ -5566,7 +5639,11 @@ function normalizePaymentStatus(value) {
 export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
   const now = new Date().toISOString();
   const id = existing?._id || `dord-${uuidv4()}`;
-  const orderNumber = existing?.orderNumber || `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+  const clientOrderNumber = String(data?.orderNumber || '').trim().toUpperCase();
+  const orderNumber = existing?.orderNumber
+    || (/^[A-Z0-9][A-Z0-9\-_]{2,31}$/.test(clientOrderNumber)
+      ? clientOrderNumber
+      : `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`);
 
   const items = Array.isArray(data.items) ? data.items.map((i) => ({
     id: i.id || '',
@@ -6411,6 +6488,36 @@ function sanitizePrinterConfig(raw) {
   };
 }
 
+/** Una vez hay impresora de red en el PDV, no se borra con payloads vacíos/nulos. */
+function resolvePrinterConfigField(data, existing) {
+  const existingCfg = existing?.printerConfig
+    ? sanitizePrinterConfig(existing.printerConfig)
+    : null;
+  const existingHost = String(existingCfg?.networkHost || '').trim();
+
+  if (!Object.prototype.hasOwnProperty.call(data || {}, 'printerConfig')) {
+    return existingCfg ? { printerConfig: existingCfg } : {};
+  }
+
+  const next = sanitizePrinterConfig(data.printerConfig);
+  if (!next) {
+    return existingCfg ? { printerConfig: existingCfg } : {};
+  }
+
+  const nextHost = String(next.networkHost || '').trim();
+  if (next.connectionType === 'network' && nextHost) {
+    return { printerConfig: next };
+  }
+  if (next.connectionType === 'system' && String(next.systemPrinterName || '').trim()) {
+    return { printerConfig: next };
+  }
+  // No sustituir una IP de tienda ya guardada por browser/vacío.
+  if (existingCfg && existingCfg.connectionType === 'network' && existingHost) {
+    return { printerConfig: existingCfg };
+  }
+  return { printerConfig: next };
+}
+
 function mapPointOfSaleTerminal(t) {
   const out = {
     id: String(t.id || `term-${uuidv4().slice(0, 8)}`),
@@ -6420,12 +6527,23 @@ function mapPointOfSaleTerminal(t) {
     printerName: String(t.printerName || ''),
     active: t.active !== false,
   };
-  if (Object.prototype.hasOwnProperty.call(t || {}, 'printerConfig')) {
-    const cfg = sanitizePrinterConfig(t.printerConfig);
-    if (cfg) out.printerConfig = cfg;
-  } else if (t?.printerConfig) {
-    const cfg = sanitizePrinterConfig(t.printerConfig);
-    if (cfg) out.printerConfig = cfg;
+  const rawCfg = Object.prototype.hasOwnProperty.call(t || {}, 'printerConfig')
+    ? t.printerConfig
+    : t?.printerConfig;
+  if (rawCfg) {
+    const cfg = sanitizePrinterConfig(rawCfg);
+    if (cfg) {
+      const host = String(cfg.networkHost || '').trim();
+      const systemName = String(cfg.systemPrinterName || '').trim();
+      // No persistir config de red vacía: en el TPV tapa la impresora de la tienda.
+      if (cfg.connectionType === 'network') {
+        if (host) out.printerConfig = cfg;
+      } else if (cfg.connectionType === 'system') {
+        if (systemName) out.printerConfig = cfg;
+      } else {
+        out.printerConfig = cfg;
+      }
+    }
   }
   return out;
 }
@@ -6453,11 +6571,7 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     terminalCode,
     address: String(data.address || existing?.address || ''),
     terminals,
-    ...(Object.prototype.hasOwnProperty.call(data, 'printerConfig')
-      ? { printerConfig: sanitizePrinterConfig(data.printerConfig) }
-      : existing?.printerConfig
-        ? { printerConfig: sanitizePrinterConfig(existing.printerConfig) }
-        : {}),
+    ...resolvePrinterConfigField(data, existing),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
     createdAt: existing?.createdAt || now,
     updatedAt: now,

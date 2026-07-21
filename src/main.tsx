@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import App from "./app/App.tsx";
 import "./styles/index.css";
 import "./app/lib/i18n";
+import { enforceFreshLoginOnAppUpdate } from "./app/lib/appInstallStamp";
 import {
   clearStaleWebCachesInDev,
   configureNativeSafeArea,
@@ -26,14 +27,22 @@ function showBootstrapError(error: unknown) {
   `;
 }
 
-// React primero: la limpieza de SW/caché puede colgarse y no debe bloquear el arranque.
-void clearStaleWebCachesInDev();
-registerPwaServiceWorker();
-void prepareNativeWebView();
-void configureNativeSafeArea();
+async function boot() {
+  // Antes de AuthProvider: nueva build nativa → login limpio (sin sesión del cliente anterior).
+  try {
+    await enforceFreshLoginOnAppUpdate();
+  } catch {
+    /* no bloquear arranque */
+  }
 
-const rootEl = document.getElementById("root");
-if (rootEl) {
+  // React primero tras el wipe: la limpieza de SW/caché puede colgarse y no debe bloquear.
+  void clearStaleWebCachesInDev();
+  registerPwaServiceWorker();
+  void prepareNativeWebView();
+  void configureNativeSafeArea();
+
+  const rootEl = document.getElementById("root");
+  if (!rootEl) return;
   try {
     createRoot(rootEl).render(<App />);
   } catch (error) {
@@ -41,3 +50,5 @@ if (rootEl) {
     console.error("[Vertial bootstrap]", error);
   }
 }
+
+void boot();

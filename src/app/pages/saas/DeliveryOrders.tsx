@@ -40,7 +40,7 @@ import { CancelOrderModal } from '../../components/delivery/CancelOrderModal';
 import { RefundOrderModal } from '../../components/delivery/RefundOrderModal';
 import { ReopenOrderModal } from '../../components/delivery/ReopenOrderModal';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
-import { businessTicketInfoFrom } from '../../lib/deliveryTicketHelpers';
+import { businessTicketInfoFrom, shouldPrintCustomerTicketOnDispatch } from '../../lib/deliveryTicketHelpers';
 import { CreateOrderWizard } from '../../components/delivery/CreateOrderWizard';
 import { DeliveryAlertsBar, type DeliveryAlert } from '../../components/delivery/DeliveryAlertsBar';
 import {
@@ -293,6 +293,15 @@ export function DeliveryOrders() {
       setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
       toast.success(`Estado: ${STATUS_CONFIG[next].label}`);
+      if (next === 'en_reparto' && currentBusiness && shouldPrintCustomerTicketOnDispatch(updated)) {
+        void printDeliveryTicket({
+          order: updated,
+          business: businessTicketInfoFrom(currentBusiness),
+          salesPointName: updated.salesPointName,
+          cashierName: user?.fullName,
+          variant: 'customer',
+        });
+      }
     } catch {
       toast.error('Error al cambiar estado');
     }

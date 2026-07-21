@@ -5,21 +5,18 @@ export type {
   DeliveryTicketVariant,
 } from './deliveryTicketTypes';
 
-/** Evita doble tap: un ticket a la vez desde la UI. (BLINDADO build 33 / 112127f) */
-let printInFlight: Promise<void> | null = null;
+/**
+ * Un ticket a la vez (BLINDADO build 33 / 112127f).
+ * Si llega otro mientras imprime, se encola — no se descarta.
+ */
+let printTail: Promise<void> = Promise.resolve();
 
 export async function printDeliveryTicket(
   options: import('./deliveryTicketTypes').DeliveryTicketPrintOptions,
 ): Promise<void> {
   const { toast } = await import('sonner');
 
-  if (printInFlight) {
-    toast.message('Espera: hay un ticket imprimiéndose…');
-    await printInFlight.catch(() => undefined);
-    return;
-  }
-
-  printInFlight = (async () => {
+  const job = async () => {
     try {
       const { printDeliveryTicket: printUnified } = await import('./vertialPrint/printDeliveryTicket');
       const result = await printUnified(options);
@@ -35,11 +32,12 @@ export async function printDeliveryTicket(
           : `No se pudo imprimir el ticket${detail}`,
       );
     }
-  })();
+  };
 
-  try {
-    await printInFlight;
-  } finally {
-    printInFlight = null;
-  }
+  const run = printTail.then(job, job);
+  printTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  await run;
 }

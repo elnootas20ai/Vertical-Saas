@@ -6,8 +6,10 @@ export type PromoApplyMode = 'manual_code' | 'auto';
 
 export interface PromoProductMatch {
   productIds?: string[];
-  /** Subcadenas del nombre (sin acentos, case-insensitive). */
+  /** Subcadenas / tokens del nombre (sin acentos, case-insensitive). */
   nameIncludes?: string[];
+  /** Si el nombre contiene alguno de estos, no aplica (p. ej. burger vs pizza Bacon). */
+  excludeNameIncludes?: string[];
 }
 
 export interface StoredPromotion {
@@ -108,6 +110,16 @@ export function isPromotionActiveNow(p: StoredPromotion, now = new Date()): bool
   return true;
 }
 
+/** Coincide por token/frase con límites de palabra (no substring suelto). */
+function nameContainsToken(hayFold: string, needleFold: string): boolean {
+  const n = String(needleFold || '').trim();
+  if (!n || !hayFold) return false;
+  const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`).test(hayFold);
+}
+
+const BURGER_NAME_MARKERS = ['burger', 'hamburguesa', 'hamburgesa', 'top burger'];
+
 export function matchPromoProduct(
   match: PromoProductMatch | undefined,
   line: Pick<PromoCartLine, 'productId' | 'name'>,
@@ -120,10 +132,26 @@ export function matchPromoProduct(
   const needles = (match.nameIncludes || [])
     .map((n) => normalizePromoText(n))
     .filter(Boolean);
-  if (needles.length === 0) return ids.length > 0 ? false : false;
+  if (needles.length === 0) return false;
+
   const hay = normalizePromoText(line.name || '');
   if (!hay) return false;
-  return needles.some((n) => hay.includes(n));
+
+  const excludes = (match.excludeNameIncludes || [])
+    .map((n) => normalizePromoText(n))
+    .filter(Boolean);
+  if (excludes.some((ex) => nameContainsToken(hay, ex))) return false;
+
+  // Promo de pizzas (needles tipo bacon/margarita) no debe caer en burgers.
+  const hayLooksBurger = BURGER_NAME_MARKERS.some((m) => nameContainsToken(hay, m));
+  if (hayLooksBurger) {
+    const needleTargetsBurger = needles.some((n) =>
+      BURGER_NAME_MARKERS.some((m) => n.includes(m)),
+    );
+    if (!needleTargetsBurger) return false;
+  }
+
+  return needles.some((n) => nameContainsToken(hay, n));
 }
 
 export function findActivePromotionByCode(codeRaw: string): AppliedPromo | null {

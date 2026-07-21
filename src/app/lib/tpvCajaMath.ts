@@ -81,6 +81,26 @@ export function buildTpvRegisterSummary(session: TpvRegisterSession): TpvRegiste
   };
 }
 
+/**
+ * Total vivo de la barra TPV: cobros efectivo + tarjeta + entradas − salidas.
+ * (No incluye fondo inicial; ese va al arqueo de efectivo.)
+ */
+export function calcTpvShiftCollectionsTotal(session: TpvRegisterSession): {
+  efectivo: number;
+  tarjeta: number;
+  cashIn: number;
+  cashOut: number;
+  total: number;
+} {
+  const summary = buildTpvRegisterSummary(session);
+  const efectivo = Number(summary.salesByMethod.efectivo || 0);
+  const tarjeta = Number(summary.salesByMethod.tarjeta || 0);
+  const cashIn = Number(summary.totalCashIn || 0);
+  const cashOut = Number(summary.totalCashOut || 0);
+  const total = Number((efectivo + tarjeta + cashIn - cashOut).toFixed(2));
+  return { efectivo, tarjeta, cashIn, cashOut, total };
+}
+
 export function isCajaRegistrationOk(status: string | null | undefined): boolean {
   return status === 'registered' || status === 'nothing_to_register' || status === 'already_registered';
 }

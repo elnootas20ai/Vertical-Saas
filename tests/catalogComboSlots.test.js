@@ -171,6 +171,33 @@ describe('catalogComboSlots', () => {
     expect(catalogProductsForComboSection(sideSection, catalog).map((p) => p._id)).toEqual(['c1']);
   });
 
+  it('allowlist restringe productos del hueco (p. ej. Deluxe o Monalisa)', async () => {
+    const { resolveComboSlotAllowlist } = await import('../src/app/lib/catalogComboSlots.ts');
+    const catalog = [
+      item({ _id: 'd1', name: 'Patatas Deluxe', category: 'Complementos' }),
+      item({ _id: 'm1', name: 'Patatas Monalisa', category: 'Complementos' }),
+      item({ _id: 'x1', name: 'Alitas', category: 'Complementos' }),
+    ];
+    const section = {
+      catalogCategory: 'Complementos',
+      slotKind: 'side',
+      expectedCount: 0,
+      required: true,
+      slotQuota: 1,
+      groupBySlotKind: true,
+    };
+    const allow = resolveComboSlotAllowlist(
+      { comboSlotAllowlists: { side: ['d1', 'm1'] } },
+      'side',
+    );
+    expect(allow).toEqual(['d1', 'm1']);
+    expect(
+      catalogProductsForComboSection(section, catalog, undefined, { allowlistIds: allow }).map(
+        (p) => p._id,
+      ),
+    ).toEqual(['d1', 'm1']);
+  });
+
   it('buildComboMenuSections sin bebidas en catálogo sigue agrupando por tipo', () => {
     const catalog = [item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' })];
     const sections = buildComboMenuSections('estandar', catalog);

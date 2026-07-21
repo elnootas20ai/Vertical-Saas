@@ -19,14 +19,19 @@ function sanitizeWeekdays(value) {
 }
 
 function sanitizeProductMatch(value) {
-  if (!value || typeof value !== 'object') return { productIds: [], nameIncludes: [] };
+  if (!value || typeof value !== 'object') {
+    return { productIds: [], nameIncludes: [], excludeNameIncludes: [] };
+  }
   const productIds = Array.isArray(value.productIds)
     ? value.productIds.map((id) => String(id || '').trim()).filter(Boolean)
     : [];
   const nameIncludes = Array.isArray(value.nameIncludes)
     ? value.nameIncludes.map((n) => String(n || '').trim()).filter(Boolean)
     : [];
-  return { productIds, nameIncludes };
+  const excludeNameIncludes = Array.isArray(value.excludeNameIncludes)
+    ? value.excludeNameIncludes.map((n) => String(n || '').trim()).filter(Boolean)
+    : [];
+  return { productIds, nameIncludes, excludeNameIncludes };
 }
 
 function sanitizePromotion(doc) {

@@ -44,7 +44,7 @@ import {
   getTpvPhaseTimer,
 } from '../../../lib/deliveryOpsLiveTimes';
 import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
-import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../../lib/deliveryTicketHelpers';
+import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal, shouldPrintCustomerTicketOnDispatch } from '../../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
 import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetailCard';
 import { DecimalNumpadField } from '../../../components/saas/DecimalNumpadField';
@@ -281,11 +281,6 @@ function waitBadgeClasses(minutes: number): string {
     return 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-200 dark:border-amber-800';
   }
   return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:border-gray-600';
-}
-
-/** Minutos de la fase actual (montaje o reparto), misma lógica que centro de ops. */
-function orderPhaseMinutes(order: DeliveryOrder, nowMs: number): number {
-  return getTpvPhaseTimer(order, nowMs).minutes;
 }
 
 const DELIVERY_TYPE_BADGE: Record<DeliveryType, { label: string; className: string; Icon: LucideIcon }> = {
@@ -1371,25 +1366,36 @@ export function WorkerTpvDelivery({
         ],
       };
 
-      // Calle 1: ticket (no await). Calle 2: guardar estado.
-      if (next === 'en_reparto' && currentBusiness && order.deliveryType === 'domicilio') {
-        void printDeliveryTicket({
-          order: payload,
-          business: businessTicketInfoFrom(currentBusiness),
-          salesPointName: payload.salesPointName,
-          cashierName: user?.fullName,
-          variant: 'customer',
-          accountEmail: user?.email,
-        });
+      // Calle 1: ticket cliente al pasar a repartidor (no await). Calle 2: guardar estado.
+      const ticketBusiness =
+        currentBusiness
+        || businesses.find((b) => {
+          const id = String(b.business_id || '').replace(/^business:/, '').trim();
+          return id && id === String(businessId || '').replace(/^business:/, '').trim();
+        })
+        || null;
+      if (next === 'en_reparto' && shouldPrintCustomerTicketOnDispatch(order)) {
+        if (ticketBusiness) {
+          void printDeliveryTicket({
+            order: payload,
+            business: businessTicketInfoFrom(ticketBusiness),
+            salesPointName: payload.salesPointName,
+            cashierName: user?.fullName,
+            variant: 'customer',
+            accountEmail: user?.email,
+          });
+        } else {
+          toast.error('No se pudo imprimir el ticket de cliente: falta empresa activa');
+        }
       }
       if (
         next === 'entregado'
-        && currentBusiness
+        && ticketBusiness
         && (payload.paymentStatus === 'paid' || orderAlreadyCobrado(payload))
       ) {
         void printDeliveryTicket({
           order: payload,
-          business: businessTicketInfoFrom(currentBusiness),
+          business: businessTicketInfoFrom(ticketBusiness),
           salesPointName: payload.salesPointName,
           cashierName: user?.fullName,
           variant: 'customer',
@@ -1491,8 +1497,8 @@ export function WorkerTpvDelivery({
       if (selectedOrder?._id === updated._id) setSelectedOrder(null);
       if (deliveryCompleteOrder?._id === updated._id) setDeliveryCompleteOrder(null);
       toast.success(`Pedido #${deleteOrder.orderNumber} eliminado`);
-    } catch {
-      toast.error('Error al eliminar el pedido');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al eliminar el pedido');
     } finally {
       endAdvancing(deleteOrder._id);
     }
@@ -1538,18 +1544,12 @@ export function WorkerTpvDelivery({
       if (!orderInRegisterSession(o, openSession)) return false;
       return isCompletedBoardOrder(o);
     });
-    const activeWait = [...montaje, ...enReparto];
-    const avgWait =
-      activeWait.length > 0
-        ? Math.round(activeWait.reduce((s, o) => s + orderPhaseMinutes(o, nowMs), 0) / activeWait.length)
-        : null;
     return {
       montaje: montaje.length,
       delivery: enReparto.length,
       delivered: completados.length,
-      avgWait,
     };
-  }, [orders, openSession, nowMs]);
+  }, [orders, openSession]);
 
   const scopedActive = useMemo(
     () => orders.filter((o) => orderOnOpenTpvOpsBoard(o, openSession)),
@@ -1926,7 +1926,7 @@ export function WorkerTpvDelivery({
             Resumen del turno
           </p>
         )}
-        <div className={`grid grid-cols-4 ${isTabletUi ? 'gap-1.5' : 'gap-1.5 sm:gap-2'}`}>
+        <div className={`grid grid-cols-3 ${isTabletUi ? 'gap-1.5' : 'gap-1.5 sm:gap-2'}`}>
           <div className={`rounded-xl border text-center text-indigo-700 bg-indigo-50 border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-900 dark:text-indigo-300 ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}>
             <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>{stats.montaje}</p>
             <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>Montaje</p>
@@ -1952,20 +1952,6 @@ export function WorkerTpvDelivery({
               {showDelivered ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </p>
           </button>
-          <div
-            className={`rounded-xl border text-center ${
-              stats.avgWait != null && stats.avgWait >= WARN_MINUTES
-                ? 'text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300'
-                : 'text-gray-700 bg-gray-50 border-gray-200 dark:bg-gray-800/50 dark:border-gray-700 dark:text-gray-300'
-            } ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}
-          >
-            <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>
-              {stats.avgWait != null ? `${stats.avgWait}m` : '—'}
-            </p>
-            <p className={`font-semibold uppercase tracking-wide opacity-80 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>
-              {isTabletUi ? 'Fase' : 'Tiempo fase'}
-            </p>
-          </div>
         </div>
 
         {/* Siempre visible: si solo va en casilla colapsada parece que “desapareció”. */}

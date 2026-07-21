@@ -29,12 +29,19 @@ function pdvBase(overrides: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  updatePointOfSaleRequest.mockReset().mockImplementation(async (_uid, payload) => ({
-    ...(payload as object),
-    _id: 'pdv-1',
-    _rev: 'new-rev',
-  }));
-  listPointsOfSaleRequest.mockReset();
+  updatePointOfSaleRequest.mockReset().mockImplementation(async (_uid, payload) => {
+    const p = payload as { _id?: string; printerConfig?: unknown };
+    return {
+      ...(payload as object),
+      _id: p._id || 'pdv-1',
+      _rev: 'new-rev',
+      name: 'Tienda',
+      printerConfig: p.printerConfig || wifiConfig,
+    };
+  });
+  listPointsOfSaleRequest.mockReset().mockResolvedValue([
+    { _id: 'pdv-1', name: 'Tienda', printerConfig: wifiConfig, terminals: [] },
+  ]);
   localStorage.clear();
 });
 

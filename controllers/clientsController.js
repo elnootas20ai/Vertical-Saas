@@ -23,6 +23,7 @@ import {
   sanitizeClientPromotion,
   listClientPromotionsByClient,
   searchClientsByPhone,
+  searchClientsForList,
   getClientDocumentsForUser,
   listDeliveryOrdersByUser,
   resolveDataOwnerUserId,
@@ -53,9 +54,19 @@ function resolveQueryBusinessId(req) {
   return normalizeBusinessScopeId(req.query?.businessId || req.query?.business_id || '');
 }
 
+const businessCountCache = new Map(); // userId -> { at, count }
+const BUSINESS_COUNT_TTL_MS = 120_000;
+
 async function countActiveBusinesses(req, userId) {
+  const uid = String(userId || '').trim();
+  const cached = businessCountCache.get(uid);
+  if (cached && Date.now() - cached.at < BUSINESS_COUNT_TTL_MS) {
+    return cached.count;
+  }
   const businesses = await listBusinessesByUser(req, userId);
-  return businesses.filter((b) => !b?.deletedAt).length;
+  const count = businesses.filter((b) => !b?.deletedAt).length;
+  businessCountCache.set(uid, { at: Date.now(), count });
+  return count;
 }
 
 async function resolveClientListOptions(req, userId, businessId) {
@@ -109,10 +120,18 @@ export async function listClients(req, res) {
 
     const businessId = resolveQueryBusinessId(req);
     const listOptions = await resolveClientListOptions(req, userId, businessId);
-    const raw = await listClientsByUser(req, userId, listOptions);
+    const searchParam = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const query = { ...req.query };
+    let raw;
+    if (searchParam) {
+      // Índice en memoria: no recorrer miles de docs en cada tecla del CRM.
+      raw = await searchClientsForList(req, userId, searchParam, listOptions);
+      delete query.search;
+    } else {
+      raw = await listClientsByUser(req, userId, listOptions);
+    }
     const useLite = req.query.lite === '1' || req.query.lite === 'true';
     const sanitizer = useLite ? sanitizeClientSummary : sanitizeClient;
-    const query = { ...req.query };
     if (useLite && query.limit === undefined && query.skip === undefined) {
       query.limit = '50';
       query.skip = '0';

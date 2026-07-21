@@ -11,7 +11,7 @@ function escapeHtml(value: string): string {
 
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:4px 10px 8px;font-size:14px;color:#000;line-height:1.35}
+body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:2px 10px 4px;font-size:14px;color:#000;line-height:1.35}
 .c{text-align:center}.hr{border-top:1px dashed #333;margin:10px 0}
 table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .t td{font-size:16px;font-weight:bold;padding-top:6px}

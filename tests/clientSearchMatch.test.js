@@ -3,6 +3,8 @@ import {
   clientMatchesBusinessScope,
   scoreClientSearchMatch,
   scorePhoneDigitsMatch,
+  buildClientSearchIndex,
+  candidateIndicesForClientSearch,
 } from '../shared/clients/clientSearchMatch.js';
 
 describe('clientMatchesBusinessScope', () => {
@@ -104,5 +106,28 @@ describe('scoreClientSearchMatch', () => {
         excludeUnscopedLegacy: false,
       }),
     ).toBe(true);
+  });
+});
+
+describe('buildClientSearchIndex', () => {
+  it('encuentra candidatos por teléfono sin recorrer toda la cartera', () => {
+    const docs = [
+      { name: 'Ana', phone: '600111222', user_id: 'u1', type: 'client' },
+      { name: 'Luis', phone: '611222333', user_id: 'u1', type: 'client' },
+      { name: 'Uriel', phone: '647779812', user_id: 'u1', type: 'client' },
+    ];
+    const index = buildClientSearchIndex(docs);
+    const hits = candidateIndicesForClientSearch(index, '', '647');
+    expect([...hits]).toEqual([2]);
+  });
+
+  it('encuentra candidatos por prefijo de nombre', () => {
+    const docs = [
+      { name: 'Ana García', phone: '600111222', type: 'client' },
+      { name: 'Luis Pérez', phone: '611222333', type: 'client' },
+    ];
+    const index = buildClientSearchIndex(docs);
+    const hits = candidateIndicesForClientSearch(index, 'garc', '');
+    expect([...hits]).toEqual([0]);
   });
 });

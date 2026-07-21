@@ -21,6 +21,7 @@ import {
   pickDefaultActivePdvId,
   DELIVERY_ACTIVE_STORE_CHANGED,
 } from '../../lib/deliveryOpsPdvSelection';
+import { shouldPrintCustomerTicketOnDispatch } from '../../lib/deliveryTicketHelpers';
 import {
   Package,
   Search,
@@ -512,6 +513,31 @@ export function DeliveryMontaje() {
       });
 
       toast.success(`Pedido ${order.orderNumber} → ${DESTINATION_CONFIG[destination].label}`);
+
+      // Ticket cliente al enviar a repartidor (montaje → reparto).
+      if (
+        destination === 'reparto'
+        && currentBusiness
+        && shouldPrintCustomerTicketOnDispatch(updated)
+      ) {
+        void (async () => {
+          try {
+            const { printDeliveryTicket } = await import('../../lib/deliveryTicketPrint');
+            const { businessTicketInfoFrom, buildOrderTicketOptions } = await import(
+              '../../lib/deliveryTicketHelpers'
+            );
+            await printDeliveryTicket(
+              buildOrderTicketOptions(updated, businessTicketInfoFrom(currentBusiness), {
+                salesPointName: updated.salesPointName,
+                cashierName: user?.fullName,
+                variant: 'customer',
+              }),
+            );
+          } catch {
+            toast.error(`No se pudo imprimir el ticket del pedido ${order.orderNumber}`);
+          }
+        })();
+      }
     } catch {
       toast.error('Error al completar el montaje');
     } finally {

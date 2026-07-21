@@ -30,6 +30,7 @@ test('incluye críticas y caja / impagos clave', () => {
     'payment_overdue',
     'delivery_unpaid_order',
     'client_payment_overdue',
+    'delivery_order_cancelled',
   ]) {
     assert.ok(CEO_MOBILE_PUSH_RULE_IDS.has(id), `falta ${id}`);
   }

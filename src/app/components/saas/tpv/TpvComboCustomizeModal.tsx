@@ -17,6 +17,7 @@ import {
   mainFamilyForProduct,
   normalizeComboItemsForSave,
   resolveComboRefSlotKind,
+  resolveComboSlotAllowlist,
   resolveTpvComboMenuSections,
   totalUnitsInCatalogSection,
   totalUnitsInSlotKind,
@@ -393,7 +394,9 @@ export function TpvComboCustomizeModal({
               const need = unitsNeededInComboSection(section);
               const picked = comboItemsInCatalogSection(section, selections, catalogItems);
               const have = picked.reduce((sum, r) => sum + Math.max(1, r.quantity || 1), 0);
-              const products = catalogProductsForComboSection(section, catalogItems, item._id);
+              const products = catalogProductsForComboSection(section, catalogItems, item._id, {
+                allowlistIds: resolveComboSlotAllowlist(item.customFields, section.slotKind),
+              });
               const done = need <= 0 || have >= need;
               const key = comboMenuSectionKey(section);
               const expanded = expandedKey === key;

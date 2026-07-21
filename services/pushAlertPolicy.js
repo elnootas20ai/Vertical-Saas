@@ -26,13 +26,14 @@ export const CEO_MOBILE_PUSH_RULE_IDS = new Set([
   'delivery_driver_mismatch',
   'butcher_register_pending',
 
-  // ── Impagos / cobros ──
+  // ── Impagos / cobros / pedidos anulados ──
   'delivery_unpaid_order',
   'delivery_unpaid',
   'client_payment_overdue',
   'overdue_client_invoice',
   'supplier_invoice_overdue',
   'sale_cancelled',
+  'delivery_order_cancelled',
   'cv_sale_unpaid',
   'scrapyard_sale_unpaid',
   'cleaning_client_unpaid',

@@ -123,22 +123,19 @@ function pushLineDetail(
 
 /**
  * Margen superior: la cuchilla suele dejar el inicio del papel encima del cabezal.
- * Sin este avance, el título/negocio salen cortados (p. ej. Badalona).
+ * 1 línea basta para no cortar el título; más blanco desperdicia bobina (Badalona).
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  chunks.push(command([ESC, 0x64, 3]));
+  chunks.push(command([ESC, 0x64, 1]));
 }
 
 /**
  * Avance + corte: el pie (método de pago, gracias…) debe quedar por encima de la cuchilla.
- * Con solo 3 líneas en algunas térmicas 80 mm (Badalona) el ticket sale “corto” / cortado.
- * 8 líneas ≈ margen seguro sin tirar media bobina.
+ * 4 líneas ≈ blanco moderado en 80 mm (antes 5; un poco menos bobina sin cortar el final).
  */
-function pushFeedAndCut(chunks: Uint8Array[], width: number) {
+function pushFeedAndCut(chunks: Uint8Array[], _width: number) {
   chunks.push(setSize(SIZE_NORMAL));
-  chunks.push(textLine('', width));
-  chunks.push(textLine('', width));
-  chunks.push(command([ESC, 0x64, 8]));
+  chunks.push(command([ESC, 0x64, 4]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
 }
@@ -349,7 +346,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
   const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   return concat([
     command([ESC, 0x40]),
-    command([ESC, 0x64, 3]),
+    command([ESC, 0x64, 1]),
     command([ESC, 0x61, 1]),
     command([ESC, 0x45, 1]),
     setSize(SIZE_TALL),
@@ -368,7 +365,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
     textLine('Vuelve a la app y pulsa', width),
     textLine('"Usar esta impresora"', width),
     textLine('', width),
-    command([ESC, 0x64, 8]),
+    command([ESC, 0x64, 4]),
     command([GS, 0x56, 0]),
   ]);
 }

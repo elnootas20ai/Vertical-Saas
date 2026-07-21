@@ -13,7 +13,7 @@ import {
   Shield,
   Smartphone,
 } from 'lucide-react';
-import { pointOfSaleDisplayLabel, type PointOfSale } from '../../lib/deliveryApi';
+import { pointOfSaleDisplayLabel, listPointsOfSaleRequest, type PointOfSale } from '../../lib/deliveryApi';
 import { IMPRESORA_SETTINGS_PATH } from '../../lib/vertialPrint/nativePrinterFlow';
 import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
 import {
@@ -332,9 +332,20 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
 
       // 2) Misma tienda en servidor (Ajustes / Panel / otras tablets)
       let syncedToStore = false;
-      if (scope?.userId && pdv?._id) {
+      if (scope?.userId && pdvId) {
         try {
-          const saved = await savePrinterConfigToPdv(scope.userId, pdv, next, 'store', undefined, {
+          let pdvDoc = pdv && pdv._id === pdvId ? pdv : null;
+          if (!pdvDoc) {
+            const list = await listPointsOfSaleRequest(scope.userId, {
+              includeInactive: true,
+              suppressLogout: true,
+            });
+            pdvDoc = list.find((p) => p._id === pdvId) || null;
+          }
+          if (!pdvDoc) {
+            throw new Error('No se encontró la tienda para guardar la impresora');
+          }
+          const saved = await savePrinterConfigToPdv(scope.userId, pdvDoc, next, 'store', undefined, {
             suppressLogout: true,
           });
           syncActiveScope(next, saved);

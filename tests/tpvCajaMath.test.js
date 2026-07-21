@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildTpvRegisterSummary,
   calcTpvExpectedCash,
+  calcTpvShiftCollectionsTotal,
   normalizeTpvPaymentMethod,
   sumCashReturns,
   sumCashStaffConsumption,
@@ -28,6 +29,27 @@ describe('calcTpvExpectedCash', () => {
       ],
     };
     expect(calcTpvExpectedCash(session)).toBe(130);
+  });
+});
+
+describe('calcTpvShiftCollectionsTotal', () => {
+  it('suma cobros efectivo+tarjeta y entradas/salidas (sin fondo inicial)', () => {
+    const session = {
+      initialCashAmount: 100,
+      transactions: [
+        { type: 'sale', paymentMethod: 'efectivo', amount: 20 },
+        { type: 'sale', paymentMethod: 'tarjeta', amount: 15 },
+        { type: 'cash_in', amount: 10 },
+        { type: 'cash_out', amount: 3 },
+      ],
+    };
+    const row = calcTpvShiftCollectionsTotal(session);
+    expect(row.efectivo).toBe(20);
+    expect(row.tarjeta).toBe(15);
+    expect(row.cashIn).toBe(10);
+    expect(row.cashOut).toBe(3);
+    // 20 + 15 + 10 - 3 = 42 (fondo 100 no entra)
+    expect(row.total).toBe(42);
   });
 });
 

@@ -25,6 +25,8 @@ import {
   Timer, MessageSquare, ChevronDown, ChevronRight, Users, Navigation,
   Plus, Banknote, AlertTriangle, RefreshCw, LayoutDashboard, ClipboardCheck, Receipt, Contact2, ArrowRight,
 } from 'lucide-react';
+import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
+import { businessTicketInfoFrom, shouldPrintCustomerTicketOnDispatch } from '../../lib/deliveryTicketHelpers';
 
 function timeSince(d: string): string {
   if (!d) return '';
@@ -215,7 +217,17 @@ export function DeliveryReparto() {
       // departedAt automáticamente, pero lo enviamos también para que la UI
       // refleje el cambio sin esperar al refresh.
       const u = await updateDeliveryOrderRequest(uid, { ...o, status: 'en_reparto', departedAt: now, stageHistory: [...(o.stageHistory || []), { status: 'en_reparto', date: now, user: user?.fullName || '', notes: 'Inició ruta' }] } as DeliveryOrder);
-      setOrders(p => p.map(x => x._id === u._id ? u : x)); toast.success('Ruta iniciada');
+      setOrders(p => p.map(x => x._id === u._id ? u : x));
+      toast.success('Ruta iniciada');
+      if (currentBusiness && shouldPrintCustomerTicketOnDispatch(u)) {
+        void printDeliveryTicket({
+          order: u,
+          business: businessTicketInfoFrom(currentBusiness),
+          salesPointName: u.salesPointName,
+          cashierName: user?.fullName,
+          variant: 'customer',
+        });
+      }
     } catch { toast.error('Error al iniciar ruta'); }
   };
 

@@ -840,7 +840,7 @@ export function TpvRapidoOrderFlow({
       enabled: !showCreateForm,
       matchByName: true,
       minQueryLength: 2,
-      debounceMs: 350,
+      debounceMs: 200,
       resultLimit: 20,
     });
 
@@ -927,7 +927,6 @@ export function TpvRapidoOrderFlow({
   const [splitBillOpen, setSplitBillOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
   const actionBusyRef = useRef(false);
-  const cashCalculatorRef = useRef<HTMLDivElement>(null);
 
   const tpvErrorMeta = useMemo(
     () => ({
@@ -2039,25 +2038,6 @@ export function TpvRapidoOrderFlow({
           (a) => a.id === selectedAddressId,
         );
 
-        const promoNote = (() => {
-          const parts: string[] = [];
-          if (effectiveCalc.autoDiscount > 0 && effectiveCalc.autoPromoNames.length > 0) {
-            parts.push(
-              `Promo auto: ${effectiveCalc.autoPromoNames.join(', ')} · -${formatPrice(effectiveCalc.autoDiscount)}`,
-            );
-          }
-          if (promoMode === 'code' && appliedPromo) {
-            parts.push(
-              `Promo (código): ${appliedPromo.code} (${appliedPromo.name}) · -${formatPrice(effectiveCalc.manualDiscount)}`,
-            );
-          } else if (promoMode === 'client' && clientPromoSelected) {
-            parts.push(
-              `Promo (cliente): ${clientPromoSelected.nombre} (${clientPromoSelected.tipo}) · -${formatPrice(effectiveCalc.manualDiscount)}`,
-            );
-          }
-          return parts.join(' | ');
-        })();
-
         const pdvId = String(register.session?.pointOfSaleId || '').trim();
         const pdvName = String(register.session?.pointOfSaleName || '').trim();
         const takerId = effectiveOrderTakerId;
@@ -2098,7 +2078,8 @@ export function TpvRapidoOrderFlow({
           totalAmount: payableTotal,
           ...(discountAmount > 0 ? { discountAmount } : {}),
           ...(deliveryFeeAmount > 0 ? { deliveryFee: deliveryFeeAmount } : {}),
-          notes: [tableNote, orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
+          // Sin texto de promo en notas: cocina no necesita el descuento; el € va en discountAmount.
+          notes: [tableNote, orderNotes.trim()].filter(Boolean).join('\n'),
           observations: [
             takerName ? `Atendido por: ${takerName}` : '',
             tableNote && !restaurantTable?.isCounter ? `Servicio en mesa` : '',
@@ -2114,6 +2095,8 @@ export function TpvRapidoOrderFlow({
           paymentCollectedBy: collectOnDelivery ? '' : takerName,
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
+          // Mismo nº en ticket y servidor → imprimir en paralelo al crear.
+          orderNumber: `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`,
           ...(restaurantTable && !restaurantTable.isCounter
             ? { tableNumber: restaurantTable.number, tableId: restaurantTable.id }
             : {}),
@@ -2130,7 +2113,7 @@ export function TpvRapidoOrderFlow({
             id: offlineId,
             type: 'delivery_order',
             user_id: userId,
-            orderNumber: 'PENDIENTE',
+            orderNumber: orderData.orderNumber || 'PENDIENTE',
             createdAt: now,
             updatedAt: now,
           } as DeliveryOrder);
@@ -2138,24 +2121,33 @@ export function TpvRapidoOrderFlow({
           return;
         }
 
-        const { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
-        notifyDeliveryOpsLive({
-          reason: 'order_created',
-          businessId: created.business_id || writeBusinessId || businessId,
-        });
-
-        // Calle 1: ticket cliente al instante (no esperar a la impresora).
-        // Calle 2: liberar mesa / pantalla de éxito en paralelo.
+        // Ticket en paralelo al POST: no esperar a que “cargue el sistema”.
         if (currentBusiness && !collectOnDelivery) {
+          const printableOrder = {
+            ...orderData,
+            _id: `local-${orderData.orderNumber}`,
+            id: `local-${orderData.orderNumber}`,
+            type: 'delivery_order',
+            user_id: userId,
+            orderNumber: orderData.orderNumber || '',
+            createdAt: now,
+            updatedAt: now,
+          } as DeliveryOrder;
           void printDeliveryTicket({
-            order: created,
+            order: printableOrder,
             business: businessTicketInfoFrom(currentBusiness),
-            salesPointName: created.salesPointName || pdvName,
+            salesPointName: pdvName,
             cashierName: takerName,
             variant: 'customer',
             accountEmail: user?.email,
           });
         }
+
+        const { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+        notifyDeliveryOpsLive({
+          reason: 'order_created',
+          businessId: created.business_id || writeBusinessId || businessId,
+        });
 
         setCreatedOrder(created);
         if (cajaStatus && !isCajaRegistrationOk(cajaStatus)) {
@@ -2165,14 +2157,12 @@ export function TpvRapidoOrderFlow({
         }
 
         if (restaurantTable && !restaurantTable.isCounter && userId) {
-          try {
-            await changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnPaid(), {
-              currentGuests: 0,
-              occupiedBy: '',
-            });
-          } catch (releaseErr) {
+          void changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnPaid(), {
+            currentGuests: 0,
+            occupiedBy: '',
+          }).catch((releaseErr) => {
             showTpvError(releaseErr, 'liberar_mesa');
-          }
+          });
         }
       } catch (err: unknown) {
         showTpvError(err, 'crear_pedido', 'Error al crear el pedido');
@@ -2435,19 +2425,14 @@ export function TpvRapidoOrderFlow({
         paymentCollected: true,
         paymentCollectedAt: now,
         paymentCollectedBy: takerName,
+        orderNumber: `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`,
         ...(restaurantTable ? { tableNumber: restaurantTable.number, tableId: restaurantTable.id } : {}),
       };
 
-      const { order: cajaOrder } = await createDeliveryOrderWithCajaStatus(userId, orderData);
-      notifyDeliveryOpsLive({
-        reason: 'order_paid',
-        businessId: cajaOrder.business_id || writeBusinessId || businessId,
-      });
-
-      // Calle 1: imprimir ya (no await). Calle 2: cerrar cuenta / liberar mesa.
+      // Ticket en paralelo al POST de caja.
       if (currentBusiness) {
         const ticketItems = splitLabel
-          ? cajaOrder.items
+          ? orderData.items
           : flattenDiningAccountLines(diningOrder).map((line) => ({
               quantity: line.quantity,
               name: line.name,
@@ -2455,14 +2440,30 @@ export function TpvRapidoOrderFlow({
               notes: line.notes,
             }));
         void printDeliveryTicket({
-          order: { ...cajaOrder, items: ticketItems as DeliveryOrder['items'] },
+          order: {
+            ...orderData,
+            _id: `local-${orderData.orderNumber}`,
+            id: `local-${orderData.orderNumber}`,
+            type: 'delivery_order',
+            user_id: userId,
+            orderNumber: orderData.orderNumber || '',
+            createdAt: now,
+            updatedAt: now,
+            items: ticketItems as DeliveryOrder['items'],
+          } as DeliveryOrder,
           business: businessTicketInfoFrom(currentBusiness),
-          salesPointName: cajaOrder.salesPointName || pdvName,
+          salesPointName: pdvName,
           cashierName: takerName,
           variant: 'customer',
           accountEmail: user?.email,
         });
       }
+
+      const { order: cajaOrder } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+      notifyDeliveryOpsLive({
+        reason: 'order_paid',
+        businessId: cajaOrder.business_id || writeBusinessId || businessId,
+      });
 
       const closedOrder = await payAndCloseDiningOrder({
         userId,
@@ -4032,9 +4033,10 @@ export function TpvRapidoOrderFlow({
                   onClick={() => {
                     setPaymentMethod(key);
                     if (key === 'efectivo' && (isRestaurantMode || deliveryType !== 'domicilio')) {
-                      requestAnimationFrame(() => {
-                        cashCalculatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      });
+                      // Exacto por defecto: no hace falta teclear; solo cambiar si entrega otro billete.
+                      setCashGiven(cashChargeTotal.toFixed(2));
+                    } else {
+                      setCashGiven('');
                     }
                   }}
                   className={`flex flex-col items-center gap-1.5 rounded-xl border-2 transition-all touch-manipulation ${
@@ -4052,70 +4054,38 @@ export function TpvRapidoOrderFlow({
             </div>
 
             {showCashChangeCalculator && (
-              <div
-                ref={cashCalculatorRef}
-                className="mt-4 p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/20"
-              >
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <label className={`${LABEL_CLASS} mb-0`}>El cliente paga con</label>
-                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-200 tabular-nums">
-                    A cobrar {formatPrice(cashChargeTotal)}
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mr-0.5">
+                  Entrega
+                </span>
+                {cashQuickAmounts.map((amount) => {
+                  const label = Math.abs(amount - cashChargeTotal) < 0.001
+                    ? 'Exacto'
+                    : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
+                  const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
+                  return (
+                    <button
+                      key={label + String(amount)}
+                      type="button"
+                      onClick={() => setCashGiven(amount.toFixed(2))}
+                      className={`min-h-[32px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation transition-colors ${
+                        selected
+                          ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
+                          : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+                {changeAmount !== null && changeAmount > 0.001 ? (
+                  <span className="ml-auto text-xs font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                    Cambio {formatPrice(changeAmount)}
                   </span>
-                </div>
-                <DecimalNumpadField
-                  value={cashGiven}
-                  onChange={setCashGiven}
-                  placeholder={cashChargeTotal.toFixed(2)}
-                  showNumpad
-                  compactNumpad={tabletMode}
-                  autoFocus={tabletMode}
-                  inputClassName={`${INPUT_CLASS} text-lg font-medium pr-8`}
-                  suffix={
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
-                  }
-                />
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {cashQuickAmounts.map((amount) => {
-                    const label = Math.abs(amount - cashChargeTotal) < 0.001 ? 'Exacto' : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
-                    const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
-                    return (
-                      <button
-                        key={label + String(amount)}
-                        type="button"
-                        onClick={() => setCashGiven(amount.toFixed(2))}
-                        className={`min-h-[36px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation ${
-                          selected
-                            ? 'bg-amber-600 text-white border-amber-600'
-                            : 'bg-white dark:bg-gray-800 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div
-                  className={`mt-3 flex items-center justify-between rounded-xl px-3 py-2.5 ${
-                    changeAmount === null
-                      ? 'bg-white/70 dark:bg-gray-900/40 text-amber-900 dark:text-amber-200 border border-amber-200/80 dark:border-amber-800'
-                      : changeAmount >= 0
-                        ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
-                        : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                  }`}
-                >
-                  <span className="text-sm font-semibold">
-                    {changeAmount === null ? 'Cambio' : changeAmount >= 0 ? 'Cambio' : 'Falta'}
+                ) : changeAmount !== null && changeAmount < -0.001 ? (
+                  <span className="ml-auto text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">
+                    Falta {formatPrice(Math.abs(changeAmount))}
                   </span>
-                  <span className="text-lg font-bold tabular-nums">
-                    {changeAmount === null
-                      ? '—'
-                      : formatPrice(Math.abs(changeAmount))}
-                  </span>
-                </div>
-                {changeAmount === null ? (
-                  <p className="mt-1.5 text-[11px] text-amber-800/80 dark:text-amber-200/80">
-                    Pulsa Exacto o escribe lo que entrega el cliente para ver el cambio.
-                  </p>
                 ) : null}
               </div>
             )}
@@ -4143,9 +4113,7 @@ export function TpvRapidoOrderFlow({
                       value={tipInput}
                       onChange={setTipInput}
                       placeholder="Otra cantidad"
-                      /* Con efectivo visible, un 2.º pad ocupa y corta el scroll; tip = teclado/atajos. */
-                      showNumpad={paymentMethod !== 'efectivo'}
-                      compactNumpad={tabletMode}
+                      showNumpad={false}
                       inputClassName={`${INPUT_CLASS} pr-8 text-sm font-semibold`}
                       suffix={
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>

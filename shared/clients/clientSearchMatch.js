@@ -88,6 +88,85 @@ export function clientPhoneDigitHaystacks(doc) {
   return list.filter(Boolean);
 }
 
+function addIndexHit(map, key, idx) {
+  if (!key) return;
+  let set = map.get(key);
+  if (!set) {
+    set = new Set();
+    map.set(key, set);
+  }
+  set.add(idx);
+}
+
+/**
+ * Índice en memoria para no recorrer miles de clientes en cada tecla del TPV.
+ * Prefijos de teléfono + prefijos de palabras del nombre.
+ */
+export function buildClientSearchIndex(docs) {
+  const phonePrefix = new Map();
+  const namePrefix = new Map();
+  const list = Array.isArray(docs) ? docs : [];
+
+  for (let i = 0; i < list.length; i += 1) {
+    const doc = list[i];
+    for (const digits of clientPhoneDigitHaystacks(doc)) {
+      const variants = new Set([digits, localPhoneDigits(digits)].filter(Boolean));
+      for (const d of variants) {
+        const max = Math.min(d.length, 12);
+        for (let len = 1; len <= max; len += 1) {
+          addIndexHit(phonePrefix, d.slice(0, len), i);
+        }
+        for (let len = 3; len <= Math.min(d.length, 9); len += 1) {
+          addIndexHit(phonePrefix, `e:${d.slice(-len)}`, i);
+        }
+      }
+    }
+
+    const nameHay = clientNameSearchHaystack(doc);
+    const words = nameHay.split(/[^a-z0-9]+/).filter(Boolean);
+    for (const w of words) {
+      const max = Math.min(w.length, 6);
+      for (let len = 1; len <= max; len += 1) {
+        addIndexHit(namePrefix, w.slice(0, len), i);
+      }
+    }
+  }
+
+  return { phonePrefix, namePrefix, size: list.length };
+}
+
+/** Candidatos a puntuar. Sin índice → null (scan completo). Con índice vacío → sin matches. */
+export function candidateIndicesForClientSearch(index, qFold, qDigits) {
+  if (!index) return null;
+  const hits = new Set();
+
+  if (qDigits && qDigits.length >= 1) {
+    const exact = index.phonePrefix.get(qDigits);
+    if (exact) for (const i of exact) hits.add(i);
+    const ends = index.phonePrefix.get(`e:${qDigits}`);
+    if (ends) for (const i of ends) hits.add(i);
+    const qLocal = localPhoneDigits(qDigits);
+    if (qLocal && qLocal !== qDigits) {
+      const el = index.phonePrefix.get(qLocal);
+      if (el) for (const i of el) hits.add(i);
+      const eel = index.phonePrefix.get(`e:${qLocal}`);
+      if (eel) for (const i of eel) hits.add(i);
+    }
+  }
+
+  if (qFold && qFold.length >= 1) {
+    const tokens = qFold.split(/\s+/).filter((t) => t.length >= 1);
+    const parts = tokens.length > 0 ? tokens : [qFold];
+    for (const token of parts) {
+      const key = token.slice(0, Math.min(6, token.length));
+      const set = index.namePrefix.get(key);
+      if (set) for (const i of set) hits.add(i);
+    }
+  }
+
+  return hits;
+}
+
 /** Puntuación de coincidencia por teléfono (0 = sin match). */
 export function scorePhoneDigitsMatch(hayDigits, qDigits) {
   if (!hayDigits || !qDigits || qDigits.length < 1) return 0;

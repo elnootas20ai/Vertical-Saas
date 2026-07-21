@@ -509,10 +509,18 @@ export async function correctDeliveryOrderPaymentRequest(
   paymentMethod: string,
 ): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; order: DeliveryOrder }>(
+  const result = await request<{
+    ok: boolean;
+    order: DeliveryOrder;
+    session?: TpvRegisterSession;
+    sessionsUpdated?: number;
+  }>(
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/payment-method`,
     { method: 'PUT', body: JSON.stringify({ paymentMethod }) },
   );
+  if (result.session?._id && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: result.session }));
+  }
   return unwrapOrderResponse(result);
 }
 
@@ -1606,6 +1614,8 @@ export async function updatePointOfSaleRequest(
   );
   if (!result.pointOfSale) throw new Error('Respuesta inválida del servidor');
   invalidatePointsOfSaleCache();
+  // Mantener caché local de impresora alineada con lo guardado en servidor.
+  cacheServerPdvPrinterConfigs([result.pointOfSale]);
   return result.pointOfSale;
 }
 

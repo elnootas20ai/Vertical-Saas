@@ -30,6 +30,18 @@ describe('orderItemCustomizationDetail — sin duplicar SIN', () => {
   });
 });
 
+describe('shouldPrintCustomerTicketOnDispatch', () => {
+  it('imprime domicilio y sin tipo; no recogida ni sala', async () => {
+    const { shouldPrintCustomerTicketOnDispatch } = await import(
+      '../src/app/lib/deliveryTicketHelpers.ts'
+    );
+    expect(shouldPrintCustomerTicketOnDispatch({ deliveryType: 'domicilio' })).toBe(true);
+    expect(shouldPrintCustomerTicketOnDispatch({})).toBe(true);
+    expect(shouldPrintCustomerTicketOnDispatch({ deliveryType: 'recogida' })).toBe(false);
+    expect(shouldPrintCustomerTicketOnDispatch({ deliveryType: 'sala' })).toBe(false);
+  });
+});
+
 describe('ticket IVA hostelería', () => {
   it('usa 10% por defecto en ticket cliente', () => {
     const doc = buildTicketDocument({
@@ -48,7 +60,6 @@ describe('ticket IVA hostelería', () => {
     });
     expect(doc.vatRate).toBe(10);
     expect(doc.base + doc.vat).toBeCloseTo(30.5, 2);
-    // 30.5 / 1.10 ≈ 27.727 base
     expect(doc.base).toBeCloseTo(30.5 / 1.1, 2);
   });
 });

@@ -28,6 +28,7 @@ const pizzaPromo: StoredPromotion = {
   weekdays: [1, 2, 3, 4],
   productMatch: {
     nameIncludes: ['prosciutto', 'bacon', 'calzone apertas', 'margarita', 'roquefort'],
+    excludeNameIncludes: ['burger', 'hamburguesa', 'hamburgesa'],
   },
   startDate: '2026-01-01',
   endDate: '2027-12-31T23:59:59',
@@ -51,7 +52,16 @@ describe('promo fixed_unit_price', () => {
     expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Pizza Margarita' })).toBe(true);
     expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'PROSCIUTTO' })).toBe(true);
     expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Calzone Apertas' })).toBe(true);
+    expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Pizza Bacon' })).toBe(true);
+    expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Bacon' })).toBe(true);
     expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Pizza 4 quesos' })).toBe(false);
+  });
+
+  it('no aplica a burger de bacon (solo las 5 pizzas)', () => {
+    expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Burger de bacon' })).toBe(false);
+    expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Bacon Burger' })).toBe(false);
+    expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Top Burger Bacon' })).toBe(false);
+    expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Hamburguesa bacon' })).toBe(false);
   });
 
   it('discounts unit price down to 11€ on matching lines Mon–Thu', () => {
@@ -59,12 +69,13 @@ describe('promo fixed_unit_price', () => {
       [
         { name: 'Prosciutto', unitPrice: 13.5, quantity: 2 },
         { name: 'Bacon', unitPrice: 12, quantity: 1 },
+        { name: 'Burger de bacon', unitPrice: 14, quantity: 1 },
         { name: 'Coca Cola', unitPrice: 2.5, quantity: 1 },
       ],
       [pizzaPromo],
       mondayAtNoon(),
     );
-    // (13.5-11)*2 + (12-11)*1 = 5 + 1 = 6
+    // (13.5-11)*2 + (12-11)*1 = 5 + 1 = 6  (burger no cuenta)
     expect(discount).toBeCloseTo(6);
     expect(matchedLineCount).toBe(2);
     expect(applied.map((p) => p.id)).toEqual(['promo-pizzas-11']);
