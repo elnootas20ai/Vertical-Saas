@@ -13,6 +13,7 @@ import {
   tpvBuildYourOwnIngredientPool,
   type StoreIngredient,
 } from '../../../lib/catalogCustomization';
+import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { TpvModalRoot } from './TpvModalRoot';
 
@@ -46,9 +47,9 @@ function defaultTabForItem(
 }
 
 function matchesSearch(text: string, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  const q = foldTpvSearchText(query);
   if (!q) return true;
-  return text.toLowerCase().includes(q);
+  return foldTpvSearchText(text).includes(q);
 }
 
 export function TpvItemCustomizeModal({

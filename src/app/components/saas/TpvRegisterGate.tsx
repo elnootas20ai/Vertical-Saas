@@ -50,10 +50,12 @@ import {
   aggregatorRowsFromClosingTotals,
   sumAggregatorRows,
   sumAggregatorCash,
+  parseAggregatorAmount,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
 import {
   buildShiftFoodFamilyReportForSession,
+  type FoodFamilyCounts,
 } from '../../lib/shiftFoodFamilyCounts';
 import { AggregatorClosingEditor } from './AggregatorClosingEditor';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
@@ -169,6 +171,13 @@ function emptyCashDenominationCount(): CashDenominationCount {
 
 function calcDenominationTotal(counts: CashDenominationCount): number {
   return DENOMINATIONS.reduce((sum, d) => sum + (counts[d.key] || 0) * d.value, 0);
+}
+
+function parseClosingCountInput(raw: string, fallback = 0): number {
+  const t = String(raw || '').trim().replace(',', '.');
+  if (!t) return Math.max(0, Math.floor(fallback));
+  const n = Math.floor(Number(t));
+  return Number.isFinite(n) && n >= 0 ? n : Math.max(0, Math.floor(fallback));
 }
 
 /** Aproxima un importe en billetes/monedas EUR para el conteo de apertura. */
@@ -1318,7 +1327,7 @@ function TpvGatePortal({ children }: { children: ReactNode }) {
 
 // ─── Closing Screen ─────────────────────────────────────────────────────────
 
-function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [], busy = false }: {
+function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [], busy = false, showDeliveryClosingSlots = true }: {
   session: TpvRegisterSession;
   dataUserId: string;
   onClose: (
@@ -1330,6 +1339,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   onCancel: () => void;
   restaurantWarnings?: string[];
   busy?: boolean;
+  /** Delivery: slots Efectivo + pizzas/burgers/tacos editables. */
+  showDeliveryClosingSlots?: boolean;
 }) {
   const [counts, setCounts] = useState<CashDenominationCount>({});
   const [notes, setNotes] = useState('');
@@ -1338,6 +1349,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [manualAggregatorTotals, setManualAggregatorTotals] = useState<Record<string, string>>({});
   const [manualAggregatorCash, setManualAggregatorCash] = useState<Record<string, string>>({});
   const [manualInitialized, setManualInitialized] = useState(false);
+  const [cashSlot, setCashSlot] = useState('');
+  const [cashSlotFocused, setCashSlotFocused] = useState(false);
+  const [manualFood, setManualFood] = useState({ pizza: '', burger: '', taco: '' });
+  const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
   const summary = buildTpvRegisterSummary(session);
@@ -1356,6 +1371,14 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     () => buildShiftFoodFamilyReportForSession(session, shiftOrders),
     [session, shiftOrders],
   );
+  const closingFood: FoodFamilyCounts = useMemo(() => {
+    if (!showDeliveryClosingSlots) return foodReport.total;
+    return {
+      pizza: parseClosingCountInput(manualFood.pizza, foodReport.total.pizza),
+      burger: parseClosingCountInput(manualFood.burger, foodReport.total.burger),
+      taco: parseClosingCountInput(manualFood.taco, foodReport.total.taco),
+    };
+  }, [showDeliveryClosingSlots, manualFood, foodReport.total]);
   const aggregatorEuroTotal = useMemo(
     () => sumAggregatorRows(finalAggregatorRows).totalSales,
     [finalAggregatorRows],
@@ -1367,6 +1390,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const expected = Math.round((expectedTpv + aggregatorCashTotal) * 100) / 100;
   const diff = countedTotal - expected;
   const grandEuroTotal = Math.round((expectedTpv + aggregatorEuroTotal) * 100) / 100;
+  const cashSlotDisplay = cashSlotFocused
+    ? cashSlot
+    : countedTotal > 0
+      ? countedTotal.toFixed(2)
+      : cashSlot;
 
   useEffect(() => {
     if (manualInitialized || aggregatorRows.length === 0) return;
@@ -1381,12 +1409,37 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     setManualInitialized(true);
   }, [aggregatorRows, manualInitialized]);
 
+  useEffect(() => {
+    if (!showDeliveryClosingSlots || foodSlotsInitialized || shiftOrdersLoading) return;
+    setManualFood({
+      pizza: String(foodReport.total.pizza || 0),
+      burger: String(foodReport.total.burger || 0),
+      taco: String(foodReport.total.taco || 0),
+    });
+    setFoodSlotsInitialized(true);
+  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, foodReport.total]);
+
   const handleManualAggregatorChange = useCallback((channel: string, value: string) => {
     setManualAggregatorTotals((prev) => ({ ...prev, [channel]: value }));
   }, []);
 
   const handleManualAggregatorCashChange = useCallback((channel: string, value: string) => {
     setManualAggregatorCash((prev) => ({ ...prev, [channel]: value }));
+  }, []);
+
+  const handleCashSlotChange = useCallback((value: string) => {
+    setCashSlot(value);
+    const parsed = parseAggregatorAmount(value);
+    if (parsed == null) {
+      if (!String(value || '').trim()) setCounts({});
+      return;
+    }
+    setCounts(buildDenominationFromAmount(parsed));
+  }, []);
+
+  const handleFoodSlotChange = useCallback((key: keyof FoodFamilyCounts, value: string) => {
+    const cleaned = value.replace(/[^\d]/g, '');
+    setManualFood((prev) => ({ ...prev, [key]: cleaned }));
   }, []);
 
   useEffect(() => {
@@ -1473,20 +1526,103 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
                 Efectivo del TPV e importes de Glovo / Uber / Just Eat / Flipdish. Al rellenar, el total general suma todo.
               </p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 tabular-nums">
-                  Pizzas {foodReport.total.pizza}
-                </span>
-                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-orange-100 text-orange-900 dark:bg-orange-950/50 dark:text-orange-200 tabular-nums">
-                  Burgers {foodReport.total.burger}
-                </span>
-                <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-lime-100 text-lime-900 dark:bg-lime-950/50 dark:text-lime-200 tabular-nums">
-                  Tacos {foodReport.total.taco}
-                </span>
-              </div>
             </div>
 
             <div className="p-4 space-y-4">
+              {showDeliveryClosingSlots ? (
+                <div className="rounded-xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 sm:p-4 space-y-3">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
+                      Slots de cierre
+                    </p>
+                    <p className="text-[11px] text-emerald-900/70 dark:text-emerald-200/70 mt-0.5">
+                      Efectivo contado (€) y totales de pizzas, burgers y tacos. Esos números van al general de la caja.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+                    <label className="rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                        <Banknote className="w-3 h-3" /> Efectivo
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0,00"
+                        value={cashSlotDisplay}
+                        onFocus={() => {
+                          setCashSlotFocused(true);
+                          setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
+                        }}
+                        onBlur={() => setCashSlotFocused(false)}
+                        onChange={(e) => handleCashSlotChange(e.target.value)}
+                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/40 dark:bg-emerald-950/40 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      />
+                      <span className="text-[10px] text-gray-500">€ en caja</span>
+                    </label>
+                    <label className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                        Pizzas
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={manualFood.pizza}
+                        onChange={(e) => handleFoodSlotChange('pizza', e.target.value)}
+                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                      />
+                      <span className="text-[10px] text-gray-500">
+                        Sistema: {foodReport.total.pizza}
+                      </span>
+                    </label>
+                    <label className="rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-orange-800 dark:text-orange-200">
+                        Burgers
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={manualFood.burger}
+                        onChange={(e) => handleFoodSlotChange('burger', e.target.value)}
+                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-orange-200 dark:border-orange-800 rounded-lg bg-orange-50/50 dark:bg-orange-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+                      />
+                      <span className="text-[10px] text-gray-500">
+                        Sistema: {foodReport.total.burger}
+                      </span>
+                    </label>
+                    <label className="rounded-xl border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-lime-800 dark:text-lime-200">
+                        Tacos
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={manualFood.taco}
+                        onChange={(e) => handleFoodSlotChange('taco', e.target.value)}
+                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-lime-200 dark:border-lime-800 rounded-lg bg-lime-50/50 dark:bg-lime-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-lime-500/30"
+                      />
+                      <span className="text-[10px] text-gray-500">
+                        Sistema: {foodReport.total.taco}
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 tabular-nums">
+                    Pizzas {foodReport.total.pizza}
+                  </span>
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-orange-100 text-orange-900 dark:bg-orange-950/50 dark:text-orange-200 tabular-nums">
+                    Burgers {foodReport.total.burger}
+                  </span>
+                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-lime-100 text-lime-900 dark:bg-lime-950/50 dark:text-lime-200 tabular-nums">
+                    Tacos {foodReport.total.taco}
+                  </span>
+                </div>
+              )}
+
               {/* Cash flow summary */}
               <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-gray-500">Fondo de apertura</span><span className="font-semibold text-gray-900 dark:text-gray-100">{session.initialCashAmount.toFixed(2)}€</span></div>
@@ -1543,10 +1679,21 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 </div>
               </div>
 
-              {/* Cash count */}
+              {/* Cash count detail (optional billetes) */}
               <div>
-                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Conteo de efectivo de cierre</h4>
-                <CashCountGrid counts={counts} onChange={setCounts} />
+                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+                  {showDeliveryClosingSlots ? 'Detalle billetes/monedas (opcional)' : 'Conteo de efectivo de cierre'}
+                </h4>
+                <CashCountGrid
+                  counts={counts}
+                  onChange={(next) => {
+                    setCounts(next);
+                    if (!cashSlotFocused) {
+                      const total = calcDenominationTotal(next);
+                      setCashSlot(total > 0 ? total.toFixed(2) : '');
+                    }
+                  }}
+                />
               </div>
 
               {/* Difference */}
@@ -1574,6 +1721,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 onManualCashChange={handleManualAggregatorCashChange}
                 title="4 integradores (turno)"
                 foodReport={foodReport}
+                closingFoodTotal={showDeliveryClosingSlots ? closingFood : null}
               />
 
               <div className="rounded-xl border-2 border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 p-4 space-y-2">
@@ -1583,6 +1731,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-300">Efectivo TPV</span>
                   <span className="font-semibold tabular-nums">{expectedTpv.toFixed(2)}€</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-300">Efectivo contado (slot)</span>
+                  <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{countedTotal.toFixed(2)}€</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-300">Efectivo integradores (entra en caja)</span>
@@ -1601,11 +1753,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <span className="tabular-nums">{grandEuroTotal.toFixed(2)}€</span>
                 </div>
                 <div className="flex flex-wrap gap-2 pt-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  <span>🍕 {foodReport.total.pizza} pizzas</span>
+                  <span>🍕 {closingFood.pizza} pizzas</span>
                   <span>·</span>
-                  <span>🍔 {foodReport.total.burger} burgers</span>
+                  <span>🍔 {closingFood.burger} burgers</span>
                   <span>·</span>
-                  <span>🌮 {foodReport.total.taco} tacos</span>
+                  <span>🌮 {closingFood.taco} tacos</span>
                 </div>
               </div>
             </div>
@@ -1667,9 +1819,9 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             type="button"
             disabled={busy}
             onClick={() => onClose(counts, notes, finalAggregatorRows, {
-              pizza: foodReport.total.pizza,
-              burger: foodReport.total.burger,
-              taco: foodReport.total.taco,
+              pizza: closingFood.pizza,
+              burger: closingFood.burger,
+              taco: closingFood.taco,
               byChannel: foodReport.byAggregator,
             })}
             className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
@@ -3942,6 +4094,7 @@ export function TpvRegisterGate({
             onCancel={dismissClosing}
             restaurantWarnings={restaurantCloseWarnings}
             busy={closingBusy}
+            showDeliveryClosingSlots={!isRestaurantVertical}
           />
         </TpvGatePortal>
       ) : null}

@@ -22,6 +22,17 @@ export async function listPromotionsRequest(userId: string): Promise<StoredPromo
   return data.promotions || [];
 }
 
+export async function createPromotionRequest(
+  userId: string,
+  promotion: StoredPromotion,
+): Promise<StoredPromotion> {
+  const data = await apiRequest<{ ok: boolean; promotion: StoredPromotion }>(
+    `/api/promotions/${encodeURIComponent(userId)}`,
+    { method: 'POST', body: JSON.stringify({ promotion }) },
+  );
+  return data.promotion;
+}
+
 export async function syncPromotionsRequest(userId: string, promotions: StoredPromotion[]): Promise<StoredPromotion[]> {
   const data = await apiRequest<{ ok: boolean; promotions: StoredPromotion[] }>(
     `/api/promotions/${encodeURIComponent(userId)}/sync`,

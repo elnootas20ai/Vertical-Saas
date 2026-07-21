@@ -13,6 +13,7 @@ import {
   inferComboMenuPresetId,
   inferComboSlotKind,
   isComboMenuComplete,
+  mainFamilyForProduct,
   normalizeComboItemsForSave,
   resolveComboRefSlotKind,
   totalUnitsInCatalogSection,
@@ -21,6 +22,7 @@ import {
   type ComboSlotKind,
   type ComboStructureSlot,
 } from '../../lib/catalogComboSlots';
+import { foldTpvSearchText } from '../../lib/tpvCatalogNavigation';
 
 type CatalogComboCompositionEditorProps = {
   comboItems: CatalogComboRef[];
@@ -144,10 +146,10 @@ function CatalogSectionBlock({
   const slotDone = slotNeed > 0 && slotHave >= slotNeed;
 
   const products = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = foldTpvSearchText(search);
     return catalogProductsForComboSection(section, catalogItems, excludeItemId).filter((p) => {
       if (!q) return true;
-      return p.name.toLowerCase().includes(q) || p.sku?.toLowerCase().includes(q);
+      return foldTpvSearchText(p.name).includes(q) || foldTpvSearchText(p.sku || '').includes(q);
     });
   }, [section, catalogItems, excludeItemId, search]);
 
@@ -310,7 +312,16 @@ export function CatalogComboCompositionEditor({
 
     let next = [...comboItems];
 
-    if (categoryNeed > 0) {
+    if (section.groupByMainFamily) {
+      const family = section.groupByMainFamily;
+      next = next.filter((ref) => {
+        if (resolveComboRefSlotKind(ref, catalogItems) !== 'main') return true;
+        const p = catalogItems.find((c) => c._id === ref.productId);
+        return (
+          mainFamilyForProduct(p?.category || '', ref.productName || p?.name || '') !== family
+        );
+      });
+    } else if (categoryNeed > 0) {
       next = next.filter((ref) => {
         const p = catalogItems.find((c) => c._id === ref.productId);
         if (!p) return true;
@@ -329,7 +340,7 @@ export function CatalogComboCompositionEditor({
     const sameIdx = next.findIndex((c) => c.productId === product._id);
     const need = categoryNeed > 0 ? categoryNeed : slotNeed;
     const have =
-      categoryNeed > 0
+      categoryNeed > 0 || section.groupByMainFamily
         ? totalUnitsInCatalogSection(section, next, catalogItems)
         : totalUnitsInSlotKind(slotKind, next, catalogItems);
 

@@ -223,6 +223,32 @@ describe('catalogComboSlots', () => {
     expect(inferMainFamilyFromComboSelections(picks, catalog)).toBe('burger');
   });
 
+  it('pizza de especialidad cuenta como plato del menú (1 pizza o premium)', () => {
+    expect(inferComboSlotKind('Pizzas Premium')).toBe('main');
+    expect(inferComboSlotKind('Especialidad')).toBe('main');
+    expect(inferComboSlotKind('Premium')).toBe('main');
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'p2', name: 'Trufa', category: 'Pizzas Premium' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Complementos' }),
+      item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const sections = buildComboMenuSections('estandar', catalog);
+    const pizzaSection = sections.find((s) => s.groupByMainFamily === 'pizza');
+    expect(pizzaSection?.catalogCategory).toBe('Pizzas / Especialidad');
+    expect(pizzaSection?.expectedCount).toBe(1);
+    expect(catalogProductsForComboSection(pizzaSection, catalog).map((p) => p._id).sort()).toEqual([
+      'p1',
+      'p2',
+    ]);
+    const withPremium = [
+      { productId: 'p2', productName: 'Trufa', quantity: 1, slotKind: 'main' },
+      { productId: 'c1', productName: 'Patatas', quantity: 1, slotKind: 'side' },
+      { productId: 'b1', productName: 'Coca', quantity: 1, slotKind: 'drink' },
+    ];
+    expect(isComboMenuComplete(sections, withPremium, catalog)).toBe(true);
+  });
+
   it('Top Burgers y productos con burger en el nombre cuentan como main', () => {
     expect(inferComboSlotKind('Top Burgers')).toBe('main');
     expect(inferComboSlotKind('Principales', 'Smash Burger')).toBe('main');

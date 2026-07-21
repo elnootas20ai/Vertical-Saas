@@ -101,7 +101,8 @@ ${doc.customerAddress ? `<p class="big${doc.emphasizeCustomerAddress ? ' b' : ''
 ${rows}
 <div class="hr"></div>
 <table class="t"><tr><td>TOTAL</td><td style="text-align:right">${doc.total.toFixed(2)}€</td></tr></table>
-<p>${escapeHtml(doc.paymentStatusLabel)}${doc.paymentLabel && doc.paymentLabel !== '-' ? ` · ${escapeHtml(doc.paymentLabel)}` : ''}</p>
+${doc.paymentLabel ? `<p class="b">Método: ${escapeHtml(doc.paymentLabel)}</p>` : ''}
+${doc.paymentStatusLabel ? `<p>${escapeHtml(doc.paymentStatusLabel)}</p>` : ''}
 ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}
 <div class="f">${escapeHtml(doc.footer)}</div>
 </body></html>`;
@@ -133,7 +134,8 @@ ${doc.cashierName ? `<p>Atendido por: ${escapeHtml(doc.cashierName)}</p>` : ''}
 <div class="hr"></div>
 <table class="t"><tr><td>${doc.isRefund ? 'TOTAL DEVUELTO' : 'TOTAL'}</td><td style="text-align:right">${doc.isRefund ? '-' : ''}${doc.total.toFixed(2)}€</td></tr></table>
 <div class="hr"></div>
-<p>Método: ${escapeHtml(doc.paymentLabel)}</p>
+${doc.paymentLabel ? `<p class="b">Método: ${escapeHtml(doc.paymentLabel)}</p>` : ''}
+${doc.paymentStatusLabel ? `<p>${escapeHtml(doc.paymentStatusLabel)}</p>` : ''}
 ${doc.refundReason ? `<p>Motivo: ${escapeHtml(doc.refundReason)}</p>` : ''}
 <div class="f">
   ${escapeHtml(doc.footer)}<br/>
@@ -234,7 +236,7 @@ export function printTestTicketBrowser(paperWidthMm: 58 | 80 = 80) {
     lines: [{ qty: 1, name: 'Producto demo', total: 9.99 }],
     base: 8.26,
     vat: 1.73,
-    vatRate: 21,
+    vatRate: 10,
     total: 9.99,
     paymentLabel: 'Efectivo',
     paymentStatusLabel: 'Cobrado',

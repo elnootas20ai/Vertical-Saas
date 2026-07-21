@@ -1,7 +1,7 @@
 /**
  * Shell TPV sala (CEO / tablet).
- * Flujo Delivery-equivalente: local → fichaje + caja (TpvRegisterGate) → plano mesas.
- * No monta TpvRapidoPage ni WorkerTpvDelivery.
+ * Flujo: local → fichaje + caja (TpvRegisterGate) → plano mesas → TPV de mesa.
+ * No monta WorkerTpvDelivery. El cobro de mesa usa RestaurantTableTpvFlow.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';

@@ -27,6 +27,7 @@ import {
   filterOrdersForActivePdv,
 } from '../../../lib/pdvScope';
 import { listClockins, type ClockinRecord } from '../../../lib/clockinsApi';
+import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import type { BusinessType } from '../../../lib/businessApi';
 import { useNavigate } from 'react-router';
 import {
@@ -241,8 +242,10 @@ function SalesContent() {
     let items = catalog;
     if (activeCategory && activeCategory !== 'Todos') items = items.filter(i => i.category === activeCategory);
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      items = items.filter(i => i.name.toLowerCase().includes(q) || i.sku?.toLowerCase().includes(q));
+      const q = foldTpvSearchText(searchQuery);
+      items = items.filter(
+        (i) => foldTpvSearchText(i.name).includes(q) || foldTpvSearchText(i.sku || '').includes(q),
+      );
     }
     return items;
   }, [catalog, activeCategory, searchQuery]);

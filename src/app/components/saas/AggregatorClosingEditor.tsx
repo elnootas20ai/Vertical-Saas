@@ -16,6 +16,8 @@ interface AggregatorClosingEditorProps {
   onManualCashChange: (channel: string, value: string) => void;
   title?: string;
   foodReport?: ShiftFoodFamilyReport | null;
+  /** Totales de cierre editados (slots); si hay, sustituyen al auto en el resumen. */
+  closingFoodTotal?: FoodFamilyCounts | null;
 }
 
 function FoodMiniCounts({ counts }: { counts: FoodFamilyCounts }) {
@@ -42,6 +44,7 @@ export function AggregatorClosingEditor({
   onManualCashChange,
   title = 'Cajas agregadores (turno)',
   foodReport = null,
+  closingFoodTotal = null,
 }: AggregatorClosingEditorProps) {
   const displayRows = autoRows.map((row) => {
     const ch = row.platform.channel;
@@ -54,7 +57,7 @@ export function AggregatorClosingEditor({
   });
   const totals = sumAggregatorRows(displayRows);
   const cashTotal = sumAggregatorCash(displayRows);
-  const foodTotal = foodReport?.total || emptyFoodFamilyCounts();
+  const foodTotal = closingFoodTotal || foodReport?.total || emptyFoodFamilyCounts();
 
   return (
     <div className="rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/50 dark:bg-purple-900/10 p-4 space-y-3">
@@ -67,10 +70,10 @@ export function AggregatorClosingEditor({
           <div className="text-emerald-700 dark:text-emerald-300">Efectivo → caja: {cashTotal.toFixed(2)}€</div>
         </div>
       </div>
-      {foodReport ? (
+      {foodReport || closingFoodTotal ? (
         <div className="rounded-lg border border-purple-200/80 dark:border-purple-800 bg-white/70 dark:bg-gray-900/40 px-3 py-2">
           <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
-            Conteo total del turno
+            {closingFoodTotal ? 'Conteo total (slots de cierre)' : 'Conteo total del turno'}
           </p>
           <FoodMiniCounts counts={foodTotal} />
         </div>

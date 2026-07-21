@@ -1,6 +1,6 @@
 import { Navigate } from 'react-router-dom';
 import { useBusiness } from '../../context/BusinessContext';
-import { isDeliveryOpsBusinessType } from '../../lib/deliveryOpsTypes';
+import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { CatalogPage as DeliveryCatalogPage } from './DeliveryCatalog';
 import { CatalogPage as GenericCatalogPage } from './CatalogPage';
 
@@ -11,7 +11,7 @@ export function VerticalCatalogEntry() {
   if (businessType === 'carDealership') {
     return <Navigate to="/saas/vehicles" replace />;
   }
-  if (isDeliveryOpsBusinessType(businessType)) {
+  if (isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType)) {
     return <DeliveryCatalogPage />;
   }
   return <GenericCatalogPage />;

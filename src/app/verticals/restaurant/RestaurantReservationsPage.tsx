@@ -196,7 +196,7 @@ export function RestaurantReservationsPage() {
       const [resList, tableList, floorConfig] = await Promise.all([
         listReservations(userId),
         listDiningTablesRequest(userId),
-        getFloorConfigRequest(userId),
+        getFloorConfigRequest(userId, businessId ? { businessId } : undefined),
       ]);
       setReservations(resList);
       setTables(tableList);
@@ -211,7 +211,7 @@ export function RestaurantReservationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, businessId]);
 
   useEffect(() => {
     void loadData();

@@ -103,7 +103,7 @@ export async function applyRestaurantSalaQuickSetup(
     }
   }
 
-  const floorConfig = await getFloorConfigRequest(userId).catch(() => null);
+  const floorConfig = await getFloorConfigRequest(userId, { businessId }).catch(() => null);
   const tpvOptions = {
     parentPdvId: String(parentPdvId || '').trim() || undefined,
     business,

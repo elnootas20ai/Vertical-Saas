@@ -219,6 +219,9 @@ export function buildFloorConfigDocument(userId, data = {}, existing = null) {
     tpvCount: Number(data.tpvCount ?? existing?.tpvCount ?? 0),
     viewStyle: data.viewStyle ?? existing?.viewStyle ?? 'modern',
     canvasScope: data.canvasScope ?? existing?.canvasScope ?? 'zone',
+    salaQuickSetupComplete: Boolean(
+      data.salaQuickSetupComplete ?? existing?.salaQuickSetupComplete ?? false,
+    ),
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -244,16 +247,31 @@ export function sanitizeFloorConfig(doc) {
     tpvCount: Number(doc.tpvCount || 0),
     viewStyle: doc.viewStyle || 'modern',
     canvasScope: doc.canvasScope === 'full' ? 'full' : 'zone',
+    salaQuickSetupComplete: Boolean(doc.salaQuickSetupComplete),
     createdAt: doc.createdAt || '',
     updatedAt: doc.updatedAt || '',
   };
 }
 
-export async function getFloorConfigByUser(req, userId) {
+function normalizeSalaBusinessId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+export async function getFloorConfigByUser(req, userId, businessId = '') {
   const db = getSalaDbName();
   await ensureDatabase(req, db);
   const docs = await getAllDocuments(req, db);
-  return docs.find((doc) => doc?.type === 'dining_floor_config' && !doc?.deletedAt && doc?.user_id === userId) || null;
+  const configs = docs.filter(
+    (doc) => doc?.type === 'dining_floor_config' && !doc?.deletedAt && doc?.user_id === userId,
+  );
+  const bid = normalizeSalaBusinessId(businessId);
+  if (bid) {
+    return (
+      configs.find((doc) => normalizeSalaBusinessId(doc.businessId) === bid)
+      || null
+    );
+  }
+  return configs[0] || null;
 }
 
 // ─── DINING ORDER ────────────────────────────────────────────────────────────

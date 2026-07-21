@@ -34,13 +34,21 @@ import { Pagination } from '../../components/saas/Pagination';
 import { CrmNav } from '../../components/saas/CrmNav';
 import { usePagination } from '../../hooks/usePagination';
 import { v4 as uuidv4 } from 'uuid';
-import { readStoredPromotions, writeStoredPromotions, type StoredPromotion, setClientAppliedPromo, type AppliedPromo } from '../../lib/promoCodes';
+import {
+  readStoredPromotions,
+  writeStoredPromotions,
+  type StoredPromotion,
+  setClientAppliedPromo,
+  type AppliedPromo,
+  type PromoApplyMode,
+  type PromoWeekday,
+} from '../../lib/promoCodes';
 import { listPromotionsRequest, syncPromotionsRequest } from '../../lib/promotionsApi';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PromoStatus = 'active' | 'scheduled' | 'paused' | 'expired' | 'draft';
-type PromoType = 'percentage' | 'fixed' | '2x1' | 'gift' | 'code';
+type PromoType = 'percentage' | 'fixed' | '2x1' | 'gift' | 'code' | 'fixed_unit_price';
 type PageView = 'list' | 'create' | 'detail';
 
 interface Promotion {
@@ -60,7 +68,22 @@ interface Promotion {
   createdAt: string;
   revenue: number;
   ordersUsed: number;
+  weekdays?: PromoWeekday[];
+  productNameIncludes?: string[];
+  productIds?: string[];
+  fixedUnitPrice?: number;
+  applyMode?: PromoApplyMode;
 }
+
+const WEEKDAY_OPTIONS: { value: PromoWeekday; label: string }[] = [
+  { value: 1, label: 'Lun' },
+  { value: 2, label: 'Mar' },
+  { value: 3, label: 'Mié' },
+  { value: 4, label: 'Jue' },
+  { value: 5, label: 'Vie' },
+  { value: 6, label: 'Sáb' },
+  { value: 7, label: 'Dom' },
+];
 
 function toStoredPromotion(p: Promotion): StoredPromotion {
   return {
@@ -76,6 +99,13 @@ function toStoredPromotion(p: Promotion): StoredPromotion {
     maxUses: p.maxUses,
     currentUses: p.currentUses,
     createdAt: p.createdAt,
+    weekdays: p.weekdays,
+    productMatch: {
+      productIds: p.productIds || [],
+      nameIncludes: p.productNameIncludes || [],
+    },
+    fixedUnitPrice: p.fixedUnitPrice,
+    applyMode: p.applyMode,
   };
 }
 
@@ -96,6 +126,11 @@ function fromStoredPromotion(p: StoredPromotion): Promotion {
     createdAt: p.createdAt || new Date().toISOString(),
     revenue: 0,
     ordersUsed: 0,
+    weekdays: Array.isArray(p.weekdays) ? (p.weekdays as PromoWeekday[]) : [],
+    productNameIncludes: p.productMatch?.nameIncludes || [],
+    productIds: p.productMatch?.productIds || [],
+    fixedUnitPrice: p.fixedUnitPrice != null ? Number(p.fixedUnitPrice) : undefined,
+    applyMode: p.applyMode || (p.type === 'fixed_unit_price' ? 'auto' : undefined),
   };
 }
 
@@ -113,6 +148,11 @@ const TYPE_CONFIG: Record<PromoType, { label: string; icon: React.ElementType; c
   '2x1':     { label: '2×1 / Pack',        icon: Package,  color: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400' },
   gift:       { label: 'Regalo',            icon: Gift,     color: 'bg-pink-100 text-pink-600 dark:bg-pink-900/30 dark:text-pink-400' },
   code:       { label: 'Código promocional', icon: Sparkles, color: 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400' },
+  fixed_unit_price: {
+    label: 'Precio fijo producto',
+    icon: Tag,
+    color: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400',
+  },
 };
 
 const AUDIENCE_LABELS: Record<string, string> = {
@@ -175,7 +215,7 @@ function StatusBadge({ status }: { status: PromoStatus }) {
 }
 
 function TypeBadge({ type }: { type: PromoType }) {
-  const cfg = TYPE_CONFIG[type];
+  const cfg = TYPE_CONFIG[type] || TYPE_CONFIG.percentage;
   const Icon = cfg.icon;
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${cfg.color}`}>
@@ -438,14 +478,26 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
     endDate: defaultEndDate(),
     maxUses: '' as string,
     targetAudience: 'all' as Promotion['targetAudience'],
+    weekdays: [] as PromoWeekday[],
+    productNamesText: '',
+    fixedUnitPrice: 11,
+    applyAuto: true,
   });
 
   function resetForm() {
     setForm({
       name: '', description: '', type: 'percentage', discountValue: 10, code: '',
       startDate: defaultStartDate(), endDate: defaultEndDate(), maxUses: '', targetAudience: 'all',
+      weekdays: [], productNamesText: '', fixedUnitPrice: 11, applyAuto: true,
     });
     setEditingId(null);
+  }
+
+  function parseProductNames(text: string): string[] {
+    return String(text || '')
+      .split(/[,;\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
 
   function showToast(msg: string, type: 'success' | 'error' = 'success') {
@@ -487,16 +539,28 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       showToast('Las fechas de inicio y fin son obligatorias', 'error');
       return;
     }
+    const productNames = parseProductNames(form.productNamesText);
+    if (form.type === 'fixed_unit_price') {
+      if (!(form.fixedUnitPrice > 0)) {
+        showToast('Indica el precio fijo del producto', 'error');
+        return;
+      }
+      if (productNames.length === 0) {
+        showToast('Indica al menos un nombre de producto (ej: Margarita, Prosciutto)', 'error');
+        return;
+      }
+    }
 
     setSaving(true);
     setTimeout(() => {
+      const fixedPrice = form.type === 'fixed_unit_price' ? Number(form.fixedUnitPrice) : undefined;
       const newPromo: Promotion = {
         id: uuidv4(),
         name: form.name,
         description: form.description,
         type: form.type,
         status: asDraft ? 'draft' : (new Date(form.startDate) > new Date() ? 'scheduled' : 'active'),
-        discountValue: form.discountValue,
+        discountValue: form.type === 'fixed_unit_price' ? Number(form.fixedUnitPrice) : form.discountValue,
         code: form.code || undefined,
         startDate: new Date(form.startDate).toISOString(),
         endDate: new Date(form.endDate + 'T23:59:59').toISOString(),
@@ -506,6 +570,12 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
         createdAt: new Date().toISOString(),
         revenue: 0,
         ordersUsed: 0,
+        weekdays: form.weekdays.length > 0 ? [...form.weekdays] : undefined,
+        productNameIncludes: productNames,
+        fixedUnitPrice: fixedPrice,
+        applyMode: form.type === 'fixed_unit_price'
+          ? (form.applyAuto ? 'auto' : 'manual_code')
+          : undefined,
       };
       setPromotions((prev) => [newPromo, ...prev]);
       showToast(asDraft ? 'Promoción guardada como borrador' : 'Promoción creada correctamente');
@@ -521,6 +591,17 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       showToast('El nombre es obligatorio', 'error');
       return;
     }
+    const productNames = parseProductNames(form.productNamesText);
+    if (form.type === 'fixed_unit_price') {
+      if (!(form.fixedUnitPrice > 0)) {
+        showToast('Indica el precio fijo del producto', 'error');
+        return;
+      }
+      if (productNames.length === 0) {
+        showToast('Indica al menos un nombre de producto', 'error');
+        return;
+      }
+    }
     setSaving(true);
     setTimeout(() => {
       setPromotions((prev) =>
@@ -531,12 +612,18 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                 name: form.name,
                 description: form.description,
                 type: form.type,
-                discountValue: form.discountValue,
+                discountValue: form.type === 'fixed_unit_price' ? Number(form.fixedUnitPrice) : form.discountValue,
                 code: form.code || undefined,
                 startDate: new Date(form.startDate).toISOString(),
                 endDate: new Date(form.endDate + 'T23:59:59').toISOString(),
                 maxUses: form.maxUses ? parseInt(form.maxUses) : null,
                 targetAudience: form.targetAudience,
+                weekdays: form.weekdays.length > 0 ? [...form.weekdays] : undefined,
+                productNameIncludes: productNames,
+                fixedUnitPrice: form.type === 'fixed_unit_price' ? Number(form.fixedUnitPrice) : undefined,
+                applyMode: form.type === 'fixed_unit_price'
+                  ? (form.applyAuto ? 'auto' : 'manual_code')
+                  : undefined,
               }
             : p,
         ),
@@ -561,6 +648,10 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       endDate: formatDateInput(promo.endDate),
       maxUses: promo.maxUses ? String(promo.maxUses) : '',
       targetAudience: promo.targetAudience,
+      weekdays: promo.weekdays || [],
+      productNamesText: (promo.productNameIncludes || []).join(', '),
+      fixedUnitPrice: promo.fixedUnitPrice ?? promo.discountValue ?? 11,
+      applyAuto: (promo.applyMode || 'auto') !== 'manual_code',
     });
     setEditingId(promo.id);
     setActiveView('create');
@@ -834,7 +925,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                 <span className="w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs flex items-center justify-center font-bold">1</span>
                 Tipo de promoción
               </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
                 {(Object.entries(TYPE_CONFIG) as [PromoType, typeof TYPE_CONFIG[PromoType]][]).map(([key, cfg]) => {
                   const Icon = cfg.icon;
                   const isSelected = form.type === key;
@@ -907,6 +998,82 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                       </span>
                     </div>
                   </div>
+                )}
+
+                {form.type === 'fixed_unit_price' && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Precio fijo por unidad (€) *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.01}
+                          value={form.fixedUnitPrice}
+                          onChange={(e) => setForm((f) => ({ ...f, fixedUnitPrice: Math.max(0, Number(e.target.value)) }))}
+                          className="w-full text-sm border border-slate-200 dark:border-gray-700 dark:bg-gray-900 rounded-lg px-3 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 font-medium">€</span>
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                        Productos (nombres, separados por coma) *
+                      </label>
+                      <textarea
+                        value={form.productNamesText}
+                        onChange={(e) => setForm((f) => ({ ...f, productNamesText: e.target.value }))}
+                        rows={2}
+                        className="w-full text-sm border border-slate-200 dark:border-gray-700 dark:bg-gray-900 rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400"
+                        placeholder="Prosciutto, Bacon, Calzone apertas, Margarita, Roquefort"
+                      />
+                      <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        El TPV busca estos textos dentro del nombre del producto (sin importar mayúsculas).
+                      </p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
+                        Días de la semana (vacío = todos)
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {WEEKDAY_OPTIONS.map((d) => {
+                          const on = form.weekdays.includes(d.value);
+                          return (
+                            <button
+                              key={d.value}
+                              type="button"
+                              onClick={() => setForm((f) => ({
+                                ...f,
+                                weekdays: on
+                                  ? f.weekdays.filter((x) => x !== d.value)
+                                  : [...f.weekdays, d.value].sort((a, b) => a - b),
+                              }))}
+                              className={`px-2.5 h-8 rounded-lg text-xs font-semibold border transition-colors ${
+                                on
+                                  ? 'bg-amber-500 text-white border-amber-500'
+                                  : 'bg-white dark:bg-gray-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-gray-700'
+                              }`}
+                            >
+                              {d.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.applyAuto}
+                          onChange={(e) => setForm((f) => ({ ...f, applyAuto: e.target.checked }))}
+                          className="rounded border-slate-300"
+                        />
+                        Aplicar sola en el TPV (sin código)
+                      </label>
+                    </div>
+                  </>
                 )}
 
                 <div>
@@ -1066,7 +1233,9 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                   {selectedPromo.discountValue > 0 && (
                     <div className="flex-shrink-0 w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg">
                       <span className="text-white font-bold text-lg">
-                        {selectedPromo.type === 'fixed' ? `${selectedPromo.discountValue}€` : `${selectedPromo.discountValue}%`}
+                        {selectedPromo.type === 'fixed' || selectedPromo.type === 'fixed_unit_price'
+                          ? `${selectedPromo.fixedUnitPrice ?? selectedPromo.discountValue}€`
+                          : `${selectedPromo.discountValue}%`}
                       </span>
                     </div>
                   )}
@@ -1216,7 +1385,11 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                         <div>
                           <dt className="text-xs text-slate-500 dark:text-slate-400">Descuento</dt>
                           <dd className="font-medium text-slate-900 dark:text-slate-100">
-                            {selectedPromo.type === 'fixed' ? `${selectedPromo.discountValue} €` : selectedPromo.type === '2x1' || selectedPromo.type === 'gift' ? 'N/A' : `${selectedPromo.discountValue}%`}
+                            {selectedPromo.type === 'fixed' || selectedPromo.type === 'fixed_unit_price'
+                              ? `${selectedPromo.fixedUnitPrice ?? selectedPromo.discountValue} €`
+                              : selectedPromo.type === '2x1' || selectedPromo.type === 'gift'
+                                ? 'N/A'
+                                : `${selectedPromo.discountValue}%`}
                           </dd>
                         </div>
                         <div>

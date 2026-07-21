@@ -11,6 +11,7 @@ import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
 import { coerceSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import {
   consumeSalaSetupPending,
@@ -189,10 +190,9 @@ export function RestaurantSalaPage() {
         return;
       }
 
-      // Primero el mapa: si ya hay zonas/mesas, entrar en vivo aunque el scope
-      // de tiendas aún no haya terminado de hidratarse.
+      // Primero el mapa de ESTA empresa (no el del bar u otra vertical).
       const [config, listed] = await Promise.all([
-        getFloorConfigRequest(userId).catch(() => null),
+        getFloorConfigRequest(userId, { businessId }).catch(() => null),
         listDiningTablesRequest(userId).catch(() => []),
       ]);
 
@@ -213,7 +213,7 @@ export function RestaurantSalaPage() {
         return;
       }
 
-      // Solo primera vez / local vacío → asistente.
+      // Primera vez / local vacío → asistente (¿qué espacios tienes?).
       setView('setup');
     } catch {
       setView(parentPdvId || pendingPdvId || hasStoreInScope ? 'setup' : 'no_pdv');
@@ -481,6 +481,11 @@ export function RestaurantSalaPage() {
             businessId={businessId}
             storeLabel={displayLabelForActive || currentBusiness?.name}
             saving={saving}
+            verticalTone={
+              isStrictDeliveryBusinessType(currentBusiness?.businessType)
+                ? 'delivery'
+                : 'restaurant'
+            }
             onSubmit={(drafts) => void handleSubmit(drafts)}
           />
         </div>

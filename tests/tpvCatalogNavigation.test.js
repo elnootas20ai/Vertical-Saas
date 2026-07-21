@@ -6,6 +6,8 @@ import {
   defaultTpvSectionId,
   searchTpvProducts,
   buildTpvProductSearchIndex,
+  filterTpvCatalogProducts,
+  foldTpvSearchText,
 } from '../src/app/lib/tpvCatalogNavigation';
 
 describe('categoriesForTpvScope', () => {
@@ -152,5 +154,55 @@ describe('categoriesForTpvScope', () => {
       'modomio',
       'blackburger',
     ]);
+  });
+});
+
+describe('búsqueda TPV sin acentos', () => {
+  it('foldTpvSearchText quita diacríticos', () => {
+    expect(foldTpvSearchText('Diávola')).toBe('diavola');
+    expect(foldTpvSearchText('Jamón')).toBe('jamon');
+    expect(foldTpvSearchText('  Café  ')).toBe('cafe');
+  });
+
+  it('searchTpvProducts encuentra «Diávola» con «dia»', () => {
+    const catalog = [
+      {
+        _id: 'diavola',
+        name: 'Diávola',
+        itemType: 'product',
+        category: 'Pizzas',
+        active: true,
+        brandIds: ['mod'],
+        unitPrice: 12,
+      },
+      {
+        _id: 'margarita',
+        name: 'Margarita',
+        itemType: 'product',
+        category: 'Pizzas',
+        active: true,
+        brandIds: ['mod'],
+        unitPrice: 10,
+      },
+    ];
+    const index = buildTpvProductSearchIndex(catalog);
+    const hits = searchTpvProducts(index, catalog, 'dia', { kind: 'all' }, null, {});
+    expect(hits.map((i) => i._id)).toEqual(['diavola']);
+  });
+
+  it('filterTpvCatalogProducts también ignora acentos', () => {
+    const catalog = [
+      {
+        _id: 'jamon',
+        name: 'Jamón ibérico',
+        itemType: 'product',
+        category: 'Entrantes',
+        active: true,
+        brandIds: [],
+        unitPrice: 8,
+      },
+    ];
+    const hits = filterTpvCatalogProducts(catalog, { kind: 'all' }, null, 'jamon', {});
+    expect(hits.map((i) => i._id)).toEqual(['jamon']);
   });
 });

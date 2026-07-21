@@ -25,7 +25,13 @@ function foldKey(s: string): string {
     .trim()
     .toLowerCase()
     .normalize('NFD')
-    .replace(/\p{M}/gu, '');
+    .replace(/\p{M}/gu, '')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** Búsqueda TPV sin acentos: «dia» encuentra «Diávola», «jamon» encuentra «Jamón». */
+export function foldTpvSearchText(s: string): string {
+  return foldKey(s);
 }
 
 export function formatTpvSectionId(scope: TpvCatalogScope): string {
@@ -254,18 +260,17 @@ export function filterTpvCatalogProducts(
   productSearch: string,
   clientProductScores: Record<string, number>,
 ): CatalogItem[] {
-  const q = productSearch.trim().toLowerCase();
+  const q = foldKey(productSearch);
 
   let items: CatalogItem[];
   if (q) {
     // Con texto de búsqueda: todo el catálogo vendible (no solo la marca activa).
-    items = catalog.filter(isSellable).filter(
-      (i) =>
-        i.name.toLowerCase().includes(q) ||
-        i.category?.toLowerCase().includes(q) ||
-        String(i.sku || '').toLowerCase().includes(q) ||
-        String(i.barcode || '').toLowerCase().includes(q),
-    );
+    items = catalog.filter(isSellable).filter((i) => {
+      const hay = foldKey(
+        [i.name, i.category, i.sku, i.barcode].map((s) => String(s || '')).join(' '),
+      );
+      return hay.includes(q);
+    });
   } else {
     if (!scope) return [];
     items = itemsInScope(catalog, scope);

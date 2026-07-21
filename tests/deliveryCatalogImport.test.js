@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import {
@@ -266,6 +267,21 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(stock.minStock).toBe(15);
     expect(stock.unit).toBe('kg');
     expect(stock.isStockItem).toBe(true);
+  });
+
+  it('mapImportEntryToCatalogItem fuerza carta sin isStockItem', async () => {
+    const { mapImportEntryToCatalogItem } = await import('../src/app/lib/deliveryCatalogImport.ts');
+    const mapped = await mapImportEntryToCatalogItem(
+      {
+        name: 'Diávola',
+        category: 'Pizzas',
+        price: '11,20',
+      },
+      { businessId: 'biz-1', brandCache: [], vertical: 'delivery' },
+    );
+    expect(mapped?.item.isStockItem).toBe(false);
+    expect(mapped?.item.stockCategory).toBe('finished_product');
+    expect(mapped?.item.module).toBe('catalog');
   });
 
   it('isOfficialCatalogTemplateHeaders detects official column row', async () => {

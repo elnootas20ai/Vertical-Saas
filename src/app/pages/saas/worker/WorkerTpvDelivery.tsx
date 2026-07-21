@@ -38,6 +38,7 @@ import {
   orderLoadBoundsForOpenSession,
   orderOnOpenTpvOpsBoard,
 } from '../../../lib/tpvCajaScope';
+import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import {
   formatElapsedMinutes,
   getTpvPhaseTimer,
@@ -46,6 +47,8 @@ import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal } from '../../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
 import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetailCard';
+import { DecimalNumpadField } from '../../../components/saas/DecimalNumpadField';
+import { parseDecimalPadValue } from '../../../lib/decimalNumpadInput';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { isTpvOpsVerticalPending } from '../../../lib/deliveryOpsTypes';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
@@ -316,16 +319,16 @@ function matchesFulfillmentFilter(order: DeliveryOrder, filter: FulfillmentFilte
 }
 
 function matchesSearch(order: DeliveryOrder, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  const q = foldTpvSearchText(query);
   if (!q) return true;
-  const customer = order.customerName?.toLowerCase() || '';
-  const orderNo = order.orderNumber.toLowerCase();
+  const customer = foldTpvSearchText(order.customerName || '');
+  const orderNo = foldTpvSearchText(order.orderNumber);
   const phoneDigits = String(order.customerPhone || '').replace(/\D/g, '');
   const qDigits = query.replace(/\D/g, '');
   if (orderNo.includes(q) || customer.includes(q)) return true;
   if (qDigits.length >= 3 && phoneDigits.includes(qDigits)) return true;
   // Prefijo de palabra en el nombre (evita "uri" → pedido de Carlos por un producto "Pureza")
-  const nameWords = customer.split(/[^a-z0-9áéíóúüñ]+/i).filter(Boolean);
+  const nameWords = customer.split(/[^a-z0-9]+/).filter(Boolean);
   if (q.length < 4) {
     return nameWords.some((w) => w.startsWith(q));
   }
@@ -603,6 +606,117 @@ function DeliverPaymentModal({
   loading: boolean;
 }) {
   useModalClose(!loading, onClose);
+  const chargeTotal = resolveDeliveryOrderChargeTotal(order);
+  const [cashStep, setCashStep] = useState(false);
+  const [cashGiven, setCashGiven] = useState('');
+  const cashGivenAmount = parseDecimalPadValue(cashGiven);
+  const changeAmount =
+    !isNaN(cashGivenAmount) && cashGivenAmount > 0 ? cashGivenAmount - chargeTotal : null;
+  const cashQuickAmounts = (() => {
+    const base = [5, 10, 20, 50, 100].filter((v) => v >= chargeTotal);
+    const exact = Math.ceil(chargeTotal * 100) / 100;
+    return Array.from(new Set([exact, ...base])).filter((v) => v > 0).slice(0, 6);
+  })();
+
+  if (cashStep) {
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={loading ? undefined : onClose} />
+        <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="absolute top-3 right-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+          >
+            <X className="w-5 h-5 text-gray-500" />
+          </button>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 pr-8">Efectivo · cambio</h3>
+          <p className="text-sm text-gray-500 mt-1 font-mono">#{order.orderNumber}</p>
+          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-2 tabular-nums">
+            A cobrar {formatCurrency(chargeTotal)}
+          </p>
+          <div className="mt-4">
+            <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
+              El cliente paga con
+            </label>
+            <DecimalNumpadField
+              value={cashGiven}
+              onChange={setCashGiven}
+              placeholder={chargeTotal.toFixed(2)}
+              showNumpad
+              compactNumpad
+              inputClassName="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-lg font-medium text-gray-900 dark:text-gray-100 outline-none focus:border-emerald-500 pr-8"
+              suffix={
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+              }
+            />
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {cashQuickAmounts.map((amount) => {
+                const label =
+                  Math.abs(amount - chargeTotal) < 0.001
+                    ? 'Exacto'
+                    : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
+                const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
+                return (
+                  <button
+                    key={label + String(amount)}
+                    type="button"
+                    onClick={() => setCashGiven(amount.toFixed(2))}
+                    className={`min-h-[36px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation ${
+                      selected
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'bg-white dark:bg-gray-800 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div
+              className={`mt-3 flex items-center justify-between rounded-xl px-3 py-2.5 ${
+                changeAmount === null
+                  ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800'
+                  : changeAmount >= 0
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+              }`}
+            >
+              <span className="text-sm font-semibold">
+                {changeAmount === null ? 'Cambio' : changeAmount >= 0 ? 'Cambio' : 'Falta'}
+              </span>
+              <span className="text-lg font-bold tabular-nums">
+                {changeAmount === null ? '—' : formatCurrency(Math.abs(changeAmount))}
+              </span>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setCashStep(false);
+                setCashGiven('');
+              }}
+              disabled={loading}
+              className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-300 disabled:opacity-50"
+            >
+              Atrás
+            </button>
+            <button
+              type="button"
+              onClick={() => onConfirm('efectivo')}
+              disabled={loading || (changeAmount !== null && changeAmount < 0)}
+              className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Confirmar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -623,7 +737,7 @@ function DeliverPaymentModal({
           <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Entregar pedido</h3>
           <p className="text-sm text-gray-500 mt-1 font-mono">#{order.orderNumber}</p>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2 tabular-nums">
-            {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
+            {formatCurrency(chargeTotal)}
           </p>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">
             {shouldAskPaymentOnDelivery(order)
@@ -646,7 +760,7 @@ function DeliverPaymentModal({
             <>
               <button
                 type="button"
-                onClick={() => onConfirm('efectivo')}
+                onClick={() => setCashStep(true)}
                 disabled={loading}
                 className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors disabled:opacity-50"
               >

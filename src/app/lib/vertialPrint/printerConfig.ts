@@ -27,6 +27,12 @@ export const DEFAULT_PRINTER_CONFIG: VertialPrinterConfig = {
   preferBridge: true,
 };
 
+/**
+ * Ancho de papel del ticket delivery unificado (Tiana, Badalona y resto).
+ * Misma maquetación en todas las tiendas; la IP de impresora sigue siendo por PDV.
+ */
+export const DELIVERY_TICKET_PAPER_WIDTH_MM: 58 | 80 = 80;
+
 export function resolveBridgeUrl(config?: Pick<VertialPrinterConfig, 'bridgeHost'>): string {
   const raw = String(config?.bridgeHost || '').trim();
   if (raw) {

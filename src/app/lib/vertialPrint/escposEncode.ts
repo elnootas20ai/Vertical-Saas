@@ -123,20 +123,22 @@ function pushLineDetail(
 
 /**
  * Margen superior: la cuchilla suele dejar el inicio del papel encima del cabezal.
- * Sin este avance, el título/negocio salen cortados.
+ * Sin este avance, el título/negocio salen cortados (p. ej. Badalona).
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  // Mínimo para no cortar el título
-  chunks.push(command([ESC, 0x64, 1]));
+  chunks.push(command([ESC, 0x64, 3]));
 }
 
 /**
- * Avance + corte: suficiente para leer el pie, sin tirar media bobina.
+ * Avance + corte: el pie (método de pago, gracias…) debe quedar por encima de la cuchilla.
+ * Con solo 3 líneas en algunas térmicas 80 mm (Badalona) el ticket sale “corto” / cortado.
+ * 8 líneas ≈ margen seguro sin tirar media bobina.
  */
 function pushFeedAndCut(chunks: Uint8Array[], width: number) {
   chunks.push(setSize(SIZE_NORMAL));
-  // ~3 líneas hasta cuchilla (ajustado más compacto)
-  chunks.push(command([ESC, 0x64, 3]));
+  chunks.push(textLine('', width));
+  chunks.push(textLine('', width));
+  chunks.push(command([ESC, 0x64, 8]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
 }
@@ -260,11 +262,13 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     pushMoneyRow(chunks, 'TOTAL', money(doc.total), colsForSize(paperWidthMm, SIZE_TITLE));
     chunks.push(command([ESC, 0x45, 0]));
     chunks.push(setSize(SIZE_NORMAL));
-    chunks.push(setSize(SIZE_TALL));
-    chunks.push(textLine(doc.paymentStatusLabel, tallCols));
-    chunks.push(setSize(SIZE_NORMAL));
-    if (doc.paymentLabel && doc.paymentLabel !== '-') {
-      chunks.push(textLine(doc.paymentLabel, width));
+    if (doc.paymentLabel) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`Metodo: ${doc.paymentLabel}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    if (doc.paymentStatusLabel) {
+      chunks.push(textLine(doc.paymentStatusLabel, width));
     }
     if (doc.orderNotes) {
       chunks.push(setSize(SIZE_TALL));
@@ -316,9 +320,14 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     chunks.push(command([ESC, 0x45, 0]));
     chunks.push(setSize(SIZE_NORMAL));
     chunks.push(textLine(sepLine(width), width));
-    chunks.push(setSize(SIZE_TALL));
-    chunks.push(textLine(`Metodo: ${doc.paymentLabel}`, tallCols));
-    chunks.push(setSize(SIZE_NORMAL));
+    if (doc.paymentLabel) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(textLine(`Metodo: ${doc.paymentLabel}`, tallCols));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    if (doc.paymentStatusLabel) {
+      chunks.push(textLine(doc.paymentStatusLabel, width));
+    }
 
     if (doc.refundReason) chunks.push(textLine(`Motivo: ${doc.refundReason}`, width));
   }
@@ -340,7 +349,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
   const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   return concat([
     command([ESC, 0x40]),
-    command([ESC, 0x64, 1]),
+    command([ESC, 0x64, 3]),
     command([ESC, 0x61, 1]),
     command([ESC, 0x45, 1]),
     setSize(SIZE_TALL),
@@ -359,7 +368,7 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
     textLine('Vuelve a la app y pulsa', width),
     textLine('"Usar esta impresora"', width),
     textLine('', width),
-    command([ESC, 0x64, 3]),
+    command([ESC, 0x64, 8]),
     command([GS, 0x56, 0]),
   ]);
 }
@@ -386,7 +395,7 @@ export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
     lines: [{ qty: 1, name: 'Producto demo', total: 9.99 }],
     base: 8.26,
     vat: 1.73,
-    vatRate: 21,
+    vatRate: 10,
     total: 9.99,
     paymentLabel: 'Efectivo',
     paymentStatusLabel: 'Cobrado',

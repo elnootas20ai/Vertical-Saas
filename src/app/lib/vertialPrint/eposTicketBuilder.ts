@@ -93,9 +93,9 @@ export function buildEposTicket(
   const titleCols = colsForSize(paperWidthMm, true);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(1);
+    builder.addFeedLine(3);
   } else {
-    builder.addText('\n');
+    builder.addText('\n\n\n');
   }
 
   // Comanda cocina: solo pedido + productos + notas (sin cliente ni datos fiscales)
@@ -125,8 +125,8 @@ export function buildEposTicket(
     }
     builder.addTextAlign('center');
     line(builder, doc.footer, width);
-    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(3);
-    else builder.addText('\n\n');
+    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(8);
+    else builder.addText('\n\n\n\n');
     if (typeof builder.addCut === 'function') builder.addCut(builder.CUT_FEED ?? 1);
     return;
   }
@@ -181,10 +181,12 @@ export function buildEposTicket(
     setTextSize(builder, 2, 2);
     boldMoneyRow(builder, 'TOTAL', money(doc.total), titleCols);
     setTextSize(builder, 1, 1);
-    setTextSize(builder, 1, 2);
-    line(builder, doc.paymentStatusLabel, tallCols);
-    setTextSize(builder, 1, 1);
-    if (doc.paymentLabel && doc.paymentLabel !== '-') line(builder, doc.paymentLabel, width);
+    if (doc.paymentLabel) {
+      setTextSize(builder, 1, 2);
+      line(builder, `Metodo: ${doc.paymentLabel}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    if (doc.paymentStatusLabel) line(builder, doc.paymentStatusLabel, width);
     if (doc.orderNotes) {
       setTextSize(builder, 1, 2);
       line(builder, `NOTA: ${doc.orderNotes}`, tallCols);
@@ -224,9 +226,12 @@ export function buildEposTicket(
     );
     setTextSize(builder, 1, 1);
     sep(builder, width);
-    setTextSize(builder, 1, 2);
-    line(builder, `Metodo: ${doc.paymentLabel}`, tallCols);
-    setTextSize(builder, 1, 1);
+    if (doc.paymentLabel) {
+      setTextSize(builder, 1, 2);
+      line(builder, `Metodo: ${doc.paymentLabel}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    if (doc.paymentStatusLabel) line(builder, doc.paymentStatusLabel, width);
     if (doc.refundReason) line(builder, `Motivo: ${doc.refundReason}`, width);
   }
 
@@ -235,9 +240,9 @@ export function buildEposTicket(
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(3);
+    builder.addFeedLine(8);
   } else {
-    builder.addText('\n\n');
+    builder.addText('\n\n\n\n');
   }
 
   if (typeof builder.addCut === 'function') {

@@ -79,6 +79,9 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).not.toMatch(/Atendido:/);
     expect(text).not.toMatch(/NIF\/CIF/);
     expect(text).not.toMatch(/Tienda:/);
+    expect(text).not.toMatch(/Metodo/i);
+    expect(text).not.toMatch(/Efectivo|Tarjeta|Cobrado/i);
+    expect(doc.paymentLabel).toBe('');
   });
 
   it('reparto: dirección, productos, total y cobro', () => {
@@ -88,6 +91,7 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(doc.deliveryTypeLabel).toMatch(/domicilio/i);
     expect(doc.customerPhone).toBe('666123456');
     expect(doc.customerAddress).toContain('Av. Principal');
+    expect(doc.paymentLabel).toBe('Efectivo');
 
     const text = decodeEscpos(encodeTicketEscpos(doc));
     expect(text).toContain('REPARTO');
@@ -96,7 +100,22 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('666123456');
     expect(text).toContain('TOTAL');
     expect(text).toContain('18.50');
+    expect(text).toContain('Metodo: Efectivo');
     expect(text).toContain('Cobrado');
+  });
+
+  it('ticket cliente y reparto: metodo aunque el cobro este pendiente', () => {
+    const opts = baseOptions();
+    opts.order.paymentStatus = 'pending';
+    opts.order.paymentMethod = 'tarjeta';
+    opts.order.paidAmount = 0;
+    const customer = buildTicketDocument({ ...opts, variant: 'customer' });
+    const delivery = buildTicketDocument({ ...opts, variant: 'delivery' });
+    expect(customer.paymentLabel).toBe('Tarjeta');
+    expect(delivery.paymentLabel).toBe('Tarjeta');
+    expect(customer.paymentStatusLabel).toBe('Pendiente de cobro');
+    expect(decodeEscpos(encodeTicketEscpos(customer))).toContain('Metodo: Tarjeta');
+    expect(decodeEscpos(encodeTicketEscpos(delivery))).toContain('Metodo: Tarjeta');
   });
 
   it('ticket cliente: IVA, total, mods, teléfono y dirección', () => {
@@ -115,7 +134,7 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('Tel: 666123456');
     expect(text).toContain('Dir: Av. Principal');
     expect(text).toContain('Base imponible');
-    expect(text).toContain('IVA 21%');
+    expect(text).toContain('IVA 10%');
     expect(text).toContain('TOTAL');
     expect(text).toContain('Extra queso');
     expect(text).toContain('Gracias por su visita');

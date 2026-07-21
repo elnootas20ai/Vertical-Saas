@@ -119,6 +119,8 @@ export interface DeliveryOrder {
   items: DeliveryOrderItem[];
   itemsSubtotal?: number;
   discountAmount?: number;
+  /** Coste de envío (a domicilio). */
+  deliveryFee?: number;
   totalAmount: number;
   notes: string;
   observations: string;
@@ -2098,6 +2100,8 @@ export interface DeliveryConfig {
   storeIngredients?: StoreIngredient[];
   /** Precio único para todos los extras de pago en el TPV. */
   tpvDefaultExtraPrice?: number;
+  /** Coste de envío automático en TPV (solo pedidos a domicilio). */
+  tpvDeliveryFee?: number;
   tpvBrandIngredients?: TpvBrandIngredientSelection;
   tpvBrandSupplements?: TpvBrandSupplements;
   tpvCategoryTemplates?: TpvCategoryTemplates;

@@ -5586,24 +5586,40 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
   })) : (existing?.items || []);
   const itemsSubtotal = items.reduce((s, i) => s + Number(i.total || 0), 0);
   const roundMoney = (n) => Math.round(Number(n) * 100) / 100;
+  const deliveryFeeRaw = data.deliveryFee != null && data.deliveryFee !== ''
+    ? Number(data.deliveryFee)
+    : Number(existing?.deliveryFee || 0);
+  const deliveryFee = Number.isFinite(deliveryFeeRaw) && deliveryFeeRaw > 0
+    ? roundMoney(deliveryFeeRaw)
+    : 0;
+  const explicitDiscount = data.discountAmount != null && data.discountAmount !== ''
+    ? Number(data.discountAmount)
+    : NaN;
+  const discountAmount = Number.isFinite(explicitDiscount) && explicitDiscount >= 0
+    ? roundMoney(Math.min(explicitDiscount, itemsSubtotal))
+    : 0;
+  const maxPayable = roundMoney(Math.max(0, itemsSubtotal - discountAmount) + deliveryFee);
   const explicitTotal = data.totalAmount != null && data.totalAmount !== ''
     ? Number(data.totalAmount)
     : NaN;
   const preservedTotal = existing?.totalAmount != null ? Number(existing.totalAmount) : NaN;
   let totalAmount;
   if (Number.isFinite(explicitTotal) && explicitTotal >= 0) {
-    totalAmount = roundMoney(Math.min(explicitTotal, itemsSubtotal));
-  } else if (existing && Number.isFinite(preservedTotal)) {
+    // Permite envío: el total puede superar el subtotal de líneas.
+    totalAmount = roundMoney(Math.min(explicitTotal, maxPayable > 0 ? maxPayable : explicitTotal));
+  } else if (existing && Number.isFinite(preservedTotal) && data.items == null) {
     totalAmount = roundMoney(preservedTotal);
   } else {
-    totalAmount = roundMoney(itemsSubtotal);
+    totalAmount = maxPayable > 0 || deliveryFee > 0 || discountAmount > 0
+      ? maxPayable
+      : roundMoney(itemsSubtotal);
   }
-  const explicitDiscount = data.discountAmount != null && data.discountAmount !== ''
-    ? Number(data.discountAmount)
-    : NaN;
-  const discountAmount = Number.isFinite(explicitDiscount) && explicitDiscount >= 0
-    ? roundMoney(Math.min(explicitDiscount, itemsSubtotal))
-    : roundMoney(Math.max(0, itemsSubtotal - totalAmount));
+  const inferredDiscount = Number.isFinite(explicitDiscount) && explicitDiscount >= 0
+    ? discountAmount
+    : roundMoney(Math.max(0, itemsSubtotal + deliveryFee - totalAmount));
+  const finalDiscountAmount = Number.isFinite(explicitDiscount) && explicitDiscount >= 0
+    ? discountAmount
+    : inferredDiscount;
 
   const newStatus = normalizeDeliveryOrderStatus(data.status);
   const oldStatus = existing ? normalizeDeliveryOrderStatus(existing.status) : null;
@@ -5689,7 +5705,8 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
 
     items,
     itemsSubtotal: roundMoney(itemsSubtotal),
-    discountAmount,
+    discountAmount: finalDiscountAmount,
+    deliveryFee,
     totalAmount,
     notes: String(data.notes || ''),
     observations: String(data.observations || existing?.observations || ''),
@@ -5772,6 +5789,7 @@ export function sanitizeDeliveryOrder(doc) {
     items: Array.isArray(doc.items) ? doc.items : [],
     itemsSubtotal: Number(doc.itemsSubtotal ?? doc.totalAmount ?? 0),
     discountAmount: Number(doc.discountAmount || 0),
+    deliveryFee: Number(doc.deliveryFee || 0),
     totalAmount: Number(doc.totalAmount || 0),
     notes: doc.notes || '',
     observations: doc.observations || '',
@@ -5860,6 +5878,7 @@ const DEFAULT_DELIVERY_CONFIG = {
     defaultDiscountPercent: 0,
     eligibleCategories: [],
   },
+  tpvDeliveryFee: 0,
 };
 
 export function sanitizeStoreIngredients(raw) {
@@ -6061,6 +6080,12 @@ export function buildDeliveryConfigDocument(userId, data = {}, existing = null) 
       const p = Number(raw);
       return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : undefined;
     })(),
+    /** Coste de envío automático en TPV cuando el pedido es a domicilio. */
+    tpvDeliveryFee: (() => {
+      const raw = base.tpvDeliveryFee ?? existing?.tpvDeliveryFee;
+      const p = Number(raw);
+      return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : 0;
+    })(),
     tpvBrandIngredients: sanitizeTpvBrandIngredients(
       base.tpvBrandIngredients ?? existing?.tpvBrandIngredients,
     ),
@@ -6124,6 +6149,10 @@ export function sanitizeDeliveryConfig(doc) {
     tpvDefaultExtraPrice: (() => {
       const p = Number(doc.tpvDefaultExtraPrice);
       return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : undefined;
+    })(),
+    tpvDeliveryFee: (() => {
+      const p = Number(doc.tpvDeliveryFee);
+      return Number.isFinite(p) && p >= 0 ? Math.round(p * 100) / 100 : 0;
     })(),
     tpvBrandIngredients: sanitizeTpvBrandIngredients(doc.tpvBrandIngredients),
     tpvBrandSupplements: sanitizeTpvBrandSupplementsFlat(doc.tpvBrandSupplements),

@@ -27,6 +27,7 @@ import {
 import { listCatalogItemsRequest, type CatalogItem } from '../../lib/deliveryApi';
 import { resolveCatalogProductImage } from '../../lib/catalogProductPlaceholders';
 import { listClockins, type ClockinRecord } from '../../lib/clockinsApi';
+import { foldTpvSearchText } from '../../lib/tpvCatalogNavigation';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useTpv, type TpvWorker } from '../../context/TpvContext';
@@ -159,8 +160,10 @@ export function TpvModePage({ salesPoint }: TpvModePageProps = {}) {
       items = items.filter(i => i.category === activeCategory);
     }
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      items = items.filter(i => i.name.toLowerCase().includes(q) || i.sku?.toLowerCase().includes(q));
+      const q = foldTpvSearchText(searchQuery);
+      items = items.filter(
+        (i) => foldTpvSearchText(i.name).includes(q) || foldTpvSearchText(i.sku || '').includes(q),
+      );
     }
     return items;
   }, [catalog, activeCategory, searchQuery]);

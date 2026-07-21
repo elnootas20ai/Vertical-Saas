@@ -14,7 +14,7 @@ import {
 } from './nativePrintRouting';
 import { sendEposTestTicket, sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
 import { normalizeVertialPrinterConfig } from './printerConfigNormalize';
-import type { VertialPrinterConfig } from './printerConfig';
+import { DELIVERY_TICKET_PAPER_WIDTH_MM, type VertialPrinterConfig } from './printerConfig';
 import {
   NATIVE_PRINTER_PRINT_FAILED_MESSAGE,
   resolveNativePrinterForPrint,
@@ -24,6 +24,14 @@ export type PrintDeliveryTicketResult = {
   method: 'epos' | 'native' | 'bridge' | 'browser';
   ok: boolean;
 };
+
+/** Misma maquetación de ticket en todas las tiendas (80 mm). */
+function withUnifiedTicketPaperWidth(config: VertialPrinterConfig): VertialPrinterConfig {
+  return normalizeVertialPrinterConfig({
+    ...config,
+    paperWidthMm: DELIVERY_TICKET_PAPER_WIDTH_MM,
+  });
+}
 
 /**
  * Config efectiva para imprimir un pedido: primero el scope activo (sesión TPV /
@@ -42,7 +50,7 @@ function resolvePrinterConfigForOrder(options: DeliveryTicketPrintOptions) {
 export async function printDeliveryTicket(
   options: DeliveryTicketPrintOptions,
 ): Promise<PrintDeliveryTicketResult> {
-  const config = resolvePrinterConfigForOrder(options);
+  const config = withUnifiedTicketPaperWidth(resolvePrinterConfigForOrder(options));
   const doc = buildTicketDocument(options);
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 

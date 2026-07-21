@@ -46,7 +46,7 @@ export function useRestaurantTpvFloor(
       dayStart.setHours(0, 0, 0, 0);
       const [tablesData, config, ordersToday, reservationsToday] = await Promise.all([
         listDiningTablesRequest(userId),
-        getFloorConfigRequest(userId),
+        getFloorConfigRequest(userId, businessId ? { businessId } : undefined),
         listDiningOrdersRequest(userId, { dateFrom: dayStart.toISOString() }).catch(() => []),
         listFloorReservations(userId).catch(() => []),
       ]);

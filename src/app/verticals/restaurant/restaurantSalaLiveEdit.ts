@@ -173,7 +173,7 @@ export async function addZoneWithTables(params: AddZoneParams): Promise<{
   const linked = await ensureRoomTpvDetailed(userId, businessId, room, tpvOptions);
   room = linked.room;
 
-  const floorConfig = await getFloorConfigRequest(userId).catch(() => null);
+  const floorConfig = await getFloorConfigRequest(userId, { businessId }).catch(() => null);
   const nextRooms = [...rooms, room];
   await persistRooms(userId, businessId, nextRooms, floorConfig);
 
@@ -314,7 +314,7 @@ export async function removeZoneIfIdle(params: {
     return String(t.zone || '').trim() !== room.name;
   });
 
-  const floorConfig = await getFloorConfigRequest(userId).catch(() => null);
+  const floorConfig = await getFloorConfigRequest(userId, { businessId }).catch(() => null);
   await persistRooms(userId, businessId, nextRooms, floorConfig);
 
   return { rooms: nextRooms, tables: nextTables };

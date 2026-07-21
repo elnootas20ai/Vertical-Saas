@@ -195,6 +195,8 @@ export const COMBO_MENU_PRESETS: ComboMenuPreset[] = [
   },
 ];
 
+export type ComboMainFamily = 'pizza' | 'burger';
+
 /** Sección del menú — nombres como en el Excel (Pizzas, Complementos, Bebidas…). */
 export type ComboMenuCatalogSection = {
   /** Título visible (siempre el nombre estándar salvo platos principales). */
@@ -205,10 +207,15 @@ export type ComboMenuCatalogSection = {
   slotQuota: number;
   /** Si true, incluye productos de Sides, Entrantes, etc. bajo «Complementos». */
   groupBySlotKind?: boolean;
+  /** Plato principal: agrupa Pizzas + Premium / Burgers en un solo bloque. */
+  groupByMainFamily?: ComboMainFamily;
 };
 
 const MAIN_CATEGORY_ORDER = [
   'Pizzas',
+  'Pizzas Premium',
+  'Premium',
+  'Especialidad',
   'Top Burgers',
   'Burgers',
   'Hamburguesas',
@@ -317,13 +324,6 @@ function presetStructureForMenu(presetId: string): ComboStructureSlot[] {
   return DEFAULT_COMBO_STRUCTURE;
 }
 
-function primaryMainCategory(catalog: CatalogItem[]): string {
-  const mains = uniqueCatalogCategoriesForSlotKind('main', catalog);
-  if (mains.length === 0) return DEFAULT_SECTION_LABEL.main;
-  const pizza = mains.find((c) => foldCategory(normalizeImportCategory(c)) === 'pizzas');
-  return pizza ?? mains[0];
-}
-
 /** Secciones del combo = categorías reales del catálogo, enlazadas al menú. */
 export function buildComboMenuSections(
   presetId: string,
@@ -331,7 +331,6 @@ export function buildComboMenuSections(
 ): ComboMenuCatalogSection[] {
   const structure = presetStructureForMenu(presetId);
   const sections: ComboMenuCatalogSection[] = [];
-  const primaryMain = primaryMainCategory(catalog);
 
   for (const slot of structure) {
     const quota = Math.max(0, slot.expectedCount ?? (slot.required ? 1 : 0));
@@ -351,14 +350,43 @@ export function buildComboMenuSections(
     }
 
     if (slot.slotKind === 'main') {
-      for (const cat of categories) {
-        const isPrimary = categoriesMatch(cat, primaryMain);
+      const families: ComboMainFamily[] = [];
+      if (categories.some((c) => mainFamilyForCatalogCategory(c) === 'pizza')) families.push('pizza');
+      if (categories.some((c) => mainFamilyForCatalogCategory(c) === 'burger')) families.push('burger');
+
+      if (families.length === 0) {
+        for (const cat of categories) {
+          sections.push({
+            catalogCategory: cat,
+            slotKind: 'main',
+            expectedCount: quota,
+            required: slot.required,
+            slotQuota: quota,
+          });
+        }
+        continue;
+      }
+
+      for (const family of families) {
+        const familyCats = categories.filter((c) => mainFamilyForCatalogCategory(c) === family);
+        const hasSpecialty =
+          family === 'pizza' &&
+          familyCats.some((c) => {
+            const k = foldCategory(normalizeImportCategory(c));
+            return /premium|especialidad/.test(k);
+          });
         sections.push({
-          catalogCategory: cat,
+          catalogCategory:
+            family === 'pizza'
+              ? hasSpecialty
+                ? 'Pizzas / Especialidad'
+                : 'Pizzas'
+              : familyCats.find((c) => /top\s*burger/i.test(c)) || 'Burgers',
           slotKind: 'main',
-          expectedCount: isPrimary ? quota : 0,
-          required: slot.required && isPrimary,
+          expectedCount: quota,
+          required: Boolean(slot.required),
           slotQuota: quota,
+          groupByMainFamily: family,
         });
       }
       continue;
@@ -402,6 +430,17 @@ export function comboItemsInCatalogSection(
   comboItems: CatalogComboRef[],
   catalog: CatalogItem[],
 ): CatalogComboRef[] {
+  if (section.groupByMainFamily) {
+    const family = section.groupByMainFamily;
+    return comboItems.filter((ref) => {
+      if (resolveComboRefSlotKind(ref, catalog) !== 'main') return false;
+      const product = catalog.find((c) => c._id === ref.productId);
+      return (
+        mainFamilyForProduct(product?.category || '', ref.productName || product?.name || '') ===
+        family
+      );
+    });
+  }
   if (section.groupBySlotKind) {
     return comboItemsInSlotKind(section.slotKind, comboItems, catalog);
   }
@@ -417,6 +456,12 @@ export function catalogProductsForComboSection(
   catalog: CatalogItem[],
   excludeItemId?: string,
 ): CatalogItem[] {
+  if (section.groupByMainFamily) {
+    const family = section.groupByMainFamily;
+    return catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId).filter(
+      (p) => mainFamilyForProduct(p.category || '', p.name) === family,
+    );
+  }
   if (section.groupBySlotKind) {
     return catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId);
   }
@@ -515,6 +560,11 @@ const SLOT_CATALOG_CATEGORIES: Record<Exclude<ComboSlotKind, 'other'>, Set<strin
   main: new Set([
     'pizzas',
     'pizza',
+    'pizzas premium',
+    'pizza premium',
+    'premium',
+    'especialidad',
+    'especialidades',
     'burgers',
     'burger',
     'hamburguesas',
@@ -568,6 +618,7 @@ function slotKindFromCategory(category: string): ComboSlotKind | null {
     if (SLOT_CATALOG_CATEGORIES[kind].has(key)) return kind;
   }
   if (/^top\s*burger/.test(key) || key.includes('burger')) return 'main';
+  if (key.includes('pizza') || /premium|especialidad|calzone/.test(key)) return 'main';
   if (/refresco|cerveza|vino|bebida|zumo|agua/.test(key)) return 'drink';
   if (/salsa|complement|extra|side|guarnicion|patata|entrante/.test(key)) return 'side';
   if (/postre|helado|dulce|bolleria/.test(key)) return 'dessert';
@@ -696,8 +747,6 @@ export function normalizeComboItemsForSave(
   }));
 }
 
-export type ComboMainFamily = 'pizza' | 'burger';
-
 /** Pizza vs burger según categoría de catálogo (TPV menú). */
 export function mainFamilyForCatalogCategory(category: string): ComboMainFamily {
   const key = foldCategory(normalizeImportCategory(category));
@@ -754,8 +803,12 @@ export function inferMainFamilyFromComboSelections(
 
 export function comboMenuHasMainFamilyChoice(sections: ComboMenuCatalogSection[]): boolean {
   const mains = sections.filter((s) => s.slotKind === 'main' && s.slotQuota > 0);
-  const hasPizza = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'pizza');
-  const hasBurger = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'burger');
+  const hasPizza = mains.some(
+    (s) => (s.groupByMainFamily ?? mainFamilyForCatalogCategory(s.catalogCategory)) === 'pizza',
+  );
+  const hasBurger = mains.some(
+    (s) => (s.groupByMainFamily ?? mainFamilyForCatalogCategory(s.catalogCategory)) === 'burger',
+  );
   return hasPizza && hasBurger;
 }
 
@@ -767,7 +820,9 @@ export function filterComboMenuSectionsForMainFamily(
     return sections.filter((s) => s.slotKind !== 'main');
   }
   return sections.filter(
-    (s) => s.slotKind !== 'main' || mainFamilyForCatalogCategory(s.catalogCategory) === family,
+    (s) =>
+      s.slotKind !== 'main' ||
+      (s.groupByMainFamily ?? mainFamilyForCatalogCategory(s.catalogCategory)) === family,
   );
 }
 

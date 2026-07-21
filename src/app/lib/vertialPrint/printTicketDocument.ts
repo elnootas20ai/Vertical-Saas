@@ -12,6 +12,8 @@ import {
 import { shouldBlockBrowserPrintOnNative, NATIVE_WIFI_PRINTER_SETUP_MESSAGE } from './nativePrintRouting';
 import { sendEposTicket, shouldUseEposPrint } from './eposPrintClient';
 import type { VertialPrinterConfig } from './printerConfig';
+import { DELIVERY_TICKET_PAPER_WIDTH_MM } from './printerConfig';
+import { normalizeVertialPrinterConfig } from './printerConfigNormalize';
 import type { TicketDocument } from './ticketDocument';
 import type { PrintDeliveryTicketResult } from './printDeliveryTicket';
 
@@ -24,7 +26,10 @@ export async function printTicketDocument(
   doc: TicketDocument,
   options?: { config?: VertialPrinterConfig },
 ): Promise<PrintDeliveryTicketResult> {
-  const config = options?.config ?? resolveEffectivePrinterConfig();
+  const config = normalizeVertialPrinterConfig({
+    ...(options?.config ?? resolveEffectivePrinterConfig()),
+    paperWidthMm: DELIVERY_TICKET_PAPER_WIDTH_MM,
+  });
   const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
 
   if (isVertialNativeApp()) {

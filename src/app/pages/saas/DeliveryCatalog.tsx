@@ -53,6 +53,7 @@ import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../l
 import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
+  DELIVERY_CATALOG_TEMPLATE_FILENAME,
   downloadDeliveryCatalogImportTemplate,
   partitionDeliveryCatalogImportEntries,
 } from '../../lib/deliveryCatalogExcelTemplate';
@@ -2600,10 +2601,10 @@ export function CatalogPage() {
   const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
   const isDeliveryOps = isDeliveryOpsBusinessType(currentBusiness?.businessType);
   const isRestaurantCatalog = isRestaurantBusinessType(currentBusiness?.businessType);
+  /** Misma UI/flujo de catálogo TPV (delivery y bar/restaurante). */
+  const usesTpvCatalogUi = isDeliveryOps || isRestaurantCatalog;
   const catalogVertical = isRestaurantCatalog ? 'restaurant' : 'delivery';
-  const catalogImportTemplateFilename = isRestaurantCatalog
-    ? 'plantilla_catalogo_restaurante_tpv.xlsx'
-    : 'plantilla_catalogo_delivery_tpv.xlsx';
+  const catalogImportTemplateFilename = DELIVERY_CATALOG_TEMPLATE_FILENAME;
   const retailStoreCount = useMemo(
     () => activeStore.retailWorkCenters.filter((wc) => wc.active !== false).length,
     [activeStore.retailWorkCenters],
@@ -3084,7 +3085,7 @@ export function CatalogPage() {
   }, []);
 
   const handleDownloadSampleZip = useCallback(async () => {
-    const zipCopy = getRetailOpsUiCopy(isRestaurantCatalog ? 'restaurant' : 'delivery');
+    const zipCopy = getRetailOpsUiCopy('delivery');
     try {
       const zip = new JSZip();
       zip.file('PIZ-001.png', SAMPLE_PNG_BASE64, { base64: true });
@@ -3110,7 +3111,7 @@ export function CatalogPage() {
     } catch {
       toast.error('No se pudo generar el ZIP de ejemplo');
     }
-  }, [isRestaurantCatalog]);
+  }, []);
 
   // ── Data loading ────────────────────────────────────────────────────────────
 
@@ -3348,7 +3349,7 @@ export function CatalogPage() {
     const payload: Partial<CatalogItem> = {
       ...data,
       module: 'catalog',
-      ...(isDeliveryOps
+      ...(usesTpvCatalogUi
         ? { vertical: catalogVertical, business_id: businessId || undefined }
         : {}),
     };
@@ -3367,7 +3368,7 @@ export function CatalogPage() {
         if (!options?.keepOpen) {
           toast.success('Artículo creado');
         }
-        if (isDeliveryOps && businessId) {
+        if (usesTpvCatalogUi && businessId) {
           try {
             const sync = await syncTpvOrganizersAfterCatalogImport(businessId, [created]);
             const activation = await activateCommercialLinesAfterCatalogImport(businessId, [created]);
@@ -4764,24 +4765,24 @@ export function CatalogPage() {
 
   const brandSetupCtx = useMemo(
     () =>
-      resolveBrandSetupContext(isDeliveryOps, activeStore.retailWorkCenters, {
+      resolveBrandSetupContext(usesTpvCatalogUi, activeStore.retailWorkCenters, {
         storesConfirmed:
           retailStoreCount > 0 ||
           activeStore.allPointsOfSale.length > 0,
       }),
-    [isDeliveryOps, activeStore.retailWorkCenters, activeStore.allPointsOfSale.length, retailStoreCount],
+    [usesTpvCatalogUi, activeStore.retailWorkCenters, activeStore.allPointsOfSale.length, retailStoreCount],
   );
 
   const brandReady = useMemo(() => {
-    if (!isDeliveryOps) return true;
+    if (!usesTpvCatalogUi) return true;
     if (brands.length === 0) return false;
     return isDeliveryBrandActivationComplete(brands, brandSetupCtx);
-  }, [isDeliveryOps, brands, brandSetupCtx]);
+  }, [usesTpvCatalogUi, brands, brandSetupCtx]);
 
   /** No mostrar el aviso hasta tener marcas + tiendas cargadas (evita flash al entrar). */
   const brandCheckReady =
     pageReady && Boolean(businessId) && !brandsLoading && !activeStore.loading;
-  const showBrandIncompleteBanner = isDeliveryOps && brandCheckReady && !brandReady;
+  const showBrandIncompleteBanner = usesTpvCatalogUi && brandCheckReady && !brandReady;
 
   const catalogBusy = loading && catalogItems.length === 0;
 

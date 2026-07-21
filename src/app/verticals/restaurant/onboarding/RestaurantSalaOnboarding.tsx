@@ -22,6 +22,8 @@ type Props = {
   businessId: string;
   storeLabel?: string;
   saving?: boolean;
+  /** delivery | restaurant — solo cambia textos del asistente. */
+  verticalTone?: 'restaurant' | 'delivery';
   /** Se llama al confirmar; convierte el draft en el payload de persistencia. */
   onSubmit: (rooms: SalaQuickSetupRoomDraft[]) => void;
 };
@@ -37,10 +39,12 @@ export function RestaurantSalaOnboarding({
   businessId,
   storeLabel,
   saving,
+  verticalTone = 'restaurant',
   onSubmit,
 }: Props) {
   const [state, dispatch] = useReducer(onboardingReducer, undefined, createInitialDraft);
   const hydrated = useRef(false);
+  const isDelivery = verticalTone === 'delivery';
 
   useEffect(() => {
     if (!businessId || hydrated.current) return;
@@ -77,10 +81,10 @@ export function RestaurantSalaOnboarding({
         <header className="space-y-4">
           <div>
             <p className="text-xs font-medium uppercase tracking-[0.16em] text-neutral-400">
-              Alta · Bar / restaurante
+              {isDelivery ? 'Alta · Delivery' : 'Alta · Bar / restaurante'}
             </p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900">
-              Montamos tu local
+              {isDelivery ? 'Montamos tu sala / mostrador' : 'Montamos tu local'}
             </h1>
             <p className="mt-1 text-sm text-neutral-500">
               {storeLabel

@@ -25,7 +25,18 @@ import {
 import { updateClientRequest, getClientDetailRequest, listClientsPageRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
-import { findActivePromotionByCode, computePromoDiscount, type AppliedPromo, getClientAppliedPromo } from '../../lib/promoCodes';
+import {
+  findActivePromotionByCode,
+  computePromoDiscount,
+  computeFixedUnitPriceDiscount,
+  listAutoFixedUnitPricePromotions,
+  readStoredPromotions,
+  writeStoredPromotions,
+  type AppliedPromo,
+  type StoredPromotion,
+  getClientAppliedPromo,
+} from '../../lib/promoCodes';
+import { listPromotionsRequest } from '../../lib/promotionsApi';
 import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, formatTicketCustomerAddress, formatTicketCustomerPhone } from '../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../components/delivery/OrderTicketButtons';
@@ -888,6 +899,9 @@ export function TpvRapidoOrderFlow({
   const [tpvBrandIngredientSelection, setTpvBrandIngredientSelection] = useState<TpvBrandIngredientSelection>({});
   const [tpvBrandSupplements, setTpvBrandSupplements] = useState<TpvBrandSupplements>({});
   const [tpvDefaultExtraPrice, setTpvDefaultExtraPrice] = useState<number>(0);
+  const [tpvDeliveryFee, setTpvDeliveryFee] = useState<number>(0);
+  /** Si true, no se cobra el envío automático en este pedido. */
+  const [waiveDeliveryFee, setWaiveDeliveryFee] = useState(false);
   const [recentOrdersPool, setRecentOrdersPool] = useState<DeliveryOrder[]>([]);
 
   // Step 4 - Payment
@@ -902,6 +916,9 @@ export function TpvRapidoOrderFlow({
   const [promoMode, setPromoMode] = useState<'none' | 'code' | 'client'>('none');
   const [clientPromos, setClientPromos] = useState<ClientPromotion[]>([]);
   const [selectedClientPromoId, setSelectedClientPromoId] = useState<string>('');
+  const [companyPromos, setCompanyPromos] = useState<StoredPromotion[]>(() =>
+    typeof window !== 'undefined' ? readStoredPromotions() : [],
+  );
 
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
@@ -957,6 +974,21 @@ export function TpvRapidoOrderFlow({
     accountBusinessCount: businesses.length,
   });
 
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void listPromotionsRequest(userId)
+      .then((remote) => {
+        if (cancelled || !Array.isArray(remote)) return;
+        writeStoredPromotions(remote);
+        setCompanyPromos(remote);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
   const reloadDeliveryCustomization = useCallback(() => {
     if (!userId) return;
     getDeliveryConfigRequest(userId)
@@ -972,6 +1004,7 @@ export function TpvRapidoOrderFlow({
         setTpvBrandIngredientSelection(ingredientSelection);
         setTpvBrandSupplements(brandSupplements);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+        setTpvDeliveryFee(Number(cfg?.tpvDeliveryFee) > 0 ? Number(cfg.tpvDeliveryFee) : 0);
       })
       .catch(() => {});
   }, [userId, brands]);
@@ -1036,6 +1069,7 @@ export function TpvRapidoOrderFlow({
         setTpvBrandIngredientSelection(ingredientSelection);
         setTpvBrandSupplements(brandSupplements);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+        setTpvDeliveryFee(Number(cfg?.tpvDeliveryFee) > 0 ? Number(cfg.tpvDeliveryFee) : 0);
       })
       .catch(() => {
         if (!cancelled) {
@@ -1044,6 +1078,7 @@ export function TpvRapidoOrderFlow({
           setTpvBrandIngredientSelection({});
           setTpvBrandSupplements({});
           setTpvDefaultExtraPrice(0);
+          setTpvDeliveryFee(0);
         }
       });
     return () => {
@@ -1070,6 +1105,7 @@ export function TpvRapidoOrderFlow({
         setStoreIngredients(unified);
         setTpvBrandIngredientSelection(ingredientSelection);
         setTpvDefaultExtraPrice(inferTpvDefaultExtraPrice(unified, cfg?.tpvDefaultExtraPrice));
+        setTpvDeliveryFee(Number(cfg?.tpvDeliveryFee) > 0 ? Number(cfg.tpvDeliveryFee) : 0);
       })
       .catch(() => {});
     return () => {
@@ -1298,6 +1334,16 @@ export function TpvRapidoOrderFlow({
     [cart],
   );
 
+  const autoPromoCalc = useMemo(() => {
+    const lines = cart.map((ci) => ({
+      productId: ci.catalogItem._id,
+      name: ci.catalogItem.name || '',
+      unitPrice: cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization),
+      quantity: ci.quantity,
+    }));
+    return computeFixedUnitPriceDiscount(lines, listAutoFixedUnitPricePromotions(companyPromos));
+  }, [cart, companyPromos]);
+
   const clientPromoSelected = useMemo(() => {
     if (!selectedClientPromoId) return null;
     return clientPromos.find((p) => p.id === selectedClientPromoId) || null;
@@ -1319,48 +1365,64 @@ export function TpvRapidoOrderFlow({
   }, [cart]);
 
   const effectiveCalc = useMemo(() => {
+    const autoDiscount = Math.min(cartTotal, Math.max(0, autoPromoCalc.discount));
+    const afterAuto = Math.max(0, cartTotal - autoDiscount);
+
+    let manualDiscount = 0;
     if (promoMode === 'code') {
-      return computePromoDiscount(cartTotal, appliedPromo);
-    }
-    if (promoMode === 'client') {
-      if (!clientPromoSelected) return { discount: 0, finalTotal: cartTotal };
-      const isActive = String(clientPromoSelected.estado || '').toLowerCase() === 'activa';
-      if (!isActive) return { discount: 0, finalTotal: cartTotal };
-      const tipo = String(clientPromoSelected.tipo || '').toLowerCase();
-      if (tipo === '2x1') {
-        const d = Math.min(cartTotal, compute2x1Discount());
-        return { discount: d, finalTotal: Math.max(0, cartTotal - d) };
+      manualDiscount = computePromoDiscount(afterAuto, appliedPromo).discount;
+    } else if (promoMode === 'client') {
+      if (clientPromoSelected) {
+        const isActive = String(clientPromoSelected.estado || '').toLowerCase() === 'activa';
+        if (isActive) {
+          const tipo = String(clientPromoSelected.tipo || '').toLowerCase();
+          if (tipo === '2x1') {
+            manualDiscount = Math.min(afterAuto, compute2x1Discount());
+          } else if (tipo === 'descuento') {
+            const pct = Math.min(100, Math.max(0, Number(clientPromoSelected.descuento || 0)));
+            manualDiscount = Math.min(afterAuto, (afterAuto * pct) / 100);
+          }
+        }
       }
-      if (tipo === 'descuento') {
-        const pct = Math.min(100, Math.max(0, Number(clientPromoSelected.descuento || 0)));
-        const d = Math.min(cartTotal, (cartTotal * pct) / 100);
-        return { discount: d, finalTotal: Math.max(0, cartTotal - d) };
-      }
-      // regalo/envio_gratis/puntos/otro -> no cambia total (solo anotación)
-      return { discount: 0, finalTotal: cartTotal };
     }
-    return { discount: 0, finalTotal: cartTotal };
-  }, [promoMode, cartTotal, appliedPromo, clientPromoSelected, compute2x1Discount]);
+
+    const discount = Math.min(cartTotal, autoDiscount + manualDiscount);
+    return {
+      discount,
+      finalTotal: Math.max(0, cartTotal - discount),
+      autoDiscount,
+      manualDiscount,
+      autoPromoNames: autoPromoCalc.applied.map((p) => p.name).filter(Boolean),
+    };
+  }, [promoMode, cartTotal, appliedPromo, clientPromoSelected, compute2x1Discount, autoPromoCalc]);
 
   const finalTotal = effectiveCalc.finalTotal;
   const discountAmount = effectiveCalc.discount;
+
+  const configuredDeliveryFee = useMemo(() => {
+    if (isRestaurantMode) return 0;
+    if (deliveryType !== 'domicilio') return 0;
+    const fee = Number(tpvDeliveryFee || 0);
+    if (!Number.isFinite(fee) || fee <= 0) return 0;
+    return Math.round(fee * 100) / 100;
+  }, [isRestaurantMode, deliveryType, tpvDeliveryFee]);
+
+  const deliveryFeeAmount = waiveDeliveryFee ? 0 : configuredDeliveryFee;
+
+  /** Total a cobrar: productos − promos + envío (si domicilio y no se quitó). */
+  const payableTotal = useMemo(
+    () => Math.max(0, finalTotal + deliveryFeeAmount),
+    [finalTotal, deliveryFeeAmount],
+  );
+
+  useEffect(() => {
+    if (deliveryType !== 'domicilio') setWaiveDeliveryFee(false);
+  }, [deliveryType]);
 
   const cartCount = useMemo(
     () => cart.reduce((sum, ci) => sum + ci.quantity, 0),
     [cart],
   );
-
-  const cashGivenAmount = useMemo(() => parseDecimalPadValue(cashGiven), [cashGiven]);
-  const changeAmount = useMemo(() => {
-    if (isNaN(cashGivenAmount) || cashGivenAmount <= 0) return null;
-    return cashGivenAmount - finalTotal;
-  }, [cashGivenAmount, finalTotal]);
-  const cashQuickAmounts = useMemo(() => {
-    const base = [5, 10, 20, 50, 100].filter((v) => v >= finalTotal);
-    const exact = Math.ceil(finalTotal * 100) / 100;
-    const uniq = Array.from(new Set([exact, ...base])).filter((v) => v > 0).slice(0, 6);
-    return uniq;
-  }, [finalTotal]);
 
   const applyPromoCode = useCallback(() => {
     const code = promoCodeInput.trim();
@@ -1390,7 +1452,13 @@ export function TpvRapidoOrderFlow({
       if (isRestaurantMode) {
         if (step === 'client' || step === 'delivery') return false;
         if (step === 'products') return true;
-        if (step === 'payment') return cart.length > 0;
+        if (step === 'payment') {
+          const due =
+            restaurantDiningOrder && !restaurantTable?.isCounter
+              ? diningOrderDueAmount(restaurantDiningOrder)
+              : 0;
+          return cart.length > 0 || due > 0;
+        }
         return false;
       }
       if (step === 'client') return true;
@@ -1399,7 +1467,7 @@ export function TpvRapidoOrderFlow({
       if (step === 'payment') return !!selectedClient && !!deliveryType && cart.length > 0;
       return false;
     },
-    [isRestaurantMode, selectedClient, deliveryType, cart.length],
+    [isRestaurantMode, selectedClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable],
   );
 
   const saleClient = isRestaurantMode ? tableWalkInClient : selectedClient;
@@ -1972,13 +2040,22 @@ export function TpvRapidoOrderFlow({
         );
 
         const promoNote = (() => {
+          const parts: string[] = [];
+          if (effectiveCalc.autoDiscount > 0 && effectiveCalc.autoPromoNames.length > 0) {
+            parts.push(
+              `Promo auto: ${effectiveCalc.autoPromoNames.join(', ')} · -${formatPrice(effectiveCalc.autoDiscount)}`,
+            );
+          }
           if (promoMode === 'code' && appliedPromo) {
-            return `Promo (código): ${appliedPromo.code} (${appliedPromo.name}) · -${formatPrice(discountAmount)}`;
+            parts.push(
+              `Promo (código): ${appliedPromo.code} (${appliedPromo.name}) · -${formatPrice(effectiveCalc.manualDiscount)}`,
+            );
+          } else if (promoMode === 'client' && clientPromoSelected) {
+            parts.push(
+              `Promo (cliente): ${clientPromoSelected.nombre} (${clientPromoSelected.tipo}) · -${formatPrice(effectiveCalc.manualDiscount)}`,
+            );
           }
-          if (promoMode === 'client' && clientPromoSelected) {
-            return `Promo (cliente): ${clientPromoSelected.nombre} (${clientPromoSelected.tipo}) · -${formatPrice(discountAmount)}`;
-          }
-          return '';
+          return parts.join(' | ');
         })();
 
         const pdvId = String(register.session?.pointOfSaleId || '').trim();
@@ -2018,8 +2095,9 @@ export function TpvRapidoOrderFlow({
           takenBy: takerId || user?.user_id || user?.id || '',
           takenByName: takerName,
           items,
-          totalAmount: finalTotal,
+          totalAmount: payableTotal,
           ...(discountAmount > 0 ? { discountAmount } : {}),
+          ...(deliveryFeeAmount > 0 ? { deliveryFee: deliveryFeeAmount } : {}),
           notes: [tableNote, orderNotes.trim(), promoNote].filter(Boolean).join('\n'),
           observations: [
             takerName ? `Atendido por: ${takerName}` : '',
@@ -2029,7 +2107,7 @@ export function TpvRapidoOrderFlow({
             .join(' · '),
           paymentMethod: normalizeTpvPaymentMethod(method),
           paymentStatus: collectOnDelivery ? 'pending' : 'paid',
-          paidAmount: collectOnDelivery ? 0 : finalTotal,
+          paidAmount: collectOnDelivery ? 0 : payableTotal,
           paidAt: collectOnDelivery ? '' : now,
           paymentCollected: !collectOnDelivery,
           paymentCollectedAt: collectOnDelivery ? '' : now,
@@ -2102,7 +2180,7 @@ export function TpvRapidoOrderFlow({
         setSubmitting(false);
       }
     },
-    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError],
+    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError],
   );
 
   const accountDue = useMemo(
@@ -2121,6 +2199,38 @@ export function TpvRapidoOrderFlow({
   const restaurantAccountMode = Boolean(
     embeddedInRestaurantTpv && restaurantDiningOrder && !restaurantTable?.isCounter,
   );
+
+  /** Importe que se cobra ahora (para calculadora de cambio). */
+  const cashChargeTotal = useMemo(() => {
+    if (restaurantAccountMode) {
+      if (hasActiveSplit && nextUnpaidSplitPart) return nextUnpaidSplitPart.amount;
+      return Math.max(0, accountDue + finalTotal);
+    }
+    return payableTotal;
+  }, [
+    restaurantAccountMode,
+    hasActiveSplit,
+    nextUnpaidSplitPart,
+    accountDue,
+    finalTotal,
+    payableTotal,
+  ]);
+
+  const cashGivenAmount = useMemo(() => parseDecimalPadValue(cashGiven), [cashGiven]);
+  const changeAmount = useMemo(() => {
+    if (isNaN(cashGivenAmount) || cashGivenAmount <= 0) return null;
+    return cashGivenAmount - cashChargeTotal;
+  }, [cashGivenAmount, cashChargeTotal]);
+  const cashQuickAmounts = useMemo(() => {
+    const base = [5, 10, 20, 50, 100].filter((v) => v >= cashChargeTotal);
+    const exact = Math.ceil(cashChargeTotal * 100) / 100;
+    const uniq = Array.from(new Set([exact, ...base])).filter((v) => v > 0).slice(0, 6);
+    return uniq;
+  }, [cashChargeTotal]);
+
+  /** En domicilio el cobro es al entregar; en recogida/sala sí hay cambio en caja. */
+  const showCashChangeCalculator =
+    paymentMethod === 'efectivo' && (isRestaurantMode || deliveryType !== 'domicilio');
 
   const accountLines = useMemo(
     () => (restaurantDiningOrder ? flattenDiningAccountLines(restaurantDiningOrder) : []),
@@ -2706,6 +2816,11 @@ export function TpvRapidoOrderFlow({
               <p className="text-gray-500 dark:text-gray-400 mt-1">
                 {createdOrder.customerName} · {formatPrice(createdOrder.totalAmount)}
               </p>
+              {paymentMethod === 'efectivo' && changeAmount !== null && changeAmount >= 0 ? (
+                <p className="mt-2 text-base font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                  Cambio {formatPrice(changeAmount)}
+                </p>
+              ) : null}
               <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
                 {createdOrder.items.length} producto{createdOrder.items.length !== 1 ? 's' : ''}
                 {!isRestaurantMode && (
@@ -2955,9 +3070,9 @@ export function TpvRapidoOrderFlow({
               {orderPanelCount}
             </span>
           )}
-          {finalTotal > 0 && (
+          {payableTotal > 0 && (
             <span className="font-bold text-sm text-gray-900 dark:text-gray-100 tabular-nums shrink-0">
-              {formatPrice(finalTotal)}
+              {formatPrice(payableTotal)}
             </span>
           )}
         </div>
@@ -3777,15 +3892,65 @@ export function TpvRapidoOrderFlow({
                           <span className="text-gray-500 dark:text-gray-400">Subtotal</span>
                           <span className="font-bold tabular-nums">{formatPrice(cartTotal)}</span>
                         </div>
-                        <div className="flex items-center justify-between text-xs mt-0.5">
-                          <span className="text-gray-500 dark:text-gray-400">Descuento</span>
-                          <span className={`font-bold tabular-nums ${discountAmount > 0 ? 'text-emerald-600' : ''}`}>
-                            -{formatPrice(discountAmount)}
-                          </span>
-                        </div>
+                        {effectiveCalc.autoDiscount > 0 ? (
+                          <div className="flex items-center justify-between text-[10px] text-emerald-700 dark:text-emerald-400 mt-0.5">
+                            <span className="truncate pr-2">
+                              {effectiveCalc.autoPromoNames[0] || 'Promo automática'}
+                            </span>
+                            <span className="font-semibold tabular-nums shrink-0">
+                              -{formatPrice(effectiveCalc.autoDiscount)}
+                            </span>
+                          </div>
+                        ) : null}
+                        {effectiveCalc.manualDiscount > 0 ? (
+                          <div className="flex items-center justify-between text-xs mt-0.5">
+                            <span className="text-gray-500 dark:text-gray-400">Descuento</span>
+                            <span className="font-bold tabular-nums text-emerald-600">
+                              -{formatPrice(effectiveCalc.manualDiscount)}
+                            </span>
+                          </div>
+                        ) : discountAmount <= 0 ? (
+                          <div className="flex items-center justify-between text-xs mt-0.5">
+                            <span className="text-gray-500 dark:text-gray-400">Descuento</span>
+                            <span className="font-bold tabular-nums">-{formatPrice(0)}</span>
+                          </div>
+                        ) : null}
+                        {configuredDeliveryFee > 0 ? (
+                          <div className="flex items-center justify-between text-xs mt-0.5 gap-2">
+                            <span className="text-gray-500 dark:text-gray-400 shrink-0">Envío</span>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              {waiveDeliveryFee ? (
+                                <>
+                                  <span className="text-gray-400 line-through tabular-nums">
+                                    {formatPrice(configuredDeliveryFee)}
+                                  </span>
+                                  <span className="font-bold tabular-nums text-emerald-600">0,00 €</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setWaiveDeliveryFee(false)}
+                                    className="px-1.5 h-6 rounded-md border border-gray-200 dark:border-gray-600 text-[10px] font-semibold text-gray-600 dark:text-gray-300 shrink-0"
+                                  >
+                                    Restaurar
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <span className="font-bold tabular-nums">{formatPrice(configuredDeliveryFee)}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setWaiveDeliveryFee(true)}
+                                    className="px-1.5 h-6 rounded-md border border-gray-200 dark:border-gray-600 text-[10px] font-semibold text-gray-600 dark:text-gray-300 shrink-0"
+                                  >
+                                    Quitar
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
                         <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
                           <span className="font-bold text-sm">Total</span>
-                          <span className="font-bold text-base tabular-nums">{formatPrice(finalTotal)}</span>
+                          <span className="font-bold text-base tabular-nums">{formatPrice(payableTotal)}</span>
                         </div>
                         {!tabletMode && (
                         <button
@@ -3823,7 +3988,34 @@ export function TpvRapidoOrderFlow({
                 <p className="mt-1 text-cyan-800 dark:text-cyan-200">
                   Indica cómo pagará el cliente. El cobro se confirma al entregar; si cambia, prevalece lo que marques entonces.
                 </p>
-                <p className="mt-2 text-lg font-bold tabular-nums">{formatPrice(finalTotal)}</p>
+                {configuredDeliveryFee > 0 ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-cyan-800 dark:text-cyan-200">
+                    {waiveDeliveryFee ? (
+                      <>
+                        <span>Envío quitado (era {formatPrice(configuredDeliveryFee)})</span>
+                        <button
+                          type="button"
+                          onClick={() => setWaiveDeliveryFee(false)}
+                          className="px-2 h-7 rounded-lg border border-cyan-300 dark:border-cyan-700 text-xs font-semibold"
+                        >
+                          Restaurar envío
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span>Envío +{formatPrice(configuredDeliveryFee)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setWaiveDeliveryFee(true)}
+                          className="px-2 h-7 rounded-lg border border-cyan-300 dark:border-cyan-700 text-xs font-semibold"
+                        >
+                          Quitar envío
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+                <p className="mt-1 text-lg font-bold tabular-nums">{formatPrice(payableTotal)}</p>
               </div>
             )}
 
@@ -3839,9 +4031,9 @@ export function TpvRapidoOrderFlow({
                   type="button"
                   onClick={() => {
                     setPaymentMethod(key);
-                    if (key === 'efectivo' && deliveryType !== 'domicilio') {
+                    if (key === 'efectivo' && (isRestaurantMode || deliveryType !== 'domicilio')) {
                       requestAnimationFrame(() => {
-                        cashCalculatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        cashCalculatorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       });
                     }
                   }}
@@ -3859,18 +4051,24 @@ export function TpvRapidoOrderFlow({
               ))}
             </div>
 
-            {paymentMethod === 'efectivo' && deliveryType !== 'domicilio' && (
+            {showCashChangeCalculator && (
               <div
                 ref={cashCalculatorRef}
                 className="mt-4 p-4 rounded-2xl border-2 border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/20"
               >
-                <label className={LABEL_CLASS}>El cliente paga con</label>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <label className={`${LABEL_CLASS} mb-0`}>El cliente paga con</label>
+                  <span className="text-xs font-semibold text-amber-800 dark:text-amber-200 tabular-nums">
+                    A cobrar {formatPrice(cashChargeTotal)}
+                  </span>
+                </div>
                 <DecimalNumpadField
                   value={cashGiven}
                   onChange={setCashGiven}
-                  placeholder={finalTotal.toFixed(2)}
+                  placeholder={cashChargeTotal.toFixed(2)}
                   showNumpad
                   compactNumpad={tabletMode}
+                  autoFocus={tabletMode}
                   inputClassName={`${INPUT_CLASS} text-lg font-medium pr-8`}
                   suffix={
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
@@ -3878,7 +4076,7 @@ export function TpvRapidoOrderFlow({
                 />
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {cashQuickAmounts.map((amount) => {
-                    const label = Math.abs(amount - finalTotal) < 0.001 ? 'Exacto' : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
+                    const label = Math.abs(amount - cashChargeTotal) < 0.001 ? 'Exacto' : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
                     const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
                     return (
                       <button
@@ -3896,20 +4094,29 @@ export function TpvRapidoOrderFlow({
                     );
                   })}
                 </div>
-                {changeAmount !== null && (
-                  <div
-                    className={`mt-3 flex items-center justify-between rounded-xl px-3 py-2 ${
-                      changeAmount >= 0
+                <div
+                  className={`mt-3 flex items-center justify-between rounded-xl px-3 py-2.5 ${
+                    changeAmount === null
+                      ? 'bg-white/70 dark:bg-gray-900/40 text-amber-900 dark:text-amber-200 border border-amber-200/80 dark:border-amber-800'
+                      : changeAmount >= 0
                         ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
                         : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
-                    }`}
-                  >
-                    <span className="text-sm font-semibold">{changeAmount >= 0 ? 'Cambio' : 'Falta'}</span>
-                    <span className="text-lg font-bold tabular-nums">
-                      {formatPrice(Math.abs(changeAmount))}
-                    </span>
-                  </div>
-                )}
+                  }`}
+                >
+                  <span className="text-sm font-semibold">
+                    {changeAmount === null ? 'Cambio' : changeAmount >= 0 ? 'Cambio' : 'Falta'}
+                  </span>
+                  <span className="text-lg font-bold tabular-nums">
+                    {changeAmount === null
+                      ? '—'
+                      : formatPrice(Math.abs(changeAmount))}
+                  </span>
+                </div>
+                {changeAmount === null ? (
+                  <p className="mt-1.5 text-[11px] text-amber-800/80 dark:text-amber-200/80">
+                    Pulsa Exacto o escribe lo que entrega el cliente para ver el cambio.
+                  </p>
+                ) : null}
               </div>
             )}
 

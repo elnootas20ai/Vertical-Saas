@@ -13,8 +13,26 @@ function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
 }
 
+function sanitizeWeekdays(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 1 && d <= 7))];
+}
+
+function sanitizeProductMatch(value) {
+  if (!value || typeof value !== 'object') return { productIds: [], nameIncludes: [] };
+  const productIds = Array.isArray(value.productIds)
+    ? value.productIds.map((id) => String(id || '').trim()).filter(Boolean)
+    : [];
+  const nameIncludes = Array.isArray(value.nameIncludes)
+    ? value.nameIncludes.map((n) => String(n || '').trim()).filter(Boolean)
+    : [];
+  return { productIds, nameIncludes };
+}
+
 function sanitizePromotion(doc) {
   if (!doc || doc.type !== 'promotion') return null;
+  const productMatch = sanitizeProductMatch(doc.productMatch);
+  const weekdays = sanitizeWeekdays(doc.weekdays);
   return {
     id: doc._id,
     name: String(doc.name || ''),
@@ -33,12 +51,35 @@ function sanitizePromotion(doc) {
     revenue: Number(doc.revenue || 0),
     ordersUsed: Number(doc.ordersUsed || 0),
     active: doc.active === true || doc.status === 'active',
+    weekdays,
+    productMatch,
+    fixedUnitPrice: doc.fixedUnitPrice != null ? Number(doc.fixedUnitPrice) : undefined,
+    applyMode: doc.applyMode === 'manual_code' ? 'manual_code' : (doc.applyMode === 'auto' ? 'auto' : undefined),
   };
 }
 
 function buildPromotionDocument(userId, data, existing = null) {
   const id = existing?._id || data.id || `promo-${uuidv4()}`;
   const status = String(data.status || existing?.status || 'draft');
+  const promoType = String(data.type || data.promoType || existing?.promoType || 'percentage');
+  const productMatch = data.productMatch !== undefined
+    ? sanitizeProductMatch(data.productMatch)
+    : sanitizeProductMatch(existing?.productMatch);
+  const weekdays = data.weekdays !== undefined
+    ? sanitizeWeekdays(data.weekdays)
+    : sanitizeWeekdays(existing?.weekdays);
+  const fixedUnitPriceRaw = data.fixedUnitPrice !== undefined
+    ? data.fixedUnitPrice
+    : existing?.fixedUnitPrice;
+  const applyModeRaw = data.applyMode !== undefined
+    ? data.applyMode
+    : existing?.applyMode;
+  let applyMode;
+  if (applyModeRaw === 'manual_code' || applyModeRaw === 'auto') {
+    applyMode = applyModeRaw;
+  } else if (promoType === 'fixed_unit_price') {
+    applyMode = 'auto';
+  }
   return {
     ...(existing || {}),
     _id: id,
@@ -46,7 +87,7 @@ function buildPromotionDocument(userId, data, existing = null) {
     user_id: userId,
     name: String(data.name || existing?.name || '').trim(),
     description: String(data.description ?? existing?.description ?? ''),
-    promoType: String(data.type || data.promoType || existing?.promoType || 'percentage'),
+    promoType,
     status,
     active: status === 'active',
     discountValue: Number(data.discountValue ?? existing?.discountValue ?? 0),
@@ -59,6 +100,12 @@ function buildPromotionDocument(userId, data, existing = null) {
     clientIds: Array.isArray(data.clientIds) ? data.clientIds : (existing?.clientIds || []),
     revenue: Number(data.revenue ?? existing?.revenue ?? 0),
     ordersUsed: Number(data.ordersUsed ?? existing?.ordersUsed ?? 0),
+    weekdays,
+    productMatch,
+    fixedUnitPrice: fixedUnitPriceRaw != null && fixedUnitPriceRaw !== ''
+      ? Number(fixedUnitPriceRaw)
+      : (promoType === 'fixed_unit_price' ? Number(data.discountValue ?? existing?.discountValue ?? 0) : undefined),
+    applyMode,
     createdAt: existing?.createdAt || data.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     deletedAt: existing?.deletedAt || null,

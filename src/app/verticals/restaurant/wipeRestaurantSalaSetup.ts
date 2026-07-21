@@ -36,7 +36,7 @@ export async function wipeRestaurantSalaSetup(
     deletedTables += 1;
   }
 
-  const floor = await getFloorConfigRequest(uid).catch(() => null);
+  const floor = await getFloorConfigRequest(uid, { businessId: bid }).catch(() => null);
   if (floor) {
     const floorBiz = normalizeBusinessId(floor.businessId);
     if (!floorBiz || floorBiz === bid) {

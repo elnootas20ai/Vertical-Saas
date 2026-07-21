@@ -268,7 +268,8 @@ export async function getFloorConfig(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
-    const config = await getFloorConfigByUser(req, userId);
+    const businessId = String(req.query?.businessId || req.query?.business_id || '').trim();
+    const config = await getFloorConfigByUser(req, userId, businessId);
     if (!config) {
       return res.json({ ok: true, config: null });
     }
@@ -286,7 +287,8 @@ export async function saveFloorConfig(req, res) {
 
     const db = getSalaDbName();
     await ensureDatabase(req, db);
-    const existing = await getFloorConfigByUser(req, userId);
+    const businessId = String(config.businessId || config.business_id || '').trim();
+    const existing = await getFloorConfigByUser(req, userId, businessId);
     const doc = buildFloorConfigDocument(userId, config, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     const sanitized = sanitizeFloorConfig({ ...doc, _rev: saved.rev });

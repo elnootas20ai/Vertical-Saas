@@ -342,9 +342,15 @@ export async function deleteDiningWallRequest(userId: string, wallId: string) {
 
 // ─── Floor Config ────────────────────────────────────────────────────────────
 
-export async function getFloorConfigRequest(userId: string) {
+export async function getFloorConfigRequest(userId: string, opts?: { businessId?: string }) {
   const uid = normalizeUserId(userId);
-  const data = await request<{ config: DiningFloorConfig | null }>(`/api/sala/floor-config/${uid}`);
+  const params = new URLSearchParams();
+  const bid = String(opts?.businessId || '').replace(/^business:/, '').trim();
+  if (bid) params.set('businessId', bid);
+  const qs = params.toString();
+  const data = await request<{ config: DiningFloorConfig | null }>(
+    `/api/sala/floor-config/${uid}${qs ? `?${qs}` : ''}`,
+  );
   return data.config;
 }
 

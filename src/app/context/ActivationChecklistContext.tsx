@@ -356,7 +356,7 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
             businessId ? listBrandsRequest(businessId).catch(() => []) : Promise.resolve([]),
             listCatalogItemsRequest(dataUserId, 'catalog').catch(() => []),
             isRestaurant
-              ? getFloorConfigRequest(dataUserId).catch(() => null)
+              ? getFloorConfigRequest(dataUserId, { businessId }).catch(() => null)
               : Promise.resolve(null),
             isRestaurant
               ? listDiningTablesRequest(dataUserId).catch(() => [])

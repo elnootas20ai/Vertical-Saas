@@ -11,19 +11,39 @@ export function orderItemCustomizationDetail(
   item: Pick<DeliveryOrderItem, 'extras' | 'ingredients'>,
 ): string[] {
   const lines: string[] = [];
-  if (Array.isArray(item.extras)) {
-    for (const e of item.extras) {
-      const text = String(e || '').trim();
-      if (text) lines.push(text);
-    }
-  }
+  const removedKeys = new Set<string>();
+
   if (Array.isArray(item.ingredients)) {
     for (const ing of item.ingredients) {
       if (String(ing.quantity || '').toLowerCase() !== 'sin') continue;
       const name = String(ing.name || '').trim();
-      if (name) lines.push(`- sin ${name}`);
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (removedKeys.has(key)) continue;
+      removedKeys.add(key);
+      lines.push(`- sin ${name}`);
     }
   }
+
+  if (Array.isArray(item.extras)) {
+    for (const e of item.extras) {
+      const text = String(e || '').trim();
+      if (!text) continue;
+      const sinMatch = text.match(/^-\s*sin\s+(.+)$/i);
+      if (sinMatch) {
+        const name = String(sinMatch[1] || '').trim();
+        if (!name) continue;
+        const key = name.toLowerCase();
+        // Ya está en ingredients (quantity:sin) o repetido en extras
+        if (removedKeys.has(key)) continue;
+        removedKeys.add(key);
+        lines.push(`- sin ${name}`);
+        continue;
+      }
+      lines.push(text);
+    }
+  }
+
   return lines;
 }
 
@@ -39,14 +59,28 @@ export function orderItemCustomizationParts(
 ): OrderItemCustomizationParts {
   const added: string[] = [];
   const removed: string[] = [];
+  const removedKeys = new Set<string>();
+  const addedKeys = new Set<string>();
   for (const line of orderItemCustomizationDetail(item)) {
     const trimmed = line.trim();
     if (trimmed.startsWith('+')) {
-      added.push(trimmed.slice(1).trim());
+      const name = trimmed.slice(1).trim();
+      const key = name.toLowerCase();
+      if (!name || addedKeys.has(key)) continue;
+      addedKeys.add(key);
+      added.push(name);
     } else if (/^-\s*sin\s/i.test(trimmed)) {
-      removed.push(trimmed.replace(/^-\s*sin\s*/i, '').trim());
+      const name = trimmed.replace(/^-\s*sin\s*/i, '').trim();
+      const key = name.toLowerCase();
+      if (!name || removedKeys.has(key)) continue;
+      removedKeys.add(key);
+      removed.push(name);
     } else if (trimmed.startsWith('-')) {
-      removed.push(trimmed.slice(1).trim());
+      const name = trimmed.slice(1).trim();
+      const key = name.toLowerCase();
+      if (!name || removedKeys.has(key)) continue;
+      removedKeys.add(key);
+      removed.push(name);
     }
   }
   return { added, removed, note: String(item.notes || '').trim() };

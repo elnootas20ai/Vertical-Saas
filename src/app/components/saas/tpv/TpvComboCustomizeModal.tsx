@@ -14,6 +14,7 @@ import {
   isComboMenuComplete,
   isComboMenuSectionDone,
   mainFamilyForCatalogCategory,
+  mainFamilyForProduct,
   normalizeComboItemsForSave,
   resolveComboRefSlotKind,
   resolveTpvComboMenuSections,
@@ -48,7 +49,16 @@ function pickProductInSection(
 
   let next = [...comboItems];
 
-  if (categoryNeed > 0) {
+  if (section.groupByMainFamily) {
+    const family = section.groupByMainFamily;
+    next = next.filter((ref) => {
+      if (resolveComboRefSlotKind(ref, catalogItems) !== 'main') return true;
+      const p = catalogItems.find((c) => c._id === ref.productId);
+      return (
+        mainFamilyForProduct(p?.category || '', ref.productName || p?.name || '') !== family
+      );
+    });
+  } else if (categoryNeed > 0) {
     next = next.filter((ref) => {
       const p = catalogItems.find((c) => c._id === ref.productId);
       if (!p) return true;
@@ -67,7 +77,7 @@ function pickProductInSection(
   const sameIdx = next.findIndex((c) => c.productId === product._id);
   const need = categoryNeed > 0 ? categoryNeed : slotNeed;
   const have =
-    categoryNeed > 0
+    categoryNeed > 0 || section.groupByMainFamily
       ? totalUnitsInCatalogSection(section, next, catalogItems)
       : totalUnitsInSlotKind(slotKind, next, catalogItems);
 
@@ -226,7 +236,8 @@ export function TpvComboCustomizeModal({
       setMainFamily(family);
       const mainSection = visibleSections.find(
         (s) =>
-          s.slotKind === 'main' && mainFamilyForCatalogCategory(s.catalogCategory) === family,
+          s.slotKind === 'main' &&
+          (s.groupByMainFamily ?? mainFamilyForCatalogCategory(s.catalogCategory)) === family,
       );
       if (mainSection) {
         setExpandedKey(comboMenuSectionKey(mainSection));

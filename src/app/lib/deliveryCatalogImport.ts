@@ -558,6 +558,9 @@ export async function mapImportEntryToCatalogItem(
     costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
     stockQuantity: 0,
     minStock: 0,
+    /** Carta TPV: nunca inventario. Evita que un flag viejo sticky oculte el producto en el TPV. */
+    isStockItem: false,
+    stockCategory: 'finished_product' as CatalogItem['stockCategory'],
     allergens: String(entry.allergens || '')
       .split(',')
       .map((a) => a.trim())

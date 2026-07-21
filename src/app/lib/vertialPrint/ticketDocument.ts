@@ -47,12 +47,49 @@ const PAYMENT_LABELS: Record<string, string> = {
   bizum: 'Bizum',
   online: 'Online',
   otro: 'Otro',
+  otros: 'Otro',
 };
 
 const DELIVERY_TYPE_LABELS: Record<string, string> = {
   domicilio: 'Envío a domicilio',
   recogida: 'Recogida en local',
 };
+
+/** Normaliza paymentMethod del pedido a etiqueta legible (Efectivo / Tarjeta…). */
+export function resolveTicketPaymentMethodLabel(
+  paymentMethod: string | undefined | null,
+): string {
+  const raw = String(paymentMethod || '').trim().toLowerCase();
+  if (!raw) return '';
+  return PAYMENT_LABELS[raw] || String(paymentMethod || '').trim();
+}
+
+/**
+ * Cobro en ticket cliente/reparto. Cocina: vacío (no se imprime).
+ * Si hay método (efectivo/tarjeta), siempre se muestra aunque el cobro esté pendiente.
+ */
+export function resolveTicketPaymentFields(input: {
+  variant: DeliveryTicketVariant;
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
+}): { paymentLabel: string; paymentStatusLabel: string } {
+  if (input.variant === 'kitchen') {
+    return { paymentLabel: '', paymentStatusLabel: '' };
+  }
+  const method = resolveTicketPaymentMethodLabel(input.paymentMethod);
+  const isPaid = String(input.paymentStatus || '').toLowerCase() === 'paid';
+  const paymentStatusLabel = isPaid ? 'Cobrado' : 'Pendiente de cobro';
+  if (method) {
+    return {
+      paymentLabel: method,
+      paymentStatusLabel,
+    };
+  }
+  return {
+    paymentLabel: isPaid ? 'Cobrado' : 'Pendiente',
+    paymentStatusLabel,
+  };
+}
 
 /**
  * Nombre que sale arriba del ticket (marca / comercial).
@@ -107,7 +144,7 @@ export function buildTicketDocument({
   business,
   salesPointName,
   cashierName,
-  vatRate = 21,
+  vatRate = 10,
   isRefund = false,
   variant: requestedVariant,
 }: DeliveryTicketPrintOptions): TicketDocument {
@@ -124,12 +161,12 @@ export function buildTicketDocument({
   const deliveryTypeLabel = DELIVERY_TYPE_LABELS[deliveryType] || order.deliveryType || '';
   const isPickup = deliveryType === 'recogida';
   const isHomeDelivery = deliveryType === 'domicilio';
-  const paymentMethodLabel = PAYMENT_LABELS[order.paymentMethod || ''] || order.paymentMethod || '';
   const isPaid = order.paymentStatus === 'paid';
-  const paymentStatusLabel = isPaid ? 'Cobrado' : 'Pendiente de cobro';
-  const paymentLabel = isPaid
-    ? paymentMethodLabel || 'Cobrado'
-    : (variant === 'customer' ? 'Pendiente' : '-');
+  const { paymentLabel, paymentStatusLabel } = resolveTicketPaymentFields({
+    variant,
+    paymentMethod: order.paymentMethod,
+    paymentStatus: order.paymentStatus,
+  });
 
   const lines: TicketLine[] = (order.items || [])
     .map((item) => {

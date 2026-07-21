@@ -45,7 +45,7 @@ export const DELIVERY_CATALOG_TEMPLATE_HEADERS = DELIVERY_CATALOG_IMPORT_COLUMNS
 /** Versión de la plantilla (solo cambiar si hay migración acordada). */
 export const DELIVERY_CATALOG_TEMPLATE_VERSION = 4;
 
-export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_delivery_tpv.xlsx';
+export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_tpv.xlsx';
 
 /** Filas vacías en «catalogo» (fila 2 en adelante). No se importan si están vacías. */
 export const DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS = 5000;
