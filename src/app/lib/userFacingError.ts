@@ -7,9 +7,10 @@ const API_BASE = getApiBase();
 const FRIENDLY: Array<{ test: RegExp; message: string }> = [
   { test: /failed to fetch|networkerror|load failed|no se pudo conectar|network/i, message: 'Sin conexión con el servidor. Comprueba la red o que el PC de caja esté encendido.' },
   { test: /sesión expirada|session expired|401|unauthorized|token/i, message: 'Tu sesión ha caducado. Cierra y vuelve a entrar.' },
-  { test: /abre la caja|caja.*abierta|register.*open/i, message: 'Abre la caja de la tienda antes de cobrar.' },
+  { test: /no hay caja abierta|abre la caja antes de cobrar|abre la caja de la tienda/i, message: 'Abre la caja de la tienda antes de cobrar.' },
   { test: /mesa.*cuenta|cuenta abierta|already has/i, message: 'Esa mesa ya tiene una cuenta abierta.' },
   { test: /no está libre|not available|unavailable/i, message: 'Esa mesa no está disponible ahora.' },
+  { test: /ya hay una caja abierta/i, message: 'Ya hay una caja abierta en esa tienda.' },
   { test: /409|conflict|_rev/i, message: 'Otra acción se guardó antes. Espera un segundo y vuelve a intentarlo.' },
   { test: /timeout|timed out|tard/i, message: 'El servidor tardó demasiado. Reintenta en unos segundos.' },
 ];

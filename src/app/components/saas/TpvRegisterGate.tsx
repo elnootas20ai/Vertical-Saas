@@ -1,7 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, createContext, useContext, lazy, Suspense, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
-import { toUserFacingMessage } from '../../lib/userFacingError';
+import { toUserFacingMessage, extractErrorMessage } from '../../lib/userFacingError';
 import { useAuth } from '../../context/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useBusiness } from '../../context/BusinessContext';
@@ -2035,7 +2035,7 @@ function ClockInModal({
     const vacationMsg = vacationBlockedById[mid];
     if (vacationMsg) {
       setActionMsg({ type: 'err', text: vacationMsg });
-      toast.error(vacationMsg);
+      toast.error(vacationMsg, { id: 'tpv-clockin-vacation' });
       return;
     }
     setActingId(member.user_id);
@@ -3042,6 +3042,7 @@ export function TpvRegisterGate({
   const clockedInWorkersRef = useRef<TpvClockedInWorker[]>([]);
   clockedInWorkersRef.current = clockedInWorkers;
   const [selectedOrderTakerId, setSelectedOrderTakerId] = useState<string | null>(null);
+  const openingInFlightRef = useRef(false);
   const skipManagerAutoPdvRef = useRef(false);
   const loadSeqRef = useRef(0);
   const loadInflightRef = useRef<Promise<void> | null>(null);
@@ -3813,19 +3814,38 @@ export function TpvRegisterGate({
 
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
+    if (openingInFlightRef.current) return;
+    openingInFlightRef.current = true;
+    try {
     const pdvId = String(data.pointOfSaleId || '').trim();
+
+    const attachExistingOpen = (existing: TpvRegisterSession) => {
+      const storeId = String(data.pointOfSaleId || existing.pointOfSaleId || '').trim();
+      if (!isWorkerUser && storeId) {
+        const bid = resolveBusinessScopeId(currentBusiness);
+        if (bid && dataUserId) {
+          writeDeliveryOpsSelectedPdvId(bid, dataUserId, storeId);
+        }
+        setManagerPdvPickId(storeId);
+        skipManagerAutoPdvRef.current = false;
+      }
+      setSessions((prev) => {
+        const exists = prev.some((s) => s._id === existing._id);
+        if (exists) {
+          return prev.map((s) => (s._id === existing._id ? existing : s));
+        }
+        return [existing, ...prev];
+      });
+      setPostCloseSession(null);
+      window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: existing }));
+      // Un solo aviso (id fijo = sonner no apila cientos).
+      toast.info('Entrando en la caja ya abierta', { id: 'tpv-continue-register', duration: 2500 });
+    };
+
     const localOpen = pickNewestOpenRegisterSessionForStore(sessions, pdvId, pointsOfSale);
     // Solo reenganchar si es caja de HOY. Si es de otro día, seguir a crear (el servidor cierra la vieja).
     if (localOpen && !isTpvRegisterSessionFromPriorCalendarDay(localOpen)) {
-      if (!isWorkerUser && pdvId) {
-        const bid = resolveBusinessScopeId(currentBusiness);
-        if (bid && dataUserId) {
-          writeDeliveryOpsSelectedPdvId(bid, dataUserId, pdvId);
-        }
-        setManagerPdvPickId(pdvId);
-        skipManagerAutoPdvRef.current = false;
-      }
-      window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: localOpen }));
+      attachExistingOpen(localOpen);
       return;
     }
     const openerId = normalizeClockinUserId(data.workerId);
@@ -3895,11 +3915,17 @@ export function TpvRegisterGate({
           void refreshClockedInWorkers({ silent: true });
         } catch {
           // La caja ya abrió; sin fichaje el TPV se bloquea — abrir modal y avisar.
-          toast.warning('Caja abierta. Ficha al equipo para poder vender.', { duration: 7000 });
+          toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
+            id: 'tpv-clockin-needed',
+            duration: 7000,
+          });
           setShowClockIn(true);
         }
       } else if (isTpvRegisterSessionOpen(created)) {
-        toast.warning('Caja abierta. Ficha al equipo para poder vender.', { duration: 7000 });
+        toast.warning('Caja abierta. Ficha al equipo para poder vender.', {
+          id: 'tpv-clockin-needed',
+          duration: 7000,
+        });
         setShowClockIn(true);
       }
       // Aviso para el campanario de notificaciones. Útil para auditoría y para que
@@ -3916,10 +3942,19 @@ export function TpvRegisterGate({
         metadata: { initialCashAmount: total, pointOfSaleId: data.pointOfSaleId, terminalId: data.terminalId },
       }).catch((error) => { console.error('Error creating tpv open notification:', error); });
     } catch (err) {
-      if (err instanceof TpvRegisterSessionConflictError) {
-        const existing = err.existingSession;
+      const conflictExisting =
+        (err instanceof TpvRegisterSessionConflictError && err.existingSession)
+        || (
+          err
+          && typeof err === 'object'
+          && (err as { name?: string }).name === 'TpvRegisterSessionConflictError'
+          && (err as TpvRegisterSessionConflictError).existingSession
+        )
+        || null;
+      if (conflictExisting) {
+        const existing = conflictExisting;
         // Conflicto con caja de otro día: cerrarla y reintentar apertura de hoy.
-        if (existing && isTpvRegisterSessionFromPriorCalendarDay(existing)) {
+        if (isTpvRegisterSessionFromPriorCalendarDay(existing)) {
           try {
             const expected = calcTpvExpectedCash(existing);
             const closed = await updateTpvRegisterSessionRequest(dataUserId, {
@@ -3967,31 +4002,35 @@ export function TpvRegisterGate({
             setPostCloseSession(null);
             return;
           } catch (retryErr) {
+            const retryConflict =
+              (retryErr instanceof TpvRegisterSessionConflictError && retryErr.existingSession)
+              || (
+                retryErr
+                && typeof retryErr === 'object'
+                && (retryErr as { name?: string }).name === 'TpvRegisterSessionConflictError'
+                && (retryErr as TpvRegisterSessionConflictError).existingSession
+              );
+            if (retryConflict) {
+              attachExistingOpen(retryConflict);
+              return;
+            }
             toast.error(toUserFacingMessage(retryErr, 'No se pudo abrir la caja de hoy'));
             return;
           }
         }
-        const pdvId = String(data.pointOfSaleId || existing.pointOfSaleId || '').trim();
-        setSessions((prev) => {
-          const exists = prev.some((s) => s._id === existing._id);
-          if (exists) {
-            return prev.map((s) => (s._id === existing._id ? existing : s));
-          }
-          return [existing, ...prev];
-        });
-        setPostCloseSession(null);
-        if (!isWorkerUser && pdvId) {
-          const bid = resolveBusinessScopeId(currentBusiness);
-          if (bid && dataUserId) {
-            writeDeliveryOpsSelectedPdvId(bid, dataUserId, pdvId);
-          }
-          setManagerPdvPickId(pdvId);
-          skipManagerAutoPdvRef.current = false;
-        }
-        window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: existing }));
+        attachExistingOpen(existing);
+        return;
+      }
+      const msg = extractErrorMessage(err);
+      if (/ya hay una caja abierta/i.test(msg)) {
+        // Sin existingSession en payload: no spamear toast; el usuario puede reintentar.
+        toast.info('Ya hay una caja abierta en esta tienda', { id: 'tpv-continue-register', duration: 2500 });
         return;
       }
       toast.error(toUserFacingMessage(err, 'No se pudo abrir la caja'));
+    }
+    } finally {
+      openingInFlightRef.current = false;
     }
   };
 
