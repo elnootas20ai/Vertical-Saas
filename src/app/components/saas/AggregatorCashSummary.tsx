@@ -63,6 +63,11 @@ export function AggregatorCashSummary({ rows, title = 'Cajas agregadores', compa
                 Efectivo en caja: {fmtMoney(row.cashSales)}€
               </div>
             ) : null}
+            {(Number(row.cardSales) || 0) > 0 ? (
+              <div className="text-[11px] font-semibold text-blue-700 dark:text-blue-300 mt-0.5 tabular-nums">
+                Tarjeta: {fmtMoney(row.cardSales)}€
+              </div>
+            ) : null}
             <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
               {row.orderCount} pedido{row.orderCount === 1 ? '' : 's'}
               {row.orderCount > 0 ? ` · ticket ${fmtMoney(row.avgTicket)}€` : ''}

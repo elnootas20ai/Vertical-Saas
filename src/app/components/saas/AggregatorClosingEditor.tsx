@@ -2,6 +2,7 @@ import { Plug } from 'lucide-react';
 import {
   parseAggregatorAmount,
   sumAggregatorCash,
+  sumAggregatorCard,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
 import type { FoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
@@ -17,13 +18,16 @@ interface AggregatorClosingEditorProps {
   onManualFoodChange: (channel: string, key: keyof FoodFamilyCounts, value: string) => void;
   manualCashByChannel: Record<string, string>;
   onManualCashChange: (channel: string, value: string) => void;
+  manualCardByChannel: Record<string, string>;
+  onManualCardChange: (channel: string, value: string) => void;
   title?: string;
   /** Número del primer paso (Glovo = startStep, Uber = startStep+1…). */
   startStep?: number;
 }
 
 /**
- * Cierre TPV: por app → pizzas / burgers / tacos + efectivo (suma al arqueo).
+ * Cierre TPV: por app → pizzas / burgers / tacos + efectivo + tarjeta.
+ * Solo el efectivo se suma al arqueo de caja física.
  */
 export function AggregatorClosingEditor({
   autoRows,
@@ -32,17 +36,23 @@ export function AggregatorClosingEditor({
   onManualFoodChange,
   manualCashByChannel,
   onManualCashChange,
+  manualCardByChannel,
+  onManualCardChange,
   title = 'Integraciones',
   startStep = 2,
 }: AggregatorClosingEditorProps) {
-  const cashTotal = sumAggregatorCash(
-    autoRows.map((row) => {
-      const ch = row.platform.channel;
-      const parsedCash = parseAggregatorAmount(manualCashByChannel[ch] ?? '');
-      const cashSales = parsedCash != null ? parsedCash : row.cashSales;
-      return { ...row, cashSales };
-    }),
-  );
+  const displayRows = autoRows.map((row) => {
+    const ch = row.platform.channel;
+    const parsedCash = parseAggregatorAmount(manualCashByChannel[ch] ?? '');
+    const parsedCard = parseAggregatorAmount(manualCardByChannel[ch] ?? '');
+    return {
+      ...row,
+      cashSales: parsedCash != null ? parsedCash : row.cashSales,
+      cardSales: parsedCard != null ? parsedCard : row.cardSales,
+    };
+  });
+  const cashTotal = sumAggregatorCash(displayRows);
+  const cardTotal = sumAggregatorCard(displayRows);
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 overflow-hidden">
@@ -50,13 +60,14 @@ export function AggregatorClosingEditor({
         <div className="flex items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-100 uppercase tracking-wider">
           <Plug className="w-3.5 h-3.5 text-purple-600" /> {title}
         </div>
-        <div className="text-[11px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-          Efectivo apps → caja: {cashTotal.toFixed(2)}€
+        <div className="text-right text-[11px] font-semibold tabular-nums space-y-0.5">
+          <div className="text-emerald-700 dark:text-emerald-300">Efectivo apps → caja: {cashTotal.toFixed(2)}€</div>
+          <div className="text-blue-700 dark:text-blue-300">Tarjeta apps: {cardTotal.toFixed(2)}€</div>
         </div>
       </div>
 
       <p className="px-3 pt-2 text-[11px] text-gray-500 dark:text-gray-400">
-        Por cada app: unidades y el efectivo que ha entrado en caja (se suma al arqueo).
+        Por cada app: unidades, efectivo (suma al arqueo) y tarjeta (solo registro).
       </p>
 
       <div className="p-3 space-y-3">
@@ -93,7 +104,7 @@ export function AggregatorClosingEditor({
                 <span className="text-[10px] text-gray-400 truncate shrink-0">{autoHint}</span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 <label className="rounded-lg border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
                   <span className="text-[10px] font-bold text-amber-800 dark:text-amber-200">🍕 Pizzas</span>
                   <input
@@ -138,6 +149,18 @@ export function AggregatorClosingEditor({
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Entra en caja</span>
+                </label>
+                <label className="rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
+                  <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300">💳 Tarjeta (€)</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={manualCardByChannel[ch] ?? ''}
+                    onChange={(e) => onManualCardChange(ch, e.target.value)}
+                    className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-blue-200 dark:border-blue-800 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                  />
+                  <span className="text-[9px] text-gray-400">Solo registro</span>
                 </label>
               </div>
             </div>
