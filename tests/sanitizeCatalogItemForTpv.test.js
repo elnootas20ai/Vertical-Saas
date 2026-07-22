@@ -29,4 +29,28 @@ describe('sanitizeCatalogItemForTpv', () => {
     });
     expect(otherBiz).toHaveLength(0);
   });
+
+  it('conserva comboSlotAllowlists para menús (lado/bebida) en TPV', () => {
+    const doc = {
+      _id: 'combo-1',
+      user_id: 'owner-1',
+      name: 'Individual',
+      category: 'Combos',
+      unitPrice: 12,
+      business_id: 'biz-a',
+      itemType: 'combo',
+      customFields: {
+        comboStructureConfirmed: true,
+        comboStructure: [
+          { slotKind: 'main', label: 'Pizza', required: true, expectedCount: 1 },
+          { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
+          { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
+        ],
+        comboSlotAllowlists: { side: ['cat-a', 'cat-b'] },
+      },
+    };
+    const sanitized = sanitizeCatalogItemForTpv(doc);
+    expect(sanitized.customFields.comboSlotAllowlists).toEqual({ side: ['cat-a', 'cat-b'] });
+    expect(sanitized.customFields.comboStructureConfirmed).toBe(true);
+  });
 });

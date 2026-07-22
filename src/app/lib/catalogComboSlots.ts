@@ -473,20 +473,74 @@ export function catalogProductsForComboSection(
   let products: CatalogItem[];
   if (section.groupByMainFamily) {
     const family = section.groupByMainFamily;
-    products = catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId).filter(
-      (p) => mainFamilyForProduct(p.category || '', p.name) === family,
+    products = sellableCatalogProducts(catalog, excludeItemId).filter((p) =>
+      isComboSelectableMainProduct(p, family),
     );
   } else if (section.groupBySlotKind) {
-    products = catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId);
+    products = catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId).filter(
+      (p) => !isExcludedComboPickerProduct(p),
+    );
   } else {
-    products = catalogProductsForCategory(section.catalogCategory, catalog, excludeItemId);
+    products = catalogProductsForCategory(section.catalogCategory, catalog, excludeItemId).filter(
+      (p) => !isExcludedComboPickerProduct(p),
+    );
   }
-  const allow = options?.allowlistIds;
+  // Plato principal (pizzas/burgers): nunca limitar por allowlist — salir TODAS las de carta.
+  const allow =
+    section.slotKind === 'main' ? null : options?.allowlistIds;
   if (allow && allow.length > 0) {
     const set = new Set(allow);
     products = products.filter((p) => set.has(p._id));
   }
-  return products;
+  return products.sort((a, b) => {
+    const ca = foldCategory(normalizeImportCategory(a.category || ''));
+    const cb = foldCategory(normalizeImportCategory(b.category || ''));
+    const order = ['pizzas', 'pizza', 'premium', 'especialidad', 'especialidades', 'calzones', 'calzone'];
+    const ia = order.findIndex((o) => ca === o || ca.startsWith(o));
+    const ib = order.findIndex((o) => cb === o || cb.startsWith(o));
+    const sa = ia === -1 ? 50 : ia;
+    const sb = ib === -1 ? 50 : ib;
+    if (sa !== sb) return sa - sb;
+    return a.name.localeCompare(b.name, 'es');
+  });
+}
+
+function isExcludedComboPickerProduct(item: Pick<CatalogItem, 'name' | 'category' | 'customFields'>): boolean {
+  const name = foldCategory(item.name || '');
+  const cat = foldCategory(normalizeImportCategory(item.category || ''));
+  if (item.customFields?.halfHalf === true) return true;
+  if (/^receta\b/.test(name)) return true;
+  if (/mitad\s*y\s*mitad|half\s*and\s*half|half-half/.test(name)) return true;
+  if (['envases', 'ingredientes', 'consumibles', 'reventa'].includes(cat)) return true;
+  if (/caja\s*pizza/.test(name)) return true;
+  return false;
+}
+
+/**
+ * Pizza (o burger) elegible en menús TPV: carta real, sin recetas/stock/envases.
+ */
+export function isComboSelectableMainProduct(
+  item: Pick<CatalogItem, 'name' | 'category' | 'itemType' | 'active' | 'customFields'>,
+  family: ComboMainFamily,
+): boolean {
+  if (item.active === false) return false;
+  if (item.itemType === 'combo' || item.itemType === 'service') return false;
+  if (isExcludedComboPickerProduct(item)) return false;
+
+  const cat = foldCategory(normalizeImportCategory(item.category || ''));
+  const name = foldCategory(item.name || '');
+
+  if (family === 'burger') {
+    if (inferComboSlotKind(item.category || '', item.name) !== 'main') return false;
+    return mainFamilyForProduct(item.category || '', item.name) === 'burger';
+  }
+
+  // Pizza / especialidad / premium / calzone (todas las categorías de carta).
+  if (/^(pizzas?|premium|especialidad(es)?|calzones?)$/.test(cat)) return true;
+  if (/pizza|calzone/.test(cat)) return true;
+  if (inferComboSlotKind(item.category || '', item.name) !== 'main') return false;
+  if (mainFamilyForProduct(item.category || '', item.name) === 'burger') return false;
+  return /pizza|calzone/.test(name);
 }
 
 export function totalUnitsInCatalogSection(
@@ -680,6 +734,7 @@ const SLOT_CATALOG_CATEGORIES: Record<Exclude<ComboSlotKind, 'other'>, Set<strin
     'bowls',
     'principales',
     'calzones',
+    'calzone',
   ]),
   side: new Set([
     'complementos',

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronDown, ChevronUp, Minus, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Minus, Plus, Search, X } from 'lucide-react';
 import type { CatalogComboRef, CatalogItem } from '../../../lib/deliveryApi';
 import {
   COMBO_SLOT_META,
@@ -17,11 +17,11 @@ import {
   resolveComboRefSlotKind,
   resolveComboSlotAllowlist,
   resolveTpvComboMenuSections,
-  totalUnitsInCatalogSection,
   type ComboMainFamily,
   type ComboMenuCatalogSection,
   unitsNeededInComboSection,
 } from '../../../lib/catalogComboSlots';
+import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { TpvModalRoot } from './TpvModalRoot';
 
@@ -133,6 +133,7 @@ export function TpvComboCustomizeModal({
   );
 
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [sectionQuery, setSectionQuery] = useState('');
 
   useEffect(() => {
     if (needsMainFamilyPick && !mainFamily) return;
@@ -144,6 +145,10 @@ export function TpvComboCustomizeModal({
       return firstOpenSection(displaySections, selections, catalogItems);
     });
   }, [needsMainFamilyPick, mainFamily, displaySections, selections, catalogItems]);
+
+  useEffect(() => {
+    setSectionQuery('');
+  }, [expandedKey]);
 
   const menuComplete = isComboMenuComplete(menuSections, selections, catalogItems);
   const basePrice = Number(item.unitPrice || 0);
@@ -328,6 +333,11 @@ export function TpvComboCustomizeModal({
               const done = need <= 0 || have >= need;
               const key = comboMenuSectionKey(section);
               const expanded = expandedKey === key;
+              const q = foldTpvSearchText(sectionQuery);
+              const visibleProducts =
+                expanded && q
+                  ? products.filter((p) => foldTpvSearchText(`${p.name} ${p.category || ''}`).includes(q))
+                  : products;
 
               return (
                 <section
@@ -412,8 +422,28 @@ export function TpvComboCustomizeModal({
                         </div>
                       )}
 
-                      <div className="p-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                        {products.map((product) => {
+                      {products.length > 8 && (
+                        <div className="px-2 pt-2">
+                          <label className="relative block">
+                            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+                            <input
+                              type="search"
+                              value={sectionQuery}
+                              onChange={(e) => setSectionQuery(e.target.value)}
+                              placeholder={`Buscar en ${section.catalogCategory} (${products.length})`}
+                              className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-8 pr-3 text-xs text-gray-900 placeholder:text-gray-400 focus:border-emerald-400 focus:outline-none dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      <div className="p-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-[42vh] overflow-y-auto">
+                        {visibleProducts.length === 0 ? (
+                          <p className="col-span-full text-center text-xs text-gray-500 py-4">
+                            {q ? 'Sin coincidencias' : 'No hay productos en esta sección'}
+                          </p>
+                        ) : (
+                          visibleProducts.map((product) => {
                           const selected = picked.find((r) => r.productId === product._id);
                           const atMax = need > 0 && have >= need && !selected;
                           return (
@@ -431,9 +461,15 @@ export function TpvComboCustomizeModal({
                               }`}
                             >
                               <span className="line-clamp-2 leading-snug">{product.name}</span>
+                              {product.category && section.groupByMainFamily ? (
+                                <span className="mt-0.5 block truncate text-[9px] font-medium text-gray-400">
+                                  {product.category}
+                                </span>
+                              ) : null}
                             </button>
                           );
-                        })}
+                        })
+                        )}
                       </div>
                     </div>
                   )}

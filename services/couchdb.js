@@ -10024,6 +10024,10 @@ export function sanitizeCatalogItemForTpv(doc) {
   if (rawCf.comboStructureConfirmed === true) {
     customFields.comboStructureConfirmed = true;
   }
+  // Allowlists de menú (p. ej. Individual → solo Patatas Deluxe/Monalisa).
+  if (rawCf.comboSlotAllowlists && typeof rawCf.comboSlotAllowlists === 'object' && !Array.isArray(rawCf.comboSlotAllowlists)) {
+    customFields.comboSlotAllowlists = rawCf.comboSlotAllowlists;
+  }
   if (rawCf.halfHalf === true) {
     customFields.halfHalf = true;
   }
