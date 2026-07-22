@@ -315,6 +315,9 @@ export function tpvSessionMatchesStoreRef(
  * Resuelve la caja activa del TPV.
  * Si el pick de tienda parpadea o no matchea un instante, conserva la última caja abierta
  * (sobre todo en tablet / a mitad de pedido) para no volver a «Abrir caja».
+ *
+ * Si hay varias cajas abiertas para la misma tienda, gana siempre la más reciente
+ * por `openedAt` (evita reenganchar una caja fantasma del 6 de julio al salir del TPV).
  */
 export function resolveActiveTpvRegisterSession(params: {
   sessions: TpvRegisterSession[];
@@ -331,11 +334,16 @@ export function resolveActiveTpvRegisterSession(params: {
 
   let found: TpvRegisterSession | null = null;
   if (pick) {
-    found = open.find((s) => tpvSessionMatchesStoreRef(s, pick, pdvs)) || null;
+    found = pickNewestOpenRegisterSessionForStore(open, pick, pdvs);
   } else if (open.length === 1) {
     found = open[0];
   } else if (open.length > 1 && params.sticky?._id) {
-    found = open.find((s) => s._id === params.sticky?._id) || null;
+    const stickyLive = open.find((s) => s._id === params.sticky?._id) || null;
+    if (stickyLive) {
+      const storeRef = String(stickyLive.pointOfSaleId || '').trim();
+      found =
+        pickNewestOpenRegisterSessionForStore(open, storeRef, pdvs) || stickyLive;
+    }
   }
 
   if (found) {
@@ -370,6 +378,44 @@ export function resolveActiveTpvRegisterSession(params: {
 
   // Pick apunta a otra tienda sin caja abierta → OpeningScreen, pero no olvidar la sticky.
   return { session: null, nextSticky: candidate };
+}
+
+/** Compara dos sesiones: la de `openedAt` más reciente gana. */
+export function compareTpvSessionsByOpenedAtDesc(
+  a: Pick<TpvRegisterSession, 'openedAt'>,
+  b: Pick<TpvRegisterSession, 'openedAt'>,
+): number {
+  return String(b.openedAt || '').localeCompare(String(a.openedAt || ''));
+}
+
+/**
+ * Entre cajas abiertas de la misma tienda (PDV o workCenter), la más nueva.
+ * «Salir del TPV» no cierra caja: sin esto un `find` puede reenganchar una abierta antigua.
+ */
+export function pickNewestOpenRegisterSessionForStore(
+  sessions: TpvRegisterSession[],
+  storeRefId: string,
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+): TpvRegisterSession | null {
+  const pick = String(storeRefId || '').trim();
+  if (!pick) return null;
+  const matches = (Array.isArray(sessions) ? sessions : []).filter(
+    (s) =>
+      isTpvRegisterSessionOpenStatus(s) && tpvSessionMatchesStoreRef(s, pick, pointsOfSale),
+  );
+  if (matches.length === 0) return null;
+  return [...matches].sort(compareTpvSessionsByOpenedAtDesc)[0] || null;
+}
+
+/** true si la caja se abrió en un día local distinto de hoy. */
+export function isTpvRegisterSessionFromPriorCalendarDay(
+  session: Pick<TpvRegisterSession, 'openedAt'> | null | undefined,
+  now = new Date(),
+): boolean {
+  const openedAt = String(session?.openedAt || '').trim();
+  if (!openedAt) return false;
+  const openDay = localCalendarDayKey(new Date(openedAt));
+  return Boolean(openDay) && openDay !== localCalendarDayKey(now);
 }
 
 /** Una caja abierta por tienda (la más reciente si hay duplicados). */

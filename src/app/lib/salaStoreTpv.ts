@@ -116,9 +116,15 @@ export function resolveSalaTpvDisplay(
     || activeTerminals[0];
   const terminal = roomTerminal || storeDefault;
   const terminalCode = resolveCopyableTpvCode(pdv, terminal, Boolean(roomTerminal));
-  const openSession = sessions.find(
+  const openMatches = sessions.filter(
     (s) => isSessionOpen(s) && sessionMatchesPdv(s, pdv),
   );
+  const openSession =
+    openMatches.length === 0
+      ? undefined
+      : [...openMatches].sort((a, b) =>
+          String(b.openedAt || '').localeCompare(String(a.openedAt || '')),
+        )[0];
   return {
     pdvId: pdv._id,
     pdvLabel,

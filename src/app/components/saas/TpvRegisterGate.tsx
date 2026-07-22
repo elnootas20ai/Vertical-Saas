@@ -33,9 +33,8 @@ import {
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import {
-  localCalendarDayKey,
   mergeTpvRegisterSessionsPreservingOpen,
-  registerSessionSpansMultipleDays,
+  pickNewestOpenRegisterSessionForStore,
   resolveActiveTpvRegisterSession,
   findLastClosedTpvSession,
   resolvePreviousCloseCashAmount,
@@ -3814,10 +3813,9 @@ export function TpvRegisterGate({
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
     const pdvId = String(data.pointOfSaleId || '').trim();
-    const localOpen = sessions.find(
-      (s) => isTpvRegisterSessionOpen(s) && tpvSessionMatchesStoreRef(s, pdvId, pointsOfSale),
-    );
+    const localOpen = pickNewestOpenRegisterSessionForStore(sessions, pdvId, pointsOfSale);
     if (localOpen) {
+      // Ya hay caja abierta en esa tienda: entrar en ella sin toast (no bloquea ni molesta al abrir).
       if (!isWorkerUser && pdvId) {
         const bid = resolveBusinessScopeId(currentBusiness);
         if (bid && dataUserId) {
@@ -3827,7 +3825,6 @@ export function TpvRegisterGate({
         skipManagerAutoPdvRef.current = false;
       }
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: localOpen }));
-      toast.info(`Continuando con la caja ya abierta en ${localOpen.pointOfSaleName || 'esta tienda'}`);
       return;
     }
     const openerId = normalizeClockinUserId(data.workerId);
@@ -3938,7 +3935,6 @@ export function TpvRegisterGate({
           skipManagerAutoPdvRef.current = false;
         }
         window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: existing }));
-        toast.info(`Continuando con la caja ya abierta en ${existing.pointOfSaleName || 'esta tienda'}`);
         return;
       }
       toast.error(toUserFacingMessage(err, 'No se pudo abrir la caja'));
@@ -4638,22 +4634,6 @@ export function TpvRegisterGate({
           minimal={compactRegisterChrome}
           quickActions={statusBarQuickActions}
         />
-        {(isTabletSession || !compactRegisterChrome) && registerSessionSpansMultipleDays(activeSession) && (
-          <div className="relative z-20 bg-amber-100 dark:bg-amber-950/40 border-b border-amber-300 dark:border-amber-800 px-4 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3 flex-wrap">
-            <span>
-              Caja abierta desde el{' '}
-              <strong>{new Date(activeSession.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}</strong>
-              . Ciérrala para el cierre diario y abre una caja nueva hoy ({localCalendarDayKey()}).
-            </span>
-            <button
-              type="button"
-              onClick={() => void handleRequestClose()}
-              className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 text-white font-semibold hover:bg-amber-700"
-            >
-              Cerrar caja
-            </button>
-          </div>
-        )}
         {!compactRegisterChrome && !isRestaurantVerticalChrome && (
           <RegisterCashOpsStrip session={activeSession} />
         )}

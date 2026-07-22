@@ -1093,6 +1093,8 @@ export type DeliverySidebarStoreRow = {
   workCenterId: string;
   title: string;
   code?: string;
+  /** Código tablet TPV (6 chars) — para copiar en sidebar. */
+  terminalCode?: string;
   inactive: boolean;
   needsPdv: boolean;
 };
@@ -1129,12 +1131,14 @@ export function buildDeliverySidebarStoreRows(
     const wcInactive = wc.active === false;
     if (pdv) {
       const lines = pointOfSaleSidebarLines(pdv);
+      const terminalCode = String(pdv.terminalCode || '').trim().toUpperCase() || undefined;
       return {
         rowId: pdv._id,
         pdvId: pdv._id,
         workCenterId: wc._id,
         title: lines.title,
         code: lines.code || undefined,
+        terminalCode,
         inactive: wcInactive || pdv.active === false,
         needsPdv: false,
       };
@@ -1924,6 +1928,9 @@ export interface TpvRegisterSession {
 
   /** Efectivo declarado por integrador al cierre (suma al arqueo de caja). */
   aggregatorClosingCash?: Record<string, number>;
+
+  /** Tarjeta declarada por integrador al cierre (informativo). */
+  aggregatorClosingCard?: Record<string, number>;
 
   /**
    * Conteo de pizzas / burgers / tacos del turno al cerrar caja.

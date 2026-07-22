@@ -47,7 +47,7 @@ export function ClockedInWorkerBubbles({
   }
 
   return (
-    <div className={`${compact ? 'min-w-0' : 'space-y-1.5'} ${loading ? 'opacity-80' : ''}`}>
+    <div className={`${ultraCompact ? 'shrink-0 overflow-visible' : compact ? 'min-w-0' : 'space-y-1.5'} ${loading ? 'opacity-80' : ''}`}>
       {!compact && label ? (
         <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 min-h-[1.125rem]">
           <UserCheck className="w-3.5 h-3.5" />
@@ -57,7 +57,7 @@ export function ClockedInWorkerBubbles({
           )}
         </div>
       ) : null}
-      <div className={`flex items-center flex-wrap min-h-[2rem] ${ultraCompact ? 'gap-0.5' : 'gap-1.5'}`}>
+      <div className={`flex items-center ${ultraCompact ? 'gap-1 flex-nowrap overflow-visible py-0.5' : 'flex-wrap min-h-[2rem] gap-1.5'}`}>
         {workers.map((worker) => {
           const isSelected = normalizeClockinUserId(selectedId) === worker.id;
           const onBreak = worker.status === 'break';
@@ -68,7 +68,7 @@ export function ClockedInWorkerBubbles({
             <>
               <span
                 className={`rounded-full flex items-center justify-center font-bold shrink-0 ${
-                  ultraCompact ? 'w-6 h-6 text-[9px]' : compact ? 'w-7 h-7 text-[10px]' : 'w-8 h-8 text-[11px]'
+                  ultraCompact ? 'w-7 h-7 text-[10px]' : compact ? 'w-7 h-7 text-[10px]' : 'w-8 h-8 text-[11px]'
                 } ${
                   isSelected
                     ? 'bg-emerald-600 text-white'
@@ -111,11 +111,13 @@ export function ClockedInWorkerBubbles({
               type="button"
               onClick={() => onSelect?.(worker.id)}
               title={`${worker.name}${onBreak ? ' (descanso)' : ''}`}
-              className={`flex items-center gap-1.5 rounded-full text-xs font-medium transition-all ${
-                compact ? 'p-0.5' : 'px-2.5 py-1.5'
+              className={`flex items-center gap-1.5 rounded-full text-xs font-medium transition-all shrink-0 ${
+                compact ? (ultraCompact ? 'p-0' : 'p-0.5') : 'px-2.5 py-1.5'
               } ${
                 isSelected
-                  ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 ring-2 ring-emerald-500 ring-offset-1 dark:ring-offset-gray-900'
+                  ? ultraCompact
+                    ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 ring-2 ring-emerald-500'
+                    : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 ring-2 ring-emerald-500 ring-offset-1 dark:ring-offset-gray-900'
                   : onBreak
                     ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900/40'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'

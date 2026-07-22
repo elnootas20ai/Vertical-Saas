@@ -126,6 +126,7 @@ import {
   Plug,
   Mail,
   Loader2,
+  Copy,
 } from 'lucide-react';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
@@ -184,6 +185,8 @@ interface SidebarItem {
   label: string;
   /** Segunda línea (p. ej. código PDV en monospace). */
   subLabel?: string;
+  /** Código tablet TPV (copiable) ligado a la tienda. */
+  terminalCode?: string;
   icon: React.ReactNode;
   path: string;
   pro?: boolean;
@@ -1510,10 +1513,12 @@ function SidebarInner({
           if (row.code) subParts.push(row.code);
           if (row.needsPdv) subParts.push('Sin PDV');
           else if (row.inactive) subParts.push('Inactiva');
+          const terminalCode = String(row.terminalCode || '').trim().toUpperCase() || undefined;
           return {
             id: `sp-${row.rowId}`,
             label: row.title,
             subLabel: subParts.length ? subParts.join(' · ') : undefined,
+            terminalCode,
             inactive: row.inactive,
             icon: <Store className="w-3.5 h-3.5" />,
             path: '#',
@@ -1917,7 +1922,9 @@ function SidebarInner({
                           {(isMobile || !collapsed) && (
                             <span
                               className={`flex-1 min-w-0 text-left ${
-                                isSalesPointSubItem && item.subLabel ? 'flex flex-col gap-0.5' : ''
+                                isSalesPointSubItem && (item.subLabel || item.terminalCode)
+                                  ? 'flex flex-col gap-0.5'
+                                  : ''
                               }`}
                             >
                               <span
@@ -1938,6 +1945,37 @@ function SidebarInner({
                                   }`}
                                 >
                                   {item.subLabel}
+                                </span>
+                              ) : null}
+                              {isSalesPointSubItem && item.terminalCode ? (
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  title="Copiar código TPV"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    const code = String(item.terminalCode || '').trim().toUpperCase();
+                                    if (!code) return;
+                                    void navigator.clipboard.writeText(code).then(
+                                      () => toast.success(`Código TPV copiado: ${code}`),
+                                      () => toast.error('No se pudo copiar'),
+                                    );
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    (e.currentTarget as HTMLElement).click();
+                                  }}
+                                  className={`inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] leading-none tracking-widest transition-colors ${
+                                    isActive
+                                      ? 'bg-amber-100/80 text-amber-800 hover:bg-amber-200/80 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/60'
+                                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                                  }`}
+                                >
+                                  <Copy className="h-2.5 w-2.5 shrink-0 opacity-70" />
+                                  <span className="truncate">{item.terminalCode}</span>
                                 </span>
                               ) : null}
                             </span>

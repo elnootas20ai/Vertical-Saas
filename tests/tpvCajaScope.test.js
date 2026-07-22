@@ -87,6 +87,52 @@ describe('resolveActiveTpvRegisterSession', () => {
     });
     expect(r.session?._id).toBe('s1');
   });
+
+  it('prefers newest open session for the same store (not an ancient July open)', () => {
+    const july6 = {
+      _id: 's-old',
+      status: 'open',
+      pointOfSaleId: 'pdv-1',
+      openedAt: '2026-07-06T10:00:00.000Z',
+    };
+    const today = {
+      _id: 's-new',
+      status: 'open',
+      pointOfSaleId: 'pdv-1',
+      openedAt: '2026-07-22T09:00:00.000Z',
+    };
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [july6, today],
+      sticky: null,
+      pickId: 'pdv-1',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: false,
+    });
+    expect(r.session?._id).toBe('s-new');
+  });
+
+  it('after exit (no sticky), still picks newest even if July 6 is listed first', () => {
+    const july6 = {
+      _id: 's-old',
+      status: 'open',
+      pointOfSaleId: 'wc-1',
+      openedAt: '2026-07-06T10:00:00.000Z',
+    };
+    const today = {
+      _id: 's-new',
+      status: 'open',
+      pointOfSaleId: 'pdv-1',
+      openedAt: '2026-07-22T11:00:00.000Z',
+    };
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [july6, today],
+      sticky: null,
+      pickId: 'pdv-1',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: true,
+    });
+    expect(r.session?._id).toBe('s-new');
+  });
 });
 
 describe('sessionActiveOnCalendarDay', () => {
