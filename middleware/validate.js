@@ -115,7 +115,6 @@ export const inviteUserSchema = z.object({
   workCenterId: z.string().max(100).trim().optional().default(''),
   scheduleTemplateId: z.string().max(200).trim().optional().default(''),
   message: z.string().max(500).trim().optional().default(''),
-  posPin: z.string().regex(/^\d{4,6}$/, 'El PIN de TPV debe tener entre 4 y 6 dígitos').optional(),
 });
 
 export const saveBillingCardSchema = z.object({

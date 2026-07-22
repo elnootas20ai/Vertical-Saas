@@ -170,7 +170,6 @@ export interface AuthContextType {
     isExistingUser?: boolean;
     inviteExpiresAt?: string;
     companyCode?: string;
-    posPin?: string;
     error?: string;
   }>;
   lookupInviteEmail: (
@@ -816,7 +815,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isExistingUser: Boolean(response.isExistingUser),
         inviteExpiresAt: response.inviteExpiresAt,
         companyCode: response.companyCode,
-        posPin: response.posPin,
       };
     } catch (error) {
       return {

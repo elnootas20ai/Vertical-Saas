@@ -1185,14 +1185,12 @@ export async function inviteUserRequest(data: {
   workCenterId?: string;
   scheduleTemplateId?: string;
   message?: string;
-  posPin?: string;
 }) {
   return request<AuthUser & {
     invitation?: TeamInvitation;
     isExistingUser?: boolean;
     inviteExpiresAt?: string;
     companyCode?: string;
-    posPin?: string;
   }>('/api/auth/invite', {
     method: 'POST',
     body: JSON.stringify(data),

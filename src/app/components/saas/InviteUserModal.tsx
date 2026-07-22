@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
-  X, Mail, User, Shield, ShieldCheck, ChevronDown, Wrench, Star, Check, CheckCircle2,
+  X, Mail, User, Shield, ChevronDown, Wrench, Star, Check, CheckCircle2,
   ArrowLeft, ArrowRight, Loader2, Briefcase,
   Building2, MapPin, ClipboardList, UserCheck, FileWarning,
   DollarSign, Clock,
@@ -26,8 +26,6 @@ import { HrGestorChecklist } from './HrGestorChecklist';
 interface InviteResult {
   isExistingUser?: boolean;
   inviteExpiresAt?: string;
-  /** PIN TPV generado al invitar — mostrarlo una sola vez al gestor. */
-  posPin?: string;
 }
 
 export interface InviteUserPayload {
@@ -755,8 +753,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                 <HrGestorChecklist mode="invite" compact />
               </div>
 
-              {/* Estado de la invitación (in-app) */}
-              <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-3">
+              <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-5">
                 <Mail className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed text-left">
                   Le aparecerá una notificación dentro de Vertial para <strong>{email.trim()}</strong>.
@@ -765,25 +762,6 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     : ''}
                 </p>
               </div>
-
-              {inviteResult?.posPin ? (
-                <div className="w-full flex items-start gap-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl px-4 py-3 mb-5">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-                  <div className="text-left min-w-0">
-                    <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">
-                      PIN de TPV (guárdalo ahora)
-                    </p>
-                    <p className="mt-1 font-mono text-lg font-bold tracking-[0.2em] text-emerald-900 dark:text-emerald-100">
-                      {inviteResult.posPin}
-                    </p>
-                    <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300 leading-relaxed">
-                      Solo se muestra una vez. El trabajador lo usará para entrar al TPV en tablet.
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="mb-5" />
-              )}
 
               {/* Actions */}
               <div className="w-full flex items-center gap-3">

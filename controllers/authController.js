@@ -31,7 +31,6 @@ import {
   findPendingJoinRequest,
   hashPassword,
   hashPosPin,
-  generatePosPin,
   isValidPosPin,
   findPointOfSaleByTerminalCode,
   resolveTerminalLoginCode,
@@ -1734,13 +1733,6 @@ export async function inviteUser(req, res) {
         message,
       });
 
-    let plainPosPin = String(req.body?.posPin || '').trim();
-    if (plainPosPin && !isValidPosPin(plainPosPin)) {
-      return badRequest(res, 'El PIN de TPV debe tener entre 4 y 6 dígitos numéricos');
-    }
-    if (!plainPosPin) plainPosPin = generatePosPin();
-    invitationDoc.posPinHash = hashPosPin(plainPosPin);
-
     // Si la invitación ya existía pero algún dato ha cambiado, actualizamos.
     if (existingInvitation) {
       invitationDoc.fullName = String(name || existingInvitation.fullName || '').trim();
@@ -1786,7 +1778,6 @@ export async function inviteUser(req, res) {
       isExistingUser: Boolean(existingAccount),
       companyCode: business?.companyCode || '',
       inviteExpiresAt: savedInvitation.expiresAt,
-      posPin: plainPosPin,
     });
   } catch (error) {
     return res.status(500).json({

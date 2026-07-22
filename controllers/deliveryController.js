@@ -2740,9 +2740,6 @@ export async function createTpvRegisterSession(req, res) {
     const scopedPdvIds = scope.scopedPdvIds;
 
     const allSessions = await listTpvRegisterSessionsByUser(req, userId);
-    const scopedSessions = businessId
-      ? filterTpvRegisterSessionsForBusiness(allSessions, businessId, scopedPdvIds)
-      : allSessions;
 
     // Alias tienda: PDV id y workCenterId (cajas viejas a veces guardan el WC).
     const scopedPdvsList = businessId

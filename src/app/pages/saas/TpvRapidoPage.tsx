@@ -161,6 +161,7 @@ import {
   ArrowLeftRight,
   Split,
   Percent,
+  Zap,
 } from 'lucide-react';
 
 type Step = 'client' | 'delivery' | 'products' | 'payment';
@@ -207,23 +208,28 @@ const LABEL_CLASS =
   'block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2';
 
 const RESTAURANT_WALKIN_CLIENT_ID = 'tpv-restaurant-walk-in';
+const DELIVERY_QUICK_ATTENTION_CLIENT_ID = 'tpv-delivery-quick-attention';
 
-function buildRestaurantWalkInClient(userId: string, businessId: string, displayName = 'Sala'): Client {
+function buildTpvWalkInClient(
+  userId: string,
+  businessId: string,
+  opts: { id: string; name: string; tags: string[] },
+): Client {
   return {
-    id: RESTAURANT_WALKIN_CLIENT_ID,
+    id: opts.id,
     type: 'client',
     user_id: userId,
     businessId,
     business_id: businessId,
     clientType: 'particular',
-    name: displayName,
+    name: opts.name,
     phone: '0',
     phonePrefix: '+34',
     email: '',
     status: 'active',
     responsible: 'TPV',
     branch_id: '',
-    tags: ['tpv', 'restaurant-walk-in'],
+    tags: opts.tags,
     address: '',
     city: '',
     notes: '',
@@ -242,12 +248,40 @@ function buildRestaurantWalkInClient(userId: string, businessId: string, display
   };
 }
 
+function buildRestaurantWalkInClient(userId: string, businessId: string, displayName = 'Sala'): Client {
+  return buildTpvWalkInClient(userId, businessId, {
+    id: RESTAURANT_WALKIN_CLIENT_ID,
+    name: displayName,
+    tags: ['tpv', 'restaurant-walk-in'],
+  });
+}
+
+function buildDeliveryQuickAttentionClient(
+  userId: string,
+  businessId: string,
+  displayName = 'Atención rápida',
+): Client {
+  return buildTpvWalkInClient(userId, businessId, {
+    id: DELIVERY_QUICK_ATTENTION_CLIENT_ID,
+    name: displayName,
+    tags: ['tpv', 'quick-attention'],
+  });
+}
+
 function restaurantFlowResetStep(): Step {
   return 'products';
 }
 
 function restaurantFlowCompletedSteps(): Set<Step> {
   return new Set(['client', 'delivery']);
+}
+
+function deliveryQuickAttentionCompletedSteps(): Set<Step> {
+  return new Set(['client', 'delivery']);
+}
+
+function isDeliveryQuickAttentionClient(client: Client | null | undefined): boolean {
+  return Boolean(client && client.id === DELIVERY_QUICK_ATTENTION_CLIENT_ID);
 }
 
 function getInitials(name: string): string {
@@ -805,15 +839,30 @@ export function TpvRapidoOrderFlow({
     return buildRestaurantWalkInClient(userId || 'tpv', writeBusinessId || businessId || 'tpv', label);
   }, [restaurantTable, walkInClient, userId, writeBusinessId, businessId]);
 
+  const quickAttentionClient = useMemo(
+    () => buildDeliveryQuickAttentionClient(userId || 'tpv', writeBusinessId || businessId || 'tpv'),
+    [userId, writeBusinessId, businessId],
+  );
+
+  const startAsRestaurant = Boolean(
+    restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType),
+  );
+  /** Delivery: entrar ya en productos (carrito a la derecha) sin wizard de cliente. */
+  const startAsQuickAttention = !startAsRestaurant && !searchParams.get('clientId');
+
   const [currentStep, setCurrentStep] = useState<Step>(() =>
-    (restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType))
+    startAsRestaurant
       ? restaurantFlowResetStep()
-      : 'client',
+      : startAsQuickAttention
+        ? 'products'
+        : 'client',
   );
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(() =>
-    (restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType))
+    startAsRestaurant
       ? restaurantFlowCompletedSteps()
-      : new Set(),
+      : startAsQuickAttention
+        ? deliveryQuickAttentionCompletedSteps()
+        : new Set(),
   );
 
   // Step 1 - Client
@@ -844,11 +893,18 @@ export function TpvRapidoOrderFlow({
       resultLimit: 20,
     });
 
+  // Nuevo pedido delivery: fijar cliente «Atención rápida» al entrar.
+  const shouldBootQuickAttentionRef = useRef(startAsQuickAttention);
+  const quickAttentionBootRef = useRef(false);
+  useEffect(() => {
+    if (!shouldBootQuickAttentionRef.current || quickAttentionBootRef.current) return;
+    quickAttentionBootRef.current = true;
+    selectClient(quickAttentionClient);
+  }, [selectClient, quickAttentionClient]);
+
   // Step 2 - Delivery
   const [deliveryType, setDeliveryType] = useState<DeliveryType | null>(() =>
-    (restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType))
-      ? 'recogida'
-      : null,
+    startAsRestaurant || startAsQuickAttention ? 'recogida' : null,
   );
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showNewAddress, setShowNewAddress] = useState(false);
@@ -919,6 +975,21 @@ export function TpvRapidoOrderFlow({
   const [companyPromos, setCompanyPromos] = useState<StoredPromotion[]>(() =>
     typeof window !== 'undefined' ? readStoredPromotions() : [],
   );
+
+  const startQuickAttentionFlow = useCallback(() => {
+    selectClient(quickAttentionClient);
+    setShowCreateForm(false);
+    setDuplicateWarning(false);
+    setPhoneInput('');
+    setDeliveryType('recogida');
+    setSelectedAddressId(null);
+    setShowNewAddress(false);
+    setAddressWarning(false);
+    setEditingAddressId(null);
+    setPaymentMethod(null);
+    setCompletedSteps(deliveryQuickAttentionCompletedSteps());
+    setCurrentStep('products');
+  }, [selectClient, quickAttentionClient]);
 
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
@@ -1461,15 +1532,21 @@ export function TpvRapidoOrderFlow({
         return false;
       }
       if (step === 'client') return true;
-      if (step === 'delivery') return !!selectedClient;
-      if (step === 'products') return !!selectedClient && !!deliveryType;
-      if (step === 'payment') return !!selectedClient && !!deliveryType && cart.length > 0;
+      if (step === 'delivery') return !!selectedClient || completedSteps.has('client');
+      if (step === 'products') {
+        return (!!selectedClient || completedSteps.has('client')) && !!deliveryType;
+      }
+      if (step === 'payment') {
+        return (!!selectedClient || completedSteps.has('client')) && !!deliveryType && cart.length > 0;
+      }
       return false;
     },
-    [isRestaurantMode, selectedClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable],
+    [isRestaurantMode, selectedClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable, completedSteps],
   );
 
-  const saleClient = isRestaurantMode ? tableWalkInClient : selectedClient;
+  const saleClient = isRestaurantMode
+    ? tableWalkInClient
+    : selectedClient ?? (completedSteps.has('client') ? quickAttentionClient : null);
 
   const orderReady =
     !!effectiveOrderTakerId &&
@@ -1657,12 +1734,24 @@ export function TpvRapidoOrderFlow({
       if (currentStep === 'payment') setCurrentStep('products');
       return;
     }
+    if (
+      currentStep === 'products'
+      && isDeliveryQuickAttentionClient(selectedClient)
+      && deliveryType === 'recogida'
+    ) {
+      clearSelection();
+      setCompletedSteps(new Set());
+      setDeliveryType(null);
+      setCurrentStep('client');
+      setTimeout(() => phoneRef.current?.focus(), 150);
+      return;
+    }
     const order: Step[] = ['client', 'delivery', 'products', 'payment'];
     const idx = order.indexOf(currentStep);
     if (idx > 0) {
       setCurrentStep(order[idx - 1]);
     }
-  }, [currentStep, isRestaurantMode]);
+  }, [currentStep, isRestaurantMode, selectedClient, deliveryType, clearSelection]);
 
   // ─── Client selection ─────────────────────────────────────────────────────
   const handleSelectClient = useCallback(
@@ -2754,11 +2843,8 @@ export function TpvRapidoOrderFlow({
       return;
     }
     appliedClientIdFromUrl.current = null;
-    setCurrentStep('client');
-    setCompletedSteps(new Set());
     setPhoneInput('');
     setPhonePrefix('+34');
-    clearSelection();
     clearResults();
     setShowCreateForm(false);
     setNewClientName('');
@@ -2767,16 +2853,12 @@ export function TpvRapidoOrderFlow({
     setNewClientNotes('');
     setNewClientPayment('');
     setDuplicateWarning(false);
-    setDeliveryType(null);
-    setSelectedAddressId(null);
-    setShowNewAddress(false);
     setCart([]);
     setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
       setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
     }
-    setPaymentMethod(null);
     setCashGiven('');
     setTipInput('');
     setOrderNotes('');
@@ -2787,8 +2869,8 @@ export function TpvRapidoOrderFlow({
     setClientPromos([]);
     setSelectedClientPromoId('');
     setCreatedOrder(null);
-    setTimeout(() => phoneRef.current?.focus(), 150);
-  }, [clearSelection, clearResults, catalogSections, catalog, isRestaurantMode, resetRestaurantTicket]);
+    startQuickAttentionFlow();
+  }, [clearResults, catalogSections, catalog, isRestaurantMode, resetRestaurantTicket, startQuickAttentionFlow]);
 
   const handleCancelOrder = useCallback(() => {
     if (isRestaurantMode) {
@@ -3172,7 +3254,8 @@ export function TpvRapidoOrderFlow({
         {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
         {currentStep === 'client' ? (
           <StepContainer step={1} title="Cliente" visible>
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col lg:flex-row gap-4 lg:gap-5 items-stretch">
+              <div className="flex-1 min-w-0 flex flex-col gap-1">
               <label className={LABEL_CLASS} htmlFor="tpv-client-search">
                 Teléfono o nombre del cliente
               </label>
@@ -3220,6 +3303,21 @@ export function TpvRapidoOrderFlow({
                   ? `Tienes ${clientsTotalCount.toLocaleString('es-ES')} clientes: busca por teléfono (3+ dígitos) o nombre (2+ letras). No se listan todos a la vez.`
                   : 'Busca por número (al menos 3 dígitos) o por nombre (2 letras o más).'}
               </p>
+            </div>
+
+              {!isRestaurantMode ? (
+                <button
+                  type="button"
+                  onClick={startQuickAttentionFlow}
+                  className={`lg:w-[220px] shrink-0 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500/70 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors touch-manipulation ${tabletMode ? 'min-h-[112px] px-3 py-3' : 'min-h-[128px] px-4 py-4'}`}
+                >
+                  <Zap className="w-7 h-7 text-emerald-600 dark:text-emerald-400" strokeWidth={2.25} />
+                  <span className="font-bold text-sm text-center leading-tight">Atención rápida</span>
+                  <span className="text-[11px] text-emerald-800/80 dark:text-emerald-200/80 text-center leading-snug">
+                    Nuevo usuario · recogida · directo a productos
+                  </span>
+                </button>
+              ) : null}
             </div>
 
             {searchError && (
@@ -3601,9 +3699,41 @@ export function TpvRapidoOrderFlow({
               cartPanel={(
                 <div className={`flex flex-col h-full min-h-0 ${tabletMode ? 'p-2.5' : 'p-3'} ${cartShake ? 'animate-shake' : ''}`}>
                   <div className={`flex items-center justify-between shrink-0 ${tabletMode ? 'mb-2' : 'mb-1.5'}`}>
-                    <h4 className={`font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider ${tabletMode ? 'text-xs' : 'text-xs'}`}>
-                      Pedido
-                    </h4>
+                    <div className="min-w-0">
+                      <h4 className={`font-bold text-gray-600 dark:text-gray-300 uppercase tracking-wider ${tabletMode ? 'text-xs' : 'text-xs'}`}>
+                        Pedido
+                      </h4>
+                      {!isRestaurantMode && saleClient ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isDeliveryQuickAttentionClient(saleClient)) {
+                              clearSelection();
+                              setCompletedSteps(new Set());
+                              setDeliveryType(null);
+                            }
+                            setCurrentStep('client');
+                            setTimeout(() => phoneRef.current?.focus(), 150);
+                          }}
+                          className="mt-0.5 flex items-center gap-1 max-w-full text-left touch-manipulation"
+                          title="Cambiar cliente"
+                        >
+                          {isDeliveryQuickAttentionClient(saleClient) ? (
+                            <Zap className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          ) : (
+                            <User className="w-3 h-3 text-gray-400 shrink-0" />
+                          )}
+                          <span className={`truncate font-semibold ${
+                            isDeliveryQuickAttentionClient(saleClient)
+                              ? 'text-emerald-700 dark:text-emerald-300 text-[11px]'
+                              : 'text-gray-500 dark:text-gray-400 text-[11px]'
+                          }`}>
+                            {saleClient.name}
+                            {deliveryType === 'recogida' ? ' · Recogida' : deliveryType === 'domicilio' ? ' · Domicilio' : ''}
+                          </span>
+                        </button>
+                      ) : null}
+                    </div>
                     {orderPanelCount > 0 && (
                       <span className={`font-bold tabular-nums rounded-full bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 ${tabletMode ? 'text-xs px-2 py-0.5' : 'text-[10px] px-2 py-0.5'}`}>
                         {orderPanelCount}

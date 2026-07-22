@@ -51,6 +51,7 @@ import {
   Wrench,
   X,
   Zap,
+  MapPin,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
 import { PayrollTab } from '../../components/saas/PayrollTab';
@@ -1230,6 +1231,7 @@ function MemberDrawer({
   roles,
   businessType,
   currentUserId,
+  workCenters = [],
   onClose,
   onMemberUpdated,
   onMemberDeleted,
@@ -1239,6 +1241,8 @@ function MemberDrawer({
   roles: RoleDefinition[];
   businessType?: string | null;
   currentUserId?: string;
+  /** Tiendas/locales para asignar TPV y fichaje. */
+  workCenters?: WorkCenter[];
   onClose: () => void;
   onMemberUpdated: (member: AuthUser) => void;
   onMemberDeleted: (member: AuthUser) => void;
@@ -1781,6 +1785,30 @@ function MemberDrawer({
                     <input className={inputClassName} value={form.employment.department} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, department: event.target.value } }))} />
                   </div>
                   <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Tienda / local (TPV y fichaje)</label>
+                    <div className="relative">
+                      <select
+                        className={`${inputClassName} appearance-none pr-9 cursor-pointer`}
+                        value={form.employment.salesPointId || ''}
+                        onChange={(event) => setForm((prev) => ({
+                          ...prev,
+                          employment: { ...prev.employment, salesPointId: event.target.value },
+                        }))}
+                      >
+                        <option value="">Sin tienda asignada</option>
+                        {workCenters.filter((wc) => wc.active !== false).map((wc) => (
+                          <option key={wc._id || wc.id} value={wc._id || wc.id}>
+                            {wc.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                    </div>
+                    <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                      Obligatorio para mostrador: sin tienda no sale al fichar en el TPV de ese local.
+                    </p>
+                  </div>
+                  <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Cargo / Posición</label>
                     <input className={inputClassName} value={form.employment.position} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, position: event.target.value } }))} />
                   </div>
@@ -2289,6 +2317,16 @@ function MemberDrawer({
                     { icon: <Mail className="w-4 h-4 text-gray-500 dark:text-gray-400" />, label: 'Email', value: memberState.email || 'Sin email' },
                     { icon: <Phone className="w-4 h-4 text-gray-500 dark:text-gray-400" />, label: 'Teléfono', value: memberState.phone || 'Sin teléfono' },
                     { icon: <Building2 className="w-4 h-4 text-gray-500 dark:text-gray-400" />, label: 'Departamento', value: memberState.employment?.department || 'Sin departamento' },
+                    {
+                      icon: <MapPin className="w-4 h-4 text-gray-500 dark:text-gray-400" />,
+                      label: 'Tienda / local (TPV)',
+                      value: (() => {
+                        const ref = String(memberState.employment?.salesPointId || '').trim();
+                        if (!ref) return 'Sin tienda asignada';
+                        const wc = workCenters.find((w) => String(w._id || w.id || '').trim() === ref);
+                        return wc?.name || ref;
+                      })(),
+                    },
                   ].map((row) => (
                     <div key={row.label} className="flex items-center gap-3">
                       <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 dark:bg-gray-700">{row.icon}</div>
@@ -3091,7 +3129,6 @@ export function Team() {
     return {
       isExistingUser,
       inviteExpiresAt: result.inviteExpiresAt,
-      posPin: result.posPin,
     };
   };
 
@@ -3547,6 +3584,20 @@ export function Team() {
                             <td className="px-5 py-4">
                               <RoleBadge role={member.role} />
                               <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">{member.employment?.department || 'Sin departamento'}</p>
+                              {(() => {
+                                const ref = String(member.employment?.salesPointId || '').trim();
+                                const wc = ref
+                                  ? workCentersData.find((w) => String(w._id || w.id || '').trim() === ref)
+                                  : null;
+                                if (wc?.name) {
+                                  return <p className="mt-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">{wc.name}</p>;
+                                }
+                                const role = String(member.role || '').trim();
+                                if (role === 'Admin' || role === 'Gerente') {
+                                  return <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">Admin: puede fichar en cualquier local</p>;
+                                }
+                                return <p className="mt-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">Sin tienda TPV</p>;
+                              })()}
                             </td>
                             {branchFilterOptions.length > 0 && (
                               <td className="px-5 py-4">
@@ -3716,6 +3767,7 @@ export function Team() {
           roles={roles}
           businessType={currentBusiness?.businessType}
           currentUserId={user?.user_id}
+          workCenters={workCentersData}
           onClose={() => setSelectedMemberId(null)}
           onMemberUpdated={handleMemberUpdated}
           onMemberDeleted={handleMemberDeleted}
