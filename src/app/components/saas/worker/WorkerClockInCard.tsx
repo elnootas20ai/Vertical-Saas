@@ -10,6 +10,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useWorkerClockIn, formatClockTimer } from '../../../hooks/useWorkerClockIn';
+import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
 
 interface WorkerClockInCardProps {
   businessId: string;
@@ -27,6 +28,11 @@ export function WorkerClockInCard({
   showHistoryLink = true,
 }: WorkerClockInCardProps) {
   const { t } = useTranslation();
+  const { storeLabel, assignedPdvId } = useWorkerAssignedStore();
+  const storeContext =
+    assignedPdvId
+      ? { sales_point_id: assignedPdvId, sales_point_name: storeLabel || undefined }
+      : undefined;
   const {
     record,
     loading,
@@ -42,7 +48,7 @@ export function WorkerClockInCard({
     handleClockIn,
     handleClockOut,
     handleBreakToggle,
-  } = useWorkerClockIn(businessId, memberId, memberName);
+  } = useWorkerClockIn(businessId, memberId, memberName, storeContext);
 
   if (loading) {
     return (

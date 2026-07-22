@@ -583,16 +583,24 @@ export async function googleLogin(req, res) {
     });
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
-    let redirectTo = '/saas/dashboard';
-    if (!savedAccount.emailVerified) {
-      redirectTo = '/auth/verify-email-pending';
+
+    let pendingInvitationsCount = 0;
+    try {
+      const pending = await listPendingInvitationsByEmail(req, savedAccount.email);
+      pendingInvitationsCount = pending.length;
+    } catch (invErr) {
+      console.error('[AUTH] Error consultando invitaciones pendientes en Google login:', invErr?.message);
     }
+
+    const redirectTo = resolvePostLoginRedirect(savedAccount, { pendingInvitationsCount });
+
     return res.json({
       ok: true,
       user: sanitizeAccount(savedAccount),
       accessToken,
       refreshToken,
       redirectTo,
+      pendingInvitationsCount,
     });
   } catch (error) {
     console.error('[AUTH] Google login error:', error?.message || error);
@@ -700,16 +708,24 @@ export async function appleLogin(req, res) {
     });
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
-    let redirectTo = '/saas/dashboard';
-    if (!savedAccount.emailVerified) {
-      redirectTo = '/auth/verify-email-pending';
+
+    let pendingInvitationsCount = 0;
+    try {
+      const pending = await listPendingInvitationsByEmail(req, savedAccount.email);
+      pendingInvitationsCount = pending.length;
+    } catch (invErr) {
+      console.error('[AUTH] Error consultando invitaciones pendientes en Apple login:', invErr?.message);
     }
+
+    const redirectTo = resolvePostLoginRedirect(savedAccount, { pendingInvitationsCount });
+
     return res.json({
       ok: true,
       user: sanitizeAccount(savedAccount),
       accessToken,
       refreshToken,
       redirectTo,
+      pendingInvitationsCount,
     });
   } catch (error) {
     console.error('[AUTH] Apple login error:', error?.message || error);
@@ -1649,6 +1665,15 @@ export async function inviteUser(req, res) {
       });
     }
 
+    // Solo cuentas de trabajador (accountType user). Una cuenta empresa se queda en Gate.
+    if ((existingAccount.accountType || 'company') === 'company') {
+      return res.status(409).json({
+        ok: false,
+        code: 'COMPANY_ACCOUNT',
+        error: 'Este email es una cuenta de empresa. Para unirse al equipo debe crearse una cuenta de trabajador (Acceso empleado).',
+      });
+    }
+
     if (business) {
       const isOwnerOfThis = business.owner_user_id === existingAccount.user_id;
       const isAlreadyMember = Array.isArray(business.members)
@@ -1819,6 +1844,8 @@ export async function lookupInviteEmail(req, res) {
       /* noop */
     }
 
+    const isCompanyAccount = (account.accountType || 'company') === 'company';
+
     return res.json({
       ok: true,
       exists: true,
@@ -1827,6 +1854,9 @@ export async function lookupInviteEmail(req, res) {
       alreadyMember,
       isOwner,
       ownsOtherBusinessName,
+      isCompanyAccount,
+      accountType: account.accountType || 'company',
+      code: isCompanyAccount ? 'COMPANY_ACCOUNT' : undefined,
     });
   } catch (error) {
     return res.status(500).json({
@@ -2038,10 +2068,13 @@ export async function acceptInvitation(req, res) {
 
     const inviteEmployment = invitation.employment || {};
     const mergedEmployment = mergeEmploymentInfo(account.employment, {
+      ...inviteEmployment,
       position: inviteEmployment.position || invitation.role || '',
       contractType: inviteEmployment.contractType || '',
       salary: inviteEmployment.salary || '',
       salesPointId: inviteEmployment.salesPointId || '',
+      workday: inviteEmployment.workday || 'completa',
+      payPeriodsPerYear: inviteEmployment.payPeriodsPerYear,
     });
     const profileDraft = {
       ...account,
@@ -2056,11 +2089,13 @@ export async function acceptInvitation(req, res) {
 
     const updatedAccount = await saveAccount(req, {
       ...account,
+      // Tras aceptar equipo: siempre cuenta trabajador (evita Gate / panel empresa).
+      accountType: 'user',
       fullName: resolvedFullName,
       phone: resolvedPhone,
       linkedBusinessId: business.business_id,
       invitedBy: profileDraft.invitedBy,
-      role: account.role && account.role !== 'Usuario' ? account.role : (invitation.role || 'Usuario'),
+      role: invitation.role || account.role || 'Usuario',
       permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
       landingPage: invitation.landingPage || account.landingPage || WORKER_DEFAULT_LANDING_PATH,
       employment: mergedEmployment,
@@ -2807,11 +2842,24 @@ export async function verifyEmail(req, res) {
     sendWelcomeEmail(savedAccount).catch(() => null);
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+
+    let pendingInvitationsCount = 0;
+    try {
+      const pending = await listPendingInvitationsByEmail(req, savedAccount.email);
+      pendingInvitationsCount = pending.length;
+    } catch (invErr) {
+      console.error('[AUTH] Error consultando invitaciones pendientes en verify-email:', invErr?.message);
+    }
+
+    const redirectTo = resolvePostLoginRedirect(savedAccount, { pendingInvitationsCount });
+
     return res.json({
       ok: true,
       user: sanitizeAccount(savedAccount),
       accessToken,
       refreshToken,
+      redirectTo,
+      pendingInvitationsCount,
     });
   } catch (error) {
     return res.status(500).json({

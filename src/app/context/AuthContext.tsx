@@ -94,7 +94,7 @@ export interface AuthContextType {
   }>;
   logout: () => Promise<void>;
   updateOnboardingData: (data: Record<string, unknown>) => Promise<void>;
-  verifyEmail: (token: string, email: string) => Promise<{ success: boolean; error?: string }>;
+  verifyEmail: (token: string, email: string) => Promise<{ success: boolean; redirectTo?: string; error?: string }>;
   /** Sincroniza usuario con /api/auth/me (p. ej. verificación hecha en otra pestaña). */
   refreshCurrentUser: () => Promise<{ ok: boolean; emailVerified: boolean; sessionInvalid?: boolean }>;
   /** true tras confirmar el perfil con el servidor (evita redirigir por caché local antigua). */
@@ -170,6 +170,7 @@ export interface AuthContextType {
     isExistingUser?: boolean;
     inviteExpiresAt?: string;
     companyCode?: string;
+    posPin?: string;
     error?: string;
   }>;
   lookupInviteEmail: (
@@ -811,6 +812,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isExistingUser: Boolean(response.isExistingUser),
         inviteExpiresAt: response.inviteExpiresAt,
         companyCode: response.companyCode,
+        posPin: response.posPin,
       };
     } catch (error) {
       return {
@@ -1019,7 +1021,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const verifyEmail = async (token: string, email: string): Promise<{ success: boolean; error?: string }> => {
+  const verifyEmail = async (token: string, email: string): Promise<{ success: boolean; redirectTo?: string; error?: string }> => {
     try {
       const response = await verifyEmailRequest(token, email);
       if (!response.user) {
@@ -1027,7 +1029,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       // S-01: Cookies establecidas por el backend
       setSessionUser(response.user);
-      return { success: true };
+      return { success: true, redirectTo: response.redirectTo };
     } catch (error) {
       return {
         success: false,

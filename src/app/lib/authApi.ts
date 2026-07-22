@@ -1163,8 +1163,15 @@ export async function inviteUserRequest(data: {
   workCenterId?: string;
   scheduleTemplateId?: string;
   message?: string;
+  posPin?: string;
 }) {
-  return request<AuthUser>('/api/auth/invite', {
+  return request<AuthUser & {
+    invitation?: TeamInvitation;
+    isExistingUser?: boolean;
+    inviteExpiresAt?: string;
+    companyCode?: string;
+    posPin?: string;
+  }>('/api/auth/invite', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -1177,6 +1184,8 @@ export interface InviteLookupResult {
   alreadyMember?: boolean;
   isOwner?: boolean;
   ownsOtherBusinessName?: string;
+  isCompanyAccount?: boolean;
+  accountType?: string;
   code?: string;
 }
 
@@ -1201,6 +1210,8 @@ export async function lookupInviteEmailRequest(
     alreadyMember: Boolean(data.alreadyMember),
     isOwner: Boolean(data.isOwner),
     ownsOtherBusinessName: data.ownsOtherBusinessName || '',
+    isCompanyAccount: Boolean(data.isCompanyAccount),
+    accountType: data.accountType,
     code: data.code,
   };
 }

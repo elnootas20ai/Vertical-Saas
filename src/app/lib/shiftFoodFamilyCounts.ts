@@ -4,6 +4,7 @@ import {
   filterOrdersForRegisterSession,
 } from './registerShiftSalesBreakdown';
 import type { TpvRegisterSession } from './deliveryApi';
+import { localCalendarDayKey } from './tpvCajaScope';
 
 export type FoodFamilyKey = 'pizza' | 'burger' | 'taco';
 
@@ -149,7 +150,10 @@ export function foodFamilyCountsFromOrdersToday(
 ): FoodFamilyCounts {
   const dayOrders = orders.filter((o) => {
     if (o.status === 'cancelled') return false;
-    const day = String(o.deliveredAt || o.createdAt || o.updatedAt || '').slice(0, 10);
+    const raw = String(o.deliveredAt || o.createdAt || o.updatedAt || '').trim();
+    if (!raw) return false;
+    const d = new Date(raw);
+    const day = Number.isNaN(d.getTime()) ? raw.slice(0, 10) : localCalendarDayKey(d);
     return day === dayKey;
   });
   return buildShiftFoodFamilyReport(dayOrders).total;

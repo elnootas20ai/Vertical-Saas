@@ -151,6 +151,7 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
       pizzasToday: filteredRows.reduce((s, r) => s + (r.metrics.pizzasToday || 0), 0),
       burgersToday: filteredRows.reduce((s, r) => s + (r.metrics.burgersToday || 0), 0),
       tacosToday: filteredRows.reduce((s, r) => s + (r.metrics.tacosToday || 0), 0),
+      kebabsToday: filteredRows.reduce((s, r) => s + (r.metrics.kebabsToday || 0), 0),
     };
   }, [filteredRows, businessFilter, search, businesses.length]);
 
@@ -329,10 +330,11 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           <StatCard label="Vac. pendientes" value={String(filteredTotals.pendingVacations)} icon={<Users className="w-4 h-4" />} tone="rose" sub="Por revisar" />
           <StatCard label="Nóminas mes" value={String(filteredTotals.payslipsThisMonth)} icon={<FileText className="w-4 h-4" />} tone="slate" sub="Subidas este mes" />
           </div>
-          <div className="grid grid-cols-3 gap-3 mt-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
             <StatCard label="Pizzas hoy" value={String(filteredTotals.pizzasToday)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Conteo del día" />
             <StatCard label="Burgers hoy" value={String(filteredTotals.burgersToday)} icon={<Package className="w-4 h-4" />} tone="rose" sub="Conteo del día" />
             <StatCard label="Tacos hoy" value={String(filteredTotals.tacosToday)} icon={<Package className="w-4 h-4" />} tone="emerald" sub="Conteo del día" />
+            <StatCard label="Kebab hoy" value={String(filteredTotals.kebabsToday || 0)} icon={<Package className="w-4 h-4" />} tone="amber" sub="Conteo del día" />
           </div>
         </div>
 
@@ -813,6 +815,7 @@ function BusinessCard({
                   <MetricPill label="Pizzas hoy" value={String(m.pizzasToday || 0)} highlight={(m.pizzasToday || 0) > 0} />
                   <MetricPill label="Burgers hoy" value={String(m.burgersToday || 0)} highlight={(m.burgersToday || 0) > 0} />
                   <MetricPill label="Tacos hoy" value={String(m.tacosToday || 0)} highlight={(m.tacosToday || 0) > 0} />
+                  <MetricPill label="Kebab hoy" value={String(m.kebabsToday || 0)} highlight={(m.kebabsToday || 0) > 0} />
                 </div>
               </div>
             ) : row.isRestaurant ? (

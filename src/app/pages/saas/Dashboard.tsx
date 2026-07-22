@@ -50,8 +50,15 @@ import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySe
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
 import { listClientsPageRequest, CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
-import { computePortfolioMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, type PortfolioMetrics } from '../../lib/portfolioMetrics';
+import { listBrandsRequest, type Brand } from '../../lib/brandApi';
+import { computePortfolioMetrics, computePortfolioClientMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, prevCalendarMonthKey, type PortfolioMetrics } from '../../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
+import {
+  buildSoldProductDailySeries,
+  resolveActiveSoldFamilies,
+  soldProductCountsForDay,
+  type SoldProductFamilyMeta,
+} from '../../lib/deliverySoldProductStats';
 import { listFinanceMovements } from '../../lib/financeApi';
 import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
 import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
@@ -768,22 +775,65 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
   }, [loadDeliveryDashboard]);
 
   const [crmClientsCount, setCrmClientsCount] = useState<number | null>(null);
+  const [crmNewClientsMonth, setCrmNewClientsMonth] = useState<number | null>(null);
+  const [deliveryBrands, setDeliveryBrands] = useState<Brand[]>([]);
+
+  useEffect(() => {
+    if (!isDeliveryVertical || !businessId) {
+      setDeliveryBrands([]);
+      return;
+    }
+    let cancelled = false;
+    listBrandsRequest(businessId)
+      .then((list) => {
+        if (!cancelled) setDeliveryBrands(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (!cancelled) setDeliveryBrands([]);
+      });
+    return () => { cancelled = true; };
+  }, [isDeliveryVertical, businessId]);
 
   const loadCrmClientsCount = useCallback(async () => {
     if (!financeUserId || !(isDeliveryVertical || isRestaurantVertical)) {
       setCrmClientsCount(null);
+      setCrmNewClientsMonth(null);
       return;
     }
     try {
-      const { meta } = await listClientsPageRequest(financeUserId, {
-        limit: 1,
-        skip: 0,
-        lite: true,
-        businessId: businessId || undefined,
-      });
-      setCrmClientsCount(Number(meta?.total || 0));
+      const monthKey = localCalendarDayKey().slice(0, 7);
+      const prevMonthStart = `${prevCalendarMonthKey(monthKey)}-01T00:00:00.000Z`;
+      const collected: Array<{
+        createdAt?: Date | string;
+        stats?: { acquisitionKind?: string; createdFrom?: string; excludeFromNewMetrics?: boolean } | null;
+      }> = [];
+      let skip = 0;
+      let totalClients = 0;
+      const pageSize = 500;
+      while (true) {
+        const { clients, meta } = await listClientsPageRequest(financeUserId, {
+          limit: pageSize,
+          skip,
+          lite: true,
+          businessId: businessId || undefined,
+          sort: '-createdAt',
+        });
+        if (skip === 0) totalClients = Number(meta?.total || 0);
+        collected.push(...clients);
+        const oldest = clients[clients.length - 1];
+        const reachedPrevMonth =
+          oldest &&
+          new Date(oldest.createdAt instanceof Date ? oldest.createdAt : oldest.createdAt || 0) <
+            new Date(prevMonthStart);
+        if (!meta.hasMore || clients.length === 0 || reachedPrevMonth) break;
+        skip += pageSize;
+      }
+      const metrics = computePortfolioClientMetrics(collected, monthKey);
+      setCrmClientsCount(totalClients || collected.length);
+      setCrmNewClientsMonth(metrics.newClientsMonth);
     } catch {
       setCrmClientsCount(null);
+      setCrmNewClientsMonth(null);
     }
   }, [financeUserId, businessId, isDeliveryVertical, isRestaurantVertical]);
 
@@ -1133,6 +1183,32 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       return { day: dayStr, label: format(d, 'd MMM', { locale: es }), value: count };
     });
   }, [isDeliveryVertical, deliveryScope, scopedDeliveryOrders, daysRange, leads]);
+
+  const soldProductFamilies = useMemo((): SoldProductFamilyMeta[] => {
+    if (!isDeliveryVertical) return [];
+    const todayKey = localCalendarDayKey();
+    const todayCounts = soldProductCountsForDay(scopedDeliveryOrders, todayKey);
+    return resolveActiveSoldFamilies(deliveryBrands, todayCounts);
+  }, [isDeliveryVertical, deliveryBrands, scopedDeliveryOrders]);
+
+  const soldProductToday = useMemo(() => {
+    if (!isDeliveryVertical) return null;
+    return soldProductCountsForDay(scopedDeliveryOrders, localCalendarDayKey());
+  }, [isDeliveryVertical, scopedDeliveryOrders]);
+
+  const soldProductDailyData = useMemo(() => {
+    if (!isDeliveryVertical || soldProductFamilies.length === 0) return [];
+    const dayKeys = daysRange.map((d) => format(d, 'yyyy-MM-dd'));
+    return buildSoldProductDailySeries(
+      scopedDeliveryOrders,
+      dayKeys,
+      soldProductFamilies,
+      (dayKey) => {
+        const d = daysRange.find((x) => format(x, 'yyyy-MM-dd') === dayKey);
+        return d ? format(d, 'd MMM', { locale: es }) : dayKey.slice(5);
+      },
+    );
+  }, [isDeliveryVertical, scopedDeliveryOrders, soldProductFamilies, daysRange]);
 
   // ── Recent activity ──
   const recentActivity = useMemo(() => {
@@ -1570,6 +1646,77 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                     </ResponsiveContainer>
                   </div>
                 </div>
+
+                {/* Productos vendidos por tipo (marcas de la empresa) */}
+                {isDeliveryVertical && soldProductFamilies.length > 0 && (
+                  <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden lg:col-span-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-5 py-4 border-b border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Package className="w-4 h-4 text-gray-500 dark:text-gray-400 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                            Productos vendidos (14 días)
+                          </p>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                            Según tipos de marca de la empresa (pizza, kebab, burger…)
+                          </p>
+                        </div>
+                      </div>
+                      <PeriodBadge period="14d" variant="minimal" className="text-[9px] opacity-50 self-start sm:self-auto" />
+                    </div>
+                    {soldProductToday && (
+                      <div className="flex flex-wrap gap-2 px-5 pt-3">
+                        {soldProductFamilies.map((fam) => {
+                          const n = Number(soldProductToday[fam.id] || 0);
+                          return (
+                            <span
+                              key={fam.id}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40"
+                            >
+                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: fam.color }} />
+                              {fam.label} hoy: {n}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="p-4 h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={soldProductDailyData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(0,0,0,0.06)" />
+                          <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+                          <YAxis allowDecimals={false} tick={{ fontSize: 10 }} width={28} tickLine={false} axisLine={false} />
+                          <Tooltip
+                            content={({ active, payload, label }) => {
+                              if (!active || !payload?.length) return null;
+                              return (
+                                <div className="bg-gray-900 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg space-y-0.5">
+                                  <p className="opacity-60 mb-1">{label}</p>
+                                  {payload.map((p) => (
+                                    <p key={String(p.dataKey)}>
+                                      <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ backgroundColor: String(p.color || '#fff') }} />
+                                      {soldProductFamilies.find((f) => f.id === p.dataKey)?.label || String(p.dataKey)}: {Number(p.value || 0)}
+                                    </p>
+                                  ))}
+                                </div>
+                              );
+                            }}
+                          />
+                          {soldProductFamilies.map((fam) => (
+                            <Bar
+                              key={fam.id}
+                              dataKey={fam.id}
+                              name={fam.label}
+                              fill={fam.color}
+                              radius={[3, 3, 0, 0]}
+                              maxBarSize={18}
+                            />
+                          ))}
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
               </div>
               )}
             </DraggableWidget>
@@ -1585,6 +1732,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   vertical={vertical}
                   stockCount={stockCount}
                   oportunidades={oportunidades}
+                  newClientsMonth={crmNewClientsMonth}
                   openIncidents={openIncidents}
                   cobrosCount={cobrosCount}
                   activeWorkers={activeWorkers}
@@ -1929,10 +2077,10 @@ function FinanceStat({ label, value, color, bg, icon, sub }: {
 // ─── Operative block (adapts to vertical) ───────────────────────────────────
 
 function OperativeBlock({
-  vertical, stockCount, oportunidades, openIncidents, cobrosCount, activeWorkers, pendingDeliveries, loading,
+  vertical, stockCount, oportunidades, newClientsMonth, openIncidents, cobrosCount, activeWorkers, pendingDeliveries, loading,
   salesClosure, verticalKpi,
 }: {
-  vertical: string; stockCount: number; oportunidades: number; openIncidents: number;
+  vertical: string; stockCount: number; oportunidades: number; newClientsMonth?: number | null; openIncidents: number;
   cobrosCount: number; activeWorkers: number; pendingDeliveries: number; loading: boolean;
   salesClosure?: SalesClosureKpis;
   verticalKpi?: VerticalKpiSnapshot | null;
@@ -1942,7 +2090,12 @@ function OperativeBlock({
   const items = useMemo(() => {
     const crmRoute = clientsRouteForVertical(vertical);
     const crmTitle = vertical === 'delivery' || vertical === 'restaurant' ? 'Clientes' : 'Oportunidades CRM';
-    const crmSub = vertical === 'delivery' || vertical === 'restaurant' ? 'Fichas de cliente' : 'Leads activos';
+    const crmSub =
+      vertical === 'delivery' || vertical === 'restaurant'
+        ? (typeof newClientsMonth === 'number' && newClientsMonth > 0
+          ? `+${newClientsMonth} nuevo${newClientsMonth === 1 ? '' : 's'} este mes`
+          : 'Fichas de cliente')
+        : 'Leads activos';
 
     const base = [
       { title: crmTitle, value: String(oportunidades), sub: crmSub, icon: <ShoppingCart className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: crmRoute },
@@ -2001,7 +2154,7 @@ function OperativeBlock({
       });
     }
     return row;
-  }, [vertical, stockCount, oportunidades, cobrosCount, activeWorkers, pendingDeliveries, salesClosure, verticalKpi]);
+  }, [vertical, stockCount, oportunidades, newClientsMonth, cobrosCount, activeWorkers, pendingDeliveries, salesClosure, verticalKpi]);
 
   return (
     <>

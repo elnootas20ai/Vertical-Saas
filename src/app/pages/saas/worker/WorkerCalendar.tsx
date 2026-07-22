@@ -13,6 +13,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import {
   getSchedule,
+  getMonday,
   WEEKDAYS,
   WEEKDAY_LABELS,
 } from '../../../lib/schedulesApi';
@@ -36,7 +37,7 @@ export function WorkerCalendar() {
   const { t, i18n } = useTranslation();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const businessId = currentBusiness?.business_id || '';
+  const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const lang = (i18n.language?.slice(0, 2) || 'es') as string;
   const dayLabelsMap = WEEKDAY_LABELS[lang] || WEEKDAY_LABELS.es;
 
@@ -48,7 +49,7 @@ export function WorkerCalendar() {
     if (!businessId || !user?.user_id) { setLoading(false); return; }
     setLoading(true);
     try {
-      const sched = await getSchedule(businessId, user.user_id);
+      const sched = await getSchedule(businessId, user.user_id, getMonday());
       setSchedule(sched);
     } catch {}
     setLoading(false);

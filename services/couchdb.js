@@ -3779,8 +3779,8 @@ export function sanitizeClient(client) {
       level: client.loyalty?.level || 'bronze',
       totalVisits: client.loyalty?.totalVisits || 0,
     },
-    createdAt: client.createdAt || new Date().toISOString(),
-    updatedAt: client.updatedAt || client.createdAt || new Date().toISOString(),
+    createdAt: client.createdAt || '',
+    updatedAt: client.updatedAt || client.createdAt || '',
     deletedAt: client.deletedAt || null,
     branch_id: client.branch_id || '',
     workCenterId: client.workCenterId || '',
@@ -3828,8 +3828,9 @@ export function sanitizeClientSummary(client) {
       points: client.loyalty?.points || 0,
       level: client.loyalty?.level || 'bronze',
     },
-    createdAt: client.createdAt || new Date().toISOString(),
-    updatedAt: client.updatedAt || client.createdAt || new Date().toISOString(),
+    // No inventar "ahora": sin createdAt no cuenta como alta del mes en el dashboard.
+    createdAt: client.createdAt || '',
+    updatedAt: client.updatedAt || client.createdAt || '',
     branch_id: client.branch_id || '',
     workCenterId: client.workCenterId || '',
   };

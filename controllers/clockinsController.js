@@ -50,6 +50,14 @@ function getAuthUserId(req) {
   return normalizeClockinUserId(req.authUser?.userId || req.authUser?.user_id || '');
 }
 
+/** Compara member_id de fichajes con el set visible (ids normalizados). */
+function isMemberVisible(visibleIds, memberId) {
+  const mid = normalizeClockinUserId(memberId);
+  if (!mid || !Array.isArray(visibleIds) || visibleIds.length === 0) return false;
+  if (visibleIds.includes(mid)) return true;
+  return visibleIds.some((id) => normalizeClockinUserId(id) === mid);
+}
+
 function getMember(business, userId) {
   if (!business?.members) return null;
   const uid = normalizeClockinUserId(userId);
@@ -359,7 +367,7 @@ export async function listClockins(req, res) {
 
     // TPV en tienda: con storeScope cualquier miembro del negocio ve fichajes de ese PDV.
     if (!storeScope || (!salesPointFilter && !workCenterFilter)) {
-      records = records.filter((r) => visibleIds.includes(r.member_id));
+      records = records.filter((r) => isMemberVisible(visibleIds, r.member_id));
     }
     records = dedupeClockinDocumentsById(records);
 
@@ -427,7 +435,7 @@ export async function listActiveNow(req, res) {
         (r) =>
           r.date === today &&
           (r.status === 'active' || r.status === 'break') &&
-          visibleIds.includes(r.member_id),
+          isMemberVisible(visibleIds, r.member_id),
       );
 
     const memberMap = await enrichMemberMap(req, business);
@@ -462,7 +470,7 @@ export async function getStats(req, res) {
 
     const { from, to, period } = req.query;
     let records = await listClockinsByBusiness(req, businessId);
-    records = records.filter((r) => visibleIds.includes(r.member_id));
+    records = records.filter((r) => isMemberVisible(visibleIds, r.member_id));
 
     if (from) records = records.filter((r) => r.date >= from);
     if (to) records = records.filter((r) => r.date <= to);
@@ -1139,7 +1147,7 @@ export async function getOrgClockStatus(req, res) {
 
     const memberMap = buildMemberMap(business);
     const nodes = (orgchart?.nodes || [])
-      .filter((n) => n.data?.user_id && visibleIds.includes(n.data.user_id))
+      .filter((n) => n.data?.user_id && isMemberVisible(visibleIds, n.data.user_id))
       .map((n) => ({
         id: n.id,
         user_id: n.data.user_id,
@@ -1152,8 +1160,8 @@ export async function getOrgClockStatus(req, res) {
       const sourceNode = orgchart.nodes?.find((n) => n.id === e.source);
       const targetNode = orgchart.nodes?.find((n) => n.id === e.target);
       return (
-        sourceNode?.data?.user_id && visibleIds.includes(sourceNode.data.user_id) &&
-        targetNode?.data?.user_id && visibleIds.includes(targetNode.data.user_id)
+        sourceNode?.data?.user_id && isMemberVisible(visibleIds, sourceNode.data.user_id) &&
+        targetNode?.data?.user_id && isMemberVisible(visibleIds, targetNode.data.user_id)
       );
     });
 
@@ -1317,7 +1325,7 @@ export async function getOvertime(req, res) {
     const schedules = await loadSchedulesForDateRange(req, businessId, fromDate, toDate);
     let clockins = await listClockinsByBusiness(req, businessId);
     clockins = clockins.filter(
-      (r) => r.date >= fromDate && r.date <= toDate && visibleIds.includes(r.member_id),
+      (r) => r.date >= fromDate && r.date <= toDate && isMemberVisible(visibleIds, r.member_id),
     );
     if (memberId) clockins = clockins.filter((r) => r.member_id === memberId);
 
@@ -1602,7 +1610,7 @@ export async function exportClockins(req, res) {
 
     const { from, to, memberId, format } = req.query;
     let records = await listClockinsByBusiness(req, businessId);
-    records = records.filter((r) => visibleIds.includes(r.member_id));
+    records = records.filter((r) => isMemberVisible(visibleIds, r.member_id));
     if (from) records = records.filter((r) => r.date >= from);
     if (to) records = records.filter((r) => r.date <= to);
     if (memberId) records = records.filter((r) => r.member_id === memberId);
@@ -1802,7 +1810,7 @@ export async function getDailySummary(req, res) {
 
     const scheduledByMember = new Map();
     for (const doc of schedules) {
-      if (!visibleIds.includes(doc.member_id)) continue;
+      if (!isMemberVisible(visibleIds, doc.member_id)) continue;
       const ws = new Date(`${doc.week_start}T00:00:00`).getTime();
       if (Number.isNaN(ws) || ws > targetTime) continue;
       const existing = scheduledByMember.get(doc.member_id);
@@ -1821,7 +1829,7 @@ export async function getDailySummary(req, res) {
     // Fichajes del día (solo visibles).
     const allClockins = await listClockinsByBusiness(req, businessId);
     const dayClockins = allClockins.filter(
-      (r) => r.date === date && visibleIds.includes(r.member_id),
+      (r) => r.date === date && isMemberVisible(visibleIds, r.member_id),
     );
 
     let onTime = 0;

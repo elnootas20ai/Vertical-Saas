@@ -1745,10 +1745,6 @@ export function TpvRapidoOrderFlow({
       toast.error('Completa nombre, teléfono (mín. 9 dígitos) y calle');
       return;
     }
-    if (isDeliveryBusiness && !newClientCity.trim()) {
-      toast.error('Completa la ciudad del cliente');
-      return;
-    }
     if (!userId) {
       toast.error('No se pudo identificar la empresa');
       return;
@@ -1783,7 +1779,7 @@ export function TpvRapidoOrderFlow({
             id: addressId,
             label: 'Casa',
             street: newClientStreet.trim(),
-            city: isDeliveryBusiness ? newClientCity.trim() : undefined,
+            city: isDeliveryBusiness ? (newClientCity.trim() || undefined) : undefined,
             isPrimary: true,
             usageCount: 0,
             lastUsedAt: null,
@@ -1796,6 +1792,7 @@ export function TpvRapidoOrderFlow({
           favoriteAddressId: null,
           totalSpent: 0,
           createdFrom: 'tpv' as const,
+          acquisitionKind: 'organic' as const,
         },
       };
       const created = await addClient(clientData);
@@ -3313,8 +3310,8 @@ export function TpvRapidoOrderFlow({
                 </div>
                 {isDeliveryBusiness && (
                   <div>
-                    <label className={LABEL_CLASS}>Ciudad *</label>
-                    <input value={newClientCity} onChange={(e) => setNewClientCity(e.target.value)} className={INPUT_CLASS} placeholder="Ciudad" />
+                    <label className={LABEL_CLASS}>Ciudad</label>
+                    <input value={newClientCity} onChange={(e) => setNewClientCity(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
                   </div>
                 )}
                 <div>

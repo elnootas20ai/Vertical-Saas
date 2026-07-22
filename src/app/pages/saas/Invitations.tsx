@@ -4,6 +4,7 @@ import { CheckCircle2, Clock3, Loader2, Mail, ShieldCheck, UserRound, XCircle } 
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import type { TeamInvitation } from '../../lib/authApi';
 import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 
@@ -17,6 +18,7 @@ function formatDate(value?: string) {
 export function Invitations() {
   const navigate = useNavigate();
   const { listMyInvitations, acceptInvitation, rejectInvitation } = useAuth();
+  const { reloadBusinesses } = useBusiness();
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -59,6 +61,11 @@ export function Invitations() {
     }
     window.dispatchEvent(new CustomEvent('vertial:invitations:refresh'));
     await loadInvitations();
+    try {
+      await reloadBusinesses();
+    } catch {
+      /* la navegación sigue; BusinessContext también escucha invitation-accepted */
+    }
 
     navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH, { replace: true });
   };

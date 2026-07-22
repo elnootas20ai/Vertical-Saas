@@ -3091,6 +3091,7 @@ export function Team() {
     return {
       isExistingUser,
       inviteExpiresAt: result.inviteExpiresAt,
+      posPin: result.posPin,
     };
   };
 

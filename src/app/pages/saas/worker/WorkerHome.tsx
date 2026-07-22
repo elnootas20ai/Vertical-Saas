@@ -118,7 +118,7 @@ export function WorkerHome() {
   const vertical = currentBusiness?.businessType as BusinessType | undefined;
   const tpvConfig = vertical ? TPV_VERTICAL_CONFIG[vertical] : undefined;
 
-  const businessId = currentBusiness?.business_id || '';
+  const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
 

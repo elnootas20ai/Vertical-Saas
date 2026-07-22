@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
-  X, Mail, User, Shield, ChevronDown, Wrench, Star, Check, CheckCircle2,
+  X, Mail, User, Shield, ShieldCheck, ChevronDown, Wrench, Star, Check, CheckCircle2,
   ArrowLeft, ArrowRight, Loader2, Briefcase,
   Building2, MapPin, ClipboardList, UserCheck, FileWarning,
   DollarSign, Clock,
@@ -26,6 +26,8 @@ import { HrGestorChecklist } from './HrGestorChecklist';
 interface InviteResult {
   isExistingUser?: boolean;
   inviteExpiresAt?: string;
+  /** PIN TPV generado al invitar — mostrarlo una sola vez al gestor. */
+  posPin?: string;
 }
 
 export interface InviteUserPayload {
@@ -66,6 +68,7 @@ type EmailStatus =
   | 'not_registered'
   | 'already_member'
   | 'owns_other'
+  | 'company_account'
   | 'error';
 
 // --- Constants ---
@@ -532,6 +535,11 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
         setLookupResult(result);
         return;
       }
+      if (result.isCompanyAccount) {
+        setEmailStatus('company_account');
+        setLookupResult(result);
+        return;
+      }
       setEmailStatus('ready');
       setLookupResult(result);
       if (result.fullName && !name.trim()) {
@@ -558,6 +566,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     else if (emailStatus === 'not_registered') e.email = 'Este email no está registrado en Vertial. La persona debe crearse una cuenta antes de poder ser invitada.';
     else if (emailStatus === 'already_member') e.email = 'Esta persona ya forma parte del equipo de esta empresa.';
     else if (emailStatus === 'owns_other') e.email = `Esta persona administra otra empresa (${lookupResult?.ownsOtherBusinessName || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`;
+    else if (emailStatus === 'company_account') e.email = 'Este email es una cuenta de empresa. Debe crearse una cuenta de trabajador (Acceso empleado) para poder invitarla.';
     else if (emailStatus === 'checking') e.email = 'Comprobando el email en Vertial…';
     return e;
   }
@@ -747,7 +756,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
               </div>
 
               {/* Estado de la invitación (in-app) */}
-              <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-5">
+              <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-3">
                 <Mail className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed text-left">
                   Le aparecerá una notificación dentro de Vertial para <strong>{email.trim()}</strong>.
@@ -756,6 +765,25 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     : ''}
                 </p>
               </div>
+
+              {inviteResult?.posPin ? (
+                <div className="w-full flex items-start gap-2.5 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl px-4 py-3 mb-5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-left min-w-0">
+                    <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">
+                      PIN de TPV (guárdalo ahora)
+                    </p>
+                    <p className="mt-1 font-mono text-lg font-bold tracking-[0.2em] text-emerald-900 dark:text-emerald-100">
+                      {inviteResult.posPin}
+                    </p>
+                    <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-300 leading-relaxed">
+                      Solo se muestra una vez. El trabajador lo usará para entrar al TPV en tablet.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-5" />
+              )}
 
               {/* Actions */}
               <div className="w-full flex items-center gap-3">
@@ -836,7 +864,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         onBlur={() => setTouched((p) => ({ ...p, email: true }))}
                         placeholder="maria@gmail.com"
                         className={`w-full pl-10 pr-10 py-2.5 border-2 rounded-xl text-sm outline-none transition-colors text-gray-900 dark:text-gray-100 ${
-                          emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || (errors.email && touched.email)
+                          emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account' || (errors.email && touched.email)
                             ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
                             : emailStatus === 'ready'
                               ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
@@ -845,7 +873,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
                         {emailStatus === 'checking' && <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />}
                         {emailStatus === 'ready' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                        {(emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other') && (
+                        {(emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account') && (
                           <X className="w-4 h-4 text-red-500" />
                         )}
                       </span>
@@ -869,8 +897,8 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       <div className="mt-2 flex items-start gap-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2">
                         <FileWarning className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
                         <p className="text-[11px] leading-relaxed text-red-700 dark:text-red-300">
-                          Este email no está registrado en Vertial. Pídele a la persona que se cree una cuenta en{' '}
-                          <span className="font-mono font-semibold">vertial.com</span> y vuelve aquí para invitarla.
+                          Este email no está registrado en Vertial. Pídele a la persona que se cree una cuenta de trabajador en{' '}
+                          <span className="font-mono font-semibold">vertialapp.com</span> (Acceso empleado) y vuelve aquí para invitarla.
                         </p>
                       </div>
                     )}
@@ -890,7 +918,15 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         </p>
                       </div>
                     )}
-                    {errors.email && emailStatus !== 'not_registered' && emailStatus !== 'already_member' && emailStatus !== 'owns_other' && (
+                    {emailStatus === 'company_account' && (
+                      <div className="mt-2 flex items-start gap-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2">
+                        <Building2 className="w-3.5 h-3.5 text-amber-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                          Este email es una cuenta de empresa. Para el equipo hace falta una cuenta de trabajador (Acceso empleado).
+                        </p>
+                      </div>
+                    )}
+                    {errors.email && emailStatus !== 'not_registered' && emailStatus !== 'already_member' && emailStatus !== 'owns_other' && emailStatus !== 'company_account' && (
                       <p className="text-xs text-red-500 mt-1 flex items-center gap-1"><span>&#x2715;</span>{errors.email}</p>
                     )}
                   </div>
@@ -1145,7 +1181,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     {t('common.cancel', 'Cancelar')}
                   </button>
                   <button type="button" onClick={handleNext}
-                    disabled={emailStatus === 'checking' || emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other'}
+                    disabled={emailStatus === 'checking' || emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account'}
                     className="ml-auto flex items-center gap-2 px-5 py-2.5 bg-gray-900 dark:bg-gray-100 hover:bg-black dark:hover:bg-white text-white dark:text-gray-900 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-900 dark:disabled:hover:bg-gray-100">
                     {emailStatus === 'checking' ? (
                       <>

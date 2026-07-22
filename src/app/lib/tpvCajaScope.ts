@@ -140,22 +140,30 @@ export function orderOnOpenTpvOpsBoard(
   return true;
 }
 
-/** Montaje en tablero TPV (listo sin montaje cerrado sigue aquí). */
+/** Montaje en tablero TPV (listo sin montaje cerrado sigue aquí). Recogida no pasa a reparto. */
 export function isTpvMontajeBoardOrder(order: {
   status?: string | null;
   assemblyCompletedAt?: string | null;
+  deliveryType?: string | null;
 }): boolean {
   const status = String(order.status || '').toLowerCase();
+  const isPickup = String(order.deliveryType || '').toLowerCase() === 'recogida';
+  // Recogida: se queda en montaje hasta el botón verde (Entregar → entregado).
+  if (isPickup) {
+    return status === 'nuevo' || status === 'cocina' || status === 'listo' || status === 'en_reparto';
+  }
   if (status === 'nuevo' || status === 'cocina') return true;
   if (status === 'listo' && !order.assemblyCompletedAt) return true;
   return false;
 }
 
-/** Reparto en tablero TPV (en_reparto o listo ya montado). */
+/** Reparto en tablero TPV (en_reparto o listo ya montado). No aplica a recogida en tienda. */
 export function isTpvRepartoBoardOrder(order: {
   status?: string | null;
   assemblyCompletedAt?: string | null;
+  deliveryType?: string | null;
 }): boolean {
+  if (String(order.deliveryType || '').toLowerCase() === 'recogida') return false;
   const status = String(order.status || '').toLowerCase();
   if (status === 'en_reparto') return true;
   if (status === 'listo' && Boolean(order.assemblyCompletedAt)) return true;

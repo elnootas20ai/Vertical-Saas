@@ -256,6 +256,27 @@ const TABLET_NEXT_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
   en_reparto: 'Entregado',
 };
 
+/** Recogida: del montaje → entregado (sin repartidor). Domicilio: montaje → reparto → entregado. */
+function tabletNextStatus(order: DeliveryOrder): DeliveryOrderStatus | undefined {
+  if (order.deliveryType === 'recogida') {
+    if (order.status === 'nuevo' || order.status === 'cocina' || order.status === 'listo' || order.status === 'en_reparto') {
+      return 'entregado';
+    }
+    return undefined;
+  }
+  return TABLET_NEXT_STATUS[order.status];
+}
+
+function tabletNextLabel(order: DeliveryOrder): string | undefined {
+  if (order.deliveryType === 'recogida') {
+    if (order.status === 'nuevo' || order.status === 'cocina' || order.status === 'listo' || order.status === 'en_reparto') {
+      return 'Entregar';
+    }
+    return undefined;
+  }
+  return TABLET_NEXT_LABEL[order.status];
+}
+
 /** Pedidos visibles en la columna Montaje (cocina omitida: entran directo aquí). */
 const LANE_STATUS_LABEL: Partial<Record<DeliveryOrderStatus, string>> = {
   nuevo: 'Montaje',
@@ -354,7 +375,7 @@ function OrderCard({
   nowMs: number;
 }) {
   const cfg = STATUS_CONFIG[order.status];
-  const nextLabel = TABLET_NEXT_LABEL[order.status];
+  const nextLabel = tabletNextLabel(order);
   const phaseTimer = getTpvPhaseTimer(order, nowMs);
   const waitMinutes = phaseTimer.minutes;
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
@@ -367,11 +388,13 @@ function OrderCard({
     .join(' · ');
   const paymentBadge = orderPaymentBoardBadge(order);
   const timerTitle =
-    phaseTimer.kind === 'reparto'
-      ? 'Tiempo en reparto (desde salida)'
-      : phaseTimer.kind === 'montaje'
-        ? 'Tiempo en montaje (hasta repartidor)'
-        : 'Tiempo de espera';
+    order.deliveryType === 'recogida'
+      ? 'Tiempo en montaje (hasta entregar en tienda)'
+      : phaseTimer.kind === 'reparto'
+        ? 'Tiempo en reparto (desde salida)'
+        : phaseTimer.kind === 'montaje'
+          ? 'Tiempo en montaje (hasta repartidor)'
+          : 'Tiempo de espera';
 
   return (
     <div
@@ -850,10 +873,12 @@ function OrderDetail({
   const { currentBusiness, businesses } = useBusiness();
   const compact = Boolean(readTpvTabletBinding());
   const cfg = STATUS_CONFIG[order.status];
-  const nextLabel = TABLET_NEXT_LABEL[order.status];
-  const displayLabel = isTpvRepartoBoardOrder(order)
-    ? 'Reparto'
-    : (LANE_STATUS_LABEL[order.status] || cfg.label);
+  const nextLabel = tabletNextLabel(order);
+  const displayLabel = order.deliveryType === 'recogida'
+    ? (order.status === 'entregado' ? 'Entregado' : 'Recogida')
+    : isTpvRepartoBoardOrder(order)
+      ? 'Reparto'
+      : (LANE_STATUS_LABEL[order.status] || cfg.label);
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
   const StatusIcon = cfg.Icon;
   const TypeIcon = typeBadge.Icon;
@@ -1315,7 +1340,7 @@ export function WorkerTpvDelivery({
   }, []);
 
   const advanceOrder = useCallback(async (order: DeliveryOrder, paymentMethod?: DeliveryPaymentMethod) => {
-    const next = TABLET_NEXT_STATUS[order.status];
+    const next = tabletNextStatus(order);
     if (!next || !userId) return;
 
     let resolvedPayment = paymentMethod;
@@ -1337,9 +1362,18 @@ export function WorkerTpvDelivery({
         if (!order.assemblyStartedAt) extras.assemblyStartedAt = now;
         if (!order.kitchenCompletedAt) extras.kitchenCompletedAt = now;
       }
-      if (next === 'entregado' && resolvedPayment) {
+      if (next === 'entregado') {
         extras.deliveredAt = now;
-        if (!orderAlreadyCobrado(order)) {
+        // Recogida: cierra montaje y entrega en un solo paso (sin columna repartidor).
+        if (order.deliveryType === 'recogida' || !order.assemblyCompletedAt) {
+          extras.assemblyCompletedAt = order.assemblyCompletedAt || now;
+          if (!order.assemblyStartedAt) extras.assemblyStartedAt = now;
+          if (!order.kitchenCompletedAt) extras.kitchenCompletedAt = now;
+        }
+        if (order.deliveryType === 'recogida' && !order.departedAt) {
+          extras.departedAt = now;
+        }
+        if (resolvedPayment && !orderAlreadyCobrado(order)) {
           extras.paymentMethod = resolvedPayment;
           extras.paymentCollected = true;
           extras.paymentCollectedAt = now;
@@ -1359,9 +1393,12 @@ export function WorkerTpvDelivery({
             status: next,
             date: now,
             user: user?.fullName || 'Tablet',
-            notes: next === 'entregado' && resolvedPayment
-              ? `Entregado · ${PAYMENT_LABELS[resolvedPayment]}`
-              : undefined,
+            notes:
+              next === 'entregado' && order.deliveryType === 'recogida'
+                ? `Recogida en tienda · ${resolvedPayment ? PAYMENT_LABELS[resolvedPayment] : 'entregado'}`
+                : next === 'entregado' && resolvedPayment
+                  ? `Entregado · ${PAYMENT_LABELS[resolvedPayment]}`
+                  : undefined,
           },
         ],
       };
@@ -1707,35 +1744,62 @@ export function WorkerTpvDelivery({
               <button
                 type="button"
                 onClick={() => setShowSearch((v) => !v)}
-                className={`flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl touch-manipulation shrink-0 ${
+                className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl touch-manipulation shrink-0 ${
                   showSearch || search
                     ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'
+                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
                 }`}
-                title="Buscar"
+                title="Buscar pedido"
+                aria-label="Buscar pedido"
               >
                 <Search className="w-4 h-4" />
+                <span className="text-[9px] font-bold leading-none">Buscar</span>
               </button>
               {ceoMode && onChangeStore && (
-                <button type="button" onClick={onChangeStore} className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl border border-indigo-200 dark:border-indigo-800 text-indigo-700 touch-manipulation shrink-0" title="Cambiar tienda">
+                <button
+                  type="button"
+                  onClick={onChangeStore}
+                  className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 text-indigo-700 touch-manipulation shrink-0"
+                  title="Cambiar tienda"
+                  aria-label="Cambiar tienda"
+                >
                   <Store className="w-4 h-4" />
+                  <span className="text-[9px] font-bold leading-none">Tienda</span>
                 </button>
               )}
               {tabletBinding && !ceoMode && (
-                <button type="button" onClick={exitTabletTpv} className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl border border-gray-200 dark:border-gray-700 text-gray-500 touch-manipulation shrink-0" title="Salir">
+                <button
+                  type="button"
+                  onClick={exitTabletTpv}
+                  className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 touch-manipulation shrink-0"
+                  title="Salir del TPV"
+                  aria-label="Salir del TPV"
+                >
                   <LogOut className="w-4 h-4" />
+                  <span className="text-[9px] font-bold leading-none">Salir</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => setSoundEnabled((v) => !v)}
-                className={`flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl touch-manipulation shrink-0 ${soundEnabled ? 'text-indigo-600' : 'text-gray-400'} hover:bg-gray-100 dark:hover:bg-gray-800`}
-                title={soundEnabled ? 'Silenciar avisos' : 'Activar avisos'}
+                className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl touch-manipulation shrink-0 hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                  soundEnabled ? 'text-indigo-600' : 'text-gray-400'
+                }`}
+                title={soundEnabled ? 'Silenciar avisos de pedidos (Glovo, web…)' : 'Activar avisos de pedidos nuevos'}
+                aria-label={soundEnabled ? 'Silenciar avisos' : 'Activar avisos'}
               >
                 {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                <span className="text-[9px] font-bold leading-none">{soundEnabled ? 'Avisos' : 'Silencio'}</span>
               </button>
-              <button type="button" onClick={() => void loadOrders()} className="flex items-center justify-center min-h-[40px] min-w-[40px] rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation shrink-0" title="Refrescar">
-                <RefreshCw className={`w-4 h-4 text-gray-500 ${refreshing ? 'animate-spin' : ''}`} />
+              <button
+                type="button"
+                onClick={() => void loadOrders()}
+                className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 touch-manipulation shrink-0"
+                title="Actualizar pedidos"
+                aria-label="Actualizar pedidos"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                <span className="text-[9px] font-bold leading-none">Actua.</span>
               </button>
             </div>
             {(showSearch || search) && (
@@ -1789,13 +1853,26 @@ export function WorkerTpvDelivery({
                 <button
                   type="button"
                   onClick={() => setSoundEnabled((v) => !v)}
-                  className={`p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 ${soundEnabled ? 'text-indigo-600' : 'text-gray-400'}`}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border hover:bg-gray-50 dark:hover:bg-gray-800 ${
+                    soundEnabled
+                      ? 'border-indigo-200 dark:border-indigo-800 text-indigo-700 bg-indigo-50 dark:bg-indigo-950/40'
+                      : 'border-gray-200 dark:border-gray-700 text-gray-500'
+                  }`}
                   title={soundEnabled ? 'Silenciar avisos de pedidos externos' : 'Activar avisos (web, Glovo…)'}
+                  aria-label={soundEnabled ? 'Silenciar avisos' : 'Activar avisos'}
                 >
-                  {soundEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                  {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+                  {soundEnabled ? 'Avisos ON' : 'Avisos OFF'}
                 </button>
-                <button type="button" onClick={() => void loadOrders()} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800" title="Refrescar">
-                  <RefreshCw className={`w-5 h-5 text-gray-500 ${refreshing ? 'animate-spin' : ''}`} />
+                <button
+                  type="button"
+                  onClick={() => void loadOrders()}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
+                  title="Actualizar lista de pedidos"
+                  aria-label="Actualizar pedidos"
+                >
+                  <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  Actualizar
                 </button>
               </div>
             </div>

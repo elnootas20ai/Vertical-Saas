@@ -21,7 +21,7 @@ type LocationState = {
   verificationEmailSent?: boolean;
 };
 
-function postVerifyPath(accountType?: string) {
+function fallbackPostVerifyPath(accountType?: string) {
   return accountType === 'user' ? WORKER_DEFAULT_LANDING_PATH : '/auth/onboarding/business-type';
 }
 
@@ -29,7 +29,7 @@ export function VerifyEmailPending() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { user, resendVerificationEmail, verifyEmail, refreshCurrentUser } = useAuth();
+  const { user, resendVerificationEmail, verifyEmail, refreshCurrentUser, listMyInvitations } = useAuth();
   const routeState = (location.state as LocationState | null) ?? null;
 
   const tokenFromUrl = searchParams.get('token');
@@ -46,6 +46,7 @@ export function VerifyEmailPending() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const redirectScheduledRef = useRef(false);
   const autoSendAttemptedRef = useRef(false);
+  const pendingRedirectToRef = useRef<string | null>(null);
 
   const targetEmail = (
     emailFromUrl ||
@@ -65,12 +66,27 @@ export function VerifyEmailPending() {
   const openedFromEmailLink = Boolean(tokenFromUrl && emailFromUrl);
 
   const goAfterVerify = useCallback(
-    (accountType?: string) => {
+    async (accountType?: string) => {
       if (redirectScheduledRef.current) return;
       redirectScheduledRef.current = true;
-      navigate(postVerifyPath(accountType), { replace: true });
+
+      let path = pendingRedirectToRef.current || '';
+      if (!path) {
+        try {
+          const invitations = await listMyInvitations();
+          if (invitations.length > 0) {
+            path = '/saas/invitations';
+          }
+        } catch {
+          /* noop */
+        }
+      }
+      if (!path) {
+        path = fallbackPostVerifyPath(accountType);
+      }
+      navigate(path, { replace: true });
     },
-    [navigate],
+    [navigate, listMyInvitations],
   );
 
   const startCountdown = useCallback((seconds: number) => {
@@ -109,6 +125,9 @@ export function VerifyEmailPending() {
         if (result.success) {
           clearPendingVerifyEmail();
           broadcastEmailVerified(emailFromUrl);
+          if (result.redirectTo) {
+            pendingRedirectToRef.current = result.redirectTo;
+          }
           setVerifyState('success');
           window.setTimeout(() => {
             try {
@@ -190,7 +209,9 @@ export function VerifyEmailPending() {
   useEffect(() => {
     if (verifyState === 'success' && openedFromEmailLink) return;
     if (checkState !== 'success' && !(verifyState === 'success' && !openedFromEmailLink)) return;
-    const t = window.setTimeout(() => goAfterVerify(user?.accountType), REDIRECT_DELAY_MS);
+    const t = window.setTimeout(() => {
+      void goAfterVerify(user?.accountType);
+    }, REDIRECT_DELAY_MS);
     return () => window.clearTimeout(t);
   }, [verifyState, checkState, openedFromEmailLink, user?.accountType, goAfterVerify]);
 

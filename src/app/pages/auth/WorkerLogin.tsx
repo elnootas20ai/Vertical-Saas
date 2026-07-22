@@ -1,15 +1,20 @@
-import { useState, type FormEvent, type PointerEvent } from 'react';
+import { useState, useCallback, useRef, useEffect, type FormEvent, type PointerEvent } from 'react';
 import { useNavigate } from 'react-router';
 import { Eye, Mail, Lock, ShieldAlert, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useTheme } from 'next-themes';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
+import { AppleSignInButton } from '../../components/auth/AppleSignInButton';
 import { useAuth } from '../../context/AuthContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
+import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
+import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
+import { signInWithApple } from '../../lib/appleSignIn';
 
 const CREDENTIALS_KEY = 'vertial_saved_worker_login';
 
@@ -25,8 +30,9 @@ function loadSavedLogin(): { email: string } | null {
 
 export function WorkerLogin() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, googleLogin, appleLogin } = useAuth();
   const { t } = useTranslation();
+  const { resolvedTheme } = useTheme();
 
   const saved = loadSavedLogin();
   const [formData, setFormData] = useState({
@@ -38,6 +44,7 @@ export function WorkerLogin() {
   const [lockInfo, setLockInfo] = useState<{ lockUntil?: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [peekPassword, setPeekPassword] = useState(false);
+  const [googleTimedOut, setGoogleTimedOut] = useState(false);
 
   const handlePasswordPeekStart = (e: PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -89,6 +96,96 @@ export function WorkerLogin() {
     if (msg) console.warn('[auth/worker-login]', msg);
     setErrors({ email: msg || t('auth.errors.loginError') });
   };
+
+  const handleGoogleCredential = useCallback(async (credential: string) => {
+    setIsSubmitting(true);
+    setErrors({});
+    try {
+      const result = await googleLogin(credential);
+
+      if (result.success) {
+        navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
+        return;
+      }
+
+      if (result.code === 'GOOGLE_ACCOUNT_NOT_FOUND' && result.googleUser) {
+        navigate(AUTH_PATHS.register, {
+          state: {
+            accountType: 'user' as const,
+            googleUser: result.googleUser,
+            googleCredential: credential,
+          },
+        });
+        return;
+      }
+
+      const msg = (result.error || t('auth.errors.googleError')).trim();
+      if (msg) console.warn('[auth/worker-google-login]', msg);
+      setErrors({ email: msg || t('auth.errors.googleError') });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [googleLogin, navigate, t]);
+
+  const showAppleAuth = isAppleSignInAvailable();
+
+  const handleAppleSignIn = useCallback(async () => {
+    setErrors({});
+    setIsSubmitting(true);
+    try {
+      const apple = await signInWithApple();
+      const result = await appleLogin(apple.identityToken, {
+        givenName: apple.givenName || undefined,
+        familyName: apple.familyName || undefined,
+      });
+      if (result.success) {
+        navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
+        return;
+      }
+      if (result.code === 'APPLE_ACCOUNT_NOT_FOUND' && result.appleUser) {
+        navigate(AUTH_PATHS.register, {
+          state: {
+            accountType: 'user' as const,
+            appleUser: result.appleUser,
+            appleCredential: apple.identityToken,
+          },
+        });
+        return;
+      }
+      const msg = (result.error || 'Error al acceder con Apple').trim();
+      if (msg) console.warn('[auth/worker-apple-login]', msg);
+      setErrors({ email: msg });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Error al acceder con Apple';
+      if (!msg.toLowerCase().includes('cancel')) {
+        setErrors({ email: msg });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [appleLogin, navigate]);
+
+  const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
+  const showGoogleAuth = googleClientConfigured && !hideGoogleOnIos;
+  const { ready: googleReady, renderButton } = useGoogleSignIn(handleGoogleCredential);
+  const googleBtnRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showGoogleAuth || !googleReady || !googleBtnRef.current) return;
+    const theme = resolvedTheme === 'dark' ? 'filled_black' : 'filled_blue';
+    renderButton(googleBtnRef.current, { theme, size: 'medium', text: 'signin_with' });
+  }, [showGoogleAuth, googleReady, renderButton, resolvedTheme]);
+
+  useEffect(() => {
+    if (!showGoogleAuth || googleReady) {
+      setGoogleTimedOut(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      setGoogleTimedOut(true);
+    }, 8000);
+    return () => window.clearTimeout(timeout);
+  }, [showGoogleAuth, googleReady]);
 
   return (
     <AccesoSplitLayout visualKey="register-user" scrollable>
@@ -184,6 +281,56 @@ export function WorkerLogin() {
             <ACCESO__Button type="submit" variant="primary" fullWidth size="lg" disabled={isSubmitting}>
               {isSubmitting ? 'Entrando...' : 'Entrar a mi panel'}
             </ACCESO__Button>
+
+            {!hideGoogleOnIos && (
+              <>
+                <div className="relative my-1">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200 dark:border-gray-700" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">{t('common.or')}</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-center gap-2.5 w-full">
+                  {!showGoogleAuth ? null : !googleReady && !googleTimedOut ? (
+                    <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center gap-2 rounded-lg border-2 border-gray-200 dark:border-gray-600 py-2 px-3 text-sm text-gray-500 dark:text-gray-400">
+                      <svg className="w-5 h-5 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      <span>{t('auth.googleLogin')}…</span>
+                    </div>
+                  ) : !googleReady && googleTimedOut ? (
+                    <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-2 px-3 text-xs text-amber-800 text-center">
+                      Google no cargó a tiempo. Puedes usar email y contraseña.
+                    </div>
+                  ) : (
+                    <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
+                  )}
+                  {showAppleAuth ? (
+                    <div className="w-full max-w-sm">
+                      <AppleSignInButton disabled={isSubmitting} onPress={handleAppleSignIn} />
+                    </div>
+                  ) : null}
+                </div>
+              </>
+            )}
+
+            {hideGoogleOnIos && showAppleAuth && (
+              <>
+                <div className="relative my-1">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-gray-200 dark:border-gray-700" />
+                  </div>
+                  <div className="relative flex justify-center text-sm">
+                    <span className="px-4 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">{t('common.or')}</span>
+                  </div>
+                </div>
+                <AppleSignInButton disabled={isSubmitting} onPress={handleAppleSignIn} />
+              </>
+            )}
           </form>
 
           <p className="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">

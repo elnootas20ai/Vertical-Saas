@@ -57,7 +57,7 @@ export function WorkerTasks() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const businessId = currentBusiness?.business_id || '';
+  const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
   const needsCompany = workerNeedsBusinessLink(user);

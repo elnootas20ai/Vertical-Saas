@@ -168,6 +168,13 @@ describe('isTpvMontajeBoardOrder / isTpvRepartoBoardOrder', () => {
     expect(isTpvRepartoBoardOrder({ status: 'listo', assemblyCompletedAt: '2026-06-16T21:00:00.000Z' })).toBe(true);
     expect(isTpvRepartoBoardOrder({ status: 'en_reparto' })).toBe(true);
   });
+
+  it('keeps recogida in montaje until delivered (no repartidor)', () => {
+    expect(isTpvMontajeBoardOrder({ status: 'listo', deliveryType: 'recogida' })).toBe(true);
+    expect(isTpvRepartoBoardOrder({ status: 'listo', deliveryType: 'recogida', assemblyCompletedAt: '2026-06-16T21:00:00.000Z' })).toBe(false);
+    expect(isTpvMontajeBoardOrder({ status: 'en_reparto', deliveryType: 'recogida' })).toBe(true);
+    expect(isTpvRepartoBoardOrder({ status: 'en_reparto', deliveryType: 'recogida' })).toBe(false);
+  });
 });
 
 describe('buildTpvRegisterSummaryForDay', () => {

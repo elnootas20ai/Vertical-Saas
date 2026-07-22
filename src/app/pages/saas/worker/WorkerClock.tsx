@@ -30,7 +30,7 @@ export function WorkerClock() {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
-  const businessId = currentBusiness?.business_id || '';
+  const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
   const { showStoreBlock, workCenter, storeLabel, assignedPdvId } = useWorkerAssignedStore();

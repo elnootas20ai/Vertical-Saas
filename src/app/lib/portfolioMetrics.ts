@@ -3,12 +3,13 @@ import {
   deliveryOrderIncomeAmount,
   shouldSyncDeliveryOrderIncome,
 } from './deliveryOrderFinanceRules';
-import { dedupeOpenRegisterSessions } from './tpvCajaScope';
+import { dedupeOpenRegisterSessions, localCalendarDayKey } from './tpvCajaScope';
 import { countsTowardNewClientMetrics } from './clientAcquisition';
 import {
   foodFamilyCountsFromOrdersToday,
   sumProductClosingCountsForDay,
 } from './shiftFoodFamilyCounts';
+import { soldProductCountsForDay } from './deliverySoldProductStats';
 
 export type PortfolioMetrics = {
   revenueToday: number;
@@ -27,10 +28,11 @@ export type PortfolioMetrics = {
   cashInRegisters: number;
   revenueByChannel: Record<string, number>;
   revenueByBrand: Record<string, number>;
-  /** Conteo diario pizzas / burgers / tacos (cierres o pedidos del día). */
+  /** Conteo diario pizzas / burgers / tacos / kebab (pedidos del día). */
   pizzasToday: number;
   burgersToday: number;
   tacosToday: number;
+  kebabsToday: number;
 };
 
 export type PortfolioClientMetrics = {
@@ -74,6 +76,7 @@ export function emptyPortfolioMetrics(): PortfolioMetrics {
     pizzasToday: 0,
     burgersToday: 0,
     tacosToday: 0,
+    kebabsToday: 0,
   };
 }
 
@@ -142,11 +145,15 @@ export function orderBelongsToPdvScope(
 }
 
 function isToday(iso: string, todayKey: string): boolean {
-  return String(iso || '').slice(0, 10) === todayKey;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  return localCalendarDayKey(d) === todayKey;
 }
 
 function isInMonth(iso: string, monthKey: string): boolean {
-  return String(iso || '').slice(0, 7) === monthKey;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  return localCalendarDayKey(d).slice(0, 7) === monthKey;
 }
 
 /** Fecha efectiva de entrega (alineado con KPIs del backend). */
@@ -329,6 +336,7 @@ export function computePortfolioMetrics(
     revenueOrdersMonth.length > 0 ? revenueMonth / revenueOrdersMonth.length : 0;
 
   const foodToday = foodFamilyCountsFromOrdersToday(scoped, todayKey);
+  const soldToday = soldProductCountsForDay(scoped, todayKey);
 
   return {
     revenueToday,
@@ -347,9 +355,10 @@ export function computePortfolioMetrics(
     cashInRegisters: 0,
     revenueByChannel,
     revenueByBrand,
-    pizzasToday: foodToday.pizza,
-    burgersToday: foodToday.burger,
-    tacosToday: foodToday.taco,
+    pizzasToday: Math.max(foodToday.pizza, soldToday.pizza),
+    burgersToday: Math.max(foodToday.burger, soldToday.burger),
+    tacosToday: Math.max(foodToday.taco, soldToday.taco),
+    kebabsToday: soldToday.kebab,
   };
 }
 

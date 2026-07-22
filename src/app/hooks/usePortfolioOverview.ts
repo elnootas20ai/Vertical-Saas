@@ -140,6 +140,7 @@ export type PortfolioTotals = {
   pizzasToday: number;
   burgersToday: number;
   tacosToday: number;
+  kebabsToday: number;
 };
 
 const EMPTY_FINANCE: PortfolioFinanceTotals = {
@@ -811,6 +812,7 @@ export function usePortfolioOverview(
     pizzasToday: rows.reduce((s, r) => s + (r.metrics.pizzasToday || 0), 0),
     burgersToday: rows.reduce((s, r) => s + (r.metrics.burgersToday || 0), 0),
     tacosToday: rows.reduce((s, r) => s + (r.metrics.tacosToday || 0), 0),
+    kebabsToday: rows.reduce((s, r) => s + (r.metrics.kebabsToday || 0), 0),
   };
 
   return { rows, totals, finance, loading, isRefreshing, lastUpdatedAt, liveSseOk, error, reload };
