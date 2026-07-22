@@ -16,6 +16,7 @@ import {
   isComboMenuComplete,
   mainFamilyForCatalogCategory,
   normalizeComboItemsForSave,
+  pickComboProductInSection,
   resolveComboRefSlotKind,
   structureFromSectionDraft,
   totalUnitsInComboSlot,
@@ -274,6 +275,35 @@ describe('catalogComboSlots', () => {
       { productId: 'b1', productName: 'Coca', quantity: 1, slotKind: 'drink' },
     ];
     expect(isComboMenuComplete(sections, withPremium, catalog)).toBe(true);
+  });
+
+  it('Combo Dúo acumula 2 pizzas distintas sin borrar la primera', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'p2', name: 'Pepperoni', category: 'Pizzas' }),
+      item({ _id: 'p3', name: 'Trufa', category: 'Pizzas Premium' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Complementos' }),
+      item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const sections = buildComboMenuSections('duo', catalog);
+    const pizzaSection = sections.find((s) => s.groupByMainFamily === 'pizza');
+    expect(pizzaSection?.expectedCount).toBe(2);
+    expect(catalogProductsForComboSection(pizzaSection, catalog).map((p) => p._id).sort()).toEqual([
+      'p1',
+      'p2',
+      'p3',
+    ]);
+
+    const afterFirst = pickComboProductInSection(pizzaSection, catalog[0], [], catalog);
+    expect(afterFirst?.map((r) => r.productId)).toEqual(['p1']);
+    const afterSecond = pickComboProductInSection(pizzaSection, catalog[1], afterFirst, catalog);
+    expect(afterSecond?.map((r) => r.productId).sort()).toEqual(['p1', 'p2']);
+
+    const side = sections.find((s) => s.slotKind === 'side');
+    const drink = sections.find((s) => s.slotKind === 'drink');
+    const withSide = pickComboProductInSection(side, catalog[3], afterSecond, catalog);
+    const complete = pickComboProductInSection(drink, catalog[4], withSide, catalog);
+    expect(isComboMenuComplete(sections, complete, catalog)).toBe(true);
   });
 
   it('Top Burgers y productos con burger en el nombre cuentan como main', () => {

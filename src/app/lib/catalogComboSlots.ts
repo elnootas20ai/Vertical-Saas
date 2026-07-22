@@ -500,6 +500,90 @@ export function totalUnitsInCatalogSection(
   );
 }
 
+/**
+ * Añade un producto a una sección del menú (TPV / editor).
+ * Si expectedCount/slotQuota > 1 (Combo Dúo, Familiar), acumula sin borrar
+ * las elecciones previas de la misma familia/categoría.
+ */
+export function pickComboProductInSection(
+  section: ComboMenuCatalogSection,
+  product: CatalogItem,
+  comboItems: CatalogComboRef[],
+  catalogItems: CatalogItem[],
+): CatalogComboRef[] | null {
+  const categoryNeed = section.expectedCount;
+  const slotNeed = section.slotQuota;
+  const slotKind = section.slotKind;
+  const refSlotKind = inferComboSlotKind(product.category || '', product.name);
+  const need = categoryNeed > 0 ? categoryNeed : slotNeed;
+
+  let next = [...comboItems];
+
+  // Solo sustituir (limpiar) cuando el hueco admite 1 unidad.
+  // Con ×2 (dúo/familiar) hay que acumular pizzas/complementos/bebidas.
+  if (need <= 1) {
+    if (section.groupByMainFamily) {
+      const family = section.groupByMainFamily;
+      next = next.filter((ref) => {
+        if (resolveComboRefSlotKind(ref, catalogItems) !== 'main') return true;
+        const p = catalogItems.find((c) => c._id === ref.productId);
+        return (
+          mainFamilyForProduct(p?.category || '', ref.productName || p?.name || '') !== family
+        );
+      });
+    } else if (categoryNeed === 1) {
+      next = next.filter((ref) => {
+        const p = catalogItems.find((c) => c._id === ref.productId);
+        if (!p) return true;
+        return !categoriesMatch(p.category || '', section.catalogCategory);
+      });
+    } else if (slotNeed === 1) {
+      next = next.filter((ref) => resolveComboRefSlotKind(ref, catalogItems) !== slotKind);
+    } else {
+      next = next.filter((ref) => {
+        const p = catalogItems.find((c) => c._id === ref.productId);
+        if (!p) return true;
+        return !categoriesMatch(p.category || '', section.catalogCategory);
+      });
+    }
+  }
+
+  const sameIdx = next.findIndex((c) => c.productId === product._id);
+  const have =
+    categoryNeed > 0 || section.groupByMainFamily
+      ? totalUnitsInCatalogSection(section, next, catalogItems)
+      : totalUnitsInSlotKind(slotKind, next, catalogItems);
+
+  if (need === 1) {
+    next.push({
+      productId: product._id,
+      productName: product.name,
+      quantity: 1,
+      slotKind: refSlotKind,
+    });
+  } else if (sameIdx >= 0) {
+    if (have < need) {
+      next[sameIdx] = {
+        ...next[sameIdx],
+        quantity: next[sameIdx].quantity + 1,
+        slotKind: refSlotKind,
+      };
+    } else {
+      return null;
+    }
+  } else {
+    if (have >= need) return null;
+    next.push({
+      productId: product._id,
+      productName: product.name,
+      quantity: 1,
+      slotKind: refSlotKind,
+    });
+  }
+
+  return normalizeComboItemsForSave(next, catalogItems);
+}
+
 export function isComboMenuComplete(
   sections: ComboMenuCatalogSection[],
   comboItems: CatalogComboRef[],

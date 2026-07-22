@@ -7,15 +7,12 @@ import {
   DEFAULT_COMBO_STRUCTURE,
   buildComboMenuSections,
   catalogProductsForComboSection,
-  categoriesMatch,
   comboItemsInCatalogSection,
   comboItemsInSlotKind,
   inferComboMenuPresetId,
-  inferComboSlotKind,
   isComboMenuComplete,
-  mainFamilyForProduct,
   normalizeComboItemsForSave,
-  resolveComboRefSlotKind,
+  pickComboProductInSection,
   totalUnitsInCatalogSection,
   totalUnitsInSlotKind,
   type ComboMenuCatalogSection,
@@ -305,67 +302,8 @@ export function CatalogComboCompositionEditor({
   };
 
   const pickProduct = (section: ComboMenuCatalogSection, product: CatalogItem) => {
-    const categoryNeed = section.expectedCount;
-    const slotNeed = section.slotQuota;
-    const slotKind = section.slotKind;
-    const refSlotKind = inferComboSlotKind(product.category || '', product.name);
-
-    let next = [...comboItems];
-
-    if (section.groupByMainFamily) {
-      const family = section.groupByMainFamily;
-      next = next.filter((ref) => {
-        if (resolveComboRefSlotKind(ref, catalogItems) !== 'main') return true;
-        const p = catalogItems.find((c) => c._id === ref.productId);
-        return (
-          mainFamilyForProduct(p?.category || '', ref.productName || p?.name || '') !== family
-        );
-      });
-    } else if (categoryNeed > 0) {
-      next = next.filter((ref) => {
-        const p = catalogItems.find((c) => c._id === ref.productId);
-        if (!p) return true;
-        return !categoriesMatch(p.category || '', section.catalogCategory);
-      });
-    } else if (slotNeed === 1) {
-      next = next.filter((ref) => resolveComboRefSlotKind(ref, catalogItems) !== slotKind);
-    } else {
-      next = next.filter((ref) => {
-        const p = catalogItems.find((c) => c._id === ref.productId);
-        if (!p) return true;
-        return !categoriesMatch(p.category || '', section.catalogCategory);
-      });
-    }
-
-    const sameIdx = next.findIndex((c) => c.productId === product._id);
-    const need = categoryNeed > 0 ? categoryNeed : slotNeed;
-    const have =
-      categoryNeed > 0 || section.groupByMainFamily
-        ? totalUnitsInCatalogSection(section, next, catalogItems)
-        : totalUnitsInSlotKind(slotKind, next, catalogItems);
-
-    if (need === 1) {
-      next.push({
-        productId: product._id,
-        productName: product.name,
-        quantity: 1,
-        slotKind: refSlotKind,
-      });
-    } else if (sameIdx >= 0) {
-      if (have < need) {
-        next[sameIdx] = { ...next[sameIdx], quantity: next[sameIdx].quantity + 1, slotKind: refSlotKind };
-      } else return;
-    } else {
-      if (have >= need) return;
-      next.push({
-        productId: product._id,
-        productName: product.name,
-        quantity: 1,
-        slotKind: refSlotKind,
-      });
-    }
-
-    emitChange(next);
+    const next = pickComboProductInSection(section, product, comboItems, catalogItems);
+    if (next) emitChange(next);
   };
 
   return (

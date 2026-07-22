@@ -4,23 +4,20 @@ import type { CatalogComboRef, CatalogItem } from '../../../lib/deliveryApi';
 import {
   COMBO_SLOT_META,
   catalogProductsForComboSection,
-  categoriesMatch,
   comboItemsInCatalogSection,
   comboMenuHasMainFamilyChoice,
   comboMenuSectionKey,
   filterComboMenuSectionsForMainFamily,
-  inferComboSlotKind,
   inferMainFamilyFromComboSelections,
   isComboMenuComplete,
   isComboMenuSectionDone,
   mainFamilyForCatalogCategory,
-  mainFamilyForProduct,
   normalizeComboItemsForSave,
+  pickComboProductInSection,
   resolveComboRefSlotKind,
   resolveComboSlotAllowlist,
   resolveTpvComboMenuSections,
   totalUnitsInCatalogSection,
-  totalUnitsInSlotKind,
   type ComboMainFamily,
   type ComboMenuCatalogSection,
   unitsNeededInComboSection,
@@ -36,75 +33,6 @@ type TpvComboCustomizeModalProps = {
   onClose: () => void;
   onConfirm: (selections: CatalogComboRef[]) => void;
 };
-
-function pickProductInSection(
-  section: ComboMenuCatalogSection,
-  product: CatalogItem,
-  comboItems: CatalogComboRef[],
-  catalogItems: CatalogItem[],
-): CatalogComboRef[] | null {
-  const categoryNeed = section.expectedCount;
-  const slotNeed = section.slotQuota;
-  const slotKind = section.slotKind;
-  const refSlotKind = inferComboSlotKind(product.category || '', product.name);
-
-  let next = [...comboItems];
-
-  if (section.groupByMainFamily) {
-    const family = section.groupByMainFamily;
-    next = next.filter((ref) => {
-      if (resolveComboRefSlotKind(ref, catalogItems) !== 'main') return true;
-      const p = catalogItems.find((c) => c._id === ref.productId);
-      return (
-        mainFamilyForProduct(p?.category || '', ref.productName || p?.name || '') !== family
-      );
-    });
-  } else if (categoryNeed > 0) {
-    next = next.filter((ref) => {
-      const p = catalogItems.find((c) => c._id === ref.productId);
-      if (!p) return true;
-      return !categoriesMatch(p.category || '', section.catalogCategory);
-    });
-  } else if (slotNeed === 1) {
-    next = next.filter((ref) => resolveComboRefSlotKind(ref, catalogItems) !== slotKind);
-  } else {
-    next = next.filter((ref) => {
-      const p = catalogItems.find((c) => c._id === ref.productId);
-      if (!p) return true;
-      return !categoriesMatch(p.category || '', section.catalogCategory);
-    });
-  }
-
-  const sameIdx = next.findIndex((c) => c.productId === product._id);
-  const need = categoryNeed > 0 ? categoryNeed : slotNeed;
-  const have =
-    categoryNeed > 0 || section.groupByMainFamily
-      ? totalUnitsInCatalogSection(section, next, catalogItems)
-      : totalUnitsInSlotKind(slotKind, next, catalogItems);
-
-  if (need === 1) {
-    next.push({
-      productId: product._id,
-      productName: product.name,
-      quantity: 1,
-      slotKind: refSlotKind,
-    });
-  } else if (sameIdx >= 0) {
-    if (have < need) {
-      next[sameIdx] = { ...next[sameIdx], quantity: next[sameIdx].quantity + 1, slotKind: refSlotKind };
-    } else return null;
-  } else {
-    if (have >= need) return null;
-    next.push({
-      productId: product._id,
-      productName: product.name,
-      quantity: 1,
-      slotKind: refSlotKind,
-    });
-  }
-
-  return normalizeComboItemsForSave(next, catalogItems);
-}
 
 function removeFromSection(
   section: ComboMenuCatalogSection,
@@ -251,7 +179,7 @@ export function TpvComboCustomizeModal({
     (section: ComboMenuCatalogSection, product: CatalogItem) => {
       const key = comboMenuSectionKey(section);
       const wasDone = isComboMenuSectionDone(section, selections, catalogItems);
-      const next = pickProductInSection(section, product, selections, catalogItems);
+      const next = pickComboProductInSection(section, product, selections, catalogItems);
       if (!next) return;
       setSelections(next);
       if (!wasDone && isComboMenuSectionDone(section, next, catalogItems)) {
