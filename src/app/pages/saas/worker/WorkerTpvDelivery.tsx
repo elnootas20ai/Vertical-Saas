@@ -23,7 +23,7 @@ import {
 import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
 import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
-import { useTpvRegisterBoardReady, useTpvRegisterIfOpen } from '../../../components/saas/TpvRegisterGate';
+import { useTpvRegisterBoardReady, useTpvRegisterIfOpen, useTpvStatusBarQuickActions } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { useTpvOrderFlowChrome, useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
@@ -83,6 +83,7 @@ import {
   ChevronDown,
   Bike,
   Car,
+  History,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -1115,7 +1116,7 @@ export function WorkerTpvDelivery({
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
   const [deliveryCompleteOrder, setDeliveryCompleteOrder] = useState<DeliveryOrder | null>(null);
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
-  const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(false);
+  const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(true);
 
   const tabletBinding = useMemo(() => readTpvTabletBinding(), []);
   const registerScope = useMemo(
@@ -1131,7 +1132,9 @@ export function WorkerTpvDelivery({
   const businessId = registerScope.scopeBusinessId;
   const register = useTpvRegisterIfOpen();
   const boardReady = useTpvRegisterBoardReady();
+  const setStatusBarQuickActions = useTpvStatusBarQuickActions();
   const registerOpen = boardReady || Boolean(register && isTpvRegisterSessionOpen(register.session));
+  const historySectionRef = useRef<HTMLDivElement | null>(null);
 
   const isTabletSession = registerScope.isTabletSession;
   const tabletVertical = tabletBinding?.tpvVertical ?? null;
@@ -1295,14 +1298,17 @@ export function WorkerTpvDelivery({
 
   useEffect(() => {
     if (!userId) {
-      setStaffConsumptionEnabled(false);
+      setStaffConsumptionEnabled(true);
       return;
     }
     getDeliveryConfigRequest(userId)
       .then((cfg) => {
         setStaffConsumptionEnabled(normalizeStaffConsumptionConfig(cfg.staffConsumption).enabled);
       })
-      .catch(() => setStaffConsumptionEnabled(false));
+      .catch(() => {
+        // Si falla la config, no ocultar consumo: por defecto va activo.
+        setStaffConsumptionEnabled(true);
+      });
   }, [userId]);
 
   useEffect(() => {
@@ -1568,6 +1574,13 @@ export function WorkerTpvDelivery({
     navigate(exitTpvTabletSessionPath(), { replace: true });
   }, [navigate]);
 
+  const openOrderHistory = useCallback(() => {
+    setShowDelivered(true);
+    window.requestAnimationFrame(() => {
+      historySectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }, []);
+
   const openSession = register?.session ?? null;
 
   const stats = useMemo(() => {
@@ -1642,6 +1655,96 @@ export function WorkerTpvDelivery({
   }), [scopedActive]);
 
   const visibleCount = assemblyOrders.length + deliveryOrders.length;
+
+  useEffect(() => {
+    if (!setStatusBarQuickActions) return;
+    if (view !== 'board' || !registerOpen) {
+      setStatusBarQuickActions(null);
+      return;
+    }
+    const actions = [
+      ...(staffConsumptionEnabled
+        ? [{
+            id: 'consumo',
+            label: 'Consumo del trabajador',
+            title: 'Registrar comida o bebida del equipo',
+            tone: 'amber' as const,
+            icon: <UtensilsCrossed />,
+            onClick: () => setView('staff-consumption'),
+          }]
+        : []),
+      {
+        id: 'search',
+        label: 'Buscar pedido',
+        title: 'Buscar por número o cliente',
+        active: showSearch || Boolean(search),
+        icon: <Search />,
+        onClick: () => setShowSearch((v) => !v),
+      },
+      {
+        id: 'sound',
+        label: soundEnabled ? 'Avisos de pedidos ON' : 'Avisos de pedidos OFF',
+        title: soundEnabled
+          ? 'Silenciar avisos de Glovo, web y apps'
+          : 'Activar avisos cuando entre un pedido nuevo',
+        active: soundEnabled,
+        icon: soundEnabled ? <Volume2 /> : <VolumeX />,
+        onClick: () => setSoundEnabled((v) => !v),
+      },
+      {
+        id: 'refresh',
+        label: 'Actualizar pedidos',
+        title: 'Recargar la lista de montaje y reparto',
+        icon: <RefreshCw className={refreshing ? 'animate-spin' : ''} />,
+        onClick: () => void loadOrders(),
+      },
+      {
+        id: 'history',
+        label: 'Historial de pedidos',
+        title: `Completados del turno (${stats.delivered})`,
+        active: showDelivered,
+        icon: <History />,
+        onClick: openOrderHistory,
+      },
+      ...(ceoMode && onChangeStore
+        ? [{
+            id: 'store',
+            label: 'Cambiar tienda',
+            title: 'Elegir otro punto de venta',
+            icon: <Store />,
+            onClick: onChangeStore,
+          }]
+        : []),
+      ...(tabletBinding && !ceoMode
+        ? [{
+            id: 'exit',
+            label: 'Salir del TPV',
+            title: 'Cerrar sesión de tablet',
+            icon: <LogOut />,
+            onClick: exitTabletTpv,
+          }]
+        : []),
+    ];
+    setStatusBarQuickActions(actions);
+    return () => setStatusBarQuickActions(null);
+  }, [
+    setStatusBarQuickActions,
+    view,
+    registerOpen,
+    staffConsumptionEnabled,
+    showSearch,
+    search,
+    soundEnabled,
+    refreshing,
+    showDelivered,
+    stats.delivered,
+    openOrderHistory,
+    loadOrders,
+    ceoMode,
+    onChangeStore,
+    tabletBinding,
+    exitTabletTpv,
+  ]);
 
   if (tpvVerticalPending) {
     return (
@@ -2032,6 +2135,7 @@ export function WorkerTpvDelivery({
         </div>
 
         {/* Siempre visible: si solo va en casilla colapsada parece que “desapareció”. */}
+        <div ref={historySectionRef}>
         <button
           type="button"
           onClick={() => setShowDelivered((v) => !v)}
@@ -2053,56 +2157,51 @@ export function WorkerTpvDelivery({
           )}
         </button>
 
-        {showDelivered && (
+        {showDelivered && completedShiftOrders.length > 0 && (
           <div className={`mt-1.5 overflow-y-auto space-y-1 rounded-xl border border-emerald-100 dark:border-emerald-900 bg-emerald-50/30 dark:bg-emerald-950/10 ${isTabletUi ? 'max-h-[26vh] p-1.5' : 'max-h-44 p-2'}`}>
-            {completedShiftOrders.length === 0 ? (
-              <p className="text-center text-xs text-gray-500 dark:text-gray-400 py-3">
-                Sin entregas en este turno. Cuando marques un pedido como entregado, saldrá aquí.
-              </p>
-            ) : (
-              completedShiftOrders.map((order) => {
-                const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
-                const dimmed =
-                  completedTodayOrders.every((o) => o._id !== order._id)
-                  && (fulfillmentFilter !== 'all' || search.trim().length > 0);
-                return (
-                  <button
-                    key={order._id}
-                    type="button"
-                    onClick={() => setSelectedOrder(order)}
-                    className={`w-full flex items-center justify-between gap-2 rounded-lg text-left touch-manipulation ${
-                      dimmed
-                        ? 'bg-white/70 dark:bg-gray-800/70 opacity-60'
-                        : 'bg-white dark:bg-gray-900 hover:bg-emerald-50/80 dark:hover:bg-gray-800'
-                    } ${isTabletUi ? 'py-1.5 px-2' : 'px-3 py-2'}`}
-                  >
-                    <div className="min-w-0 flex items-center gap-1.5">
-                      <OrderChannelBadge channel={order.channel} compact={isTabletUi} />
-                      <div className="min-w-0">
-                      <p className={`font-bold text-gray-900 dark:text-gray-100 font-mono ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
-                        #{order.orderNumber}
-                      </p>
-                      <p className={`text-gray-500 truncate ${isTabletUi ? 'text-[10px]' : 'text-[11px]'}`}>
-                        {order.customerName || 'Cliente'}
-                        {' · '}
-                        {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                      </p>
-                      </div>
+            {completedShiftOrders.map((order) => {
+              const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
+              const dimmed =
+                completedTodayOrders.every((o) => o._id !== order._id)
+                && (fulfillmentFilter !== 'all' || search.trim().length > 0);
+              return (
+                <button
+                  key={order._id}
+                  type="button"
+                  onClick={() => setSelectedOrder(order)}
+                  className={`w-full flex items-center justify-between gap-2 rounded-lg text-left touch-manipulation ${
+                    dimmed
+                      ? 'bg-white/70 dark:bg-gray-800/70 opacity-60'
+                      : 'bg-white dark:bg-gray-900 hover:bg-emerald-50/80 dark:hover:bg-gray-800'
+                  } ${isTabletUi ? 'py-1.5 px-2' : 'px-3 py-2'}`}
+                >
+                  <div className="min-w-0 flex items-center gap-1.5">
+                    <OrderChannelBadge channel={order.channel} compact={isTabletUi} />
+                    <div className="min-w-0">
+                    <p className={`font-bold text-gray-900 dark:text-gray-100 font-mono ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
+                      #{order.orderNumber}
+                    </p>
+                    <p className={`text-gray-500 truncate ${isTabletUi ? 'text-[10px]' : 'text-[11px]'}`}>
+                      {order.customerName || 'Cliente'}
+                      {' · '}
+                      {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                    </p>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className={`font-bold tabular-nums ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
-                        {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
-                      </p>
-                      <p className={`font-semibold ${statusCfg.color} ${isTabletUi ? 'text-[9px]' : 'text-[10px]'}`}>
-                        {statusCfg.label}
-                      </p>
-                    </div>
-                  </button>
-                );
-              })
-            )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className={`font-bold tabular-nums ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
+                      {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
+                    </p>
+                    <p className={`font-semibold ${statusCfg.color} ${isTabletUi ? 'text-[9px]' : 'text-[10px]'}`}>
+                      {statusCfg.label}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
+        </div>
       </div>
 
       {/* Order detail modal */}

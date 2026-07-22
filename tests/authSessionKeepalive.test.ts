@@ -67,4 +67,52 @@ describe('auth session expiry helpers', () => {
     expect(callUrl).toContain('/api/auth/refresh');
     fetchSpy.mockRestore();
   });
+
+  it('tryRefreshToken reintenta sin cookie si el primer refresh falla 401', async () => {
+    const token = makeJwt(30);
+    localStorage.setItem('vertial_access_token', token);
+    localStorage.setItem('vertial_refresh_token', 'refresh-body');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const creds = (init as RequestInit | undefined)?.credentials;
+      if (creds === 'include') {
+        return new Response(JSON.stringify({ ok: false, error: 'Refresh token no reconocido' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          accessToken: makeJwt(900),
+          refreshToken: 'refresh-new',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    const { ensureFreshAccessToken, loadStoredTokens } = await import('../src/app/lib/authApi');
+    loadStoredTokens();
+    const outcome = await ensureFreshAccessToken(120);
+    expect(outcome).toBe('refreshed');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect((fetchSpy.mock.calls[0]?.[1] as RequestInit)?.credentials).toBe('include');
+    expect((fetchSpy.mock.calls[1]?.[1] as RequestInit)?.credentials).toBe('omit');
+    fetchSpy.mockRestore();
+  });
+
+  it('tryRefreshToken trata 429 como network (no cierra sesión)', async () => {
+    const token = makeJwt(30);
+    localStorage.setItem('vertial_access_token', token);
+    localStorage.setItem('vertial_refresh_token', 'refresh-x');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, error: 'Too many requests' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const { ensureFreshAccessToken, loadStoredTokens } = await import('../src/app/lib/authApi');
+    loadStoredTokens();
+    const outcome = await ensureFreshAccessToken(120);
+    expect(outcome).toBe('network');
+    fetchSpy.mockRestore();
+  });
 });

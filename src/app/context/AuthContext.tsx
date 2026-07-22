@@ -309,8 +309,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Errores de red / timeout no deben echar de la tablet a los 2 minutos.
         if (response.ok === false && Boolean(parsedFromStorage)) {
           const msg = String(response.error || '').toLowerCase();
+          // Solo borrar si el servidor confirma sesión muerta de forma explícita.
+          // “unauthorized / refresh token” genéricos expulsaban el TPV tras sleep/red.
           const definitive =
-            /ya no es válida|sesión inválida|refresh token|unauthorized|no autorizado/.test(msg);
+            /refresh token (inválido|expirado|no reconocido)|sesión revocada|usuario no encontrado/.test(
+              msg,
+            );
           if (definitive) {
             persistSession(null);
             setUser(null);

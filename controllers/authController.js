@@ -2518,41 +2518,76 @@ export async function logActivity(req, res) {
   }
 }
 
-// S-01 + S-07: Refresh token — lee de cookie httpOnly, crea nueva sesión (sliding window)
+/**
+ * Resuelve el refresh token a usar.
+ * Preferir body cuando existe: en tablet/Capacitor la cookie httpOnly a menudo
+ * queda desfasada tras rotaciones, mientras localStorage sí tiene el token actual.
+ * Si el body falla, se intenta la cookie (web solo-cookie).
+ */
+function resolveRefreshTokenCandidates(req) {
+  const cookieToken = typeof req.cookies?.refresh_token === 'string' ? req.cookies.refresh_token.trim() : '';
+  const bodyToken = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken.trim() : '';
+  const candidates = [];
+  if (bodyToken) candidates.push(bodyToken);
+  if (cookieToken && cookieToken !== bodyToken) candidates.push(cookieToken);
+  return candidates;
+}
+
+// S-01 + S-07: Refresh token — body preferido, cookie de respaldo; rotación issue-then-revoke
 export async function refreshToken(req, res) {
   try {
-    // S-01: Leer refresh token de cookie httpOnly primero, fallback a body (compatibilidad)
-    const cookieToken = req.cookies?.refresh_token;
-    const bodyToken = req.body?.refreshToken;
-    const rawToken = cookieToken || bodyToken;
-
-    if (!rawToken) {
+    const candidates = resolveRefreshTokenCandidates(req);
+    if (candidates.length === 0) {
       return res.status(400).json({ ok: false, error: 'Refresh token requerido' });
     }
 
-    let decoded;
-    try {
-      decoded = verifyRefreshToken(rawToken);
-    } catch {
-      clearAuthCookies(res);
-      return res.status(401).json({ ok: false, error: 'Refresh token inválido o expirado' });
+    let decoded = null;
+    let result = null;
+    let lastVerifyError = false;
+
+    for (const rawToken of candidates) {
+      try {
+        decoded = verifyRefreshToken(rawToken);
+      } catch {
+        lastVerifyError = true;
+        continue;
+      }
+      const found = await findAccountByRefreshToken(req, decoded.raw);
+      if (found && found.account.user_id === decoded.userId) {
+        result = found;
+        break;
+      }
+      lastVerifyError = false;
     }
 
-    // S-07: Buscar en sesiones (nuevo modelo) o campo legacy
-    const result = await findAccountByRefreshToken(req, decoded.raw);
-    if (!result || result.account.user_id !== decoded.userId) {
+    if (!result || !decoded) {
       clearAuthCookies(res);
-      return res.status(401).json({ ok: false, error: 'Refresh token no reconocido' });
+      return res.status(401).json({
+        ok: false,
+        error: lastVerifyError
+          ? 'Refresh token inválido o expirado'
+          : 'Refresh token no reconocido',
+      });
     }
 
     const { account, session } = result;
+    const previousSessionId = session?.sessionId || null;
 
-    // S-07: Revocar sesión anterior antes de crear una nueva (token rotation)
-    if (session?.sessionId) {
-      await revokeSession(req, account, session.sessionId);
+    // Emitir primero; revocar después. Si falla el emit, la sesión anterior sigue viva
+    // (antes se revocaba primero y un fallo de Couch dejaba la tablet sin sesión).
+    const { accessToken, refreshToken: newRefreshToken } = await issueTokens(req, res, account);
+
+    if (previousSessionId) {
+      try {
+        await revokeSession(req, account, previousSessionId);
+      } catch (revokeErr) {
+        console.warn(
+          '[AUTH] refresh: no se pudo revocar sesión anterior (no bloqueante):',
+          revokeErr instanceof Error ? revokeErr.message : revokeErr,
+        );
+      }
     }
 
-    const { accessToken, refreshToken: newRefreshToken } = await issueTokens(req, res, account);
     return res.json({ ok: true, accessToken, refreshToken: newRefreshToken });
   } catch (error) {
     return res.status(500).json({

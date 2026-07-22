@@ -527,19 +527,28 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
       if (!_inMemoryToken) {
         _inMemoryToken = localStorage.getItem(TOKEN_STORAGE_KEY);
       }
-      const response = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_inMemoryToken ? { Authorization: `Bearer ${_inMemoryToken}` } : {}),
-        },
-        body: JSON.stringify(
-          _inMemoryRefreshToken ? { refreshToken: _inMemoryRefreshToken } : {},
-        ),
-      });
-      const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<AuthUser>;
-      if (response.ok && payload.ok === true) {
+
+      const runOnce = async (credentials: RequestCredentials): Promise<{
+        status: number;
+        ok: boolean;
+        payload: ApiEnvelope<AuthUser>;
+      }> => {
+        const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: 'POST',
+          credentials,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(_inMemoryToken ? { Authorization: `Bearer ${_inMemoryToken}` } : {}),
+          },
+          body: JSON.stringify(
+            _inMemoryRefreshToken ? { refreshToken: _inMemoryRefreshToken } : {},
+          ),
+        });
+        const payload = (await response.json().catch(() => ({}))) as ApiEnvelope<AuthUser>;
+        return { status: response.status, ok: response.ok && payload.ok === true, payload };
+      };
+
+      const applyOk = (payload: ApiEnvelope<AuthUser>) => {
         if (payload.accessToken) {
           setAuthTokens({
             accessToken: payload.accessToken,
@@ -547,11 +556,24 @@ async function tryRefreshToken(): Promise<RefreshOutcome> {
           });
         }
         return 'refreshed' as const;
+      };
+
+      let result = await runOnce('include');
+      if (result.ok) return applyOk(result.payload);
+
+      // Cookie httpOnly antigua puede ganar en servers viejos: reintentar solo con body.
+      if (
+        _inMemoryRefreshToken &&
+        (result.status === 401 || result.status === 400)
+      ) {
+        result = await runOnce('omit');
+        if (result.ok) return applyOk(result.payload);
       }
-      // 5xx / gateway caído: no concluyente, mantener la sesión.
-      if (response.status >= 500) return 'network' as const;
+
+      // 5xx / gateway / rate-limit: no concluyente, mantener la sesión.
+      if (result.status >= 500 || result.status === 429) return 'network' as const;
       // Sin cookie ni body en tablet: no tratar como “sesión muerta” si aún hay access token local.
-      if (response.status === 400 && _inMemoryToken) return 'network' as const;
+      if (result.status === 400 && _inMemoryToken) return 'network' as const;
       return 'rejected' as const;
     } catch {
       return 'network' as const;
@@ -1453,9 +1475,11 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
         }
       }
       const authErr = extractApiErrorMessage(payload as Record<string, unknown>);
+      // No usar “ya no es válida” aquí: AuthContext lo trata como wipe definitivo y
+      // expulsaba al login tras un refresh fallido temporal (cookie vieja / red).
       return {
         ok: false,
-        error: authErr || 'No se pudo sincronizar el perfil; la sesión ya no es válida.',
+        error: authErr || 'No se pudo sincronizar el perfil.',
       };
     }
 
