@@ -1354,6 +1354,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [cashSlot, setCashSlot] = useState('');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
   const [manualFood, setManualFood] = useState({ pizza: '', burger: '', taco: '' });
+  const [manualFoodByChannel, setManualFoodByChannel] = useState<Record<string, { pizza: string; burger: string; taco: string }>>({});
   const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(false);
   const [showExtraDetail, setShowExtraDetail] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
@@ -1419,12 +1420,19 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       burger: String(foodReport.total.burger || 0),
       taco: String(foodReport.total.taco || 0),
     });
+    const byCh: Record<string, { pizza: string; burger: string; taco: string }> = {};
+    for (const platform of closingPlatforms) {
+      const ch = platform.channel;
+      const auto = foodReport.byAggregator[ch] || { pizza: 0, burger: 0, taco: 0 };
+      byCh[ch] = {
+        pizza: String(auto.pizza || 0),
+        burger: String(auto.burger || 0),
+        taco: String(auto.taco || 0),
+      };
+    }
+    setManualFoodByChannel(byCh);
     setFoodSlotsInitialized(true);
-  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, foodReport.total]);
-
-  const handleManualAggregatorChange = useCallback((channel: string, value: string) => {
-    setManualAggregatorTotals((prev) => ({ ...prev, [channel]: value }));
-  }, []);
+  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, foodReport.total, foodReport.byAggregator, closingPlatforms]);
 
   const handleManualAggregatorCashChange = useCallback((channel: string, value: string) => {
     setManualAggregatorCash((prev) => ({ ...prev, [channel]: value }));
@@ -1444,6 +1452,33 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     const cleaned = value.replace(/[^\d]/g, '');
     setManualFood((prev) => ({ ...prev, [key]: cleaned }));
   }, []);
+
+  const handleChannelFoodChange = useCallback((channel: string, key: keyof FoodFamilyCounts, value: string) => {
+    setManualFoodByChannel((prev) => ({
+      ...prev,
+      [channel]: {
+        pizza: prev[channel]?.pizza ?? '',
+        burger: prev[channel]?.burger ?? '',
+        taco: prev[channel]?.taco ?? '',
+        [key]: value.replace(/[^\d]/g, ''),
+      },
+    }));
+  }, []);
+
+  const closingFoodByChannel = useMemo(() => {
+    const out: Record<string, FoodFamilyCounts> = {};
+    for (const platform of closingPlatforms) {
+      const ch = platform.channel;
+      const auto = foodReport.byAggregator[ch] || { pizza: 0, burger: 0, taco: 0 };
+      const manual = manualFoodByChannel[ch];
+      out[ch] = {
+        pizza: parseClosingCountInput(manual?.pizza ?? '', auto.pizza),
+        burger: parseClosingCountInput(manual?.burger ?? '', auto.burger),
+        taco: parseClosingCountInput(manual?.taco ?? '', auto.taco),
+      };
+    }
+    return out;
+  }, [closingPlatforms, foodReport.byAggregator, manualFoodByChannel]);
 
   useEffect(() => {
     if (!dataUserId) {
@@ -1490,35 +1525,38 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
           ) : null}
 
-          {/* 1) Efectivo contado + comida */}
+          {/* 1) Totales del día */}
           {showDeliveryClosingSlots ? (
             <div className="rounded-xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 sm:p-4 space-y-3">
               <div>
-                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">1. Contar la caja</p>
+                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">1. Totales del día</p>
                 <p className="text-[11px] text-emerald-800/70 dark:text-emerald-200/70 mt-0.5">
-                  Efectivo físico y unidades vendidas (pizzas / burgers / tacos).
+                  Efectivo y tarjeta del TPV, y unidades de todos los pedidos del turno.
                 </p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <label className="rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1 col-span-2 sm:col-span-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                    <Banknote className="w-3 h-3" /> Efectivo contado
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0,00"
-                    value={cashSlotDisplay}
-                    onFocus={() => {
-                      setCashSlotFocused(true);
-                      setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
-                    }}
-                    onBlur={() => setCashSlotFocused(false)}
-                    onChange={(e) => handleCashSlotChange(e.target.value)}
-                    className="w-full px-2.5 py-2.5 text-lg font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/40 dark:bg-emerald-950/40 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                  />
-                  <span className="text-[10px] text-gray-500">€ en caja física</span>
-                </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                    <Banknote className="w-3 h-3" /> Efectivo total
+                  </p>
+                  <p className="mt-1 text-xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                    {summary.salesByMethod.efectivo.toFixed(2)}€
+                  </p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros en efectivo (TPV)</p>
+                </div>
+                <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300 flex items-center gap-1">
+                    <CreditCard className="w-3 h-3" /> Tarjeta total
+                  </p>
+                  <p className="mt-1 text-xl font-bold tabular-nums text-blue-800 dark:text-blue-200">
+                    {summary.salesByMethod.tarjeta.toFixed(2)}€
+                  </p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros con tarjeta (TPV)</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2">
                 <label className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">🍕 Pizzas</span>
                   <input
@@ -1556,6 +1594,14 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <span className="text-[10px] text-gray-500">Sistema: {foodReport.total.taco}</span>
                 </label>
               </div>
+
+              {shiftOrdersLoading ? (
+                <p className="text-[11px] text-gray-500">Cargando pedidos del turno…</p>
+              ) : (
+                <p className="text-[11px] text-gray-500">
+                  Unidades de todos los pedidos del turno (TPV + apps). Puedes corregir si no cuadra.
+                </p>
+              )}
             </div>
           ) : (
             <div>
@@ -1575,31 +1621,56 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
           )}
 
-          {/* 2) Integraciones */}
+          {/* 2–5) Integraciones por app */}
           {showDeliveryClosingSlots && (
             <div className="space-y-2">
               <div>
-                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">2. Integraciones</p>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Apps de delivery</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Glovo, Uber, Just Eat, Flipdish. El efectivo de cada una se suma al arqueo con el TPV.
+                  Pasos 2 a 5: pizzas, burgers, tacos y efectivo de cada app.
                 </p>
               </div>
               <AggregatorClosingEditor
                 autoRows={aggregatorRows}
-                manualByChannel={manualAggregatorTotals}
+                foodByChannel={foodReport.byAggregator}
+                manualFoodByChannel={manualFoodByChannel}
+                onManualFoodChange={handleChannelFoodChange}
                 manualCashByChannel={manualAggregatorCash}
-                onManualChange={handleManualAggregatorChange}
                 onManualCashChange={handleManualAggregatorCashChange}
-                title="Apps de delivery"
+                title="Por integración"
+                startStep={2}
               />
             </div>
           )}
 
-          {/* 3) Resumen arqueo (lo que cuadra la caja) */}
-          <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-4 space-y-2">
+          {/* Arqueo */}
+          <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-4 space-y-3">
             <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
-              {showDeliveryClosingSlots ? '3. Arqueo' : 'Arqueo'}
+              {showDeliveryClosingSlots ? `${1 + closingPlatforms.length + 1}. Arqueo` : 'Arqueo'}
             </p>
+
+            {showDeliveryClosingSlots && (
+              <label className="block rounded-xl border-2 border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                  <Banknote className="w-3 h-3" /> Efectivo contado en caja
+                </span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  value={cashSlotDisplay}
+                  onFocus={() => {
+                    setCashSlotFocused(true);
+                    setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
+                  }}
+                  onBlur={() => setCashSlotFocused(false)}
+                  onChange={(e) => handleCashSlotChange(e.target.value)}
+                  className="mt-1.5 w-full px-2.5 py-2.5 text-lg font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/40 dark:bg-emerald-950/40 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+                <span className="text-[10px] text-gray-500">Lo que hay físicamente en la caja</span>
+              </label>
+            )}
+
             <div className="flex justify-between text-sm">
               <span className="text-gray-600 dark:text-gray-300">Efectivo TPV (pedidos + fondo − salidas)</span>
               <span className="font-semibold tabular-nums">{expectedTpv.toFixed(2)}€</span>
@@ -1783,7 +1854,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               pizza: closingFood.pizza,
               burger: closingFood.burger,
               taco: closingFood.taco,
-              byChannel: foodReport.byAggregator,
+              byChannel: closingFoodByChannel,
             })}
             className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
           >
