@@ -2759,7 +2759,9 @@ export async function createTpvRegisterSession(req, res) {
       if (wc) storeAliases.add(wc);
     }
 
-    const openForPdv = (scopedSessions || []).filter(
+    // Buscar abiertas de ESTA tienda en TODAS las empresas del usuario
+    // (mismo PDV en dos empresas no debe crear 2 cajas el mismo día).
+    const openForPdv = (allSessions || []).filter(
       (s) =>
         s.status === 'open' &&
         !s.deletedAt &&
@@ -2787,17 +2789,19 @@ export async function createTpvRegisterSession(req, res) {
     }
 
     const refreshed = await listTpvRegisterSessionsByUser(req, userId);
-    const refreshedScoped = businessId
-      ? filterTpvRegisterSessionsForBusiness(refreshed, businessId, scopedPdvIds)
-      : refreshed;
-    const alreadyOpen = (refreshedScoped || [])
+    const openSameStore = (refreshed || [])
       .filter(
         (s) =>
           s.status === 'open' &&
           !s.deletedAt &&
           storeAliases.has(String(s.pointOfSaleId || '').trim()),
       )
-      .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')))[0] || null;
+      .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')));
+    // Preferir la de la empresa activa; si no, cualquier abierta de esa tienda (evita duplicar turno).
+    const alreadyOpen =
+      openSameStore.find((s) => String(s.business_id || s.businessId || '').trim() === String(businessId || '').trim()) ||
+      openSameStore[0] ||
+      null;
     if (alreadyOpen) {
       const pdvLabel = alreadyOpen.pointOfSaleName || 'esta tienda';
       return res.status(409).json({
