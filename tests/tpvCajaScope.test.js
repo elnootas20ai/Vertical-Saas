@@ -40,8 +40,9 @@ describe('mergeTpvRegisterSessionsPreservingOpen', () => {
 
 describe('resolveActiveTpvRegisterSession', () => {
   const pdvs = [{ _id: 'pdv-1', workCenterId: 'wc-1' }, { _id: 'pdv-2', workCenterId: 'wc-2' }];
-  const openPdv1 = { _id: 's1', status: 'open', pointOfSaleId: 'pdv-1', openedAt: '2026-07-20T08:00:00.000Z' };
-  const openWc1 = { _id: 's1', status: 'open', pointOfSaleId: 'wc-1', openedAt: '2026-07-20T08:00:00.000Z' };
+  const todayIso = new Date().toISOString();
+  const openPdv1 = { _id: 's1', status: 'open', pointOfSaleId: 'pdv-1', openedAt: todayIso };
+  const openWc1 = { _id: 's1', status: 'open', pointOfSaleId: 'wc-1', openedAt: todayIso };
 
   it('holds sticky on tablet even when pick momentarily fails to match', () => {
     const r = resolveActiveTpvRegisterSession({
@@ -89,17 +90,20 @@ describe('resolveActiveTpvRegisterSession', () => {
   });
 
   it('prefers newest open session for the same store (not an ancient July open)', () => {
+    const now = new Date();
+    const todayIso = now.toISOString();
+    const old = new Date(now.getTime() - 16 * 24 * 60 * 60 * 1000).toISOString();
     const july6 = {
       _id: 's-old',
       status: 'open',
       pointOfSaleId: 'pdv-1',
-      openedAt: '2026-07-06T10:00:00.000Z',
+      openedAt: old,
     };
     const today = {
       _id: 's-new',
       status: 'open',
       pointOfSaleId: 'pdv-1',
-      openedAt: '2026-07-22T09:00:00.000Z',
+      openedAt: todayIso,
     };
     const r = resolveActiveTpvRegisterSession({
       sessions: [july6, today],
@@ -111,18 +115,21 @@ describe('resolveActiveTpvRegisterSession', () => {
     expect(r.session?._id).toBe('s-new');
   });
 
-  it('after exit (no sticky), still picks newest even if July 6 is listed first', () => {
+  it('after exit (no sticky), still picks newest even if ancient open is listed first', () => {
+    const now = new Date();
+    const todayIso = now.toISOString();
+    const old = new Date(now.getTime() - 16 * 24 * 60 * 60 * 1000).toISOString();
     const july6 = {
       _id: 's-old',
       status: 'open',
       pointOfSaleId: 'wc-1',
-      openedAt: '2026-07-06T10:00:00.000Z',
+      openedAt: old,
     };
     const today = {
       _id: 's-new',
       status: 'open',
       pointOfSaleId: 'pdv-1',
-      openedAt: '2026-07-22T11:00:00.000Z',
+      openedAt: todayIso,
     };
     const r = resolveActiveTpvRegisterSession({
       sessions: [july6, today],
@@ -132,6 +139,25 @@ describe('resolveActiveTpvRegisterSession', () => {
       holdStickyWhileOpen: true,
     });
     expect(r.session?._id).toBe('s-new');
+  });
+
+  it('does not auto-enter a prior-day-only open session (forces Abrir caja)', () => {
+    const old = new Date(Date.now() - 16 * 24 * 60 * 60 * 1000).toISOString();
+    const july6 = {
+      _id: 's-old',
+      status: 'open',
+      pointOfSaleId: 'pdv-1',
+      openedAt: old,
+    };
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [july6],
+      sticky: july6,
+      pickId: 'pdv-1',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: true,
+    });
+    expect(r.session).toBeNull();
+    expect(r.nextSticky).toBeNull();
   });
 });
 

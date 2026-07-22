@@ -24,7 +24,7 @@ import {
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, Download, Calendar, Eye,
   ShieldCheck, ShieldX, MessageSquare, TrendingUp, TrendingDown, Hash,
   Truck, MapPin,
-  ArrowLeft, Plug, History, ShoppingBag, Radio,
+  ArrowLeft, Plug, History, ShoppingBag, Radio, Lock,
 } from 'lucide-react';
 import {
   buildAggregatorCashRows,
@@ -42,6 +42,7 @@ import {
   buildTpvRegisterSummaryForDay,
   dedupeOpenRegisterSessions,
   isLocalCalendarDay,
+  isTpvRegisterSessionFromPriorCalendarDay,
   localCalendarDayKey,
   localDayBoundsForKey,
   sessionActiveOnCalendarDay,
@@ -200,12 +201,16 @@ function OpenRegisterHero({
   expandedSessionId,
   onToggleSession,
   onViewClosing,
+  onForceClose,
+  forcingSessionId,
 }: {
   sessions: TpvRegisterSession[];
   selectedDate: string;
   expandedSessionId: string | null;
   onToggleSession: (id: string) => void;
   onViewClosing: (session: TpvRegisterSession) => void;
+  onForceClose?: (session: TpvRegisterSession) => void;
+  forcingSessionId?: string | null;
 }) {
   if (sessions.length === 0) return null;
 
@@ -233,15 +238,23 @@ function OpenRegisterHero({
           const expected = calcTpvExpectedCash(session);
           const expanded = expandedSessionId === session._id;
           const openedTime = new Date(session.openedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' });
+          const stale = isTpvRegisterSessionFromPriorCalendarDay(session);
+          const openedDay = new Date(session.openedAt).toLocaleDateString('es-ES', {
+            day: 'numeric',
+            month: 'short',
+          });
+          const busy = forcingSessionId === session._id;
 
           return (
             <div
               key={session._id}
               data-caja-turn={session._id}
               className={`rounded-xl border-2 overflow-hidden transition-all ${
-                expanded
-                  ? 'border-emerald-600 bg-white dark:bg-gray-800 shadow-lg'
-                  : 'border-emerald-300 dark:border-emerald-700 bg-white/90 dark:bg-gray-800/90'
+                stale
+                  ? 'border-amber-500 bg-amber-50/90 dark:bg-amber-950/30'
+                  : expanded
+                    ? 'border-emerald-600 bg-white dark:bg-gray-800 shadow-lg'
+                    : 'border-emerald-300 dark:border-emerald-700 bg-white/90 dark:bg-gray-800/90'
               }`}
             >
               <button
@@ -249,7 +262,7 @@ function OpenRegisterHero({
                 onClick={() => onToggleSession(session._id)}
                 className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-colors"
               >
-                <div className="w-11 h-11 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0">
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${stale ? 'bg-amber-600' : 'bg-emerald-600'}`}>
                   <Store className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -258,16 +271,38 @@ function OpenRegisterHero({
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5 truncate">
                     {session.workerName} · {session.terminalName} · desde {openedTime}
+                    {stale ? ` · abierta el ${openedDay}` : ''}
                   </p>
                 </div>
                 <div className="text-right shrink-0 hidden sm:block">
-                  <div className="text-lg font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  <div className={`text-lg font-bold tabular-nums ${stale ? 'text-amber-700 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
                     {summary.totalSales.toFixed(2)}€
                   </div>
                   <div className="text-[10px] text-gray-500 tabular-nums">Efectivo: {expected.toFixed(2)}€</div>
                 </div>
                 {expanded ? <ChevronUp className="w-5 h-5 text-gray-400 shrink-0" /> : <ChevronDown className="w-5 h-5 text-gray-400 shrink-0" />}
               </button>
+              {(stale || expanded) && onForceClose && (
+                <div className="px-4 pb-3 flex flex-wrap gap-2">
+                  {stale && (
+                    <p className="w-full text-xs text-amber-800 dark:text-amber-200">
+                      Esta caja es de otro día y mezcla pedidos viejos. Ciérrala aquí y abre un turno de hoy en el TPV.
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onForceClose(session);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-xs font-semibold"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    {busy ? 'Cerrando…' : 'Forzar cierre'}
+                  </button>
+                </div>
+              )}
               {expanded && (
                 <div className="border-t border-emerald-100 dark:border-emerald-900/50 p-4">
                   <RegisterCard session={session} onViewClosing={onViewClosing} detailOnly />
@@ -777,6 +812,7 @@ export function CajaPage() {
   const [orders, setOrders] = useState<DeliveryOrder[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [dismissingEmpty, setDismissingEmpty] = useState(false);
+  const [forcingSessionId, setForcingSessionId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnceRef = useRef(false);
   const userCollapsedOpenRef = useRef(false);
@@ -839,7 +875,7 @@ export function CajaPage() {
         if (canValidateClosings) setValidatingSession(session);
         else setViewingClosingSession(session);
       } else if (session.status === 'open') {
-        toast.info('Esta caja sigue abierta. El cierre se realiza desde el TPV en tienda.');
+        toast.info('Esta caja sigue abierta. Puedes forzar el cierre desde Caja (botón Forzar cierre) o cerrarla en el TPV.');
       } else {
         setViewingClosingSession(session);
       }
@@ -1032,6 +1068,36 @@ export function CajaPage() {
     }
   };
 
+  const handleForceCloseOpenSession = async (session: TpvRegisterSession) => {
+    if (!dataUserId || session.status !== 'open') return;
+    const day = new Date(session.openedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
+    const ok = window.confirm(
+      `¿Forzar cierre de la caja de ${session.pointOfSaleName || 'esta tienda'} (abierta el ${day})?\n\nLuego abre un turno nuevo en el TPV para ver solo los pedidos de hoy.`,
+    );
+    if (!ok) return;
+    setForcingSessionId(session._id);
+    try {
+      const expected = calcTpvExpectedCash(session);
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, {
+        ...session,
+        status: 'closed',
+        closedAt: new Date().toISOString(),
+        closedBy: user?.name || user?.email || 'Gerente',
+        closingNotes: `Cierre forzado desde Caja (sesión abierta el ${String(session.openedAt || '').slice(0, 10)})`,
+        expectedCash: expected,
+        finalCashAmount: expected,
+        difference: 0,
+        closingValidationStatus: 'pending',
+      });
+      setSessions((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
+      toast.success('Caja cerrada. Abre un turno de hoy en el TPV.');
+    } catch {
+      toast.error('No se pudo forzar el cierre');
+    } finally {
+      setForcingSessionId(null);
+    }
+  };
+
   useEffect(() => {
     userCollapsedOpenRef.current = false;
     setExpandedSessionId(null);
@@ -1195,6 +1261,8 @@ export function CajaPage() {
             expandedSessionId={expandedSessionId}
             onToggleSession={handleToggleSession}
             onViewClosing={handleViewClosing}
+            onForceClose={handleForceCloseOpenSession}
+            forcingSessionId={forcingSessionId}
           />
         )}
 

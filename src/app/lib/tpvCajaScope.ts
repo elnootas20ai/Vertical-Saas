@@ -346,6 +346,11 @@ export function resolveActiveTpvRegisterSession(params: {
     }
   }
 
+  // Caja de otro día: no entrar (arrastra pedidos viejos). Abrir turno nuevo cierra la vieja en servidor.
+  if (found && isTpvRegisterSessionFromPriorCalendarDay(found)) {
+    return { session: null, nextSticky: null };
+  }
+
   if (found) {
     return { session: found, nextSticky: found };
   }
@@ -366,6 +371,10 @@ export function resolveActiveTpvRegisterSession(params: {
       ? sticky
       : null;
   if (!candidate) {
+    return { session: null, nextSticky: null };
+  }
+
+  if (isTpvRegisterSessionFromPriorCalendarDay(candidate)) {
     return { session: null, nextSticky: null };
   }
 

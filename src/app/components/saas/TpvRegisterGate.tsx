@@ -33,6 +33,7 @@ import {
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import {
+  isTpvRegisterSessionFromPriorCalendarDay,
   mergeTpvRegisterSessionsPreservingOpen,
   pickNewestOpenRegisterSessionForStore,
   resolveActiveTpvRegisterSession,
@@ -3814,8 +3815,8 @@ export function TpvRegisterGate({
     if (!dataUserId) return;
     const pdvId = String(data.pointOfSaleId || '').trim();
     const localOpen = pickNewestOpenRegisterSessionForStore(sessions, pdvId, pointsOfSale);
-    if (localOpen) {
-      // Ya hay caja abierta en esa tienda: entrar en ella sin toast (no bloquea ni molesta al abrir).
+    // Solo reenganchar si es caja de HOY. Si es de otro día, seguir a crear (el servidor cierra la vieja).
+    if (localOpen && !isTpvRegisterSessionFromPriorCalendarDay(localOpen)) {
       if (!isWorkerUser && pdvId) {
         const bid = resolveBusinessScopeId(currentBusiness);
         if (bid && dataUserId) {
@@ -3917,6 +3918,59 @@ export function TpvRegisterGate({
     } catch (err) {
       if (err instanceof TpvRegisterSessionConflictError) {
         const existing = err.existingSession;
+        // Conflicto con caja de otro día: cerrarla y reintentar apertura de hoy.
+        if (existing && isTpvRegisterSessionFromPriorCalendarDay(existing)) {
+          try {
+            const expected = calcTpvExpectedCash(existing);
+            const closed = await updateTpvRegisterSessionRequest(dataUserId, {
+              ...existing,
+              status: 'closed',
+              closedAt: new Date().toISOString(),
+              closedBy: data.workerName || 'Sistema',
+              closingNotes: `Cierre automático: jornada antigua (nueva apertura)`,
+              expectedCash: expected,
+              finalCashAmount: expected,
+              difference: 0,
+            } as TpvRegisterSession);
+            setSessions((prev) => prev.map((s) => (s._id === closed._id ? closed : s)));
+          } catch (closeErr) {
+            toast.error(toUserFacingMessage(closeErr, 'No se pudo cerrar la caja antigua'));
+            return;
+          }
+          try {
+            const writeBusinessId = resolveRetailOpsWriteBusinessId(
+              scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
+              businesses,
+            );
+            const created = await createTpvRegisterSessionRequest(dataUserId, {
+              business_id: writeBusinessId || scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
+              workerId: data.workerId || '',
+              workerName: data.workerName,
+              pointOfSaleId: data.pointOfSaleId,
+              pointOfSaleName: data.pointOfSaleName,
+              terminalId: data.terminalId,
+              terminalName: data.terminalName,
+              datafonName: data.datafonName,
+              printerName: data.printerName,
+              openedBy: data.workerName,
+              openingCashCount: data.counts,
+              initialCashAmount: total,
+              status: 'open',
+              transactions: [],
+              cashCounts: [],
+              incidents: [],
+              linkedOrderIds: [],
+              salesByChannel: {},
+            } as Partial<TpvRegisterSession>);
+            setSessions((prev) => [created, ...prev.filter((s) => s._id !== existing._id)]);
+            window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: created }));
+            setPostCloseSession(null);
+            return;
+          } catch (retryErr) {
+            toast.error(toUserFacingMessage(retryErr, 'No se pudo abrir la caja de hoy'));
+            return;
+          }
+        }
         const pdvId = String(data.pointOfSaleId || existing.pointOfSaleId || '').trim();
         setSessions((prev) => {
           const exists = prev.some((s) => s._id === existing._id);

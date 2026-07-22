@@ -2743,8 +2743,27 @@ export async function createTpvRegisterSession(req, res) {
     const scopedSessions = businessId
       ? filterTpvRegisterSessionsForBusiness(allSessions, businessId, scopedPdvIds)
       : allSessions;
+
+    // Alias tienda: PDV id y workCenterId (cajas viejas a veces guardan el WC).
+    const scopedPdvsList = businessId
+      ? await listScopedPointsOfSaleForBusiness(req, userId, businessId)
+      : await listScopedPointsOfSaleForUser(req, userId);
+    const pdvMeta =
+      (scopedPdvsList || []).find((p) => String(p._id || '').trim() === pdvId) ||
+      (scopedPdvsList || []).find((p) => String(p.workCenterId || '').trim() === pdvId) ||
+      null;
+    const storeAliases = new Set([pdvId]);
+    if (pdvMeta) {
+      storeAliases.add(String(pdvMeta._id || '').trim());
+      const wc = String(pdvMeta.workCenterId || '').trim();
+      if (wc) storeAliases.add(wc);
+    }
+
     const openForPdv = (scopedSessions || []).filter(
-      (s) => s.status === 'open' && !s.deletedAt && String(s.pointOfSaleId || '').trim() === pdvId,
+      (s) =>
+        s.status === 'open' &&
+        !s.deletedAt &&
+        storeAliases.has(String(s.pointOfSaleId || '').trim()),
     );
 
     for (const stale of openForPdv) {
@@ -2771,12 +2790,14 @@ export async function createTpvRegisterSession(req, res) {
     const refreshedScoped = businessId
       ? filterTpvRegisterSessionsForBusiness(refreshed, businessId, scopedPdvIds)
       : refreshed;
-    const alreadyOpen = findOpenTpvRegisterSessionForPointOfSale(
-      refreshedScoped,
-      pdvId,
-      businessId,
-      scopedPdvIds,
-    );
+    const alreadyOpen = (refreshedScoped || [])
+      .filter(
+        (s) =>
+          s.status === 'open' &&
+          !s.deletedAt &&
+          storeAliases.has(String(s.pointOfSaleId || '').trim()),
+      )
+      .sort((a, b) => String(b.openedAt || '').localeCompare(String(a.openedAt || '')))[0] || null;
     if (alreadyOpen) {
       const pdvLabel = alreadyOpen.pointOfSaleName || 'esta tienda';
       return res.status(409).json({
