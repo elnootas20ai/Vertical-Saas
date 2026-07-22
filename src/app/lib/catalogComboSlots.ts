@@ -158,28 +158,28 @@ export type ComboMenuPreset = {
 export const COMBO_MENU_PRESETS: ComboMenuPreset[] = [
   {
     id: 'estandar',
-    label: 'Estándar',
-    hint: 'Plato + complemento + bebida',
+    label: 'Individual',
+    hint: '1 pizza + 1 complemento + 1 bebida',
     structure: DEFAULT_COMBO_STRUCTURE,
   },
   {
     id: 'duo',
     label: 'Dúo',
-    hint: '2 platos + complemento + bebida',
+    hint: '2 pizzas + 1 complemento + 2 bebidas',
     structure: [
-      { slotKind: 'main', label: 'Pizzas o burgers (×2)', required: true, expectedCount: 2 },
+      { slotKind: 'main', label: 'Pizzas (×2)', required: true, expectedCount: 2 },
       { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
-      { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
+      { slotKind: 'drink', label: 'Bebidas (×2)', required: true, expectedCount: 2 },
     ],
   },
   {
     id: 'familiar',
     label: 'Familiar',
-    hint: '2 platos + 2 complementos + 2 bebidas',
+    hint: '3 pizzas + 2 complementos + 4 bebidas',
     structure: [
-      { slotKind: 'main', label: 'Pizzas o burgers (×2)', required: true, expectedCount: 2 },
+      { slotKind: 'main', label: 'Pizzas (×3)', required: true, expectedCount: 3 },
       { slotKind: 'side', label: 'Complementos (×2)', required: true, expectedCount: 2 },
-      { slotKind: 'drink', label: 'Bebidas (×2)', required: true, expectedCount: 2 },
+      { slotKind: 'drink', label: 'Bebidas (×4)', required: true, expectedCount: 4 },
     ],
   },
   {
@@ -328,8 +328,12 @@ function presetStructureForMenu(presetId: string): ComboStructureSlot[] {
 export function buildComboMenuSections(
   presetId: string,
   catalog: CatalogItem[],
+  structureOverride?: ComboStructureSlot[] | null,
 ): ComboMenuCatalogSection[] {
-  const structure = presetStructureForMenu(presetId);
+  const structure =
+    Array.isArray(structureOverride) && structureOverride.length > 0
+      ? structureOverride
+      : presetStructureForMenu(presetId);
   const sections: ComboMenuCatalogSection[] = [];
 
   for (const slot of structure) {
@@ -995,9 +999,12 @@ export function resolveTpvComboMenuSections(
     comboItem.customFields,
     comboItem.comboItems?.length ?? 0,
   );
-  const presetId = structure.length > 0 ? inferComboMenuPresetId(structure) : 'estandar';
-  const effectivePreset = presetId === 'custom' ? 'estandar' : presetId || 'estandar';
-  return buildComboMenuSections(effectivePreset, catalog);
+  if (structure.length > 0) {
+    // Usar SIEMPRE los expectedCount guardados (Individual/Dúo/Familiar), no caer a 1-1-1.
+    const presetId = inferComboMenuPresetId(structure);
+    return buildComboMenuSections(presetId === 'custom' ? 'estandar' : presetId, catalog, structure);
+  }
+  return buildComboMenuSections('estandar', catalog);
 }
 
 /** Menú / combo vendible en TPV (tipo combo, categoría o productos incluidos). */

@@ -18,6 +18,7 @@ import {
   normalizeComboItemsForSave,
   pickComboProductInSection,
   resolveComboRefSlotKind,
+  resolveTpvComboMenuSections,
   structureFromSectionDraft,
   totalUnitsInComboSlot,
   validateComboSectionDraft,
@@ -286,6 +287,7 @@ describe('catalogComboSlots', () => {
       item({ _id: 'rec', name: 'Receta Margarita', category: 'Pizzas' }),
       item({ _id: 'c1', name: 'Patatas', category: 'Complementos' }),
       item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+      item({ _id: 'b2', name: 'Fanta', category: 'Bebidas' }),
     ];
     const sections = buildComboMenuSections('duo', catalog);
     const pizzaSection = sections.find((s) => s.groupByMainFamily === 'pizza');
@@ -304,9 +306,66 @@ describe('catalogComboSlots', () => {
 
     const side = sections.find((s) => s.slotKind === 'side');
     const drink = sections.find((s) => s.slotKind === 'drink');
+    expect(drink?.slotQuota).toBe(2);
     const withSide = pickComboProductInSection(side, catalog[5], afterSecond, catalog);
-    const complete = pickComboProductInSection(drink, catalog[6], withSide, catalog);
+    const withDrink1 = pickComboProductInSection(drink, catalog[6], withSide, catalog);
+    const complete = pickComboProductInSection(drink, catalog[7], withDrink1, catalog);
     expect(isComboMenuComplete(sections, complete, catalog)).toBe(true);
+  });
+
+  it('Familiar pide 3 pizzas, 2 complementos y 4 bebidas', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'A', category: 'Pizzas' }),
+      item({ _id: 'p2', name: 'B', category: 'Pizzas' }),
+      item({ _id: 'p3', name: 'C', category: 'Premium' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Complementos' }),
+      item({ _id: 'c2', name: 'Aros', category: 'Complementos' }),
+      item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+      item({ _id: 'b2', name: 'Fanta', category: 'Bebidas' }),
+      item({ _id: 'b3', name: 'Agua', category: 'Bebidas' }),
+      item({ _id: 'b4', name: 'Cerveza', category: 'Bebidas' }),
+    ];
+    const sections = buildComboMenuSections('familiar', catalog);
+    const pizza = sections.find((s) => s.groupByMainFamily === 'pizza');
+    const side = sections.find((s) => s.slotKind === 'side');
+    const drink = sections.find((s) => s.slotKind === 'drink');
+    expect(pizza?.expectedCount).toBe(3);
+    expect(side?.slotQuota).toBe(2);
+    expect(drink?.slotQuota).toBe(4);
+
+    let sel = [];
+    sel = pickComboProductInSection(pizza, catalog[0], sel, catalog);
+    sel = pickComboProductInSection(pizza, catalog[1], sel, catalog);
+    sel = pickComboProductInSection(pizza, catalog[2], sel, catalog);
+    sel = pickComboProductInSection(side, catalog[3], sel, catalog);
+    sel = pickComboProductInSection(side, catalog[4], sel, catalog);
+    for (const b of [catalog[5], catalog[6], catalog[7], catalog[8]]) {
+      sel = pickComboProductInSection(drink, b, sel, catalog);
+    }
+    expect(isComboMenuComplete(sections, sel, catalog)).toBe(true);
+  });
+
+  it('resolveTpvComboMenuSections respeta expectedCount custom (no cae a 1-1-1)', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'A', category: 'Pizzas' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Complementos' }),
+      item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const combo = {
+      customFields: {
+        comboStructureConfirmed: true,
+        comboStructure: [
+          { slotKind: 'main', label: 'Pizzas', required: true, expectedCount: 3 },
+          { slotKind: 'side', label: 'Comp', required: true, expectedCount: 2 },
+          { slotKind: 'drink', label: 'Bebidas', required: true, expectedCount: 4 },
+        ],
+      },
+      comboItems: [],
+    };
+    const sections = resolveTpvComboMenuSections(combo, catalog);
+    expect(sections.find((s) => s.groupByMainFamily === 'pizza')?.expectedCount).toBe(3);
+    expect(sections.find((s) => s.slotKind === 'side')?.slotQuota).toBe(2);
+    expect(sections.find((s) => s.slotKind === 'drink')?.slotQuota).toBe(4);
   });
 
   it('Individual / estándar / familiar incluyen Premium y Especialidad y excluyen Receta', () => {
@@ -328,6 +387,38 @@ describe('catalogComboSlots', () => {
         'p3',
       ]);
     }
+  });
+
+  it('Individual (1 pizza + side allowlist + drink) completes and swaps pizza', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'p2', name: 'Trufa', category: 'Premium' }),
+      item({ _id: 'deluxe', name: 'Patatas Deluxe', category: 'Complementos' }),
+      item({ _id: 'mona', name: 'Patatas Monalisa', category: 'Complementos' }),
+      item({ _id: 'other', name: 'Patatas Fritas', category: 'Complementos' }),
+      item({ _id: 'b1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const sections = buildComboMenuSections('estandar', catalog);
+    const pizzaSection = sections.find((s) => s.groupByMainFamily === 'pizza');
+    const side = sections.find((s) => s.slotKind === 'side');
+    const drink = sections.find((s) => s.slotKind === 'drink');
+    expect(pizzaSection?.expectedCount).toBe(1);
+
+    const allowSide = catalogProductsForComboSection(side, catalog, undefined, {
+      allowlistIds: ['deluxe', 'mona'],
+    }).map((p) => p._id);
+    expect(allowSide.sort()).toEqual(['deluxe', 'mona']);
+
+    let sel = pickComboProductInSection(pizzaSection, catalog[0], [], catalog);
+    sel = pickComboProductInSection(side, catalog[2], sel, catalog);
+    sel = pickComboProductInSection(drink, catalog[5], sel, catalog);
+    expect(isComboMenuComplete(sections, sel, catalog)).toBe(true);
+
+    const swapped = pickComboProductInSection(pizzaSection, catalog[1], sel, catalog);
+    expect(swapped?.filter((r) => resolveComboRefSlotKind(r, catalog) === 'main').map((r) => r.productId)).toEqual([
+      'p2',
+    ]);
+    expect(isComboMenuComplete(sections, swapped, catalog)).toBe(true);
   });
 
   it('Top Burgers y productos con burger en el nombre cuentan como main', () => {

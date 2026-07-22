@@ -97,11 +97,17 @@ export function filterTpvCatalogItems(
     activeBusinessType: scope.activeBusinessType,
   };
 
-  // Solo carta vendible: nunca ingredientes/stock en el TPV.
+  // Solo carta vendible: nunca ingredientes/envases de almacén puro en el TPV.
+  // OJO: muchas pizzas de carta tienen isStockItem=true (control de stock) y DEBEN verse.
   const sellableRaw = rawItems.filter((item) => {
     if ((item.module || 'catalog') !== 'catalog') return false;
-    if (item.module === 'stock' || item.isStockItem === true) return false;
-    if (item.stockCategory && item.stockCategory !== 'finished_product') {
+    if (String(item.module || '').trim() === 'stock') return false;
+    if (item.isStockItem === true) {
+      const sc = String(item.stockCategory || '').trim();
+      if (['ingredient', 'packaging', 'cleaning', 'consumable', 'raw_material'].includes(sc)) {
+        return false;
+      }
+    } else if (item.stockCategory && item.stockCategory !== 'finished_product') {
       const stockLike = ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable'];
       if (stockLike.includes(item.stockCategory)) return false;
     }
