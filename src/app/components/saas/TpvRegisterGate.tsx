@@ -1355,6 +1355,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
   const [manualFood, setManualFood] = useState({ pizza: '', burger: '', taco: '' });
   const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(false);
+  const [showExtraDetail, setShowExtraDetail] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
   const summary = buildTpvRegisterSummary(session);
@@ -1463,13 +1464,16 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Lock className="w-5 h-5 text-red-500" /> Cierre de caja</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {session.workerName} · Abierta {new Date(session.openedAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                {session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {session.workerName}
+                {showDeliveryClosingSlots ? ' · Contar efectivo + apps' : ''}
+              </p>
             </div>
             <button onClick={onCancel} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"><X className="w-5 h-5 text-gray-500" /></button>
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 space-y-5">
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4">
           {restaurantWarnings.length > 0 ? (
             <div className="rounded-xl border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-600 p-4 space-y-1">
               <p className="text-sm font-bold text-amber-900 dark:text-amber-100 flex items-center gap-2">
@@ -1485,326 +1489,281 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               </p>
             </div>
           ) : null}
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-xl">
-              <div className="text-xs text-green-600 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> Ventas</div>
-              <div className="text-lg font-bold text-green-700 dark:text-green-400">{summary.totalSales.toFixed(2)}€</div>
-            </div>
-            <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">
-              <div className="text-xs text-red-600 flex items-center gap-1"><TrendingDown className="w-3 h-3" /> Devoluciones</div>
-              <div className="text-lg font-bold text-red-700 dark:text-red-400">{summary.totalReturns.toFixed(2)}€</div>
-            </div>
-            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-              <div className="text-xs text-blue-600">Entradas</div>
-              <div className="text-lg font-bold text-blue-700 dark:text-blue-400">{summary.totalCashIn.toFixed(2)}€</div>
-            </div>
-            <div className="p-3 bg-orange-50 dark:bg-orange-900/20 rounded-xl">
-              <div className="text-xs text-orange-600">Salidas</div>
-              <div className="text-lg font-bold text-orange-700 dark:text-orange-400">{summary.totalCashOut.toFixed(2)}€</div>
-            </div>
-          </div>
 
-          {/* Sales by method */}
-          <div className="flex gap-2 flex-wrap text-xs">
-            {summary.salesByMethod.efectivo > 0 && <span className="px-2.5 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 rounded-lg font-medium flex items-center gap-1"><Banknote className="w-3 h-3" /> Efectivo: {summary.salesByMethod.efectivo.toFixed(2)}€</span>}
-            {summary.salesByMethod.tarjeta > 0 && <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 rounded-lg font-medium flex items-center gap-1"><CreditCard className="w-3 h-3" /> Tarjeta: {summary.salesByMethod.tarjeta.toFixed(2)}€</span>}
-            {summary.salesByMethod.bizum > 0 && <span className="px-2.5 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 rounded-lg font-medium flex items-center gap-1"><PhoneIcon className="w-3 h-3" /> Bizum: {summary.salesByMethod.bizum.toFixed(2)}€</span>}
-            {summary.salesByMethod.online > 0 && <span className="px-2.5 py-1 bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 rounded-lg font-medium flex items-center gap-1"><Wifi className="w-3 h-3" /> Online: {summary.salesByMethod.online.toFixed(2)}€</span>}
-            <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium flex items-center gap-1"><Receipt className="w-3 h-3" /> {summary.totalTransactions} operaciones</span>
-          </div>
-
-          <RegisterShiftSalesBreakdown
-            session={session}
-            orders={shiftOrders}
-            loading={shiftOrdersLoading}
-            registerSummary={summary}
-          />
-
-          {/* Caja + integradores juntos: conteos y totales que suman */}
-          <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Cierre: caja + integradores</h3>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-                Efectivo del TPV e importes de Glovo / Uber / Just Eat / Flipdish. Al rellenar, el total general suma todo.
-              </p>
-            </div>
-
-            <div className="p-4 space-y-4">
-              {showDeliveryClosingSlots ? (
-                <div className="rounded-xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/20 p-3 sm:p-4 space-y-3">
-                  <div>
-                    <p className="text-xs font-bold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
-                      Slots de cierre
-                    </p>
-                    <p className="text-[11px] text-emerald-900/70 dark:text-emerald-200/70 mt-0.5">
-                      Efectivo contado (€) y totales de pizzas, burgers y tacos. Esos números van al general de la caja.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-                    <label className="rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                        <Banknote className="w-3 h-3" /> Efectivo
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="0,00"
-                        value={cashSlotDisplay}
-                        onFocus={() => {
-                          setCashSlotFocused(true);
-                          setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
-                        }}
-                        onBlur={() => setCashSlotFocused(false)}
-                        onChange={(e) => handleCashSlotChange(e.target.value)}
-                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/40 dark:bg-emerald-950/40 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                      />
-                      <span className="text-[10px] text-gray-500">€ en caja</span>
-                    </label>
-                    <label className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">
-                        Pizzas
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={manualFood.pizza}
-                        onChange={(e) => handleFoodSlotChange('pizza', e.target.value)}
-                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                      />
-                      <span className="text-[10px] text-gray-500">
-                        Sistema: {foodReport.total.pizza}
-                      </span>
-                    </label>
-                    <label className="rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-orange-800 dark:text-orange-200">
-                        Burgers
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={manualFood.burger}
-                        onChange={(e) => handleFoodSlotChange('burger', e.target.value)}
-                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-orange-200 dark:border-orange-800 rounded-lg bg-orange-50/50 dark:bg-orange-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/30"
-                      />
-                      <span className="text-[10px] text-gray-500">
-                        Sistema: {foodReport.total.burger}
-                      </span>
-                    </label>
-                    <label className="rounded-xl border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-lime-800 dark:text-lime-200">
-                        Tacos
-                      </span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="0"
-                        value={manualFood.taco}
-                        onChange={(e) => handleFoodSlotChange('taco', e.target.value)}
-                        className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-lime-200 dark:border-lime-800 rounded-lg bg-lime-50/50 dark:bg-lime-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-lime-500/30"
-                      />
-                      <span className="text-[10px] text-gray-500">
-                        Sistema: {foodReport.total.taco}
-                      </span>
-                    </label>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200 tabular-nums">
-                    Pizzas {foodReport.total.pizza}
-                  </span>
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-orange-100 text-orange-900 dark:bg-orange-950/50 dark:text-orange-200 tabular-nums">
-                    Burgers {foodReport.total.burger}
-                  </span>
-                  <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-lime-100 text-lime-900 dark:bg-lime-950/50 dark:text-lime-200 tabular-nums">
-                    Tacos {foodReport.total.taco}
-                  </span>
-                </div>
-              )}
-
-              {/* Cash flow summary */}
-              <div className="bg-gray-50 dark:bg-gray-900 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between"><span className="text-gray-500">Fondo de apertura</span><span className="font-semibold text-gray-900 dark:text-gray-100">{session.initialCashAmount.toFixed(2)}€</span></div>
-                <div className="flex justify-between"><span className="text-green-600">+ Cobros en efectivo</span><span className="font-semibold text-green-700">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
-                {cashStaffConsumption > 0 && (
-                  <div className="flex justify-between"><span className="text-green-600">+ Consumo equipo (efectivo)</span><span className="font-semibold text-green-700">{cashStaffConsumption.toFixed(2)}€</span></div>
-                )}
-                <div className="flex justify-between"><span className="text-blue-600">+ Entradas de efectivo</span><span className="font-semibold text-blue-700">{summary.totalCashIn.toFixed(2)}€</span></div>
-                <div className="flex justify-between"><span className="text-red-600">− Devoluciones efectivo</span><span className="font-semibold text-red-700">{cashReturnsTotal.toFixed(2)}€</span></div>
-                <div className="flex justify-between"><span className="text-orange-600">− Salidas de efectivo</span><span className="font-semibold text-orange-700">{summary.totalCashOut.toFixed(2)}€</span></div>
-                {(() => {
-                  const cashOuts = (session.transactions || [])
-                    .filter((t) => t.type === 'cash_out' || t.type === 'expense')
-                    .slice()
-                    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-                  if (cashOuts.length === 0) return null;
-                  return (
-                    <div className="mt-2 rounded-lg border border-orange-200 dark:border-orange-800 bg-orange-50/80 dark:bg-orange-950/30 p-2.5 space-y-1.5">
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-orange-700 dark:text-orange-300">
-                        Detalle salidas (motivo)
-                      </p>
-                      {cashOuts.map((tx) => (
-                        <div key={tx.id} className="flex items-start justify-between gap-2 text-xs">
-                          <div className="min-w-0">
-                            <p className="font-medium text-gray-900 dark:text-gray-100 break-words">
-                              {tx.description?.trim() || 'Sin motivo indicado'}
-                            </p>
-                            <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                              {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                              {tx.registeredBy ? ` · ${tx.registeredBy}` : ''}
-                            </p>
-                          </div>
-                          <span className="font-bold tabular-nums text-orange-700 dark:text-orange-300 shrink-0">
-                            −{Number(tx.amount || 0).toFixed(2)}€
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
-                  <span className="text-gray-900 dark:text-gray-100">= Efectivo TPV</span>
-                  <span className="text-emerald-700 dark:text-emerald-400 text-base">{expectedTpv.toFixed(2)}€</span>
-                </div>
-                {aggregatorCashTotal > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-purple-600 dark:text-purple-300">+ Efectivo integradores</span>
-                    <span className="font-semibold text-purple-700 dark:text-purple-300">{aggregatorCashTotal.toFixed(2)}€</span>
-                  </div>
-                )}
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
-                  <span className="text-gray-900 dark:text-gray-100">= Efectivo esperado (arqueo)</span>
-                  <span className="text-emerald-700 dark:text-emerald-400 text-base">{expected.toFixed(2)}€</span>
-                </div>
-              </div>
-
-              {/* Cash count detail (optional billetes) */}
+          {/* 1) Efectivo contado + comida */}
+          {showDeliveryClosingSlots ? (
+            <div className="rounded-xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 sm:p-4 space-y-3">
               <div>
-                <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-                  {showDeliveryClosingSlots ? 'Detalle billetes/monedas (opcional)' : 'Conteo de efectivo de cierre'}
-                </h4>
-                <CashCountGrid
-                  counts={counts}
-                  onChange={(next) => {
-                    setCounts(next);
-                    if (!cashSlotFocused) {
-                      const total = calcDenominationTotal(next);
-                      setCashSlot(total > 0 ? total.toFixed(2) : '');
-                    }
-                  }}
-                />
+                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">1. Contar la caja</p>
+                <p className="text-[11px] text-emerald-800/70 dark:text-emerald-200/70 mt-0.5">
+                  Efectivo físico y unidades vendidas (pizzas / burgers / tacos).
+                </p>
               </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <label className="rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1 col-span-2 sm:col-span-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
+                    <Banknote className="w-3 h-3" /> Efectivo contado
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={cashSlotDisplay}
+                    onFocus={() => {
+                      setCashSlotFocused(true);
+                      setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
+                    }}
+                    onBlur={() => setCashSlotFocused(false)}
+                    onChange={(e) => handleCashSlotChange(e.target.value)}
+                    className="w-full px-2.5 py-2.5 text-lg font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/40 dark:bg-emerald-950/40 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                  <span className="text-[10px] text-gray-500">€ en caja física</span>
+                </label>
+                <label className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">🍕 Pizzas</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={manualFood.pizza}
+                    onChange={(e) => handleFoodSlotChange('pizza', e.target.value)}
+                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                  />
+                  <span className="text-[10px] text-gray-500">Sistema: {foodReport.total.pizza}</span>
+                </label>
+                <label className="rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-orange-800 dark:text-orange-200">🍔 Burgers</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={manualFood.burger}
+                    onChange={(e) => handleFoodSlotChange('burger', e.target.value)}
+                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-orange-200 dark:border-orange-800 rounded-lg bg-orange-50/50 dark:bg-orange-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+                  />
+                  <span className="text-[10px] text-gray-500">Sistema: {foodReport.total.burger}</span>
+                </label>
+                <label className="rounded-xl border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-lime-800 dark:text-lime-200">🌮 Tacos</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={manualFood.taco}
+                    onChange={(e) => handleFoodSlotChange('taco', e.target.value)}
+                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-lime-200 dark:border-lime-800 rounded-lg bg-lime-50/50 dark:bg-lime-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-lime-500/30"
+                  />
+                  <span className="text-[10px] text-gray-500">Sistema: {foodReport.total.taco}</span>
+                </label>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+                Conteo de efectivo de cierre
+              </h4>
+              <CashCountGrid
+                counts={counts}
+                onChange={(next) => {
+                  setCounts(next);
+                  if (!cashSlotFocused) {
+                    const total = calcDenominationTotal(next);
+                    setCashSlot(total > 0 ? total.toFixed(2) : '');
+                  }
+                }}
+              />
+            </div>
+          )}
 
-              {/* Difference */}
-              {countedTotal > 0 && (
-                <div className={`p-4 rounded-xl border-2 ${diff === 0 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : diff > 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-bold text-gray-900 dark:text-gray-100">Diferencia efectivo</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{countedTotal.toFixed(2)}€ contado − {expected.toFixed(2)}€ esperado</div>
-                    </div>
-                    <div className={`text-2xl font-bold ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                      {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
-                    </div>
-                  </div>
-                  {diff === 0 && <p className="text-xs text-green-600 mt-1 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> La caja cuadra perfectamente</p>}
-                  {diff !== 0 && <p className="text-xs mt-1 flex items-center gap-1 {diff > 0 ? 'text-blue-600' : 'text-red-600'}"><AlertTriangle className="w-3 h-3" /> {diff > 0 ? 'Hay un sobrante de efectivo' : 'Falta efectivo en la caja'}</p>}
-                </div>
-              )}
-
+          {/* 2) Integraciones */}
+          {showDeliveryClosingSlots && (
+            <div className="space-y-2">
+              <div>
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">2. Integraciones</p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Glovo, Uber, Just Eat, Flipdish. El efectivo de cada una se suma al arqueo con el TPV.
+                </p>
+              </div>
               <AggregatorClosingEditor
                 autoRows={aggregatorRows}
                 manualByChannel={manualAggregatorTotals}
                 manualCashByChannel={manualAggregatorCash}
                 onManualChange={handleManualAggregatorChange}
                 onManualCashChange={handleManualAggregatorCashChange}
-                title="4 integradores (turno)"
-                foodReport={foodReport}
-                closingFoodTotal={showDeliveryClosingSlots ? closingFood : null}
+                title="Apps de delivery"
               />
-
-              <div className="rounded-xl border-2 border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 p-4 space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                  Total general del cierre
-                </p>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-300">Efectivo TPV</span>
-                  <span className="font-semibold tabular-nums">{expectedTpv.toFixed(2)}€</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-300">Efectivo contado (slot)</span>
-                  <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{countedTotal.toFixed(2)}€</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-300">Efectivo integradores (entra en caja)</span>
-                  <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{aggregatorCashTotal.toFixed(2)}€</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600 dark:text-gray-300">Total 4 integradores</span>
-                  <span className="font-semibold tabular-nums text-purple-700 dark:text-purple-300">{aggregatorEuroTotal.toFixed(2)}€</span>
-                </div>
-                <div className="border-t border-emerald-200 dark:border-emerald-800 pt-2 flex justify-between font-bold text-base">
-                  <span className="text-gray-900 dark:text-gray-100">Arqueo esperado (TPV + efectivo integradores)</span>
-                  <span className="text-emerald-700 dark:text-emerald-400 tabular-nums">{expected.toFixed(2)}€</span>
-                </div>
-                <div className="flex justify-between text-sm font-semibold">
-                  <span className="text-gray-700 dark:text-gray-200">Total negocio (TPV + tot. integradores)</span>
-                  <span className="tabular-nums">{grandEuroTotal.toFixed(2)}€</span>
-                </div>
-                <div className="flex flex-wrap gap-2 pt-1 text-xs font-semibold text-gray-700 dark:text-gray-200">
-                  <span>🍕 {closingFood.pizza} pizzas</span>
-                  <span>·</span>
-                  <span>🍔 {closingFood.burger} burgers</span>
-                  <span>·</span>
-                  <span>🌮 {closingFood.taco} tacos</span>
-                </div>
-              </div>
             </div>
+          )}
+
+          {/* 3) Resumen arqueo (lo que cuadra la caja) */}
+          <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-4 space-y-2">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+              {showDeliveryClosingSlots ? '3. Arqueo' : 'Arqueo'}
+            </p>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600 dark:text-gray-300">Efectivo TPV (pedidos + fondo − salidas)</span>
+              <span className="font-semibold tabular-nums">{expectedTpv.toFixed(2)}€</span>
+            </div>
+            {showDeliveryClosingSlots && (
+              <div className="flex justify-between text-sm">
+                <span className="text-purple-700 dark:text-purple-300">+ Efectivo integraciones</span>
+                <span className="font-semibold tabular-nums text-purple-700 dark:text-purple-300">{aggregatorCashTotal.toFixed(2)}€</span>
+              </div>
+            )}
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
+              <span className="text-gray-900 dark:text-gray-100">Esperado en caja</span>
+              <span className="text-emerald-700 dark:text-emerald-400 text-base tabular-nums">{expected.toFixed(2)}€</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600 dark:text-gray-300">Contado</span>
+              <span className="font-semibold tabular-nums">{countedTotal.toFixed(2)}€</span>
+            </div>
+            {countedTotal > 0 && (
+              <div className={`mt-1 p-3 rounded-xl border-2 ${diff === 0 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : diff > 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-gray-900 dark:text-gray-100">Diferencia</span>
+                  <span className={`text-xl font-bold tabular-nums ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                    {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+                  </span>
+                </div>
+                {diff === 0 && (
+                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> La caja cuadra
+                  </p>
+                )}
+                {diff !== 0 && (
+                  <p className={`text-xs mt-1 flex items-center gap-1 ${diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                    <AlertTriangle className="w-3 h-3" /> {diff > 0 ? 'Sobrante' : 'Falta efectivo'}
+                  </p>
+                )}
+              </div>
+            )}
+            {showDeliveryClosingSlots && aggregatorEuroTotal > 0 && (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
+                Ventas apps (info): {aggregatorEuroTotal.toFixed(2)}€ · Negocio TPV+apps: {grandEuroTotal.toFixed(2)}€
+              </p>
+            )}
           </div>
 
-          {session.cashCounts.length > 0 && (
-            <div>
-              <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Arqueos realizados</h4>
-              <div className="space-y-1.5">
-                {session.cashCounts.map(cc => (
-                  <div key={cc.id} className="flex items-center justify-between text-xs p-2.5 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <div>
-                      <span className="text-gray-600 dark:text-gray-400">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}</span>
-                      {cc.notes && <span className="text-gray-400 ml-2">· {cc.notes}</span>}
-                    </div>
-                    <span className={`font-semibold ${cc.difference === 0 ? 'text-green-600' : cc.difference > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                      {cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€ {cc.difference === 0 ? '✓' : ''}
-                    </span>
+          {/* Detalle opcional (plegado) */}
+          <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowExtraDetail((v) => !v)}
+              className="w-full px-3 py-2.5 flex items-center justify-between text-left text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/80"
+            >
+              <span>{showExtraDetail ? 'Ocultar detalle del turno' : 'Ver detalle del turno (ventas, salidas…)'}</span>
+              {showExtraDetail ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            {showExtraDetail && (
+              <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="p-2.5 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                    <div className="text-[10px] text-green-600">Ventas</div>
+                    <div className="text-sm font-bold text-green-700 dark:text-green-400">{summary.totalSales.toFixed(2)}€</div>
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                  <div className="p-2.5 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                    <div className="text-[10px] text-red-600">Devoluciones</div>
+                    <div className="text-sm font-bold text-red-700 dark:text-red-400">{summary.totalReturns.toFixed(2)}€</div>
+                  </div>
+                  <div className="p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <div className="text-[10px] text-blue-600">Entradas</div>
+                    <div className="text-sm font-bold text-blue-700 dark:text-blue-400">{summary.totalCashIn.toFixed(2)}€</div>
+                  </div>
+                  <div className="p-2.5 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                    <div className="text-[10px] text-orange-600">Salidas</div>
+                    <div className="text-sm font-bold text-orange-700 dark:text-orange-400">{summary.totalCashOut.toFixed(2)}€</div>
+                  </div>
+                </div>
 
-          {(session.incidents?.length || 0) > 0 && (
-            <div>
-              <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Incidencias ({session.incidents.length})</h4>
-              <div className="space-y-1.5">
-                {session.incidents.map(inc => (
-                  <div key={inc.id} className="flex items-center justify-between text-xs p-2.5 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${inc.severity === 'high' ? 'bg-red-100 text-red-700' : inc.severity === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>{inc.severity === 'high' ? 'Alta' : inc.severity === 'medium' ? 'Media' : 'Baja'}</span>
-                      <span className="text-gray-600 dark:text-gray-400 truncate max-w-[200px]">{inc.description}</span>
-                    </div>
-                    {inc.amount != null && <span className="font-semibold text-gray-700 dark:text-gray-300">{inc.amount.toFixed(2)}€</span>}
+                <div className="flex gap-2 flex-wrap text-[11px]">
+                  {summary.salesByMethod.efectivo > 0 && <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 rounded-lg font-medium">Efectivo: {summary.salesByMethod.efectivo.toFixed(2)}€</span>}
+                  {summary.salesByMethod.tarjeta > 0 && <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 rounded-lg font-medium">Tarjeta: {summary.salesByMethod.tarjeta.toFixed(2)}€</span>}
+                  {summary.salesByMethod.bizum > 0 && <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 rounded-lg font-medium">Bizum: {summary.salesByMethod.bizum.toFixed(2)}€</span>}
+                  {summary.salesByMethod.online > 0 && <span className="px-2 py-1 bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 rounded-lg font-medium">Online: {summary.salesByMethod.online.toFixed(2)}€</span>}
+                  <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium">{summary.totalTransactions} operaciones</span>
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 rounded-lg p-3 space-y-1.5 text-xs">
+                  <div className="flex justify-between"><span className="text-gray-500">Fondo apertura</span><span className="font-semibold">{session.initialCashAmount.toFixed(2)}€</span></div>
+                  <div className="flex justify-between"><span className="text-green-600">+ Cobros efectivo</span><span className="font-semibold">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
+                  {cashStaffConsumption > 0 && (
+                    <div className="flex justify-between"><span className="text-green-600">+ Consumo equipo</span><span className="font-semibold">{cashStaffConsumption.toFixed(2)}€</span></div>
+                  )}
+                  <div className="flex justify-between"><span className="text-blue-600">+ Entradas</span><span className="font-semibold">{summary.totalCashIn.toFixed(2)}€</span></div>
+                  <div className="flex justify-between"><span className="text-red-600">− Devoluciones</span><span className="font-semibold">{cashReturnsTotal.toFixed(2)}€</span></div>
+                  <div className="flex justify-between"><span className="text-orange-600">− Salidas</span><span className="font-semibold">{summary.totalCashOut.toFixed(2)}€</span></div>
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-1.5 flex justify-between font-bold">
+                    <span>= Efectivo TPV</span>
+                    <span className="text-emerald-700">{expectedTpv.toFixed(2)}€</span>
                   </div>
-                ))}
+                </div>
+
+                <RegisterShiftSalesBreakdown
+                  session={session}
+                  orders={shiftOrders}
+                  loading={shiftOrdersLoading}
+                  registerSummary={summary}
+                />
+
+                {showDeliveryClosingSlots && (
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Billetes / monedas (opcional)</h4>
+                    <CashCountGrid
+                      counts={counts}
+                      onChange={(next) => {
+                        setCounts(next);
+                        if (!cashSlotFocused) {
+                          const total = calcDenominationTotal(next);
+                          setCashSlot(total > 0 ? total.toFixed(2) : '');
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+
+                {session.cashCounts.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Arqueos del turno</h4>
+                    <div className="space-y-1">
+                      {session.cashCounts.map((cc) => (
+                        <div key={cc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                          <span className="text-gray-500">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}</span>
+                          <span className={`font-semibold ${cc.difference === 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                            {cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(session.incidents?.length || 0) > 0 && (
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Incidencias ({session.incidents.length})</h4>
+                    <div className="space-y-1">
+                      {session.incidents.map((inc) => (
+                        <div key={inc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                          <span className="text-gray-600 truncate max-w-[220px]">{inc.description}</span>
+                          {inc.amount != null && <span className="font-semibold">{inc.amount.toFixed(2)}€</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Notas de cierre</label>
-            <textarea rows={2} className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm resize-none"
-              placeholder="Observaciones del cierre..." value={notes} onChange={e => setNotes(e.target.value)} />
+            <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Notas (opcional)</label>
+            <textarea
+              rows={2}
+              className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm resize-none"
+              placeholder="Observaciones del cierre..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
           </div>
         </div>
 

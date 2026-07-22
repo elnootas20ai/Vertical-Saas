@@ -68,10 +68,11 @@ const DEVICES = [
   },
 ];
 
+/** Solo pantallas en uso (Apple 2.3.3: sin splash/login). Genérico SaaS. */
 const SCENES = [
-  { slug: '01-login', path: '/auth/login', needsAuth: false },
-  { slug: '02-gate', path: '/auth/gate', needsAuth: true },
-  { slug: '03-dashboard', path: '/saas', needsAuth: true },
+  { slug: '01-dashboard', path: '/saas/dashboard', needsAuth: true },
+  { slug: '02-clients', path: '/saas/clients', needsAuth: true },
+  { slug: '03-team', path: '/saas/team', needsAuth: true },
   { slug: '04-settings', path: '/saas/settings', needsAuth: true },
 ];
 
@@ -173,17 +174,20 @@ async function captureDevice(browser, device) {
   const page = await context.newPage();
 
   try {
-    // Login limpio primero (sin banner en capturas)
     await page.goto(`${BASE}/auth/login`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     await page.waitForTimeout(600);
     await page.getByRole('button', { name: /Aceptar todas/i }).click({ timeout: 2000 }).catch(() => {});
     await page.waitForTimeout(400);
-    await shot(page, device, SCENES[0]);
 
     await login(page);
-    // Ya estamos en gate tras login
-    await shot(page, device, SCENES[1]);
-    for (const scene of SCENES.slice(2)) {
+
+    // Saltar gate/onboarding si aparece
+    if (page.url().includes('/auth/gate')) {
+      await page.getByRole('button', { name: /Continuar|Entrar|Empezar|Ir al panel/i }).click({ timeout: 4000 }).catch(() => {});
+      await page.waitForTimeout(800);
+    }
+
+    for (const scene of SCENES) {
       await shot(page, device, scene);
     }
   } finally {
@@ -210,10 +214,10 @@ async function main() {
     await browser.close();
   }
 
-  console.log('\nListo. Sube en App Store Connect:');
+  console.log('\nListo. Sube en App Store Connect (sin login/splash):');
   console.log(`  iPhone 6,5" → ${path.join(OUT, 'iphone-65')}`);
   console.log(`  iPad 13"    → ${path.join(OUT, 'ipad-13')}`);
-  console.log('Mínimo 1 por tamaño; puedes subir varias (01–04).');
+  console.log('Orden sugerido: dashboard → clients → team → settings.');
 }
 
 main().catch((err) => {

@@ -36,10 +36,13 @@ workflows:
         script: |
           cd ios/App
           pod install
-      - name: Número de build incremental
+      - name: Versión de marketing + build incremental
         script: |
           cd ios/App
+          # App Store Connect: versión nueva (tras 1.7). Build number = Codemagic BUILD_NUMBER.
+          agvtool new-marketing-version 1.8
           agvtool new-version -all $BUILD_NUMBER
+          echo "Marketing: $(agvtool what-marketing-version -terse1)  Build: $(agvtool what-version -terse)"
       - name: Diagnóstico firma (perfil vs entitlements)
         script: |
           set -e
