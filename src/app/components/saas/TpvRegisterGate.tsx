@@ -50,6 +50,7 @@ import {
   aggregatorRowsFromClosingTotals,
   sumAggregatorRows,
   sumAggregatorCash,
+  sumAggregatorCard,
   parseAggregatorAmount,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
@@ -142,7 +143,9 @@ import {
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
   ChevronUp, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
   MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
+  MoreVertical,
 } from 'lucide-react';
+import { useModalClose } from '../../hooks/useModalClose';
 
 // ─── Denomination config (EUR) ──────────────────────────────────────────────
 
@@ -296,6 +299,24 @@ const TpvRegisterContext = createContext<TpvRegisterContextType | null>(null);
 /** true solo cuando el gate ya pasó la apertura de caja y muestra el tablero operativo. */
 const TpvRegisterBoardReadyContext = createContext(false);
 
+/** Atajos del vertical (p. ej. delivery) a la izquierda del tick verde / nombre de tienda. */
+export type TpvStatusBarQuickAction = {
+  id: string;
+  label: string;
+  title?: string;
+  active?: boolean;
+  /** Resalte opcional (p. ej. consumo equipo). */
+  tone?: 'default' | 'amber';
+  onClick: () => void;
+  icon: ReactNode;
+};
+
+type TpvStatusBarQuickActionsApi = {
+  setQuickActions: (actions: TpvStatusBarQuickAction[] | null) => void;
+};
+
+const TpvStatusBarQuickActionsContext = createContext<TpvStatusBarQuickActionsApi | null>(null);
+
 export function TpvRegisterProvider({
   value,
   children,
@@ -321,6 +342,11 @@ export function useTpvRegister(): TpvRegisterContextType {
 /** El gate solo monta el tablero TPV tras abrir caja; evita bloquear «Nuevo» por contexto desincronizado. */
 export function useTpvRegisterBoardReady(): boolean {
   return useContext(TpvRegisterBoardReadyContext);
+}
+
+/** Registra botones junto al tick verde de caja abierta (barra superior). */
+export function useTpvStatusBarQuickActions(): TpvStatusBarQuickActionsApi['setQuickActions'] | null {
+  return useContext(TpvStatusBarQuickActionsContext)?.setQuickActions ?? null;
 }
 
 // ─── Opening Screen ─────────────────────────────────────────────────────────
@@ -1350,6 +1376,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
   const [manualAggregatorTotals, setManualAggregatorTotals] = useState<Record<string, string>>({});
   const [manualAggregatorCash, setManualAggregatorCash] = useState<Record<string, string>>({});
+  const [manualAggregatorCard, setManualAggregatorCard] = useState<Record<string, string>>({});
   const [manualInitialized, setManualInitialized] = useState(false);
   const [cashSlot, setCashSlot] = useState('');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
@@ -1368,8 +1395,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     [closingPlatforms, session, shiftOrders],
   );
   const finalAggregatorRows = useMemo(
-    () => applyManualAggregatorTotals(aggregatorRows, manualAggregatorTotals, manualAggregatorCash),
-    [aggregatorRows, manualAggregatorTotals, manualAggregatorCash],
+    () => applyManualAggregatorTotals(aggregatorRows, manualAggregatorTotals, manualAggregatorCash, manualAggregatorCard),
+    [aggregatorRows, manualAggregatorTotals, manualAggregatorCash, manualAggregatorCard],
   );
   const foodReport = useMemo(
     () => buildShiftFoodFamilyReportForSession(session, shiftOrders),
@@ -1391,6 +1418,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     () => sumAggregatorCash(finalAggregatorRows),
     [finalAggregatorRows],
   );
+  const aggregatorCardTotal = useMemo(
+    () => sumAggregatorCard(finalAggregatorRows),
+    [finalAggregatorRows],
+  );
   const expected = Math.round((expectedTpv + aggregatorCashTotal) * 100) / 100;
   const diff = countedTotal - expected;
   const grandEuroTotal = Math.round((expectedTpv + aggregatorEuroTotal) * 100) / 100;
@@ -1404,12 +1435,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     if (manualInitialized || aggregatorRows.length === 0) return;
     const initialTotals: Record<string, string> = {};
     const initialCash: Record<string, string> = {};
+    const initialCard: Record<string, string> = {};
     for (const row of aggregatorRows) {
       initialTotals[row.platform.channel] = row.totalSales > 0 ? row.totalSales.toFixed(2) : '';
       initialCash[row.platform.channel] = '';
+      initialCard[row.platform.channel] = '';
     }
     setManualAggregatorTotals(initialTotals);
     setManualAggregatorCash(initialCash);
+    setManualAggregatorCard(initialCard);
     setManualInitialized(true);
   }, [aggregatorRows, manualInitialized]);
 
@@ -1436,6 +1470,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
   const handleManualAggregatorCashChange = useCallback((channel: string, value: string) => {
     setManualAggregatorCash((prev) => ({ ...prev, [channel]: value }));
+  }, []);
+
+  const handleManualAggregatorCardChange = useCallback((channel: string, value: string) => {
+    setManualAggregatorCard((prev) => ({ ...prev, [channel]: value }));
   }, []);
 
   const handleCashSlotChange = useCallback((value: string) => {
@@ -1637,6 +1675,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 onManualFoodChange={handleChannelFoodChange}
                 manualCashByChannel={manualAggregatorCash}
                 onManualCashChange={handleManualAggregatorCashChange}
+                manualCardByChannel={manualAggregatorCard}
+                onManualCardChange={handleManualAggregatorCardChange}
                 title="Por integración"
                 startStep={2}
               />
@@ -1679,6 +1719,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <div className="flex justify-between text-sm">
                 <span className="text-purple-700 dark:text-purple-300">+ Efectivo integraciones</span>
                 <span className="font-semibold tabular-nums text-purple-700 dark:text-purple-300">{aggregatorCashTotal.toFixed(2)}€</span>
+              </div>
+            )}
+            {showDeliveryClosingSlots && aggregatorCardTotal > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-blue-700 dark:text-blue-300">Tarjeta apps (info)</span>
+                <span className="font-semibold tabular-nums text-blue-700 dark:text-blue-300">{aggregatorCardTotal.toFixed(2)}€</span>
               </div>
             )}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
@@ -2312,6 +2358,7 @@ function RegisterStatusBar({
   onSelectOrderTaker,
   isTabletMode = false,
   minimal = false,
+  quickActions = null,
 }: {
   session: TpvRegisterSession;
   onRequestClockIn: () => void;
@@ -2330,6 +2377,8 @@ function RegisterStatusBar({
   isTabletMode?: boolean;
   /** Tablet en flujo de pedido: una sola fila mínima para dejar espacio al catálogo. */
   minimal?: boolean;
+  /** Atajos del tablero (Buscar / Avisos / Historial…) a la izq. del tick verde. */
+  quickActions?: TpvStatusBarQuickAction[] | null;
 }) {
   const expected = calcTpvExpectedCash(session);
   const collections = calcTpvShiftCollectionsTotal(session);
@@ -2357,15 +2406,173 @@ function RegisterStatusBar({
       ? 'shrink-0 inline-flex items-center justify-center gap-1.5 min-h-[44px] px-4 rounded-lg border-2 border-red-300 bg-red-50 text-red-700 text-[11px] font-bold transition-colors touch-manipulation whitespace-nowrap hover:bg-red-100 ml-2 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
       : 'px-4 py-1.5 rounded-lg border-2 border-red-300 bg-red-50 text-red-700 font-bold transition-colors flex items-center gap-1 hover:bg-red-100 ml-2 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300';
   const actionBtn = opsBtn;
+  const [menuOpen, setMenuOpen] = useState(false);
+  useModalClose(menuOpen, () => setMenuOpen(false));
+
+  const runMenuAction = (fn: () => void) => {
+    setMenuOpen(false);
+    fn();
+  };
+
+  const cajaMenuItems: { id: string; label: string; title?: string; danger?: boolean; icon: ReactNode; onClick: () => void }[] = [
+    {
+      id: 'clockin',
+      label: 'Fichar equipo',
+      title: 'Fichar entrada del resto del equipo',
+      icon: <LogIn className="w-5 h-5" />,
+      onClick: onRequestClockIn,
+    },
+    {
+      id: 'cashops',
+      label: 'Movimiento de caja',
+      title: 'Entrada o salida de efectivo',
+      icon: <Banknote className="w-5 h-5" />,
+      onClick: onRequestCashOps,
+    },
+    ...(showNativePrinter && onRequestPrinterSetup
+      ? [{
+          id: 'printer',
+          label: nativePrinterReady ? 'Impresora lista' : 'Configurar impresora',
+          title: nativePrinterReady ? 'Impresora lista' : 'Configurar impresora WiFi',
+          icon: <Printer className="w-5 h-5" />,
+          onClick: onRequestPrinterSetup,
+        }]
+      : []),
+    {
+      id: 'cashcount',
+      label: 'Arqueo',
+      title: 'Contar efectivo de la caja',
+      icon: <Calculator className="w-5 h-5" />,
+      onClick: onRequestCashCount,
+    },
+    {
+      id: 'incident',
+      label: 'Incidencia',
+      title: 'Registrar incidencia',
+      icon: <AlertTriangle className="w-5 h-5" />,
+      onClick: onRequestIncident,
+    },
+    {
+      id: 'close',
+      label: 'Cerrar caja',
+      title: 'Cerrar caja del turno',
+      danger: true,
+      icon: <Lock className="w-5 h-5" />,
+      onClick: onRequestClose,
+    },
+  ];
+
+  const menuPanel = menuOpen ? (
+    <TpvGatePortal>
+      <div className="fixed inset-0 z-[120] flex" role="dialog" aria-modal="true" aria-label="Menú TPV">
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/45 backdrop-blur-[1px]"
+          aria-label="Cerrar menú"
+          onClick={() => setMenuOpen(false)}
+        />
+        <aside className="relative z-10 flex h-full w-[min(20rem,88vw)] flex-col bg-white dark:bg-stone-900 shadow-2xl border-r border-stone-200 dark:border-stone-700 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] animate-in slide-in-from-left duration-200">
+          <div className="flex items-center justify-between gap-2 px-4 pb-3 border-b border-stone-200 dark:border-stone-700">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Menú TPV</p>
+              <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                {storeLabel || 'Tienda'}
+                {terminalLabel ? ` · ${terminalLabel}` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              className="shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-xl border border-stone-200 dark:border-stone-600 text-stone-600 dark:text-stone-300 touch-manipulation"
+              aria-label="Cerrar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-4">
+            {quickActions && quickActions.length > 0 ? (
+              <div>
+                <p className="px-1 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-stone-400">Pedidos</p>
+                <div className="space-y-1">
+                  {quickActions.map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onClick={() => runMenuAction(action.onClick)}
+                      className={`w-full flex items-center gap-3 min-h-[52px] px-3 rounded-xl text-left touch-manipulation transition-colors ${
+                        action.active
+                          ? 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200'
+                          : action.tone === 'amber'
+                            ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100'
+                            : 'bg-stone-50 text-stone-800 hover:bg-stone-100 dark:bg-stone-800/60 dark:text-stone-100 dark:hover:bg-stone-800'
+                      }`}
+                    >
+                      <span className="[&>svg]:w-5 [&>svg]:h-5 shrink-0 opacity-90">{action.icon}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-bold leading-tight">{action.label}</span>
+                        {action.title && action.title !== action.label ? (
+                          <span className="block text-[11px] opacity-70 mt-0.5 leading-snug">{action.title}</span>
+                        ) : null}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <div>
+              <p className="px-1 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-stone-400">Caja</p>
+              <div className="space-y-1">
+                {cajaMenuItems.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => runMenuAction(item.onClick)}
+                    className={`w-full flex items-center gap-3 min-h-[52px] px-3 rounded-xl text-left touch-manipulation transition-colors ${
+                      item.danger
+                        ? 'bg-red-50 text-red-800 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60'
+                        : 'bg-stone-50 text-stone-800 hover:bg-stone-100 dark:bg-stone-800/60 dark:text-stone-100 dark:hover:bg-stone-800'
+                    }`}
+                  >
+                    <span className="shrink-0 opacity-90">{item.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold leading-tight">{item.label}</span>
+                      {item.title && item.title !== item.label ? (
+                        <span className="block text-[11px] opacity-70 mt-0.5 leading-snug">{item.title}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </TpvGatePortal>
+  ) : null;
+
+  const menuTrigger = (
+    <button
+      type="button"
+      onClick={() => setMenuOpen(true)}
+      title="Abrir menú TPV"
+      aria-label="Abrir menú TPV"
+      aria-expanded={menuOpen}
+      className="shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg border border-stone-200 bg-white text-stone-700 transition-colors touch-manipulation hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+    >
+      <MoreVertical className="w-5 h-5" />
+    </button>
+  );
 
   if (minimal) {
     return (
-      <div className="relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 px-2 py-1.5 flex items-center gap-1.5 text-[11px] min-h-[48px] pt-[max(0.375rem,env(safe-area-inset-top))]">
+      <>
+      <div className="relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 px-2 py-1.5 flex items-center gap-1.5 text-[11px] min-h-[52px] pt-[max(0.375rem,env(safe-area-inset-top))] overflow-visible">
+        {menuTrigger}
         <span className="flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-400 shrink-0">
           <CheckCircle2 className="w-3.5 h-3.5" />
           <span className="sr-only">Caja abierta</span>
         </span>
-        <div className="min-w-0 flex-1 flex flex-col justify-center leading-tight">
+        <div className="min-w-0 flex-1 flex flex-col justify-center leading-tight overflow-hidden">
           <span className="text-stone-800 dark:text-stone-100 font-semibold truncate" title={[storeLabel, terminalLabel].filter(Boolean).join(' · ')}>
             {storeLabel || 'Tienda'}
             {terminalLabel ? (
@@ -2373,7 +2580,7 @@ function RegisterStatusBar({
             ) : null}
           </span>
           <span
-            className="font-bold text-stone-900 dark:text-stone-50 tabular-nums text-sm tracking-tight"
+            className="font-bold text-stone-900 dark:text-stone-50 tabular-nums text-sm tracking-tight truncate"
             title={collectionsTitle}
           >
             {collections.total.toFixed(2)}€
@@ -2390,7 +2597,8 @@ function RegisterStatusBar({
             <AlertTriangle className="w-3.5 h-3.5" />
           </span>
         )}
-        <div className="flex items-center gap-1 shrink-0 overflow-x-auto scrollbar-hide">
+        {/* Bolitas fuera del scroll: el overflow cortaba el anillo de selección. */}
+        <div className="flex items-center gap-1 shrink-0 overflow-visible pl-0.5">
           <ClockedInWorkerBubbles
             workers={clockedInWorkers}
             selectedId={selectedOrderTakerId}
@@ -2402,39 +2610,18 @@ function RegisterStatusBar({
           <button type="button" onClick={onRequestClockIn} title="Fichar equipo" className={actionBtn}>
             <LogIn className="w-4 h-4 shrink-0" />
           </button>
-          <button type="button" onClick={onRequestCashOps} title="Movimiento de caja" className={actionBtn}>
-            <Banknote className="w-4 h-4 shrink-0" />
-          </button>
-          {showNativePrinter && onRequestPrinterSetup && (
-            <button
-              type="button"
-              onClick={onRequestPrinterSetup}
-              title={nativePrinterReady ? 'Impresora lista' : 'Configurar impresora'}
-              className={`${actionBtn} relative`}
-            >
-              <Printer className="w-4 h-4 shrink-0" />
-              {nativePrinterReady ? (
-                <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-stone-900" />
-              ) : null}
-            </button>
-          )}
-          <button type="button" onClick={onRequestCashCount} title="Arqueo" className={actionBtn}>
-            <Calculator className="w-4 h-4 shrink-0" />
-          </button>
-          <button type="button" onClick={onRequestIncident} title="Incidencia" className={actionBtn}>
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-          </button>
-          <button type="button" onClick={onRequestClose} title="Cerrar caja" className={closeBtn}>
-            <Lock className="w-4 h-4 shrink-0" />
-          </button>
         </div>
       </div>
+      {menuPanel}
+      </>
     );
   }
 
   return (
+    <>
     <div className={`relative z-20 border-b border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 flex flex-col gap-2 text-xs pt-[max(0px,env(safe-area-inset-top))] ${isTabletMode ? 'px-2 py-2' : 'px-3 sm:px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3'}`}>
       <div className={`flex items-center gap-2 sm:gap-3 flex-wrap min-w-0 ${isTabletMode ? 'text-[11px]' : ''}`}>
+        {menuTrigger}
         <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 font-semibold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
           <CheckCircle2 className="w-3.5 h-3.5" /> Caja abierta
         </span>
@@ -2515,6 +2702,8 @@ function RegisterStatusBar({
         </button>
       </div>
     </div>
+    {menuPanel}
+    </>
   );
 }
 
@@ -2831,6 +3020,11 @@ export function TpvRegisterGate({
   const [showIncident, setShowIncident] = useState(false);
   const [showPrinterSetup, setShowPrinterSetup] = useState(false);
   const [printerBarTick, setPrinterBarTick] = useState(0);
+  const [statusBarQuickActions, setStatusBarQuickActions] = useState<TpvStatusBarQuickAction[] | null>(null);
+  const statusBarQuickActionsApi = useMemo<TpvStatusBarQuickActionsApi>(
+    () => ({ setQuickActions: setStatusBarQuickActions }),
+    [],
+  );
   const isNativeApp = isVertialNativeApp();
   const nativePrinterReady = useMemo(() => {
     if (!isNativeApp) return false;
@@ -3778,11 +3972,14 @@ export function TpvRegisterGate({
     const summary = buildTpvRegisterSummary(session);
     const aggregatorClosingTotals: Record<string, number> = {};
     const aggregatorClosingCash: Record<string, number> = {};
+    const aggregatorClosingCard: Record<string, number> = {};
     let aggregatorCashSum = 0;
     for (const row of aggregatorRows) {
       aggregatorClosingTotals[row.platform.channel] = row.totalSales;
       const cash = Math.max(0, Number(row.cashSales) || 0);
+      const card = Math.max(0, Number(row.cardSales) || 0);
       aggregatorClosingCash[row.platform.channel] = cash;
+      aggregatorClosingCard[row.platform.channel] = card;
       aggregatorCashSum += cash;
       summary.salesByChannel[row.platform.channel] = row.totalSales;
     }
@@ -3804,6 +4001,7 @@ export function TpvRegisterGate({
       summary,
       aggregatorClosingTotals,
       aggregatorClosingCash,
+      aggregatorClosingCard,
       ...(productClosingCounts ? { productClosingCounts } : {}),
       closingValidationStatus: autoValidated ? 'validated' : 'pending',
       ...(autoValidated
@@ -4295,6 +4493,7 @@ export function TpvRegisterGate({
                   getClosingAggregatorPlatforms(),
                   postCloseSession.aggregatorClosingTotals || postCloseSession.summary?.salesByChannel,
                   postCloseSession.aggregatorClosingCash,
+                  postCloseSession.aggregatorClosingCard,
                 )}
               title="Cajas agregadores"
             />
@@ -4419,6 +4618,7 @@ export function TpvRegisterGate({
 
   return wrapShell(
     <TpvRegisterBoardReadyContext.Provider value>
+      <TpvStatusBarQuickActionsContext.Provider value={statusBarQuickActionsApi}>
       <div className={tpvFrameClass}>
         <RegisterStatusBar
           session={activeSession}
@@ -4436,6 +4636,7 @@ export function TpvRegisterGate({
           onSelectOrderTaker={setSelectedOrderTakerId}
           isTabletMode={isTabletSession}
           minimal={compactRegisterChrome}
+          quickActions={statusBarQuickActions}
         />
         {(isTabletSession || !compactRegisterChrome) && registerSessionSpansMultipleDays(activeSession) && (
           <div className="relative z-20 bg-amber-100 dark:bg-amber-950/40 border-b border-amber-300 dark:border-amber-800 px-4 py-2 text-xs text-amber-900 dark:text-amber-200 flex items-center justify-between gap-3 flex-wrap">
@@ -4527,6 +4728,7 @@ export function TpvRegisterGate({
           </Suspense>
         </TpvGatePortal>
       )}
+    </TpvStatusBarQuickActionsContext.Provider>
     </TpvRegisterBoardReadyContext.Provider>,
   );
 }
