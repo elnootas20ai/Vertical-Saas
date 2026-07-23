@@ -117,23 +117,18 @@ export function buildEposTicket(
     }
     sep(builder, width);
     for (const item of doc.lines) {
-      setTextSize(builder, 2, 2);
-      line(builder, `${item.qty}x ${item.name}`, titleCols);
+      // Medida Tiana: doble alto (no 2×2).
+      setTextSize(builder, 1, 2);
+      line(builder, `${item.qty}x ${item.name}`, tallCols);
       setTextSize(builder, 1, 1);
       for (const name of item.added || []) {
-        setTextSize(builder, 1, 2);
-        line(builder, `  + ${name}`, tallCols);
-        setTextSize(builder, 1, 1);
+        line(builder, `  + ${name}`, width);
       }
       for (const name of item.removed || []) {
-        setTextSize(builder, 1, 2);
-        line(builder, `  SIN ${name}`, tallCols);
-        setTextSize(builder, 1, 1);
+        line(builder, `  SIN ${name}`, width);
       }
       if (item.note) {
-        setTextSize(builder, 1, 2);
-        line(builder, `  NOTA: ${item.note}`, tallCols);
-        setTextSize(builder, 1, 1);
+        line(builder, `  NOTA: ${item.note}`, width);
       }
     }
     if (doc.orderNotes) {
@@ -144,8 +139,8 @@ export function buildEposTicket(
     }
     builder.addTextAlign('center');
     line(builder, doc.footer, width);
-    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(14);
-    else builder.addText('\n\n\n\n\n\n\n\n');
+    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(4);
+    else builder.addText('\n\n\n\n');
     if (typeof builder.addCut === 'function') builder.addCut(builder.CUT_FEED ?? 1);
     return;
   }
@@ -259,9 +254,9 @@ export function buildEposTicket(
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(14);
+    builder.addFeedLine(4);
   } else {
-    builder.addText('\n\n\n\n\n\n\n\n');
+    builder.addText('\n\n\n\n');
   }
 
   if (typeof builder.addCut === 'function') {

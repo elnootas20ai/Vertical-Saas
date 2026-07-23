@@ -123,25 +123,19 @@ function pushLineDetail(
 
 /**
  * Margen superior: la cuchilla suele dejar el inicio del papel encima del cabezal.
- * Sin este avance, el título/negocio salen cortados.
+ * 1 línea basta (medida Tiana); más blanco desperdicia bobina.
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  // 6 líneas: al imprimir Cocina + Cliente seguidos, el 2º no debe empezar cortado
-  chunks.push(command([ESC, 0x64, 6]));
+  chunks.push(command([ESC, 0x64, 1]));
 }
 
 /**
- * Avance amplio + corte: el pie debe quedar por encima de la cuchilla.
- * Con poco avance el pie del ticket anterior quedaba a medias en el siguiente.
+ * Avance + corte: el pie debe quedar por encima de la cuchilla.
+ * 4 líneas ≈ blanco moderado en 80 mm (medida Tiana).
  */
-function pushFeedAndCut(chunks: Uint8Array[], width: number) {
+function pushFeedAndCut(chunks: Uint8Array[], _width: number) {
   chunks.push(setSize(SIZE_NORMAL));
-  chunks.push(textLine('', width));
-  chunks.push(textLine('', width));
-  chunks.push(textLine('', width));
-  chunks.push(textLine('', width));
-  // ~14 líneas ≈ margen seguro hasta la cuchilla en HPRT / térmicas 80 mm
-  chunks.push(command([ESC, 0x64, 14]));
+  chunks.push(command([ESC, 0x64, 4]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
 }
@@ -181,8 +175,6 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
   const tallCols = colsForSize(paperWidthMm, SIZE_TALL);
   const chunks: Uint8Array[] = [
     command([ESC, 0x40]),
-    // Margen izquierdo (~3 mm) para que el texto no roce el borde del rollo.
-    command([GS, 0x4c, 24, 0]),
   ];
   pushTopMargin(chunks);
 
@@ -203,26 +195,9 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
       chunks.push(setSize(SIZE_NORMAL));
     }
     chunks.push(textLine(sepLine(width), width));
-    const titleCols = colsForSize(paperWidthMm, SIZE_TITLE);
     for (const line of doc.lines) {
-      chunks.push(setSize(SIZE_TITLE));
-      chunks.push(textLine(`${line.qty}x ${line.name}`, titleCols));
-      chunks.push(setSize(SIZE_NORMAL));
-      for (const name of line.added || []) {
-        chunks.push(setSize(SIZE_TALL));
-        chunks.push(textLine(`  + ${name}`, tallCols));
-        chunks.push(setSize(SIZE_NORMAL));
-      }
-      for (const name of line.removed || []) {
-        chunks.push(setSize(SIZE_TALL));
-        chunks.push(textLine(`  SIN ${name}`, tallCols));
-        chunks.push(setSize(SIZE_NORMAL));
-      }
-      if (line.note) {
-        chunks.push(setSize(SIZE_TALL));
-        chunks.push(textLine(`  NOTA: ${line.note}`, tallCols));
-        chunks.push(setSize(SIZE_NORMAL));
-      }
+      // Medida Tiana: doble alto (no 2×2, que sale inmenso).
+      pushLineDetail(chunks, line, width, paperWidthMm);
     }
     if (doc.orderNotes) {
       chunks.push(textLine(sepLine(width), width));

@@ -69,7 +69,7 @@ function buildKitchenTicketHtml(doc: TicketDocument): string {
   return `<!DOCTYPE html><html><head><title>Comanda ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}</style></head><body>
 <div class="c">
-  <strong style="font-size:26px">${escapeHtml(doc.title)}</strong><br/>
+  <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
   <span class="small">${escapeHtml(doc.ticketNo)} - ${escapeHtml(doc.dateLabel)}</span>
 </div>
 <div class="hr"></div>
