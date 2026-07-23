@@ -2,27 +2,40 @@ import { Capacitor } from '@capacitor/core';
 import { clearVertialClientCachesForAppUpdate, SESSION_USER_STORAGE_KEY } from './clientSessionStorage';
 import { logoutRequest } from './authApi';
 
-/** Marca de instalación: al cambiar (nueva build TestFlight) → login limpio. */
+/** Marca de instalación: al cambiar (nueva build TestFlight / nuevo bundle) → login limpio. */
 export const APP_INSTALL_STAMP_KEY = 'vertial_app_install_stamp';
 
 /**
- * Identificador de la build actual.
- * En iOS/Android usa version+build nativos (Codemagic sube CFBundleVersion).
- * En web solo marca el canal web (no fuerza logout en cada deploy de vertialapp.com).
+ * Tras wipe por update: Auth no debe rehidratar sesión aunque quede basura local/cookie.
+ * Se limpia al completar un login nuevo.
  */
-export async function resolveCurrentAppStamp(): Promise<string> {
+export const FORCE_FRESH_LOGIN_KEY = 'vertial_force_fresh_login';
+
+function bundleStamp(): string {
+  return String(import.meta.env.VITE_BUILD_STAMP || import.meta.env.VITE_APP_VERSION || '0');
+}
+
+/**
+ * Identificador de la build actual.
+ * Nativo: version + build (Codemagic) + stamp del bundle JS (por si el nº de build no cambia).
+ * Web: stamp del bundle (cada deploy frontend).
+ *
+ * Si App.getInfo() falla, devolvemos null → no inventar stamp distinto (evitar logout falso en TPV).
+ */
+export async function resolveCurrentAppStamp(): Promise<string | null> {
+  const bundle = bundleStamp();
   if (Capacitor.isNativePlatform()) {
     try {
       const { App } = await import('@capacitor/app');
       const info = await App.getInfo();
       const version = String(info.version || '').trim() || '0';
       const build = String(info.build || '').trim() || '0';
-      return `native:${version}:${build}`;
+      return `native:${version}:${build}:${bundle}`;
     } catch {
-      return `native:fallback:${String(import.meta.env.VITE_APP_VERSION || '0')}`;
+      return null;
     }
   }
-  return `web:${String(import.meta.env.VITE_APP_VERSION || '0')}`;
+  return `web:${bundle}`;
 }
 
 export function hasPersistedAuthSession(): boolean {
@@ -54,23 +67,60 @@ export function shouldWipeSessionOnStampChange(
   return previousStamp !== currentStamp;
 }
 
+export function markForceFreshLogin(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(FORCE_FRESH_LOGIN_KEY, '1');
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearForceFreshLogin(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(FORCE_FRESH_LOGIN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function mustForceFreshLogin(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(FORCE_FRESH_LOGIN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Si la app nativa cambió de versión/build, borra sesión, tokens y “recordarme”
+ * Si la app cambió de versión/build/bundle, borra sesión, tokens y “recordarme”
  * y notifica logout al servidor. Debe ejecutarse ANTES de montar AuthProvider.
  * @returns true si se forzó login limpio
  */
+async function logoutWithTimeout(ms = 2500): Promise<void> {
+  await Promise.race([
+    logoutRequest().catch(() => undefined),
+    new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, ms);
+    }),
+  ]);
+}
+
 export async function enforceFreshLoginOnAppUpdate(): Promise<boolean> {
   if (typeof window === 'undefined') return false;
 
-  let currentStamp = '';
+  let currentStamp: string | null = null;
   try {
     currentStamp = await resolveCurrentAppStamp();
   } catch {
     return false;
   }
+  // Sin stamp nativo fiable: no tocar sesión (mejor seguir en TPV que echar por error).
   if (!currentStamp) return false;
 
-  // Solo en app nativa (TestFlight/APK). En web no cerramos sesión en cada deploy.
+  // Solo app nativa (TestFlight/APK). En web no cerramos sesión en cada deploy.
   if (!currentStamp.startsWith('native:')) {
     try {
       localStorage.setItem(APP_INSTALL_STAMP_KEY, currentStamp);
@@ -90,14 +140,12 @@ export async function enforceFreshLoginOnAppUpdate(): Promise<boolean> {
   const wipe = shouldWipeSessionOnStampChange(previousStamp, currentStamp, {
     hasPersistedSession: hasPersistedAuthSession(),
   });
+
   if (wipe) {
-    try {
-      // Invalidar cookie/refresh en servidor si aún hay token local.
-      await logoutRequest();
-    } catch {
-      /* ignore */
-    }
+    // No bloquear el arranque de la app si la red va mal.
+    await logoutWithTimeout(2500);
     clearVertialClientCachesForAppUpdate();
+    markForceFreshLogin();
   }
 
   try {

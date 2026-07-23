@@ -275,10 +275,10 @@ export async function getDocument(req, dbName, docId) {
 
 /**
  * Cache en memoria por titular (evita el tope 5MB del LRU global en cuentas grandes).
- * TTL largo + sliding: cuentas con miles de clientes (TPV/CRM) no vuelven a leer Couch
- * en cada búsqueda si el TPV está en uso.
+ * TTL corto y fijo: el TPV debe ver clientes nuevos/editados sin reiniciar el backend.
+ * (Un TTL deslizante de 10 min hacía que la búsqueda no “actualizara” mientras la caja estaba abierta.)
  */
-const CLIENT_DOCS_TTL_MS = 600_000;
+const CLIENT_DOCS_TTL_MS = 120_000;
 const clientDocumentsByUser = new Map();
 const clientsUserIndexReady = new Set();
 
@@ -296,8 +296,6 @@ function readClientDocumentsCache(uid) {
     clientDocumentsByUser.delete(uid);
     return null;
   }
-  // Sliding TTL: mientras se use el TPV/CRM, no caduca en frío.
-  entry.at = Date.now();
   return entry.docs;
 }
 
@@ -308,7 +306,6 @@ function readClientSearchBundle(uid) {
     clientDocumentsByUser.delete(uid);
     return null;
   }
-  entry.at = Date.now();
   if (!entry.searchIndex) {
     entry.searchIndex = buildClientSearchIndex(entry.docs);
   }

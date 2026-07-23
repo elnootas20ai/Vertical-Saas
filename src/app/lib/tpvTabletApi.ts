@@ -1,4 +1,4 @@
-import { authFetch, cacheAccessToken, type ApiEnvelope, type AuthUser } from './authApi';
+import { setAuthTokens, type ApiEnvelope, type AuthUser } from './authApi';
 import { getApiBase } from './apiBase';
 import type { PointOfSale } from './deliveryApi';
 
@@ -15,9 +15,14 @@ function extractApiError(payload: Record<string, unknown>): string {
   return 'Error inesperado en la petición';
 }
 
+/**
+ * Login/activación tablet: fetch directo (sin authFetch).
+ * Un código malo suele ser 401; authFetch lo trataría como sesión muerta y echaría del TPV.
+ */
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T & ApiEnvelope<unknown>> {
-  const response = await authFetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${API_BASE}${path}`, {
     ...init,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers || {}),
@@ -26,6 +31,8 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T & ApiE
   const payload = (await response.json().catch(() => ({}))) as T & ApiEnvelope<unknown> & {
     error?: string | { message?: string };
     message?: string;
+    accessToken?: string;
+    refreshToken?: string;
   };
   if (!response.ok || payload.ok === false) {
     throw new Error(extractApiError(payload as Record<string, unknown>));
@@ -46,6 +53,8 @@ export interface TpvTabletBindingPayload {
 }
 
 export interface TpvTabletLoginResult extends ApiEnvelope<AuthUser> {
+  accessToken?: string;
+  refreshToken?: string;
   business?: {
     business_id: string;
     name: string;
@@ -65,7 +74,12 @@ export async function tpvTabletActivateRequest(
     method: 'POST',
     body: JSON.stringify({ terminalCode }),
   });
-  if (result.accessToken) cacheAccessToken(result.accessToken);
+  if (result.accessToken) {
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+  }
   return result;
 }
 
@@ -76,6 +90,11 @@ export async function tpvTabletSwitchRequest(
     method: 'POST',
     body: JSON.stringify({ terminalCode }),
   });
-  if (result.accessToken) cacheAccessToken(result.accessToken);
+  if (result.accessToken) {
+    setAuthTokens({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+  }
   return result;
 }

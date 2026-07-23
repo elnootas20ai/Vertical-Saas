@@ -40,10 +40,13 @@ export default defineConfig(({ mode }) => {
   } catch {
     /* ignore */
   }
+  // Cambia en cada `vite build` → la app nativa fuerza login limpio al actualizar.
+  const buildStamp = `${appVersion}-${Date.now()}`
 
   return {
     define: {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+      'import.meta.env.VITE_BUILD_STAMP': JSON.stringify(buildStamp),
     },
     server: {
       hmr: true,

@@ -12,6 +12,9 @@ const KEEP_ON_ACCOUNT_SWITCH = new Set([
   'vertial_native_onboarding_seen',
   // Tablet TPV: al caducar sesión / re-login no perder el vínculo PDV (pedidos de reparto).
   'vertial_tpv_tablet_binding',
+  // Tras update: no borrar el flag hasta login OK (setSessionUser).
+  'vertial_force_fresh_login',
+  'vertial_app_install_stamp',
 ]);
 
 /**
@@ -178,13 +181,34 @@ export function clearVertialClientCaches(extraKeepKeys: string[] = []): void {
 
 /**
  * Tras actualizar la app (TestFlight / nueva build): logout total en el dispositivo.
- * Borra sesión, tokens y “recordarme”; conserva impresoras por tienda y consentimiento.
+ * Borra sesión, tokens y “recordarme”.
+ * Conserva: consentimiento, vínculo tablet TPV, impresoras por tienda.
+ * (Sin el vínculo tablet, el TPV delivery pierde dueño/PDV y parece que “no hay clientes”.)
  */
 export function clearVertialClientCachesForAppUpdate(): void {
   if (typeof window === 'undefined') return;
 
-  const keep = new Set(['vertial_cookie_consent', 'vertial_app_install_stamp']);
+  const keep = new Set([
+    'vertial_cookie_consent',
+    'vertial_app_install_stamp',
+    'vertial_force_fresh_login',
+    // Obligatorio en tablet TPV: PDV + dataUserId del dueño (búsqueda de clientes).
+    'vertial_tpv_tablet_binding',
+  ]);
   clearAuthTokens();
+
+  // Sesión y “recordarme” (login limpio tras update). NO tocar tablet binding ni impresoras.
+  for (const key of [
+    SESSION_USER_STORAGE_KEY,
+    'vertial_saved_login',
+    'vertial_saved_worker_login',
+  ]) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const lsRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i += 1) {

@@ -45,6 +45,11 @@ function writeSearchCache(key: string, clients: Client[]) {
   }
 }
 
+/** Limpia la caché en memoria del buscador TPV (p. ej. al abrir pedido o tras alta). */
+export function clearClientPhoneSearchCache(): void {
+  clientSearchResultCache.clear();
+}
+
 export function useClientPhoneSearch(params: {
   userId: string;
   phone: string;

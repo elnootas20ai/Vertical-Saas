@@ -9,7 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
+import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
   createDeliveryOrderWithCajaStatus,
@@ -223,7 +223,8 @@ function buildTpvWalkInClient(
     business_id: businessId,
     clientType: 'particular',
     name: opts.name,
-    phone: '0',
+    // Sin teléfono: no es ficha CRM; evita «+34 0» en ticket y sync falso por dígito 0.
+    phone: '',
     phonePrefix: '+34',
     email: '',
     status: 'active',
@@ -246,6 +247,11 @@ function buildTpvWalkInClient(
     },
     createdAt: new Date(0).toISOString(),
   };
+}
+
+/** Cliente sintético del TPV (atención rápida / sala): no existe en Couch CRM. */
+function isTpvSyntheticClientId(clientId: string | null | undefined): boolean {
+  return String(clientId || '').startsWith('tpv-');
 }
 
 function buildRestaurantWalkInClient(userId: string, businessId: string, displayName = 'Sala'): Client {
@@ -804,6 +810,7 @@ export function TpvRapidoOrderFlow({
   // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
   useEffect(() => {
     if (!clientSearchUserId) return;
+    clearClientPhoneSearchCache();
     void listClientsPageRequest(clientSearchUserId, {
       limit: 1,
       skip: 0,
@@ -958,21 +965,31 @@ export function TpvRapidoOrderFlow({
   const [companyPromos, setCompanyPromos] = useState<StoredPromotion[]>(() =>
     typeof window !== 'undefined' ? readStoredPromotions() : [],
   );
+  /** Recogida en local sin ficha CRM; va en paralelo a la búsqueda de clientes. */
+  const [quickAttentionActive, setQuickAttentionActive] = useState(false);
 
   const startQuickAttentionFlow = useCallback(() => {
+    clearResults();
+    setQuickAttentionActive(true);
     selectClient(quickAttentionClient);
     setShowCreateForm(false);
     setDuplicateWarning(false);
     setPhoneInput('');
+    setPhoneShake(false);
     setDeliveryType('recogida');
     setSelectedAddressId(null);
     setShowNewAddress(false);
     setAddressWarning(false);
     setEditingAddressId(null);
     setPaymentMethod(null);
+    setAppliedPromo(null);
+    setPromoCodeInput('');
+    setPromoMode('none');
+    setClientPromos([]);
+    setSelectedClientPromoId('');
     setCompletedSteps(deliveryQuickAttentionCompletedSteps());
     setCurrentStep('products');
-  }, [selectClient, quickAttentionClient]);
+  }, [selectClient, quickAttentionClient, clearResults]);
 
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
@@ -1500,6 +1517,10 @@ export function TpvRapidoOrderFlow({
     if (promoMode === 'code') setPromoMode('none');
   }, [promoMode]);
 
+  const deliveryFlowClient =
+    selectedClient
+    || (quickAttentionActive ? quickAttentionClient : null);
+
   const isStepReachable = useCallback(
     (step: Step) => {
       if (isRestaurantMode) {
@@ -1515,15 +1536,15 @@ export function TpvRapidoOrderFlow({
         return false;
       }
       if (step === 'client') return true;
-      if (step === 'delivery') return !!selectedClient;
-      if (step === 'products') return !!selectedClient && !!deliveryType;
-      if (step === 'payment') return !!selectedClient && !!deliveryType && cart.length > 0;
+      if (step === 'delivery') return !!deliveryFlowClient;
+      if (step === 'products') return !!deliveryFlowClient && !!deliveryType;
+      if (step === 'payment') return !!deliveryFlowClient && !!deliveryType && cart.length > 0;
       return false;
     },
-    [isRestaurantMode, selectedClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable],
+    [isRestaurantMode, deliveryFlowClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable],
   );
 
-  const saleClient = isRestaurantMode ? tableWalkInClient : selectedClient;
+  const saleClient = isRestaurantMode ? tableWalkInClient : deliveryFlowClient;
 
   const orderReady =
     !!effectiveOrderTakerId &&
@@ -1681,6 +1702,7 @@ export function TpvRapidoOrderFlow({
 
   const resetFlowFromClientStep = useCallback(() => {
     appliedClientIdFromUrl.current = null;
+    setQuickAttentionActive(false);
     clearSelection();
     setCompletedSteps(new Set());
     setCurrentStep('client');
@@ -1713,9 +1735,10 @@ export function TpvRapidoOrderFlow({
     }
     if (
       currentStep === 'products'
-      && isDeliveryQuickAttentionClient(selectedClient)
+      && (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient))
       && deliveryType === 'recogida'
     ) {
+      setQuickAttentionActive(false);
       clearSelection();
       setCompletedSteps(new Set());
       setDeliveryType(null);
@@ -1728,11 +1751,12 @@ export function TpvRapidoOrderFlow({
     if (idx > 0) {
       setCurrentStep(order[idx - 1]);
     }
-  }, [currentStep, isRestaurantMode, selectedClient, deliveryType, clearSelection]);
+  }, [currentStep, isRestaurantMode, selectedClient, deliveryType, clearSelection, quickAttentionActive]);
 
   // ─── Client selection ─────────────────────────────────────────────────────
   const handleSelectClient = useCallback(
     (client: Client) => {
+      setQuickAttentionActive(false);
       selectClient(client);
       setShowCreateForm(false);
       setDuplicateWarning(false);
@@ -1750,7 +1774,7 @@ export function TpvRapidoOrderFlow({
       }
       setClientPromos([]);
       setSelectedClientPromoId('');
-      if (userId) {
+      if (userId && !isTpvSyntheticClientId(client.id)) {
         fetchClientPromotionsRequest(userId, client.id)
           .then((promos) => {
             setClientPromos(promos || []);
@@ -1765,7 +1789,7 @@ export function TpvRapidoOrderFlow({
       setEditingAddressId(null);
       completeStep('client');
     },
-    [selectClient, completeStep],
+    [selectClient, completeStep, userId],
   );
 
   const clientIdFromUrl = searchParams.get('clientId');
@@ -2115,13 +2139,17 @@ export function TpvRapidoOrderFlow({
             : `Mesa ${restaurantTable.number}${restaurantTable.roomName ? ` · ${restaurantTable.roomName}` : ''}`
           : '';
 
+        const walkInSale = isTpvSyntheticClientId(saleClient.id);
         const orderData: Partial<DeliveryOrder> = {
-          clientId: saleClient.id,
+          // Walk-in / atención rápida: sin ficha CRM (no contaminar clientes ni sync).
+          clientId: walkInSale ? '' : saleClient.id,
           customerName: saleClient.name,
-          customerPhone: formatTicketCustomerPhone(
-            saleClient.phone,
-            saleClient.phonePrefix || phonePrefix,
-          ),
+          customerPhone: walkInSale
+            ? ''
+            : formatTicketCustomerPhone(
+                saleClient.phone,
+                saleClient.phonePrefix || phonePrefix,
+              ),
           customerEmail: saleClient.email || '',
           customerAddress: formatTicketCustomerAddress({
             street: selectedAddr?.street || saleClient.address,
@@ -2451,13 +2479,16 @@ export function TpvRapidoOrderFlow({
         ? `Mesa ${restaurantTable.number}${restaurantTable.roomName ? ` · ${restaurantTable.roomName}` : ''}`
         : '';
 
+      const walkInSale = isTpvSyntheticClientId(saleClient?.id);
       const orderData: Partial<DeliveryOrder> = {
-        clientId: saleClient?.id || '',
+        clientId: walkInSale ? '' : (saleClient?.id || ''),
         customerName: saleClient?.name || tableNote || 'Sala',
-        customerPhone: formatTicketCustomerPhone(
-          saleClient?.phone,
-          saleClient?.phonePrefix || phonePrefix,
-        ),
+        customerPhone: walkInSale
+          ? ''
+          : formatTicketCustomerPhone(
+              saleClient?.phone,
+              saleClient?.phonePrefix || phonePrefix,
+            ),
         customerAddress: formatTicketCustomerAddress({
           street: saleClient?.address,
           city: saleClient?.city,
@@ -2819,6 +2850,7 @@ export function TpvRapidoOrderFlow({
       return;
     }
     appliedClientIdFromUrl.current = null;
+    setQuickAttentionActive(false);
     setCurrentStep('client');
     setCompletedSteps(new Set());
     setPhoneInput('');
@@ -3261,8 +3293,9 @@ export function TpvRapidoOrderFlow({
                     onChange={(e) => {
                       const value = e.target.value;
                       setPhoneInput(value);
-                      if (selectedClient) {
-                        if (isDeliveryQuickAttentionClient(selectedClient)) {
+                      if (selectedClient || quickAttentionActive) {
+                        if (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient)) {
+                          setQuickAttentionActive(false);
                           clearSelection();
                           setShowCreateForm(false);
                           setNewClientPhone('');
@@ -3695,7 +3728,8 @@ export function TpvRapidoOrderFlow({
                         <button
                           type="button"
                           onClick={() => {
-                            if (isDeliveryQuickAttentionClient(saleClient)) {
+                            if (quickAttentionActive || isDeliveryQuickAttentionClient(saleClient)) {
+                              setQuickAttentionActive(false);
                               clearSelection();
                               setCompletedSteps(new Set());
                               setDeliveryType(null);

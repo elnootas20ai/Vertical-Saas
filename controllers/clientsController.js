@@ -27,6 +27,7 @@ import {
   getClientDocumentsForUser,
   listDeliveryOrdersByUser,
   resolveDataOwnerUserId,
+  invalidateClientDocumentsForUser,
 } from '../services/couchdb.js';
 import { chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
@@ -871,6 +872,10 @@ export async function searchByPhone(req, res) {
 
     const { ownerUserId, account } = await resolveDataOwnerUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    if (String(req.query?.refresh || '') === '1') {
+      invalidateClientDocumentsForUser(ownerUserId);
+    }
 
     const businessId = resolveQueryBusinessId(req);
     const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);

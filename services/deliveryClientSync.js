@@ -170,7 +170,11 @@ export async function syncClientAfterDeliveryOrder(req, userId, order) {
 
   let clientId = String(order.clientId || '').trim();
 
-  if (!clientId && order.customerPhone) {
+  // Pedidos walk-in / atención rápida del TPV: no existen en CRM.
+  if (clientId.startsWith('tpv-')) return null;
+
+  const phoneDigits = String(order.customerPhone || '').replace(/\D/g, '');
+  if (!clientId && phoneDigits.length >= 6) {
     const matches = await searchClientsByPhone(req, userId, order.customerPhone, 5);
     if (matches.length === 1) {
       clientId = matches[0]._id || matches[0].id;

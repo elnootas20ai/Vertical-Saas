@@ -5,6 +5,7 @@ import {
   clearVertialClientCaches,
   SESSION_USER_STORAGE_KEY,
 } from '../lib/clientSessionStorage';
+import { clearForceFreshLogin, mustForceFreshLogin } from '../lib/appInstallStamp';
 import {
   type AccountActivityItem,
   type ActiveSession,
@@ -254,6 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [sessionSyncedWithServer, setSessionSyncedWithServer] = useState(false);
 
   const setSessionUser = useCallback((nextUser: User) => {
+    clearForceFreshLogin();
     setUser(nextUser);
     setIsAuthenticated(true);
     persistSession(nextUser);
@@ -272,6 +274,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       persistSession(null);
       clearAuthTokens();
     });
+
+    // Tras actualizar TestFlight: no rehidratar la cuenta anterior (ni con cookie/basura local).
+    if (mustForceFreshLogin()) {
+      stopAuthSessionKeepalive();
+      persistSession(null);
+      clearAuthTokens();
+      setUser(null);
+      setIsAuthenticated(false);
+      setSessionSyncedWithServer(true);
+      setIsInitializing(false);
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const sessionUser = localStorage.getItem(SESSION_USER_STORAGE_KEY);
     if (!sessionUser) {

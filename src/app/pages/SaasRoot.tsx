@@ -115,6 +115,8 @@ function SaasContent() {
 
   useEffect(() => {
     if (!isAuthenticated || isInitializing) return;
+    // En TPV tablet no refrescar /me al foco cada rato: evita tirones y redirects.
+    if (tpvTabletSaasSession || location.pathname.startsWith('/saas/worker/tpv')) return;
     const syncSubscription = () => {
       void refreshCurrentUser();
     };
@@ -125,7 +127,7 @@ function SaasContent() {
       window.removeEventListener('focus', syncSubscription);
       window.clearInterval(interval);
     };
-  }, [isAuthenticated, isInitializing, refreshCurrentUser]);
+  }, [isAuthenticated, isInitializing, refreshCurrentUser, tpvTabletSaasSession, location.pathname]);
 
   useEffect(() => {
 
@@ -133,17 +135,21 @@ function SaasContent() {
 
       if (location.pathname.startsWith('/saas/settings')) return;
       if (location.pathname === WORKER_IDENTITY_SETUP_PATH) return;
+      // TPV tablet: no sacar del turno por verificación de email.
+      if (tpvTabletSaasSession || location.pathname.startsWith('/saas/worker/tpv')) return;
 
       navigate('/auth/verify-email-pending', { replace: true });
 
     }
 
-  }, [isInitializing, isAuthenticated, user, navigate, location.pathname]);
+  }, [isInitializing, isAuthenticated, user, navigate, location.pathname, tpvTabletSaasSession]);
 
 
 
   useEffect(() => {
     if (isInitializing || !isAuthenticated || !user) return;
+    // TPV operativo: no redirigir a nómina/alta a mitad de turno.
+    if (tpvTabletSaasSession || location.pathname.startsWith('/saas/worker/tpv')) return;
     if (!needsWorkerPayrollSetup(user)) {
       clearWorkerPayrollBypass(String(user.user_id || user.id || '').trim() || undefined);
       return;
@@ -170,7 +176,7 @@ function SaasContent() {
     }
 
     navigate(WORKER_PAYROLL_SETUP_PATH, { replace: true });
-  }, [isInitializing, isAuthenticated, user, location.pathname, location.state, navigate]);
+  }, [isInitializing, isAuthenticated, user, location.pathname, location.state, navigate, tpvTabletSaasSession]);
 
 
 
