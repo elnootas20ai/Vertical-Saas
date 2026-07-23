@@ -116,20 +116,24 @@ export async function listClients(req, res) {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
 
-    const account = await findAccountByUserId(req, userId);
+    const { ownerUserId, account } = await resolveDataOwnerUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
+    if (String(req.query?.refresh || '') === '1') {
+      invalidateClientDocumentsForUser(ownerUserId);
+    }
+
     const businessId = resolveQueryBusinessId(req);
-    const listOptions = await resolveClientListOptions(req, userId, businessId);
+    const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);
     const searchParam = typeof req.query.search === 'string' ? req.query.search.trim() : '';
     const query = { ...req.query };
     let raw;
     if (searchParam) {
       // Índice en memoria: no recorrer miles de docs en cada tecla del CRM.
-      raw = await searchClientsForList(req, userId, searchParam, listOptions);
+      raw = await searchClientsForList(req, ownerUserId, searchParam, listOptions);
       delete query.search;
     } else {
-      raw = await listClientsByUser(req, userId, listOptions);
+      raw = await listClientsByUser(req, ownerUserId, listOptions);
     }
     const useLite = req.query.lite === '1' || req.query.lite === 'true';
     const sanitizer = useLite ? sanitizeClientSummary : sanitizeClient;
@@ -142,9 +146,9 @@ export async function listClients(req, res) {
     let clients = pageDocs.map(sanitizer).filter(Boolean);
     const enrichLiveStats = req.query.liveStats === '1' || req.query.liveStats === 'true';
     if (enrichLiveStats && clients.length > 0) {
-      const allOrders = await listDeliveryOrdersByUser(req, userId);
+      const allOrders = await listDeliveryOrdersByUser(req, ownerUserId);
       const deliveryOrders = businessId
-        ? await scopeDeliveryOrdersToBusinessId(req, userId, businessId, allOrders)
+        ? await scopeDeliveryOrdersToBusinessId(req, ownerUserId, businessId, allOrders)
         : allOrders;
       clients = clients.map((row) => enrichClientRowWithLiveDeliveryStats(row, deliveryOrders));
     }

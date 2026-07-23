@@ -126,7 +126,7 @@ export function useClientPhoneSearch(params: {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const clients = await searchClientsByPhoneRequest(
+        let clients = await searchClientsByPhoneRequest(
           userId,
           queryForApi,
           resultLimit,
@@ -134,6 +134,17 @@ export function useClientPhoneSearch(params: {
           businessId,
           { includeLegacy: true, fallbackAll: true },
         );
+        // Si la caché servidor quedó vacía, un refresh recupera carteras reales (Pau ~6k).
+        if (clients.length === 0 && !controller.signal.aborted && seq === requestSeqRef.current) {
+          clients = await searchClientsByPhoneRequest(
+            userId,
+            queryForApi,
+            resultLimit,
+            controller.signal,
+            businessId,
+            { includeLegacy: true, fallbackAll: true, refresh: true },
+          );
+        }
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
         // No cachear vacíos: evita “no hay clientes” pegado tras un fallo de filtro/red.
         if (clients.length > 0) writeSearchCache(key, clients);

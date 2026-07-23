@@ -3848,11 +3848,12 @@ export async function getClientDocumentsForUser(req, userId) {
   if (!uid) return [];
 
   const cached = readClientDocumentsCache(uid);
-  if (cached) return cached;
+  // [] es truthy en JS: una carga vacía no debe “pegarse” y tumbar el TPV.
+  if (Array.isArray(cached) && cached.length > 0) return cached;
 
   const cacheKey = cacheService.buildKey('clients_user', uid, 'all');
   const fromLru = cacheService.get(cacheKey);
-  if (fromLru) {
+  if (Array.isArray(fromLru) && fromLru.length > 0) {
     writeClientDocumentsCache(uid, fromLru);
     return fromLru;
   }
@@ -3884,9 +3885,13 @@ export async function getClientDocumentsForUser(req, userId) {
     const clients = docs.filter(
       (doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === uid,
     );
-    writeClientDocumentsCache(uid, clients);
-    // Puede fallar en silencio si el LRU rechaza por tamaño; el Map local ya cubre.
-    cacheService.set(cacheKey, clients, CLIENT_DOCS_TTL_MS);
+    // No cachear vacío: evita que un _find momentáneo a 0 deje el TPV ciego.
+    if (clients.length > 0) {
+      writeClientDocumentsCache(uid, clients);
+      cacheService.set(cacheKey, clients, CLIENT_DOCS_TTL_MS);
+    } else {
+      invalidateClientDocumentsForUser(uid);
+    }
     return clients;
   })().finally(() => {
     clientDocumentsInflight.delete(uid);

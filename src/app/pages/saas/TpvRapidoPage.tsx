@@ -816,6 +816,7 @@ export function TpvRapidoOrderFlow({
       skip: 0,
       lite: true,
       businessId: clientSearchBusinessId || undefined,
+      refresh: true,
     }).catch(() => undefined);
   }, [clientSearchUserId, clientSearchBusinessId]);
 

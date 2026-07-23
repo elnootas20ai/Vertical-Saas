@@ -385,6 +385,8 @@ export async function listClientsPageRequest(
     businessId?: string;
     /** Calcula stats/loyalty desde pedidos delivery (columnas Pro del listado). */
     liveStats?: boolean;
+    /** Invalida caché servidor de clientes del titular (TPV / cuentas grandes). */
+    refresh?: boolean;
     signal?: AbortSignal;
   } = {},
 ): Promise<{ clients: Client[]; meta: ClientsListMeta }> {
@@ -404,6 +406,7 @@ export async function listClientsPageRequest(
     params.set('filter[workCenterId]', options.workCenterId);
   }
   if (options.liveStats) params.set('liveStats', '1');
+  if (options.refresh) params.set('refresh', '1');
 
   const payload = await request<{ ok: boolean; clients: unknown[]; meta?: ClientsListMeta }>(
     `/api/clients/${encodeURIComponent(userId)}?${params.toString()}`,
