@@ -9,6 +9,11 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** Blanco fijo al final (cocina 6 cm / ticket normal 12 cm); el cuerpo crece con el pedido. */
+function bodyPaddingBottom(variant: TicketDocument['variant']): string {
+  return variant === 'kitchen' ? '6cm' : '12cm';
+}
+
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:16px 12px 28px;font-size:14px;color:#000;line-height:1.4}
@@ -67,7 +72,9 @@ function buildKitchenTicketHtml(doc: TicketDocument): string {
   }).join('');
 
   return `<!DOCTYPE html><html><head><title>Comanda ${escapeHtml(doc.ticketNo)}</title>
-<style>${BASE_STYLES}</style></head><body>
+<style>${BASE_STYLES}
+body{padding-bottom:${bodyPaddingBottom(doc.variant)}}
+</style></head><body>
 <div class="c">
   <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
   <span class="small">${escapeHtml(doc.ticketNo)} - ${escapeHtml(doc.dateLabel)}</span>
@@ -89,7 +96,9 @@ function buildDeliverySlipHtml(doc: TicketDocument): string {
   }).join('');
 
   return `<!DOCTYPE html><html><head><title>Reparto ${escapeHtml(doc.ticketNo)}</title>
-<style>${BASE_STYLES}</style></head><body>
+<style>${BASE_STYLES}
+body{padding-bottom:${bodyPaddingBottom(doc.variant)}}
+</style></head><body>
 ${buildHeaderHtml(doc)}
 <p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>
 ${doc.deliveryTypeLabel ? `<p class="b">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
@@ -115,7 +124,9 @@ function buildCustomerTicketHtml(doc: TicketDocument): string {
   }).join('');
 
   return `<!DOCTYPE html><html><head><title>${doc.isRefund ? 'Devolución' : 'Ticket'} ${escapeHtml(doc.ticketNo)}</title>
-<style>${BASE_STYLES}</style></head><body>
+<style>${BASE_STYLES}
+body{padding-bottom:${bodyPaddingBottom(doc.variant)}}
+</style></head><body>
 ${buildHeaderHtml(doc)}
 ${doc.salesPointName ? `<p>Tienda: ${escapeHtml(doc.salesPointName)}</p>` : ''}
 <p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>

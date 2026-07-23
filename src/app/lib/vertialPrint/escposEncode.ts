@@ -121,6 +121,16 @@ function pushLineDetail(
   }
 }
 
+/** Blanco fijo al final (antes del corte). El cuerpo crece con el pedido. */
+export const TICKET_TAIL_FEED_CM = {
+  kitchen: 6,
+  customer: 12,
+  delivery: 12,
+} as const;
+
+/** 203 dpi típico Epson TM ≈ 8 dots/mm. */
+const DOTS_PER_MM = 8;
+
 /**
  * Margen superior: la cuchilla suele dejar el inicio del papel encima del cabezal.
  * 1 línea basta (medida Tiana); más blanco desperdicia bobina.
@@ -129,15 +139,31 @@ function pushTopMargin(chunks: Uint8Array[]) {
   chunks.push(command([ESC, 0x64, 1]));
 }
 
+/** ESC J n — avanza n dots (máx. 255 por comando). */
+function pushFeedDots(chunks: Uint8Array[], dots: number) {
+  let left = Math.max(0, Math.round(dots));
+  while (left > 0) {
+    const n = Math.min(255, left);
+    chunks.push(command([ESC, 0x4a, n]));
+    left -= n;
+  }
+}
+
 /**
- * Avance + corte: el pie debe quedar por encima de la cuchilla.
- * 4 líneas ≈ blanco moderado en 80 mm (medida Tiana).
+ * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~12 cm.
+ * Solo el pie en blanco: si hay más líneas, el ticket se alarga solo.
  */
-function pushFeedAndCut(chunks: Uint8Array[], _width: number) {
+function pushFeedAndCut(chunks: Uint8Array[], feedCm: number) {
   chunks.push(setSize(SIZE_NORMAL));
-  chunks.push(command([ESC, 0x64, 4]));
+  pushFeedDots(chunks, feedCm * 10 * DOTS_PER_MM);
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
+}
+
+export function tailFeedCmForVariant(variant: TicketDocument['variant']): number {
+  if (variant === 'kitchen') return TICKET_TAIL_FEED_CM.kitchen;
+  if (variant === 'delivery') return TICKET_TAIL_FEED_CM.delivery;
+  return TICKET_TAIL_FEED_CM.customer;
 }
 
 /** Dirección del cliente: en domicilio un poco más marcada (negrita). */
@@ -207,7 +233,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     }
     chunks.push(command([ESC, 0x61, 1]));
     chunks.push(textLine(doc.footer, width));
-    pushFeedAndCut(chunks, width);
+    pushFeedAndCut(chunks, tailFeedCmForVariant(doc.variant));
     return concat(chunks);
   }
 
@@ -335,7 +361,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
   if (doc.variant === 'customer') {
     chunks.push(textLine('Gracias por su visita', width));
   }
-  pushFeedAndCut(chunks, width);
+  pushFeedAndCut(chunks, tailFeedCmForVariant(doc.variant));
 
   return concat(chunks);
 }

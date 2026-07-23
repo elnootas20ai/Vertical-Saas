@@ -1,5 +1,9 @@
 import type { TicketDocument } from './ticketDocument';
-import { sanitizeEscposText, wrapEscposLines } from './escposEncode';
+import {
+  sanitizeEscposText,
+  wrapEscposLines,
+  tailFeedCmForVariant,
+} from './escposEncode';
 
 type EposBuilder = {
   addTextAlign: (align: string) => void;
@@ -7,9 +11,34 @@ type EposBuilder = {
   addTextStyle?: (reverse?: boolean, ul?: boolean, em?: boolean) => void;
   addTextSize?: (width: number, height: number) => void;
   addFeedLine?: (lines: number) => void;
+  addFeedUnit?: (unit: number) => void;
   addCut?: (type: number) => void;
   CUT_FEED?: number;
+  CUT_NO_FEED?: number;
 };
+
+/** 203 dpi ≈ 8 dots/mm; espaciado típico de línea ≈ 30 dots (~3.75 mm). */
+const DOTS_PER_MM = 8;
+const MM_PER_LINE = 3.75;
+
+function feedBaseCm(builder: EposBuilder, feedCm: number) {
+  const dots = Math.max(0, Math.round(feedCm * 10 * DOTS_PER_MM));
+  if (typeof builder.addFeedUnit === 'function') {
+    let left = dots;
+    while (left > 0) {
+      const n = Math.min(255, left);
+      builder.addFeedUnit(n);
+      left -= n;
+    }
+    return;
+  }
+  const lines = Math.max(1, Math.round((feedCm * 10) / MM_PER_LINE));
+  if (typeof builder.addFeedLine === 'function') {
+    builder.addFeedLine(lines);
+  } else {
+    builder.addText('\n'.repeat(lines));
+  }
+}
 
 function money(value: number): string {
   return `${Number(value || 0).toFixed(2)} EUR`;
@@ -92,10 +121,11 @@ export function buildEposTicket(
   const tallCols = colsForSize(paperWidthMm, false);
   const titleCols = colsForSize(paperWidthMm, true);
 
+  // Margen superior corto (medida Tiana); la base larga va al final.
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(6);
+    builder.addFeedLine(1);
   } else {
-    builder.addText('\n\n\n\n\n\n');
+    builder.addText('\n');
   }
 
   // Comanda cocina: solo pedido + productos + notas (sin cliente ni datos fiscales)
@@ -139,9 +169,10 @@ export function buildEposTicket(
     }
     builder.addTextAlign('center');
     line(builder, doc.footer, width);
-    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(4);
-    else builder.addText('\n\n\n\n');
-    if (typeof builder.addCut === 'function') builder.addCut(builder.CUT_FEED ?? 1);
+    feedBaseCm(builder, tailFeedCmForVariant(doc.variant));
+    if (typeof builder.addCut === 'function') {
+      builder.addCut(builder.CUT_NO_FEED ?? builder.CUT_FEED ?? 1);
+    }
     return;
   }
 
@@ -253,13 +284,9 @@ export function buildEposTicket(
   line(builder, doc.footer, width);
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
-  if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(4);
-  } else {
-    builder.addText('\n\n\n\n');
-  }
+  feedBaseCm(builder, tailFeedCmForVariant(doc.variant));
 
   if (typeof builder.addCut === 'function') {
-    builder.addCut(builder.CUT_FEED ?? 1);
+    builder.addCut(builder.CUT_NO_FEED ?? builder.CUT_FEED ?? 1);
   }
 }
