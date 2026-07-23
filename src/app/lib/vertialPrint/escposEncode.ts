@@ -181,6 +181,8 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
   const tallCols = colsForSize(paperWidthMm, SIZE_TALL);
   const chunks: Uint8Array[] = [
     command([ESC, 0x40]),
+    // Margen izquierdo (~3 mm) para que el texto no roce el borde del rollo.
+    command([GS, 0x4c, 24, 0]),
   ];
   pushTopMargin(chunks);
 
@@ -201,8 +203,26 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
       chunks.push(setSize(SIZE_NORMAL));
     }
     chunks.push(textLine(sepLine(width), width));
+    const titleCols = colsForSize(paperWidthMm, SIZE_TITLE);
     for (const line of doc.lines) {
-      pushLineDetail(chunks, line, width, paperWidthMm);
+      chunks.push(setSize(SIZE_TITLE));
+      chunks.push(textLine(`${line.qty}x ${line.name}`, titleCols));
+      chunks.push(setSize(SIZE_NORMAL));
+      for (const name of line.added || []) {
+        chunks.push(setSize(SIZE_TALL));
+        chunks.push(textLine(`  + ${name}`, tallCols));
+        chunks.push(setSize(SIZE_NORMAL));
+      }
+      for (const name of line.removed || []) {
+        chunks.push(setSize(SIZE_TALL));
+        chunks.push(textLine(`  SIN ${name}`, tallCols));
+        chunks.push(setSize(SIZE_NORMAL));
+      }
+      if (line.note) {
+        chunks.push(setSize(SIZE_TALL));
+        chunks.push(textLine(`  NOTA: ${line.note}`, tallCols));
+        chunks.push(setSize(SIZE_NORMAL));
+      }
     }
     if (doc.orderNotes) {
       chunks.push(textLine(sepLine(width), width));

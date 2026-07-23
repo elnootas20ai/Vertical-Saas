@@ -141,6 +141,25 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('Atendido: Ana');
   });
 
+  it('ticket/reparto: muestra línea de envío cuando hay deliveryFee', () => {
+    const opts = baseOptions();
+    opts.order.totalAmount = 20.49;
+    opts.order.paidAmount = 0;
+    opts.order.paymentStatus = 'pending';
+    opts.order.deliveryFee = 1.5;
+    opts.order.items = [{ quantity: 1, name: 'Individual', total: 18.99 }];
+    const customer = buildTicketDocument({ ...opts, variant: 'customer' });
+    expect(customer.lines.some((l) => /envio/i.test(l.name) && l.total === 1.5)).toBe(true);
+    expect(customer.total).toBe(20.49);
+    const text = decodeEscpos(encodeTicketEscpos(customer));
+    expect(text).toContain('Envio a domicilio');
+    expect(text).toContain('1.50');
+    expect(text).toContain('20.49');
+
+    const kitchen = buildTicketDocument({ ...opts, variant: 'kitchen' });
+    expect(kitchen.lines.some((l) => /envio/i.test(l.name))).toBe(false);
+  });
+
   it('ticket: solo nombre de pila, sin apellidos', () => {
     const opts = baseOptions();
     opts.order.customerName = 'María García López';

@@ -63,18 +63,18 @@ function buildHeaderHtml(doc: TicketDocument): string {
 function buildKitchenTicketHtml(doc: TicketDocument): string {
   const rows = doc.lines.map((item) => {
     const detail = buildLineDetailHtml(item);
-    return `<div class="item"><span class="b">${item.qty}x</span> ${escapeHtml(item.name)}${detail}</div>`;
+    return `<div class="item"><span class="big">${item.qty}x ${escapeHtml(item.name)}</span>${detail}</div>`;
   }).join('');
 
   return `<!DOCTYPE html><html><head><title>Comanda ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}</style></head><body>
 <div class="c">
-  <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
+  <strong style="font-size:26px">${escapeHtml(doc.title)}</strong><br/>
   <span class="small">${escapeHtml(doc.ticketNo)} - ${escapeHtml(doc.dateLabel)}</span>
 </div>
 <div class="hr"></div>
-<p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>
-${doc.deliveryTypeLabel ? `<p class="b">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
+<p class="big">Pedido: #${escapeHtml(doc.orderNumber)}</p>
+${doc.deliveryTypeLabel ? `<p class="big">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
 ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}

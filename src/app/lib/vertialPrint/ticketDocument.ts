@@ -182,6 +182,15 @@ export function buildTicketDocument({
     })
     .filter((line) => line.name && line.qty > 0);
 
+  const deliveryFee = Math.max(0, Number(order.deliveryFee || 0));
+  if (deliveryFee > 0 && variant !== 'kitchen') {
+    lines.push({
+      qty: 1,
+      name: 'Envio a domicilio',
+      total: deliveryFee,
+    });
+  }
+
   // Recogida: no imprimir calle del cliente. Domicilio: sí, un poco más marcada.
   const customerAddress = isPickup
     ? ''

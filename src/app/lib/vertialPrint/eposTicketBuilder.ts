@@ -116,7 +116,26 @@ export function buildEposTicket(
       setTextSize(builder, 1, 1);
     }
     sep(builder, width);
-    for (const item of doc.lines) pushLineDetail(builder, item, width, paperWidthMm);
+    for (const item of doc.lines) {
+      setTextSize(builder, 2, 2);
+      line(builder, `${item.qty}x ${item.name}`, titleCols);
+      setTextSize(builder, 1, 1);
+      for (const name of item.added || []) {
+        setTextSize(builder, 1, 2);
+        line(builder, `  + ${name}`, tallCols);
+        setTextSize(builder, 1, 1);
+      }
+      for (const name of item.removed || []) {
+        setTextSize(builder, 1, 2);
+        line(builder, `  SIN ${name}`, tallCols);
+        setTextSize(builder, 1, 1);
+      }
+      if (item.note) {
+        setTextSize(builder, 1, 2);
+        line(builder, `  NOTA: ${item.note}`, tallCols);
+        setTextSize(builder, 1, 1);
+      }
+    }
     if (doc.orderNotes) {
       sep(builder, width);
       setTextSize(builder, 1, 2);

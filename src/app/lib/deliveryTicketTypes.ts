@@ -25,6 +25,8 @@ export interface DeliveryOrderLike {
   paymentStatus?: string;
   totalAmount?: number;
   paidAmount?: number;
+  /** Gastos de envío (domicilio); van en el total pero deben verse como línea. */
+  deliveryFee?: number;
   refundAmount?: number;
   refundReason?: string;
   paidAt?: string;
