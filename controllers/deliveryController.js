@@ -130,7 +130,7 @@ import {
   getPhaseStartTime,
   normalizeDeliveryOrderStatus,
 } from '../services/deliveryAlertStatusUtils.js';
-import { notifyManagersOrderCancelled } from '../services/deliveryOrderNotifications.js';
+import { notifyManagersOrderCancelled, appendTpvIncidentForOrderCancel } from '../services/deliveryOrderNotifications.js';
 import { getApprovedVacationBlockingWork } from '../services/vacationClockinGate.js';
 import logger from '../services/logger.js';
 import {
@@ -850,16 +850,40 @@ export async function cancelDeliveryOrder(req, res) {
       reason: trimmedReason,
     });
     triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: 'cancelled', previousStatus: existing.status }).catch(() => null);
-    notifyManagersOrderCancelled(req, {
+
+    // Incidencia en caja abierta (si hay) + alerta al admin / Centro de alertas.
+    await appendTpvIncidentForOrderCancel(req, {
+      userId,
       order: sanitized,
+      cancelReason: trimmedReason,
+      actorName,
+      callerAccount: actorAccount,
+      amount: netSaleInCaja,
+      resolveOrderPdvIdForCaja,
+    }).catch((err) => {
+      logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error registrando incidencia TPV');
+    });
+
+    const notifyResult = await notifyManagersOrderCancelled(req, {
+      order: { ...sanitized, cancelledAt: now },
       cancelReason: trimmedReason,
       actorUserId,
       actorName,
       businessUserId: userId,
+      previousStatus: existing.status,
+      cajaReturnAmount: netSaleInCaja > 0.001 ? netSaleInCaja : 0,
     }).catch((err) => {
       logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error notificando gerentes por cancelación');
+      return { notified: 0, alertId: null };
     });
-    return res.json({ ok: true, order: sanitized, cajaRegistration });
+
+    return res.json({
+      ok: true,
+      order: sanitized,
+      cajaRegistration,
+      alertNotified: Boolean(notifyResult?.notified),
+      alertId: notifyResult?.alertId || null,
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cancelar pedido' });
   }

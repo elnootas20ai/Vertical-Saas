@@ -128,7 +128,7 @@ async function businessOwnerMeetsAlertRule(business, ruleId, category) {
   }
 }
 
-async function resolveRecipients(businessId, ruleId, category, fallbackUserId) {
+async function resolveRecipients(businessId, ruleId, category, fallbackUserId, { force = false } = {}) {
   if (!businessId) return fallbackUserId ? [fallbackUserId] : [];
   try {
     const business = await findBusinessById(fakeReq, businessId);
@@ -140,12 +140,12 @@ async function resolveRecipients(businessId, ruleId, category, fallbackUserId) {
     const config = await getBusinessAlertConfig(businessId);
     const rules = config?.rules || [];
     const rule = rules.find((r) => r.id === ruleId || r.id === category) || null;
-    if (rule && !rule.enabled) return [];
+    if (rule && !rule.enabled && !force) return [];
 
     const userIds = new Set();
     if (business.owner_user_id) userIds.add(business.owner_user_id);
 
-    if (rule?.recipientRoles?.length) {
+    if (rule?.recipientRoles?.length && !force) {
       for (const m of business.members) {
         if (!m.user_id) continue;
         if (memberMatchesRecipientRoles(m.role, rule.recipientRoles)) {
@@ -164,6 +164,11 @@ async function resolveRecipients(businessId, ruleId, category, fallbackUserId) {
           userIds.add(m.user_id);
         }
       }
+      if (rule?.customRecipients?.length) {
+        for (const uid of rule.customRecipients) {
+          if (uid) userIds.add(uid);
+        }
+      }
     }
 
     if (userIds.size > 0) return Array.from(userIds);
@@ -173,25 +178,31 @@ async function resolveRecipients(businessId, ruleId, category, fallbackUserId) {
   }
 }
 
-async function resolveChannels(businessId, ruleId, category) {
+async function resolveChannels(businessId, ruleId, category, { force = false } = {}) {
   if (!businessId) return ['inApp'];
   try {
     const config = await getBusinessAlertConfig(businessId);
-    if (!config) return ['inApp'];
-    if (config.global?.muteAll) return [];
+    if (!config) {
+      return force || isCeoUrgentMobilePushRule(ruleId, category)
+        ? ['inApp', 'push']
+        : ['inApp'];
+    }
+    if (config.global?.muteAll && !force) return [];
     const rules = config.rules || [];
     const rule = rules.find((r) => r.id === ruleId || r.id === category);
     const channels = rule?.channels?.length
       ? [...rule.channels]
       : [...(config.global?.defaultChannels || ['inApp'])];
 
-    // CEO urgentes (caja / impagos): forzar push aunque el negocio solo tenga inApp guardado.
-    if (isCeoUrgentMobilePushRule(ruleId, category) && !channels.includes('push')) {
+    if (!channels.includes('inApp')) channels.push('inApp');
+
+    // CEO urgentes (caja / impagos / pedido eliminado): forzar push aunque el negocio solo tenga inApp.
+    if ((force || isCeoUrgentMobilePushRule(ruleId, category)) && !channels.includes('push')) {
       channels.push('push');
     }
     return channels;
   } catch {
-    return ['inApp'];
+    return force ? ['inApp', 'push'] : ['inApp'];
   }
 }
 
@@ -255,28 +266,29 @@ async function hasLegacyDatedAlertToday(category, dedupKey) {
 export async function emitGlobalAlert({
   businessId = '', userId = '', source, ruleId, category = '', priority, level,
   title, message, entityId = '', entityType = '', route = '', metadata = {}, dedupKey,
+  force = false,
 }) {
   try {
     const resolvedSource = normalizeSource(source || deriveSourceFromCategory(category));
     const resolvedPriority = normalizePriority(priority || derivePriorityFromLevel(level || 'warning'));
     const resolvedLevel = level || PRIORITY_TO_LEVEL[resolvedPriority] || 'warning';
 
-    const channels = await resolveChannels(businessId, ruleId, category);
+    const channels = await resolveChannels(businessId, ruleId, category, { force });
     if (channels.length === 0) return null;
 
-    if (businessId) {
+    if (businessId && !force) {
       const business = await findBusinessById(fakeReq, businessId);
       if (business && !(await businessOwnerMeetsAlertRule(business, ruleId, category))) {
         return null;
       }
     }
 
-    const recipientUserIds = await resolveRecipients(businessId, ruleId, category, userId);
+    const recipientUserIds = await resolveRecipients(businessId, ruleId, category, userId, { force });
     if (recipientUserIds.length === 0) return null;
 
     const quiet = await isQuietHours(businessId);
-    // Dinero/caja al CEO: suenan aunque sea horario silencioso.
-    const bypassQuiet = quiet && isCeoUrgentMobilePushRule(ruleId, category);
+    // Dinero/caja / pedido eliminado al CEO: suenan aunque sea horario silencioso.
+    const bypassQuiet = force || (quiet && isCeoUrgentMobilePushRule(ruleId, category));
 
     const now = new Date().toISOString();
     const notifBase = buildNotificationDocument({
@@ -317,7 +329,7 @@ export async function emitGlobalAlert({
         }
         return sanitized;
       }
-      if (await hasLegacyDatedAlertToday(category, dedupKey)) return null;
+      if (!force && await hasLegacyDatedAlertToday(category, dedupKey)) return null;
       notifBase._id = buildStableAlertId(category, dedupKey);
     }
 
