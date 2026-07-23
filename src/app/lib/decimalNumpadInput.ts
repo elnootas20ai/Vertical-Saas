@@ -22,9 +22,11 @@ export function appendDecimalNumpadKey(current: string, key: string, maxDecimals
     return current === '' ? '0.' : `${current}.`;
   }
   if (!/^\d$/.test(key)) return current;
-  if (current.includes('.')) {
+  // Importe ya cerrado (p. ej. Exacto 61.40): el siguiente dígito empieza cantidad nueva.
+  // Sin esto el pad parece «roto» tras pulsar Exacto / un billete rápido.
+  if (maxDecimals > 0 && current.includes('.')) {
     const [, dec = ''] = current.split('.');
-    if (dec.length >= maxDecimals) return current;
+    if (dec.length >= maxDecimals) return key;
   }
   if (current === '0') return key;
   return current + key;

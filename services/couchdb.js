@@ -3940,7 +3940,9 @@ export function filterClientDocsBySearch(docs, searchIndex, phoneQuery, userId, 
   const forceScan = raw.includes('@') || Boolean(options.forceScan);
 
   const candidates = forceScan ? null : candidateIndicesForClientSearch(searchIndex, qFold, qDigits);
-  const useIndex = Boolean(searchIndex) && !forceScan && candidates != null;
+  // Índice vacío → scan completo (índice desfasado / cliente nuevo aún no indexado).
+  const useIndex =
+    Boolean(searchIndex) && !forceScan && candidates != null && candidates.size > 0;
 
   const scored = [];
   let exactPhoneHits = 0;

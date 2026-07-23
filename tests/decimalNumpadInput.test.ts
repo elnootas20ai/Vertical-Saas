@@ -17,9 +17,14 @@ describe('decimalNumpadInput', () => {
     expect(appendDecimalNumpadKey('12.', '.')).toBe('12.');
   });
 
-  it('limits decimal digits', () => {
-    expect(appendDecimalNumpadKey('1.23', '4')).toBe('1.23');
+  it('limits decimal digits while typing', () => {
     expect(appendDecimalNumpadKey('1.2', '3')).toBe('1.23');
+  });
+
+  it('tras importe cerrado (Exacto / billete) el siguiente dígito empieza cantidad nueva', () => {
+    expect(appendDecimalNumpadKey('1.23', '4')).toBe('4');
+    expect(appendDecimalNumpadKey('61.40', '1')).toBe('1');
+    expect(appendDecimalNumpadKey('100.00', '5')).toBe('5');
   });
 
   it('parses values with comma or point', () => {

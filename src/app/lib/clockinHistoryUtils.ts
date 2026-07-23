@@ -67,12 +67,13 @@ export function clockinBelongsToLocalDay(
   return recordDay === dayKey || Boolean(clockInIso);
 }
 
-/** Fichaje válido para el turno de caja: solo fichajes del día local de hoy. */
+/** Fichaje válido para el turno de caja: día local de hoy, o turno aún abierto (noche/UTC). */
 export function clockinValidForRegisterSession(
-  record: Pick<ClockinRecord, 'date' | 'entries' | 'createdAt'>,
+  record: Pick<ClockinRecord, 'date' | 'entries' | 'createdAt' | 'status'>,
   _sessionOpenedAt?: string | null | undefined,
   dayKey = localCalendarDayKey(),
 ): boolean {
+  if (isClockinPresent(deriveEffectiveClockinStatus(record))) return true;
   return clockinBelongsToLocalDay(record, dayKey);
 }
 

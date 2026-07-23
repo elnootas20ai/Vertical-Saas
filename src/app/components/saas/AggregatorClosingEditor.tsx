@@ -5,6 +5,7 @@ import {
   sumAggregatorCard,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
+import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import type { FoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
 import { emptyFoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
 
@@ -53,6 +54,29 @@ export function AggregatorClosingEditor({
   });
   const cashTotal = sumAggregatorCash(displayRows);
   const cardTotal = sumAggregatorCard(displayRows);
+  const foodTotals = autoRows.reduce(
+    (acc, row) => {
+      const ch = row.platform.channel;
+      const autoFood = foodByChannel[ch] || emptyFoodFamilyCounts();
+      const food = manualFoodByChannel[ch] || {
+        pizza: String(autoFood.pizza || 0),
+        burger: String(autoFood.burger || 0),
+        taco: String(autoFood.taco || 0),
+      };
+      const n = (raw: string, fallback: number) => {
+        const t = String(raw ?? '').trim();
+        if (!t) return fallback;
+        const v = Number.parseInt(t, 10);
+        return Number.isFinite(v) && v >= 0 ? v : fallback;
+      };
+      acc.pizza += n(food.pizza, autoFood.pizza);
+      acc.burger += n(food.burger, autoFood.burger);
+      acc.taco += n(food.taco, autoFood.taco);
+      return acc;
+    },
+    { pizza: 0, burger: 0, taco: 0 },
+  );
+  const appsMoneyTotal = Math.round((cashTotal + cardTotal) * 100) / 100;
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 overflow-hidden">
@@ -145,7 +169,7 @@ export function AggregatorClosingEditor({
                     inputMode="decimal"
                     placeholder="0,00"
                     value={manualCashByChannel[ch] ?? ''}
-                    onChange={(e) => onManualCashChange(ch, e.target.value)}
+                    onChange={(e) => onManualCashChange(ch, formatMoneyAsYouType(e.target.value, true))}
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Entra en caja</span>
@@ -157,7 +181,7 @@ export function AggregatorClosingEditor({
                     inputMode="decimal"
                     placeholder="0,00"
                     value={manualCardByChannel[ch] ?? ''}
-                    onChange={(e) => onManualCardChange(ch, e.target.value)}
+                    onChange={(e) => onManualCardChange(ch, formatMoneyAsYouType(e.target.value, true))}
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-blue-200 dark:border-blue-800 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Solo registro</span>
@@ -166,6 +190,36 @@ export function AggregatorClosingEditor({
             </div>
           );
         })}
+
+        <div className="rounded-xl border-2 border-gray-900 dark:border-gray-200 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 p-3 space-y-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider opacity-80">Total apps</p>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
+              <p className="text-[10px] opacity-70">🍕 Pizzas</p>
+              <p className="text-base font-bold tabular-nums">{foodTotals.pizza}</p>
+            </div>
+            <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
+              <p className="text-[10px] opacity-70">🍔 Burgers</p>
+              <p className="text-base font-bold tabular-nums">{foodTotals.burger}</p>
+            </div>
+            <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
+              <p className="text-[10px] opacity-70">🌮 Tacos</p>
+              <p className="text-base font-bold tabular-nums">{foodTotals.taco}</p>
+            </div>
+            <div className="rounded-lg bg-emerald-500/20 dark:bg-emerald-600/15 px-2 py-1.5">
+              <p className="text-[10px] opacity-70">💵 Efectivo</p>
+              <p className="text-base font-bold tabular-nums">{cashTotal.toFixed(2)}€</p>
+            </div>
+            <div className="rounded-lg bg-blue-500/20 dark:bg-blue-600/15 px-2 py-1.5">
+              <p className="text-[10px] opacity-70">💳 Tarjeta</p>
+              <p className="text-base font-bold tabular-nums">{cardTotal.toFixed(2)}€</p>
+            </div>
+          </div>
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/15 dark:border-black/10">
+            <span className="text-xs font-semibold opacity-80">Suma efectivo + tarjeta apps</span>
+            <span className="text-lg font-bold tabular-nums">{appsMoneyTotal.toFixed(2)}€</span>
+          </div>
+        </div>
       </div>
     </div>
   );

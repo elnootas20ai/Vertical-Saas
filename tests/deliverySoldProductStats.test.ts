@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  brandHeroSoldCountsForDay,
   buildSoldProductDailySeries,
   classifySoldProductFamily,
   resolveActiveSoldFamilies,
@@ -58,5 +59,37 @@ describe('soldProductCountsForDay / daily series', () => {
     );
     expect(series[0].pizza).toBe(2);
     expect(series[0].kebab).toBe(1);
+  });
+});
+
+describe('brandHeroSoldCountsForDay', () => {
+  it('desglosa el ítem importante por marca (pizza / burger)', () => {
+    const dayKey = '2026-07-22';
+    const brands = [
+      { _id: 'b-pizza', name: 'Modomio', deliveryLineKind: 'pizza', active: true },
+      { _id: 'b-burger', name: 'BlackBurger', deliveryLineKind: 'burger_fastfood', active: true },
+    ];
+    const orders = [
+      {
+        _id: '1',
+        status: 'entregado',
+        deliveredAt: '2026-07-22T12:00:00.000Z',
+        items: [
+          { name: 'Margarita', category: 'Pizzas', quantity: 3, brandIds: ['b-pizza'] },
+          { name: 'Cheese', category: 'Burgers', quantity: 2, brandIds: ['b-burger'] },
+          { name: 'Coca', category: 'Bebidas', quantity: 5, brandIds: ['b-pizza'] },
+        ],
+      },
+    ];
+    const rows = brandHeroSoldCountsForDay(orders as any, brands, dayKey);
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.brandId === 'b-pizza')).toMatchObject({
+      familyLabel: 'Pizzas',
+      count: 3,
+    });
+    expect(rows.find((r) => r.brandId === 'b-burger')).toMatchObject({
+      familyLabel: 'Burgers',
+      count: 2,
+    });
   });
 });

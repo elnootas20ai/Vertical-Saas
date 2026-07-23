@@ -141,7 +141,7 @@ describe('resolveActiveTpvRegisterSession', () => {
     expect(r.session?._id).toBe('s-new');
   });
 
-  it('does not auto-enter a prior-day-only open session (forces Abrir caja)', () => {
+  it('keeps remembering open session until closed (even multi-day)', () => {
     const old = new Date(Date.now() - 16 * 24 * 60 * 60 * 1000).toISOString();
     const july6 = {
       _id: 's-old',
@@ -156,8 +156,26 @@ describe('resolveActiveTpvRegisterSession', () => {
       pointsOfSale: pdvs,
       holdStickyWhileOpen: true,
     });
-    expect(r.session).toBeNull();
-    expect(r.nextSticky).toBeNull();
+    expect(r.session?._id).toBe('s-old');
+    expect(r.nextSticky?._id).toBe('s-old');
+  });
+
+  it('recovers open session from last night (past midnight)', () => {
+    const lastNight = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+    const overnight = {
+      _id: 's-night',
+      status: 'open',
+      pointOfSaleId: 'pdv-1',
+      openedAt: lastNight,
+    };
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [overnight],
+      sticky: null,
+      pickId: 'pdv-1',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: true,
+    });
+    expect(r.session?._id).toBe('s-night');
   });
 });
 

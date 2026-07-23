@@ -90,9 +90,37 @@ export interface AggregatorCashRow {
 }
 
 export function parseAggregatorAmount(raw: string): number | null {
-  const t = String(raw || '').trim().replace(',', '.');
-  if (!t) return null;
-  const n = Number(t);
+  const s = String(raw || '').replace(/\s/g, '').trim();
+  if (!s) return null;
+
+  // es-ES: miles con punto, decimales con coma (1.400,50) o solo coma (90,5).
+  if (s.includes(',')) {
+    const lastComma = s.lastIndexOf(',');
+    const intDigits = s.slice(0, lastComma).replace(/\D/g, '');
+    const decDigits = s.slice(lastComma + 1).replace(/\D/g, '').slice(0, 2);
+    const base = intDigits || '0';
+    const n = Number(decDigits ? `${base}.${decDigits}` : base);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return Math.round(n * 100) / 100;
+  }
+
+  // Solo dígitos y puntos: "90.5" (decimal) o "1.400" (miles).
+  const dots = (s.match(/\./g) || []).length;
+  if (dots === 1) {
+    const [left, right = ''] = s.split('.');
+    const intDigits = left.replace(/\D/g, '');
+    const decDigits = right.replace(/\D/g, '');
+    // 1–2 decimales → decimal; 3 dígitos tras el punto → miles (1.400).
+    if (decDigits.length > 0 && decDigits.length <= 2) {
+      const n = Number(`${intDigits || '0'}.${decDigits}`);
+      if (!Number.isFinite(n) || n < 0) return null;
+      return Math.round(n * 100) / 100;
+    }
+  }
+
+  const intDigits = s.replace(/\D/g, '');
+  if (!intDigits) return null;
+  const n = Number(intDigits);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n * 100) / 100;
 }

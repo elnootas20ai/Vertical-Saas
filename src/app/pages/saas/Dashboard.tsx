@@ -17,7 +17,7 @@ import { fetchAlertsSummary, type AlertsSummary } from '../../lib/clockinAlertsA
 import { fetchTeamDashboardSnapshot, type TeamDashboardSnapshot } from '../../lib/teamDashboardApi';
 import { TeamRrhhDashboardWidget } from '../../components/saas/TeamRrhhDashboardWidget';
 import { AlertSummaryWidget } from '../../components/saas/AlertSummaryWidget';
-import { listDeliveryOrdersRequest, filterDeliveryOrdersRequest, TPV_SESSION_SYNC_EVENT, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
+import { listDeliveryOrdersRequest, filterDeliveryOrdersRequest, listTpvRegisterSessionsRequest, TPV_SESSION_SYNC_EVENT, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
 import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import {
   BarChart, Bar, Cell, ResponsiveContainer, Tooltip,
@@ -51,16 +51,17 @@ import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
 import { listClientsPageRequest, CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
 import { listBrandsRequest, type Brand } from '../../lib/brandApi';
-import { computePortfolioMetrics, computePortfolioClientMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, prevCalendarMonthKey, type PortfolioMetrics } from '../../lib/portfolioMetrics';
+import { computePortfolioMetrics, computePortfolioClientMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, deliveryOrderRevenueAmount, applyTpvCashMetrics, prevCalendarMonthKey, type PortfolioMetrics } from '../../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import {
   buildSoldProductDailySeries,
   resolveActiveSoldFamilies,
   soldProductCountsForDay,
+  brandHeroSoldCountsForDay,
   type SoldProductFamilyMeta,
 } from '../../lib/deliverySoldProductStats';
-import { listFinanceMovements } from '../../lib/financeApi';
-import { computeEbitdaForMonth } from '../../lib/ebitdaMetrics';
+import { coreEbitdaSubtitle } from '../../lib/ebitdaMetrics';
+import { useCoreEbitdaMonth } from '../../hooks/useCoreEbitdaMonth';
 import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
 import { Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -320,7 +321,7 @@ function MiniBarChart({ data, color }: { data: DailyPoint[]; color: string }) {
 // ─── KPI Card ──────────────────────────────────────────────────────────────────
 
 function KPICard({
-  title, value, sub, icon, iconBg, iconColor, trend, onClick, loading, miniChart,
+  title, value, sub, icon, iconBg, iconColor, trend, onClick, loading, miniChart, detail,
 }: {
   title: string;
   value: string;
@@ -332,6 +333,8 @@ function KPICard({
   onClick?: () => void;
   loading?: boolean;
   miniChart?: React.ReactNode;
+  /** Sustituye el valor grande (p. ej. desglose por marca). */
+  detail?: React.ReactNode;
 }) {
   return (
     <button
@@ -348,11 +351,13 @@ function KPICard({
           </div>
           {loading ? (
             <div className="h-8 w-20 bg-gray-100 dark:bg-gray-700 animate-pulse rounded-lg mb-1" />
+          ) : detail ? (
+            <div className="mb-0.5 min-h-[2rem]">{detail}</div>
           ) : (
             <p className="text-2xl sm:text-3xl font-black text-gray-900 dark:text-gray-100 mb-0.5 leading-none">{value}</p>
           )}
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            {!loading && trend && (
+            {!loading && !detail && trend && (
               <span className={`flex items-center gap-0.5 text-[11px] font-bold ${
                 trend.up === true ? 'text-emerald-600' : trend.up === false ? 'text-red-500' : 'text-gray-400'
               }`}>
@@ -588,31 +593,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     lockedWidgets,
   } = useDashboardPlanAccess();
 
+  const { snapshot: ebitdaMonth, loading: ebitdaLoading } = useCoreEbitdaMonth(canViewEbitda);
   const financeUserId = resolveBusinessDataUserId(authUser, currentBusiness);
-  const [ebitdaMonth, setEbitdaMonth] = useState<{ value: number; margin: number } | null>(null);
-
-  useEffect(() => {
-    if (!financeUserId || !businessId || !canViewEbitda) {
-      setEbitdaMonth(null);
-      return;
-    }
-    let cancelled = false;
-    const monthKey = new Date().toISOString().slice(0, 7);
-    void listFinanceMovements(financeUserId)
-      .then((movs) => {
-        if (cancelled) return;
-        const hasTagged = movs.some((m) => String(m.businessId || '').trim() === businessId);
-        const scope = hasTagged
-          ? { level: 'business' as const, businessId }
-          : { level: 'all' as const };
-        const totals = computeEbitdaForMonth(movs, monthKey, scope);
-        setEbitdaMonth({ value: totals.ebitda, margin: totals.ebitdaMargin });
-      })
-      .catch(() => {
-        if (!cancelled) setEbitdaMonth(null);
-      });
-    return () => { cancelled = true; };
-  }, [financeUserId, businessId, canViewEbitda]);
   const teamMembers = useMemo(
     () => (currentBusiness?.members || []).map((m) => ({ user_id: m.user_id, fullName: m.fullName })),
     [currentBusiness?.members],
@@ -689,6 +671,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     pdvIds: string[];
     primaryPdvId: string | null;
     wcScopeIds: string[];
+    /** Total de pedidos de la empresa (meta del filtro API). */
+    ordersTotal: number;
   } | null>(null);
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
@@ -713,7 +697,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
     const monthEnd = `${todayKey}T23:59:59.999Z`;
     try {
-      const [{ pointsOfSale, workCenters }, orderResult] = await Promise.all([
+      const [{ pointsOfSale, workCenters }, orderResult, tpvSessions, ordersCountResult] = await Promise.all([
         loadDeliveryStores(authUser, currentBusiness).catch(() => ({
           dataUserId: '',
           workCenters: [],
@@ -723,6 +707,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           dateFrom: orderFetchFrom,
           dateTo: monthEnd,
           limit: 3000,
+          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
+        }).catch(() => ({ orders: [], total: 0 })),
+        listTpvRegisterSessionsRequest(dataUserId, {
+          ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
+        }).catch(() => []),
+        // Total real de la empresa (sin recortar por fechas del dashboard)
+        filterDeliveryOrdersRequest(dataUserId, {
+          limit: 1,
           ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
         }).catch(() => ({ orders: [], total: 0 })),
       ]);
@@ -741,13 +733,19 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       const wcScope = new Set(storeIds);
       if (pdvIds.length === 0 && wcScope.size === 0 && (orderResult.orders || []).length === 0) {
         setDeliveryMetrics(emptyPortfolioMetrics());
-        setDeliveryScope({ orders: orderResult.orders, pdvIds, primaryPdvId: null, wcScopeIds: [...wcScope] });
+        setDeliveryScope({
+          orders: orderResult.orders,
+          pdvIds,
+          primaryPdvId: null,
+          wcScopeIds: [...wcScope],
+          ordersTotal: Number(ordersCountResult.total || orderResult.total || 0),
+        });
         return;
       }
       const createdMap = new Map(pointsOfSale.map((p) => [p._id, String(p.createdAt || '')]));
       const scopePdvIds = pdvIds.length ? pdvIds : orderPdvIds;
       const primaryPdv = pickPrimaryPdvIdFromList(scopePdvIds, createdMap) || orderPdvIds[0] || null;
-      setDeliveryMetrics(
+      const baseMetrics =
         scopePdvIds.length === 0
           ? emptyPortfolioMetrics()
           : computePortfolioMetrics(
@@ -756,13 +754,24 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               primaryPdv,
               todayKey,
               wcScope,
-            ),
+            );
+      setDeliveryMetrics(applyTpvCashMetrics(baseMetrics, tpvSessions || [], scopePdvIds, todayKey));
+      const scopedForTotal = filterOrdersToPortfolioScope(
+        orderResult.orders || [],
+        scopePdvIds,
+        primaryPdv,
+        wcScope,
       );
       setDeliveryScope({
         orders: orderResult.orders,
         pdvIds: scopePdvIds,
         primaryPdvId: primaryPdv,
         wcScopeIds: [...wcScope],
+        ordersTotal: Math.max(
+          Number(ordersCountResult.total || 0),
+          Number(orderResult.total || 0),
+          scopedForTotal.length,
+        ),
       });
     } catch {
       setDeliveryMetrics(null);
@@ -1093,7 +1102,20 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     : (sk?.salesMonth ?? soldThisMonth.reduce((s, v) => s + (v.salePrice || 0), 0));
   const expensesMonth    = sk?.expensesMonth ?? 0;
   const estimatedProfit  = sk?.estimatedProfit ?? (salesMonth - expensesMonth);
-  const cashBalance      = sk?.cashBalance ?? 0;
+  // Delivery: misma fuente que Ventas (pedidos cobrados del negocio activo).
+  // El KPI de servidor es por cuenta y suele no tener cobros finance sync → Caja en 0 €.
+  const cashBalance = isDeliveryVertical && deliveryScope
+    ? (() => {
+        const scoped = filterOrdersToPortfolioScope(
+          deliveryScope.orders,
+          deliveryScope.pdvIds,
+          deliveryScope.primaryPdvId,
+          new Set(deliveryScope.wcScopeIds),
+        );
+        const fromOrders = scoped.reduce((sum, o) => sum + deliveryOrderRevenueAmount(o), 0);
+        return Math.round(fromOrders * 100) / 100;
+      })()
+    : (sk?.cashBalance ?? 0);
   const criticalStock    = sk?.criticalStockCount ?? 0;
   const activeWorkers    = sk?.activeWorkers ?? 0;
   const totalClockinsToday = sk?.totalClockinsToday ?? 0;
@@ -1195,6 +1217,15 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     if (!isDeliveryVertical) return null;
     return soldProductCountsForDay(scopedDeliveryOrders, localCalendarDayKey());
   }, [isDeliveryVertical, scopedDeliveryOrders]);
+
+  const brandHeroToday = useMemo(() => {
+    if (!isDeliveryVertical) return [];
+    return brandHeroSoldCountsForDay(
+      scopedDeliveryOrders,
+      deliveryBrands,
+      localCalendarDayKey(),
+    );
+  }, [isDeliveryVertical, scopedDeliveryOrders, deliveryBrands]);
 
   const soldProductDailyData = useMemo(() => {
     if (!isDeliveryVertical || soldProductFamilies.length === 0) return [];
@@ -1368,8 +1399,25 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   iconColor="text-emerald-600"
                   trend={salesTodayCount > 0 ? { value: `+${salesTodayCount}`, up: true } : undefined}
                   onClick={() => navigate(isCompraventaVertical ? '/saas/vertical/compraventa/ventas' : '/saas/sales')}
-                  loading={serverLoading}
+                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
                 />
+                {(isDeliveryVertical || isRestaurantVertical) && (
+                  <KPICard
+                    title="Alertas ops"
+                    value={String(openIncidents)}
+                    sub={
+                      openIncidents > 0
+                        ? `${deliveryAlertsCritical} crítica${deliveryAlertsCritical === 1 ? '' : 's'}`
+                        : 'Sin alertas'
+                    }
+                    icon={<ShieldAlert className="w-4 h-4" />}
+                    iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
+                    iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
+                    trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
+                    onClick={() => navigate(isDeliveryVertical ? '/saas/delivery-ops' : '/saas/caja')}
+                    loading={serverLoading}
+                  />
+                )}
                 <KPICard
                   title="Ventas mes"
                   value={salesMonth > 0 ? formatEur(salesMonth) : '—'}
@@ -1381,40 +1429,70 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                   iconColor="text-blue-600"
                   trend={salesMonth > 0 ? { value: formatEur(salesMonth), up: true } : undefined}
                   onClick={() => navigate('/saas/sales-metrics')}
-                  loading={serverLoading}
+                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
                   miniChart={<MiniBarChart data={dailySalesData} color="blue" />}
                 />
-                <KPICard
-                  title="Gastos mes"
-                  value={expensesMonth > 0 ? formatEur(expensesMonth) : '—'}
-                  sub="Pagos registrados"
-                  icon={<CreditCard className="w-4 h-4" />}
-                  iconBg="bg-red-100 dark:bg-red-900/40"
-                  iconColor="text-red-600"
-                  trend={expensesMonth > 0 ? { value: formatEur(expensesMonth), up: false } : undefined}
-                  onClick={() => navigate('/saas/income-expenses')}
-                  loading={serverLoading}
-                />
+                {isDeliveryVertical ? (
+                  <KPICard
+                    title="Pedidos totales"
+                    value={
+                      deliveryScope != null
+                        ? String(deliveryScope.ordersTotal)
+                        : '—'
+                    }
+                    sub={
+                      deliveryMetrics
+                        ? `${deliveryMetrics.ordersMonth} este mes · ${deliveryMetrics.ordersToday} hoy`
+                        : 'Pedidos de la empresa'
+                    }
+                    icon={<Hash className="w-4 h-4" />}
+                    iconBg="bg-violet-100 dark:bg-violet-900/40"
+                    iconColor="text-violet-600"
+                    trend={
+                      deliveryMetrics && deliveryMetrics.ordersToday > 0
+                        ? { value: `+${deliveryMetrics.ordersToday} hoy`, up: true }
+                        : undefined
+                    }
+                    onClick={() => navigate('/saas/delivery-ops')}
+                    loading={deliveryDataLoading}
+                  />
+                ) : (
+                  <KPICard
+                    title="Gastos mes"
+                    value={expensesMonth > 0 ? formatEur(expensesMonth) : '—'}
+                    sub="Pagos registrados"
+                    icon={<CreditCard className="w-4 h-4" />}
+                    iconBg="bg-red-100 dark:bg-red-900/40"
+                    iconColor="text-red-600"
+                    trend={expensesMonth > 0 ? { value: formatEur(expensesMonth), up: false } : undefined}
+                    onClick={() => navigate('/saas/income-expenses')}
+                    loading={serverLoading}
+                  />
+                )}
                 <KPICard
                   title={canViewEbitda ? 'EBITDA mes' : 'Beneficio est.'}
                   value={
                     canViewEbitda && ebitdaMonth
-                      ? formatEur(ebitdaMonth.value)
+                      ? formatEur(ebitdaMonth.ebitda)
                       : (salesMonth > 0 ? formatEur(estimatedProfit) : '—')
                   }
                   sub={
                     canViewEbitda && ebitdaMonth
-                      ? `Margen ${ebitdaMonth.margin.toFixed(1)}% · ${currentBusiness?.name || 'empresa'}`
+                      ? coreEbitdaSubtitle(ebitdaMonth, currentBusiness?.name)
                       : isBasicPlan
                         ? 'Sube a Normal para EBITDA'
                         : (quickFinance ? `Margen ${quickFinance.marginPct}%` : 'Empresa activa')
                   }
                   icon={<PieChart className="w-4 h-4" />}
-                  iconBg={(canViewEbitda && ebitdaMonth ? ebitdaMonth.value : estimatedProfit) >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-red-100 dark:bg-red-900/40'}
-                  iconColor={(canViewEbitda && ebitdaMonth ? ebitdaMonth.value : estimatedProfit) >= 0 ? 'text-emerald-600' : 'text-red-600'}
+                  iconBg={(canViewEbitda && ebitdaMonth ? ebitdaMonth.ebitda : estimatedProfit) >= 0 ? 'bg-emerald-100 dark:bg-emerald-900/40' : 'bg-red-100 dark:bg-red-900/40'}
+                  iconColor={(canViewEbitda && ebitdaMonth ? ebitdaMonth.ebitda : estimatedProfit) >= 0 ? 'text-emerald-600' : 'text-red-600'}
                   trend={
                     canViewEbitda && ebitdaMonth
-                      ? { value: `${ebitdaMonth.margin.toFixed(1)}%`, up: ebitdaMonth.value > 0 ? true : ebitdaMonth.value < 0 ? false : null }
+                      ? (ebitdaMonth.quality === 'income_only'
+                        ? { value: 'Sin gastos', up: null }
+                        : ebitdaMonth.quality === 'empty'
+                          ? undefined
+                          : { value: `${ebitdaMonth.ebitdaMargin.toFixed(1)}%`, up: ebitdaMonth.ebitda > 0 ? true : ebitdaMonth.ebitda < 0 ? false : null })
                       : (salesMonth > 0 ? { value: `${quickFinance?.marginPct ?? 0}%`, up: estimatedProfit > 0 ? true : estimatedProfit < 0 ? false : null } : undefined)
                   }
                   onClick={() => {
@@ -1426,86 +1504,132 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                       navigate('/saas/billing');
                     }
                   }}
-                  loading={serverLoading}
+                  loading={canViewEbitda ? ebitdaLoading : serverLoading}
                 />
                 <KPICard
                   title="Caja actual"
                   value={formatEur(cashBalance)}
-                  sub={cashBalance >= 0 ? 'Balance positivo' : 'Balance negativo'}
+                  sub={
+                    isDeliveryVertical
+                      ? (deliveryMetrics && deliveryMetrics.openCashRegisters > 0
+                        ? `${deliveryMetrics.openCashRegisters} caja${deliveryMetrics.openCashRegisters !== 1 ? 's' : ''} abierta${deliveryMetrics.openCashRegisters !== 1 ? 's' : ''}`
+                        : (cashBalance > 0 ? 'Cobros de pedidos' : 'Sin cobros aún'))
+                      : (cashBalance >= 0 ? 'Balance positivo' : 'Balance negativo')
+                  }
                   icon={<Wallet className="w-4 h-4" />}
                   iconBg={cashBalance >= 0 ? 'bg-cyan-100 dark:bg-cyan-900/40' : 'bg-red-100 dark:bg-red-900/40'}
                   iconColor={cashBalance >= 0 ? 'text-cyan-600' : 'text-red-600'}
                   trend={cashBalance !== 0 ? { value: formatEur(Math.abs(cashBalance)), up: cashBalance >= 0 ? true : false } : undefined}
-                  onClick={() => navigate('/saas/finance')}
-                  loading={serverLoading}
+                  onClick={() => navigate(isDeliveryVertical ? '/saas/caja' : '/saas/finance')}
+                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
                 />
                 <KPICard
-                  title={vertical === 'delivery' ? 'Pedidos activos' : 'Stock crítico'}
-                  value={vertical === 'delivery' ? String(pendingDeliveriesKpi) : String(criticalStock)}
+                  title={isDeliveryVertical ? 'Pedidos activos' : 'Stock crítico'}
+                  value={isDeliveryVertical ? String(pendingDeliveriesKpi) : String(criticalStock)}
                   sub={
-                    vertical === 'delivery'
+                    isDeliveryVertical
                       ? (pendingDeliveriesKpi > 0 ? 'En cocina / reparto' : 'Sin pedidos en curso')
                       : (criticalStock > 0 ? 'Productos bajo mínimo' : 'Todo en orden')
                   }
-                  icon={vertical === 'delivery' ? <Truck className="w-4 h-4" /> : <Boxes className="w-4 h-4" />}
+                  icon={isDeliveryVertical ? <Truck className="w-4 h-4" /> : <Boxes className="w-4 h-4" />}
                   iconBg={
-                    vertical === 'delivery'
+                    isDeliveryVertical
                       ? (pendingDeliveriesKpi > 0 ? 'bg-cyan-100 dark:bg-cyan-900/40' : 'bg-gray-100 dark:bg-gray-700')
                       : (criticalStock > 0 ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-gray-100 dark:bg-gray-700')
                   }
                   iconColor={
-                    vertical === 'delivery'
+                    isDeliveryVertical
                       ? (pendingDeliveriesKpi > 0 ? 'text-cyan-600' : 'text-gray-400')
                       : (criticalStock > 0 ? 'text-amber-600' : 'text-gray-400')
                   }
                   trend={
-                    vertical === 'delivery'
+                    isDeliveryVertical
                       ? (pendingDeliveriesKpi > 0 ? { value: `${pendingDeliveriesKpi} en curso`, up: true } : undefined)
                       : (criticalStock > 0 ? { value: `${criticalStock} alertas`, up: false } : undefined)
                   }
                   onClick={() => navigate(
-                    vertical === 'delivery'
+                    isDeliveryVertical
                       ? '/saas/delivery-ops'
                       : isRestaurantVertical
                         ? '/saas/sala'
                         : '/saas/catalog',
                   )}
-                  loading={serverLoading}
+                  loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
                 />
-                <KPICard
-                  title="Equipo activo"
-                  value={activeWorkers > 0 ? String(activeWorkers) : totalClockinsToday > 0 ? String(totalClockinsToday) : '—'}
-                  sub={totalClockinsToday > 0 ? `${totalClockinsToday} fichaje${totalClockinsToday > 1 ? 's' : ''} hoy` : 'Sin fichajes hoy'}
-                  icon={<UserCheck className="w-4 h-4" />}
-                  iconBg="bg-violet-100 dark:bg-violet-900/40"
-                  iconColor="text-violet-600"
-                  trend={activeWorkers > 0 ? { value: `${activeWorkers} ahora`, up: true } : undefined}
-                  onClick={() => navigate('/saas/clockins')}
-                  loading={serverLoading}
-                />
-                <KPICard
-                  title={isDeliveryVertical || isRestaurantVertical ? 'Alertas ops' : 'Incidencias'}
-                  value={String(openIncidents)}
-                  sub={
-                    isDeliveryVertical || isRestaurantVertical
-                      ? (openIncidents > 0
-                        ? `${deliveryAlertsCritical} crítica${deliveryAlertsCritical === 1 ? '' : 's'}`
-                        : 'Sin alertas')
-                      : (openIncidents > 0 ? 'Abiertas ahora' : 'Sin incidencias')
-                  }
-                  icon={<ShieldAlert className="w-4 h-4" />}
-                  iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
-                  iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
-                  trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
-                  onClick={() => navigate(
-                    vertical === 'delivery'
-                      ? '/saas/delivery-ops'
-                      : isRestaurantVertical
-                        ? '/saas/caja'
-                        : '/saas/workshop',
-                  )}
-                  loading={serverLoading}
-                />
+                {isDeliveryVertical ? (
+                  <KPICard
+                    title="Por marca · hoy"
+                    value={
+                      brandHeroToday.length === 0
+                        ? '—'
+                        : String(brandHeroToday.reduce((s, b) => s + b.count, 0))
+                    }
+                    sub={
+                      brandHeroToday.length === 0
+                        ? 'Configura marcas en Ajustes'
+                        : brandHeroToday.length === 1
+                          ? `${brandHeroToday[0].familyLabel} de ${brandHeroToday[0].brandName}`
+                          : `${brandHeroToday.length} marcas`
+                    }
+                    icon={<Package className="w-4 h-4" />}
+                    iconBg="bg-amber-100 dark:bg-amber-900/40"
+                    iconColor="text-amber-700"
+                    detail={
+                      brandHeroToday.length > 0 ? (
+                        <div className="space-y-1">
+                          {brandHeroToday.slice(0, 3).map((row) => (
+                            <div
+                              key={row.brandId}
+                              className="flex items-baseline justify-between gap-2 text-sm leading-tight"
+                            >
+                              <span className="truncate text-gray-600 dark:text-gray-300 font-medium">
+                                {row.brandName}
+                              </span>
+                              <span className="shrink-0 font-black text-gray-900 dark:text-gray-100 tabular-nums">
+                                {row.count}{' '}
+                                <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                                  {row.familyLabel.toLowerCase()}
+                                </span>
+                              </span>
+                            </div>
+                          ))}
+                          {brandHeroToday.length > 3 && (
+                            <p className="text-[10px] text-gray-400">+{brandHeroToday.length - 3} más</p>
+                          )}
+                        </div>
+                      ) : undefined
+                    }
+                    onClick={() => navigate('/saas/sales-metrics')}
+                    loading={deliveryDataLoading}
+                  />
+                ) : (
+                  <>
+                    <KPICard
+                      title="Equipo activo"
+                      value={activeWorkers > 0 ? String(activeWorkers) : totalClockinsToday > 0 ? String(totalClockinsToday) : '—'}
+                      sub={totalClockinsToday > 0 ? `${totalClockinsToday} fichaje${totalClockinsToday > 1 ? 's' : ''} hoy` : 'Sin fichajes hoy'}
+                      icon={<UserCheck className="w-4 h-4" />}
+                      iconBg="bg-violet-100 dark:bg-violet-900/40"
+                      iconColor="text-violet-600"
+                      trend={activeWorkers > 0 ? { value: `${activeWorkers} ahora`, up: true } : undefined}
+                      onClick={() => navigate('/saas/clockins')}
+                      loading={serverLoading}
+                    />
+                    {!isRestaurantVertical && (
+                      <KPICard
+                        title="Incidencias"
+                        value={String(openIncidents)}
+                        sub={openIncidents > 0 ? 'Abiertas ahora' : 'Sin incidencias'}
+                        icon={<ShieldAlert className="w-4 h-4" />}
+                        iconBg={openIncidents > 0 ? 'bg-red-100 dark:bg-red-900/40' : 'bg-emerald-100 dark:bg-emerald-900/40'}
+                        iconColor={openIncidents > 0 ? 'text-red-600' : 'text-emerald-600'}
+                        trend={openIncidents > 0 ? { value: `${openIncidents} abierta${openIncidents > 1 ? 's' : ''}`, up: false } : undefined}
+                        onClick={() => navigate('/saas/workshop')}
+                        loading={serverLoading}
+                      />
+                    )}
+                  </>
+                )}
               </div>
             </DraggableWidget>
           </div>

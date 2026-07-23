@@ -9,7 +9,6 @@ import { normalizeBusinessScopeId } from '../lib/deliverySetup';
 import { isRestaurantBusinessType } from '../lib/deliveryOpsTypes';
 import type { Business } from '../lib/businessApi';
 import { clearRestaurantClientCaches } from '../verticals/restaurant/clearRestaurantClientCaches';
-import { RESTAURANT_OPS_HOME_PATH } from '../lib/retailOpsPaths';
 
 function findBusinessByScopeId(list: Business[], businessId: string): Business | undefined {
   const norm = normalizeBusinessScopeId(businessId);
@@ -46,15 +45,13 @@ export function useSwitchActiveBusiness() {
       switchBusiness(found.business_id);
 
       if (options?.syncUrl !== false) {
+        // Solo cambia de ruta si la actual es incompatible (delivery ↔ restaurant).
+        // En dashboard u otras pantallas comunes, quédate y refresca con la empresa nueva.
         const switchedPath = resolvePathAfterBusinessSwitch(
           location.pathname,
           found.businessType,
         );
-        const nextPath =
-          switchedPath
-          || (isRestaurantBusinessType(found.businessType)
-            ? RESTAURANT_OPS_HOME_PATH
-            : location.pathname);
+        const nextPath = switchedPath || location.pathname;
         navigate(saasPathWithBusinessScope(nextPath, found.business_id), {
           replace: true,
           preventScrollReset: true,

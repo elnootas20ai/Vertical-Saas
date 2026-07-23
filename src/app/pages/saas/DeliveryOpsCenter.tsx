@@ -371,7 +371,7 @@ function opsAlertsCoverCash(alerts: OpsAlert[]): boolean {
 function opsAlertActionLabel(a: OpsAlert): string | null {
   switch (a.type) {
     case 'cash_pending_validation':
-      return 'Validar cierre';
+      return 'Ver cierre';
     case 'register_discrepancy':
       return 'Ver cierre';
     case 'cash_pending_close':

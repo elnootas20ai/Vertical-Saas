@@ -31,9 +31,9 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
+import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import {
-  isTpvRegisterSessionFromPriorCalendarDay,
   mergeTpvRegisterSessionsPreservingOpen,
   pickNewestOpenRegisterSessionForStore,
   resolveActiveTpvRegisterSession,
@@ -88,20 +88,10 @@ import {
 } from '../../lib/tpvRegisterScope';
 import {
   exitTpvTabletSessionPath,
-  isTpvTabletWorkerPath,
   mergeTabletBindingPdv,
   readTpvTabletBinding,
 } from '../../lib/tpvTabletSession';
 
-function isTabletTpvBootstrapReady(): boolean {
-  if (typeof window === 'undefined') return false;
-  const binding = readTpvTabletBinding();
-  return Boolean(
-    binding?.pdvId
-    && binding?.businessId
-    && isTpvTabletWorkerPath(window.location.pathname),
-  );
-}
 import {
   filterUsersForStoreClockin,
   loadClockedInStoreWorkers,
@@ -111,7 +101,7 @@ import {
   clockinValidForRegisterSession,
   type TpvClockedInWorker,
 } from '../../lib/tpvClockedInWorkers';
-import { pickPreferredMemberClockin, todayDateStr } from '../../lib/clockinHistoryUtils';
+import { pickPreferredMemberClockin, todayDateStr, dateDaysAgo } from '../../lib/clockinHistoryUtils';
 import { deriveEffectiveClockinStatus, isClockinPresent } from '../../lib/clockinStatus';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
@@ -1425,6 +1415,18 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const expected = Math.round((expectedTpv + aggregatorCashTotal) * 100) / 100;
   const diff = countedTotal - expected;
   const grandEuroTotal = Math.round((expectedTpv + aggregatorEuroTotal) * 100) / 100;
+  const tpvCashSales = Math.round((Number(summary.salesByMethod.efectivo) || 0) * 100) / 100;
+  const tpvCardSales = Math.round((Number(summary.salesByMethod.tarjeta) || 0) * 100) / 100;
+  const tpvBizumSales = Math.round((Number(summary.salesByMethod.bizum) || 0) * 100) / 100;
+  const tpvOnlineSales = Math.round((Number(summary.salesByMethod.online) || 0) * 100) / 100;
+  const tpvOtherSales = Math.round((Number(summary.salesByMethod.otro) || 0) * 100) / 100;
+  const tpvAllSales = Math.round((Number(summary.totalSales) || 0) * 100) / 100;
+  const dayCashTotal = Math.round((tpvCashSales + aggregatorCashTotal) * 100) / 100;
+  const dayCardTotal = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
+  const appsMoneyTotal = Math.round((aggregatorCashTotal + aggregatorCardTotal) * 100) / 100;
+  /** Todo el dinero del día: cobros TPV (todos los métodos) + efectivo/tarjeta declarados de apps. */
+  const dayMoneyTotal = Math.round((tpvAllSales + appsMoneyTotal) * 100) / 100;
+  const dayFoodUnits = closingFood.pizza + closingFood.burger + closingFood.taco;
   const cashSlotDisplay = cashSlotFocused
     ? cashSlot
     : countedTotal > 0
@@ -1469,18 +1471,19 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, foodReport.total, foodReport.byAggregator, closingPlatforms]);
 
   const handleManualAggregatorCashChange = useCallback((channel: string, value: string) => {
-    setManualAggregatorCash((prev) => ({ ...prev, [channel]: value }));
+    setManualAggregatorCash((prev) => ({ ...prev, [channel]: formatMoneyAsYouType(value, true) }));
   }, []);
 
   const handleManualAggregatorCardChange = useCallback((channel: string, value: string) => {
-    setManualAggregatorCard((prev) => ({ ...prev, [channel]: value }));
+    setManualAggregatorCard((prev) => ({ ...prev, [channel]: formatMoneyAsYouType(value, true) }));
   }, []);
 
   const handleCashSlotChange = useCallback((value: string) => {
-    setCashSlot(value);
-    const parsed = parseAggregatorAmount(value);
+    const formatted = formatMoneyAsYouType(value, true);
+    setCashSlot(formatted);
+    const parsed = parseAggregatorAmount(formatted);
     if (parsed == null) {
-      if (!String(value || '').trim()) setCounts({});
+      if (!String(formatted || '').trim()) setCounts({});
       return;
     }
     setCounts(buildDenominationFromAmount(parsed));
@@ -1640,6 +1643,28 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   Unidades de todos los pedidos del turno (TPV + apps). Puedes corregir si no cuadra.
                 </p>
               )}
+
+              <div className="rounded-xl border-2 border-emerald-600/40 dark:border-emerald-400/40 bg-white dark:bg-gray-900 px-3 py-2.5 space-y-1">
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="font-semibold text-emerald-900 dark:text-emerald-100">
+                    Subtotal de esta sección (TPV)
+                  </span>
+                  <span className="text-lg font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                    {(tpvCashSales + tpvCardSales).toFixed(2)}€
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  {tpvCashSales.toFixed(2)}€ efectivo + {tpvCardSales.toFixed(2)}€ tarjeta
+                  {tpvAllSales > tpvCashSales + tpvCardSales
+                    ? ` · cobros TPV con todos los métodos: ${tpvAllSales.toFixed(2)}€`
+                    : ''}
+                  {' · '}
+                  {closingFood.pizza + closingFood.burger + closingFood.taco} unidades
+                </p>
+                <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-200">
+                  Sí se suma abajo del todo en «TOTAL DE TODO» (+ lo que pongas en las apps).
+                </p>
+              </div>
             </div>
           ) : (
             <div>
@@ -1882,6 +1907,86 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
+
+          {showDeliveryClosingSlots ? (
+            <div className="rounded-2xl border-2 border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 p-4 space-y-3">
+              <div>
+                <p className="text-sm font-bold uppercase tracking-wide">Total de todo</p>
+                <p className="text-[11px] opacity-70 mt-0.5">
+                  Unidades de arriba + cobros TPV (efectivo, tarjeta, Bizum…) + efectivo/tarjeta de todas las apps.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
+                  <p className="text-[10px] opacity-70">🍕 Pizzas</p>
+                  <p className="text-xl font-bold tabular-nums">{closingFood.pizza}</p>
+                </div>
+                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
+                  <p className="text-[10px] opacity-70">🍔 Burgers</p>
+                  <p className="text-xl font-bold tabular-nums">{closingFood.burger}</p>
+                </div>
+                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
+                  <p className="text-[10px] opacity-70">🌮 Tacos</p>
+                  <p className="text-xl font-bold tabular-nums">{closingFood.taco}</p>
+                </div>
+                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
+                  <p className="text-[10px] opacity-70">Unidades</p>
+                  <p className="text-xl font-bold tabular-nums">{dayFoodUnits}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                <div className="rounded-xl bg-emerald-500/20 dark:bg-emerald-600/15 px-3 py-2 space-y-1">
+                  <div className="flex justify-between gap-2">
+                    <span className="opacity-80">Efectivo TPV</span>
+                    <span className="font-semibold tabular-nums">{tpvCashSales.toFixed(2)}€</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="opacity-80">+ Efectivo apps</span>
+                    <span className="font-semibold tabular-nums">{aggregatorCashTotal.toFixed(2)}€</span>
+                  </div>
+                  <div className="flex justify-between gap-2 pt-1 border-t border-white/15 dark:border-black/10 font-bold">
+                    <span>Total efectivo</span>
+                    <span className="tabular-nums">{dayCashTotal.toFixed(2)}€</span>
+                  </div>
+                </div>
+                <div className="rounded-xl bg-blue-500/20 dark:bg-blue-600/15 px-3 py-2 space-y-1">
+                  <div className="flex justify-between gap-2">
+                    <span className="opacity-80">Tarjeta TPV</span>
+                    <span className="font-semibold tabular-nums">{tpvCardSales.toFixed(2)}€</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="opacity-80">+ Tarjeta apps</span>
+                    <span className="font-semibold tabular-nums">{aggregatorCardTotal.toFixed(2)}€</span>
+                  </div>
+                  <div className="flex justify-between gap-2 pt-1 border-t border-white/15 dark:border-black/10 font-bold">
+                    <span>Total tarjeta</span>
+                    <span className="tabular-nums">{dayCardTotal.toFixed(2)}€</span>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2 space-y-1 text-sm">
+                <div className="flex justify-between gap-2">
+                  <span className="opacity-80">Cobros TPV (efectivo+tarjeta+Bizum+online+otros)</span>
+                  <span className="font-semibold tabular-nums">{tpvAllSales.toFixed(2)}€</span>
+                </div>
+                {(tpvBizumSales > 0 || tpvOnlineSales > 0 || tpvOtherSales > 0) ? (
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] opacity-75">
+                    {tpvBizumSales > 0 ? <span>Bizum {tpvBizumSales.toFixed(2)}€</span> : null}
+                    {tpvOnlineSales > 0 ? <span>Online {tpvOnlineSales.toFixed(2)}€</span> : null}
+                    {tpvOtherSales > 0 ? <span>Otros {tpvOtherSales.toFixed(2)}€</span> : null}
+                  </div>
+                ) : null}
+                <div className="flex justify-between gap-2">
+                  <span className="opacity-80">+ Apps (efectivo + tarjeta declarados)</span>
+                  <span className="font-semibold tabular-nums">{appsMoneyTotal.toFixed(2)}€</span>
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3 pt-1 border-t border-white/20 dark:border-black/10">
+                <span className="text-sm font-bold">TOTAL DE TODO</span>
+                <span className="text-2xl font-bold tabular-nums">{dayMoneyTotal.toFixed(2)}€</span>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
@@ -1951,16 +2056,24 @@ function ClockInModal({
     setLoading(true);
     setError('');
     try {
-      const [users, records] = await Promise.all([
+      const today = todayDateStr();
+      const yesterday = dateDaysAgo(1);
+      const listOpts = {
+        salesPointId: pdvId || undefined,
+        workCenterId: workCenterId || undefined,
+        storeScope: Boolean(pdvId),
+        recordsOnly: true as const,
+      };
+      const [users, recordsToday, recordsYesterday] = await Promise.all([
         fetchBusinessUsers(businessId),
-        listClockins(businessId, {
-          date: todayDateStr(),
-          salesPointId: pdvId || undefined,
-          workCenterId: workCenterId || undefined,
-          storeScope: Boolean(pdvId),
-          recordsOnly: true,
-        }),
+        listClockins(businessId, { ...listOpts, date: today }),
+        listClockins(businessId, { ...listOpts, date: yesterday }),
       ]);
+      const byId = new Map<string, ClockinRecord>();
+      for (const r of [...recordsYesterday, ...recordsToday]) {
+        if (r?._id) byId.set(r._id, r);
+      }
+      const records = Array.from(byId.values());
       const storeTeam = filterUsersForStoreClockin(
         users,
         ownerUserId,
@@ -2041,7 +2154,6 @@ function ClockInModal({
     setActingId(member.user_id);
     setActionMsg(null);
     let already = false;
-    const today = todayDateStr();
     try {
       const rec = await clockIn(businessId, mid, member.fullName || member.email || 'Trabajador', {
         device_type: 'tablet',
@@ -2060,10 +2172,12 @@ function ClockInModal({
         const rest = prev.filter((r) => r._id !== normalized._id);
         return [...rest, normalized];
       });
+      // Recargar hoy+ayer: el fichaje puede ser de anoche (UTC/local) y si no, no aparece.
+      await load();
       setActionMsg({
         type: 'ok',
         text: already
-          ? `${member.fullName || 'Trabajador'} ya estaba fichado. Pulsa Continuar.`
+          ? `${member.fullName || 'Trabajador'} ya estaba fichado. Usa Finalizar si acabó la jornada, o Continuar.`
           : `${member.fullName || 'Trabajador'} fichado correctamente.`,
       });
     } catch (e) {
@@ -2419,7 +2533,7 @@ function RegisterStatusBar({
       id: 'clockin',
       label: 'Fichar equipo',
       title: 'Fichar entrada del resto del equipo',
-      icon: <LogIn className="w-5 h-5" />,
+      icon: <UserCheck className="w-5 h-5" />,
       onClick: onRequestClockIn,
     },
     {
@@ -2607,8 +2721,8 @@ function RegisterStatusBar({
             compact
             ultraCompact
           />
-          <button type="button" onClick={onRequestClockIn} title="Fichar equipo" className={actionBtn}>
-            <LogIn className="w-4 h-4 shrink-0" />
+          <button type="button" onClick={onRequestClockIn} title="Fichar equipo" className={actionBtn} aria-label="Fichar equipo">
+            <UserCheck className="w-4 h-4 shrink-0" />
           </button>
         </div>
       </div>
@@ -2673,7 +2787,7 @@ function RegisterStatusBar({
           label="En tienda"
         />
         <button type="button" onClick={onRequestClockIn} title="Fichar entrada del resto del equipo" className={actionBtn}>
-          <LogIn className="w-4 h-4 shrink-0" /> {isTabletMode ? 'Fichar' : 'Fichar equipo'}
+          <UserCheck className="w-4 h-4 shrink-0" /> {isTabletMode ? 'Fichar' : 'Fichar equipo'}
         </button>
         <button type="button" onClick={onRequestCashOps} className={actionBtn}>
           <Banknote className="w-4 h-4 shrink-0" /> Mov. caja
@@ -3007,7 +3121,13 @@ export function TpvRegisterGate({
   const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [pointsOfSale, setPointsOfSale] = useState<PointOfSale[]>([]);
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>([]);
-  const [loading, setLoading] = useState(() => !isTabletTpvBootstrapReady());
+  /** Siempre true al montar: evita flash de Abrir caja/Fichar mientras llega la sesión abierta. */
+  const [loading, setLoading] = useState(true);
+  /**
+   * Tras el primer load sin caja abierta, espera un instante por si la lista
+   * llega un tick tarde (reentrada al TPV) antes de mostrar OpeningScreen.
+   */
+  const [openingRecoverHold, setOpeningRecoverHold] = useState(true);
   const [loadTimedOut, setLoadTimedOut] = useState(false);
   const [showClosing, setShowClosing] = useState(false);
   /** Snapshot de la caja a cerrar: el modal no debe desaparecer si activeSession parpadea. */
@@ -3477,7 +3597,7 @@ export function TpvRegisterGate({
     } catch {
       if (!silent && clockedInWorkersRef.current.length === 0) setClockedInWorkers([]);
     } finally {
-      if (!silent && clockedInWorkersRef.current.length === 0) setClockedInWorkersLoading(false);
+      if (!silent) setClockedInWorkersLoading(false);
     }
   }, [businessId, scopeBusiness?.owner_user_id, currentBusiness?.owner_user_id, activeStoreScope, activeSession, user?.user_id, user?.id]);
 
@@ -3499,8 +3619,11 @@ export function TpvRegisterGate({
     if (!activeStoreScope.pdvId) {
       setClockedInWorkers([]);
       setSelectedOrderTakerId(null);
+      setClockedInWorkersLoading(false);
       return;
     }
+    // Evita flash «Fichaje requerido» un frame antes de que arranque el fetch.
+    setClockedInWorkersLoading(true);
     void refreshClockedInWorkers();
     const interval = setInterval(() => void refreshClockedInWorkers({ silent: true }), 60000);
     return () => clearInterval(interval);
@@ -3812,6 +3935,21 @@ export function TpvRegisterGate({
     return () => window.clearTimeout(timer);
   }, [loading]);
 
+  // No mostrar Abrir caja hasta confirmar que no hay sesión open (o timeout corto).
+  useEffect(() => {
+    if (isTpvRegisterSessionOpen(activeSession)) {
+      setOpeningRecoverHold(false);
+      return;
+    }
+    if (loading) {
+      setOpeningRecoverHold(true);
+      return;
+    }
+    setOpeningRecoverHold(true);
+    const timer = window.setTimeout(() => setOpeningRecoverHold(false), 450);
+    return () => window.clearTimeout(timer);
+  }, [loading, activeSession?._id, activeSession?.status]);
+
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
     if (openingInFlightRef.current) return;
@@ -3843,8 +3981,8 @@ export function TpvRegisterGate({
     };
 
     const localOpen = pickNewestOpenRegisterSessionForStore(sessions, pdvId, pointsOfSale);
-    // Solo reenganchar si es caja de HOY. Si es de otro día, seguir a crear (el servidor cierra la vieja).
-    if (localOpen && !isTpvRegisterSessionFromPriorCalendarDay(localOpen)) {
+    // Salir del TPV no cierra: si hay caja abierta en esta tienda, siempre reenganchar.
+    if (localOpen) {
       attachExistingOpen(localOpen);
       return;
     }
@@ -3952,73 +4090,8 @@ export function TpvRegisterGate({
         )
         || null;
       if (conflictExisting) {
-        const existing = conflictExisting;
-        // Conflicto con caja de otro día: cerrarla y reintentar apertura de hoy.
-        if (isTpvRegisterSessionFromPriorCalendarDay(existing)) {
-          try {
-            const expected = calcTpvExpectedCash(existing);
-            const closed = await updateTpvRegisterSessionRequest(dataUserId, {
-              ...existing,
-              status: 'closed',
-              closedAt: new Date().toISOString(),
-              closedBy: data.workerName || 'Sistema',
-              closingNotes: `Cierre automático: jornada antigua (nueva apertura)`,
-              expectedCash: expected,
-              finalCashAmount: expected,
-              difference: 0,
-            } as TpvRegisterSession);
-            setSessions((prev) => prev.map((s) => (s._id === closed._id ? closed : s)));
-          } catch (closeErr) {
-            toast.error(toUserFacingMessage(closeErr, 'No se pudo cerrar la caja antigua'));
-            return;
-          }
-          try {
-            const writeBusinessId = resolveRetailOpsWriteBusinessId(
-              scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
-              businesses,
-            );
-            const created = await createTpvRegisterSessionRequest(dataUserId, {
-              business_id: writeBusinessId || scopeBusinessId || resolveBusinessScopeId(currentBusiness) || '',
-              workerId: data.workerId || '',
-              workerName: data.workerName,
-              pointOfSaleId: data.pointOfSaleId,
-              pointOfSaleName: data.pointOfSaleName,
-              terminalId: data.terminalId,
-              terminalName: data.terminalName,
-              datafonName: data.datafonName,
-              printerName: data.printerName,
-              openedBy: data.workerName,
-              openingCashCount: data.counts,
-              initialCashAmount: total,
-              status: 'open',
-              transactions: [],
-              cashCounts: [],
-              incidents: [],
-              linkedOrderIds: [],
-              salesByChannel: {},
-            } as Partial<TpvRegisterSession>);
-            setSessions((prev) => [created, ...prev.filter((s) => s._id !== existing._id)]);
-            window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: created }));
-            setPostCloseSession(null);
-            return;
-          } catch (retryErr) {
-            const retryConflict =
-              (retryErr instanceof TpvRegisterSessionConflictError && retryErr.existingSession)
-              || (
-                retryErr
-                && typeof retryErr === 'object'
-                && (retryErr as { name?: string }).name === 'TpvRegisterSessionConflictError'
-                && (retryErr as TpvRegisterSessionConflictError).existingSession
-              );
-            if (retryConflict) {
-              attachExistingOpen(retryConflict);
-              return;
-            }
-            toast.error(toUserFacingMessage(retryErr, 'No se pudo abrir la caja de hoy'));
-            return;
-          }
-        }
-        attachExistingOpen(existing);
+        // Ya hay caja abierta → entrar en esa (nunca abrir otra hasta cerrar).
+        attachExistingOpen(conflictExisting);
         return;
       }
       const msg = extractErrorMessage(err);
@@ -4501,7 +4574,7 @@ export function TpvRegisterGate({
     );
   }
 
-  if (loading && !isTpvRegisterSessionOpen(activeSession)) {
+  if ((loading || openingRecoverHold) && !isTpvRegisterSessionOpen(activeSession)) {
     return wrapShell(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
         <div className="text-center max-w-sm">
@@ -4518,6 +4591,7 @@ export function TpvRegisterGate({
                 onClick={() => {
                   setLoadTimedOut(false);
                   setLoading(true);
+                  setOpeningRecoverHold(true);
                   void loadData();
                 }}
                 className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white"
@@ -4529,7 +4603,7 @@ export function TpvRegisterGate({
           ) : (
             <>
               <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-gray-900 rounded-full mx-auto mb-3" />
-              <p className="text-sm text-gray-500">Cargando caja...</p>
+              <p className="text-sm text-gray-500">Recuperando caja…</p>
             </>
           )}
         </div>
@@ -4733,31 +4807,38 @@ export function TpvRegisterGate({
         <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
           {!clockInGate.allowed && !showClockIn && (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-gray-950/55 backdrop-blur-[2px] p-4">
-              <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-4">
-                <div className="w-12 h-12 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center mx-auto">
-                  <LogIn className="w-6 h-6 text-violet-600 dark:text-violet-400" />
+              {clockInGate.reason === 'loading' ? (
+                <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-3">
+                  <div className="animate-spin w-8 h-8 border-2 border-gray-300 border-t-violet-600 rounded-full mx-auto" />
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Comprobando fichajes…</p>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">
-                    {clockInGate.reason === 'vacation_blocked' ? 'No disponible' : 'Fichaje requerido'}
-                  </h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {tpvClockInBlockMessage(clockInGate.reason, isWorkerUser)}
-                  </p>
-                  {clockInStoreScope?.storeLabel && (
-                    <p className="text-xs text-gray-400 mt-2">
-                      Local: <span className="font-semibold text-gray-600 dark:text-gray-300">{clockInStoreScope.storeLabel}</span>
+              ) : (
+                <div className="max-w-sm w-full rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6 text-center space-y-4">
+                  <div className="w-12 h-12 rounded-xl bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center mx-auto">
+                    <LogIn className="w-6 h-6 text-violet-600 dark:text-violet-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">
+                      {clockInGate.reason === 'vacation_blocked' ? 'No disponible' : 'Fichaje requerido'}
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      {tpvClockInBlockMessage(clockInGate.reason, isWorkerUser)}
                     </p>
-                  )}
+                    {clockInStoreScope?.storeLabel && (
+                      <p className="text-xs text-gray-400 mt-2">
+                        Local: <span className="font-semibold text-gray-600 dark:text-gray-300">{clockInStoreScope.storeLabel}</span>
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowClockIn(true)}
+                    className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold text-sm"
+                  >
+                    Fichar equipo en este local
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setShowClockIn(true)}
-                  className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold text-sm"
-                >
-                  Fichar equipo en este local
-                </button>
-              </div>
+              )}
             </div>
           )}
           {children}

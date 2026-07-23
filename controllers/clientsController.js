@@ -874,7 +874,21 @@ export async function searchByPhone(req, res) {
 
     const businessId = resolveQueryBusinessId(req);
     const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);
-    const clients = await searchClientsByPhone(req, ownerUserId, q, limit, listOptions);
+    // TPV: incluir clientes legacy sin business_id (cuentas con varias empresas).
+    if (String(req.query?.includeLegacy || '') === '1') {
+      listOptions.excludeUnscopedLegacy = false;
+    }
+    let clients = await searchClientsByPhone(req, ownerUserId, q, limit, listOptions);
+    // Si con filtro de empresa no hay nada, reintentar en toda la cuenta (mismo titular).
+    if (
+      (!clients || clients.length === 0)
+      && businessId
+      && String(req.query?.fallbackAll || '') === '1'
+    ) {
+      clients = await searchClientsByPhone(req, ownerUserId, q, limit, {
+        excludeUnscopedLegacy: false,
+      });
+    }
     return res.json({ ok: true, clients: clients.map((c) => sanitizeClient(c)).filter(Boolean) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al buscar clientes' });

@@ -2022,7 +2022,7 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
       businessType = String(account?.businessType || '').trim();
     } catch { /* best-effort */ }
 
-    const cacheKey = cacheService.buildKey('kpi', userId, 'v2');
+    const cacheKey = cacheService.buildKey('kpi', userId, 'v3');
     const cached = cacheService.get(cacheKey);
     if (cached) {
       res.setHeader('X-Cache', 'HIT');
@@ -2224,10 +2224,17 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     // Beneficio estimado
     const estimatedProfit = salesMonthTotal - expensesMonth;
 
-    // Caja actual: all-time incomes - all-time expenses
+    // Caja actual: finanzas + hueco de pedidos delivery cobrados aún sin movimiento financiero
     const totalIncomes = userFinance.filter((d) => d.type === 'cobro').reduce((s, d) => s + Number(d.totalAmount || 0), 0);
     const totalExpenses = userFinance.filter((d) => d.type === 'pago').reduce((s, d) => s + Number(d.totalAmount || 0), 0);
-    const cashBalance = totalIncomes - totalExpenses;
+    const financeDeliveryIncomeAll = userFinance
+      .filter((d) => d.type === 'cobro' && d.source === 'delivery_order')
+      .reduce((s, d) => s + Number(d.totalAmount || 0), 0);
+    const totalDeliveryPaid = userDeliveryOrders
+      .filter((o) => isPaidDeliveryOrder(o))
+      .reduce((s, o) => s + deliveryOrderNet(o), 0);
+    const deliveryCashGap = Math.max(0, totalDeliveryPaid - financeDeliveryIncomeAll);
+    const cashBalance = totalIncomes - totalExpenses + deliveryCashGap;
 
     // Stock crítico: solo si hay infraestructura de inventario y artículos inventariables
     const userCatalog = catalogDocs.filter((d) => d.user_id === userId && d.active !== false && !d.deletedAt);

@@ -14,7 +14,7 @@ export interface FinanceMovementScope {
 
 export type EbitdaScopeFilter =
   | { level: 'all' }
-  | { level: 'business'; businessId: string }
+  | { level: 'business'; businessId: string; /** Incluye movimientos legacy sin businessId (cuenta 1 empresa). */ includeUntagged?: boolean }
   | { level: 'store'; businessId?: string; workCenterId: string };
 
 export function movementMatchesEbitdaScope(
@@ -24,7 +24,7 @@ export function movementMatchesEbitdaScope(
   if (scope.level === 'all') return true;
   if (scope.level === 'business') {
     const bid = String(movement.businessId || '').trim();
-    if (!bid) return false;
+    if (!bid) return Boolean(scope.includeUntagged);
     return bid === scope.businessId;
   }
   const wcId = String(movement.workCenterId || '').trim();

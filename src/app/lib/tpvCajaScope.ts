@@ -346,11 +346,7 @@ export function resolveActiveTpvRegisterSession(params: {
     }
   }
 
-  // Caja de otro día: no entrar (arrastra pedidos viejos). Abrir turno nuevo cierra la vieja en servidor.
-  if (found && isTpvRegisterSessionFromPriorCalendarDay(found)) {
-    return { session: null, nextSticky: null };
-  }
-
+  // Mientras status=open: siempre recordar/reenganchar (Salir del TPV no cierra caja).
   if (found) {
     return { session: found, nextSticky: found };
   }
@@ -371,10 +367,6 @@ export function resolveActiveTpvRegisterSession(params: {
       ? sticky
       : null;
   if (!candidate) {
-    return { session: null, nextSticky: null };
-  }
-
-  if (isTpvRegisterSessionFromPriorCalendarDay(candidate)) {
     return { session: null, nextSticky: null };
   }
 
@@ -425,6 +417,25 @@ export function isTpvRegisterSessionFromPriorCalendarDay(
   if (!openedAt) return false;
   const openDay = localCalendarDayKey(new Date(openedAt));
   return Boolean(openDay) && openDay !== localCalendarDayKey(now);
+}
+
+/**
+ * Caja abierta demasiado antigua para reenganchar al entrar al TPV.
+ * Permite turno de noche (pasa de medianoche) y bloquea fantasmas de hace días.
+ */
+export const TPV_STALE_OPEN_SESSION_MAX_AGE_HOURS = 18;
+
+export function isTpvRegisterSessionStaleOpen(
+  session: Pick<TpvRegisterSession, 'openedAt'> | null | undefined,
+  now = new Date(),
+  maxAgeHours = TPV_STALE_OPEN_SESSION_MAX_AGE_HOURS,
+): boolean {
+  const openedAt = String(session?.openedAt || '').trim();
+  if (!openedAt) return false;
+  const openedMs = new Date(openedAt).getTime();
+  if (!Number.isFinite(openedMs)) return false;
+  const ageHours = (now.getTime() - openedMs) / (1000 * 60 * 60);
+  return ageHours > maxAgeHours;
 }
 
 /** Una caja abierta por tienda (la más reciente si hay duplicados). */

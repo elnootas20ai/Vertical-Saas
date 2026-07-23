@@ -271,7 +271,6 @@ const menuItemDefs = [
   { id: 'doc-contracts',     navKey: 'docContracts',    icon: <ScrollText className="w-5 h-5" />,  path: '/saas/documents?tab=contracts' },
   { id: 'doc-licenses',      navKey: 'docLicenses',     icon: <ShieldCheck className="w-5 h-5" />, path: '/saas/documents?tab=licenses' },
   { id: 'doc-financial',     navKey: 'docFinancial',    icon: <Wallet className="w-5 h-5" />,      path: '/saas/documents?tab=financial' },
-  { id: 'doc-user-expenses', navKey: 'docUserExpenses', icon: <Receipt className="w-5 h-5" />,     path: '/saas/documents?tab=user-expenses' },
   { id: 'doc-other',         navKey: 'docOther',        icon: <FolderOpen className="w-5 h-5" />,  path: '/saas/documents?tab=other' },
 
   // ── Documentación compraventa (tabs vehículo) ────────────────────────────────
@@ -501,7 +500,7 @@ const sidebarGroupDefs = [
   { id: 'equipo',           icon: <UsersRound className="w-4 h-4 shrink-0" />,    itemIds: ['team', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll'] },
   { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'bank-reconciliation', 'reports', 'sales-metrics'] },
-  { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-user-expenses', 'doc-other'] },
+  { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-other'] },
   { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-fiscal'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
   { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'sala', 'caja', 'web-config', 'delivery-integrations'] },

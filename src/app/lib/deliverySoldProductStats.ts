@@ -167,3 +167,85 @@ export function soldProductFamilyLabel(id: string): string {
 export function soldProductFamilyColor(id: string): string {
   return FAMILY_BY_ID[id as SoldProductFamilyId]?.color || '#6366F1';
 }
+
+/** Familia “estrella” de una marca según su tipo de línea (pizza → Pizzas, etc.). */
+export function familyMetaForBrandLineKind(
+  deliveryLineKind?: string | null,
+): SoldProductFamilyMeta | null {
+  const kind = String(deliveryLineKind || '').trim() as DeliveryBrandLineKindId;
+  if (!kind) return null;
+  return SOLD_PRODUCT_FAMILIES.find((f) => f.lineKinds.includes(kind)) || null;
+}
+
+export type BrandHeroSoldToday = {
+  brandId: string;
+  brandName: string;
+  familyId: SoldProductFamilyId | null;
+  familyLabel: string;
+  count: number;
+};
+
+function itemMatchesBrand(
+  item: DeliveryOrderItem,
+  brand: { _id: string; id?: string; deliveryLineKind?: string | null },
+  activeBrandCount: number,
+): boolean {
+  const ids = (item.brandIds || []).map((x) => String(x || '').trim()).filter(Boolean);
+  const brandId = String(brand._id || '').trim();
+  const brandAlt = String(brand.id || '').trim();
+  if (ids.length > 0) {
+    return ids.includes(brandId) || (brandAlt !== '' && ids.includes(brandAlt));
+  }
+  // Sin brandIds en la línea: 1 marca → todo; varias → por familia del tipo de línea
+  if (activeBrandCount <= 1) return true;
+  const fam = classifySoldProductFamily(item.category, item.name);
+  const brandFam = familyMetaForBrandLineKind(brand.deliveryLineKind);
+  return Boolean(fam && brandFam && fam === brandFam.id);
+}
+
+/**
+ * Por marca: cuántas unidades del ítem importante (pizzas, burgers…) se han vendido hoy.
+ * Si hay 3 marcas tipadas, salen 3 filas (una por marca).
+ */
+export function brandHeroSoldCountsForDay(
+  orders: DeliveryOrder[],
+  brands: Array<{
+    _id: string;
+    id?: string;
+    name?: string | null;
+    deliveryLineKind?: string | null;
+    active?: boolean;
+  }> = [],
+  dayKey: string,
+): BrandHeroSoldToday[] {
+  const active = brands.filter((b) => b && b.active !== false && String(b._id || '').trim());
+  if (active.length === 0) return [];
+
+  return active.map((brand) => {
+    const fam = familyMetaForBrandLineKind(brand.deliveryLineKind);
+    let count = 0;
+    for (const order of orders) {
+      if (String(order.status || '').toLowerCase() === 'cancelled') continue;
+      if (orderDayKey(order) !== dayKey) continue;
+      for (const item of order.items || []) {
+        const qty = Number(item.quantity || 0);
+        if (qty <= 0) continue;
+        if (!itemMatchesBrand(item, brand, active.length)) continue;
+        const itemFam = countItem(item);
+        if (fam) {
+          if (itemFam !== fam.id) continue;
+        } else if (!itemFam) {
+          continue;
+        }
+        count += qty;
+      }
+    }
+    return {
+      brandId: String(brand._id),
+      brandName: String(brand.name || '').trim() || 'Marca',
+      familyId: fam?.id || null,
+      familyLabel: fam?.label || 'Items',
+      count,
+    };
+  });
+}

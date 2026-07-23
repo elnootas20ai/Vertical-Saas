@@ -39,6 +39,61 @@ import { getApprovedVacationBlockingClockin, getApprovedVacationBlockingWork, ge
 
 const WEEKDAYS_MAP = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
+/** Día civil en zona ES (YYYY-MM-DD). Evita el desfase UTC a medianoche. */
+function calendarDayKeyMadrid(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Madrid',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function isOpenClockinRecord(record) {
+  if (!record) return false;
+  const entries = Array.isArray(record.entries) ? record.entries : [];
+  if (entries.some((e) => e?.type === 'clock_out')) return false;
+  const status = record.status || deriveClockinStatus(entries);
+  return status !== 'completed';
+}
+
+function clockinLocalDayKey(record) {
+  const clockInIso = (record?.entries || []).find((e) => e?.type === 'clock_in')?.time;
+  if (clockInIso) {
+    try {
+      return calendarDayKeyMadrid(new Date(clockInIso));
+    } catch {
+      /* fall through */
+    }
+  }
+  return String(record?.date || '').slice(0, 10);
+}
+
+async function autoCloseOpenClockin(req, clockinsDb, openDoc, nowIso) {
+  let entries = [...(openDoc.entries || [])];
+  const status = deriveClockinStatus(entries);
+  if (status === 'break') {
+    entries = [...entries, { type: 'break_end', time: nowIso }];
+  }
+  entries = [...entries, { type: 'clock_out', time: nowIso }];
+  const { totalMinutes, breakMinutes } = computeClockinMinutes(
+    entries,
+    openDoc.scheduled_start,
+    openDoc.scheduled_end,
+    openDoc.date,
+  );
+  const closed = {
+    ...openDoc,
+    entries,
+    totalMinutes,
+    breakMinutes,
+    status: 'completed',
+    updatedAt: nowIso,
+  };
+  await putDocument(req, clockinsDb, openDoc._id, closed);
+  return closed;
+}
+
 function getSchedulesDbName() {
   const prefix = process.env.VITE_COUCHDB_DB || 'vertial';
   return `${prefix}-schedules`.toLowerCase().replace(/[^a-z0-9_$()+-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -929,46 +984,52 @@ export async function checkInMember(req, res) {
       });
     }
 
-    const date = new Date().toISOString().slice(0, 10);
+    const date = calendarDayKeyMadrid();
     const now = new Date().toISOString();
     const clockinsDb = getClockinsDbName();
     await ensureDatabase(req, clockinsDb);
 
     const existingRecords = await listClockinsByBusiness(req, businessId);
-    const activeToday = existingRecords.find((r) => {
-      if (normalizeClockinUserId(r.member_id) !== targetMemberId || r.date !== date) return false;
-      const status = r.status || deriveClockinStatus(r.entries);
-      return status !== 'completed';
+    const openClockin = existingRecords.find((r) => {
+      if (normalizeClockinUserId(r.member_id) !== targetMemberId) return false;
+      return isOpenClockinRecord(r);
     });
-    if (activeToday) {
-      const sp = String(salesPointId || '').trim();
-      const spName = String(salesPointName || '').trim();
-      const wc = String(workCenterId || '').trim();
-      const existingSp = String(activeToday.sales_point_id || '').trim();
-      let doc = activeToday;
-      if (sp && !existingSp) {
-        doc = {
-          ...activeToday,
-          sales_point_id: sp,
-          sales_point_name: spName || activeToday.sales_point_name,
-          updatedAt: now,
-        };
-        await putDocument(req, clockinsDb, activeToday._id, doc);
-      } else if (sp && existingSp && !salesPointRefsSameStore(existingSp, sp, wc)) {
-        return res.status(409).json({
-          ok: false,
-          error: 'Ya tienes un fichaje activo hoy en otra tienda',
-        });
-      } else if (sp && existingSp && sp !== existingSp && salesPointRefsSameStore(existingSp, sp, wc)) {
-        doc = {
-          ...activeToday,
-          sales_point_id: sp,
-          sales_point_name: spName || activeToday.sales_point_name,
-          updatedAt: now,
-        };
-        await putDocument(req, clockinsDb, activeToday._id, doc);
+
+    if (openClockin) {
+      const openLocalDay = clockinLocalDayKey(openClockin);
+      // Jornada de otro día (p. ej. sin finalizar anoche): cerrar y permitir fichar de nuevo.
+      if (openLocalDay && openLocalDay < date) {
+        await autoCloseOpenClockin(req, clockinsDb, openClockin, now);
+      } else {
+        const sp = String(salesPointId || '').trim();
+        const spName = String(salesPointName || '').trim();
+        const wc = String(workCenterId || '').trim();
+        const existingSp = String(openClockin.sales_point_id || '').trim();
+        let doc = openClockin;
+        if (sp && !existingSp) {
+          doc = {
+            ...openClockin,
+            sales_point_id: sp,
+            sales_point_name: spName || openClockin.sales_point_name,
+            updatedAt: now,
+          };
+          await putDocument(req, clockinsDb, openClockin._id, doc);
+        } else if (sp && existingSp && !salesPointRefsSameStore(existingSp, sp, wc)) {
+          return res.status(409).json({
+            ok: false,
+            error: 'Ya tienes un fichaje activo hoy en otra tienda',
+          });
+        } else if (sp && existingSp && sp !== existingSp && salesPointRefsSameStore(existingSp, sp, wc)) {
+          doc = {
+            ...openClockin,
+            sales_point_id: sp,
+            sales_point_name: spName || openClockin.sales_point_name,
+            updatedAt: now,
+          };
+          await putDocument(req, clockinsDb, openClockin._id, doc);
+        }
+        return res.json({ ok: true, clockin: doc, alreadyActive: true });
       }
-      return res.json({ ok: true, clockin: doc, alreadyActive: true });
     }
 
     const id = `clockin:${businessId}:${targetMemberId}:${date}:${Date.now()}`;

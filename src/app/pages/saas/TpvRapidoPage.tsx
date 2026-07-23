@@ -847,22 +847,12 @@ export function TpvRapidoOrderFlow({
   const startAsRestaurant = Boolean(
     restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType),
   );
-  /** Delivery: entrar ya en productos (carrito a la derecha) sin wizard de cliente. */
-  const startAsQuickAttention = !startAsRestaurant && !searchParams.get('clientId');
 
   const [currentStep, setCurrentStep] = useState<Step>(() =>
-    startAsRestaurant
-      ? restaurantFlowResetStep()
-      : startAsQuickAttention
-        ? 'products'
-        : 'client',
+    startAsRestaurant ? restaurantFlowResetStep() : 'client',
   );
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(() =>
-    startAsRestaurant
-      ? restaurantFlowCompletedSteps()
-      : startAsQuickAttention
-        ? deliveryQuickAttentionCompletedSteps()
-        : new Set(),
+    startAsRestaurant ? restaurantFlowCompletedSteps() : new Set(),
   );
 
   // Step 1 - Client
@@ -885,7 +875,9 @@ export function TpvRapidoOrderFlow({
     useClientPhoneSearch({
       userId: clientSearchUserId,
       phone: phoneInput,
-      businessId: clientSearchBusinessId,
+      // TPV: buscar en toda la cuenta (los 7k+ clientes). El filtro por empresa
+      // ocultaba fichas legacy / de otra sede y parecía que «no cargan».
+      businessId: undefined,
       enabled: !showCreateForm,
       matchByName: true,
       minQueryLength: 2,
@@ -893,18 +885,9 @@ export function TpvRapidoOrderFlow({
       resultLimit: 20,
     });
 
-  // Nuevo pedido delivery: fijar cliente «Atención rápida» al entrar.
-  const shouldBootQuickAttentionRef = useRef(startAsQuickAttention);
-  const quickAttentionBootRef = useRef(false);
-  useEffect(() => {
-    if (!shouldBootQuickAttentionRef.current || quickAttentionBootRef.current) return;
-    quickAttentionBootRef.current = true;
-    selectClient(quickAttentionClient);
-  }, [selectClient, quickAttentionClient]);
-
   // Step 2 - Delivery
   const [deliveryType, setDeliveryType] = useState<DeliveryType | null>(() =>
-    startAsRestaurant || startAsQuickAttention ? 'recogida' : null,
+    startAsRestaurant ? 'recogida' : null,
   );
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
   const [showNewAddress, setShowNewAddress] = useState(false);
@@ -1532,21 +1515,15 @@ export function TpvRapidoOrderFlow({
         return false;
       }
       if (step === 'client') return true;
-      if (step === 'delivery') return !!selectedClient || completedSteps.has('client');
-      if (step === 'products') {
-        return (!!selectedClient || completedSteps.has('client')) && !!deliveryType;
-      }
-      if (step === 'payment') {
-        return (!!selectedClient || completedSteps.has('client')) && !!deliveryType && cart.length > 0;
-      }
+      if (step === 'delivery') return !!selectedClient;
+      if (step === 'products') return !!selectedClient && !!deliveryType;
+      if (step === 'payment') return !!selectedClient && !!deliveryType && cart.length > 0;
       return false;
     },
-    [isRestaurantMode, selectedClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable, completedSteps],
+    [isRestaurantMode, selectedClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable],
   );
 
-  const saleClient = isRestaurantMode
-    ? tableWalkInClient
-    : selectedClient ?? (completedSteps.has('client') ? quickAttentionClient : null);
+  const saleClient = isRestaurantMode ? tableWalkInClient : selectedClient;
 
   const orderReady =
     !!effectiveOrderTakerId &&
@@ -2304,9 +2281,8 @@ export function TpvRapidoOrderFlow({
     return uniq;
   }, [cashChargeTotal]);
 
-  /** En domicilio el cobro es al entregar; en recogida/sala sí hay cambio en caja. */
-  const showCashChangeCalculator =
-    paymentMethod === 'efectivo' && (isRestaurantMode || deliveryType !== 'domicilio');
+  /** Calculadora de cambio siempre que paguen en efectivo (también domicilio: ayuda a anotar billete/cambio). */
+  const showCashChangeCalculator = paymentMethod === 'efectivo';
 
   const accountLines = useMemo(
     () => (restaurantDiningOrder ? flattenDiningAccountLines(restaurantDiningOrder) : []),
@@ -2843,8 +2819,11 @@ export function TpvRapidoOrderFlow({
       return;
     }
     appliedClientIdFromUrl.current = null;
+    setCurrentStep('client');
+    setCompletedSteps(new Set());
     setPhoneInput('');
     setPhonePrefix('+34');
+    clearSelection();
     clearResults();
     setShowCreateForm(false);
     setNewClientName('');
@@ -2853,12 +2832,16 @@ export function TpvRapidoOrderFlow({
     setNewClientNotes('');
     setNewClientPayment('');
     setDuplicateWarning(false);
+    setDeliveryType(null);
+    setSelectedAddressId(null);
+    setShowNewAddress(false);
     setCart([]);
     setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
       setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
     }
+    setPaymentMethod(null);
     setCashGiven('');
     setTipInput('');
     setOrderNotes('');
@@ -2869,8 +2852,8 @@ export function TpvRapidoOrderFlow({
     setClientPromos([]);
     setSelectedClientPromoId('');
     setCreatedOrder(null);
-    startQuickAttentionFlow();
-  }, [clearResults, catalogSections, catalog, isRestaurantMode, resetRestaurantTicket, startQuickAttentionFlow]);
+    setTimeout(() => phoneRef.current?.focus(), 150);
+  }, [clearSelection, clearResults, catalogSections, catalog, isRestaurantMode, resetRestaurantTicket]);
 
   const handleCancelOrder = useCallback(() => {
     if (isRestaurantMode) {
@@ -3254,8 +3237,7 @@ export function TpvRapidoOrderFlow({
         {/* ═══════════════ STEP 1: CLIENT ═══════════════ */}
         {currentStep === 'client' ? (
           <StepContainer step={1} title="Cliente" visible>
-            <div className="flex flex-col lg:flex-row gap-4 lg:gap-5 items-stretch">
-              <div className="flex-1 min-w-0 flex flex-col gap-1">
+            <div className="flex flex-col gap-1">
               <label className={LABEL_CLASS} htmlFor="tpv-client-search">
                 Teléfono o nombre del cliente
               </label>
@@ -3280,7 +3262,15 @@ export function TpvRapidoOrderFlow({
                       const value = e.target.value;
                       setPhoneInput(value);
                       if (selectedClient) {
-                        resetFlowFromClientStep();
+                        if (isDeliveryQuickAttentionClient(selectedClient)) {
+                          clearSelection();
+                          setShowCreateForm(false);
+                          setNewClientPhone('');
+                          setDuplicateWarning(false);
+                          setPhoneShake(false);
+                        } else {
+                          resetFlowFromClientStep();
+                        }
                       } else {
                         setShowCreateForm(false);
                         setNewClientPhone('');
@@ -3299,25 +3289,12 @@ export function TpvRapidoOrderFlow({
                 </div>
               </form>
               <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                {clientsTotalCount >= 500
+                {!clientSearchUserId
+                  ? 'No se pudo identificar la cuenta para buscar clientes. Cierra sesión y vuelve a entrar.'
+                  : clientsTotalCount >= 500
                   ? `Tienes ${clientsTotalCount.toLocaleString('es-ES')} clientes: busca por teléfono (3+ dígitos) o nombre (2+ letras). No se listan todos a la vez.`
                   : 'Busca por número (al menos 3 dígitos) o por nombre (2 letras o más).'}
               </p>
-            </div>
-
-              {!isRestaurantMode ? (
-                <button
-                  type="button"
-                  onClick={startQuickAttentionFlow}
-                  className={`lg:w-[220px] shrink-0 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500/70 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors touch-manipulation ${tabletMode ? 'min-h-[112px] px-3 py-3' : 'min-h-[128px] px-4 py-4'}`}
-                >
-                  <Zap className="w-7 h-7 text-emerald-600 dark:text-emerald-400" strokeWidth={2.25} />
-                  <span className="font-bold text-sm text-center leading-tight">Atención rápida</span>
-                  <span className="text-[11px] text-emerald-800/80 dark:text-emerald-200/80 text-center leading-snug">
-                    Nuevo usuario · recogida · directo a productos
-                  </span>
-                </button>
-              ) : null}
             </div>
 
             {searchError && (
@@ -3345,27 +3322,38 @@ export function TpvRapidoOrderFlow({
             )}
 
             {!showCreateForm && (
-              <div className="mt-3 flex items-center justify-between gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   {searchError
                     ? 'Revisa la conexión e inténtalo otra vez.'
                     : (!isSearching && results.length === 0 && clientSearchReady)
-                      ? (isDeliveryBusiness && clientsTotalCount > 0
-                        ? 'No se encontró ningún cliente en esta empresa. Si los importaste en otra, cámbiala arriba.'
-                        : 'No se encontró ningún cliente')
-                      : 'Si no aparece, puedes crear cliente manualmente'}
+                      ? 'No se encontró ningún cliente con esa búsqueda'
+                      : 'Si no aparece, crea uno o usa atención rápida'}
                 </p>
-                <button
-                  onClick={() => {
-                    const d = phoneInput.replace(/\D/g, '');
-                    setNewClientPhone(d.length >= 6 ? phoneInput.replace(/\s+/g, ' ').trim() : '');
-                    setShowCreateForm(true);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-medium text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Crear cliente nuevo
-                </button>
+                <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                  {!isRestaurantMode ? (
+                    <button
+                      type="button"
+                      onClick={startQuickAttentionFlow}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 font-medium text-xs hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors touch-manipulation"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      Atención rápida
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = phoneInput.replace(/\D/g, '');
+                      setNewClientPhone(d.length >= 6 ? phoneInput.replace(/\s+/g, ' ').trim() : '');
+                      setShowCreateForm(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-medium text-xs hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Crear cliente nuevo
+                  </button>
+                </div>
               </div>
             )}
 
@@ -4159,7 +4147,7 @@ export function TpvRapidoOrderFlow({
                   type="button"
                   onClick={() => {
                     setPaymentMethod(key);
-                    if (key === 'efectivo' && (isRestaurantMode || deliveryType !== 'domicilio')) {
+                    if (key === 'efectivo') {
                       // Exacto por defecto: no hace falta teclear; solo cambiar si entrega otro billete.
                       setCashGiven(cashChargeTotal.toFixed(2));
                     } else {
@@ -4181,39 +4169,53 @@ export function TpvRapidoOrderFlow({
             </div>
 
             {showCashChangeCalculator && (
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mr-0.5">
-                  Entrega
-                </span>
-                {cashQuickAmounts.map((amount) => {
-                  const label = Math.abs(amount - cashChargeTotal) < 0.001
-                    ? 'Exacto'
-                    : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
-                  const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
-                  return (
-                    <button
-                      key={label + String(amount)}
-                      type="button"
-                      onClick={() => setCashGiven(amount.toFixed(2))}
-                      className={`min-h-[32px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation transition-colors ${
-                        selected
-                          ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
-                          : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-                {changeAmount !== null && changeAmount > 0.001 ? (
-                  <span className="ml-auto text-xs font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">
-                    Cambio {formatPrice(changeAmount)}
+              <div className="mt-2.5 space-y-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mr-0.5">
+                    Entrega
                   </span>
-                ) : changeAmount !== null && changeAmount < -0.001 ? (
-                  <span className="ml-auto text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">
-                    Falta {formatPrice(Math.abs(changeAmount))}
-                  </span>
-                ) : null}
+                  {cashQuickAmounts.map((amount) => {
+                    const label = Math.abs(amount - cashChargeTotal) < 0.001
+                      ? 'Exacto'
+                      : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
+                    const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
+                    return (
+                      <button
+                        key={label + String(amount)}
+                        type="button"
+                        onClick={() => setCashGiven(amount.toFixed(2))}
+                        className={`min-h-[32px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation transition-colors ${
+                          selected
+                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
+                            : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                  {changeAmount !== null && changeAmount > 0.001 ? (
+                    <span className="ml-auto text-xs font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                      Cambio {formatPrice(changeAmount)}
+                    </span>
+                  ) : changeAmount !== null && changeAmount < -0.001 ? (
+                    <span className="ml-auto text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">
+                      Falta {formatPrice(Math.abs(changeAmount))}
+                    </span>
+                  ) : null}
+                </div>
+                <DecimalNumpadField
+                  value={cashGiven}
+                  onChange={setCashGiven}
+                  placeholder={cashChargeTotal.toFixed(2)}
+                  showNumpad
+                  compactNumpad={tabletMode}
+                  inputClassName={`${INPUT_CLASS} pr-8 text-lg font-semibold tabular-nums`}
+                  numpadClassName="mt-2"
+                  suffix={
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                  }
+                />
               </div>
             )}
 

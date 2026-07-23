@@ -566,9 +566,12 @@ export async function searchClientsByPhoneRequest(
   limit = 5,
   signal?: AbortSignal,
   businessId?: string,
+  options?: { includeLegacy?: boolean; fallbackAll?: boolean },
 ): Promise<Client[]> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   if (businessId?.trim()) params.set('businessId', businessId.trim());
+  if (options?.includeLegacy) params.set('includeLegacy', '1');
+  if (options?.fallbackAll) params.set('fallbackAll', '1');
   const payload = await request<{ ok: boolean; clients: unknown[] }>(
     `/api/clients/${encodeURIComponent(userId)}/search-by-phone?${params.toString()}`,
     signal ? { signal } : undefined,

@@ -78,7 +78,8 @@ import {
   Smartphone,
   Globe,
   UtensilsCrossed,
-  LogOut,
+  DoorOpen,
+  Tablet,
   ChevronUp,
   ChevronDown,
   Bike,
@@ -1185,7 +1186,6 @@ export function WorkerTpvDelivery({
   const [dayKey, setDayKey] = useState(() => localCalendarDayKey());
   /** Abierto por defecto: en tablet si va cerrado parece que “desaparecieron”. */
   const [showDelivered, setShowDelivered] = useState(true);
-  const [showSearch, setShowSearch] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(() => isTpvBoardSoundEnabled());
   const sessionOpenedAt = register?.session?.openedAt ?? null;
 
@@ -1674,14 +1674,6 @@ export function WorkerTpvDelivery({
           }]
         : []),
       {
-        id: 'search',
-        label: 'Buscar pedido',
-        title: 'Buscar por número o cliente',
-        active: showSearch || Boolean(search),
-        icon: <Search />,
-        onClick: () => setShowSearch((v) => !v),
-      },
-      {
         id: 'sound',
         label: soundEnabled ? 'Avisos de pedidos ON' : 'Avisos de pedidos OFF',
         title: soundEnabled
@@ -1718,9 +1710,9 @@ export function WorkerTpvDelivery({
       ...(tabletBinding && !ceoMode
         ? [{
             id: 'exit',
-            label: 'Salir del TPV',
-            title: 'Cerrar sesión de tablet',
-            icon: <LogOut />,
+            label: 'Cerrar tablet',
+            title: 'Salir del TPV y volver al código de tienda',
+            icon: <Tablet />,
             onClick: exitTabletTpv,
           }]
         : []),
@@ -1732,8 +1724,6 @@ export function WorkerTpvDelivery({
     view,
     registerOpen,
     staffConsumptionEnabled,
-    showSearch,
-    search,
     soundEnabled,
     refreshing,
     showDelivered,
@@ -1844,20 +1834,6 @@ export function WorkerTpvDelivery({
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                onClick={() => setShowSearch((v) => !v)}
-                className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl touch-manipulation shrink-0 ${
-                  showSearch || search
-                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
-                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400'
-                }`}
-                title="Buscar pedido"
-                aria-label="Buscar pedido"
-              >
-                <Search className="w-4 h-4" />
-                <span className="text-[9px] font-bold leading-none">Buscar</span>
-              </button>
               {ceoMode && onChangeStore && (
                 <button
                   type="button"
@@ -1874,11 +1850,11 @@ export function WorkerTpvDelivery({
                 <button
                   type="button"
                   onClick={exitTabletTpv}
-                  className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 touch-manipulation shrink-0"
+                  className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 touch-manipulation shrink-0"
                   title="Salir del TPV"
                   aria-label="Salir del TPV"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <DoorOpen className="w-4 h-4" />
                   <span className="text-[9px] font-bold leading-none">Salir</span>
                 </button>
               )}
@@ -1905,24 +1881,6 @@ export function WorkerTpvDelivery({
                 <span className="text-[9px] font-bold leading-none">Actua.</span>
               </button>
             </div>
-            {(showSearch || search) && (
-              <div className="relative mt-1.5">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Buscar nº, cliente…"
-                  autoFocus={showSearch}
-                  className="w-full pl-8 pr-8 py-2 min-h-[36px] text-xs rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 placeholder:text-gray-400 focus:ring-1 focus:ring-indigo-500 outline-none"
-                />
-                {search && (
-                  <button type="button" onClick={() => { setSearch(''); setShowSearch(false); }} className="absolute right-2 top-1/2 -translate-y-1/2">
-                    <X className="w-3.5 h-3.5 text-gray-400" />
-                  </button>
-                )}
-              </div>
-            )}
           </>
         ) : (
           <>
@@ -1948,8 +1906,8 @@ export function WorkerTpvDelivery({
                   </button>
                 )}
                 {tabletBinding && !ceoMode && (
-                  <button type="button" onClick={exitTabletTpv} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500" title="Salir">
-                    <LogOut className="w-4 h-4" />
+                  <button type="button" onClick={exitTabletTpv} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300" title="Salir del TPV">
+                    <DoorOpen className="w-4 h-4" />
                     Salir
                   </button>
                 )}

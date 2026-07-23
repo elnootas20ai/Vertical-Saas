@@ -73,12 +73,29 @@ describe('clockinValidForRegisterSession', () => {
     )).toBe(true);
   });
 
-  it('rejects fichaje from another calendar day', () => {
-    expect(clockinBelongsToLocalDay(
+  it('accepts turno aún abierto de otro día (noche / desfase UTC)', () => {
+    expect(clockinValidForRegisterSession(
       {
         date: '2026-06-17',
+        status: 'active',
         entries: [{ type: 'clock_in', time: '2026-06-17T20:00:00.000Z' }],
       },
+      null,
+      dayKey,
+    )).toBe(true);
+  });
+
+  it('rejects fichaje cerrado de otro día', () => {
+    expect(clockinValidForRegisterSession(
+      {
+        date: '2026-06-17',
+        status: 'completed',
+        entries: [
+          { type: 'clock_in', time: '2026-06-17T10:00:00.000Z' },
+          { type: 'clock_out', time: '2026-06-17T18:00:00.000Z' },
+        ],
+      },
+      null,
       dayKey,
     )).toBe(false);
   });

@@ -17,6 +17,12 @@ const CLIENT_SEARCH_CACHE_TTL_MS = 45_000;
 const CLIENT_SEARCH_CACHE_MAX = 40;
 const clientSearchResultCache = new Map<string, { at: number; clients: Client[] }>();
 
+/** Walk-in / atención rápida del TPV: no deben impedir buscar un cliente real. */
+export function clientSelectionBlocksPhoneSearch(client: Client | null | undefined): boolean {
+  if (!client) return false;
+  return !String(client.id || '').startsWith('tpv-');
+}
+
 function cacheKey(userId: string, businessId: string | undefined, query: string, limit: number) {
   return `${userId}|${businessId || ''}|${limit}|${query}`;
 }
@@ -76,10 +82,11 @@ export function useClientPhoneSearch(params: {
   const trimmed = phone.trim();
   const digits = phone.replace(/\D/g, '');
   const queryForApi = matchByName ? trimmed : digits;
+  const blocksSearch = clientSelectionBlocksPhoneSearch(selectedClient);
   const shouldSearch =
     enabled &&
     !!userId &&
-    !selectedClient &&
+    !blocksSearch &&
     (matchByName ? trimmed.length >= minQueryLength : digits.length >= minDigits);
 
   useEffect(() => {
@@ -120,9 +127,11 @@ export function useClientPhoneSearch(params: {
           resultLimit,
           controller.signal,
           businessId,
+          { includeLegacy: true, fallbackAll: true },
         );
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
-        writeSearchCache(key, clients);
+        // No cachear vacíos: evita “no hay clientes” pegado tras un fallo de filtro/red.
+        if (clients.length > 0) writeSearchCache(key, clients);
         setResults(clients);
         setSearchError(null);
         setIsSearching(false);

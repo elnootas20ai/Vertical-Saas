@@ -28,7 +28,7 @@ export function EbitdaPage() {
   const [movements, setMovements] = useState<FinanceMovementRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
-  const [scopeMode, setScopeMode] = useState<ScopeMode>('all');
+  const [scopeMode, setScopeMode] = useState<ScopeMode>('business');
   const [selectedBusinessId, setSelectedBusinessId] = useState('');
   const [selectedStoreId, setSelectedStoreId] = useState('');
 
@@ -51,10 +51,10 @@ export function EbitdaPage() {
   useEffect(() => { loadData(); }, [loadData]);
 
   useEffect(() => {
-    if (scopeMode === 'business' && !selectedBusinessId && currentBusiness?.business_id) {
+    if (!selectedBusinessId && currentBusiness?.business_id) {
       setSelectedBusinessId(currentBusiness.business_id);
     }
-  }, [scopeMode, selectedBusinessId, currentBusiness?.business_id]);
+  }, [selectedBusinessId, currentBusiness?.business_id]);
 
   const businessNameMap = useMemo(
     () => new Map(businesses.map((b) => [b.business_id, b.name])),
@@ -84,10 +84,14 @@ export function EbitdaPage() {
       };
     }
     if (scopeMode === 'business' && selectedBusinessId) {
-      return { level: 'business', businessId: selectedBusinessId };
+      return {
+        level: 'business',
+        businessId: selectedBusinessId,
+        includeUntagged: businesses.length <= 1,
+      };
     }
     return { level: 'all' };
-  }, [scopeMode, selectedBusinessId, selectedStoreId]);
+  }, [scopeMode, selectedBusinessId, selectedStoreId, businesses.length]);
 
   const scopeLabel = useMemo(() => {
     if (scopeMode === 'all') return 'Todas las empresas (consolidado)';
@@ -198,6 +202,10 @@ export function EbitdaPage() {
         <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
           Viendo: <span className="font-semibold text-gray-700 dark:text-gray-300">{scopeLabel}</span>
           {scopeMode === 'store' && !selectedStoreId ? ' — elige una tienda para ver datos' : null}
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-3 py-2">
+          EBITDA core = ingresos − coste de producto − gastos de explotación (Finanzas).
+          No incluye intereses ni impuestos. Si solo hay cobros, el margen parece 100% hasta que registres gastos.
         </p>
 
         {loading ? (
