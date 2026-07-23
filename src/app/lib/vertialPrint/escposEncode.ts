@@ -123,19 +123,25 @@ function pushLineDetail(
 
 /**
  * Margen superior: la cuchilla suele dejar el inicio del papel encima del cabezal.
- * 1 línea basta para no cortar el título; más blanco desperdicia bobina (Badalona).
+ * Sin este avance, el título/negocio salen cortados.
  */
 function pushTopMargin(chunks: Uint8Array[]) {
-  chunks.push(command([ESC, 0x64, 1]));
+  // 6 líneas: al imprimir Cocina + Cliente seguidos, el 2º no debe empezar cortado
+  chunks.push(command([ESC, 0x64, 6]));
 }
 
 /**
- * Avance + corte: el pie (método de pago, gracias…) debe quedar por encima de la cuchilla.
- * 4 líneas ≈ blanco moderado en 80 mm (antes 5; un poco menos bobina sin cortar el final).
+ * Avance amplio + corte: el pie debe quedar por encima de la cuchilla.
+ * Con poco avance el pie del ticket anterior quedaba a medias en el siguiente.
  */
-function pushFeedAndCut(chunks: Uint8Array[], _width: number) {
+function pushFeedAndCut(chunks: Uint8Array[], width: number) {
   chunks.push(setSize(SIZE_NORMAL));
-  chunks.push(command([ESC, 0x64, 4]));
+  chunks.push(textLine('', width));
+  chunks.push(textLine('', width));
+  chunks.push(textLine('', width));
+  chunks.push(textLine('', width));
+  // ~14 líneas ≈ margen seguro hasta la cuchilla en HPRT / térmicas 80 mm
+  chunks.push(command([ESC, 0x64, 14]));
   // GS V 0 — un solo corte completo
   chunks.push(command([GS, 0x56, 0]));
 }

@@ -11,11 +11,11 @@ function escapeHtml(value: string): string {
 
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:2px 10px 4px;font-size:14px;color:#000;line-height:1.35}
+body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:16px 12px 28px;font-size:14px;color:#000;line-height:1.4}
 .c{text-align:center}.hr{border-top:1px dashed #333;margin:10px 0}
 table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .t td{font-size:16px;font-weight:bold;padding-top:6px}
-.f{margin-top:6px;font-size:12px;text-align:center;color:#666;line-height:1.3}
+.f{margin-top:20px;font-size:12px;text-align:center;color:#666;line-height:1.4}
 .small{font-size:12px;color:#444}
 .note{color:#b45309;font-size:12px;font-weight:bold}
 .add{color:#047857;font-size:12px;font-weight:bold}

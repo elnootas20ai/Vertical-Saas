@@ -93,9 +93,9 @@ export function buildEposTicket(
   const titleCols = colsForSize(paperWidthMm, true);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(1);
+    builder.addFeedLine(6);
   } else {
-    builder.addText('\n');
+    builder.addText('\n\n\n\n\n\n');
   }
 
   // Comanda cocina: solo pedido + productos + notas (sin cliente ni datos fiscales)
@@ -125,8 +125,8 @@ export function buildEposTicket(
     }
     builder.addTextAlign('center');
     line(builder, doc.footer, width);
-    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(4);
-    else builder.addText('\n\n');
+    if (typeof builder.addFeedLine === 'function') builder.addFeedLine(14);
+    else builder.addText('\n\n\n\n\n\n\n\n');
     if (typeof builder.addCut === 'function') builder.addCut(builder.CUT_FEED ?? 1);
     return;
   }
@@ -240,9 +240,9 @@ export function buildEposTicket(
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
   if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(4);
+    builder.addFeedLine(14);
   } else {
-    builder.addText('\n\n');
+    builder.addText('\n\n\n\n\n\n\n\n');
   }
 
   if (typeof builder.addCut === 'function') {
