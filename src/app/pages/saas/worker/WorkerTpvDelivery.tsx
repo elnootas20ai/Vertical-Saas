@@ -1534,12 +1534,20 @@ export function WorkerTpvDelivery({
     if (!userId || !deleteOrder) return;
     if (!beginAdvancing(deleteOrder._id)) return;
     try {
-      const updated = await cancelDeliveryOrderRequest(userId, deleteOrder._id, reason);
+      const { order: updated, cajaRegistration } = await cancelDeliveryOrderRequest(
+        userId,
+        deleteOrder._id,
+        reason,
+      );
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
       setDeleteOrder(null);
       if (selectedOrder?._id === updated._id) setSelectedOrder(null);
       if (deliveryCompleteOrder?._id === updated._id) setDeliveryCompleteOrder(null);
-      toast.success(`Pedido #${deleteOrder.orderNumber} eliminado`);
+      if (cajaRegistration?.status === 'registered') {
+        toast.success(`Pedido #${deleteOrder.orderNumber} eliminado · restado de caja`);
+      } else {
+        toast.success(`Pedido #${deleteOrder.orderNumber} eliminado`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar el pedido');
     } finally {

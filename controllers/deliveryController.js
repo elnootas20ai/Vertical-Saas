@@ -530,7 +530,11 @@ async function maybeDeductRecipeStockForDeliveredOrder(req, userId, doc, previou
 async function maybeSyncDeliveryOrderFinance(req, userId, doc) {
   if (!doc) return;
   try {
-    if (String(doc.status || '') === 'devuelto' || String(doc.paymentStatus || '') === 'refunded') {
+    if (
+      String(doc.status || '') === 'devuelto'
+      || String(doc.status || '') === 'cancelled'
+      || String(doc.paymentStatus || '') === 'refunded'
+    ) {
       await ensureDeliveryOrderRefundServer(req, userId, doc);
       return;
     }
@@ -738,6 +742,21 @@ export async function removeDeliveryOrder(req, res) {
 
 // ─── CANCEL ORDER ────────────────────────────────────────────────────────────
 
+/**
+ * Importe neto a restar de caja al eliminar un pedido (ventas − devoluciones ya registradas).
+ * Solo usa movimientos reales de la sesión abierta: no inventa imports.
+ */
+async function resolveOpenSessionNetSaleForOrder(req, userId, orderDoc, callerAccount) {
+  const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount);
+  if (!orderPdvId) return 0;
+  const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+  const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
+  if (!openSession) return 0;
+  const sales = sumTpvRegisterSaleAmountForOrder(openSession.transactions, orderDoc._id);
+  const returns = sumTpvRegisterReturnAmountForOrder(openSession.transactions, orderDoc._id);
+  return Math.round((sales - returns) * 100) / 100;
+}
+
 export async function cancelDeliveryOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
@@ -748,11 +767,12 @@ export async function cancelDeliveryOrder(req, res) {
     }
     const existing = await ensureDeliveryOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
-    if (existing.status === 'entregado') {
-      return badRequest(res, 'No se puede cancelar un pedido ya entregado');
-    }
     if (existing.status === 'cancelled') {
       return badRequest(res, 'El pedido ya está cancelado');
+    }
+    if (String(existing.status || '').toLowerCase() === 'devuelto'
+      || String(existing.paymentStatus || '') === 'refunded') {
+      return badRequest(res, 'Este pedido ya fue devuelto');
     }
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
@@ -762,22 +782,67 @@ export async function cancelDeliveryOrder(req, res) {
     const now = new Date().toISOString();
     const trimmedReason = String(cancelReason).trim();
     const db = getDeliveryDbName();
+
+    // Restar de caja si el pedido ya había entrado como venta (TPV cobrado, entregado, etc.).
+    const netSaleInCaja = await resolveOpenSessionNetSaleForOrder(req, userId, existing, actorAccount);
+
     const doc = buildDeliveryOrderDocument(userId, {
       ...existing,
       status: 'cancelled',
       cancelReason: trimmedReason,
       cancelledAt: now,
       cancelledBy: actorName,
+      ...(netSaleInCaja > 0.001
+        ? {
+            paymentCollected: false,
+            paymentStatus: 'refunded',
+            refundAmount: netSaleInCaja,
+            refundReason: trimmedReason,
+            refundedAt: now,
+            refundedBy: actorName,
+          }
+        : {}),
       stageHistory: [
         ...(existing.stageHistory || []),
         { status: 'cancelled', date: now, user: actorName, notes: trimmedReason },
       ],
     }, existing);
+
+    // Reponer stock si hubo descuento (cobrado o entregado).
+    try {
+      await restoreDeliveryOrderStockFromMovements(req, userId, {
+        orderId: doc._id,
+        orderType: 'delivery_order',
+        performedBy: 'system',
+      });
+    } catch (err) {
+      logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error revirtiendo stock al eliminar pedido');
+    }
+
     const saved = await putDocument(req, db, doc._id, doc);
+
+    let cajaRegistration = { status: 'nothing_to_register' };
+    if (netSaleInCaja > 0.001) {
+      cajaRegistration = await autoRegisterTpvReturnForOrder(req, userId, { ...doc, _rev: saved.rev }, {
+        amount: netSaleInCaja,
+        paymentMethod: existing.paymentMethod || 'efectivo',
+        registeredBy: actorName,
+        description: `Eliminación pedido ${doc.orderNumber || ''} — ${trimmedReason}`.trim(),
+        callerAccount: actorAccount,
+      });
+      await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
+    }
+
     await logAccountActivity(req, {
       actorUserId: actorUserId, actorName, targetUserId: userId,
       type: 'delivery_order', action: `Eliminó pedido ${doc.orderNumber}: ${trimmedReason}`,
-      entityId: doc._id, entityLabel: doc.orderNumber, metadata: { cancelReason: trimmedReason, cancelledBy: actorName },
+      entityId: doc._id, entityLabel: doc.orderNumber,
+      metadata: {
+        cancelReason: trimmedReason,
+        cancelledBy: actorName,
+        previousStatus: existing.status,
+        cajaReturnAmount: netSaleInCaja > 0.001 ? netSaleInCaja : 0,
+      },
     });
     const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
     broadcastDeliveryOrderSse(account, userId, 'cancelled', { ...doc, _rev: saved.rev }, {
@@ -794,7 +859,7 @@ export async function cancelDeliveryOrder(req, res) {
     }).catch((err) => {
       logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error notificando gerentes por cancelación');
     });
-    return res.json({ ok: true, order: sanitized });
+    return res.json({ ok: true, order: sanitized, cajaRegistration });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cancelar pedido' });
   }

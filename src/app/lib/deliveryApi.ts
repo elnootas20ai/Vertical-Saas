@@ -233,6 +233,17 @@ export interface CatalogComboRef {
   quantity: number;
   /** Tipo de componente: pizza, bebida, postre… */
   slotKind?: 'main' | 'drink' | 'dessert' | 'side' | 'other';
+  /**
+   * Identificador de unidad cuando el menú lleva varias iguales (Dúo/Familiar)
+   * y cada una puede personalizarse distinto.
+   */
+  instanceId?: string;
+  /** Quitar ingredientes de esta unidad (pizza 1, pizza 2…). */
+  removedIngredients?: string[];
+  /** Extras de pago de esta unidad. */
+  addedSupplements?: { id: string; name: string; price: number }[];
+  /** Nota de esta unidad. */
+  notes?: string;
 }
 
 export interface CatalogSalesChannel {
@@ -553,19 +564,31 @@ export async function refundDeliveryOrderRequest(
   return order;
 }
 
+export type DeliveryCancelResult = {
+  order: DeliveryOrder;
+  cajaRegistration?: {
+    status?: string;
+    message?: string;
+  };
+};
+
 export async function cancelDeliveryOrderRequest(
   userId: string,
   orderId: string,
   cancelReason: string,
-): Promise<DeliveryOrder> {
+): Promise<DeliveryCancelResult> {
   const id = normalizeUserId(userId);
-  const result = await request<{ ok: boolean; order: DeliveryOrder }>(
+  const result = await request<{
+    ok: boolean;
+    order: DeliveryOrder;
+    cajaRegistration?: DeliveryCancelResult['cajaRegistration'];
+  }>(
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/cancel`,
     { method: 'PUT', body: JSON.stringify({ cancelReason: cancelReason.trim() }) },
   );
   if (!result.order) throw new Error('Respuesta inválida del servidor');
   notifyOpsAfterOrderMutation('order_cancelled', result.order);
-  return result.order;
+  return { order: result.order, cajaRegistration: result.cajaRegistration };
 }
 
 export async function reopenDeliveryOrderRequest(userId: string, orderId: string): Promise<DeliveryOrder> {

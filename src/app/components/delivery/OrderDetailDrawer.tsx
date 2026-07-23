@@ -304,10 +304,10 @@ export function OrderDetailDrawer({
               <Printer className="w-4 h-4" /> Ticket devolución
             </button>
           )}
-          {canCancel && !['cancelled', 'entregado', 'devuelto'].includes(order.status) && (
+          {canCancel && !['cancelled', 'devuelto'].includes(order.status) && (
             <button onClick={() => onCancel(order)}
               className="py-2.5 px-4 border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl text-sm font-medium transition-colors">
-              Cancelar
+              {order.status === 'entregado' ? 'Eliminar' : 'Cancelar'}
             </button>
           )}
           {canReopen && ['cancelled', 'entregado'].includes(order.status) && order.status !== 'devuelto' && (

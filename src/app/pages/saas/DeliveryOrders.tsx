@@ -311,13 +311,21 @@ export function DeliveryOrders() {
     if (!userId || !cancelOrder) return;
     setActionLoading(true);
     try {
-      const updated = await cancelDeliveryOrderRequest(userId, cancelOrder._id, reason);
+      const { order: updated, cajaRegistration } = await cancelDeliveryOrderRequest(
+        userId,
+        cancelOrder._id,
+        reason,
+      );
       setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
       setCancelOrder(null);
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
-      toast.success('Pedido cancelado');
-    } catch {
-      toast.error('Error al cancelar');
+      if (cajaRegistration?.status === 'registered') {
+        toast.success('Pedido eliminado · restado de caja');
+      } else {
+        toast.success('Pedido eliminado');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error al eliminar el pedido');
     } finally {
       setActionLoading(false);
     }
@@ -791,6 +799,7 @@ export function DeliveryOrders() {
           onConfirm={handleCancel}
           onClose={() => setCancelOrder(null)}
           loading={actionLoading}
+          mode={cancelOrder.status === 'entregado' ? 'delete' : 'cancel'}
         />
       )}
 
