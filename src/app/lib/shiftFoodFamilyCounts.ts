@@ -47,6 +47,23 @@ export function classifyFoodFamily(
   return null;
 }
 
+/**
+ * Unidades de pizza por producto de menú (cierre de caja).
+ * Individual → 1, Dúo → 2, Familiar → 3. null si no es ese tipo de menú.
+ */
+export function pizzaUnitsFromProductLabel(
+  category: string | undefined,
+  name: string | undefined,
+): number | null {
+  const blob = `${fold(category || '')} ${fold(name || '')}`.trim();
+  if (!blob) return null;
+  // Familiar primero: más específico que un “combo” genérico.
+  if (/\bfamiliar\b/.test(blob)) return 3;
+  if (/\bduos?\b/.test(blob)) return 2;
+  if (/\bindividual(es)?\b/.test(blob)) return 1;
+  return null;
+}
+
 function addCounts(target: FoodFamilyCounts, key: FoodFamilyKey, qty: number): void {
   if (qty <= 0) return;
   target[key] += qty;
@@ -65,6 +82,13 @@ function countItem(item: DeliveryOrderItem): FoodFamilyCounts {
   const qty = Number(item.quantity || 0);
   if (qty <= 0) return out;
   const family = classifyFoodFamily(item.category, item.name);
+  const sizeUnits = pizzaUnitsFromProductLabel(item.category, item.name);
+  // Menús Individual / Dúo / Familiar cuentan pizzas reales (1 / 2 / 3),
+  // aunque la categoría sea “Combos” y no diga “pizza”. No pisar burgers/tacos.
+  if (sizeUnits != null && family !== 'burger' && family !== 'taco') {
+    addCounts(out, 'pizza', qty * sizeUnits);
+    return out;
+  }
   if (family) addCounts(out, family, qty);
   return out;
 }

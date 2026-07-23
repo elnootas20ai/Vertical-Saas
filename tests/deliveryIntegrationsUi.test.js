@@ -7,6 +7,8 @@ import {
   getAggregatorCajaPlatforms,
   getClosingAggregatorPlatforms,
   DEFAULT_DELIVERY_INTEGRATIONS,
+  sumAggregatorCash,
+  sumAggregatorCard,
 } from '../src/app/lib/deliveryIntegrationsUi.ts';
 
 describe('deliveryIntegrationsUi', () => {
@@ -145,8 +147,35 @@ describe('deliveryIntegrationsUi', () => {
     );
     expect(manual.find((r) => r.platform.channel === 'glovo')?.totalSales).toBe(123.45);
     expect(manual.find((r) => r.platform.channel === 'glovo')?.cashSales).toBe(20);
-    // cash cannot exceed total
-    expect(manual.find((r) => r.platform.channel === 'ubereats')?.totalSales).toBe(50);
-    expect(manual.find((r) => r.platform.channel === 'ubereats')?.cashSales).toBe(50);
+    // Si el efectivo declarado supera el total, el total sube (no se anula el efectivo).
+    expect(manual.find((r) => r.platform.channel === 'ubereats')?.cashSales).toBe(60);
+    expect(manual.find((r) => r.platform.channel === 'ubereats')?.totalSales).toBe(60);
+  });
+
+  it('cuenta efectivo/tarjeta manual aunque totalSales auto sea 0 (cierre Pau)', () => {
+    const rows = buildAggregatorCashRows(getClosingAggregatorPlatforms(), {
+      openedAt: '2026-06-08T10:00:00.000Z',
+      pointOfSaleId: 'pdv-1',
+      transactions: [],
+    }, []);
+    const manual = applyManualAggregatorTotals(
+      rows,
+      {},
+      { glovo: '100', justeat: '25,50' },
+      { glovo: '40', ubereats: '10' },
+    );
+    const glovo = manual.find((r) => r.platform.channel === 'glovo');
+    expect(glovo?.cashSales).toBe(100);
+    expect(glovo?.cardSales).toBe(40);
+    expect(glovo?.totalSales).toBe(140);
+    const justeat = manual.find((r) => r.platform.channel === 'justeat');
+    expect(justeat?.cashSales).toBe(25.5);
+    expect(justeat?.totalSales).toBe(25.5);
+    const uber = manual.find((r) => r.platform.channel === 'ubereats');
+    expect(uber?.cardSales).toBe(10);
+    expect(uber?.totalSales).toBe(10);
+    const apps =
+      sumAggregatorCash(manual) + sumAggregatorCard(manual);
+    expect(apps).toBe(175.5);
   });
 });

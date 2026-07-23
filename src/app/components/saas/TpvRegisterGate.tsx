@@ -1780,9 +1780,9 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 )}
               </div>
             )}
-            {showDeliveryClosingSlots && aggregatorEuroTotal > 0 && (
+            {showDeliveryClosingSlots && (
               <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
-                Ventas apps (info): {aggregatorEuroTotal.toFixed(2)}€ · Negocio TPV+apps: {grandEuroTotal.toFixed(2)}€
+                Ventas apps: {aggregatorEuroTotal.toFixed(2)}€ · TPV + apps: {grandEuroTotal.toFixed(2)}€
               </p>
             )}
           </div>

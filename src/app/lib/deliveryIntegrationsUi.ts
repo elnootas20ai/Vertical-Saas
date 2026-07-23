@@ -136,12 +136,16 @@ export function applyManualAggregatorTotals(
     const parsedTotal = parseAggregatorAmount(manualByChannel[ch] ?? '');
     const parsedCash = parseAggregatorAmount(manualCashByChannel[ch] ?? '');
     const parsedCard = parseAggregatorAmount(manualCardByChannel[ch] ?? '');
-    const totalSales = parsedTotal != null ? parsedTotal : row.totalSales;
     let cashSales = parsedCash != null ? parsedCash : row.cashSales;
     let cardSales = parsedCard != null ? parsedCard : row.cardSales;
-    // El efectivo no puede superar el total del integrador.
-    if (cashSales > totalSales) cashSales = totalSales;
-    if (cardSales > totalSales) cardSales = totalSales;
+    let totalSales = parsedTotal != null ? parsedTotal : row.totalSales;
+    const declaredParts = Math.round((cashSales + cardSales) * 100) / 100;
+    // Cierre manual (Pau): si no hay pedidos de apps en sistema (totalSales=0) pero sí
+    // escriben efectivo/tarjeta, esos importes deben contar en «TOTAL DE TODO».
+    // Antes se recortaban a totalSales y el total final salía sin apps.
+    if (declaredParts > totalSales) {
+      totalSales = declaredParts;
+    }
     return {
       ...row,
       totalSales,

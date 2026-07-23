@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildShiftFoodFamilyReport,
   classifyFoodFamily,
+  pizzaUnitsFromProductLabel,
 } from '../src/app/lib/shiftFoodFamilyCounts.ts';
 
 describe('classifyFoodFamily', () => {
@@ -11,6 +12,15 @@ describe('classifyFoodFamily', () => {
     expect(classifyFoodFamily('Top Burger', 'Doble')).toBe('burger');
     expect(classifyFoodFamily('Tacos', 'Pastor')).toBe('taco');
     expect(classifyFoodFamily('Extras', 'Coca Cola')).toBe(null);
+  });
+});
+
+describe('pizzaUnitsFromProductLabel', () => {
+  it('Individual=1, Dúo=2, Familiar=3', () => {
+    expect(pizzaUnitsFromProductLabel('Combos', 'Menú Individual')).toBe(1);
+    expect(pizzaUnitsFromProductLabel('Menús', 'Combo Dúo')).toBe(2);
+    expect(pizzaUnitsFromProductLabel('Combos', 'Familiar')).toBe(3);
+    expect(pizzaUnitsFromProductLabel('Pizzas', 'Margarita')).toBe(null);
   });
 });
 
@@ -44,5 +54,36 @@ describe('buildShiftFoodFamilyReport', () => {
     expect(report.byAggregator.glovo).toEqual({ pizza: 2, burger: 1, taco: 0 });
     expect(report.byAggregator.ubereats).toEqual({ pizza: 0, burger: 2, taco: 0 });
     expect(report.byChannel.tpv).toEqual({ pizza: 0, burger: 0, taco: 3 });
+  });
+
+  it('cuenta pizzas de menú Individual / Dúo / Familiar (1 / 2 / 3)', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 'c1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          { name: 'Menú Individual', category: 'Combos', quantity: 1 },
+          { name: 'Combo Dúo', category: 'Menús', quantity: 1 },
+          { name: 'Familiar', category: 'Combos', quantity: 1 },
+          { name: 'Combo Familiar', category: 'Menús', quantity: 2 },
+        ],
+      },
+    ]);
+    // 1 + 2 + 3 + (2×3) = 12 pizzas
+    expect(report.total).toEqual({ pizza: 12, burger: 0, taco: 0 });
+    expect(report.byChannel.tpv.pizza).toBe(12);
+  });
+
+  it('no convierte burgers con “Familiar” en pizzas', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 'b1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [{ name: 'Burger Familiar', category: 'Burger', quantity: 1 }],
+      },
+    ]);
+    expect(report.total).toEqual({ pizza: 0, burger: 1, taco: 0 });
   });
 });
