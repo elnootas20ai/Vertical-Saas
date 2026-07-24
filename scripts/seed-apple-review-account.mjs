@@ -1,12 +1,16 @@
 /**
  * Cuenta demo para revisores Apple (TestFlight / App Store).
- * Acceso completo al dashboard SaaS con plan Pro activo.
+ * Acceso SaaS con plan Pro activo — vertical delivery.
  *
- * Uso (producción):
+ * Uso (producción, vía VPS):
+ *   node scripts/remote-seed-apple-review-account.mjs
+ *
+ * Local / SSH en el VPS:
  *   NODE_ENV=production node scripts/seed-apple-review-account.mjs
  *
  * Opcional:
  *   APPLE_REVIEW_EMAIL=... APPLE_REVIEW_PASSWORD=... (mín. 8 caracteres)
+ *   APPLE_REVIEW_RECREATE=1  → soft-delete cuenta/negocios previos del email y crea una nueva
  */
 import '../config/env.js';
 import crypto from 'node:crypto';
@@ -14,17 +18,21 @@ import { v4 as uuidv4 } from 'uuid';
 
 const ACCOUNTS_DB = 'accounts';
 const BUSINESSES_DB = 'businesses';
+const SALES_POINTS_DB = 'bbddsaas-sales-points';
+const DELIVERY_DB = 'bbddsaas-delivery';
 
 const REVIEW_EMAIL = String(process.env.APPLE_REVIEW_EMAIL || 'apple-review@vertialapp.com')
   .trim()
   .toLowerCase();
 const REVIEW_PASSWORD = String(process.env.APPLE_REVIEW_PASSWORD || 'VertialApple2026!').trim();
-const BUSINESS_NAME = 'Vertial Demo Restaurante';
+const BUSINESS_NAME = 'Vertial Demo Delivery';
+const BUSINESS_TYPE = 'delivery';
+const RECREATE = String(process.env.APPLE_REVIEW_RECREATE || '1').trim() !== '0';
 
 const TEAM_PERMISSION_KEYS = [
   'vehicles', 'clients', 'sales', 'reservations', 'documents', 'finance', 'ancove', 'team',
   'fleet', 'delivery', 'cash_register', 'cleaning_materials', 'acquisitions', 'butcher_waste',
-  'butcher_purchases', 'reports', 'scrapyard_docs', 'scrapyard',
+  'butcher_purchases', 'reports', 'scrapyard_docs', 'scrapyard', 'workshop',
 ];
 
 function hashPassword(password) {
@@ -79,20 +87,39 @@ function buildAdminPermissions() {
   return Object.fromEntries(TEAM_PERMISSION_KEYS.map((k) => [k, { view: true, edit: true }]));
 }
 
-async function findAccountByEmail(email) {
+async function findAccountsByEmail(email) {
   const data = await couchJson('POST', `/${ACCOUNTS_DB}/_find`, {
     selector: { type: 'account', email },
-    limit: 1,
+    limit: 25,
   });
-  return data?.docs?.[0] || null;
+  return data?.docs || [];
 }
 
-async function findBusinessForOwner(ownerId) {
+async function findBusinessesForOwner(ownerId) {
   const data = await couchJson('POST', `/${BUSINESSES_DB}/_find`, {
     selector: { type: 'business', owner_user_id: ownerId },
-    limit: 1,
+    limit: 25,
   });
-  return data?.docs?.[0] || null;
+  return data?.docs || [];
+}
+
+async function softDeleteDoc(db, doc, now) {
+  if (!doc?._id || doc.deletedAt) return;
+  await couchJson('PUT', `/${db}/${encodeURIComponent(doc._id)}`, {
+    ...doc,
+    status: doc.status === 'accepted' ? 'accepted' : 'inactive',
+    deletedAt: now,
+    updatedAt: now,
+  });
+  console.log(`[soft-delete] ${db}/${doc._id}`);
+}
+
+async function ensureDb(db) {
+  try {
+    await couchJson('PUT', `/${db}`);
+  } catch (e) {
+    if (!/already exists|file_exists/i.test(String(e.message))) throw e;
+  }
 }
 
 async function main() {
@@ -105,12 +132,8 @@ async function main() {
     process.exit(1);
   }
 
-  for (const db of [ACCOUNTS_DB, BUSINESSES_DB]) {
-    try {
-      await couchJson('PUT', `/${db}`);
-    } catch (e) {
-      if (!/already exists|file_exists/i.test(String(e.message))) throw e;
-    }
+  for (const db of [ACCOUNTS_DB, BUSINESSES_DB, SALES_POINTS_DB, DELIVERY_DB]) {
+    await ensureDb(db);
   }
 
   const now = new Date().toISOString();
@@ -118,14 +141,29 @@ async function main() {
   const adminPerms = buildAdminPermissions();
   const passwordHash = hashPassword(REVIEW_PASSWORD);
 
-  const existing = await findAccountByEmail(REVIEW_EMAIL);
-  const ownerId = existing?.user_id || uuidv4();
-  let business = existing ? await findBusinessForOwner(ownerId) : null;
+  const existingAccounts = await findAccountsByEmail(REVIEW_EMAIL);
+  const activeExisting = existingAccounts.find((a) => !a.deletedAt) || null;
+
+  if (RECREATE && existingAccounts.length) {
+    console.log(`\n[recreate] Soft-delete de ${existingAccounts.length} cuenta(s) previas (${REVIEW_EMAIL})…`);
+    for (const acc of existingAccounts) {
+      if (acc.deletedAt) continue;
+      const businesses = await findBusinessesForOwner(acc.user_id);
+      for (const b of businesses) {
+        await softDeleteDoc(BUSINESSES_DB, b, now);
+      }
+      await softDeleteDoc(ACCOUNTS_DB, acc, now);
+    }
+  }
+
+  const reuse = !RECREATE && activeExisting ? activeExisting : null;
+  const ownerId = reuse?.user_id || uuidv4();
+  let business = reuse ? (await findBusinessesForOwner(ownerId)).find((b) => !b.deletedAt) || null : null;
   const businessId = business?.business_id || uuidv4();
 
   const owner = {
-    _id: existing?._id || `account:${ownerId}`,
-    _rev: existing?._rev,
+    _id: reuse?._id || `account:${ownerId}`,
+    _rev: reuse?._rev,
     type: 'account',
     user_id: ownerId,
     email: REVIEW_EMAIL,
@@ -141,7 +179,7 @@ async function main() {
     invitedBy: '',
     companyName: BUSINESS_NAME,
     onboardingCompleted: true,
-    onboardingData: { businessType: 'restaurant', source: 'apple-review-seed' },
+    onboardingData: { businessType: BUSINESS_TYPE, source: 'apple-review-seed' },
     provider: 'email',
     permissions: adminPerms,
     employment: {},
@@ -168,11 +206,22 @@ async function main() {
     referralCode: '',
     referredByAffiliateId: '',
     passwordHash,
-    createdAt: existing?.createdAt || now,
+    createdAt: reuse?.createdAt || now,
     updatedAt: now,
+    deletedAt: null,
   };
 
   const savedOwner = await couchJson('PUT', `/${ACCOUNTS_DB}/${encodeURIComponent(owner._id)}`, owner);
+
+  const member = {
+    user_id: ownerId,
+    fullName: owner.fullName,
+    email: owner.email,
+    role: 'Admin',
+    branch_id: null,
+    permissions: adminPerms,
+    joinedAt: business?.members?.[0]?.joinedAt || now,
+  };
 
   if (!business) {
     business = {
@@ -181,64 +230,107 @@ async function main() {
       business_id: businessId,
       owner_user_id: ownerId,
       group_id: null,
-      businessType: 'restaurant',
+      businessType: BUSINESS_TYPE,
       name: BUSINESS_NAME,
       legalName: BUSINESS_NAME,
       taxId: 'B00000000',
-      address: 'Calle Demo 1',
+      address: 'Calle Demo Delivery 1',
       city: 'Madrid',
       phone: owner.phone,
       email: owner.email,
       logo: '',
       companyCode: 'APPLE01',
       branches: [],
-      members: [
-        {
-          user_id: ownerId,
-          fullName: owner.fullName,
-          email: owner.email,
-          role: 'Admin',
-          branch_id: null,
-          permissions: adminPerms,
-          joinedAt: now,
-        },
-      ],
+      members: [member],
       createdAt: now,
       updatedAt: now,
+      deletedAt: null,
     };
   } else {
     business = {
       ...business,
       name: BUSINESS_NAME,
       legalName: BUSINESS_NAME,
-      businessType: 'restaurant',
+      businessType: BUSINESS_TYPE,
       owner_user_id: ownerId,
       email: owner.email,
       phone: owner.phone,
-      members: [
-        {
-          user_id: ownerId,
-          fullName: owner.fullName,
-          email: owner.email,
-          role: 'Admin',
-          branch_id: null,
-          permissions: adminPerms,
-          joinedAt: business.members?.[0]?.joinedAt || now,
-        },
-      ],
+      address: business.address || 'Calle Demo Delivery 1',
+      members: [member],
       updatedAt: now,
+      deletedAt: null,
     };
   }
 
   await couchJson('PUT', `/${BUSINESSES_DB}/${encodeURIComponent(business._id)}`, business);
 
-  // ── Afiliado demo (Apple 2.1: acceso Empresa + Afiliado) ───────────────────
-  const AFFILIATES_DB = 'affiliates';
+  // Tienda + PDV mínimos para que delivery no salga “sin tienda”
+  const wcId = `wc-apple-review-${businessId.slice(0, 8)}`;
+  let existingWc = null;
   try {
-    await couchJson('PUT', `/${AFFILIATES_DB}`);
-  } catch (e) {
-    if (!/already exists|file_exists/i.test(String(e.message))) throw e;
+    existingWc = await couchJson('GET', `/${SALES_POINTS_DB}/${encodeURIComponent(wcId)}`);
+  } catch {
+    existingWc = null;
   }
+
+  const wcDoc = {
+    _id: wcId,
+    _rev: existingWc?._rev,
+    id: wcId,
+    type: 'sales_point',
+    user_id: ownerId,
+    businessId,
+    business_id: businessId,
+    name: 'Demo Delivery Tienda',
+    centerType: 'punto_de_venta',
+    ownership: 'propiedad',
+    address: 'Calle Demo Delivery 1',
+    city: 'Madrid',
+    active: true,
+    expectedStaffCount: 2,
+    createdAt: existingWc?.createdAt || now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+  await couchJson('PUT', `/${SALES_POINTS_DB}/${encodeURIComponent(wcId)}`, wcDoc);
+
+  const pdvId = `pdv-apple-review-${businessId.slice(0, 8)}`;
+  let existingPdv = null;
+  try {
+    existingPdv = await couchJson('GET', `/${DELIVERY_DB}/${encodeURIComponent(pdvId)}`);
+  } catch {
+    existingPdv = null;
+  }
+
+  const pdvDoc = {
+    _id: pdvId,
+    _rev: existingPdv?._rev,
+    type: 'point_of_sale',
+    user_id: ownerId,
+    businessId,
+    business_id: businessId,
+    workCenterId: wcId,
+    name: 'Demo Delivery PDV',
+    code: 'APPLEPDV',
+    active: true,
+    address: 'Calle Demo Delivery 1',
+    city: 'Madrid',
+    terminals: [
+      {
+        id: `term-apple-${businessId.slice(0, 8)}`,
+        name: 'Tablet Review',
+        active: true,
+      },
+    ],
+    createdAt: existingPdv?.createdAt || now,
+    updatedAt: now,
+    deletedAt: null,
+  };
+  await couchJson('PUT', `/${DELIVERY_DB}/${encodeURIComponent(pdvId)}`, pdvDoc);
+
+  // ── Afiliado demo (opcional) ───────────────────────────────────────────────
+  const AFFILIATES_DB = 'affiliates';
+  await ensureDb(AFFILIATES_DB);
 
   const AFFILIATE_CODE = String(process.env.APPLE_REVIEW_AFFILIATE_CODE || 'APPLEAFF').trim().toUpperCase();
   const REFERRAL_CODE = String(process.env.APPLE_REVIEW_REFERRAL_CODE || 'REFAPPLE').trim().toUpperCase();
@@ -272,7 +364,7 @@ async function main() {
     whatsapp: '+34600000001',
     company: 'Vertial Demo Partners',
     website: 'https://vertialapp.com',
-    verticals: ['restaurant', 'delivery'],
+    verticals: ['delivery'],
     affiliateCode: AFFILIATE_CODE,
     referralCode: REFERRAL_CODE,
     commissionRate: 20,
@@ -288,14 +380,16 @@ async function main() {
 
   await couchJson('PUT', `/${AFFILIATES_DB}/${encodeURIComponent(affiliateDoc._id)}`, affiliateDoc);
 
-  console.log('\n=== Cuenta Apple Review lista ===\n');
+  console.log('\n=== Cuenta Apple Review lista (delivery) ===\n');
   console.log('— Empresa —');
   console.log(`Email:       ${REVIEW_EMAIL}`);
   console.log(`Contraseña:  ${REVIEW_PASSWORD}`);
   console.log(`Plan:        Pro (subscription_active)`);
-  console.log(`Vertical:    restaurant → Entry → Empresa → login → dashboard`);
+  console.log(`Vertical:    delivery → Entry → Empresa → login → dashboard`);
   console.log(`business_id: ${businessId}`);
   console.log(`user_id:     ${ownerId}`);
+  console.log(`wc:          ${wcId}`);
+  console.log(`pdv:         ${pdvId}`);
   console.log(`rev cuenta:  ${savedOwner.rev}`);
   console.log('\n— Afiliado —');
   console.log(`Código:      ${AFFILIATE_CODE}`);

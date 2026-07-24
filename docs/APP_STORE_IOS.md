@@ -46,8 +46,9 @@ Tras `npm run cap:sync`, `packageClassList` debe incluir Push, Apple Sign In, Ap
 ### Privacidad Apple
 - `ios/App/App/PrivacyInfo.xcprivacy` (email, nombre, user ID, device ID/APNs, fotos, ubicación)
 
-### Guideline 4.8 — Login
+### Guideline 4.8 / Design — Login (Sign in with Apple)
 - **Google oculto en app iOS**; **Sign in with Apple** en login y registro (`@capacitor-community/apple-sign-in`)
+- Botón SIWA: logo **oficial** de Apple Design Resources en `public/apple-signin/` (no SVG inventado)
 - Login con email/contraseña disponible
 - Backend: `POST /api/auth/apple-login`
 
@@ -56,12 +57,11 @@ Tras `npm run cap:sync`, `packageClassList` debe incluir Push, Apple Sign In, Ap
 - Trabajadores → Seguridad → eliminar cuenta (compacto)
 - Backend: `DELETE /api/auth/profile/:userId` (auto-borrado)
 
-### Guideline 3.1.1 — Suscripciones (modelo clientes)
-- **App iOS = acceso para clientes** con cuenta/plan ya activos
-- **Alta de empresa + cobro solo en la web** (vertialapp.com), fuera de la app
-- Sin botones de pagar, planes, transferencia ni enlace a checkout en iOS
-- Sin «Crear cuenta de empresa» en la pantalla de entrada iOS
-- Usuarios con plan activo usan la app con login normal (email / Sign in with Apple / trabajador)
+### Guideline 3.1.1 — App para clientes Vertial
+- **App iOS = acceso para clientes de Vertial** (login + operativa)
+- Sin cobros ni compras dentro de la app
+- Sin «Crear cuenta de empresa» en la entrada iOS
+- Login: email / Sign in with Apple / trabajador
 
 ### API nativa
 - `getApiBase()` usa `https://vertialapp.com` en Capacitor cuando `VITE_API_URL=/api`
@@ -117,10 +117,11 @@ Push al iPhone del **CEO**: solo críticas + dinero/caja (descuadre, caja sin ce
 ### Cuentas demo (App Review Information)
 
 ```
-Empresa (owner / dashboard):
+Empresa (owner / dashboard delivery):
 Email: apple-review@vertialapp.com
-Password: [la de seed / APPLE_REVIEW_PASSWORD]
+Password: VertialApple2026!
 → Entry → Empresa → Iniciar sesión
+(Vertical: delivery, plan Pro)
 
 Afiliado:
 Email / código: [cuenta afiliado de prueba activa]
@@ -132,14 +133,11 @@ Asegura que la cuenta empresa tenga **suscripción activa** (script `scripts/see
 
 ### Review Notes (pegar en inglés)
 
-> Vertial is a B2B multiplatform operations SaaS. The iOS app is login-only for existing accounts (company staff, workers, affiliates). There is NO business/organization registration and NO in-app purchase for Vertial subscriptions on iOS.
+> Vertial is a SaaS product for Vertial customers. The iOS app is an access client for existing Vertial customers (company staff and workers) so they can use the system on iPad/iPhone. There are no purchases, payments, or subscriptions sold in the app. Account setup is handled by Vertial for our customers; the app is login and operations only.
 >
-> Sign in with Google is intentionally NOT available on iOS (we use Sign in with Apple per Guideline 4.8). Please ignore any older metadata mentioning Google — Sign in with Apple + email/password are the iOS methods.
+> Sign in with Apple uses official artwork from Apple Design Resources. Sign in with Google is not available on iOS. Sign in with Apple + email/password are the iOS methods.
 >
-> Cookies: the iOS app does not show a cookie consent banner and does not use advertising/analytics cookies or tracking. No App Tracking Transparency prompt is required because we do not track users.
->
-> Demo — Company: [email] / [password] (active Pro). Path: Entry → Empresa → Iniciar sesión.
-> Demo — Affiliate: [email or code] / [password]. Path: Entry → Afiliado → Iniciar sesión.
+> Demo — Company: [email] / [password]. Path: Entry → Empresa → Sign in.
 > Account deletion: Settings → Security → Delete account.
 
 ### Checklist App Store Connect (metadatos 2.3)
