@@ -26,7 +26,7 @@ import { notifyBusinessesChanged, VERTIAL_BUSINESSES_CHANGED } from '../lib/busi
 import { notifyDeliveryWorkCentersChanged, normalizeBusinessScopeId } from '../lib/deliverySetup';
 import { notifyDeliveryActiveStoreChanged } from '../lib/deliveryOpsPdvSelection';
 import { clearAllRetailScopeCaches } from '../verticals/retailScopeRegistry';
-import { readTpvTabletBinding } from '../lib/tpvTabletSession';
+import { isTpvTabletBindingAllowedForAuth, readTpvTabletBinding, sanitizeTpvTabletBindingForAuth } from '../lib/tpvTabletSession';
 
 export type { BusinessContextType } from './businessContextRef';
 
@@ -170,7 +170,15 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
           (b) =>
             normalizeBusinessScopeId(b.business_id) === normalizeBusinessScopeId(tabletBusinessId),
         );
-        if (tabletBiz) {
+        const tabletOk =
+          tabletBiz &&
+          isTpvTabletBindingAllowedForAuth({
+            binding: readTpvTabletBinding(),
+            authUser: { user_id: userId },
+            businesses: list,
+            businessesSettled: true,
+          });
+        if (tabletOk && tabletBiz) {
           setCurrentBusiness((prev) =>
             prev?.business_id === tabletBiz.business_id ? prev : tabletBiz,
           );
@@ -267,6 +275,11 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       }
 
       setBusinesses(list);
+      sanitizeTpvTabletBindingForAuth({
+        authUser: { user_id: userId },
+        businesses: list,
+        businessesSettled: true,
+      });
       resolveCurrentBusiness(list, userId, user?.linkedBusinessId);
       if (list.length > 0) {
         writeBusinessesCache(userId, list);

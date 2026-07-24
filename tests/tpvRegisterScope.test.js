@@ -37,14 +37,46 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
         pdvId: 'pdv-nueva',
         businessId: 'empresa-tablet',
         dataUserId: 'owner-tablet',
+        authUserId: 'worker-1',
       },
       authUser: { user_id: 'worker-1' },
       pathname: '/saas/worker/tpv/delivery',
+      businesses: [
+        {
+          business_id: 'empresa-tablet',
+          owner_user_id: 'owner-tablet',
+          members: [{ user_id: 'worker-1' }],
+        },
+      ],
+      businessesSettled: true,
     });
     expect(r.scopeBusinessId).toBe('empresa-tablet');
     expect(r.effectiveDataUserId).toBe('owner-tablet');
     expect(r.isTabletSession).toBe(true);
     expect(r.shouldSyncBusinessFromTablet).toBe(true);
+  });
+
+  it('ignora binding de otra cuenta (p. ej. Pau) y se queda en la cuenta activa', () => {
+    const r = resolveTpvRegisterScope({
+      currentBusiness: {
+        business_id: 'mi-empresa',
+        id: 'mi-empresa',
+        owner_user_id: 'yo',
+      },
+      tabletBinding: {
+        pdvId: 'pdv-pau',
+        businessId: 'empresa-pau',
+        dataUserId: 'pau-owner',
+        authUserId: 'pau-worker',
+      },
+      authUser: { user_id: 'yo' },
+      pathname: '/saas/worker/tpv/delivery',
+      businesses: [{ business_id: 'mi-empresa', owner_user_id: 'yo' }],
+      businessesSettled: true,
+    });
+    expect(r.isTabletSession).toBe(false);
+    expect(r.scopeBusinessId).toBe('mi-empresa');
+    expect(r.effectiveDataUserId).toBe('yo');
   });
 
   it('binding tablet en /saas/caja/tpv no activa sesión tablet (gerente restaurante)', () => {
@@ -57,6 +89,8 @@ describe('tpvRegisterScope — regresión caja tablet', () => {
       },
       authUser: { user_id: 'owner-1' },
       pathname: '/saas/caja/tpv',
+      businesses: [{ business_id: 'rest-1', owner_user_id: 'owner-1' }],
+      businessesSettled: true,
     });
     expect(r.scopeBusinessId).toBe('rest-1');
     expect(r.isTabletSession).toBe(false);

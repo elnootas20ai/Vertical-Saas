@@ -47,6 +47,7 @@ import {
   type RetailScopeContext,
 } from '../verticals/retailScopeRegistry';
 import {
+  isTpvTabletBindingAllowedForAuth,
   isTpvTabletWorkerPath,
   mergeTabletBindingPdv,
   readTpvTabletBinding,
@@ -130,10 +131,28 @@ type StoreLoadOptions = { force?: boolean };
 function resolveTabletBoundStoreScope(
   pathname: string,
   businessId: string,
+  authUser?: { user_id?: string; id?: string } | null,
+  businesses?: Array<{
+    business_id?: string;
+    id?: string;
+    owner_user_id?: string;
+    members?: Array<{ user_id?: string }>;
+  }> | null,
+  businessesSettled?: boolean,
 ): ReturnType<typeof readTpvTabletBinding> | null {
   const binding = readTpvTabletBinding();
   if (!binding?.pdvId || !binding?.businessId) return null;
   if (!isTpvTabletWorkerPath(pathname)) return null;
+  if (
+    !isTpvTabletBindingAllowedForAuth({
+      binding,
+      authUser,
+      businesses,
+      businessesSettled,
+    })
+  ) {
+    return null;
+  }
   if (resolveBusinessScopeId({ business_id: binding.businessId }) !== businessId) return null;
   return binding;
 }
@@ -310,9 +329,16 @@ function ActiveStoreScopeProviderImpl({
     setInitialLoading(false);
 
     // Tablet TPV: el código fija tienda antes de que el selector global cambie de empresa.
+    // Solo si el binding pertenece a esta cuenta (no a Pau u otra).
     if (isTpvTabletWorkerPath(location.pathname)) {
       const binding = readTpvTabletBinding();
-      if (binding?.pdvId && binding?.businessId) {
+      const allowed = isTpvTabletBindingAllowedForAuth({
+        binding,
+        authUser: user,
+        businesses,
+        businessesSettled: businessesFetchSettled,
+      });
+      if (allowed && binding?.pdvId && binding?.businessId) {
         const { retail, allPdvs } = buildTabletScopeRows(binding);
         if (retail.length > 0 || allPdvs.length > 0) {
           hasDisplayedStoresRef.current = true;
@@ -362,13 +388,19 @@ function ActiveStoreScopeProviderImpl({
       loadInflightRef.current = null;
     }
 
-    const tabletBinding = resolveTabletBoundStoreScope(location.pathname, businessId);
+    const tabletBinding = resolveTabletBoundStoreScope(
+      location.pathname,
+      businessId,
+      user,
+      businesses,
+      businessesFetchSettled,
+    );
     if (tabletBinding) {
       const { retail, allPdvs } = buildTabletScopeRows(tabletBinding);
       hasDisplayedStoresRef.current = allPdvs.length > 0 || retail.length > 0;
       applyStores(retail, allPdvs);
     }
-  }, [businessId, accountBusinessCount, applyStores, location.pathname]);
+  }, [businessId, accountBusinessCount, applyStores, location.pathname, user, businesses, businessesFetchSettled]);
 
   const bump = useCallback(() => setVersion((v) => v + 1), []);
 

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, type FormEvent, type PointerEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useLocation } from 'react-router';
 import { Eye, Mail, Lock, ShieldAlert, Users } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from 'next-themes';
@@ -15,6 +15,7 @@ import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
 import { signInWithApple } from '../../lib/appleSignIn';
+import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
 
 const CREDENTIALS_KEY = 'vertial_saved_worker_login';
 
@@ -30,9 +31,17 @@ function loadSavedLogin(): { email: string } | null {
 
 export function WorkerLogin() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login, googleLogin, appleLogin } = useAuth();
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
+
+  const tpvReturn = location.state as {
+    fromTpvTablet?: boolean;
+    terminalCode?: string;
+    returnTo?: string;
+    message?: string;
+  } | null;
 
   const saved = loadSavedLogin();
   const [formData, setFormData] = useState({
@@ -45,6 +54,21 @@ export function WorkerLogin() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [peekPassword, setPeekPassword] = useState(false);
   const [googleTimedOut, setGoogleTimedOut] = useState(false);
+
+  const goAfterLogin = useCallback(
+    (fallback?: string) => {
+      if (tpvReturn?.fromTpvTablet) {
+        const code = normalizeTpvTabletCode(tpvReturn.terminalCode || '');
+        navigate(tpvReturn.returnTo || AUTH_PATHS.tpvTabletLogin, {
+          replace: true,
+          state: code ? { terminalCode: code } : undefined,
+        });
+        return;
+      }
+      navigate(fallback || WORKER_DEFAULT_LANDING_PATH);
+    },
+    [navigate, tpvReturn],
+  );
 
   const handlePasswordPeekStart = (e: PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -82,7 +106,7 @@ export function WorkerLogin() {
     setIsSubmitting(false);
 
     if (result.success) {
-      navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
+      goAfterLogin(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
       return;
     }
 
@@ -104,7 +128,7 @@ export function WorkerLogin() {
       const result = await googleLogin(credential);
 
       if (result.success) {
-        navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
+        goAfterLogin(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
         return;
       }
 
@@ -125,7 +149,7 @@ export function WorkerLogin() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [googleLogin, navigate, t]);
+  }, [goAfterLogin, googleLogin, navigate, t]);
 
   const showAppleAuth = isAppleSignInAvailable();
 
@@ -139,7 +163,7 @@ export function WorkerLogin() {
         familyName: apple.familyName || undefined,
       });
       if (result.success) {
-        navigate(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
+        goAfterLogin(result.redirectTo || WORKER_DEFAULT_LANDING_PATH);
         return;
       }
       if (result.code === 'APPLE_ACCOUNT_NOT_FOUND' && result.appleUser) {
@@ -163,7 +187,7 @@ export function WorkerLogin() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [appleLogin, navigate]);
+  }, [appleLogin, goAfterLogin, navigate]);
 
   const hideGoogleOnIos = shouldHideThirdPartyAuthOnIos();
   const showGoogleAuth = googleClientConfigured && !hideGoogleOnIos;
@@ -206,6 +230,13 @@ export function WorkerLogin() {
               Iniciar sesión
             </h1>
           </div>
+
+          {tpvReturn?.message && !lockInfo && (
+            <div className="mb-4 rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-sm text-amber-800">{tpvReturn.message}</p>
+            </div>
+          )}
 
           {lockInfo && (
             <div className="mb-4 rounded-xl bg-red-50 border border-red-200 p-4 flex items-start gap-3">

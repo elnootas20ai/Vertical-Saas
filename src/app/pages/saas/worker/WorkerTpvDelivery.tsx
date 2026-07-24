@@ -28,6 +28,8 @@ import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { useTpvOrderFlowChrome, useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
 import {
+  isCancelledDeliveryOrder,
+  isCompletedHistoryBoardOrder,
   isDeliveredBoardOrder,
   isTpvMontajeBoardOrder,
   isTpvRepartoBoardOrder,
@@ -145,6 +147,11 @@ type FulfillmentFilter = 'all' | 'recogida' | 'domicilio';
 
 function isCompletedBoardOrder(order: DeliveryOrder): boolean {
   return isDeliveredBoardOrder(order);
+}
+
+/** Completados del turno: incluye eliminados que ya estaban entregados. */
+function isHistoryCompletedBoardOrder(order: DeliveryOrder): boolean {
+  return isCompletedHistoryBoardOrder(order);
 }
 
 /** Pedido cobrado en TPV (Cobrar y enviar): tiene canal y método de pago. */
@@ -1126,8 +1133,10 @@ export function WorkerTpvDelivery({
       tabletBinding,
       authUser: user,
       pathname: location.pathname,
+      businesses,
+      businessesSettled: businessesFetchSettled,
     }),
-    [currentBusiness, tabletBinding, user, location.pathname],
+    [currentBusiness, tabletBinding, user, location.pathname, businesses, businessesFetchSettled],
   );
   const userId = registerScope.effectiveDataUserId;
   const businessId = registerScope.scopeBusinessId;
@@ -1155,19 +1164,22 @@ export function WorkerTpvDelivery({
   useTpvOrderFlowChrome(view === 'new-order');
   useTpvSuppressBottomBar(view !== 'board');
   // CEO TPV rápido = misma UI compacta que tablet (antes !ceoMode forzaba el layout grande "antiguo").
-  const isTabletUi = ceoMode || Boolean(tabletBinding);
+  const isTabletUi = ceoMode || isTabletSession;
   const workerPdv = useMemo(
     () => resolvePdvIdFromStoreRef(activeStoreScope.pointsOfSale, user?.employment?.salesPointId),
     [activeStoreScope.pointsOfSale, user?.employment?.salesPointId],
   );
   const scopedPdvId = useMemo(() => {
     if (ceoMode && forcedPdvId) return String(forcedPdvId).trim() || null;
-    const fromTablet = String(tabletBinding?.pdvId || '').trim();
-    if (fromTablet) return fromTablet;
+    // Solo usar PDV del binding si la sesión tablet es válida para esta cuenta.
+    if (isTabletSession) {
+      const fromTablet = String(tabletBinding?.pdvId || '').trim();
+      if (fromTablet) return fromTablet;
+    }
     const fromWorker = String(workerPdv.pdvId || '').trim();
     if (fromWorker) return fromWorker;
     return String(activeStoreScope.activeSalesPointId || '').trim() || null;
-  }, [ceoMode, forcedPdvId, tabletBinding?.pdvId, workerPdv.pdvId, activeStoreScope.activeSalesPointId]);
+  }, [ceoMode, forcedPdvId, isTabletSession, tabletBinding?.pdvId, workerPdv.pdvId, activeStoreScope.activeSalesPointId]);
   const primaryPdvId = useMemo(
     () => pickDefaultActivePdvId(activeStoreScope.pointsOfSale.filter((p) => p.active !== false)),
     [activeStoreScope.pointsOfSale],
@@ -1600,7 +1612,7 @@ export function WorkerTpvDelivery({
     );
     const completados = orders.filter((o) => {
       if (!orderInRegisterSession(o, openSession)) return false;
-      return isCompletedBoardOrder(o);
+      return isHistoryCompletedBoardOrder(o);
     });
     return {
       montaje: montaje.length,
@@ -1635,11 +1647,10 @@ export function WorkerTpvDelivery({
   const completedShiftOrders = useMemo(
     () => orders
       .filter((o) => {
-        if (o.status === 'cancelled') return false;
         if (!orderInRegisterSession(o, openSession)) return false;
-        return isCompletedBoardOrder(o);
+        return isHistoryCompletedBoardOrder(o);
       })
-      .sort((a, b) => new Date(b.deliveredAt || b.createdAt).getTime() - new Date(a.deliveredAt || a.createdAt).getTime())
+      .sort((a, b) => new Date(b.deliveredAt || b.cancelledAt || b.createdAt).getTime() - new Date(a.deliveredAt || a.cancelledAt || a.createdAt).getTime())
       .slice(0, 50),
     [orders, openSession],
   );
@@ -2126,6 +2137,7 @@ export function WorkerTpvDelivery({
         {showDelivered && completedShiftOrders.length > 0 && (
           <div className={`mt-1.5 overflow-y-auto space-y-1 rounded-xl border border-emerald-100 dark:border-emerald-900 bg-emerald-50/30 dark:bg-emerald-950/10 ${isTabletUi ? 'max-h-[26vh] p-1.5' : 'max-h-44 p-2'}`}>
             {completedShiftOrders.map((order) => {
+              const deleted = isCancelledDeliveryOrder(order);
               const statusCfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.nuevo;
               const dimmed =
                 completedTodayOrders.every((o) => o._id !== order._id)
@@ -2136,15 +2148,17 @@ export function WorkerTpvDelivery({
                   type="button"
                   onClick={() => setSelectedOrder(order)}
                   className={`w-full flex items-center justify-between gap-2 rounded-lg text-left touch-manipulation ${
-                    dimmed
-                      ? 'bg-white/70 dark:bg-gray-800/70 opacity-60'
-                      : 'bg-white dark:bg-gray-900 hover:bg-emerald-50/80 dark:hover:bg-gray-800'
+                    deleted
+                      ? 'bg-gray-100/90 dark:bg-gray-800/80 opacity-80'
+                      : dimmed
+                        ? 'bg-white/70 dark:bg-gray-800/70 opacity-60'
+                        : 'bg-white dark:bg-gray-900 hover:bg-emerald-50/80 dark:hover:bg-gray-800'
                   } ${isTabletUi ? 'py-1.5 px-2' : 'px-3 py-2'}`}
                 >
                   <div className="min-w-0 flex items-center gap-1.5">
                     <OrderChannelBadge channel={order.channel} compact={isTabletUi} />
                     <div className="min-w-0">
-                    <p className={`font-bold text-gray-900 dark:text-gray-100 font-mono ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
+                    <p className={`font-bold font-mono ${deleted ? 'text-gray-500 line-through' : 'text-gray-900 dark:text-gray-100'} ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
                       #{order.orderNumber}
                     </p>
                     <p className={`text-gray-500 truncate ${isTabletUi ? 'text-[10px]' : 'text-[11px]'}`}>
@@ -2155,11 +2169,11 @@ export function WorkerTpvDelivery({
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className={`font-bold tabular-nums ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
+                    <p className={`font-bold tabular-nums ${deleted ? 'text-gray-500' : ''} ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
                       {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
                     </p>
-                    <p className={`font-semibold ${statusCfg.color} ${isTabletUi ? 'text-[9px]' : 'text-[10px]'}`}>
-                      {statusCfg.label}
+                    <p className={`font-semibold ${deleted ? 'text-red-600 dark:text-red-400' : statusCfg.color} ${isTabletUi ? 'text-[9px]' : 'text-[10px]'}`}>
+                      {deleted ? 'Eliminado' : statusCfg.label}
                     </p>
                   </div>
                 </button>

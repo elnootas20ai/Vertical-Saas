@@ -1,4 +1,5 @@
 import {
+  isCompletedHistoryBoardOrder,
   isCompletedShiftOrder,
   isDeliveredBoardOrder,
   isRefundedDeliveryOrder,
@@ -20,6 +21,28 @@ describe('isDeliveredBoardOrder', () => {
       paymentStatus: 'paid',
     })).toBe(false);
     expect(isDeliveredBoardOrder({ status: 'cancelled' })).toBe(false);
+  });
+});
+
+describe('isCompletedHistoryBoardOrder', () => {
+  it('incluye entregados y eliminados que sí se entregaron', () => {
+    expect(isCompletedHistoryBoardOrder({ status: 'entregado' })).toBe(true);
+    expect(isCompletedHistoryBoardOrder({
+      status: 'cancelled',
+      deliveredAt: '2026-07-23T12:00:00.000Z',
+      paymentStatus: 'refunded',
+    })).toBe(true);
+    expect(isCompletedHistoryBoardOrder({
+      status: 'cancelled',
+      stageHistory: [{ status: 'entregado', date: '2026-07-23T12:00:00.000Z' }],
+    })).toBe(true);
+  });
+
+  it('no mete cancelados que nunca se entregaron', () => {
+    expect(isCompletedHistoryBoardOrder({
+      status: 'cancelled',
+      stageHistory: [{ status: 'nuevo', date: '2026-07-23T10:00:00.000Z' }],
+    })).toBe(false);
   });
 });
 

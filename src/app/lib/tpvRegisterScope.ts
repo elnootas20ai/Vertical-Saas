@@ -1,6 +1,9 @@
 import type { Business } from './businessApi';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
-import { isTpvTabletWorkerPath } from './tpvTabletSession';
+import {
+  isTpvTabletBindingAllowedForAuth,
+  isTpvTabletWorkerPath,
+} from './tpvTabletSession';
 import { resolveBusinessDataUserId } from './tenantUserId';
 
 export interface TpvTabletBindingRef {
@@ -8,6 +11,7 @@ export interface TpvTabletBindingRef {
   dataUserId?: string;
   pdvId?: string;
   workCenterId?: string;
+  authUserId?: string;
 }
 
 type AuthLike = { user_id?: string; id?: string } | null | undefined;
@@ -110,7 +114,8 @@ export function businessScopeIdFromTabletBinding(
 
 /**
  * Fuente única para TpvRegisterGate: qué empresa y qué userId usar al cargar caja.
- * En tablet el código de tienda manda sobre la empresa cacheada en el selector.
+ * En tablet el código de tienda manda sobre la empresa cacheada en el selector,
+ * pero SOLO si el binding pertenece a la cuenta activa (no a Pau u otra).
  */
 export function resolveTpvRegisterScope(params: {
   currentBusiness: Business | null;
@@ -118,6 +123,14 @@ export function resolveTpvRegisterScope(params: {
   authUser: AuthLike;
   /** Ruta actual: la sesión tablet solo aplica en /saas/worker/tpv*. */
   pathname?: string | null;
+  /** Empresas de la cuenta activa — para no usar un binding ajeno. */
+  businesses?: Array<{
+    business_id?: string;
+    id?: string;
+    owner_user_id?: string;
+    members?: Array<{ user_id?: string }>;
+  }> | null;
+  businessesSettled?: boolean;
 }): {
   scopeBusinessId: string;
   effectiveDataUserId: string;
@@ -125,11 +138,36 @@ export function resolveTpvRegisterScope(params: {
   shouldSyncBusinessFromTablet: boolean;
 } {
   const { currentBusiness, tabletBinding, authUser, pathname } = params;
-  const tablet = isActiveTpvTabletSession(tabletBinding, pathname);
+  const businesses = Array.isArray(params.businesses) ? params.businesses : [];
+  const businessesSettled = Boolean(params.businessesSettled) || businesses.length > 0;
+
+  const pathOk = isActiveTpvTabletSession(tabletBinding, pathname);
+  const bindingAllowed = isTpvTabletBindingAllowedForAuth({
+    binding: tabletBinding
+      ? {
+          pdvId: tabletBinding.pdvId,
+          businessId: tabletBinding.businessId,
+          dataUserId: tabletBinding.dataUserId,
+          authUserId: tabletBinding.authUserId,
+        }
+      : null,
+    authUser,
+    businesses,
+    businessesSettled,
+  });
+  // Con código de tienda válido: datos SIEMPRE de la tienda (nunca cuenta personal),
+  // aunque la URL aún no sea /worker/tpv (SaasRoot redirige).
+  const hasTerminalIds = Boolean(
+    String(tabletBinding?.pdvId || '').trim()
+    && String(tabletBinding?.businessId || '').trim()
+    && String(tabletBinding?.dataUserId || '').trim(),
+  );
+  const tablet = bindingAllowed && hasTerminalIds;
+
   const tabletBid = businessScopeIdFromTabletBinding(tabletBinding);
   const activeBid = resolveBusinessScopeId(currentBusiness);
 
-  const scopeBusinessId = tablet && tabletBid ? tabletBid : activeBid || tabletBid;
+  const scopeBusinessId = tablet && tabletBid ? tabletBid : activeBid;
 
   const tabletOwnerId = String(tabletBinding?.dataUserId || '').trim();
   const effectiveDataUserId =
@@ -142,7 +180,8 @@ export function resolveTpvRegisterScope(params: {
   return {
     scopeBusinessId,
     effectiveDataUserId,
-    isTabletSession: tablet,
+    /** UI/caja tablet: solo en rutas worker/tpv. Los datos de tienda ya van arriba con `tablet`. */
+    isTabletSession: tablet && pathOk,
     shouldSyncBusinessFromTablet,
   };
 }

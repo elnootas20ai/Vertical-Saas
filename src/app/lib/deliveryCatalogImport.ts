@@ -107,6 +107,7 @@ function foldImportKey(s: string): string {
 /** Tipo de menú opcional en Excel: estandar | duo | familiar | con_postre */
 export function resolveImportComboStructure(
   entry: Record<string, string>,
+  options?: { vertical?: string },
 ): ComboStructureSlot[] {
   const raw = String(
     entry.tipo_menu || entry.tipoMenu || entry.menu || entry.combo || entry.tipo || '',
@@ -119,7 +120,7 @@ export function resolveImportComboStructure(
         foldImportKey(p.label) === key ||
         foldImportKey(p.hint) === key,
     );
-    return (preset?.structure ?? DEFAULT_COMBO_STRUCTURE).map((s) => ({ ...s }));
+    return (preset?.structure ?? defaultComboStructureForVertical(options?.vertical)).map((s) => ({ ...s }));
   }
 
   const name = foldImportKey(entry.name || '');
@@ -140,7 +141,35 @@ export function resolveImportComboStructure(
     return COMBO_MENU_PRESETS.find((p) => p.id === 'con_postre')!.structure.map((s) => ({ ...s }));
   }
 
-  return DEFAULT_COMBO_STRUCTURE.map((s) => ({ ...s }));
+  return defaultComboStructureForVertical(options?.vertical).map((s) => ({ ...s }));
+}
+
+function defaultComboStructureForVertical(vertical?: string): ComboStructureSlot[] {
+  if (String(vertical || '').trim() === 'restaurant') {
+    return [
+      { slotKind: 'main', label: 'Plato / tapa', required: true, expectedCount: 1 },
+      { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
+    ];
+  }
+  return DEFAULT_COMBO_STRUCTURE;
+}
+
+/** IVA del Excel (opcional). Restaurant → 10% por defecto; delivery → 21%. */
+export function resolveImportTaxRate(
+  entry: Record<string, string>,
+  vertical?: string,
+): number {
+  const raw = String(
+    entry.taxRate || entry.iva || entry.vat || entry.impuesto || '',
+  )
+    .trim()
+    .replace('%', '')
+    .replace(',', '.');
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0 && n <= 100) return n;
+  }
+  return String(vertical || '').trim() === 'restaurant' ? 10 : 21;
 }
 
 export type ResolveBrandIdsFromImportResult = {
@@ -580,6 +609,7 @@ export async function mapImportEntryToCatalogItem(
     available: true,
     webVisible: true,
     module: 'catalog',
+    taxRate: resolveImportTaxRate(entry, options.vertical),
     ...(options.businessId
       ? {
           business_id: options.businessId,
@@ -602,7 +632,7 @@ export async function mapImportEntryToCatalogItem(
   if (item.itemType === 'combo') {
     item.customFields = {
       ...(item.customFields || {}),
-      comboStructure: resolveImportComboStructure(entry),
+      comboStructure: resolveImportComboStructure(entry, { vertical: options.vertical }),
       comboStructureConfirmed: true,
     };
   } else if (/mitad\s*y\s*mitad|half\s*and\s*half|half-half/i.test(name)) {

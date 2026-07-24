@@ -58,6 +58,10 @@ import {
   buildShiftFoodFamilyReportForSession,
   type FoodFamilyCounts,
 } from '../../lib/shiftFoodFamilyCounts';
+import {
+  buildShiftSalesBreakdown,
+  filterOrdersForRegisterSession,
+} from '../../lib/registerShiftSalesBreakdown';
 import { AggregatorClosingEditor } from './AggregatorClosingEditor';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
@@ -1374,6 +1378,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [manualFoodByChannel, setManualFoodByChannel] = useState<Record<string, { pizza: string; burger: string; taco: string }>>({});
   const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(false);
   const [showExtraDetail, setShowExtraDetail] = useState(false);
+  const [showDayOrders, setShowDayOrders] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
   const summary = buildTpvRegisterSummary(session);
@@ -1392,6 +1397,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     () => buildShiftFoodFamilyReportForSession(session, shiftOrders),
     [session, shiftOrders],
   );
+  const dayOrdersBreakdown = useMemo(() => {
+    const scoped = filterOrdersForRegisterSession(session, shiftOrders);
+    return buildShiftSalesBreakdown(scoped);
+  }, [session, shiftOrders]);
   const closingFood: FoodFamilyCounts = useMemo(() => {
     if (!showDeliveryClosingSlots) return foodReport.total;
     return {
@@ -1641,8 +1650,70 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               ) : (
                 <p className="text-[11px] text-gray-500">
                   Unidades de todos los pedidos del turno (TPV + apps). Puedes corregir si no cuadra.
+                  Los menús Individual / Dúo / Familiar suman 1 / 2 / 3 pizzas (según las pizzas del combo).
                 </p>
               )}
+
+              <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowDayOrders((v) => !v)}
+                  className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-gray-50 dark:hover:bg-gray-800/80"
+                >
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                    Pedidos del día
+                    <span className="ml-1.5 font-normal text-gray-500">
+                      ({dayOrdersBreakdown.orderCount})
+                    </span>
+                  </span>
+                  {showDayOrders ? (
+                    <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                  )}
+                </button>
+                {showDayOrders && (
+                  <div className="border-t border-gray-100 dark:border-gray-800 max-h-[42vh] overflow-y-auto">
+                    {shiftOrdersLoading ? (
+                      <p className="px-3 py-3 text-[11px] text-gray-500">Cargando…</p>
+                    ) : dayOrdersBreakdown.orders.length === 0 ? (
+                      <p className="px-3 py-3 text-[11px] text-gray-500">Sin pedidos en este turno</p>
+                    ) : (
+                      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {dayOrdersBreakdown.orders.map((order) => {
+                          const time = order.createdAt
+                            ? new Date(order.createdAt).toLocaleTimeString('es-ES', {
+                                timeStyle: 'short',
+                              })
+                            : '—';
+                          return (
+                            <li key={order.orderId} className="px-3 py-2.5">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
+                                    #{order.orderNumber} · {order.customerName || 'Cliente'}
+                                  </p>
+                                  <p className="text-[10px] text-gray-500 mt-0.5">
+                                    {time} · {order.channel || '—'} · {order.itemCount} uds
+                                  </p>
+                                  <p className="text-[10px] text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                                    {order.items
+                                      .map((it) => `${it.quantity}× ${it.name}`)
+                                      .join(' · ')}
+                                  </p>
+                                </div>
+                                <span className="text-xs font-bold tabular-nums text-gray-900 dark:text-gray-100 shrink-0">
+                                  {order.total.toFixed(2)}€
+                                </span>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="rounded-xl border-2 border-emerald-600/40 dark:border-emerald-400/40 bg-white dark:bg-gray-900 px-3 py-2.5 space-y-1">
                 <div className="flex items-center justify-between gap-2 text-sm">
@@ -3078,8 +3149,10 @@ export function TpvRegisterGate({
       tabletBinding,
       authUser: user,
       pathname: location.pathname,
+      businesses,
+      businessesSettled: businessesFetchSettled,
     }),
-    [currentBusiness, tabletBinding, user, location.pathname],
+    [currentBusiness, tabletBinding, user, location.pathname, businesses, businessesFetchSettled],
   );
 
   const isTabletSession = registerScope.isTabletSession;
@@ -4444,13 +4517,17 @@ export function TpvRegisterGate({
     setPostCloseAggregatorRows([]);
     // En tablet nos quedamos en el TPV (pantalla de abrir caja), nunca history.back() al dashboard CEO.
     if (isTabletSession) return;
+    if (isRestaurantVertical) {
+      navigate('/saas/caja/tpv', { replace: true });
+      return;
+    }
     try {
       if (window.history.length > 1) window.history.back();
       else navigate(opsHomePath);
     } catch {
       // ignore
     }
-  }, [isTabletSession, navigate, opsHomePath]);
+  }, [isTabletSession, isRestaurantVertical, navigate, opsHomePath]);
 
   const requestClockIn = useCallback(() => setShowClockIn(true), []);
 
@@ -4613,6 +4690,7 @@ export function TpvRegisterGate({
 
   if (!activeSession && postCloseSession) {
     const expected = calcTpvExpectedCash(postCloseSession);
+    const restaurantSummary = postCloseSession.summary;
     return wrapShell(
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
@@ -4649,17 +4727,41 @@ export function TpvRegisterGate({
                 {(postCloseSession.difference || 0) >= 0 ? '+' : ''}{Number(postCloseSession.difference || 0).toFixed(2)}€
               </span>
             </div>
-            <AggregatorCashSummary
-              rows={postCloseAggregatorRows.length > 0
-                ? postCloseAggregatorRows
-                : aggregatorRowsFromClosingTotals(
-                  getClosingAggregatorPlatforms(),
-                  postCloseSession.aggregatorClosingTotals || postCloseSession.summary?.salesByChannel,
-                  postCloseSession.aggregatorClosingCash,
-                  postCloseSession.aggregatorClosingCard,
-                )}
-              title="Cajas agregadores"
-            />
+            {isRestaurantVertical ? (
+              restaurantSummary ? (
+                <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-900/40 p-3 space-y-2">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
+                    Turno TPV sala
+                  </p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-stone-500">Ventas del turno</span>
+                    <span className="font-semibold text-stone-900 dark:text-stone-100">
+                      {Number(restaurantSummary.totalSales || 0).toFixed(2)}€
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-stone-500">Efectivo</span>
+                    <span className="font-semibold">{Number(restaurantSummary.salesByMethod?.efectivo || 0).toFixed(2)}€</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-stone-500">Tarjeta</span>
+                    <span className="font-semibold">{Number(restaurantSummary.salesByMethod?.tarjeta || 0).toFixed(2)}€</span>
+                  </div>
+                </div>
+              ) : null
+            ) : (
+              <AggregatorCashSummary
+                rows={postCloseAggregatorRows.length > 0
+                  ? postCloseAggregatorRows
+                  : aggregatorRowsFromClosingTotals(
+                    getClosingAggregatorPlatforms(),
+                    postCloseSession.aggregatorClosingTotals || postCloseSession.summary?.salesByChannel,
+                    postCloseSession.aggregatorClosingCash,
+                    postCloseSession.aggregatorClosingCard,
+                  )}
+                title="Cajas agregadores"
+              />
+            )}
           </div>
           <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
             <button
@@ -4683,7 +4785,7 @@ export function TpvRegisterGate({
               onClick={leavePostCloseScreen}
               className="flex-1 py-3 rounded-xl bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
-              {isTabletSession ? 'Seguir en TPV' : 'Volver'}
+              {isTabletSession ? 'Seguir en TPV' : isRestaurantVertical ? 'Volver a TPV sala' : 'Volver'}
             </button>
           </div>
         </div>

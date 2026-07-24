@@ -81,8 +81,20 @@ export interface VacationSettings {
   allowances: Record<string, number>;
   /** annual_fixed = cupo entero al año; monthly = se van sumando días cada mes. */
   accrualMode?: VacationAccrualMode;
-  /** Días que se suman por mes completo (p. ej. 1.83 ≈ 22/12, o 2). */
+  /** Días que se suman por mes completo (p. ej. 2.5 naturales ≈ 30/12, o 1.83 ≈ 22/12). */
   daysPerMonth?: number;
+  /**
+   * Cómo contar días de una solicitud.
+   * - business: lun–vie (aprox. 22 días/año)
+   * - natural: todos los días del periodo (mín. legal ES = 30/año → ~2,5/mes)
+   */
+  dayBasis?: 'business' | 'natural';
+  /** Máximo de días naturales seguidos en una solicitud (7 ≈ 1 semana, 14 ≈ 2). 0 = sin límite. */
+  maxConsecutiveDays?: number;
+  /** Si true, no se pueden pedir vacaciones que caigan en fin de semana. */
+  onlyWeekdays?: boolean;
+  /** Días mínimos de antelación respecto a hoy. */
+  minNoticeDays?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -99,6 +111,70 @@ export function countBusinessDays(start: string, end: string): number {
     cur.setDate(cur.getDate() + 1);
   }
   return count;
+}
+
+/** Días naturales inclusive (España art. 38 ET → 30/año ≈ 2,5/mes). */
+export function countNaturalDays(start: string, end: string): number {
+  const a = new Date(`${start}T12:00:00`);
+  const b = new Date(`${end}T12:00:00`);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b < a) return 0;
+  return Math.floor((b.getTime() - a.getTime()) / 86_400_000) + 1;
+}
+
+export function countVacationRequestDays(
+  start: string,
+  end: string,
+  settings?: Pick<VacationSettings, 'dayBasis'> | null,
+): number {
+  // Por defecto naturales (orientación legal ES); dayBasis 'business' = lun–vie.
+  return settings?.dayBasis === 'business'
+    ? countBusinessDays(start, end)
+    : countNaturalDays(start, end);
+}
+
+export function validateVacationRequestPolicy(
+  start: string,
+  end: string,
+  settings: VacationSettings | null | undefined,
+): { ok: true } | { ok: false; error: string } {
+  if (!start || !end) return { ok: false, error: 'Indica fecha de inicio y fin.' };
+  if (end < start) return { ok: false, error: 'La fecha de fin no puede ser anterior al inicio.' };
+
+  const natural = countNaturalDays(start, end);
+  if (natural <= 0) return { ok: false, error: 'El periodo no es válido.' };
+
+  const maxConsec = Number(settings?.maxConsecutiveDays || 0);
+  if (maxConsec > 0 && natural > maxConsec) {
+    return {
+      ok: false,
+      error: `La empresa permite como máximo ${maxConsec} días seguidos (≈ ${Math.round(maxConsec / 7)} semana(s)).`,
+    };
+  }
+
+  const minNotice = Number(settings?.minNoticeDays || 0);
+  if (minNotice > 0) {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const startDate = new Date(`${start}T12:00:00`);
+    const diff = Math.floor((startDate.getTime() - today.getTime()) / 86_400_000);
+    if (diff < minNotice) {
+      return { ok: false, error: `Debes pedirlas con al menos ${minNotice} días de antelación.` };
+    }
+  }
+
+  if (settings?.onlyWeekdays) {
+    const cur = new Date(`${start}T12:00:00`);
+    const endDate = new Date(`${end}T12:00:00`);
+    while (cur <= endDate) {
+      const dow = cur.getDay();
+      if (dow === 0 || dow === 6) {
+        return { ok: false, error: 'La empresa solo permite vacaciones en días laborables (lun–vie).' };
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+  }
+
+  return { ok: true };
 }
 
 export const LEAVE_TYPE_LABELS: Record<string, Record<LeaveType, string>> = {
@@ -134,7 +210,11 @@ export async function createVacationRequest(
   memberId: string,
   memberName: string,
   data: { startDate: string; endDate: string; leaveType: LeaveType; notes: string },
+  settings?: VacationSettings | null,
 ): Promise<VacationRequest> {
+  const policy = validateVacationRequestPolicy(data.startDate, data.endDate, settings || null);
+  if (!policy.ok) throw new Error(policy.error);
+
   await ensureDb();
   const now = new Date().toISOString();
   const id = `vacation:${businessId}:${Date.now()}`;
@@ -146,7 +226,7 @@ export async function createVacationRequest(
     member_name: memberName,
     startDate: data.startDate,
     endDate: data.endDate,
-    totalDays: countBusinessDays(data.startDate, data.endDate),
+    totalDays: countVacationRequestDays(data.startDate, data.endDate, settings),
     leaveType: data.leaveType,
     status: 'pending',
     notes: data.notes,
@@ -287,10 +367,15 @@ export async function getSettings(businessId: string): Promise<VacationSettings>
     _id: id,
     type: 'vacation_settings',
     business_id: businessId,
-    defaultDaysPerYear: 22,
+    // Orientación legal ES (art. 38 ET): 30 naturales/año ≈ 2,5/mes; muchas empresas usan 22 laborables.
+    defaultDaysPerYear: 30,
     allowances: {},
     accrualMode: 'monthly',
-    daysPerMonth: Math.round((22 / 12) * 100) / 100,
+    daysPerMonth: 2.5,
+    dayBasis: 'natural',
+    maxConsecutiveDays: 14,
+    onlyWeekdays: false,
+    minNoticeDays: 7,
     createdAt: now,
     updatedAt: now,
   };

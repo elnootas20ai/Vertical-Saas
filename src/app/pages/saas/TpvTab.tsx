@@ -17,6 +17,7 @@ import { NuevoClienteModal } from '../../components/saas/NuevoClienteModal';
 import type { AuthUser, RoleDefinition } from '../../lib/authApi';
 import type { Client } from '../../context/AppContext';
 import { getInvitePermissionsForUser, loadCustomRoles, mergeRoleCatalog } from '../../lib/roleCatalog';
+import { getFunctionRolesForBusiness } from '../../lib/inviteFunctionRoles';
 import { isVertialNativeApp, printTicketDocument } from '../../lib/vertialPrint';
 import { splitTicketVat, type TicketDocument } from '../../lib/vertialPrint/ticketDocument';
 
@@ -720,8 +721,12 @@ export function TpvTab({ userName, userId, view }: TpvTabProps) {
 
   const customRoles = useMemo(() => loadCustomRoles(authUser?.user_id || 'guest'), [authUser?.user_id]);
   const inviteRoles = useMemo(
-    () => mergeRoleCatalog(baseRoles, customRoles, teamMembers),
-    [baseRoles, customRoles, teamMembers],
+    () => {
+      const verticalBase = getFunctionRolesForBusiness(currentBusiness?.businessType);
+      const mergedBase = verticalBase.length > 0 ? verticalBase : baseRoles;
+      return mergeRoleCatalog(mergedBase, customRoles, teamMembers);
+    },
+    [baseRoles, customRoles, teamMembers, currentBusiness?.businessType],
   );
 
   useEffect(() => {

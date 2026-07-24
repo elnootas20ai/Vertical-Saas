@@ -30,6 +30,20 @@ export function isDeliveredBoardOrder(order: Pick<DeliveryOrder, 'status' | 'pay
   return String(order.status || '').toLowerCase() === 'entregado';
 }
 
+/**
+ * Historial «Completados del turno»: entregados + pedidos que se eliminaron
+ * después de haber sido entregados (siguen visibles como Eliminado).
+ */
+export function isCompletedHistoryBoardOrder(
+  order: Pick<DeliveryOrder, 'status' | 'paymentStatus' | 'deliveredAt' | 'stageHistory'>,
+): boolean {
+  if (isDeliveredBoardOrder(order)) return true;
+  if (!isCancelledDeliveryOrder(order)) return false;
+  if (String(order.deliveredAt || '').trim()) return true;
+  const stages = Array.isArray(order.stageHistory) ? order.stageHistory : [];
+  return stages.some((s) => String(s?.status || '').toLowerCase() === 'entregado');
+}
+
 /** Recuento caja / ventas del turno: entregados o ya cobrados en TPV. */
 export function isCompletedShiftOrder(order: Pick<DeliveryOrder, 'status' | 'totalAmount' | 'paidAmount' | 'paymentStatus' | 'paymentCollected'>): boolean {
   if (isCancelledDeliveryOrder(order)) return false;

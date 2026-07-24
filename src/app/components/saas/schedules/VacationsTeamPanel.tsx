@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
   Check,
@@ -39,6 +39,7 @@ interface Props {
   onReview: (req: VacationRequest, decision: 'approved' | 'rejected') => void;
   onDelete: (req: VacationRequest) => void;
   onRequest: () => void;
+  onSaveSettings?: (next: VacationSettings) => Promise<void>;
 }
 
 export function VacationsTeamPanel({
@@ -57,9 +58,11 @@ export function VacationsTeamPanel({
   onReview,
   onDelete,
   onRequest,
+  onSaveSettings,
 }: Props) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<VacationStatus | 'all'>('all');
+  const [savingPolicy, setSavingPolicy] = useState(false);
 
   const myStats = useMemo(() => {
     if (!userId || !vacSettings) return null;
@@ -116,6 +119,21 @@ export function VacationsTeamPanel({
           <Plus className="w-4 h-4" /> Solicitar
         </button>
       </div>
+
+      {canManage && vacSettings && onSaveSettings && (
+        <VacationPolicyCard
+          settings={vacSettings}
+          saving={savingPolicy}
+          onSave={async (next) => {
+            setSavingPolicy(true);
+            try {
+              await onSaveSettings(next);
+            } finally {
+              setSavingPolicy(false);
+            }
+          }}
+        />
+      )}
 
       {canManage && pending.length > 0 && (
         <div className="rounded-2xl border border-amber-200 dark:border-amber-800/50 bg-amber-50/30 dark:bg-amber-950/20 overflow-hidden">
@@ -284,6 +302,157 @@ function MiniKpi({ label, value, tone }: { label: string; value: string; tone: '
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5">
       <p className="text-[10px] font-semibold uppercase text-gray-400">{label}</p>
       <p className={`text-xl font-bold tabular-nums mt-0.5 ${c[tone]}`}>{value}</p>
+    </div>
+  );
+}
+
+function VacationPolicyCard({
+  settings,
+  saving,
+  onSave,
+}: {
+  settings: VacationSettings;
+  saving: boolean;
+  onSave: (next: VacationSettings) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    dayBasis: settings.dayBasis === 'business' ? 'business' : 'natural',
+    maxConsecutiveDays: Number(settings.maxConsecutiveDays ?? 14),
+    onlyWeekdays: Boolean(settings.onlyWeekdays),
+    minNoticeDays: Number(settings.minNoticeDays ?? 7),
+    accrualMode: settings.accrualMode === 'annual_fixed' ? 'annual_fixed' : 'monthly',
+    daysPerMonth: Number(settings.daysPerMonth ?? 2.5),
+    defaultDaysPerYear: Number(settings.defaultDaysPerYear ?? 30),
+  });
+
+  useEffect(() => {
+    setDraft({
+      dayBasis: settings.dayBasis === 'business' ? 'business' : 'natural',
+      maxConsecutiveDays: Number(settings.maxConsecutiveDays ?? 14),
+      onlyWeekdays: Boolean(settings.onlyWeekdays),
+      minNoticeDays: Number(settings.minNoticeDays ?? 7),
+      accrualMode: settings.accrualMode === 'annual_fixed' ? 'annual_fixed' : 'monthly',
+      daysPerMonth: Number(settings.daysPerMonth ?? 2.5),
+      defaultDaysPerYear: Number(settings.defaultDaysPerYear ?? 30),
+    });
+  }, [settings._id, settings._rev, settings.updatedAt]);
+
+  return (
+    <div className="rounded-2xl border border-violet-200 dark:border-violet-800/50 bg-violet-50/40 dark:bg-violet-950/20 p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <CalendarDays className="w-4 h-4 text-violet-600" />
+          Política de vacaciones (empresa)
+        </h3>
+        <p className="text-xs text-gray-500 mt-1">
+          Orientación España: mínimo 30 días naturales/año (≈ 2,5/mes). Muchas empresas usan 22 laborables. Ajusta reglas de solicitud aquí.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+          Cómo contar días
+          <select
+            value={draft.dayBasis}
+            onChange={(e) => setDraft((p) => ({ ...p, dayBasis: e.target.value as 'natural' | 'business' }))}
+            className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+          >
+            <option value="natural">Naturales (recomendado ES)</option>
+            <option value="business">Laborables (lun–vie)</option>
+          </select>
+        </label>
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+          Máx. días seguidos (0 = sin límite)
+          <select
+            value={String(draft.maxConsecutiveDays)}
+            onChange={(e) => setDraft((p) => ({ ...p, maxConsecutiveDays: Number(e.target.value) }))}
+            className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+          >
+            <option value="0">Sin límite</option>
+            <option value="7">7 días (≈ 1 semana)</option>
+            <option value="14">14 días (≈ 2 semanas)</option>
+            <option value="21">21 días (≈ 3 semanas)</option>
+            <option value="30">30 días</option>
+          </select>
+        </label>
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+          Antelación mínima (días)
+          <input
+            type="number"
+            min={0}
+            max={90}
+            value={draft.minNoticeDays}
+            onChange={(e) => setDraft((p) => ({ ...p, minNoticeDays: Math.max(0, Number(e.target.value) || 0) }))}
+            className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+          />
+        </label>
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+          Devengo
+          <select
+            value={draft.accrualMode}
+            onChange={(e) => setDraft((p) => ({ ...p, accrualMode: e.target.value as 'monthly' | 'annual_fixed' }))}
+            className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+          >
+            <option value="monthly">Mensual (se van sumando)</option>
+            <option value="annual_fixed">Cupo fijo anual</option>
+          </select>
+        </label>
+        {draft.accrualMode === 'monthly' ? (
+          <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+            Días por mes
+            <input
+              type="number"
+              step="0.1"
+              min={0}
+              max={5}
+              value={draft.daysPerMonth}
+              onChange={(e) => setDraft((p) => ({ ...p, daysPerMonth: Number(e.target.value) || 0 }))}
+              className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+            />
+          </label>
+        ) : (
+          <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+            Días por año
+            <input
+              type="number"
+              min={0}
+              max={60}
+              value={draft.defaultDaysPerYear}
+              onChange={(e) => setDraft((p) => ({ ...p, defaultDaysPerYear: Number(e.target.value) || 0 }))}
+              className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+            />
+          </label>
+        )}
+        <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 dark:text-gray-200 mt-6">
+          <input
+            type="checkbox"
+            checked={draft.onlyWeekdays}
+            onChange={(e) => setDraft((p) => ({ ...p, onlyWeekdays: e.target.checked }))}
+            className="rounded border-gray-300"
+          />
+          Solo días laborables (lun–vie) en la solicitud
+        </label>
+      </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() =>
+            void onSave({
+              ...settings,
+              dayBasis: draft.dayBasis as 'natural' | 'business',
+              maxConsecutiveDays: draft.maxConsecutiveDays,
+              onlyWeekdays: draft.onlyWeekdays,
+              minNoticeDays: draft.minNoticeDays,
+              accrualMode: draft.accrualMode as 'monthly' | 'annual_fixed',
+              daysPerMonth: draft.daysPerMonth,
+              defaultDaysPerYear: draft.defaultDaysPerYear,
+            })
+          }
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-xl bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50"
+        >
+          {saving ? 'Guardando…' : 'Guardar política'}
+        </button>
+      </div>
     </div>
   );
 }

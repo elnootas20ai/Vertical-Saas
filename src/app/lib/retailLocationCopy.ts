@@ -40,6 +40,12 @@ export type HrLocationCopy = {
   scheduleCardSubtitle: string;
   clockinsFilterAllCenters: string;
   sedesEmptyHint: string;
+  /** Equipo → ficha miembro: asignar local para TPV/fichaje */
+  memberStoreLabel: string;
+  memberStoreEmpty: string;
+  memberStoreHint: string;
+  memberMissingStoreBadge: string;
+  memberPositionPlaceholder: string;
 };
 
 export function resolvePdvWizardVariant(params: {
@@ -70,6 +76,11 @@ const HR_COPY: Record<PdvWizardVariant, HrLocationCopy> = {
     scheduleCardSubtitle: 'Horario del expositor',
     clockinsFilterAllCenters: 'Todos los expositores',
     sedesEmptyHint: 'Configura tus expositores en Ajustes → Tienda',
+    memberStoreLabel: 'Exposición / PDV (TPV y fichaje)',
+    memberStoreEmpty: 'Sin exposición asignada',
+    memberStoreHint: 'Obligatorio para operar en TPV: sin exposición no sale al fichar en ese punto.',
+    memberMissingStoreBadge: 'Sin exposición TPV',
+    memberPositionPlaceholder: 'Ej: Comercial, Administración…',
   },
   restaurant: {
     inviteWorkCenterLabel: 'Local / caja',
@@ -84,6 +95,12 @@ const HR_COPY: Record<PdvWizardVariant, HrLocationCopy> = {
     scheduleCardSubtitle: 'Horario del local',
     clockinsFilterAllCenters: 'Todos los locales',
     sedesEmptyHint: 'Configura tus locales en Ajustes → Bar/restaurante',
+    memberStoreLabel: 'Local / caja (TPV y fichaje)',
+    memberStoreEmpty: 'Sin local asignado',
+    memberStoreHint:
+      'Obligatorio para sala/barra: sin local no sale al fichar en el TPV de ese bar o restaurante.',
+    memberMissingStoreBadge: 'Sin local TPV',
+    memberPositionPlaceholder: 'Ej: Camarero/a, Barista, Cocinero/a…',
   },
   delivery: {
     inviteWorkCenterLabel: 'Centro de trabajo / PDV',
@@ -98,6 +115,11 @@ const HR_COPY: Record<PdvWizardVariant, HrLocationCopy> = {
     scheduleCardSubtitle: 'Horario de la tienda',
     clockinsFilterAllCenters: 'Todos los centros',
     sedesEmptyHint: 'Configura tus centros de trabajo en Ajustes → Tienda',
+    memberStoreLabel: 'Tienda / local (TPV y fichaje)',
+    memberStoreEmpty: 'Sin tienda asignada',
+    memberStoreHint: 'Obligatorio para mostrador: sin tienda no sale al fichar en el TPV de ese local.',
+    memberMissingStoreBadge: 'Sin tienda TPV',
+    memberPositionPlaceholder: 'Ej: Mostrador, Repartidor/a, Cocinero/a…',
   },
 };
 

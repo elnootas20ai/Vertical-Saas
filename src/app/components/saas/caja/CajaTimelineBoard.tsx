@@ -170,19 +170,29 @@ export function CajaTimelineBoard({
   return (
     <div className="min-h-screen bg-[#f3f3f5] dark:bg-zinc-950 text-[#030213] dark:text-zinc-100">
       <div className="max-w-[980px] mx-auto px-4 sm:px-6 py-8 pb-20">
-        {/* Head */}
+        {/* Head — Volver a la izquierda (mismo patrón que TPV / resto de Vertial) */}
         <div className="flex items-center justify-between flex-wrap gap-3.5 mb-1.5">
-          <div className="flex items-baseline gap-3.5 flex-wrap min-w-0">
-            <h1 className="font-mono text-[19px] font-bold uppercase tracking-tight m-0 text-[#030213] dark:text-zinc-50">
-              Caja
-            </h1>
-            <div className="flex flex-wrap gap-4 text-[13px] text-zinc-500 dark:text-zinc-400">
-              <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.stores}</b> tiendas</span>
-              <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.turns}</b> turnos</span>
-              <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.openNow}</b> abiertas</span>
-              <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{Math.round(dayStats.sales)}€</b> ventas</span>
+          <div className="flex items-center gap-3 flex-wrap min-w-0">
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Volver"
+              className="w-8 h-8 shrink-0 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <div className="flex items-baseline gap-3.5 flex-wrap min-w-0">
+              <h1 className="font-mono text-[19px] font-bold uppercase tracking-tight m-0 text-[#030213] dark:text-zinc-50">
+                Caja
+              </h1>
+              <div className="flex flex-wrap gap-4 text-[13px] text-zinc-500 dark:text-zinc-400">
+                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.stores}</b> tiendas</span>
+                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.turns}</b> turnos</span>
+                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.openNow}</b> abiertas</span>
+                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{Math.round(dayStats.sales)}€</b> ventas</span>
+              </div>
+              {refreshing && <span className="text-[11px] text-zinc-400">Actualizando…</span>}
             </div>
-            {refreshing && <span className="text-[11px] text-zinc-400">Actualizando…</span>}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {headerExtra}
@@ -194,14 +204,6 @@ export function CajaTimelineBoard({
             >
               <Download className="w-3.5 h-3.5" />
               Excel ({excelClosedCount})
-            </button>
-            <button
-              type="button"
-              onClick={onBack}
-              aria-label="Volver"
-              className="w-8 h-8 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-            >
-              <ArrowLeft className="w-4 h-4" />
             </button>
           </div>
         </div>

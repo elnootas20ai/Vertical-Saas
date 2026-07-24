@@ -2,7 +2,10 @@ import { useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useBusiness } from '../context/BusinessContext';
 import { useActiveStoreScope } from '../context/ActiveStoreScopeContext';
-import { readTpvTabletBinding } from '../lib/tpvTabletSession';
+import {
+  isTpvTabletBindingAllowedForAuth,
+  readTpvTabletBinding,
+} from '../lib/tpvTabletSession';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
 import { useWorkerAssignedStore } from './useWorkerAssignedStore';
 
@@ -22,15 +25,23 @@ export type TpvStockScope = {
 /**
  * Tienda activa para inventario en TPV: tablet vinculada → PDV del trabajador → PDV activo en scope.
  * No usa el label global del sidebar si hay un PDV más específico.
+ * El binding tablet solo aplica si pertenece a la cuenta activa.
  */
 export function useTpvStockScope(override?: TpvStockScopeOverride): TpvStockScope {
   const { user } = useAuth();
-  const { currentBusiness } = useBusiness();
+  const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const activeStore = useActiveStoreScope();
   const workerStore = useWorkerAssignedStore();
 
   return useMemo(() => {
-    const binding = readTpvTabletBinding();
+    const rawBinding = readTpvTabletBinding();
+    const bindingAllowed = isTpvTabletBindingAllowedForAuth({
+      binding: rawBinding,
+      authUser: user,
+      businesses,
+      businessesSettled: businessesFetchSettled,
+    });
+    const binding = bindingAllowed ? rawBinding : null;
     const fallbackDataUserId = resolveBusinessDataUserId(user, currentBusiness) || '';
     const businessId = binding?.businessId || currentBusiness?.id || '';
 
@@ -96,6 +107,8 @@ export function useTpvStockScope(override?: TpvStockScopeOverride): TpvStockScop
     override?.pdvId,
     user,
     currentBusiness,
+    businesses,
+    businessesFetchSettled,
     activeStore.activeSalesPointId,
     activeStore.pointsOfSale,
     activeStore.displayLabelForActive,

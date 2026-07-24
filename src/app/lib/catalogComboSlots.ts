@@ -739,6 +739,24 @@ const SLOT_CATALOG_CATEGORIES: Record<Exclude<ComboSlotKind, 'other'>, Set<strin
     'principales',
     'calzones',
     'calzone',
+    // Bar / restaurante
+    'tapas',
+    'tapa',
+    'raciones',
+    'racion',
+    'bocadillos',
+    'bocadillo',
+    'montaditos',
+    'montadito',
+    'pinchos',
+    'pincho',
+    'tacos',
+    'taco',
+    'kebabs',
+    'kebab',
+    'platos',
+    'plato',
+    'carta',
   ]),
   side: new Set([
     'complementos',
@@ -783,6 +801,7 @@ function slotKindFromCategory(category: string): ComboSlotKind | null {
   }
   if (/^top\s*burger/.test(key) || key.includes('burger')) return 'main';
   if (key.includes('pizza') || /premium|especialidad|calzone/.test(key)) return 'main';
+  if (/tapa|racion|bocadillo|montadito|pincho|kebab|plato|carta/.test(key)) return 'main';
   if (/refresco|cerveza|vino|bebida|zumo|agua/.test(key)) return 'drink';
   if (/salsa|complement|extra|side|guarnicion|patata|entrante/.test(key)) return 'side';
   if (/postre|helado|dulce|bolleria/.test(key)) return 'dessert';
@@ -791,7 +810,7 @@ function slotKindFromCategory(category: string): ComboSlotKind | null {
 
 function slotKindFromNameFallback(productName: string): ComboSlotKind | null {
   const name = foldCategory(productName);
-  if (/pizza|calzone|burger|hamburg/.test(name)) return 'main';
+  if (/pizza|calzone|burger|hamburg|tapa|racion|bocadillo|pincho|kebab/.test(name)) return 'main';
   if (/patata|alita|nugget|complement|acompa/.test(name)) return 'side';
   if (/coca|pepsi|fanta|agua|cerveza|bebida|refresco/.test(name)) return 'drink';
   if (/postre|tarta|helado|brownie/.test(name)) return 'dessert';
@@ -903,12 +922,121 @@ export function normalizeComboItemsForSave(
   comboItems: CatalogComboRef[],
   catalog: CatalogItem[],
 ): CatalogComboRef[] {
-  return comboItems.map((ref) => ({
-    productId: ref.productId,
-    productName: ref.productName,
-    quantity: Math.max(1, Number(ref.quantity) || 1),
-    slotKind: resolveComboRefSlotKind(ref, catalog),
-  }));
+  return comboItems.map((ref) => {
+    const out: CatalogComboRef = {
+      productId: ref.productId,
+      productName: ref.productName,
+      quantity: Math.max(1, Number(ref.quantity) || 1),
+      slotKind: resolveComboRefSlotKind(ref, catalog),
+    };
+    const instanceId = String(ref.instanceId || '').trim();
+    if (instanceId) out.instanceId = instanceId;
+    const removed = Array.isArray(ref.removedIngredients)
+      ? ref.removedIngredients.map((n) => String(n || '').trim()).filter(Boolean)
+      : [];
+    if (removed.length) out.removedIngredients = removed;
+    const added = Array.isArray(ref.addedSupplements)
+      ? ref.addedSupplements
+          .map((s) => ({
+            id: String(s?.id || '').trim(),
+            name: String(s?.name || '').trim(),
+            price: Number(s?.price) || 0,
+          }))
+          .filter((s) => s.id && s.name)
+      : [];
+    if (added.length) out.addedSupplements = added;
+    const notes = String(ref.notes || '').trim();
+    if (notes) out.notes = notes;
+    return out;
+  });
+}
+
+function newComboInstanceId(): string {
+  return `u-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Expande principales con quantity>1 en unidades sueltas con instanceId
+ * (para personalizar cada pizza del Dúo/Familiar).
+ */
+export function ensureComboMainInstanceIds(
+  comboItems: CatalogComboRef[],
+  catalog: CatalogItem[],
+): CatalogComboRef[] {
+  const expanded: CatalogComboRef[] = [];
+  for (const ref of comboItems) {
+    const slot = resolveComboRefSlotKind(ref, catalog);
+    const qty = Math.max(1, Number(ref.quantity) || 1);
+    if (slot === 'main') {
+      for (let i = 0; i < qty; i += 1) {
+        expanded.push({
+          ...ref,
+          quantity: 1,
+          instanceId:
+            i === 0 && String(ref.instanceId || '').trim()
+              ? String(ref.instanceId).trim()
+              : newComboInstanceId(),
+          ...(i > 0
+            ? {
+                // Solo la 1ª unidad hereda personalización antigua de la línea agregada.
+                removedIngredients: undefined,
+                addedSupplements: undefined,
+                notes: undefined,
+              }
+            : {}),
+        });
+      }
+    } else {
+      expanded.push(ref);
+    }
+  }
+  return normalizeComboItemsForSave(expanded, catalog);
+}
+
+/**
+ * Añade 1 unidad del producto principal (pizza/burger) como línea aparte,
+ * para poder personalizar cada una en Individual / Dúo / Familiar.
+ */
+export function appendComboMainUnit(
+  section: ComboMenuCatalogSection,
+  product: CatalogItem,
+  comboItems: CatalogComboRef[],
+  catalogItems: CatalogItem[],
+): CatalogComboRef[] | null {
+  const need = unitsNeededInComboSection(section);
+  let next = [...comboItems];
+
+  if (need === 1) {
+    if (section.groupByMainFamily) {
+      const family = section.groupByMainFamily;
+      next = next.filter((ref) => {
+        if (resolveComboRefSlotKind(ref, catalogItems) !== 'main') return true;
+        const p = catalogItems.find((c) => c._id === ref.productId);
+        return (
+          mainFamilyForProduct(p?.category || '', ref.productName || p?.name || '') !== family
+        );
+      });
+    } else {
+      next = next.filter((ref) => {
+        const p = catalogItems.find((c) => c._id === ref.productId);
+        if (!p) return true;
+        return !categoriesMatch(p.category || '', section.catalogCategory);
+      });
+    }
+  } else {
+    const have = totalUnitsInCatalogSection(section, next, catalogItems);
+    if (need > 0 && have >= need) return null;
+  }
+
+  const refSlotKind = inferComboSlotKind(product.category || '', product.name);
+  next.push({
+    productId: product._id,
+    productName: product.name,
+    quantity: 1,
+    slotKind: refSlotKind,
+    instanceId: newComboInstanceId(),
+  });
+  return normalizeComboItemsForSave(next, catalogItems);
 }
 
 /** Pizza vs burger según categoría de catálogo (TPV menú). */

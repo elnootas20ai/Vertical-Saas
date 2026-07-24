@@ -28,7 +28,7 @@ export function WorkerClockInCard({
   showHistoryLink = true,
 }: WorkerClockInCardProps) {
   const { t } = useTranslation();
-  const { storeLabel, assignedPdvId } = useWorkerAssignedStore();
+  const { storeLabel, assignedPdvId, canClockInEntry, loading: storeLoading } = useWorkerAssignedStore();
   const storeContext =
     assignedPdvId
       ? { sales_point_id: assignedPdvId, sales_point_name: storeLabel || undefined }
@@ -50,7 +50,7 @@ export function WorkerClockInCard({
     handleBreakToggle,
   } = useWorkerClockIn(businessId, memberId, memberName, storeContext);
 
-  if (loading) {
+  if (loading || storeLoading) {
     return (
       <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6 flex justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
@@ -69,6 +69,12 @@ export function WorkerClockInCard({
       {error ? (
         <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 px-3 py-2 text-sm text-red-700 dark:text-red-300">
           {error}
+        </div>
+      ) : null}
+
+      {!canClockInEntry && !isClockedIn ? (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+          Sin tienda o local asignado. Pide a tu gerente que te asigne uno en Equipo para poder fichar.
         </div>
       ) : null}
 
@@ -95,8 +101,8 @@ export function WorkerClockInCard({
             <button
               type="button"
               onClick={() => void handleClockIn()}
-              disabled={acting || record?.status === 'completed'}
-              className="inline-flex items-center gap-2 px-5 py-3 bg-white text-emerald-600 rounded-xl font-semibold shadow-lg disabled:opacity-50"
+              disabled={acting || !canClockInEntry || record?.status === 'completed'}
+              className="inline-flex items-center gap-2 px-5 py-3 bg-white text-emerald-600 rounded-xl font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {acting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
               {t('worker.clock.clockIn', 'Fichar entrada')}

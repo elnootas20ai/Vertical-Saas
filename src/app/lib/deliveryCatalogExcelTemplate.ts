@@ -58,6 +58,9 @@ export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'price', label: 'precio', required: true, example: '9.50' },
   { key: 'ingredients', label: 'ingredientes', example: 'Tomate, Mozzarella, Albahaca' },
   { key: 'description', label: 'descripcion', example: '' },
+  // Opcionales (no van en la plantilla base; se mapean si el Excel las trae)
+  { key: 'tipo_menu', label: 'tipo_menu', example: 'estandar' },
+  { key: 'taxRate', label: 'iva', example: '10' },
 ];
 
 /** Sinónimos de cabecera para auto-mapeo (plantilla oficial + exportaciones habituales). */
@@ -70,6 +73,7 @@ export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   ingredients: ['ingredientes', 'ingredients', 'ingrediente', 'receta', 'componentes'],
   description: ['descripcion', 'description', 'desc', 'notas', 'observaciones'],
   tipo_menu: ['tipo_menu', 'tipo menu', 'tipo menú', 'menu', 'menú', 'tamano menu', 'tamaño menú', 'combo tipo'],
+  taxRate: ['iva', 'tax', 'taxrate', 'vat', 'impuesto', 'tipo iva', '% iva'],
 };
 
 export type DeliveryCatalogImportIssue = {
@@ -315,10 +319,11 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
     '  · ingredientes — tapas/raciones/bocatas: Patata, Aceite, Jamón, Pan barra (escandallo auto)',
     '  · sin ingredientes — Vertial aplica coste aprox por categoría (caña ~0,35€, tapa ~2,20€…)',
     '  · complementos y bebidas: coste fijo auto aunque la columna ingredientes esté vacía',
+    '  · IVA: en bar/restaurante se aplica 10% al importar (puedes añadir columna iva si hace falta)',
     '',
     'MENÚS / COMBOS (categoria = Combos):',
-    '  · linea obligatoria (modomio, BlackBurger…)',
-    '  · ingredientes vacío (el cliente elige pizza+bebida+etc. en TPV)',
+    '  · linea obligatoria (nombre de tu Marca en Ajustes)',
+    '  · ingredientes vacío (el cliente elige plato/tapa + bebida en TPV)',
     '  · opcional: columna tipo_menu → estandar | duo | familiar | con_postre',
     '',
     'RECOMENDADO:',

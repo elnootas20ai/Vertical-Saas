@@ -19,6 +19,11 @@ export interface TpvTabletBinding {
   workCenterId: string;
   businessId: string;
   dataUserId: string;
+  /**
+   * Usuario que activó el código de tienda en este dispositivo.
+   * Si entra otra cuenta, el binding se invalida (evita saltar a datos de Pau u otra empresa).
+   */
+  authUserId?: string;
   /** Terminal TPV de sala (login con código SALA-*). */
   salaTerminalId?: string;
   /** Vertical del TPV; lo fija el backend al validar el código (no el businessType). */
@@ -102,12 +107,15 @@ export function writeTpvTabletBinding(
   binding: Omit<TpvTabletBinding, 'boundAt' | 'tpvVertical'> & {
     boundAt?: string;
     tpvVertical?: TpvTabletVertical;
+    authUserId?: string;
   },
 ): void {
   try {
+    const authUserId = String(binding.authUserId || '').trim();
     const payload: TpvTabletBinding = {
       ...binding,
       terminalCode: String(binding.terminalCode || '').trim().toUpperCase(),
+      ...(authUserId ? { authUserId } : {}),
       tpvVertical: binding.tpvVertical
         || inferLegacyTpvVertical({
           ...binding,
@@ -141,6 +149,86 @@ export function isTpvTabletBound(): boolean {
   return readTpvTabletBinding() !== null;
 }
 
+/**
+ * ¿Este binding tablet pertenece a la cuenta/sesión actual?
+ * Evita que un código de Pau (u otra empresa) deje datos en el TPV de otra cuenta.
+ */
+export function isTpvTabletBindingAllowedForAuth(params: {
+  binding?: Pick<TpvTabletBinding, 'pdvId' | 'businessId' | 'dataUserId' | 'authUserId'> | null;
+  authUser?: { user_id?: string; id?: string } | null;
+  businesses?: Array<{
+    business_id?: string;
+    id?: string;
+    owner_user_id?: string;
+    members?: Array<{ user_id?: string }>;
+  }> | null;
+  /** true cuando ya cargó la lista de empresas (aunque esté vacía). */
+  businessesSettled?: boolean;
+}): boolean {
+  const binding = params.binding;
+  if (!binding) return false;
+  const pdvId = String(binding.pdvId || '').trim();
+  const businessId = normalizeBusinessScopeId(binding.businessId);
+  const dataUserId = String(binding.dataUserId || '').trim();
+  if (!pdvId || !businessId || !dataUserId) return false;
+
+  const selfId = String(params.authUser?.user_id || params.authUser?.id || '').trim();
+  if (!selfId) return false;
+
+  const boundAuth = String(binding.authUserId || '').trim();
+  if (boundAuth && boundAuth !== selfId) return false;
+
+  const list = Array.isArray(params.businesses) ? params.businesses : [];
+  if (list.length === 0) {
+    // Sin empresas: solo confiar si este mismo usuario activó el código.
+    // Bindings viejos sin authUserId → no confiar (bloquea salto a Pau).
+    return boundAuth === selfId;
+  }
+
+  const match = list.find(
+    (b) => normalizeBusinessScopeId(b.business_id || b.id) === businessId,
+  );
+  if (!match) return false;
+
+  const ownerId = String(match.owner_user_id || '').trim();
+  if (dataUserId !== selfId && dataUserId !== ownerId) return false;
+
+  if (ownerId === selfId || dataUserId === selfId) return true;
+  return (match.members || []).some((m) => String(m.user_id || '').trim() === selfId);
+}
+
+/**
+ * Si el binding es de otra cuenta/empresa, lo borra.
+ * Devuelve el binding válido o null.
+ */
+export function sanitizeTpvTabletBindingForAuth(params: {
+  authUser?: { user_id?: string; id?: string } | null;
+  businesses?: Array<{
+    business_id?: string;
+    id?: string;
+    owner_user_id?: string;
+    members?: Array<{ user_id?: string }>;
+  }> | null;
+  businessesSettled?: boolean;
+}): TpvTabletBinding | null {
+  const binding = readTpvTabletBinding();
+  if (!binding) return null;
+  const ok = isTpvTabletBindingAllowedForAuth({
+    binding,
+    authUser: params.authUser,
+    businesses: params.businesses,
+    businessesSettled: params.businessesSettled,
+  });
+  if (ok) return binding;
+  clearTpvTabletBinding();
+  return null;
+}
+
+/** Sesión con código de tienda activo (da igual la ruta). */
+export function isTpvTabletTerminalBound(): boolean {
+  return isTpvTabletBound();
+}
+
 /** Rutas del TPV operativo tras activar tablet (código de tienda). */
 export function isTpvTabletWorkerPath(pathname: string): boolean {
   const path = String(pathname || '').trim();
@@ -151,13 +239,31 @@ export function isTpvTabletWorkerPath(pathname: string): boolean {
   );
 }
 
+/**
+ * Con código TPV activo solo se permite el TPV de tienda (y fichaje).
+ * Nunca dashboard personal, Gate, CRM, etc.
+ */
+export function isTpvTabletAllowedPath(pathname: string): boolean {
+  const path = String(pathname || '').trim();
+  if (!path) return false;
+  if (isTpvTabletWorkerPath(path)) return true;
+  if (path.startsWith('/auth/tpv-tablet')) return true;
+  // Fichaje previo al tablero TPV
+  if (path === '/saas/worker/clock' || path.startsWith('/saas/worker/clock/')) return true;
+  return false;
+}
+
 /** Sesión tablet con binding válido en ruta TPV — no forzar selector de empresas. */
 export function isTpvTabletSaasSession(pathname: string): boolean {
   return isTpvTabletBound() && isTpvTabletWorkerPath(pathname);
 }
 
-/** Destino del TPV tablet — solo Delivery (bar/restaurante retirado del producto). */
+/** Destino del TPV tablet según el binding (delivery o restaurant). */
 export function resolveTpvTabletWorkerPath(): string {
+  const binding = readTpvTabletBinding();
+  if (binding?.tpvVertical === TPV_TABLET_VERTICAL_RESTAURANT) {
+    return TPV_TABLET_RESTAURANT_PATH;
+  }
   return TPV_TABLET_DELIVERY_PATH;
 }
 

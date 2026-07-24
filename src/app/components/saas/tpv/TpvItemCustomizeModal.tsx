@@ -31,6 +31,10 @@ type TpvItemCustomizeModalProps = {
   brands?: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>;
   /** Catálogo TPV completo (combos → ingredientes de productos incluidos). */
   catalogItems?: CatalogItem[];
+  /** Texto bajo el título (p. ej. «Pizza 2 de 3»). */
+  stepHint?: string;
+  /** Texto del botón final. Por defecto: Añadir al pedido + precio. */
+  confirmLabel?: string;
   onClose: () => void;
   onConfirm: (customization: CartLineCustomization) => void;
 };
@@ -63,6 +67,8 @@ export function TpvItemCustomizeModal({
   defaultExtraPrice,
   brands,
   catalogItems,
+  stepHint,
+  confirmLabel,
   onClose,
   onConfirm,
 }: TpvItemCustomizeModalProps) {
@@ -256,7 +262,7 @@ export function TpvItemCustomizeModal({
               <div className="flex items-center gap-2 mb-1">
                 <Pizza className="w-4 h-4 text-orange-500 shrink-0" />
                 <p className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                  {customizable ? 'Personaliza tu pedido' : 'Añadir al pedido'}
+                  {stepHint || (customizable ? 'Personaliza tu pedido' : 'Añadir al pedido')}
                 </p>
               </div>
               <h2 id="tpv-customize-title" className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 leading-tight">
@@ -533,7 +539,7 @@ export function TpvItemCustomizeModal({
             onClick={() => onConfirm(customization)}
             className="w-full py-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-base transition-colors shadow-lg"
           >
-            Añadir al pedido · {formatPrice(unitTotal)}
+            {confirmLabel || `Añadir al pedido · ${formatPrice(unitTotal)}`}
           </button>
         </div>
       </div>

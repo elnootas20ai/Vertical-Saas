@@ -3903,8 +3903,7 @@ async function resolveBusinessForPointOfSale(req, pdv) {
   return resolveBusinessDocumentForPointOfSale(req, pdv);
 }
 
-/** Dueño / CEO de la empresa: el código TPV no puede abrir esa cuenta. */
-function isBusinessCeoAccountForTablet(account, business) {
+function isBusinessOwnerAccount(account, business) {
   if (!account || !business) return false;
   const uid = String(account.user_id || '').trim();
   const ownerId = String(business.owner_user_id || '').trim();
@@ -3912,25 +3911,56 @@ function isBusinessCeoAccountForTablet(account, business) {
 }
 
 /**
- * Sesión tablet: solo si ya hay trabajador con acceso al PDV.
- * Sin sesión o con CEO → hay que entrar como trabajador (nunca dueño).
+ * Cuenta operativa para tablet: preferir un trabajador del local.
+ * Si no hay, el dueño puede activar (el binding tablet deja la app en TPV cerrado).
+ */
+async function resolveTabletSessionAccount(req, business, pdv) {
+  const ownerId = String(business.owner_user_id || '').trim();
+  const members = Array.isArray(business.members) ? business.members : [];
+
+  for (const member of members) {
+    const memberId = String(member.user_id || '').trim();
+    if (!memberId || (ownerId && memberId === ownerId)) continue;
+    const account = await findAccountByUserId(req, memberId);
+    if (!account || account.deletedAt || account.status === 'inactive') continue;
+    if (isBusinessOwnerAccount(account, business)) continue;
+    if (workerCanAccessPdvForTablet(account, business, pdv)) return account;
+  }
+
+  return null;
+}
+
+/**
+ * Código de tienda → sesión TPV.
+ * No exige login previo. No manda a “entra como trabajador”.
+ * Si hay sesión de trabajador del local, se reutiliza; si no, se elige cuenta operativa.
  */
 async function resolveAccountForTpvTabletLogin(req, business, pdv) {
   const sessionUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
   if (sessionUserId) {
     const current = await findAccountByUserId(req, sessionUserId);
     if (current && !current.deletedAt && current.status !== 'inactive') {
-      if (isBusinessCeoAccountForTablet(current, business)) {
-        return { account: null, accessDenied: true, code: 'TPV_CEO_FORBIDDEN' };
-      }
-      if (workerCanAccessPdvForTablet(current, business, pdv)) {
+      const isOwner = isBusinessOwnerAccount(current, business);
+      if (!isOwner && workerCanAccessPdvForTablet(current, business, pdv)) {
         return { account: current, accessDenied: false };
       }
-      return { account: null, accessDenied: true, code: 'STORE_NOT_ASSIGNED' };
+      // Dueño u otra sesión: no bloquear el código; abrir TPV con cuenta operativa.
     }
   }
 
-  return { account: null, accessDenied: true, code: 'TPV_NEED_WORKER' };
+  const worker = await resolveTabletSessionAccount(req, business, pdv);
+  if (worker) return { account: worker, accessDenied: false };
+
+  const ownerId = String(business.owner_user_id || '').trim();
+  if (ownerId) {
+    const owner = await findAccountByUserId(req, ownerId);
+    if (owner && !owner.deletedAt && owner.status !== 'inactive'
+      && workerCanAccessPdvForTablet(owner, business, pdv)) {
+      return { account: owner, accessDenied: false };
+    }
+  }
+
+  return { account: null, accessDenied: true, code: 'STORE_NOT_ASSIGNED' };
 }
 
 async function performTpvTabletLogin(req, res, { terminalCode }) {
@@ -3953,38 +3983,11 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
   }
 
   const { account, accessDenied, code } = await resolveAccountForTpvTabletLogin(req, business, pdv);
-  if (accessDenied) {
-    if (code === 'TPV_CEO_FORBIDDEN') {
-      return res.status(403).json({
-        ok: false,
-        error:
-          'El código TPV no puede abrir la cuenta del dueño (CEO). Cierra esa sesión y entra como trabajador, luego pon el código de tienda.',
-        code: 'TPV_CEO_FORBIDDEN',
-      });
-    }
-    if (code === 'TPV_NEED_WORKER') {
-      return res.status(403).json({
-        ok: false,
-        error:
-          'Primero inicia sesión como trabajador y después introduce el código de tienda. El TPV no usa la cuenta del dueño.',
-        code: 'TPV_NEED_WORKER',
-      });
-    }
+  if (accessDenied || !account) {
     return res.status(403).json({
       ok: false,
-      error: 'No tienes acceso a esta tienda. Pide al encargado que te asigne el local correcto.',
-      code: 'STORE_NOT_ASSIGNED',
-    });
-  }
-  if (!account) {
-    return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
-  }
-
-  if (isBusinessCeoAccountForTablet(account, business)) {
-    return res.status(403).json({
-      ok: false,
-      error: 'El código TPV no puede abrir la cuenta del dueño (CEO). Entra como trabajador.',
-      code: 'TPV_CEO_FORBIDDEN',
+      error: 'No hay acceso a esta tienda. Revisa el código o que el local tenga equipo asignado.',
+      code: code || 'STORE_NOT_ASSIGNED',
     });
   }
 
@@ -4039,7 +4042,10 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
   const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
 
   const businessType = String(business.businessType || '').trim();
-  const tpvVertical = 'delivery';
+  const tpvVertical = businessType === 'restaurant' ? 'restaurant' : 'delivery';
+  const redirectTo = tpvVertical === 'restaurant'
+    ? '/saas/worker/tpv/restaurant'
+    : '/saas/worker/tpv/delivery';
 
   return res.json({
     ok: true,
@@ -4062,7 +4068,7 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
     },
     accessToken,
     refreshToken,
-    redirectTo: '/saas/worker/tpv/delivery',
+    redirectTo,
     needsClockIn: true,
   });
 }

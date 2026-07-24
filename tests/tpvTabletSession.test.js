@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
   TPV_TABLET_DELIVERY_PATH,
   TPV_TABLET_RESTAURANT_PATH,
+  isTpvTabletAllowedPath,
   isTpvTabletWorkerPath,
   resolveTpvTabletWorkerPath,
   writeTpvTabletBinding,
@@ -36,16 +37,25 @@ describe('tpvTabletSession — rutas tablet', () => {
     expect(isTpvTabletWorkerPath(TPV_TABLET_DELIVERY_PATH)).toBe(true);
     expect(isTpvTabletWorkerPath(TPV_TABLET_RESTAURANT_PATH)).toBe(true);
     expect(isTpvTabletWorkerPath('/saas/worker/tpv')).toBe(true);
-    expect(isTpvTabletWorkerPath('/saas/worker/tpv/delivery')).toBe(true);
-    expect(isTpvTabletWorkerPath('/saas/worker/tpv/restaurant')).toBe(true);
     expect(isTpvTabletWorkerPath('/saas/dashboard')).toBe(false);
-    expect(isTpvTabletWorkerPath('/auth/gate')).toBe(false);
   });
 
-  it('resolveTpvTabletWorkerPath devuelve restaurant cuando el binding es restaurant', () => {
+  it('isTpvTabletAllowedPath bloquea cuenta personal con código TPV activo', () => {
+    expect(isTpvTabletAllowedPath('/saas/worker/tpv/delivery')).toBe(true);
+    expect(isTpvTabletAllowedPath('/saas/worker/clock')).toBe(true);
+    expect(isTpvTabletAllowedPath('/auth/tpv-tablet')).toBe(true);
+    expect(isTpvTabletAllowedPath('/saas/user-dashboard')).toBe(false);
+    expect(isTpvTabletAllowedPath('/saas/dashboard')).toBe(false);
+    expect(isTpvTabletAllowedPath('/saas/clients')).toBe(false);
+    expect(isTpvTabletAllowedPath('/auth/gate')).toBe(false);
+  });
+
+  it('resolveTpvTabletWorkerPath respeta delivery vs restaurant del binding', () => {
     clearTpvTabletBinding();
+    expect(resolveTpvTabletWorkerPath()).toBe(TPV_TABLET_DELIVERY_PATH);
+
     writeTpvTabletBinding({
-      terminalCode: 'SALA-001',
+      terminalCode: 'STORE-001',
       pdvId: 'pdv-1',
       workCenterId: 'wc-1',
       businessId: 'biz-1',
@@ -55,14 +65,16 @@ describe('tpvTabletSession — rutas tablet', () => {
     expect(resolveTpvTabletWorkerPath()).toBe(TPV_TABLET_RESTAURANT_PATH);
   });
 
-  it('inferLegacyTpvVertical migra bindings SALA-* a restaurant', () => {
+  it('con código TPV activo no se permite ir a cuenta personal', () => {
     writeTpvTabletBinding({
-      terminalCode: 'SALA-001',
+      terminalCode: 'STORE-001',
       pdvId: 'pdv-1',
       workCenterId: 'wc-1',
       businessId: 'biz-1',
-      dataUserId: 'user-1',
+      dataUserId: 'owner-1',
+      authUserId: 'owner-1',
     });
-    expect(resolveTpvTabletWorkerPath()).toBe(TPV_TABLET_RESTAURANT_PATH);
+    expect(isTpvTabletAllowedPath('/saas/user-dashboard')).toBe(false);
+    expect(isTpvTabletAllowedPath(resolveTpvTabletWorkerPath())).toBe(true);
   });
 });

@@ -87,6 +87,7 @@ export function TpvTabletLogin() {
         workCenterId: terminalBinding.workCenterId,
         businessId: terminalBinding.businessId,
         dataUserId: terminalBinding.dataUserId,
+        authUserId: String(user?.user_id || '').trim() || undefined,
         tpvVertical: terminalBinding.tpvVertical || 'delivery',
         salaTerminalId: terminalBinding.salaTerminalId,
         pdvName: pdv?.name,
@@ -133,7 +134,12 @@ export function TpvTabletLogin() {
       // El binding tablet ya fija empresa; seguir al TPV aunque falle el refresco global.
     }
 
-    navigate(resolveTpvTabletWorkerPath(), { replace: true });
+    const dest =
+      (typeof result.redirectTo === 'string' && result.redirectTo.startsWith('/saas/worker/tpv')
+        ? result.redirectTo
+        : null)
+      || resolveTpvTabletWorkerPath();
+    navigate(dest, { replace: true });
   };
 
   const handleTerminalKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {

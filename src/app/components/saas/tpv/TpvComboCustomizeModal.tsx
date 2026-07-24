@@ -3,15 +3,18 @@ import { Check, ChevronDown, ChevronUp, Minus, Plus, Search, X } from 'lucide-re
 import type { CatalogComboRef, CatalogItem } from '../../../lib/deliveryApi';
 import {
   COMBO_SLOT_META,
+  appendComboMainUnit,
   catalogProductsForComboSection,
   comboItemsInCatalogSection,
   comboMenuHasMainFamilyChoice,
   comboMenuSectionKey,
+  ensureComboMainInstanceIds,
   filterComboMenuSectionsForMainFamily,
   inferMainFamilyFromComboSelections,
   isComboMenuComplete,
   isComboMenuSectionDone,
   mainFamilyForCatalogCategory,
+  mainFamilyForProduct,
   normalizeComboItemsForSave,
   pickComboProductInSection,
   resolveComboRefSlotKind,
@@ -21,18 +24,44 @@ import {
   type ComboMenuCatalogSection,
   unitsNeededInComboSection,
 } from '../../../lib/catalogComboSlots';
+import {
+  EMPTY_CART_CUSTOMIZATION,
+  type CartLineCustomization,
+  type StoreIngredient,
+  type TpvBrandIngredientSelection,
+  type TpvBrandSupplements,
+  type TpvCategoryTemplates,
+} from '../../../lib/catalogCustomization';
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import { useModalClose } from '../../../hooks/useModalClose';
 import { TpvModalRoot } from './TpvModalRoot';
+import { TpvItemCustomizeModal } from './TpvItemCustomizeModal';
+
+type PendingMainCustomize = {
+  product: CatalogItem;
+  instanceId: string;
+  ordinal: number;
+  total: number;
+};
 
 type TpvComboCustomizeModalProps = {
   item: CatalogItem;
   catalogItems: CatalogItem[];
   initialSelections?: CatalogComboRef[];
   formatPrice: (n: number) => string;
+  templates?: TpvCategoryTemplates;
+  storeIngredients?: StoreIngredient[];
+  brandIngredientSelection?: TpvBrandIngredientSelection;
+  brandSupplements?: TpvBrandSupplements;
+  defaultExtraPrice?: number;
+  brands?: Array<{ _id: string; deliveryLineKind?: string; catalogCategories?: string[] }>;
   onClose: () => void;
   onConfirm: (selections: CatalogComboRef[]) => void;
 };
+
+function refKey(ref: CatalogComboRef): string {
+  return ref.instanceId || `${ref.productId}:${ref.quantity}`;
+}
 
 function removeFromSection(
   section: ComboMenuCatalogSection,
@@ -41,14 +70,18 @@ function removeFromSection(
   catalogItems: CatalogItem[],
 ): CatalogComboRef[] {
   const inSection = comboItemsInCatalogSection(section, comboItems, catalogItems);
-  const target = inSection.find((r) => r.productId === ref.productId);
+  const target = inSection.find((r) =>
+    ref.instanceId ? r.instanceId === ref.instanceId : r.productId === ref.productId,
+  );
   if (!target) return comboItems;
 
   let next = comboItems.map((r) => ({ ...r }));
-  const idx = next.findIndex((r) => r.productId === ref.productId);
+  const idx = next.findIndex((r) =>
+    ref.instanceId ? r.instanceId === ref.instanceId : r.productId === ref.productId,
+  );
   if (idx < 0) return comboItems;
 
-  if (next[idx].quantity > 1) {
+  if (!ref.instanceId && next[idx].quantity > 1) {
     next[idx] = { ...next[idx], quantity: next[idx].quantity - 1 };
   } else {
     next = next.filter((_, i) => i !== idx);
@@ -74,11 +107,32 @@ function defaultMainFamily(sections: ComboMenuCatalogSection[]): ComboMainFamily
   return null;
 }
 
+function advanceExpandedKey(
+  section: ComboMenuCatalogSection,
+  next: CatalogComboRef[],
+  displaySections: ComboMenuCatalogSection[],
+  catalogItems: CatalogItem[],
+): string | null {
+  const key = comboMenuSectionKey(section);
+  if (!isComboMenuSectionDone(section, next, catalogItems)) return key;
+  const idx = displaySections.findIndex((s) => comboMenuSectionKey(s) === key);
+  const following = displaySections
+    .slice(idx + 1)
+    .find((s) => !isComboMenuSectionDone(s, next, catalogItems));
+  return following ? comboMenuSectionKey(following) : null;
+}
+
 export function TpvComboCustomizeModal({
   item,
   catalogItems,
   initialSelections,
   formatPrice,
+  templates,
+  storeIngredients,
+  brandIngredientSelection,
+  brandSupplements,
+  defaultExtraPrice,
+  brands,
   onClose,
   onConfirm,
 }: TpvComboCustomizeModalProps) {
@@ -105,14 +159,14 @@ export function TpvComboCustomizeModal({
       const seed = item.comboItems ?? [];
       const sections = resolveTpvComboMenuSections(item, catalogItems);
       if (comboMenuHasMainFamilyChoice(sections.filter((s) => s.slotQuota > 0 || s.expectedCount > 0))) {
-        return normalizeComboItemsForSave(
+        return ensureComboMainInstanceIds(
           seed.filter((ref) => resolveComboRefSlotKind(ref, catalogItems) !== 'main'),
           catalogItems,
         );
       }
-      return normalizeComboItemsForSave(seed, catalogItems);
+      return ensureComboMainInstanceIds(seed, catalogItems);
     }
-    return normalizeComboItemsForSave(initialSelections, catalogItems);
+    return ensureComboMainInstanceIds(initialSelections, catalogItems);
   });
 
   const [mainFamily, setMainFamily] = useState<ComboMainFamily | null>(() => {
@@ -134,9 +188,11 @@ export function TpvComboCustomizeModal({
 
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [sectionQuery, setSectionQuery] = useState('');
+  const [pendingMain, setPendingMain] = useState<PendingMainCustomize | null>(null);
 
   useEffect(() => {
     if (needsMainFamilyPick && !mainFamily) return;
+    if (pendingMain) return;
     setExpandedKey((prev) => {
       if (prev) {
         const section = displaySections.find((s) => comboMenuSectionKey(s) === prev);
@@ -144,7 +200,7 @@ export function TpvComboCustomizeModal({
       }
       return firstOpenSection(displaySections, selections, catalogItems);
     });
-  }, [needsMainFamilyPick, mainFamily, displaySections, selections, catalogItems]);
+  }, [needsMainFamilyPick, mainFamily, displaySections, selections, catalogItems, pendingMain]);
 
   useEffect(() => {
     setSectionQuery('');
@@ -182,6 +238,37 @@ export function TpvComboCustomizeModal({
 
   const handlePick = useCallback(
     (section: ComboMenuCatalogSection, product: CatalogItem) => {
+      if (pendingMain) return;
+
+      // Principal (pizza/burger): 1 unidad → personalizar → siguiente.
+      if (section.slotKind === 'main') {
+        const need = unitsNeededInComboSection(section);
+        const before = comboItemsInCatalogSection(section, selections, catalogItems).reduce(
+          (sum, r) => sum + Math.max(1, r.quantity || 1),
+          0,
+        );
+        const next = appendComboMainUnit(section, product, selections, catalogItems);
+        if (!next) return;
+        const added = next.find(
+          (r) =>
+            r.productId === product._id &&
+            r.instanceId &&
+            !selections.some((s) => s.instanceId && s.instanceId === r.instanceId),
+        );
+        if (!added?.instanceId) {
+          setSelections(next);
+          return;
+        }
+        setSelections(next);
+        setPendingMain({
+          product,
+          instanceId: added.instanceId,
+          ordinal: Math.min(before + 1, Math.max(1, need)),
+          total: Math.max(1, need),
+        });
+        return;
+      }
+
       const key = comboMenuSectionKey(section);
       const wasDone = isComboMenuSectionDone(section, selections, catalogItems);
       const next = pickComboProductInSection(section, product, selections, catalogItems);
@@ -195,8 +282,67 @@ export function TpvComboCustomizeModal({
         setExpandedKey(following ? comboMenuSectionKey(following) : null);
       }
     },
-    [selections, catalogItems, displaySections],
+    [selections, catalogItems, displaySections, pendingMain],
   );
+
+  const handleMainCustomizeConfirm = useCallback(
+    (customization: CartLineCustomization) => {
+      if (!pendingMain) return;
+      const { instanceId } = pendingMain;
+      const next = selections.map((ref) => {
+        if (ref.instanceId !== instanceId) return ref;
+        return {
+          ...ref,
+          removedIngredients: customization.removedIngredients,
+          addedSupplements: customization.addedSupplements,
+          notes: customization.notes,
+        };
+      });
+      const normalized = normalizeComboItemsForSave(next, catalogItems);
+      setSelections(normalized);
+      setPendingMain(null);
+      const mainSection = displaySections.find((s) => s.slotKind === 'main');
+      if (mainSection) {
+        setExpandedKey(advanceExpandedKey(mainSection, normalized, displaySections, catalogItems));
+      }
+    },
+    [pendingMain, selections, catalogItems, displaySections],
+  );
+
+  const handleMainCustomizeClose = useCallback(() => {
+    if (!pendingMain) return;
+    const { instanceId } = pendingMain;
+    setSelections((prev) =>
+      normalizeComboItemsForSave(
+        prev.filter((r) => r.instanceId !== instanceId),
+        catalogItems,
+      ),
+    );
+    setPendingMain(null);
+  }, [pendingMain, catalogItems]);
+
+  const openMainCustomize = useCallback(
+    (ref: CatalogComboRef, section: ComboMenuCatalogSection) => {
+      if (pendingMain || section.slotKind !== 'main') return;
+      const product = catalogItems.find((c) => c._id === ref.productId);
+      if (!product || !ref.instanceId) return;
+      const picked = comboItemsInCatalogSection(section, selections, catalogItems);
+      const ordinal = Math.max(1, picked.findIndex((r) => r.instanceId === ref.instanceId) + 1);
+      const total = Math.max(1, unitsNeededInComboSection(section));
+      setPendingMain({ product, instanceId: ref.instanceId, ordinal, total });
+    },
+    [pendingMain, catalogItems, selections],
+  );
+
+  const pendingInitial = useMemo((): CartLineCustomization => {
+    if (!pendingMain) return EMPTY_CART_CUSTOMIZATION;
+    const ref = selections.find((r) => r.instanceId === pendingMain.instanceId);
+    return {
+      removedIngredients: ref?.removedIngredients ?? [],
+      addedSupplements: ref?.addedSupplements ?? [],
+      notes: ref?.notes ?? '',
+    };
+  }, [pendingMain, selections]);
 
   const toggleSection = useCallback((section: ComboMenuCatalogSection) => {
     const key = comboMenuSectionKey(section);
@@ -205,6 +351,7 @@ export function TpvComboCustomizeModal({
 
   const handleChangeMainFamily = useCallback(() => {
     setMainFamily(null);
+    setPendingMain(null);
     setSelections((prev) =>
       normalizeComboItemsForSave(
         prev.filter((ref) => resolveComboRefSlotKind(ref, catalogItems) !== 'main'),
@@ -213,6 +360,35 @@ export function TpvComboCustomizeModal({
     );
     setExpandedKey(null);
   }, [catalogItems]);
+
+  if (pendingMain) {
+    const isBurger =
+      mainFamilyForProduct(pendingMain.product.category || '', pendingMain.product.name) ===
+      'burger';
+    const unitLabel = isBurger ? 'Burger' : 'Pizza';
+    const label =
+      pendingMain.total > 1
+        ? `${unitLabel} ${pendingMain.ordinal} de ${pendingMain.total} · quitar / poner / notas`
+        : 'Quitar / poner / notas';
+    return (
+      <TpvItemCustomizeModal
+        item={pendingMain.product}
+        initial={pendingInitial}
+        formatPrice={formatPrice}
+        templates={templates}
+        storeIngredients={storeIngredients}
+        brandIngredientSelection={brandIngredientSelection}
+        brandSupplements={brandSupplements}
+        defaultExtraPrice={defaultExtraPrice}
+        brands={brands}
+        catalogItems={catalogItems}
+        stepHint={label}
+        confirmLabel="Continuar"
+        onClose={handleMainCustomizeClose}
+        onConfirm={handleMainCustomizeConfirm}
+      />
+    );
+  }
 
   return (
     <TpvModalRoot>
@@ -374,6 +550,7 @@ export function TpvComboCustomizeModal({
                         <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
                           Elige {need === 1 ? '1' : need}
                           {section.required ? ' · obligatorio' : ''}
+                          {section.slotKind === 'main' ? ' · luego personaliza' : ''}
                         </p>
                       ) : null}
                     </div>
@@ -399,11 +576,28 @@ export function TpvComboCustomizeModal({
                         <div className="px-3 py-2 flex flex-wrap gap-1.5 bg-white dark:bg-gray-900/40">
                           {picked.map((ref) => (
                             <span
-                              key={ref.productId}
+                              key={refKey(ref)}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-[11px] font-semibold text-emerald-900 dark:text-emerald-100"
                             >
-                              {ref.productName}
-                              {ref.quantity > 1 ? ` ×${ref.quantity}` : ''}
+                              {section.slotKind === 'main' && ref.instanceId ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openMainCustomize(ref, section);
+                                  }}
+                                  className="text-left hover:underline"
+                                  title="Editar quitar / poner / notas"
+                                >
+                                  {ref.productName}
+                                  {ref.quantity > 1 ? ` ×${ref.quantity}` : ''}
+                                </button>
+                              ) : (
+                                <span>
+                                  {ref.productName}
+                                  {ref.quantity > 1 ? ` ×${ref.quantity}` : ''}
+                                </span>
+                              )}
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -444,31 +638,41 @@ export function TpvComboCustomizeModal({
                           </p>
                         ) : (
                           visibleProducts.map((product) => {
-                          const selected = picked.find((r) => r.productId === product._id);
-                          const atMax = need > 0 && have >= need && !selected;
-                          return (
-                            <button
-                              key={product._id}
-                              type="button"
-                              disabled={atMax}
-                              onClick={() => handlePick(section, product)}
-                              className={`min-h-[44px] px-2 py-2 rounded-lg border text-left text-[11px] sm:text-xs font-semibold transition-all touch-manipulation active:scale-[0.98] ${
-                                selected
-                                  ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100'
-                                  : atMax
-                                    ? 'border-gray-100 dark:border-gray-800 text-gray-400 opacity-50 cursor-not-allowed'
-                                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-emerald-400'
-                              }`}
-                            >
-                              <span className="line-clamp-2 leading-snug">{product.name}</span>
-                              {product.category && section.groupByMainFamily ? (
-                                <span className="mt-0.5 block truncate text-[9px] font-medium text-gray-400">
-                                  {product.category}
-                                </span>
-                              ) : null}
-                            </button>
-                          );
-                        })
+                            const selectedCount = picked
+                              .filter((r) => r.productId === product._id)
+                              .reduce((sum, r) => sum + Math.max(1, r.quantity || 1), 0);
+                            const selected = selectedCount > 0;
+                            const atMax =
+                              need > 0 &&
+                              have >= need &&
+                              (section.slotKind === 'main' || !selected);
+                            return (
+                              <button
+                                key={product._id}
+                                type="button"
+                                disabled={atMax}
+                                onClick={() => handlePick(section, product)}
+                                className={`min-h-[44px] px-2 py-2 rounded-lg border text-left text-[11px] sm:text-xs font-semibold transition-all touch-manipulation active:scale-[0.98] ${
+                                  selected
+                                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100'
+                                    : atMax
+                                      ? 'border-gray-100 dark:border-gray-800 text-gray-400 opacity-50 cursor-not-allowed'
+                                      : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-emerald-400'
+                                }`}
+                              >
+                                <span className="line-clamp-2 leading-snug">{product.name}</span>
+                                {selectedCount > 1 ? (
+                                  <span className="mt-0.5 block text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                                    ×{selectedCount}
+                                  </span>
+                                ) : product.category && section.groupByMainFamily ? (
+                                  <span className="mt-0.5 block truncate text-[9px] font-medium text-gray-400">
+                                    {product.category}
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })
                         )}
                       </div>
                     </div>
@@ -488,7 +692,7 @@ export function TpvComboCustomizeModal({
             className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-sm touch-manipulation"
           >
             <Plus className="w-5 h-5" />
-            {menuComplete ? 'Continuar' : 'Completa el menú'}
+            {menuComplete ? 'Añadir al pedido' : 'Completa el menú'}
           </button>
         </div>
       </div>

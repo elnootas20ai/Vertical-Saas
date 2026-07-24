@@ -175,7 +175,7 @@ export function RegisterShiftSalesBreakdown({
   registerSummary?: Pick<TpvRegisterSummary, 'totalSales' | 'totalReturns'>;
 }) {
   const [sectionOpen, setSectionOpen] = useState(true);
-  const [ordersOpen, setOrdersOpen] = useState(true);
+  const [ordersOpen, setOrdersOpen] = useState(false);
 
   const breakdown = useMemo(() => {
     const scoped = filterOrdersForRegisterSession(session, orders);

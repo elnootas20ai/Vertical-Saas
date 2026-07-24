@@ -778,8 +778,10 @@ export function TpvRapidoOrderFlow({
       tabletBinding,
       authUser: user,
       pathname: location.pathname,
+      businesses,
+      businessesSettled: businessesFetchSettled,
     }),
-    [currentBusiness, tabletBinding, user, location.pathname],
+    [currentBusiness, tabletBinding, user, location.pathname, businesses, businessesFetchSettled],
   );
   const isDeliveryBusiness = useMemo(
     () => shouldUseDeliveryStores(
@@ -1623,14 +1625,15 @@ export function TpvRapidoOrderFlow({
     (selections: import('../../lib/deliveryApi').CatalogComboRef[]) => {
       if (!comboTarget) return;
       const customization: CartLineCustomization = {
-        ...(comboTarget.initial ?? EMPTY_CART_CUSTOMIZATION),
+        ...EMPTY_CART_CUSTOMIZATION,
+        notes: String(comboTarget.initial?.notes || '').trim(),
         comboSelections: selections,
       };
       const { item, lineId } = comboTarget;
       setComboTarget(null);
-      setCustomizeTarget({ item, lineId, initial: customization });
+      commitCartLine(item, customization, lineId);
     },
-    [comboTarget],
+    [comboTarget, commitCartLine],
   );
 
   const incrementCartLine = useCallback((lineId: string) => {
@@ -4359,6 +4362,12 @@ export function TpvRapidoOrderFlow({
           catalogItems={catalog}
           initialSelections={comboTarget.initial?.comboSelections}
           formatPrice={formatPrice}
+          templates={tpvCategoryTemplates}
+          brandIngredientSelection={tpvBrandIngredientSelection}
+          brandSupplements={tpvBrandSupplements}
+          storeIngredients={storeIngredients}
+          defaultExtraPrice={tpvDefaultExtraPrice}
+          brands={brands}
           onClose={() => setComboTarget(null)}
           onConfirm={handleComboConfirm}
         />

@@ -49,16 +49,6 @@ export function WorkerTpvBottomBar({
           : 'px-3 py-2.5 flex flex-col gap-2'
       }`}
     >
-      {showStock && (
-        <button
-          type="button"
-          onClick={() => requestTpvStockReviewOpen()}
-          className={`${btnBase} border border-slate-300 dark:border-slate-600 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100`}
-        >
-          <ClipboardCheck className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
-          {compact ? 'Stock' : 'Revisión de stock'}
-        </button>
-      )}
       {showExit && (
         <button
           type="button"
@@ -67,6 +57,16 @@ export function WorkerTpvBottomBar({
         >
           <LogOut className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
           Salir del TPV
+        </button>
+      )}
+      {showStock && (
+        <button
+          type="button"
+          onClick={() => requestTpvStockReviewOpen()}
+          className={`${btnBase} border border-slate-300 dark:border-slate-600 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100`}
+        >
+          <ClipboardCheck className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
+          {compact ? 'Stock' : 'Revisión de stock'}
         </button>
       )}
     </div>

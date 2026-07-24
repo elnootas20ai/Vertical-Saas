@@ -51,6 +51,7 @@ export const SIDEBAR_PLAN_CATALOG: Record<string, SidebarPlanEntry> = {
   'income-expenses': { minPlan: 'normal' },
   ebitda: { minPlan: 'normal' },
   taxes: { minPlan: 'normal' },
+  verifactu: { minPlan: 'normal' },
   reports: { minPlan: 'normal' },
   'sales-metrics': { minPlan: 'normal' },
   commissions: { minPlan: 'normal' },

@@ -1,8 +1,9 @@
 /**
  * Plano de mesas del TPV sala (tras fichaje + caja abierta).
- * Tocar mesa → crea/abre pedido que permanece hasta cobro.
+ * Tocar mesa → abre al instante el TPV core (carta/cobro) de esa mesa.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -26,9 +27,14 @@ import {
 } from '../../lib/salaApi';
 import { ensureOpenDiningOrder, loadOpenDiningOrderForTable } from '../../lib/restaurantDiningTpv';
 import { tableStatusOnOpen } from '../../lib/restaurantTableStatus';
-import { writeSalaTpvOpenTable, consumeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
+import {
+  writeSalaTpvOpenTable,
+  consumeSalaTpvOpenTable,
+  peekSalaTpvOpenTable,
+} from '../../lib/salaTpvLaunch';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { readTpvTabletBinding } from '../../lib/tpvTabletSession';
 import type { SalaRoom } from '../../lib/salaStudioTypes';
 import { SALA_ROOM_TYPE_LABELS } from '../../lib/salaStudioTypes';
 import { resolveTableCapacity } from './tableCapacity';
@@ -142,6 +148,9 @@ export function RestaurantTpvFloorBoard({
   const businessId = resolveBusinessScopeId(currentBusiness) || normalizeBusinessId(currentBusiness?.business_id);
   const actorName =
     String((user as { fullName?: string } | null)?.fullName || user?.name || user?.email || 'TPV sala').trim();
+  // Código de tienda / tablet: solo operar el TPV. Cambiar local e Ir a Sala son de CEO.
+  const isTabletOrCodeSession = tabletMode || Boolean(readTpvTabletBinding()?.pdvId);
+  const showCeoFloorActions = !isTabletOrCodeSession;
 
   const [loading, setLoading] = useState(true);
   const [rooms, setRooms] = useState<SalaRoom[]>([]);
@@ -152,7 +161,6 @@ export function RestaurantTpvFloorBoard({
   const [busyId, setBusyId] = useState('');
   const [activeTable, setActiveTable] = useState<DiningTable | RestaurantTableContext | null>(null);
   const [activeOrder, setActiveOrder] = useState<DiningOrder | null>(null);
-  const [opening, setOpening] = useState(false);
   const autoOpenDoneRef = useRef(false);
 
   const urlTableId = String(searchParams.get('mesa') || '').trim();
@@ -226,26 +234,38 @@ export function RestaurantTpvFloorBoard({
       setActiveOrder(order);
       setSeatTable(null);
       setReservedTable(null);
-      setOpening(false);
       setBusyId('');
       clearMesaParam();
     },
     [clearMesaParam],
   );
 
+  /**
+   * MVP: abrir el TPV core al instante (carta), y sincronizar cuenta/estado en segundo plano.
+   * No bloquear la UI en “Abriendo…” si la API va lenta o falla.
+   */
   const openAccount = useCallback(
     async (table: DiningTable, guests?: number) => {
       const tableId = String(table._id || table.id || '').trim();
-      if (!userId || !businessId || !tableId) {
+      if (!tableId) {
         toast.error('No se puede abrir la mesa');
         return;
       }
+      const guestCount =
+        guests
+        ?? (table.currentGuests > 0 ? table.currentGuests : Math.min(2, resolveTableCapacity(table)));
+
+      // 1) Carta YA (mismo TPV funcional que core).
+      openOrderPanel(table, null);
       setBusyId(tableId);
-      setOpening(true);
+
+      if (!userId || !businessId) {
+        toast.error('Falta sesión de empresa para guardar la cuenta de la mesa');
+        setBusyId('');
+        return;
+      }
+
       try {
-        const guestCount =
-          guests
-          ?? (table.currentGuests > 0 ? table.currentGuests : Math.min(2, resolveTableCapacity(table)));
         const order = await ensureOpenDiningOrder({
           userId,
           businessId,
@@ -260,59 +280,58 @@ export function RestaurantTpvFloorBoard({
 
         let nextTable = table;
         if (!isOccupiedStatus(table.status) || guests != null) {
-          const nextStatus = tableStatusOnOpen(table.status);
-          nextTable = await changeTableStatusRequest(userId, tableId, nextStatus, {
-            currentGuests: guestCount,
-          });
-          setTables((prev) => patchTableList(prev, nextTable));
+          try {
+            const nextStatus = tableStatusOnOpen(table.status);
+            nextTable = await changeTableStatusRequest(userId, tableId, nextStatus, {
+              currentGuests: guestCount,
+            });
+            setTables((prev) => patchTableList(prev, nextTable));
+          } catch {
+            /* la carta ya está abierta */
+          }
         }
 
         const fresh = (await loadOpenDiningOrderForTable(userId, tableId)) || order;
         writeSalaTpvOpenTable({ tableId, orderId: fresh._id });
-        openOrderPanel(nextTable, fresh);
+        setActiveTable(nextTable);
+        setActiveOrder(fresh);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'No se pudo abrir el pedido de la mesa');
-        // Aun así abrimos el TPV de carta para no dejar la mesa “muerta”.
-        openOrderPanel(table, null);
+        toast.error(err instanceof Error ? err.message : 'No se pudo crear la cuenta de la mesa');
       } finally {
         setBusyId('');
-        setOpening(false);
       }
     },
     [userId, businessId, actorName, activeRoom?.name, openOrderPanel],
   );
 
-  // Abrir mesa desde URL (?mesa=) o launch token de Sala (una sola vez).
+  // Abrir mesa desde URL (?mesa=) o launch token de Sala.
   useEffect(() => {
-    if (autoOpenDoneRef.current || loading || opening || activeOrder || !userId || tables.length === 0) {
+    if (autoOpenDoneRef.current || loading || activeTable || !userId || tables.length === 0) {
       return;
     }
-    const fromLaunch = consumeSalaTpvOpenTable()?.tableId || '';
-    const tableId = urlTableId || fromLaunch;
+    const peeked = peekSalaTpvOpenTable()?.tableId || '';
+    const tableId = urlTableId || peeked;
     if (!tableId) {
-      autoOpenDoneRef.current = true;
       return;
     }
     const match = tables.find((t) => String(t._id || t.id) === tableId);
     if (!match) {
-      autoOpenDoneRef.current = true;
-      clearMesaParam();
+      // Mesas aún no cargadas / otro local: no consumir el token ni borrar ?mesa=.
       return;
     }
     autoOpenDoneRef.current = true;
-    if (match.status === 'available') {
-      setSeatTable(match);
-      return;
-    }
+    consumeSalaTpvOpenTable();
+    // Libre u ocupada: abrir TPV core al momento (comensales por defecto si está libre).
     void openAccount(match);
-  }, [loading, opening, activeOrder, userId, tables, urlTableId, openAccount, clearMesaParam]);
+  }, [loading, activeTable, userId, tables, urlTableId, openAccount]);
 
   const handleTableClick = (table: DiningTable) => {
     const tableId = String(table._id || table.id || '').trim();
-    if (!tableId || busyId === tableId || opening) return;
+    if (!tableId || busyId === tableId || Boolean(activeTable)) return;
 
+    // Mesa libre (como Mesa 1): un click → TPV core (carta). Sin modal previo.
     if (table.status === 'available') {
-      setSeatTable(table);
+      void openAccount(table);
       return;
     }
     if (table.status === 'reserved') {
@@ -336,9 +355,8 @@ export function RestaurantTpvFloorBoard({
       })();
       return;
     }
-    if (isOccupiedStatus(table.status)) {
-      void openAccount(table);
-    }
+    // Ocupada / cuenta / cualquier otro estado operativo → TPV core.
+    void openAccount(table);
   };
 
   const handleBackFromAccount = () => {
@@ -351,10 +369,10 @@ export function RestaurantTpvFloorBoard({
     openOrderPanel(buildCounterTableContext(), null);
   };
 
-  // Panel TPV (carta) — pantalla completa encima del plano
+  // Panel TPV core (carta) — portal a body para no quedar atrapado por overflow/z-index del gate.
   if (activeTable) {
-    return (
-      <div className="fixed inset-0 z-[90] flex min-h-0 flex-col bg-gray-50 dark:bg-gray-950">
+    return createPortal(
+      <div className="fixed inset-0 z-[200] flex min-h-0 flex-col bg-gray-50 dark:bg-gray-950">
         <RestaurantTpvTableAccount
           userId={userId}
           table={activeTable}
@@ -370,18 +388,17 @@ export function RestaurantTpvFloorBoard({
             }
           }}
         />
-      </div>
+      </div>,
+      document.body,
     );
   }
 
-  if (loading || opening) {
+  if (loading) {
     return (
       <div className="flex h-full min-h-0 flex-1 items-center justify-center bg-stone-100 dark:bg-stone-950">
         <div className="px-6 text-center">
           <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-stone-400" />
-          <p className="text-sm text-stone-500">
-            {opening ? 'Abriendo TPV…' : 'Cargando plano de mesas…'}
-          </p>
+          <p className="text-sm text-stone-500">Cargando plano de mesas…</p>
         </div>
       </div>
     );
@@ -402,25 +419,27 @@ export function RestaurantTpvFloorBoard({
               Toca una mesa o el mostrador para abrir el TPV (carta)
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {!tabletMode && onChangeStore && (
+          {showCeoFloorActions ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {onChangeStore ? (
+                <button
+                  type="button"
+                  onClick={onChangeStore}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
+                >
+                  <ArrowLeftRight className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Cambiar local
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={onChangeStore}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
+                onClick={() => navigate('/saas/sala')}
+                className="rounded-xl border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
               >
-                <ArrowLeftRight className="h-3.5 w-3.5" strokeWidth={1.75} />
-                Cambiar local
+                Ir a Sala
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => navigate('/saas/sala')}
-              className="rounded-xl border border-stone-200 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-200 dark:hover:bg-stone-800"
-            >
-              Ir a Sala
-            </button>
-          </div>
+            </div>
+          ) : null}
         </div>
       </header>
 
@@ -432,7 +451,9 @@ export function RestaurantTpvFloorBoard({
               Aún no hay mesas en este local
             </p>
             <p className="mt-1 max-w-sm text-sm text-stone-500">
-              Puedes cobrar ya en el mostrador, o configurar mesas en Sala.
+              {showCeoFloorActions
+                ? 'Puedes cobrar ya en el mostrador, o configurar mesas en Sala.'
+                : 'Puedes cobrar ya en el mostrador.'}
             </p>
             <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
               <button
@@ -442,13 +463,15 @@ export function RestaurantTpvFloorBoard({
               >
                 Abrir TPV mostrador
               </button>
-              <button
-                type="button"
-                onClick={() => navigate('/saas/sala')}
-                className="rounded-xl border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 dark:border-stone-700 dark:text-stone-200"
-              >
-                Configurar Sala
-              </button>
+              {showCeoFloorActions ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/saas/sala')}
+                  className="rounded-xl border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 dark:border-stone-700 dark:text-stone-200"
+                >
+                  Configurar Sala
+                </button>
+              ) : null}
             </div>
           </div>
         ) : (
@@ -518,7 +541,7 @@ export function RestaurantTpvFloorBoard({
                   const ui = STATUS_UI[table.status] || STATUS_UI.available;
                   const capacity = resolveTableCapacity(table);
                   const tableId = String(table._id || table.id || '');
-                  const busy = busyId === tableId || opening;
+                  const busy = busyId === tableId;
                   return (
                     <button
                       key={tableId}
@@ -551,59 +574,63 @@ export function RestaurantTpvFloorBoard({
         )}
       </div>
 
-      {seatTable && (
-        <RestaurantSeatGuestsModal
-          tableLabel={seatTable.name || `Mesa ${seatTable.number}`}
-          capacity={resolveTableCapacity(seatTable)}
-          defaultGuests={Math.min(2, resolveTableCapacity(seatTable))}
-          onCancel={() => {
-            setSeatTable(null);
-            clearMesaParam();
-          }}
-          onConfirm={(guests) => void openAccount(seatTable, guests)}
-        />
-      )}
+      {seatTable
+        && createPortal(
+          <RestaurantSeatGuestsModal
+            tableLabel={seatTable.name || `Mesa ${seatTable.number}`}
+            capacity={resolveTableCapacity(seatTable)}
+            defaultGuests={Math.min(2, resolveTableCapacity(seatTable))}
+            onCancel={() => {
+              setSeatTable(null);
+              clearMesaParam();
+            }}
+            onConfirm={(guests) => void openAccount(seatTable, guests)}
+          />,
+          document.body,
+        )}
 
-      {reservedTable && (
-        <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-5 dark:border-stone-700 dark:bg-stone-900">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-stone-900 dark:text-stone-50">
-                  {reservedTable.name || `Mesa ${reservedTable.number}`}
-                </h2>
-                <p className="text-sm text-stone-500">Mesa reservada</p>
+      {reservedTable
+        && createPortal(
+          <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+            <div className="w-full max-w-sm rounded-xl border border-stone-200 bg-white p-5 dark:border-stone-700 dark:bg-stone-900">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold text-stone-900 dark:text-stone-50">
+                    {reservedTable.name || `Mesa ${reservedTable.number}`}
+                  </h2>
+                  <p className="text-sm text-stone-500">Mesa reservada</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setReservedTable(null)}
+                  className="rounded-lg p-1 text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setReservedTable(null)}
-                className="rounded-lg p-1 text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSeatTable(reservedTable);
+                    setReservedTable(null);
+                  }}
+                  className="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white"
+                >
+                  Sentar y abrir pedido
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReservedTable(null)}
+                  className="w-full rounded-xl border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 dark:border-stone-700 dark:text-stone-200"
+                >
+                  Cancelar
+                </button>
+              </div>
             </div>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setSeatTable(reservedTable);
-                  setReservedTable(null);
-                }}
-                className="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white"
-              >
-                Sentar y abrir pedido
-              </button>
-              <button
-                type="button"
-                onClick={() => setReservedTable(null)}
-                className="w-full rounded-xl border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 dark:border-stone-700 dark:text-stone-200"
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

@@ -88,6 +88,7 @@ export function Login() {
           workCenterId: terminalBinding.workCenterId,
           businessId: terminalBinding.businessId,
           dataUserId: terminalBinding.dataUserId,
+          authUserId: String(user?.user_id || '').trim() || undefined,
           tpvVertical: terminalBinding.tpvVertical || 'delivery',
           salaTerminalId: terminalBinding.salaTerminalId,
           pdvName: pdv?.name,

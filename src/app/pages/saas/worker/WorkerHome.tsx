@@ -55,6 +55,7 @@ import {
   formatMinutes,
 } from '../../../lib/clockinsApi';
 import { useGeolocation, isMobileDevice } from '../../../hooks/useGeolocation';
+import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
 import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 
 interface QuickAction {
@@ -121,6 +122,7 @@ export function WorkerHome() {
   const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
+  const { canClockInEntry, loading: storeLoading } = useWorkerAssignedStore();
 
   const [record, setRecord] = useState<ClockinRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -168,7 +170,7 @@ export function WorkerHome() {
   }, [isClockedIn]);
 
   const handleClockIn = async () => {
-    if (acting || !businessId || !memberId) return;
+    if (acting || !businessId || !memberId || !canClockInEntry) return;
     setActing(true);
     setError('');
     try {
@@ -311,16 +313,23 @@ export function WorkerHome() {
             </div>
 
             {!loading && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col items-stretch sm:items-end gap-2">
                 {!isClockedIn && !isCompleted && (
-                  <button
-                    onClick={handleClockIn}
-                    disabled={acting}
-                    className="flex items-center gap-3 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 bg-white text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
-                  >
-                    {acting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-                    {t('worker.home.clockIn')}
-                  </button>
+                  <>
+                    <button
+                      onClick={handleClockIn}
+                      disabled={acting || storeLoading || !canClockInEntry}
+                      className="flex items-center gap-3 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 bg-white text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {acting || storeLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
+                      {t('worker.home.clockIn')}
+                    </button>
+                    {!storeLoading && !canClockInEntry ? (
+                      <p className="text-white/70 text-xs max-w-[220px] sm:text-right">
+                        Sin tienda o local asignado. Pide a tu gerente que te asigne uno en Equipo.
+                      </p>
+                    ) : null}
+                  </>
                 )}
 
                 {isClockedIn && (

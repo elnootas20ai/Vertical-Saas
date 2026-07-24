@@ -58,10 +58,37 @@ export function pizzaUnitsFromProductLabel(
   const blob = `${fold(category || '')} ${fold(name || '')}`.trim();
   if (!blob) return null;
   // Familiar primero: más específico que un “combo” genérico.
-  if (/\bfamiliar\b/.test(blob)) return 3;
+  if (/\bfamiliar\b|\bfamily\b/.test(blob)) return 3;
   if (/\bduos?\b/.test(blob)) return 2;
-  if (/\bindividual(es)?\b/.test(blob)) return 1;
+  if (/\bindividual(es)?\b|\bestandar\b/.test(blob)) return 1;
   return null;
+}
+
+/** Líneas `▸ Margarita` / `▸ Margarita ×2` guardadas en extras del combo TPV. */
+export function parseComboExtraLine(raw: string): { name: string; units: number } | null {
+  let s = String(raw || '').trim();
+  if (!s.startsWith('▸') && !s.startsWith('>')) return null;
+  s = s.replace(/^[▸>]\s*/, '').trim();
+  if (!s) return null;
+  const m = s.match(/^(.*?)\s*[×x]\s*(\d+)\s*$/i);
+  if (m) {
+    const name = m[1].trim();
+    if (!name) return null;
+    return { name, units: Math.max(1, Number(m[2]) || 1) };
+  }
+  return { name: s, units: 1 };
+}
+
+function isLikelyNonMainComboExtra(name: string): boolean {
+  const n = fold(name);
+  return /bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|patata|frita|complemento|acompan|postre|helado|nugget|alita|ensalada|salad|dip|salsa|brownie|cookie|batido|smoothie|zumo|nestea|aquarius|red.?bull|monster|maiz|pan\b|aros/.test(
+    n,
+  );
+}
+
+function looksLikeMenuProduct(category: string | undefined, name: string | undefined): boolean {
+  const blob = fold(`${category || ''} ${name || ''}`);
+  return /menu|combo|menus|combos|individual|duo|familiar|family|estandar/.test(blob);
 }
 
 function addCounts(target: FoodFamilyCounts, key: FoodFamilyKey, qty: number): void {
@@ -81,10 +108,55 @@ function countItem(item: DeliveryOrderItem): FoodFamilyCounts {
   const out = emptyFoodFamilyCounts();
   const qty = Number(item.quantity || 0);
   if (qty <= 0) return out;
+
   const family = classifyFoodFamily(item.category, item.name);
   const sizeUnits = pizzaUnitsFromProductLabel(item.category, item.name);
-  // Menús Individual / Dúo / Familiar cuentan pizzas reales (1 / 2 / 3),
-  // aunque la categoría sea “Combos” y no diga “pizza”. No pisar burgers/tacos.
+  const extras = Array.isArray(item.extras) ? item.extras : [];
+  const comboParts = extras
+    .map((raw) => parseComboExtraLine(raw))
+    .filter((p): p is { name: string; units: number } => Boolean(p));
+
+  // Menús TPV: las pizzas reales van en extras (▸ Pizza), no en el nombre del combo.
+  if (comboParts.length > 0) {
+    const pizzaMenu =
+      sizeUnits != null ||
+      family === 'pizza' ||
+      (looksLikeMenuProduct(item.category, item.name) && family !== 'burger');
+    const burgerMenu = family === 'burger';
+
+    for (const part of comboParts) {
+      if (isLikelyNonMainComboExtra(part.name)) continue;
+      const partFamily = classifyFoodFamily('', part.name);
+      if (partFamily === 'taco') {
+        addCounts(out, 'taco', part.units * qty);
+        continue;
+      }
+      if (partFamily === 'burger') {
+        addCounts(out, 'burger', part.units * qty);
+        continue;
+      }
+      if (partFamily === 'pizza') {
+        addCounts(out, 'pizza', part.units * qty);
+        continue;
+      }
+      // Margarita, Pepperoni… sin la palabra “pizza”: cuentan como principal del menú.
+      if (burgerMenu) addCounts(out, 'burger', part.units * qty);
+      else if (pizzaMenu) addCounts(out, 'pizza', part.units * qty);
+    }
+
+    // Fallback: Individual/Dúo/Familiar sin extras de pizza (pedidos viejos / apps).
+    if (
+      out.pizza === 0 &&
+      out.burger === 0 &&
+      sizeUnits != null &&
+      family !== 'burger' &&
+      family !== 'taco'
+    ) {
+      addCounts(out, 'pizza', sizeUnits * qty);
+    }
+    return out;
+  }
+
   if (sizeUnits != null && family !== 'burger' && family !== 'taco') {
     addCounts(out, 'pizza', qty * sizeUnits);
     return out;

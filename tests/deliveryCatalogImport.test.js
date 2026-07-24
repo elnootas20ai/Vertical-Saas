@@ -481,4 +481,44 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(normalizeImportCategory('menú')).toBe('Combos');
     expect(isImportComboCategory('Combos')).toBe(true);
   });
+
+  it('restaurant import: IVA 10% y combos de bar (plato/tapa)', async () => {
+    const {
+      mapImportEntryToCatalogItem,
+      resolveImportTaxRate,
+      resolveImportComboStructure,
+    } = await import('../src/app/lib/deliveryCatalogImport.ts');
+    const { normalizeImportCategory } = await import(
+      '../src/app/lib/deliveryCatalogImportLogic.ts',
+    );
+
+    expect(normalizeImportCategory('bocadillo')).toBe('Bocadillos');
+    expect(normalizeImportCategory('pinchos')).toBe('Pinchos');
+    expect(resolveImportTaxRate({}, 'restaurant')).toBe(10);
+    expect(resolveImportTaxRate({ iva: '21' }, 'restaurant')).toBe(21);
+    expect(resolveImportTaxRate({}, 'delivery')).toBe(21);
+
+    const brands = [
+      { _id: 'bode', name: 'La Bodegeta', active: true, catalogCategories: ['Tapas'] },
+    ];
+    const tapa = await mapImportEntryToCatalogItem(
+      { name: 'Bravas', category: 'Tapas', linea: 'La Bodegeta', price: '4,50' },
+      { businessId: 'biz-rest', brandCache: brands, vertical: 'restaurant' },
+    );
+    expect(tapa?.item.taxRate).toBe(10);
+    expect(tapa?.item.vertical).toBe('restaurant');
+    expect(tapa?.item.unitPrice).toBe(4.5);
+
+    const combo = await mapImportEntryToCatalogItem(
+      { name: 'Menú del día', category: 'Combos', linea: 'La Bodegeta', price: '12' },
+      { businessId: 'biz-rest', brandCache: brands, vertical: 'restaurant' },
+    );
+    expect(combo?.item.itemType).toBe('combo');
+    expect(combo?.item.taxRate).toBe(10);
+    const main = combo?.item.customFields?.comboStructure?.find((s) => s.slotKind === 'main');
+    expect(main?.label).toMatch(/plato|tapa/i);
+
+    const structure = resolveImportComboStructure({ name: 'Menú casa' }, { vertical: 'restaurant' });
+    expect(structure.some((s) => s.slotKind === 'main' && /plato|tapa/i.test(s.label))).toBe(true);
+  });
 });

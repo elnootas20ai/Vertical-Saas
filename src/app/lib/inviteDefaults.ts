@@ -94,6 +94,7 @@ export function getDefaultInviteLandingPage(
   }
   if (isRestaurantBusinessType(businessType)) {
     if (role === 'Cocina') return '/saas/cocina';
+    if (role === 'Mostrador / Atención' || role === 'Encargado') return '/saas/sala';
     return WORKER_DEFAULT_LANDING_PATH;
   }
   return WORKER_DEFAULT_LANDING_PATH;

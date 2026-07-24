@@ -54,15 +54,20 @@ export function useWorkerAssignedStore() {
       (salesPointRef && !salesPointRef.startsWith('wc:') ? salesPointRef : '') ||
       '';
 
+    const hasAssignment = Boolean(salesPointRef);
+    /** Entrada de fichaje solo con tienda/local asignado en Equipo. */
+    const canClockInEntry = !loading && hasAssignment;
+
     return {
       isDelivery,
       loading,
       workCenter,
       storeLabel,
       assignedPdvId,
-      hasAssignment: Boolean(salesPointRef && workCenter),
-      /** Horario / tienda visible si hay centro o es delivery. */
-      showStoreBlock: isDelivery || pool.length > 0 || Boolean(salesPointRef),
+      hasAssignment,
+      canClockInEntry,
+      /** Mostrar bloque de tienda/horario, o aviso si falta asignación. */
+      showStoreBlock: isDelivery || pool.length > 0 || hasAssignment || !loading,
     };
   }, [
     isDelivery,

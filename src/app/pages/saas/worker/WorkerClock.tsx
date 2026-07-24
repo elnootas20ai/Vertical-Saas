@@ -33,7 +33,7 @@ export function WorkerClock() {
   const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
-  const { showStoreBlock, workCenter, storeLabel, assignedPdvId } = useWorkerAssignedStore();
+  const { showStoreBlock, workCenter, storeLabel, assignedPdvId, canClockInEntry, loading: storeLoading } = useWorkerAssignedStore();
 
   const storeContext = useMemo(
     () =>
@@ -173,16 +173,23 @@ export function WorkerClock() {
               </p>
             )}
 
-            <div className="flex items-center justify-center gap-3 mt-6">
+            <div className="flex flex-col items-center justify-center gap-2 mt-6">
               {!isClockedIn ? (
-                <button
-                  onClick={() => void handleClockIn()}
-                  disabled={acting || (record?.status === 'completed')}
-                  className="flex items-center gap-3 px-8 py-4 bg-white text-emerald-600 rounded-2xl font-bold text-lg shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100"
-                >
-                  {acting ? <Loader2 className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6" />}
-                  {t('worker.clock.clockIn', 'Fichar entrada')}
-                </button>
+                <>
+                  <button
+                    onClick={() => void handleClockIn()}
+                    disabled={acting || storeLoading || !canClockInEntry || (record?.status === 'completed')}
+                    className="flex items-center gap-3 px-8 py-4 bg-white text-emerald-600 rounded-2xl font-bold text-lg shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
+                  >
+                    {acting || storeLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6" />}
+                    {t('worker.clock.clockIn', 'Fichar entrada')}
+                  </button>
+                  {!storeLoading && !canClockInEntry && record?.status !== 'completed' ? (
+                    <p className="text-white/70 text-xs max-w-xs">
+                      Sin tienda o local asignado. Pide a tu gerente que te asigne uno en Equipo para poder fichar.
+                    </p>
+                  ) : null}
+                </>
               ) : (
                 <>
                   <button

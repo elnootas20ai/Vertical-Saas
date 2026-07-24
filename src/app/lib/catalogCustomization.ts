@@ -1732,8 +1732,12 @@ function round2(n: number): number {
 }
 
 export function cartLineUnitPrice(baseUnitPrice: number, customization: CartLineCustomization): number {
-  const extras = customization.addedSupplements.reduce((sum, s) => sum + Number(s.price || 0), 0);
-  return round2(Number(baseUnitPrice || 0) + extras);
+  const lineExtras = customization.addedSupplements.reduce((sum, s) => sum + Number(s.price || 0), 0);
+  const comboExtras = (customization.comboSelections ?? []).reduce((sum, ref) => {
+    const unitExtras = (ref.addedSupplements ?? []).reduce((s, x) => s + Number(x.price || 0), 0);
+    return sum + unitExtras * Math.max(1, Number(ref.quantity) || 1);
+  }, 0);
+  return round2(Number(baseUnitPrice || 0) + lineExtras + comboExtras);
 }
 
 export function cartLineTotal(
@@ -1751,7 +1755,12 @@ export function customizationSignature(customization: CartLineCustomization): st
     .sort()
     .join('|');
   const combo = (customization.comboSelections ?? [])
-    .map((c) => `${c.productId}:${c.quantity}`)
+    .map((c) => {
+      const rem = [...(c.removedIngredients ?? [])].sort().join(',');
+      const add = [...(c.addedSupplements ?? [])].map((s) => s.id).sort().join(',');
+      const notes = String(c.notes || '').trim();
+      return `${c.instanceId || c.productId}:${c.quantity}:${rem}:${add}:${notes}`;
+    })
     .sort()
     .join('|');
   const half = customization.halfHalfPizza
@@ -1772,6 +1781,16 @@ export function buildOrderExtras(customization: CartLineCustomization): string[]
     const label = String(ref.productName || '').trim();
     if (!label) continue;
     out.push(`▸ ${label}${ref.quantity > 1 ? ` ×${ref.quantity}` : ''}`);
+    for (const s of ref.addedSupplements ?? []) {
+      const name = String(s.name || '').trim();
+      if (name) out.push(`+ ${name}`);
+    }
+    for (const ing of ref.removedIngredients ?? []) {
+      const name = String(ing || '').trim();
+      if (name) out.push(`- sin ${name}`);
+    }
+    const notes = String(ref.notes || '').trim();
+    if (notes) out.push(`· ${notes}`);
   }
   for (const ing of customization.addedBaseIngredients ?? []) {
     out.push(`+ ${ing}`);

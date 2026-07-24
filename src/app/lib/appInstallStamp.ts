@@ -95,8 +95,8 @@ export function mustForceFreshLogin(): boolean {
 }
 
 /**
- * Si la app cambió de versión/build/bundle, borra sesión, tokens y “recordarme”
- * y notifica logout al servidor. Debe ejecutarse ANTES de montar AuthProvider.
+ * Si la app cambió de versión/build/bundle, borra sesión y fuerza login.
+ * Debe ejecutarse ANTES de montar AuthProvider.
  * @returns true si se forzó login limpio
  */
 async function logoutWithTimeout(ms = 2500): Promise<void> {
@@ -142,9 +142,12 @@ export async function enforceFreshLoginOnAppUpdate(): Promise<boolean> {
   });
 
   if (wipe) {
+    // Primero marcar force-fresh para que Auth no rehidrate ni con basura.
+    markForceFreshLogin();
     // No bloquear el arranque de la app si la red va mal.
     await logoutWithTimeout(2500);
     clearVertialClientCachesForAppUpdate();
+    // Reafirmar tras el wipe (clearCaches no borra esta clave).
     markForceFreshLogin();
   }
 

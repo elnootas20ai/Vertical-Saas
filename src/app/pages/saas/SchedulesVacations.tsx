@@ -21,7 +21,7 @@ import {
 } from '../../lib/schedulesApi';
 
 import type { VacationRequest, VacationSettings, LeaveType, VacationStatus } from '../../lib/vacationsApi';
-import { listVacations, createVacationRequest, reviewVacation, deleteVacation, getSettings, saveSettings, getDaysUsed, getDaysAllowed, countBusinessDays, LEAVE_TYPE_LABELS, STATUS_LABELS } from '../../lib/vacationsApi';
+import { listVacations, createVacationRequest, reviewVacation, deleteVacation, getSettings, saveSettings, getDaysUsed, getDaysAllowed, countVacationRequestDays, LEAVE_TYPE_LABELS, STATUS_LABELS } from '../../lib/vacationsApi';
 
 import type { CompanyHoliday, HolidayScope } from '../../lib/companyHolidaysApi';
 import { listCompanyHolidays, saveCompanyHoliday, deleteCompanyHoliday, importPresetHolidays, SCOPE_LABELS } from '../../lib/companyHolidaysApi';
@@ -291,7 +291,7 @@ export function SchedulesVacations() {
     e.preventDefault(); if (!businessId || !user) return;
     if (!vacFormData.startDate || !vacFormData.endDate) { setError('Selecciona las fechas'); return; }
     setSaving(true); setError('');
-    try { await createVacationRequest(businessId, user.user_id, user.fullName || user.email, vacFormData); flash('Solicitud enviada'); setShowVacForm(false); setVacFormData({ startDate: '', endDate: '', leaveType: 'vacation', notes: '' }); await loadData(); }
+    try { await createVacationRequest(businessId, user.user_id, user.fullName || user.email, vacFormData, vacSettings); flash('Solicitud enviada'); setShowVacForm(false); setVacFormData({ startDate: '', endDate: '', leaveType: 'vacation', notes: '' }); await loadData(); }
     catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
@@ -457,6 +457,11 @@ export function SchedulesVacations() {
             onReview={handleVacReview}
             onDelete={(r) => deleteVacation(r).then(loadData)}
             onRequest={() => setShowVacForm(true)}
+            onSaveSettings={async (next) => {
+              const saved = await saveSettings(next);
+              setVacSettings(saved);
+              flash('Política de vacaciones guardada');
+            }}
           />
         )}
 
@@ -605,7 +610,7 @@ export function SchedulesVacations() {
           <form onSubmit={handleVacSubmit} className="space-y-4">
             <div><label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label><select value={vacFormData.leaveType} onChange={e => setVacFormData({ ...vacFormData, leaveType: e.target.value as LeaveType })} className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none">{(Object.keys(leaveLabels) as LeaveType[]).map(lt => <option key={lt} value={lt}>{leaveLabels[lt]}</option>)}</select></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium text-gray-500 block mb-1">Desde</label><input type="date" value={vacFormData.startDate} onChange={e => setVacFormData({ ...vacFormData, startDate: e.target.value })} className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none" required /></div><div><label className="text-xs font-medium text-gray-500 block mb-1">Hasta</label><input type="date" value={vacFormData.endDate} onChange={e => setVacFormData({ ...vacFormData, endDate: e.target.value })} className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none" required /></div></div>
-            {vacFormData.startDate && vacFormData.endDate && vacFormData.startDate <= vacFormData.endDate && <p className="text-sm text-gray-500"><span className="font-semibold">{countBusinessDays(vacFormData.startDate, vacFormData.endDate)}</span> días laborables</p>}
+            {vacFormData.startDate && vacFormData.endDate && vacFormData.startDate <= vacFormData.endDate && <p className="text-sm text-gray-500"><span className="font-semibold">{countVacationRequestDays(vacFormData.startDate, vacFormData.endDate, vacSettings)}</span> día(s) según política</p>}
             <div><label className="text-xs font-medium text-gray-500 block mb-1">Notas</label><textarea value={vacFormData.notes} onChange={e => setVacFormData({ ...vacFormData, notes: e.target.value })} rows={2} placeholder="Opcional..." className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 placeholder:text-gray-400 outline-none" /></div>
             <button type="submit" disabled={saving} className="w-full flex items-center justify-center gap-2 py-3 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-xl disabled:opacity-50 shadow-lg shadow-amber-600/25">{saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}Enviar</button>
           </form>

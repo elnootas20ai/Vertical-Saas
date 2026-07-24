@@ -47,6 +47,7 @@ import { clientsRouter } from './routers/clientsRouter.js';
 import { financeRouter } from './routers/financeRouter.js';
 import { bankReconciliationRouter } from './routers/bankReconciliationRouter.js';
 import { invoicesRouter } from './routers/invoicesRouter.js';
+import { verifactuRouter } from './routers/verifactuRouter.js';
 import { documentsRouter } from './routers/documentsRouter.js';
 import { locationsRouter } from './routers/locationsRouter.js';
 import { emailRouter } from './routers/emailRouter.js';
@@ -1017,6 +1018,7 @@ const internalRouters = [
   ['/api/finance',               ...saasAuthGate, financeRouter],
   ['/api/bank-reconciliation',   ...saasAuthGate, bankReconciliationRouter],
   ['/api/invoices',              ...saasAuthGate, invoicesRouter],
+  ['/api/verifactu',             ...saasAuthGate, verifactuRouter],
   ['/api/documents',     ...saasAuthGate, documentsRouter],
   ['/api/locations',     ...saasAuthGate, locationsRouter],
   ['/api/workshop',      ...saasAuthGate, workshopRouter],

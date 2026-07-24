@@ -24,7 +24,10 @@ import { ScrapyardProvider } from '../context/ScrapyardContext';
 
 import { useAuth } from '../context/AuthContext';
 import {
+  isTpvTabletAllowedPath,
   isTpvTabletSaasSession,
+  isTpvTabletTerminalBound,
+  resolveTpvTabletWorkerPath,
 } from '../lib/tpvTabletSession';
 import { isWorkerAccount } from '../lib/authApi';
 import {
@@ -95,6 +98,7 @@ function SaasContent() {
 
   const navigate = useNavigate();
   const tpvTabletSaasSession = isTpvTabletSaasSession(location.pathname);
+  const tpvTabletLocked = isTpvTabletTerminalBound();
 
   const [isAutoCreating, setIsAutoCreating] = useState(false);
 
@@ -112,6 +116,14 @@ function SaasContent() {
     }
 
   }, [isAuthenticated, isInitializing, navigate]);
+
+  // Código TPV activo → solo tienda/TPV. Nunca cuenta personal ni dashboard SaaS.
+  useEffect(() => {
+    if (isInitializing || !isAuthenticated) return;
+    if (!tpvTabletLocked) return;
+    if (isTpvTabletAllowedPath(location.pathname)) return;
+    navigate(resolveTpvTabletWorkerPath(), { replace: true });
+  }, [isInitializing, isAuthenticated, tpvTabletLocked, location.pathname, navigate]);
 
   useEffect(() => {
     if (!isAuthenticated || isInitializing) return;
@@ -214,6 +226,7 @@ function SaasContent() {
       autoCreateAttempted.current ||
       isUserAccount ||
       tpvTabletSaasSession ||
+      tpvTabletLocked ||
       shouldBlockSaasAccess(subscription.status, subscription)
     ) {
       return;
@@ -344,6 +357,8 @@ function SaasContent() {
 
     tpvTabletSaasSession,
 
+    tpvTabletLocked,
+
     subscription.status,
 
     subscription.billingExempt,
@@ -386,13 +401,14 @@ function SaasContent() {
     || location.pathname === '/saas/invitations'
     || billingRecoveryMode
     || tpvTabletSaasSession
+    || tpvTabletLocked
     || (unlinkedWorkerNeedsCompany && isWorkerUnlinkedAllowedPath(location.pathname))
     || (isLinkedWorker && location.pathname.startsWith('/saas/worker'));
 
   useEffect(() => {
     if (isInitializing || !isAuthenticated || !user) return;
     if (isUserAccount || isLinkedWorker) return;
-    if (tpvTabletSaasSession) return;
+    if (tpvTabletSaasSession || tpvTabletLocked) return;
     if (billingRecoveryMode) return;
     if (!businessesFetchSettled || isLoadingBusinesses) return;
     if (businesses.length > 0) return;
@@ -405,6 +421,7 @@ function SaasContent() {
     isUserAccount,
     isLinkedWorker,
     tpvTabletSaasSession,
+    tpvTabletLocked,
     billingRecoveryMode,
     businessesFetchSettled,
     isLoadingBusinesses,

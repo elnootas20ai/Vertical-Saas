@@ -75,6 +75,38 @@ describe('buildShiftFoodFamilyReport', () => {
     expect(report.byChannel.tpv.pizza).toBe(12);
   });
 
+  it('cuenta pizzas reales desde extras ▸ del combo (aunque el nombre no diga Individual)', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 'e1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          {
+            name: 'Menú',
+            category: 'Combos',
+            quantity: 1,
+            extras: ['▸ Margarita', '▸ Patatas', '▸ Coca Cola'],
+          },
+          {
+            name: 'Menú Duo',
+            category: 'Menús',
+            quantity: 1,
+            extras: ['▸ Pepperoni', '▸ Cuatro quesos', '▸ Agua', '▸ Fanta'],
+          },
+          {
+            name: 'Combo',
+            category: 'Combos',
+            quantity: 1,
+            extras: ['▸ Barbacoa ×3', '▸ Nuggets', '▸ Agua ×4'],
+          },
+        ],
+      },
+    ]);
+    // Individual-like 1 + Duo 2 + Familiar-like 3 = 6
+    expect(report.total.pizza).toBe(6);
+  });
+
   it('no convierte burgers con “Familiar” en pizzas', () => {
     const report = buildShiftFoodFamilyReport([
       {

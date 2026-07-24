@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appendComboMainUnit,
   buildComboMenuSections,
   catalogProductsForCategory,
   catalogProductsForComboSection,
@@ -7,6 +8,7 @@ import {
   COMBO_MENU_PRESETS,
   comboMenuHasMainFamilyChoice,
   DEFAULT_COMBO_STRUCTURE,
+  ensureComboMainInstanceIds,
   expectedCountForComboSlot,
   filterComboMenuSectionsForMainFamily,
   groupComboItemsBySlot,
@@ -75,6 +77,10 @@ describe('catalogComboSlots', () => {
     expect(inferComboSlotKind('Pizzas')).toBe('main');
     expect(inferComboSlotKind('Burgers')).toBe('main');
     expect(inferComboSlotKind('Hamburguesas')).toBe('main');
+    expect(inferComboSlotKind('Tapas')).toBe('main');
+    expect(inferComboSlotKind('Raciones')).toBe('main');
+    expect(inferComboSlotKind('Bocadillos')).toBe('main');
+    expect(inferComboSlotKind('Pinchos')).toBe('main');
     expect(inferComboSlotKind('Bebidas')).toBe('drink');
     expect(inferComboSlotKind('Postres')).toBe('dessert');
     expect(inferComboSlotKind('Complementos')).toBe('side');
@@ -123,6 +129,34 @@ describe('catalogComboSlots', () => {
     );
     expect(saved[0].slotKind).toBe('main');
     expect(resolveComboRefSlotKind(saved[0], catalog)).toBe('main');
+  });
+
+  it('appendComboMainUnit crea unidades separadas con instanceId (Dúo)', () => {
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'p2', name: 'Pepperoni', category: 'Pizzas' }),
+    ];
+    const section = {
+      slotKind: 'main',
+      catalogCategory: 'Pizzas',
+      slotQuota: 2,
+      expectedCount: 2,
+      required: true,
+      groupByMainFamily: 'pizza',
+    };
+    const first = appendComboMainUnit(section, catalog[0], [], catalog);
+    expect(first).toHaveLength(1);
+    expect(first[0].instanceId).toBeTruthy();
+    expect(first[0].quantity).toBe(1);
+    const second = appendComboMainUnit(section, catalog[1], first, catalog);
+    expect(second).toHaveLength(2);
+    expect(second[0].instanceId).not.toBe(second[1].instanceId);
+    const expanded = ensureComboMainInstanceIds(
+      [{ productId: 'p1', productName: 'Margarita', quantity: 2, slotKind: 'main' }],
+      catalog,
+    );
+    expect(expanded).toHaveLength(2);
+    expect(expanded.every((r) => r.quantity === 1 && r.instanceId)).toBe(true);
   });
 
   it('menú estándar es pizza + complemento + bebida', () => {

@@ -181,9 +181,9 @@ export function clearVertialClientCaches(extraKeepKeys: string[] = []): void {
 
 /**
  * Tras actualizar la app (TestFlight / nueva build): logout total en el dispositivo.
- * Borra sesión, tokens y “recordarme”.
- * Conserva: consentimiento, vínculo tablet TPV, impresoras por tienda.
- * (Sin el vínculo tablet, el TPV delivery pierde dueño/PDV y parece que “no hay clientes”.)
+ * Borra sesión, tokens, “recordarme” y también el vínculo tablet TPV
+ * (hay que volver a login y, si aplica, a poner el código de tienda).
+ * Conserva: consentimiento y stamp de install / force-fresh.
  */
 export function clearVertialClientCachesForAppUpdate(): void {
   if (typeof window === 'undefined') return;
@@ -192,16 +192,16 @@ export function clearVertialClientCachesForAppUpdate(): void {
     'vertial_cookie_consent',
     'vertial_app_install_stamp',
     'vertial_force_fresh_login',
-    // Obligatorio en tablet TPV: PDV + dataUserId del dueño (búsqueda de clientes).
-    'vertial_tpv_tablet_binding',
   ]);
   clearAuthTokens();
 
-  // Sesión y “recordarme” (login limpio tras update). NO tocar tablet binding ni impresoras.
+  // Sesión y “recordarme” (login limpio tras update).
   for (const key of [
     SESSION_USER_STORAGE_KEY,
     'vertial_saved_login',
     'vertial_saved_worker_login',
+    // Tras update: hay que volver a login; no reutilizar código TPV de la build anterior.
+    'vertial_tpv_tablet_binding',
   ]) {
     try {
       localStorage.removeItem(key);

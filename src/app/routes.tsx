@@ -54,6 +54,7 @@ import { Team } from './pages/saas/Team';
 import { TeamMemberDetail } from './pages/saas/TeamMemberDetail';
 import { Invitations } from './pages/saas/Invitations';
 import { Finance } from './pages/saas/Finance';
+import { VerifactuPage } from './pages/saas/VerifactuPage';
 import { AdminPanel } from './pages/saas/AdminPanel';
 import { Settings } from './pages/saas/Settings';
 import { ConfiguracionGeneral } from './pages/saas/ConfiguracionGeneral';
@@ -603,6 +604,7 @@ export const router = createBrowserRouter([
           { path: 'vacations', element: <Navigate to="/saas/equipo/horarios-vacaciones" replace /> },
           { path: 'affiliates', element: <RequireBusinessOwner><Affiliates /></RequireBusinessOwner> },
           { path: 'finance', element: <RequireBusinessOwner><Finance /></RequireBusinessOwner> },
+          { path: 'verifactu', element: <RequireBusinessOwner><VerifactuPage /></RequireBusinessOwner> },
           { path: 'quotes', element: <RequireBusinessOwner><Quotes /></RequireBusinessOwner> },
           { path: 'promotions', element: <RequireBusinessOwner><PromotionsPage /></RequireBusinessOwner> },
           { path: 'sales-points', element: <Navigate to="/saas/settings/tienda" replace /> },

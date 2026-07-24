@@ -15,6 +15,12 @@ function extractApiError(payload: Record<string, unknown>): string {
   return 'Error inesperado en la petición';
 }
 
+function extractApiErrorCode(payload: Record<string, unknown>): string {
+  const code = payload.code;
+  if (typeof code === 'string' && code.trim()) return code.trim();
+  return '';
+}
+
 /**
  * Login/activación tablet: fetch directo (sin authFetch).
  * Un código malo suele ser 401; authFetch lo trataría como sesión muerta y echaría del TPV.
@@ -31,11 +37,16 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T & ApiE
   const payload = (await response.json().catch(() => ({}))) as T & ApiEnvelope<unknown> & {
     error?: string | { message?: string };
     message?: string;
+    code?: string;
     accessToken?: string;
     refreshToken?: string;
   };
   if (!response.ok || payload.ok === false) {
-    throw new Error(extractApiError(payload as Record<string, unknown>));
+    const err = new Error(extractApiError(payload as Record<string, unknown>)) as Error & {
+      code?: string;
+    };
+    err.code = extractApiErrorCode(payload as Record<string, unknown>);
+    throw err;
   }
   return payload;
 }
