@@ -14,6 +14,13 @@ import { useInviteWorkCenters } from '../../hooks/useInviteWorkCenters';
 import { getDefaultInviteLandingPage } from '../../lib/inviteDefaults';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import {
+  getFunctionRolesForBusiness,
+  getInvitePositionSuggestions,
+  getInviteRoleDisplayLabel,
+  suggestPositionForInviteRole,
+} from '../../lib/inviteFunctionRoles';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import {
   computeLaborCostBreakdown,
   formatLaborCurrency,
   resolvePayPeriodsPerYear,
@@ -26,6 +33,7 @@ import { HrGestorChecklist } from './HrGestorChecklist';
 interface InviteResult {
   isExistingUser?: boolean;
   inviteExpiresAt?: string;
+  emailSent?: boolean;
 }
 
 export interface InviteUserPayload {
@@ -127,25 +135,84 @@ function salaryDigitsFromDisplay(display: string): string {
   return display.replace(/\D/g, '');
 }
 
-// --- Worker Function Config ---
+// --- Worker Function Config (estilos; textos/lista vienen de inviteFunctionRoles) ---
 
-const ROLES: {
-  id: string;
-  dot: string;
-  badgeBg: string;
-  badgeText: string;
-  dotColor: string;
-  icon: React.ReactNode;
-  desc: string;
-  tier: 'standard' | 'normal' | 'pro';
-}[] = [
-  { id: 'Administrador', dot: 'bg-slate-900', badgeBg: 'bg-slate-100', badgeText: 'text-slate-700', dotColor: '#111827', icon: <Shield className="w-3.5 h-3.5" />, desc: 'Responsable del negocio o del local.', tier: 'standard' },
-  { id: 'Gestor', dot: 'bg-violet-500', badgeBg: 'bg-violet-50', badgeText: 'text-violet-700', dotColor: '#8b5cf6', icon: <ClipboardList className="w-3.5 h-3.5" />, desc: 'Gestiona equipo, altas y nóminas (RRHH).', tier: 'standard' },
-  { id: 'Encargado', dot: 'bg-blue-500', badgeBg: 'bg-blue-50', badgeText: 'text-blue-700', dotColor: '#3b82f6', icon: <Star className="w-3.5 h-3.5" />, desc: 'Coordina la operativa diaria.', tier: 'standard' },
-  { id: 'Mostrador / Atención', dot: 'bg-emerald-500', badgeBg: 'bg-emerald-50', badgeText: 'text-emerald-700', dotColor: '#10b981', icon: <User className="w-3.5 h-3.5" />, desc: 'Atiende clientes, mostrador, sala o food truck.', tier: 'standard' },
-  { id: 'Cocina', dot: 'bg-orange-500', badgeBg: 'bg-orange-50', badgeText: 'text-orange-700', dotColor: '#f97316', icon: <Wrench className="w-3.5 h-3.5" />, desc: 'Prepara pedidos y cocina.', tier: 'standard' },
-  { id: 'Reparto', dot: 'bg-violet-500', badgeBg: 'bg-violet-50', badgeText: 'text-violet-700', dotColor: '#8b5cf6', icon: <MapPin className="w-3.5 h-3.5" />, desc: 'Entrega pedidos a domicilio.', tier: 'standard' },
-];
+const ROLE_STYLE: Record<
+  string,
+  {
+    dot: string;
+    badgeBg: string;
+    badgeText: string;
+    dotColor: string;
+    icon: React.ReactNode;
+    tier: 'standard' | 'normal' | 'pro';
+  }
+> = {
+  Administrador: {
+    dot: 'bg-slate-900',
+    badgeBg: 'bg-slate-100',
+    badgeText: 'text-slate-700',
+    dotColor: '#111827',
+    icon: <Shield className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+  Gestor: {
+    dot: 'bg-violet-500',
+    badgeBg: 'bg-violet-50',
+    badgeText: 'text-violet-700',
+    dotColor: '#8b5cf6',
+    icon: <ClipboardList className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+  Encargado: {
+    dot: 'bg-blue-500',
+    badgeBg: 'bg-blue-50',
+    badgeText: 'text-blue-700',
+    dotColor: '#3b82f6',
+    icon: <Star className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+  'Mostrador / Atención': {
+    dot: 'bg-emerald-500',
+    badgeBg: 'bg-emerald-50',
+    badgeText: 'text-emerald-700',
+    dotColor: '#10b981',
+    icon: <User className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+  Cocina: {
+    dot: 'bg-orange-500',
+    badgeBg: 'bg-orange-50',
+    badgeText: 'text-orange-700',
+    dotColor: '#f97316',
+    icon: <Wrench className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+  Reparto: {
+    dot: 'bg-violet-500',
+    badgeBg: 'bg-violet-50',
+    badgeText: 'text-violet-700',
+    dotColor: '#8b5cf6',
+    icon: <MapPin className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+  Comercial: {
+    dot: 'bg-emerald-500',
+    badgeBg: 'bg-emerald-50',
+    badgeText: 'text-emerald-700',
+    dotColor: '#10b981',
+    icon: <Briefcase className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+  Operaciones: {
+    dot: 'bg-sky-500',
+    badgeBg: 'bg-sky-50',
+    badgeText: 'text-sky-700',
+    dotColor: '#0ea5e9',
+    icon: <Clock className="w-3.5 h-3.5" />,
+    tier: 'standard',
+  },
+};
 
 function TierPill({ tier }: { tier: 'standard' | 'normal' | 'pro' }) {
   if (tier === 'pro') {
@@ -166,20 +233,32 @@ function TierPill({ tier }: { tier: 'standard' | 'normal' | 'pro' }) {
   return null;
 }
 
-function getRoleTier(roleId: string) {
-  void roleId;
+function getRoleTier(_roleId: string) {
+  void _roleId;
   return 'standard' as const;
 }
 
-function getRoleConfig(role: RoleDefinition) {
-  const fallback = {
-    id: role.id, dot: 'bg-sky-500', badgeBg: 'bg-sky-50', badgeText: 'text-sky-700',
-    dotColor: '#0ea5e9', icon: <Shield className="w-3.5 h-3.5" />,
-    desc: role.description || 'Funcion del trabajador.', tier: 'standard' as const,
+function getRoleConfig(
+  role: RoleDefinition,
+  businessType?: string | null,
+) {
+  const style = ROLE_STYLE[role.id];
+  const label = getInviteRoleDisplayLabel(role.id, businessType);
+  const desc = role.description || 'Función del trabajador.';
+  if (style) {
+    return { ...style, id: role.id, label, desc };
+  }
+  return {
+    id: role.id,
+    label,
+    desc,
+    dot: 'bg-sky-500',
+    badgeBg: 'bg-sky-50',
+    badgeText: 'text-sky-700',
+    dotColor: '#0ea5e9',
+    icon: <Shield className="w-3.5 h-3.5" />,
+    tier: getRoleTier(role.id),
   };
-  const preset = ROLES.find((item) => item.id === role.id);
-  if (preset) return { ...preset, desc: role.description || preset.desc };
-  return { ...fallback, tier: getRoleTier(role.id) };
 }
 
 // --- SelectDropdown ---
@@ -247,9 +326,14 @@ function SelectDropdown({
 // --- RoleDropdown ---
 
 function RoleDropdown({
-  value, onChange, error, roles, selectRolePlaceholder,
+  value, onChange, error, roles, selectRolePlaceholder, businessType,
 }: {
-  value: string | null; onChange: (r: string) => void; error?: string; roles: RoleDefinition[]; selectRolePlaceholder: string;
+  value: string | null;
+  onChange: (r: string) => void;
+  error?: string;
+  roles: RoleDefinition[];
+  selectRolePlaceholder: string;
+  businessType?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -262,7 +346,9 @@ function RoleDropdown({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const selected = value ? getRoleConfig(roles.find((r) => r.id === value) || { id: value, description: '', permissions: [], users: 0 }) : null;
+  const selected = value
+    ? getRoleConfig(roles.find((r) => r.id === value) || { id: value, description: '', permissions: [], users: 0 }, businessType)
+    : null;
 
   return (
     <div ref={ref} className="relative">
@@ -277,7 +363,7 @@ function RoleDropdown({
         {selected ? (
           <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${selected.badgeBg} ${selected.badgeText}`}>
             <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selected.dot}`} />
-            {selected.id}
+            {selected.label}
             <TierPill tier={selected.tier} />
           </span>
         ) : (
@@ -288,9 +374,9 @@ function RoleDropdown({
       {open && (
         <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl z-50 overflow-hidden">
           {roles.map((role, i) => {
-            const r = getRoleConfig(role);
+            const r = getRoleConfig(role, businessType);
             const isSel = value === r.id;
-            const prevTier = i > 0 ? getRoleConfig(roles[i - 1]).tier : null;
+            const prevTier = i > 0 ? getRoleConfig(roles[i - 1], businessType).tier : null;
             const showDiv = prevTier && prevTier !== r.tier;
             return (
               <div key={r.id}>
@@ -300,7 +386,7 @@ function RoleDropdown({
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0">
                     <span className={`w-2 h-2 rounded-full flex-shrink-0 ${r.dot}`} />
-                    <span className={`text-sm font-semibold ${isSel ? 'text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300'}`}>{r.id}</span>
+                    <span className={`text-sm font-semibold ${isSel ? 'text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300'}`}>{r.label}</span>
                     <TierPill tier={r.tier} />
                     <span className="text-xs text-gray-400 dark:text-gray-500 truncate ml-1 hidden sm:block">{r.desc}</span>
                   </div>
@@ -402,8 +488,8 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const { currentBusiness: ctxBusiness } = useBusiness();
   const roleOptions = useMemo(() => {
     if (roles?.length) return roles;
-    return ROLES.map((item) => ({ id: item.id, description: item.desc, permissions: [], users: 0 }));
-  }, [roles]);
+    return getFunctionRolesForBusiness(ctxBusiness?.businessType);
+  }, [roles, ctxBusiness?.businessType]);
 
   const businessList = businesses?.length ? businesses : ctxBusiness ? [ctxBusiness] : [];
   const hasMultipleBusinesses = businessList.length > 1;
@@ -417,6 +503,12 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     ?? null;
 
   const hrCopy = getHrLocationCopy(inviteBusiness?.businessType ?? ctxBusiness?.businessType);
+  const inviteBusinessType = inviteBusiness?.businessType ?? ctxBusiness?.businessType;
+  const isRestaurantInvite = isRestaurantBusinessType(inviteBusinessType);
+  const positionSuggestions = useMemo(
+    () => getInvitePositionSuggestions(inviteBusinessType),
+    [inviteBusinessType],
+  );
 
   const { options: loadedWorkCenterOptions, loading: workCentersLoading } = useInviteWorkCenters(
     inviteBusiness,
@@ -443,6 +535,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const [payPeriodsPerYear, setPayPeriodsPerYear] = useState<string>('14');
   const [workCenterId, setWorkCenterId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [position, setPosition] = useState('');
   const [scheduleTemplateId, setScheduleTemplateId] = useState<string | null>(null);
   const [shiftTemplates, setShiftTemplates] = useState<ShiftTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
@@ -561,7 +654,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     else if (name.trim().length < 2) e.name = t('team.inviteModal.nameMinLength', 'Minimo 2 caracteres');
     if (!email.trim()) e.email = t('team.inviteModal.emailRequired', 'El email es obligatorio');
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) e.email = t('team.inviteModal.emailInvalid', 'Email no valido');
-    else if (emailStatus === 'not_registered') e.email = 'Este email no está registrado en Vertial. La persona debe crearse una cuenta antes de poder ser invitada.';
+    else if (emailStatus === 'not_registered') { /* se puede invitar: llegará email para registrarse */ }
     else if (emailStatus === 'already_member') e.email = 'Esta persona ya forma parte del equipo de esta empresa.';
     else if (emailStatus === 'owns_other') e.email = `Esta persona administra otra empresa (${lookupResult?.ownsOtherBusinessName || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`;
     else if (emailStatus === 'company_account') e.email = 'Este email es una cuenta de empresa. Debe crearse una cuenta de trabajador (Acceso empleado) para poder invitarla.';
@@ -592,8 +685,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
       setTouched({ name: true, email: true });
       return;
     }
-    if (emailStatus !== 'ready') {
-      setErrors({ email: 'Espera a que terminemos de comprobar el email en Vertial.' });
+    if (emailStatus !== 'ready' && emailStatus !== 'not_registered') {
+      setErrors({ email: emailStatus === 'checking'
+        ? 'Espera a que terminemos de comprobar el email en Vertial.'
+        : 'No se puede invitar este email.' });
       setTouched({ name: true, email: true });
       return;
     }
@@ -624,7 +719,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
         phone: fullPhone,
         role: role!,
         landingPage: getDefaultInviteLandingPage(inviteBusiness?.businessType, role),
-        position: '',
+        position: position.trim() || suggestPositionForInviteRole(role, inviteBusinessType),
         contractType: contractType!,
         grossMonthlySalary: salaryDigitsFromDisplay(grossSalary),
         payPeriodsPerYear: Number(payPeriodsPerYear) || resolvePayPeriodsPerYear(contractType!),
@@ -642,7 +737,12 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     }
   }
 
-  const selectedRoleConfig = role ? getRoleConfig(roleOptions.find((r) => r.id === role) || { id: role, description: '', permissions: [], users: 0 }) : null;
+  const selectedRoleConfig = role
+    ? getRoleConfig(
+      roleOptions.find((r) => r.id === role) || { id: role, description: '', permissions: [], users: 0 },
+      inviteBusinessType,
+    )
+    : null;
   const selectedContract = contractType ? CONTRACT_TYPES.find((c) => c.id === contractType) : null;
   const selectedTemplate = scheduleTemplateId
     ? shiftTemplates.find((t) => t._id === scheduleTemplateId)
@@ -711,7 +811,12 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                 Invitación enviada
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400 mb-5 max-w-sm">
-                <strong className="text-gray-700 dark:text-gray-200">{(lookupResult?.fullName || name).trim() || email.trim()}</strong> verá tu invitación al entrar a Vertial. Al aceptarla, se unirá automáticamente a tu equipo con la función y permisos asignados.
+                Hemos enviado un correo a{' '}
+                <strong className="text-gray-700 dark:text-gray-200">{email.trim()}</strong>
+                {inviteResult?.isExistingUser
+                  ? ' para que acepte y se una al equipo.'
+                  : ' para que cree su acceso y se una al equipo.'}
+                {' '}Al aceptar, entrará con la función y permisos asignados.
               </p>
 
               {/* Summary card */}
@@ -729,7 +834,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                   {selectedRoleConfig && (
                     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ${selectedRoleConfig.badgeBg} ${selectedRoleConfig.badgeText}`}>
                       <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${selectedRoleConfig.dot}`} />
-                      {selectedRoleConfig.id}
+                      {selectedRoleConfig.label}
                     </span>
                   )}
                   {selectedContract && (
@@ -756,9 +861,12 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
               <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-5">
                 <Mail className="w-4 h-4 text-violet-500 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed text-left">
-                  Le aparecerá una notificación dentro de Vertial para <strong>{email.trim()}</strong>.
+                  Revisa la bandeja de entrada (y spam) de <strong>{email.trim()}</strong>.
+                  {inviteResult?.emailSent === false
+                    ? ' Ojo: el correo puede no haberse enviado; prueba a reenviar desde Equipo.'
+                    : ''}
                   {inviteResult?.inviteExpiresAt
-                    ? ` La invitación caduca el ${new Date(inviteResult.inviteExpiresAt).toLocaleDateString()}.`
+                    ? ` El enlace caduca el ${new Date(inviteResult.inviteExpiresAt).toLocaleDateString()}.`
                     : ''}
                 </p>
               </div>
@@ -842,16 +950,16 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         onBlur={() => setTouched((p) => ({ ...p, email: true }))}
                         placeholder="maria@gmail.com"
                         className={`w-full pl-10 pr-10 py-2.5 border-2 rounded-xl text-sm outline-none transition-colors text-gray-900 dark:text-gray-100 ${
-                          emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account' || (errors.email && touched.email)
+                          emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account' || (errors.email && touched.email)
                             ? 'border-red-400 bg-red-50 dark:bg-red-900/20'
-                            : emailStatus === 'ready'
+                            : emailStatus === 'ready' || emailStatus === 'not_registered'
                               ? 'border-green-400 bg-green-50 dark:bg-green-900/20'
                               : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 focus:border-blue-500'
                         }`} />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
                         {emailStatus === 'checking' && <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />}
-                        {emailStatus === 'ready' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-                        {(emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account') && (
+                        {(emailStatus === 'ready' || emailStatus === 'not_registered') && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+                        {(emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account') && (
                           <X className="w-4 h-4 text-red-500" />
                         )}
                       </span>
@@ -872,11 +980,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       </div>
                     )}
                     {emailStatus === 'not_registered' && (
-                      <div className="mt-2 flex items-start gap-2 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 px-3 py-2">
-                        <FileWarning className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
-                        <p className="text-[11px] leading-relaxed text-red-700 dark:text-red-300">
-                          Este email no está registrado en Vertial. Pídele a la persona que se cree una cuenta de trabajador en{' '}
-                          <span className="font-mono font-semibold">vertialapp.com</span> (Acceso empleado) y vuelve aquí para invitarla.
+                      <div className="mt-2 flex items-start gap-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 px-3 py-2">
+                        <Mail className="w-3.5 h-3.5 text-blue-500 flex-shrink-0 mt-0.5" />
+                        <p className="text-[11px] leading-relaxed text-blue-700 dark:text-blue-300">
+                          Este email aún no tiene cuenta. Al invitar, le enviaremos un correo para que cree su acceso y se una al equipo.
                         </p>
                       </div>
                     )}
@@ -939,6 +1046,14 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       value={role}
                       onChange={(r) => {
                         setRole(r);
+                        setPosition((prev) => {
+                          const suggested = suggestPositionForInviteRole(r, inviteBusinessType);
+                          if (!prev.trim()) return suggested;
+                          // Si el cargo actual era la sugerencia del rol anterior, actualízalo.
+                          const prevSuggested = suggestPositionForInviteRole(role, inviteBusinessType);
+                          if (prev.trim() === prevSuggested) return suggested;
+                          return prev;
+                        });
                         setErrors((p) => {
                           const n = { ...p };
                           delete n.role;
@@ -947,8 +1062,44 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       }}
                       error={errors.role}
                       roles={roleOptions}
-                      selectRolePlaceholder="Selecciona función"
+                      selectRolePlaceholder={isRestaurantInvite ? 'Selecciona función (sala, cocina…)' : 'Selecciona función'}
+                      businessType={inviteBusinessType}
                     />
+                  </div>
+
+                  {/* Cargo / posición RRHH */}
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                      Cargo / posición
+                    </label>
+                    <input
+                      type="text"
+                      value={position}
+                      onChange={(e) => setPosition(e.target.value)}
+                      placeholder={hrCopy.memberPositionPlaceholder}
+                      className="w-full px-3.5 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 outline-none focus:border-blue-500"
+                    />
+                    {positionSuggestions.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {positionSuggestions.map((chip) => {
+                          const active = position.trim() === chip;
+                          return (
+                            <button
+                              key={chip}
+                              type="button"
+                              onClick={() => setPosition(chip)}
+                              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold border transition-colors ${
+                                active
+                                  ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                                  : 'border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:border-gray-300'
+                              }`}
+                            >
+                              {chip}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Tipo de contrato */}
@@ -1159,7 +1310,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     {t('common.cancel', 'Cancelar')}
                   </button>
                   <button type="button" onClick={handleNext}
-                    disabled={emailStatus === 'checking' || emailStatus === 'not_registered' || emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account'}
+                    disabled={emailStatus === 'checking' || emailStatus === 'already_member' || emailStatus === 'owns_other' || emailStatus === 'company_account' || emailStatus === 'idle' || emailStatus === 'invalid' || emailStatus === 'error'}
                     className="ml-auto flex items-center gap-2 px-5 py-2.5 bg-gray-900 dark:bg-gray-100 hover:bg-black dark:hover:bg-white text-white dark:text-gray-900 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-gray-900 dark:disabled:hover:bg-gray-100">
                     {emailStatus === 'checking' ? (
                       <>

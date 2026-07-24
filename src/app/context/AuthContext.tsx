@@ -6,6 +6,7 @@ import {
   SESSION_USER_STORAGE_KEY,
 } from '../lib/clientSessionStorage';
 import { clearForceFreshLogin, mustForceFreshLogin } from '../lib/appInstallStamp';
+import { clearTpvTabletBinding, readTpvTabletBinding } from '../lib/tpvTabletSession';
 import {
   type AccountActivityItem,
   type ActiveSession,
@@ -169,6 +170,7 @@ export interface AuthContextType {
     success: boolean;
     invitation?: TeamInvitation;
     isExistingUser?: boolean;
+    emailSent?: boolean;
     inviteExpiresAt?: string;
     companyCode?: string;
     error?: string;
@@ -256,6 +258,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const setSessionUser = useCallback((nextUser: User) => {
     clearForceFreshLogin();
+    try {
+      const binding = readTpvTabletBinding();
+      const boundAuth = String(binding?.authUserId || '').trim();
+      const nextId = String(nextUser.user_id || nextUser.id || '').trim();
+      // Otra cuenta en el mismo dispositivo → no reutilizar el código tablet de Pau/etc.
+      if (boundAuth && nextId && boundAuth !== nextId) {
+        clearTpvTabletBinding();
+      }
+    } catch {
+      // ignore
+    }
     setUser(nextUser);
     setIsAuthenticated(true);
     persistSession(nextUser);
@@ -829,6 +842,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         success: true,
         invitation: response.invitation,
         isExistingUser: Boolean(response.isExistingUser),
+        emailSent: response.emailSent !== false,
         inviteExpiresAt: response.inviteExpiresAt,
         companyCode: response.companyCode,
       };
@@ -1207,10 +1221,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error al iniciar sesión en el TPV';
+      const code =
+        error && typeof error === 'object' && 'code' in error
+          ? String((error as { code?: string }).code || '')
+          : '';
       if (message.includes('bloqueada')) {
         return { success: false, error: message, code: 'ACCOUNT_LOCKED' };
       }
-      return { success: false, error: message };
+      return { success: false, error: message, code: code || undefined };
     }
   };
 

@@ -104,38 +104,15 @@ import {
   upsertCustomRole,
 } from '../../lib/roleCatalog';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getFunctionRolesForBusiness, getInviteRoleDisplayLabel } from '../../lib/inviteFunctionRoles';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
+import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import { fetchTeamAlerts, type TeamAlert } from '../../lib/teamAlertsApi';
 import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
 import { canManagePayroll } from '../../lib/teamManagerAccess';
 
 type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'staff-consumptions' | 'payroll';
 type MemberStatus = 'active' | 'pending' | 'inactive';
-
-const RESTAURANT_FUNCTION_ROLES: RoleDefinition[] = [
-  { id: 'Administrador', description: 'Responsable del negocio o del local.', permissions: [], users: 0 },
-  { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
-  { id: 'Encargado', description: 'Coordina la operativa diaria.', permissions: [], users: 0 },
-  { id: 'Mostrador / Atención', description: 'Atiende clientes, mostrador y sala.', permissions: [], users: 0 },
-  { id: 'Cocina', description: 'Prepara comandas y cocina.', permissions: [], users: 0 },
-];
-
-const DELIVERY_FUNCTION_ROLES: RoleDefinition[] = [
-  { id: 'Administrador', description: 'Responsable del negocio o del local.', permissions: [], users: 0 },
-  { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
-  { id: 'Encargado', description: 'Coordina la operativa diaria.', permissions: [], users: 0 },
-  { id: 'Mostrador / Atención', description: 'Atiende clientes, mostrador, sala o food truck.', permissions: [], users: 0 },
-  { id: 'Cocina', description: 'Prepara pedidos y cocina.', permissions: [], users: 0 },
-  { id: 'Reparto', description: 'Entrega pedidos a domicilio.', permissions: [], users: 0 },
-];
-
-const EVENTS_FUNCTION_ROLES: RoleDefinition[] = [
-  { id: 'Administrador', description: 'Gestiona equipo, permisos y operación del negocio.', permissions: [], users: 0 },
-  { id: 'Gestor', description: 'Gestiona equipo, altas y nóminas (RRHH).', permissions: [], users: 0 },
-  { id: 'Encargado', description: 'Coordina contrataciones, catering y logística.', permissions: [], users: 0 },
-  { id: 'Comercial', description: 'Presupuestos, clientes y cierre de contratos.', permissions: [], users: 0 },
-  { id: 'Operaciones', description: 'Planificación del día del evento e invitados.', permissions: [], users: 0 },
-];
 
 // ─── Skin System ──────────────────────────────────────────────────────────────
 
@@ -908,12 +885,6 @@ function resolvePermissionModuleLabel(
   return module.label;
 }
 
-function getFunctionRolesForBusiness(businessType?: string | null): RoleDefinition[] {
-  if (businessType === 'events') return EVENTS_FUNCTION_ROLES;
-  if (isRestaurantBusinessType(businessType)) return RESTAURANT_FUNCTION_ROLES;
-  return DELIVERY_FUNCTION_ROLES;
-}
-
 function getRoleToken(role?: string, skinId?: string) {
   if (skinId) {
     const skin = getSkinById(skinId);
@@ -1096,12 +1067,21 @@ function PageNotification({ message, type, onClose }: { message: string; type: '
   );
 }
 
-function RoleBadge({ role, skinId }: { role?: string; skinId?: string }) {
+function RoleBadge({
+  role,
+  skinId,
+  businessType,
+}: {
+  role?: string;
+  skinId?: string;
+  businessType?: string | null;
+}) {
   const token = getRoleToken(role, skinId);
+  const label = getInviteRoleDisplayLabel(role || 'Usuario', businessType) || role || 'Usuario';
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${token.badgeBg} ${token.badgeText}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${token.dot}`} />
-      {role || 'Usuario'}
+      {label}
     </span>
   );
 }
@@ -1250,6 +1230,7 @@ function MemberDrawer({
   useModalClose(true, onClose);
   const { updateUser, deleteUser, resetUserPassword, getUserActivity } = useAuth();
   const { t } = useTranslation();
+  const hrCopy = getHrLocationCopy(businessType);
   const [memberState, setMemberState] = useState<AuthUser>(member);
   const [activity, setActivity] = useState<AccountActivityItem[]>(member.recentActivity || []);
   const [editing, setEditing] = useState(false);
@@ -1658,7 +1639,7 @@ function MemberDrawer({
               {editing ? 'Volver' : 'Cerrar'}
             </button>
             <div className="flex items-center gap-2">
-              <RoleBadge role={memberState.role} skinId={memberState.skinId} />
+              <RoleBadge role={memberState.role} skinId={memberState.skinId} businessType={businessType} />
               <StatusBadge status={memberState.status} />
               {memberState.workerProfileCompletion && !memberState.workerProfileCompletion.fullyCompleted && (
                 <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
@@ -1785,7 +1766,7 @@ function MemberDrawer({
                     <input className={inputClassName} value={form.employment.department} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, department: event.target.value } }))} />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Tienda / local (TPV y fichaje)</label>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">{hrCopy.memberStoreLabel}</label>
                     <div className="relative">
                       <select
                         className={`${inputClassName} appearance-none pr-9 cursor-pointer`}
@@ -1795,7 +1776,7 @@ function MemberDrawer({
                           employment: { ...prev.employment, salesPointId: event.target.value },
                         }))}
                       >
-                        <option value="">Sin tienda asignada</option>
+                        <option value="">{hrCopy.memberStoreEmpty}</option>
                         {workCenters.filter((wc) => wc.active !== false).map((wc) => (
                           <option key={wc._id || wc.id} value={wc._id || wc.id}>
                             {wc.name}
@@ -1805,12 +1786,17 @@ function MemberDrawer({
                       <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
                     </div>
                     <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                      Obligatorio para mostrador: sin tienda no sale al fichar en el TPV de ese local.
+                      {hrCopy.memberStoreHint}
                     </p>
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Cargo / Posición</label>
-                    <input className={inputClassName} value={form.employment.position} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, position: event.target.value } }))} />
+                    <input
+                      className={inputClassName}
+                      value={form.employment.position}
+                      onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, position: event.target.value } }))}
+                      placeholder={hrCopy.memberPositionPlaceholder}
+                    />
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Horario</label>
@@ -2319,10 +2305,10 @@ function MemberDrawer({
                     { icon: <Building2 className="w-4 h-4 text-gray-500 dark:text-gray-400" />, label: 'Departamento', value: memberState.employment?.department || 'Sin departamento' },
                     {
                       icon: <MapPin className="w-4 h-4 text-gray-500 dark:text-gray-400" />,
-                      label: 'Tienda / local (TPV)',
+                      label: hrCopy.memberStoreLabel.replace(' (TPV y fichaje)', ' (TPV)'),
                       value: (() => {
                         const ref = String(memberState.employment?.salesPointId || '').trim();
-                        if (!ref) return 'Sin tienda asignada';
+                        if (!ref) return hrCopy.memberStoreEmpty;
                         const wc = workCenters.find((w) => String(w._id || w.id || '').trim() === ref);
                         return wc?.name || ref;
                       })(),
@@ -2860,6 +2846,7 @@ export function Team() {
     revokeInvitation,
   } = useAuth();
   const { currentBusiness, businesses } = useBusiness();
+  const hrCopy = getHrLocationCopy(currentBusiness?.businessType);
   const { clients: contextClients, leads: contextLeads } = useApp();
   const [searchParams] = useSearchParams();
   const memberIdParam = searchParams.get('memberId');
@@ -2883,7 +2870,7 @@ export function Team() {
     { key: 'phone', label: 'Teléfono', example: '600123456' },
     { key: 'role', label: 'Funcion', example: 'Cocina' },
     { key: 'department', label: 'Departamento', example: 'Ventas' },
-    { key: 'position', label: 'Cargo', example: 'Comercial' },
+    { key: 'position', label: 'Cargo', example: isRestaurantBusinessType(currentBusiness?.businessType) ? 'Camarero/a' : 'Comercial' },
   ];
   const [showCreateRole, setShowCreateRole] = useState(false);
   const [members, setMembers] = useState<AuthUser[]>([]);
@@ -3116,11 +3103,14 @@ export function Team() {
     }
 
     const isExistingUser = Boolean(result.isExistingUser);
+    const emailSent = result.emailSent !== false;
     setPageMessage({
-      text: isExistingUser
-        ? `${name || email} recibirá la invitación con el rol «${role}» la próxima vez que inicie sesión.`
-        : `Invitación creada para ${email} con rol «${role}».`,
-      type: 'success',
+      text: emailSent
+        ? (isExistingUser
+          ? `Invitación enviada a ${email}. Recibirá un correo para unirse al equipo con el rol «${role}».`
+          : `Invitación enviada a ${email}. Recibirá un correo para crear su acceso con el rol «${role}».`)
+        : `Invitación creada para ${email}, pero el correo no se pudo enviar. Revisa la configuración de email o reenvía desde Equipo.`,
+      type: emailSent ? 'success' : 'error',
     });
     await loadDirectory(null);
     await loadPendingInvitations();
@@ -3128,6 +3118,7 @@ export function Team() {
 
     return {
       isExistingUser,
+      emailSent: result.emailSent !== false,
       inviteExpiresAt: result.inviteExpiresAt,
     };
   };
@@ -3582,7 +3573,7 @@ export function Team() {
                             </td>
                             <td className="px-5 py-4"><StatusBadge status={member.status} /></td>
                             <td className="px-5 py-4">
-                              <RoleBadge role={member.role} />
+                              <RoleBadge role={member.role} businessType={currentBusiness?.businessType} />
                               <p className="mt-1 text-[11px] text-gray-400 dark:text-gray-500">{member.employment?.department || 'Sin departamento'}</p>
                               {(() => {
                                 const ref = String(member.employment?.salesPointId || '').trim();
@@ -3596,7 +3587,7 @@ export function Team() {
                                 if (role === 'Admin' || role === 'Gerente') {
                                   return <p className="mt-0.5 text-[11px] text-gray-400 dark:text-gray-500">Admin: puede fichar en cualquier local</p>;
                                 }
-                                return <p className="mt-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">Sin tienda TPV</p>;
+                                return <p className="mt-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">{hrCopy.memberMissingStoreBadge}</p>;
                               })()}
                             </td>
                             {branchFilterOptions.length > 0 && (
@@ -3659,7 +3650,7 @@ export function Team() {
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <RoleBadge role={member.role} />
+                          <RoleBadge role={member.role} businessType={currentBusiness?.businessType} />
                           <StatusBadge status={member.status} />
                         </div>
                         <span className="text-xs text-gray-400 dark:text-gray-500">{formatRelativeTime(member.lastLoginAt)}</span>
@@ -3705,7 +3696,7 @@ export function Team() {
               return (
                 <div key={role.id} className={`rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 border-l-4 ${getRoleToken(role.id).accentBorder}`}>
                   <div className="mb-2 flex items-center gap-2">
-                    <RoleBadge role={role.id} />
+                    <RoleBadge role={role.id} businessType={currentBusiness?.businessType} />
                     <span className="text-xs text-gray-400 dark:text-gray-500">{role.users} usuario{role.users !== 1 ? 's' : ''}</span>
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">{role.description}</p>

@@ -1189,6 +1189,7 @@ export async function inviteUserRequest(data: {
   return request<AuthUser & {
     invitation?: TeamInvitation;
     isExistingUser?: boolean;
+    emailSent?: boolean;
     inviteExpiresAt?: string;
     companyCode?: string;
   }>('/api/auth/invite', {

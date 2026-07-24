@@ -1619,6 +1619,9 @@ export async function inviteUser(req, res) {
     if (!email) {
       return badRequest(res, 'El email es obligatorio');
     }
+    if (!String(name || '').trim()) {
+      return badRequest(res, 'El nombre es obligatorio');
+    }
 
     const actorUserId = String(req.authUser?.userId || '').trim();
     let invitedByDisplay = String(req.authUser?.email || '').trim();
@@ -1635,7 +1638,6 @@ export async function inviteUser(req, res) {
 
     await ensureDatabase(req, ACCOUNTS_DB);
 
-    // Validar que la empresa existe si se proporciona businessId
     let business = null;
     if (businessId) {
       business = await findBusinessById(req, businessId);
@@ -1653,56 +1655,67 @@ export async function inviteUser(req, res) {
     const existingAccount = await findAccountByEmail(req, email);
     const resolvedCompanyName = business?.name || companyName;
     const normalizedEmail = String(email).trim().toLowerCase();
+    const resolvedPermissions = normalizePermissionMatrix(permissions, role || 'Usuario');
+    const resolvedLanding = landingPage || WORKER_DEFAULT_LANDING_PATH;
+    const employmentPayload = {
+      position,
+      contractType,
+      salary: grossMonthlySalary,
+      workday: 'completa',
+      payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
+      salesPointId: workCenterId,
+    };
+    const inviteMeta = {
+      businessId: business?.business_id || '',
+      businessName: resolvedCompanyName || '',
+      role: role || 'Usuario',
+      permissions: resolvedPermissions,
+      landingPage: resolvedLanding,
+      employment: employmentPayload,
+      invitedBy: actorUserId || String(invitedBy || '').trim(),
+      scheduleTemplateId: String(scheduleTemplateId || '').trim(),
+      message: String(message || '').trim(),
+    };
 
-    // Nuevo flujo: solo se puede invitar a personas que ya tengan cuenta en Vertial.
-    // El invitado verá la invitación dentro de la app al iniciar sesión y la aceptará en un clic.
-    if (!existingAccount) {
-      return res.status(404).json({
-        ok: false,
-        code: 'USER_NOT_REGISTERED',
-        error: 'Este email no está registrado en Vertial. La persona debe crearse una cuenta antes de poder ser invitada al equipo.',
-      });
-    }
-
-    // Solo cuentas de trabajador (accountType user). Una cuenta empresa se queda en Gate.
-    if ((existingAccount.accountType || 'company') === 'company') {
-      return res.status(409).json({
-        ok: false,
-        code: 'COMPANY_ACCOUNT',
-        error: 'Este email es una cuenta de empresa. Para unirse al equipo debe crearse una cuenta de trabajador (Acceso empleado).',
-      });
-    }
-
-    if (business) {
-      const isOwnerOfThis = business.owner_user_id === existingAccount.user_id;
-      const isAlreadyMember = Array.isArray(business.members)
-        && business.members.some((m) => m.user_id === existingAccount.user_id);
-      if (isOwnerOfThis || isAlreadyMember) {
+    if (existingAccount) {
+      if ((existingAccount.accountType || 'company') === 'company') {
         return res.status(409).json({
           ok: false,
-          code: 'ALREADY_MEMBER',
-          error: 'Este usuario ya forma parte del equipo de esta empresa.',
+          code: 'COMPANY_ACCOUNT',
+          error: 'Este email es una cuenta de empresa. Para el equipo hace falta una cuenta de trabajador (Acceso empleado).',
         });
+      }
+
+      if (business) {
+        const isOwnerOfThis = business.owner_user_id === existingAccount.user_id;
+        const isAlreadyMember = Array.isArray(business.members)
+          && business.members.some((m) => m.user_id === existingAccount.user_id);
+        if (isOwnerOfThis || isAlreadyMember) {
+          return res.status(409).json({
+            ok: false,
+            code: 'ALREADY_MEMBER',
+            error: 'Este usuario ya forma parte del equipo de esta empresa.',
+          });
+        }
+      }
+
+      try {
+        const allBusinesses = await listAllBusinesses(req);
+        const ownsOtherBusiness = allBusinesses.find(
+          (b) => b.owner_user_id === existingAccount.user_id && b.business_id !== (business?.business_id || ''),
+        );
+        if (ownsOtherBusiness) {
+          return res.status(409).json({
+            ok: false,
+            code: 'OWNER_OF_OTHER_BUSINESS',
+            error: `Este usuario administra otra empresa (${ownsOtherBusiness.name || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`,
+          });
+        }
+      } catch (lookupErr) {
+        console.error('[AUTH] Error comprobando empresas del invitado:', lookupErr?.message);
       }
     }
 
-    try {
-      const allBusinesses = await listAllBusinesses(req);
-      const ownsOtherBusiness = allBusinesses.find(
-        (b) => b.owner_user_id === existingAccount.user_id && b.business_id !== (business?.business_id || ''),
-      );
-      if (ownsOtherBusiness) {
-        return res.status(409).json({
-          ok: false,
-          code: 'OWNER_OF_OTHER_BUSINESS',
-          error: `Este usuario administra otra empresa (${ownsOtherBusiness.name || 'sin nombre'}). Por ahora no puede unirse a un segundo equipo.`,
-        });
-      }
-    } catch (lookupErr) {
-      console.error('[AUTH] Error comprobando empresas del invitado:', lookupErr?.message);
-    }
-
-    // ¿Ya hay una invitación pendiente igual? La reutilizamos en lugar de crear duplicados.
     let existingInvitation = null;
     if (business?.business_id) {
       existingInvitation = await findPendingInvitationForEmailAndBusiness(req, normalizedEmail, business.business_id);
@@ -1717,37 +1730,22 @@ export async function inviteUser(req, res) {
         businessId: business?.business_id || '',
         businessName: resolvedCompanyName,
         role,
-        permissions: normalizePermissionMatrix(permissions, role || 'Usuario'),
-        landingPage,
-        employment: {
-          position,
-          contractType,
-          salary: grossMonthlySalary,
-          workday: 'completa',
-          payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
-          salesPointId: workCenterId,
-        },
+        permissions: resolvedPermissions,
+        landingPage: resolvedLanding,
+        employment: employmentPayload,
         scheduleTemplateId,
         invitedBy: actorUserId || String(invitedBy || '').trim(),
         invitedByName: invitedByDisplay,
         message,
       });
 
-    // Si la invitación ya existía pero algún dato ha cambiado, actualizamos.
     if (existingInvitation) {
       invitationDoc.fullName = String(name || existingInvitation.fullName || '').trim();
       invitationDoc.phone = String(phone || existingInvitation.phone || '').trim();
       invitationDoc.role = role || existingInvitation.role || 'Usuario';
-      invitationDoc.permissions = normalizePermissionMatrix(permissions, invitationDoc.role);
-      invitationDoc.landingPage = landingPage || existingInvitation.landingPage;
-      invitationDoc.employment = {
-        position,
-        contractType,
-        salary: grossMonthlySalary,
-        workday: 'completa',
-        payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
-        salesPointId: workCenterId,
-      };
+      invitationDoc.permissions = resolvedPermissions;
+      invitationDoc.landingPage = resolvedLanding;
+      invitationDoc.employment = employmentPayload;
       invitationDoc.scheduleTemplateId = String(scheduleTemplateId || '').trim();
       invitationDoc.message = String(message || existingInvitation.message || '').trim();
       invitationDoc.businessName = resolvedCompanyName || existingInvitation.businessName;
@@ -1755,12 +1753,100 @@ export async function inviteUser(req, res) {
 
     const savedInvitation = await saveTeamInvitation(req, invitationDoc);
 
+    let savedAccount = existingAccount;
+    let generatedPassword = '';
+    const isExistingUser = Boolean(existingAccount);
+
+    if (!existingAccount) {
+      const generated = generateTemporaryPassword(14);
+      generatedPassword = generated;
+      const { firstName, lastName } = splitFullName(name);
+      const baseUsername = (String(firstName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '') || 'user');
+      let candidateUsername = baseUsername;
+      if (business) {
+        let counter = 1;
+        while (await findTeamMemberByUsername(req, business.business_id, candidateUsername)) {
+          candidateUsername = `${baseUsername}${counter}`;
+          counter += 1;
+        }
+      }
+
+      const account = buildAccountDocument({
+        firstName,
+        lastName,
+        email: normalizedEmail,
+        phone,
+        password: generated,
+        role: role || 'Usuario',
+        permissions: resolvedPermissions,
+        accountType: 'user',
+        status: 'pending',
+        inviteStatus: 'pending',
+        invitedBy: actorUserId || String(invitedBy || '').trim(),
+        companyName: resolvedCompanyName,
+        onboardingCompleted: true,
+        onboardingData: {
+          source: 'team-invite',
+          businessId: business?.business_id || undefined,
+          scheduleTemplateId: String(scheduleTemplateId || '').trim() || undefined,
+        },
+        landingPage: resolvedLanding,
+        linkedBusinessId: business?.business_id || '',
+        username: candidateUsername,
+        employment: employmentPayload,
+      });
+      savedAccount = await saveAccount(req, account);
+      savedAccount = await saveAccount(req, {
+        ...savedAccount,
+        role: role || 'Usuario',
+        permissions: resolvedPermissions,
+        landingPage: resolvedLanding,
+        employment: mergeEmploymentInfo(savedAccount.employment, employmentPayload),
+        companyName: resolvedCompanyName,
+        linkedBusinessId: business?.business_id || '',
+        onboardingData: {
+          source: 'team-invite',
+          businessId: business?.business_id || undefined,
+          scheduleTemplateId: String(scheduleTemplateId || '').trim() || undefined,
+        },
+        updatedAt: new Date().toISOString(),
+      });
+    } else {
+      savedAccount = await saveAccount(req, {
+        ...existingAccount,
+        pendingTeamInvite: inviteMeta,
+        inviteStatus: existingAccount.inviteStatus === 'accepted' ? existingAccount.inviteStatus : 'pending',
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    const rawInviteToken = crypto.randomBytes(32).toString('hex');
+    const accountWithToken = await saveInviteToken(req, savedAccount, rawInviteToken);
+
+    let emailSent = false;
+    try {
+      const { subject, html } = buildInvitationEmail({
+        name: accountWithToken.fullName || name,
+        email: accountWithToken.email,
+        inviteToken: rawInviteToken,
+        temporaryPassword: isExistingUser ? undefined : generatedPassword,
+        invitedBy: invitedByDisplay,
+        role: role || 'Usuario',
+        companyName: resolvedCompanyName,
+        isExistingUser,
+      });
+      await sendEmail({ to: accountWithToken.email, subject, html });
+      emailSent = true;
+    } catch (emailErr) {
+      console.error('[AUTH] Error enviando email de invitación:', emailErr?.message);
+    }
+
     await logAccountActivity(req, {
       actorUserId: actorUserId || String(invitedBy || '').trim(),
       actorName: invitedByDisplay,
-      targetUserId: existingAccount?.user_id || '',
+      targetUserId: accountWithToken.user_id || '',
       type: 'team',
-      action: existingInvitation ? 'Invitación actualizada' : 'Invitación creada',
+      action: existingInvitation ? 'Invitación actualizada' : 'Invitación enviada',
       entityId: savedInvitation.invitation_id,
       entityLabel: savedInvitation.fullName || savedInvitation.email,
       metadata: {
@@ -1768,16 +1854,19 @@ export async function inviteUser(req, res) {
         role: savedInvitation.role,
         businessId: business?.business_id || '',
         companyName: resolvedCompanyName,
-        existingUser: Boolean(existingAccount),
+        existingUser: isExistingUser,
+        emailSent,
       },
     });
 
-    return res.status(existingInvitation ? 200 : 201).json({
+    return res.status(existingInvitation || isExistingUser ? 200 : 201).json({
       ok: true,
       invitation: sanitizeInvitation(savedInvitation),
-      isExistingUser: Boolean(existingAccount),
+      user: sanitizeAccount(accountWithToken),
+      isExistingUser,
+      emailSent,
       companyCode: business?.companyCode || '',
-      inviteExpiresAt: savedInvitation.expiresAt,
+      inviteExpiresAt: accountWithToken.inviteExpiresAt || savedInvitation.expiresAt,
     });
   } catch (error) {
     return res.status(500).json({
@@ -3151,6 +3240,19 @@ export async function acceptInvite(req, res) {
 
     const teamInvite = account.pendingTeamInvite || null;
     const isExistingUser = Boolean(teamInvite);
+    const inviteBusinessId = String(
+      teamInvite?.businessId
+      || account.onboardingData?.businessId
+      || account.linkedBusinessId
+      || '',
+    ).trim();
+    const inviteRole = teamInvite?.role || account.role || 'Usuario';
+    const invitePermissions = teamInvite?.permissions
+      || account.permissions
+      || normalizePermissionMatrix(undefined, inviteRole);
+    const inviteLanding = teamInvite?.landingPage || account.landingPage || WORKER_DEFAULT_LANDING_PATH;
+    const inviteEmployment = teamInvite?.employment || null;
+    const inviteBusinessName = teamInvite?.businessName || account.companyName || '';
 
     if (!isExistingUser) {
       if (!newPassword) {
@@ -3165,9 +3267,9 @@ export async function acceptInvite(req, res) {
     const now = new Date().toISOString();
 
     let savedBusiness = null;
-    if (isExistingUser && teamInvite?.businessId) {
+    if (inviteBusinessId) {
       try {
-        const business = await findBusinessById(req, teamInvite.businessId);
+        const business = await findBusinessById(req, inviteBusinessId);
         if (business) {
           const members = Array.isArray(business.members) ? business.members : [];
           const alreadyMember = members.some((m) => m.user_id === account.user_id);
@@ -3180,8 +3282,8 @@ export async function acceptInvite(req, res) {
                   user_id: account.user_id,
                   fullName: account.fullName,
                   email: account.email,
-                  role: teamInvite.role || 'Usuario',
-                  permissions: teamInvite.permissions || normalizePermissionMatrix(undefined, teamInvite.role || 'Usuario'),
+                  role: inviteRole,
+                  permissions: invitePermissions,
                   joinedAt: now,
                 },
               ],
@@ -3196,39 +3298,74 @@ export async function acceptInvite(req, res) {
       }
     }
 
+    // Marcar invitaciones in-app pendientes del mismo email/empresa como aceptadas.
+    if (inviteBusinessId && account.email) {
+      try {
+        const pending = await findPendingInvitationForEmailAndBusiness(
+          req,
+          String(account.email).trim().toLowerCase(),
+          inviteBusinessId,
+        );
+        if (pending) {
+          await saveTeamInvitation(req, {
+            ...pending,
+            status: 'accepted',
+            acceptedBy: account.user_id,
+            acceptedAt: now,
+            updatedAt: now,
+          });
+        }
+      } catch (invErr) {
+        console.error('[AUTH] Error cerrando team_invitation al aceptar:', invErr?.message);
+      }
+    }
+
     const updatedAccountDoc = {
       ...account,
+      accountType: 'user',
       inviteStatus: 'accepted',
       status: 'active',
       emailVerified: true,
       inviteTokenHash: null,
       inviteExpiresAt: null,
       pendingTeamInvite: null,
-      onboardingCompleted: isTeamInvite,
+      onboardingCompleted: isTeamInvite ? true : account.onboardingCompleted,
+      role: inviteRole,
+      permissions: invitePermissions,
+      landingPage: inviteLanding,
+      linkedBusinessId: inviteBusinessId || account.linkedBusinessId || '',
+      companyName: inviteBusinessName || account.companyName || '',
+      invitedBy: account.invitedBy || teamInvite?.invitedBy || '',
       updatedAt: now,
     };
 
     if (!isExistingUser) {
       updatedAccountDoc.passwordHash = hashPassword(newPassword);
-    } else if (teamInvite) {
-      // Reflect the invite's chosen role/landing/employment in the account so the UI lo coja.
-      if (teamInvite.role) updatedAccountDoc.role = teamInvite.role;
-      if (teamInvite.permissions) updatedAccountDoc.permissions = teamInvite.permissions;
-      if (teamInvite.landingPage) updatedAccountDoc.landingPage = teamInvite.landingPage;
-      if (teamInvite.employment) {
-        updatedAccountDoc.employment = mergeEmploymentInfo(account.employment, teamInvite.employment);
-      }
-      if (teamInvite.businessId) updatedAccountDoc.linkedBusinessId = teamInvite.businessId;
-      if (teamInvite.businessName) updatedAccountDoc.companyName = teamInvite.businessName;
-      updatedAccountDoc.invitedBy = account.invitedBy || teamInvite.invitedBy || '';
-      updatedAccountDoc.workerProfileCompletion = computeWorkerProfileCompletion({
-        ...updatedAccountDoc,
-        employment: updatedAccountDoc.employment || account.employment,
-        personalData: account.personalData,
-      });
     }
+    if (inviteEmployment) {
+      updatedAccountDoc.employment = mergeEmploymentInfo(account.employment, inviteEmployment);
+    }
+    updatedAccountDoc.workerProfileCompletion = computeWorkerProfileCompletion({
+      ...updatedAccountDoc,
+      employment: updatedAccountDoc.employment || account.employment,
+      personalData: account.personalData,
+    });
 
     const savedAccount = await saveAccount(req, updatedAccountDoc);
+
+    if ((teamInvite?.scheduleTemplateId || account.onboardingData?.scheduleTemplateId) && inviteBusinessId) {
+      try {
+        await applyInviteScheduleTemplate(req, {
+          businessId: inviteBusinessId,
+          memberId: savedAccount.user_id,
+          memberName: savedAccount.fullName,
+          templateId: teamInvite?.scheduleTemplateId || account.onboardingData?.scheduleTemplateId,
+          workCenterId: inviteEmployment?.salesPointId || account.employment?.salesPointId || '',
+        });
+      } catch (schedErr) {
+        console.error('[AUTH] Error asignando plantilla de horario al aceptar:', schedErr?.message);
+      }
+    }
 
     await logAccountActivity(req, {
       actorUserId: savedAccount.user_id,
@@ -3238,13 +3375,14 @@ export async function acceptInvite(req, res) {
       action: isExistingUser ? 'Invitación aceptada (usuario existente)' : 'Invitación aceptada',
       entityId: savedAccount.user_id,
       entityLabel: savedAccount.fullName,
-      metadata: isExistingUser
-        ? { businessId: teamInvite?.businessId || '', businessName: teamInvite?.businessName || '' }
-        : {},
+      metadata: {
+        businessId: inviteBusinessId || '',
+        businessName: inviteBusinessName || '',
+      },
     });
 
     const redirectTo = isTeamInvite
-      ? (teamInvite?.landingPage || savedAccount.landingPage || '/saas/dashboard')
+      ? resolveRedirectAfterInvitationAccept(savedAccount)
       : '/auth/onboarding/business-type';
 
     const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
@@ -3765,46 +3903,34 @@ async function resolveBusinessForPointOfSale(req, pdv) {
   return resolveBusinessDocumentForPointOfSale(req, pdv);
 }
 
-async function resolveTabletSessionAccount(req, business, pdv) {
+/** Dueño / CEO de la empresa: el código TPV no puede abrir esa cuenta. */
+function isBusinessCeoAccountForTablet(account, business) {
+  if (!account || !business) return false;
+  const uid = String(account.user_id || '').trim();
   const ownerId = String(business.owner_user_id || '').trim();
-  if (ownerId) {
-    const owner = await findAccountByUserId(req, ownerId);
-    if (owner && !owner.deletedAt && owner.status !== 'inactive') return owner;
-  }
-
-  const dataUserId = String(pdv.user_id || '').trim();
-  if (dataUserId && dataUserId !== ownerId) {
-    const dataUser = await findAccountByUserId(req, dataUserId);
-    if (dataUser && !dataUser.deletedAt && dataUser.status !== 'inactive') return dataUser;
-  }
-
-  const members = Array.isArray(business.members) ? business.members : [];
-  for (const member of members) {
-    const memberId = String(member.user_id || '').trim();
-    if (!memberId || memberId === ownerId) continue;
-    const account = await findAccountByUserId(req, memberId);
-    if (!account || account.deletedAt || account.status === 'inactive') continue;
-    if (workerCanAccessPdvForTablet(account, business, pdv)) return account;
-  }
-
-  return null;
+  return Boolean(ownerId && uid && ownerId === uid);
 }
 
-/** Si ya hay sesión JWT, conservar ese usuario cuando puede operar el PDV (no cambiar a otro trabajador). */
+/**
+ * Sesión tablet: solo si ya hay trabajador con acceso al PDV.
+ * Sin sesión o con CEO → hay que entrar como trabajador (nunca dueño).
+ */
 async function resolveAccountForTpvTabletLogin(req, business, pdv) {
   const sessionUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
   if (sessionUserId) {
     const current = await findAccountByUserId(req, sessionUserId);
     if (current && !current.deletedAt && current.status !== 'inactive') {
+      if (isBusinessCeoAccountForTablet(current, business)) {
+        return { account: null, accessDenied: true, code: 'TPV_CEO_FORBIDDEN' };
+      }
       if (workerCanAccessPdvForTablet(current, business, pdv)) {
         return { account: current, accessDenied: false };
       }
-      return { account: null, accessDenied: true };
+      return { account: null, accessDenied: true, code: 'STORE_NOT_ASSIGNED' };
     }
   }
 
-  const account = await resolveTabletSessionAccount(req, business, pdv);
-  return { account, accessDenied: false };
+  return { account: null, accessDenied: true, code: 'TPV_NEED_WORKER' };
 }
 
 async function performTpvTabletLogin(req, res, { terminalCode }) {
@@ -3826,8 +3952,24 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
 
-  const { account, accessDenied } = await resolveAccountForTpvTabletLogin(req, business, pdv);
+  const { account, accessDenied, code } = await resolveAccountForTpvTabletLogin(req, business, pdv);
   if (accessDenied) {
+    if (code === 'TPV_CEO_FORBIDDEN') {
+      return res.status(403).json({
+        ok: false,
+        error:
+          'El código TPV no puede abrir la cuenta del dueño (CEO). Cierra esa sesión y entra como trabajador, luego pon el código de tienda.',
+        code: 'TPV_CEO_FORBIDDEN',
+      });
+    }
+    if (code === 'TPV_NEED_WORKER') {
+      return res.status(403).json({
+        ok: false,
+        error:
+          'Primero inicia sesión como trabajador y después introduce el código de tienda. El TPV no usa la cuenta del dueño.',
+        code: 'TPV_NEED_WORKER',
+      });
+    }
     return res.status(403).json({
       ok: false,
       error: 'No tienes acceso a esta tienda. Pide al encargado que te asigne el local correcto.',
@@ -3836,6 +3978,14 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
   }
   if (!account) {
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
+  }
+
+  if (isBusinessCeoAccountForTablet(account, business)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'El código TPV no puede abrir la cuenta del dueño (CEO). Entra como trabajador.',
+      code: 'TPV_CEO_FORBIDDEN',
+    });
   }
 
   const lockStatus = isAccountLocked(account);
@@ -3907,7 +4057,7 @@ async function performTpvTabletLogin(req, res, { terminalCode }) {
       pdvId: pdv._id,
       workCenterId: pdv.workCenterId || '',
       businessId: business.business_id,
-      dataUserId: pdv.user_id,
+      dataUserId: String(business.owner_user_id || pdv.user_id || '').trim(),
       tpvVertical,
     },
     accessToken,

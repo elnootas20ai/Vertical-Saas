@@ -603,7 +603,7 @@ export function buildSuspensionEmail(email, name, billingUrl) {
 // A-04: Email de invitación de miembro del equipo
 export function buildInvitationEmail({ name, email, inviteToken, temporaryPassword, invitedBy, role = 'Usuario', companyName = '', isExistingUser = false }) {
   const baseUrl = getAppBaseUrl();
-  const acceptUrl = `${baseUrl}/auth/accept-invite?token=${encodeURIComponent(inviteToken)}&email=${encodeURIComponent(email)}`;
+  const acceptUrl = `${baseUrl}/auth/accept-invite?token=${encodeURIComponent(inviteToken)}&email=${encodeURIComponent(email)}${isExistingUser ? '&mode=existing' : ''}`;
   const loginUrl = `${baseUrl}/auth/login`;
   const inviterDisplay = invitedBy ? `<strong>${invitedBy}</strong>` : 'un administrador';
   const companyDisplay = companyName ? ` de <strong>${companyName}</strong>` : '';
@@ -682,7 +682,7 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
           </p>
         </td></tr>
         <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
+          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Software de gestión para negocios</p>
         </td></tr>
       </table>
     </td></tr>
