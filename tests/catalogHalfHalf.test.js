@@ -235,25 +235,34 @@ describe('resolveBuildYourOwnMaxIngredients', () => {
     ).toBe(null);
   });
 
-  it('infiere 3 / 5 desde Mitad y mitad y Modomio sin número en el título', () => {
+  it('infiere 3 / 5 desde Modomio (carta) y Premium Modomio', () => {
     expect(
       resolveBuildYourOwnMaxIngredients({
         name: 'Mitad y mitad',
+        customFields: { halfHalf: true },
+      }),
+    ).toBe(null);
+    expect(
+      resolveBuildYourOwnMaxIngredients({
+        name: 'Modomio',
+        category: 'Pizzas',
         customFields: { buildYourOwn: true },
       }),
     ).toBe(3);
     expect(
       resolveBuildYourOwnMaxIngredients({
         name: 'Modomio',
+        category: 'Premium',
         customFields: { buildYourOwn: true },
       }),
     ).toBe(5);
     expect(
       resolveBuildYourOwnMaxIngredients({
-        name: 'Mitad y mitad',
-        customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 3 },
+        name: 'Premium Modomio',
+        category: 'Premium',
+        customFields: { buildYourOwn: true },
       }),
-    ).toBe(3);
+    ).toBe(5);
   });
 });
 
@@ -280,7 +289,7 @@ describe('isTpvBuildYourOwnCatalogItem modomio', () => {
     ).toBe(false);
   });
 
-  it('Mitad y mitad BYO solo con flag (por nombre sigue half-half)', () => {
+  it('Mitad y mitad es siempre half-half (2 pizzas), nunca BYO', () => {
     expect(
       isTpvBuildYourOwnCatalogItem({
         itemType: 'product',
@@ -296,7 +305,7 @@ describe('isTpvBuildYourOwnCatalogItem modomio', () => {
         category: 'Premium',
         customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 3 },
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isTpvHalfHalfCatalogItem({
         itemType: 'product',
@@ -304,7 +313,15 @@ describe('isTpvBuildYourOwnCatalogItem modomio', () => {
         category: 'Premium',
         customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 3 },
       }),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      isTpvHalfHalfCatalogItem({
+        itemType: 'product',
+        name: 'Premium mitad y mitad (al gusto)',
+        category: 'Premium',
+        customFields: {},
+      }),
+    ).toBe(true);
   });
 });
 

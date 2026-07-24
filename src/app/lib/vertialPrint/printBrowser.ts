@@ -25,7 +25,7 @@ function bodyPaddingBottom(
 
 const BASE_STYLES = `
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:16px 12px 28px;font-size:14px;color:#000;line-height:1.4}
+body{font-family:'Courier New',monospace;width:300px;margin:0 auto;padding:5px 12px 24px;font-size:14px;color:#000;line-height:1.4}
 .c{text-align:center}.hr{border-top:1px dashed #333;margin:10px 0}
 table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .t td{font-size:16px;font-weight:bold;padding-top:6px}

@@ -10121,6 +10121,10 @@ export function sanitizeCatalogItemForTpv(doc) {
   if (rawCf.comboSlotAllowlists && typeof rawCf.comboSlotAllowlists === 'object' && !Array.isArray(rawCf.comboSlotAllowlists)) {
     customFields.comboSlotAllowlists = rawCf.comboSlotAllowlists;
   }
+  // Suplementos por producto del hueco (p. ej. Tequeños +1,50 / Salchipapas +1).
+  if (rawCf.comboSlotSurcharges && typeof rawCf.comboSlotSurcharges === 'object' && !Array.isArray(rawCf.comboSlotSurcharges)) {
+    customFields.comboSlotSurcharges = rawCf.comboSlotSurcharges;
+  }
   if (rawCf.halfHalf === true) {
     customFields.halfHalf = true;
   }

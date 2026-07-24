@@ -32,6 +32,6 @@ describe('ticketBottomFeedCm', () => {
     expect(tailFeedCmForVariant('kitchen', 15)).toBe(6);
     expect(tailFeedCmForVariant('customer', 8)).toBe(8);
     expect(tailFeedCmForVariant('delivery', 12)).toBe(12);
-    expect(tailFeedCmForVariant('customer')).toBe(10);
+    expect(tailFeedCmForVariant('customer')).toBe(9);
   });
 });

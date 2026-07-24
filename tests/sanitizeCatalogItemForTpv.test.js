@@ -47,10 +47,14 @@ describe('sanitizeCatalogItemForTpv', () => {
           { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
         ],
         comboSlotAllowlists: { side: ['cat-a', 'cat-b'] },
+        comboSlotSurcharges: { side: { 'cat-a': 1.5, 'cat-b': 1 } },
       },
     };
     const sanitized = sanitizeCatalogItemForTpv(doc);
     expect(sanitized.customFields.comboSlotAllowlists).toEqual({ side: ['cat-a', 'cat-b'] });
+    expect(sanitized.customFields.comboSlotSurcharges).toEqual({
+      side: { 'cat-a': 1.5, 'cat-b': 1 },
+    });
     expect(sanitized.customFields.comboStructureConfirmed).toBe(true);
   });
 

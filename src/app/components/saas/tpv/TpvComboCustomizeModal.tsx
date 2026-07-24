@@ -4,6 +4,7 @@ import type { CatalogComboRef, CatalogItem } from '../../../lib/deliveryApi';
 import {
   COMBO_SLOT_META,
   appendComboMainUnit,
+  applyComboSlotSurcharges,
   catalogProductsForComboSection,
   comboItemsInCatalogSection,
   comboMenuHasMainFamilyChoice,
@@ -19,6 +20,7 @@ import {
   pickComboProductInSection,
   resolveComboRefSlotKind,
   resolveComboSlotAllowlist,
+  resolveComboSlotSurcharge,
   resolveTpvComboMenuSections,
   type ComboMainFamily,
   type ComboMenuCatalogSection,
@@ -208,6 +210,24 @@ export function TpvComboCustomizeModal({
 
   const menuComplete = isComboMenuComplete(menuSections, selections, catalogItems);
   const basePrice = Number(item.unitPrice || 0);
+
+  const pricedSelections = useMemo(
+    () => applyComboSlotSurcharges(selections, item.customFields, catalogItems),
+    [selections, item.customFields, catalogItems],
+  );
+
+  const extrasTotal = useMemo(
+    () =>
+      pricedSelections.reduce((sum, ref) => {
+        const unitExtras = (ref.addedSupplements ?? []).reduce(
+          (s, x) => s + Number(x.price || 0),
+          0,
+        );
+        return sum + unitExtras * Math.max(1, Number(ref.quantity) || 1);
+      }, 0),
+    [pricedSelections],
+  );
+  const displayPrice = Math.round((basePrice + extrasTotal) * 100) / 100;
 
   const progress = useMemo(() => {
     const required = displaySections.filter(
@@ -414,8 +434,13 @@ export function TpvComboCustomizeModal({
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 <span className="font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-                  {formatPrice(basePrice)}
+                  {formatPrice(displayPrice)}
                 </span>
+                {extrasTotal > 0 ? (
+                  <span className="ml-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-300">
+                    (menú {formatPrice(basePrice)} + suplementos)
+                  </span>
+                ) : null}
               </p>
             </div>
             <button
@@ -646,6 +671,11 @@ export function TpvComboCustomizeModal({
                               need > 0 &&
                               have >= need &&
                               (section.slotKind === 'main' || !selected);
+                            const slotSurcharge = resolveComboSlotSurcharge(
+                              item.customFields,
+                              section.slotKind,
+                              product._id,
+                            );
                             return (
                               <button
                                 key={product._id}
@@ -661,13 +691,22 @@ export function TpvComboCustomizeModal({
                                 }`}
                               >
                                 <span className="line-clamp-2 leading-snug">{product.name}</span>
-                                {selectedCount > 1 ? (
+                                {slotSurcharge > 0 ? (
+                                  <span className="mt-0.5 block text-[9px] font-bold text-amber-700 dark:text-amber-300">
+                                    +{formatPrice(slotSurcharge)}
+                                  </span>
+                                ) : selectedCount > 1 ? (
                                   <span className="mt-0.5 block text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
                                     ×{selectedCount}
                                   </span>
                                 ) : product.category && section.groupByMainFamily ? (
                                   <span className="mt-0.5 block truncate text-[9px] font-medium text-gray-400">
                                     {product.category}
+                                  </span>
+                                ) : null}
+                                {slotSurcharge > 0 && selectedCount > 1 ? (
+                                  <span className="mt-0.5 block text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                                    ×{selectedCount}
                                   </span>
                                 ) : null}
                               </button>
@@ -688,7 +727,7 @@ export function TpvComboCustomizeModal({
           <button
             type="button"
             disabled={!menuComplete || (needsMainFamilyPick && !mainFamily)}
-            onClick={() => onConfirm(selections)}
+            onClick={() => onConfirm(pricedSelections)}
             className="w-full min-h-[48px] flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-sm touch-manipulation"
           >
             <Plus className="w-5 h-5" />

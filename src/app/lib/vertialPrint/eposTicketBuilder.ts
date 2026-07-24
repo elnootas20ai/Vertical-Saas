@@ -123,12 +123,8 @@ export function buildEposTicket(
   const titleCols = colsForSize(paperWidthMm, true);
   const customerFeed = feedOptions?.customerTailFeedCm;
 
-  // Margen superior corto (medida Tiana); la base larga va al final.
-  if (typeof builder.addFeedLine === 'function') {
-    builder.addFeedLine(1);
-  } else {
-    builder.addText('\n');
-  }
+  // Margen superior mínimo (~0,1 cm; antes 1 línea / ~0,4 cm).
+  // Sin feed de línea completa: ahorra ~0,3 cm arriba.
 
   // Comanda cocina: solo pedido + productos + notas (sin cliente ni datos fiscales)
   if (doc.variant === 'kitchen') {

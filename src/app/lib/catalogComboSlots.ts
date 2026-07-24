@@ -468,6 +468,71 @@ export function resolveComboSlotAllowlist(
   return cleaned.length > 0 ? cleaned : null;
 }
 
+const COMBO_SLOT_SURCHARGE_PREFIX = 'combo-slot-surcharge:';
+
+/**
+ * Suplemento al elegir un producto del hueco (p. ej. Tequeños +1,50 en Complementos).
+ * Formato: `customFields.comboSlotSurcharges.side = { [productId]: 1.5 }`
+ * o plano: `customFields.comboSlotSurcharges = { [productId]: 1.5 }`.
+ */
+export function resolveComboSlotSurcharge(
+  customFields: Record<string, unknown> | undefined,
+  slotKind: ComboSlotKind,
+  productId: string,
+): number {
+  const id = String(productId || '').trim();
+  if (!id) return 0;
+  const raw = customFields?.comboSlotSurcharges;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 0;
+  const map = raw as Record<string, unknown>;
+  const bySlot = map[slotKind];
+  if (bySlot && typeof bySlot === 'object' && !Array.isArray(bySlot)) {
+    const n = Number((bySlot as Record<string, unknown>)[id]);
+    return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+  }
+  const flat = Number(map[id]);
+  return Number.isFinite(flat) && flat > 0 ? Math.round(flat * 100) / 100 : 0;
+}
+
+function isComboSlotSurchargeSupplement(id: string): boolean {
+  return String(id || '').startsWith(COMBO_SLOT_SURCHARGE_PREFIX);
+}
+
+/**
+ * Añade/quita suplementos de hueco según `comboSlotSurcharges` sin tocar extras de pizza.
+ */
+export function applyComboSlotSurcharges(
+  comboItems: CatalogComboRef[],
+  customFields: Record<string, unknown> | undefined,
+  catalog: CatalogItem[] = [],
+): CatalogComboRef[] {
+  return comboItems.map((ref) => {
+    const slotKind = resolveComboRefSlotKind(ref, catalog);
+    const surcharge = resolveComboSlotSurcharge(customFields, slotKind, ref.productId);
+    const kept = (ref.addedSupplements || []).filter(
+      (s) => !isComboSlotSurchargeSupplement(String(s?.id || '')),
+    );
+    if (surcharge <= 0) {
+      if (kept.length === (ref.addedSupplements || []).length) return ref;
+      const out: CatalogComboRef = { ...ref };
+      if (kept.length > 0) out.addedSupplements = kept;
+      else delete out.addedSupplements;
+      return out;
+    }
+    return {
+      ...ref,
+      addedSupplements: [
+        ...kept,
+        {
+          id: `${COMBO_SLOT_SURCHARGE_PREFIX}${ref.productId}`,
+          name: ref.productName,
+          price: surcharge,
+        },
+      ],
+    };
+  });
+}
+
 export function catalogProductsForComboSection(
   section: ComboMenuCatalogSection,
   catalog: CatalogItem[],

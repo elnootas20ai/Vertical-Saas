@@ -234,6 +234,45 @@ describe('catalogComboSlots', () => {
     ).toEqual(['d1', 'm1']);
   });
 
+  it('comboSlotSurcharges aplica suplemento Tequeños/Salchipapas sin tocar extras de pizza', async () => {
+    const { resolveComboSlotSurcharge, applyComboSlotSurcharges } = await import(
+      '../src/app/lib/catalogComboSlots.ts'
+    );
+    const cf = {
+      comboSlotSurcharges: {
+        side: { teq1: 1.5, sal1: 1 },
+      },
+    };
+    expect(resolveComboSlotSurcharge(cf, 'side', 'teq1')).toBe(1.5);
+    expect(resolveComboSlotSurcharge(cf, 'side', 'sal1')).toBe(1);
+    expect(resolveComboSlotSurcharge(cf, 'side', 'pat1')).toBe(0);
+
+    const catalog = [
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'teq1', name: 'Tequeños', category: 'Complementos' }),
+    ];
+    const applied = applyComboSlotSurcharges(
+      [
+        {
+          productId: 'p1',
+          productName: 'Margarita',
+          quantity: 1,
+          slotKind: 'main',
+          addedSupplements: [{ id: 'extra-queso', name: 'Extra queso', price: 1.2 }],
+        },
+        { productId: 'teq1', productName: 'Tequeños', quantity: 1, slotKind: 'side' },
+      ],
+      cf,
+      catalog,
+    );
+    expect(applied[0].addedSupplements).toEqual([
+      { id: 'extra-queso', name: 'Extra queso', price: 1.2 },
+    ]);
+    expect(applied[1].addedSupplements).toEqual([
+      { id: 'combo-slot-surcharge:teq1', name: 'Tequeños', price: 1.5 },
+    ]);
+  });
+
   it('buildComboMenuSections sin bebidas en catálogo sigue agrupando por tipo', () => {
     const catalog = [item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' })];
     const sections = buildComboMenuSections('estandar', catalog);

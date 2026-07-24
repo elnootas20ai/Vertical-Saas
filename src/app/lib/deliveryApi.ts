@@ -1981,6 +1981,9 @@ export interface TpvRegisterSession {
 
   summary: TpvRegisterSummary;
 
+  /** Solo en PUT: ids de entradas/salidas/devoluciones a anular (no se persiste). */
+  removedTransactionIds?: string[];
+
   createdAt: string;
   updatedAt: string;
 }

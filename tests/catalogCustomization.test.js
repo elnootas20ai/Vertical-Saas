@@ -100,6 +100,43 @@ describe('catalogCustomization TPV', () => {
     ).toEqual([]);
   });
 
+  it('parte «A y B» en dos ingredientes y conserva compuestos reales', () => {
+    expect(
+      parseIngredientsBulkText(
+        'Tomate, mozzarella, rúcula, tomate deshidratado, jamón ibérico y queso fresco',
+      ),
+    ).toEqual([
+      'Tomate',
+      'mozzarella',
+      'rúcula',
+      'tomate deshidratado',
+      'jamón ibérico',
+      'queso fresco',
+    ]);
+    expect(parseIngredientsBulkText('Mozzarella, champiñones, salsa de trufa y parmesano')).toEqual([
+      'Mozzarella',
+      'champiñones',
+      'salsa de trufa',
+      'parmesano',
+    ]);
+    expect(parseIngredientsBulkText('pepinillos y salsa miel y mostaza')).toEqual([
+      'pepinillos',
+      'salsa miel y mostaza',
+    ]);
+    expect(parseIngredientsBulkText('queso di mare')).toEqual(['queso di mare']);
+    expect(
+      parseIngredientsBulkText('cebolla y un toque de salsa The Black BBQ'),
+    ).toEqual(['cebolla']);
+    expect(parseIngredientsBulkText('150g. de ternera, cebolla caramelizada y queso de cabra')).toEqual([
+      'cebolla caramelizada',
+      'queso de cabra',
+    ]);
+    expect(parseIngredientsBulkText('2 pizzas + 1 complemento + 2 refrescos')).toEqual([]);
+    expect(parseIngredientsBulkText('5 ingredientes')).toEqual([]);
+    expect(parseIngredientsBulkText('Helado de 125 ml')).toEqual([]);
+    expect(parseIngredientsBulkText('Dos sabores')).toEqual([]);
+  });
+
   it('TPV no usa la lista maestra global cuando la ficha del producto está vacía', () => {
     const master = [
       { id: '1', name: 'Tomate', role: 'base', brandIds: ['mod'], productParts: ['pizzas'] },

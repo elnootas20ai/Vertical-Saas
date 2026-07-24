@@ -125,8 +125,8 @@ function pushLineDetail(
 export const TICKET_TAIL_FEED_CM = {
   kitchen: 6,
   /** Default cliente/delivery; se puede sobrescribir por PDV (ticketBottomFeedCm). */
-  customer: 10,
-  delivery: 10,
+  customer: 9,
+  delivery: 9,
 } as const;
 
 /** 203 dpi típico Epson TM ≈ 8 dots/mm. */
@@ -134,10 +134,12 @@ const DOTS_PER_MM = 8;
 
 /**
  * Margen superior: la cuchilla suele dejar el inicio del papel encima del cabezal.
- * 1 línea basta (medida Tiana); más blanco desperdicia bobina.
+ * Antes: 1 línea (~0,4 cm). Ahora ~0,1 cm (bajamos ~0,3 cm a petición).
  */
+const TICKET_TOP_FEED_CM = 0.1;
+
 function pushTopMargin(chunks: Uint8Array[]) {
-  chunks.push(command([ESC, 0x64, 1]));
+  pushFeedDots(chunks, TICKET_TOP_FEED_CM * 10 * DOTS_PER_MM);
 }
 
 /** ESC J n — avanza n dots (máx. 255 por comando). */
@@ -151,7 +153,7 @@ function pushFeedDots(chunks: Uint8Array[], dots: number) {
 }
 
 /**
- * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~10 cm (ajustable por PDV).
+ * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~9 cm (ajustable por PDV).
  * Solo el pie en blanco: si hay más líneas, el ticket se alarga solo.
  */
 function pushFeedAndCut(chunks: Uint8Array[], feedCm: number) {

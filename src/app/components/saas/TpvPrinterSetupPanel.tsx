@@ -202,7 +202,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     return Number.isFinite(port) && port > 0 ? port : 9100;
   });
   const [manualBottomFeedCm, setManualBottomFeedCm] = useState(() =>
-    clampTicketBottomFeedCm(initialConfig(scope).ticketBottomFeedCm),
+    String(clampTicketBottomFeedCm(initialConfig(scope).ticketBottomFeedCm)),
   );
   const [ipDirty, setIpDirty] = useState(false);
   const [feedDirty, setFeedDirty] = useState(false);
@@ -226,7 +226,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const savedBottomFeedCm = clampTicketBottomFeedCm(config.ticketBottomFeedCm);
   const hasUnsavedIp =
     ipDirty && (manualIp.trim() !== selectedHost || manualPort !== selectedPort);
-  const hasUnsavedFeed = feedDirty && manualBottomFeedCm !== savedBottomFeedCm;
+  const parsedManualBottomFeedCm = clampTicketBottomFeedCm(
+    manualBottomFeedCm.trim() === '' ? savedBottomFeedCm : Number(manualBottomFeedCm),
+  );
+  const hasUnsavedFeed = feedDirty && parsedManualBottomFeedCm !== savedBottomFeedCm;
   const hasUnsavedChanges = hasUnsavedIp || hasUnsavedFeed;
   // IP siempre editable. Tras detectar red local (o si ya estaba concedida) se puede comprobar/probar.
   const canProbeNetwork = !isNative || lanConfirmed;
@@ -285,7 +288,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     setConfig(next);
     setManualIp(String(next.networkHost || '').trim());
     setManualPort(Number(next.networkPort || 9100) || 9100);
-    setManualBottomFeedCm(clampTicketBottomFeedCm(next.ticketBottomFeedCm));
+    setManualBottomFeedCm(String(clampTicketBottomFeedCm(next.ticketBottomFeedCm)));
     setFeedDirty(false);
   }, [scope?.pdv?._id, scope?.pdv?._rev, scope?.pdvId, scope?.terminalId]);
 
@@ -311,7 +314,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       networkHost: host,
       networkPort: safePort,
       paperWidthMm: 80,
-      ticketBottomFeedCm: clampTicketBottomFeedCm(manualBottomFeedCm),
+      ticketBottomFeedCm: parsedManualBottomFeedCm,
     });
 
     const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
@@ -379,7 +382,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setConfig(next);
       setManualIp(host);
       setManualPort(safePort);
-      setManualBottomFeedCm(clampTicketBottomFeedCm(next.ticketBottomFeedCm));
+      setManualBottomFeedCm(String(clampTicketBottomFeedCm(next.ticketBottomFeedCm)));
       ipDirtyRef.current = false;
       setIpDirty(false);
       setFeedDirty(false);
@@ -402,7 +405,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setPendingSaveHost('');
       setPendingSavePort(9100);
     }
-  }, [config, manualBottomFeedCm, pdv, scope, syncActiveScope, refreshDiagnostics]);
+  }, [config, parsedManualBottomFeedCm, pdv, scope, syncActiveScope, refreshDiagnostics]);
 
   const handleRequestSave = useCallback(() => {
     const host = manualIp.trim();
@@ -907,28 +910,33 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
                 Blanco abajo del ticket (cm)
               </span>
               <input
-                type="number"
+                type="text"
                 inputMode="numeric"
-                min={MIN_TICKET_BOTTOM_FEED_CM}
-                max={MAX_TICKET_BOTTOM_FEED_CM}
-                step={1}
+                pattern="[0-9]*"
                 autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
                 value={manualBottomFeedCm}
                 onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === '') {
-                    setManualBottomFeedCm(DEFAULT_TICKET_BOTTOM_FEED_CM);
-                    setFeedDirty(true);
-                    return;
-                  }
-                  setManualBottomFeedCm(clampTicketBottomFeedCm(Number(raw)));
+                  // Solo dígitos mientras escribe (sin min/max en vivo: en iPad saltaba a 18).
+                  const raw = e.target.value.replace(/[^\d]/g, '').slice(0, 2);
+                  setManualBottomFeedCm(raw);
                   setFeedDirty(true);
+                }}
+                onBlur={() => {
+                  const next = clampTicketBottomFeedCm(
+                    manualBottomFeedCm.trim() === ''
+                      ? savedBottomFeedCm
+                      : Number(manualBottomFeedCm),
+                  );
+                  setManualBottomFeedCm(String(next));
                 }}
                 className="mt-1 w-full h-9 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 font-mono"
               />
               <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                Solo ticket cliente/delivery. Rango {MIN_TICKET_BOTTOM_FEED_CM}–{MAX_TICKET_BOTTOM_FEED_CM} cm
-                (por defecto {DEFAULT_TICKET_BOTTOM_FEED_CM}). Cocina sigue en 6 cm. Guarda y prueba.
+                Solo ticket cliente/delivery. Escribe un número de {MIN_TICKET_BOTTOM_FEED_CM} a{' '}
+                {MAX_TICKET_BOTTOM_FEED_CM} (por defecto {DEFAULT_TICKET_BOTTOM_FEED_CM}). Cocina sigue
+                en 6 cm. Guarda y prueba.
               </p>
             </label>
             {isNative && (diagLoading || diagnostics) ? (

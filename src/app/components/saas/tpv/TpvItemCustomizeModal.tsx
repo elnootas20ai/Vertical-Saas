@@ -99,9 +99,15 @@ export function TpvItemCustomizeModal({
   const buildYourOwnPool = useMemo(
     () =>
       buildYourOwn
-        ? tpvBuildYourOwnIngredientPool(item, storeIngredients, brandIngredientSelection, brands)
+        ? tpvBuildYourOwnIngredientPool(
+            item,
+            storeIngredients,
+            brandIngredientSelection,
+            brands,
+            catalogItems,
+          )
         : [],
-    [buildYourOwn, storeIngredients, brandIngredientSelection, brands, item],
+    [buildYourOwn, storeIngredients, brandIngredientSelection, brands, item, catalogItems],
   );
   const buildYourOwnMax = useMemo(
     () => (buildYourOwn ? resolveBuildYourOwnMaxIngredients(item) : null),

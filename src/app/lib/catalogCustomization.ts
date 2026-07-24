@@ -193,11 +193,12 @@ function foldCatalogProductName(value: string): string {
 export function isTpvHalfHalfCatalogItem(
   item: Pick<CatalogItem, 'itemType' | 'category' | 'name' | 'customFields'>,
 ): boolean {
-  if (item.customFields?.buildYourOwn === true) return false;
-  if (item.customFields?.halfHalf === true) return true;
   if (item.itemType === 'combo') return false;
   const name = foldCatalogProductName(item.name || '');
+  // Carta: «Premium mitad y mitad (al gusto)» = elegir 2 pizzas, NO ingredientes.
   if (/mitad\s*y\s*mitad|half\s*and\s*half|half-half/.test(name)) return true;
+  if (item.customFields?.halfHalf === true) return true;
+  if (item.customFields?.buildYourOwn === true) return false;
   return false;
 }
 
@@ -205,33 +206,44 @@ export function isTpvHalfHalfCatalogItem(
 export function isTpvBuildYourOwnCatalogItem(
   item: Pick<CatalogItem, 'itemType' | 'category' | 'name' | 'customFields'>,
 ): boolean {
+  const name = foldCatalogProductName(item.name || '');
+  if (/mitad\s*y\s*mitad|half\s*and\s*half|half-half/.test(name)) return false;
   if (item.customFields?.halfHalf === true) return false;
   if (item.customFields?.buildYourOwn === true) return true;
   if (item.itemType === 'combo') return false;
-  const name = foldCatalogProductName(item.name || '');
   if (/al\s*gusto|a\s*gusto|build\s*your\s*own/.test(name)) return true;
   // Modos Excel: «3 Ingredientes», «5 Ingredientes a elegir», etc.
   if (/\d+\s*ingredientes?/.test(name)) return true;
-  // Premium DISARMINK: Modomio = pizza al gusto (no confundir con Combo Modomio).
+  // Carta Modomio: pizza al gusto (no Combo Modomio).
   if (/^(pizza\s+)?modomio(premium)?$/.test(name) || /^premium\s+modomio$/.test(name)) return true;
-  // «Mitad y mitad» BYO solo con flag buildYourOwn (arriba). Por nombre sigue siendo half-half clásico.
   return false;
 }
 
 /**
  * Tope de ingredientes base en pizza al gusto (3 / 5).
  * null = sin tope (elige los que quiera).
+ * Carta Pau: Modomio (Pizzas) = 3; Premium Modomio = 5. Mitad y mitad NO usa esto (elige 2 pizzas).
  */
 export function resolveBuildYourOwnMaxIngredients(
-  item: Pick<CatalogItem, 'name' | 'customFields'>,
+  item: Pick<CatalogItem, 'name' | 'category' | 'customFields'>,
 ): number | null {
   const rawCf = Number(item.customFields?.buildYourOwnMaxIngredients);
   if (Number.isFinite(rawCf) && rawCf > 0) return Math.min(20, Math.floor(rawCf));
 
   const name = foldCatalogProductName(item.name || '');
-  // Nombres de carta DISARMINK / Excel sin número en el título.
-  if (/mitad\s*y\s*mitad/.test(name)) return 3;
-  if (/^(pizza\s+)?modomio(premium)?$/.test(name) || /^premium\s+modomio$/.test(name)) return 5;
+  const cat = foldIngredientLabel(String(item.category || ''));
+  if (/mitad\s*y\s*mitad|half\s*and\s*half/.test(name)) return null;
+
+  const isPremiumModomio =
+    /premium\s*modomio|modomio\s*premium|modomiopremium/.test(name) ||
+    (/modomio/.test(name) && /premium/.test(cat)) ||
+    (/modomio/.test(name) && /\b5\s*ingredientes?\b/.test(name));
+  if (isPremiumModomio) return 5;
+
+  const isPlainModomio =
+    /^(pizza\s+)?modomio$/.test(name) ||
+    (/modomio/.test(name) && /\b3\s*ingredientes?\b/.test(name));
+  if (isPlainModomio) return 3;
 
   const blobs = [
     name,
@@ -270,16 +282,57 @@ function foldIngredientLabel(value: string): string {
  * Etiquetas de menú del Excel (p. ej. «0», «3 Ingredientes a elegir»), no ingredientes reales.
  * Suele venir de la columna ingredientes en filas de pizza al gusto / menús por niveles.
  */
-export function isIngredientMetaLabel(name: string): boolean {
+/**
+ * Nombres compuestos con «y» que SÍ son un solo ingrediente (no partir).
+ * Ej.: «salsa miel y mostaza». «Queso di mare» no lleva «y» → no aplica.
+ */
+const INGREDIENT_Y_COMPOUND_RES: RegExp[] = [
+  /\bmiel\s+y\s+mostaza\b/,
+  /\baceite\s+y\s+vinagre\b/,
+  /\bsal\s+y\s+pimienta\b/,
+  /\bmacarrones\s+y\s+queso\b/,
+];
+
+/** Etiquetas de producto / prosa de carta, no un ingrediente real. */
+export function isLikelyInvalidIngredientLabel(name: string): boolean {
   if (isCatalogIngredientPlaceholder(name)) return true;
   const folded = foldIngredientLabel(name);
   if (!folded) return true;
   if (/^\d+$/.test(folded)) return true;
   if (/^\+\s*\d+/.test(folded)) return true;
   if (/ingredientes?\s+a\s+elegir/.test(folded)) return true;
-  if (/\d+\s+ingredientes?\s+a\s+elegir/.test(folded)) return true;
+  if (/\d+\s+ingredientes?/.test(folded)) return true;
   if (/^elegir\s+\d+/.test(folded)) return true;
+  if (/^dos\s+sabores\b/.test(folded)) return true;
+  // Productos / mitades / menús colados en lista maestra
+  if (/mitad\s+y\s+mitad/.test(folded)) return true;
+  if (/al\s+gusto/.test(folded)) return true;
+  if (/\d+\s*pizzas?\b/.test(folded)) return true;
+  if (/\b(complementos?|refrescos?)\b/.test(folded)) return true;
+  if (/\+/.test(folded) && /\b(pizza|complemento|refresco|bebida)\b/.test(folded)) return true;
+  // Postres / no-topping pizza
+  if (/\bhelado\b/.test(folded)) return true;
+  if (/\bml\b/.test(folded) && /\b(125|250|500)\b/.test(folded)) return true;
+  // Prosa de carta
+  if (/\bun\s+toque\s+de\b/.test(folded)) return true;
+  if (/\bbase\s+blanca\s+(con|de)\b/.test(folded)) return true;
+  if (/^\d+\s*(x|×)?\s*(hamburgues|smash|chicken|burger|ud|uds)\b/.test(folded)) return true;
+  if (/\b\d+\s*(g|gr|gramos)\b/.test(folded)) return true;
+  if (/^2\s+hamburgues/.test(folded)) return true;
+  // «A y B» pegados (salvo compuestos reales): no es un solo ingrediente
+  if (/\s+y\s+/.test(folded) || /\s+e\s+/.test(folded)) {
+    const isCompound = INGREDIENT_Y_COMPOUND_RES.some((re) => re.test(folded));
+    if (!isCompound) return true;
+  }
+  const words = folded.split(/\s+/).filter(Boolean);
+  // Ingredientes reales suelen ser cortos: «queso di mare», «tomate deshidratado».
+  if (words.length > 4) return true;
+  if (words.length >= 4 && !/\b(salsa|queso|jamon|tomate|cebolla|patatas)\b/.test(folded)) return true;
   return false;
+}
+
+export function isIngredientMetaLabel(name: string): boolean {
+  return isLikelyInvalidIngredientLabel(name);
 }
 
 /** Bebidas que no deben salir como topping en pizza al gusto (van en Extras o catálogo bebidas). */
@@ -297,6 +350,7 @@ function isBuildYourOwnSelectableIngredient(
 ): boolean {
   if (!ingredientShowsInTpv(ing)) return false;
   if (isIngredientMetaLabel(ing.name)) return false;
+  if (isLikelyInvalidIngredientLabel(ing.name)) return false;
   if (templateKey === 'pizzas' && isLikelyBeverageIngredient(ing.name)) return false;
   return true;
 }
@@ -434,12 +488,64 @@ export function catalogBuildYourOwnIngredientCandidates(
   return all;
 }
 
+function isPizzaFamilyCatalogProductForIngredients(
+  item: Pick<CatalogItem, 'category' | 'name' | 'customFields'>,
+  brands?: TpvBrandHint[],
+): boolean {
+  if (isTpvBuildYourOwnCatalogItem(item)) return false;
+  if (isTpvHalfHalfCatalogItem(item)) return false;
+  const key = resolveTpvCategoryTemplateKey(item, brands);
+  if (key === 'pizzas') return true;
+  const cat = foldIngredientLabel(String(item.category || ''));
+  return /premium|especialidad|pizzas?/.test(cat);
+}
+
+/**
+ * Unión de ingredientes reales de pizzas + Premium (+ especialidad) del catálogo.
+ * Fuente para Mitad/Modomio al gusto: no usa basura de la lista maestra (combos, helados, «A y B»).
+ */
+export function collectPizzaIngredientNamesFromCatalog(
+  catalogItems: Array<Pick<CatalogItem, 'category' | 'name' | 'customFields' | 'brandIds' | 'active'>> | undefined,
+  opts?: {
+    brandIds?: string[];
+    brands?: TpvBrandHint[];
+  },
+): string[] {
+  const items = Array.isArray(catalogItems) ? catalogItems : [];
+  const brandFilter = (opts?.brandIds || []).map((id) => String(id || '').trim()).filter(Boolean);
+  const byKey = new Map<string, string>();
+  for (const product of items) {
+    if (product.active === false) continue;
+    if (!isPizzaFamilyCatalogProductForIngredients(product, opts?.brands)) continue;
+    if (brandFilter.length > 0 && !catalogPizzaMatchesBrandFilter(product, brandFilter)) continue;
+    const raw =
+      typeof product.customFields?.ingredients === 'string'
+        ? product.customFields.ingredients
+        : '';
+    for (const part of parseIngredientsBulkText(raw)) {
+      if (isLikelyInvalidIngredientLabel(part)) continue;
+      if (isLikelyBeverageIngredient(part)) continue;
+      const key = ingredientNameKey(part);
+      if (!key || byKey.has(key)) continue;
+      byKey.set(key, part.trim());
+    }
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 export function tpvBuildYourOwnIngredientPool(
   item: Pick<CatalogItem, 'brandIds' | 'category' | 'name' | 'customFields'>,
   storeIngredients?: StoreIngredient[],
   brandIngredientSelection?: TpvBrandIngredientSelection,
   brands?: TpvBrandHint[],
+  catalogItems?: Array<Pick<CatalogItem, 'category' | 'name' | 'customFields' | 'brandIds' | 'active'>>,
 ): string[] {
+  const fromCarta = collectPizzaIngredientNamesFromCatalog(catalogItems, {
+    brandIds: productBrandIdsFromItem(item),
+    brands,
+  });
+  if (fromCarta.length > 0) return fromCarta;
+
   return catalogBuildYourOwnIngredientCandidates(
     item,
     storeIngredients,
@@ -631,13 +737,71 @@ export function brandsForTpvCategoryKey<T extends { _id: string; deliveryLineKin
   return brands.filter((brand) => resolveBrandTpvCategoryKeys(brand).includes(key));
 }
 
-function parseIngredientsText(raw: string | undefined | null): string[] {
-  if (typeof raw !== 'string') return [];
-  return raw
-    .split(/[,;\n]/)
+/**
+ * Protege compuestos «A y B» conocidos, parte el resto por « y » / « e »
+ * cuando ambos lados parecen ingredientes cortos (no prosa).
+ */
+function splitJoinedIngredientNames(part: string): string[] {
+  let work = String(part || '').trim();
+  if (!work) return [];
+
+  const protectedChunks: string[] = [];
+  for (const re of INGREDIENT_Y_COMPOUND_RES) {
+    work = work.replace(re, (match) => {
+      const idx = protectedChunks.length;
+      protectedChunks.push(match.trim());
+      return ` __YCOMP${idx}__ `;
+    });
+  }
+
+  const rough = work
+    .split(/\s+(?:y|e)\s+/i)
     .map((s) => s.trim())
     .filter(Boolean)
-    .filter((name) => !isCatalogIngredientPlaceholder(name));
+    .map((s) =>
+      s
+        .replace(/__YCOMP(\d+)__/g, (_, i) => protectedChunks[Number(i)] || '')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    )
+    .filter(Boolean);
+
+  const restore = (s: string) =>
+    s
+      .replace(/__YCOMP(\d+)__/g, (_, i) => protectedChunks[Number(i)] || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  // Si al partir queda un lado basura/prosa, no partir: devolver original filtrado.
+  if (rough.length <= 1) {
+    const one = restore(work);
+    return isLikelyInvalidIngredientLabel(one) ? [] : [one].filter(Boolean);
+  }
+
+  const restored = rough.map((s) => s.trim()).filter(Boolean);
+  const valid = restored.filter((s) => !isLikelyInvalidIngredientLabel(s));
+  // Si casi todo era basura, mejor no inventar: descarta el bloque.
+  if (valid.length === 0) return [];
+  // Si un lado era prosa y el otro válido, nos quedamos con los válidos.
+  return valid;
+}
+
+function parseIngredientsText(raw: string | undefined | null): string[] {
+  if (typeof raw !== 'string') return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const chunk of raw.split(/[,;\n|/]+/)) {
+    const trimmed = chunk.trim();
+    if (!trimmed) continue;
+    for (const name of splitJoinedIngredientNames(trimmed)) {
+      if (isCatalogIngredientPlaceholder(name) || isLikelyInvalidIngredientLabel(name)) continue;
+      const key = ingredientNameKey(name);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+  }
+  return out;
 }
 
 /** Textos de importación / carta que no son ingredientes reales para el TPV. */

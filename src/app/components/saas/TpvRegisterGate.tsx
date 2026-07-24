@@ -1870,6 +1870,52 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   registerSummary={summary}
                 />
 
+                {(() => {
+                  const cashOps = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
+                  if (cashOps.length === 0) {
+                    return (
+                      <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-400">
+                        Sin movimientos de caja (entradas / salidas / devoluciones) en este turno.
+                      </div>
+                    );
+                  }
+                  return (
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                        Movimientos de caja ({cashOps.length})
+                      </h4>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {[...cashOps].reverse().map((tx) => (
+                          <div
+                            key={tx.id}
+                            className="flex items-center justify-between gap-2 text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="text-gray-400 mr-1.5">
+                                {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                              </span>
+                              <span className="font-semibold text-gray-700 dark:text-gray-300">
+                                {TPV_CASH_TX_LABELS[tx.type] || tx.type}
+                              </span>
+                              {tx.description ? (
+                                <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
+                              ) : null}
+                            </div>
+                            <span
+                              className={`shrink-0 font-bold tabular-nums ${
+                                tx.type === 'cash_in' ? 'text-green-600' : 'text-red-600'
+                              }`}
+                            >
+                              {tx.type === 'cash_in' ? '+' : '−'}
+                              {tx.amount.toFixed(2)}€
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {showDeliveryClosingSlots && (
                   <div>
                     <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Billetes / monedas (opcional)</h4>
@@ -2484,23 +2530,63 @@ function isTpvCashMovementTx(type: string): boolean {
   return type === 'cash_in' || type === 'cash_out' || type === 'return';
 }
 
-function RegisterCashOpsStrip({ session }: { session: TpvRegisterSession }) {
+function RegisterCashOpsStrip({
+  session,
+  compact = false,
+  onRemove,
+  removingId = null,
+}: {
+  session: TpvRegisterSession;
+  compact?: boolean;
+  onRemove?: (txId: string) => void;
+  removingId?: string | null;
+}) {
   const ops = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
-  if (ops.length === 0) return null;
-  const recent = [...ops].slice(-5).reverse();
+  const recent = [...ops].reverse();
   return (
-    <div className="relative z-10 bg-white/80 dark:bg-gray-900/50 border-b border-emerald-100 dark:border-emerald-900 px-4 py-1.5 flex items-center gap-2 overflow-x-auto text-[11px]">
-      <span className="font-semibold text-gray-500 dark:text-gray-400 shrink-0">Movimientos de caja:</span>
-      {recent.map((tx) => (
-        <span key={tx.id} className="shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800">
-          <span className="text-gray-400">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
-          <span className="font-semibold text-gray-700 dark:text-gray-300">{TPV_CASH_TX_LABELS[tx.type] || tx.type}</span>
-          <span className={`font-bold ${tx.type === 'cash_in' ? 'text-green-600' : 'text-red-600'}`}>
-            {tx.type === 'cash_in' ? '+' : '−'}{tx.amount.toFixed(2)}€
+    <div
+      className={`relative z-10 bg-white/90 dark:bg-gray-900/60 border-b border-emerald-100 dark:border-emerald-900 px-3 ${
+        compact ? 'py-1' : 'py-1.5'
+      } flex items-center gap-2 overflow-x-auto text-[11px]`}
+    >
+      <span className="font-semibold text-gray-500 dark:text-gray-400 shrink-0">
+        Movimientos de caja{ops.length > 0 ? ` (${ops.length})` : ''}:
+      </span>
+      {ops.length === 0 ? (
+        <span className="text-gray-400 dark:text-gray-500">Sin entradas ni salidas aún</span>
+      ) : (
+        recent.map((tx) => (
+          <span
+            key={tx.id}
+            className="shrink-0 inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-gray-100 dark:bg-gray-800"
+          >
+            <span className="text-gray-400">
+              {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+            </span>
+            <span className="font-semibold text-gray-700 dark:text-gray-300">
+              {TPV_CASH_TX_LABELS[tx.type] || tx.type}
+            </span>
+            <span className={`font-bold ${tx.type === 'cash_in' ? 'text-green-600' : 'text-red-600'}`}>
+              {tx.type === 'cash_in' ? '+' : '−'}
+              {tx.amount.toFixed(2)}€
+            </span>
+            {tx.description && (
+              <span className="text-gray-500 truncate max-w-[140px]">{tx.description}</span>
+            )}
+            {onRemove ? (
+              <button
+                type="button"
+                title="Eliminar movimiento (se descuenta de la caja)"
+                disabled={removingId === tx.id}
+                onClick={() => onRemove(tx.id)}
+                className="ml-0.5 inline-flex items-center justify-center w-5 h-5 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-40"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            ) : null}
           </span>
-          {tx.description && <span className="text-gray-500 truncate max-w-[140px]">{tx.description}</span>}
-        </span>
-      ))}
+        ))
+      )}
     </div>
   );
 }
@@ -4354,6 +4440,74 @@ export function TpvRegisterGate({
     await txQueueRef.current;
   }, [applySessionTransactions]);
 
+  const removeCashMovement = useCallback(async (txId: string) => {
+    const run = async () => {
+      const uid = dataUserIdRef.current;
+      const sessionId = activeSessionIdRef.current;
+      const id = String(txId || '').trim();
+      if (!uid || !sessionId || !id) return;
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const current = sessionsRef.current.find((s) => s._id === sessionId);
+        if (!current || !isTpvRegisterSessionOpen(current)) return;
+        const target = (current.transactions || []).find((t) => t.id === id);
+        if (!target || !isTpvCashMovementTx(target.type)) {
+          toast.error('Solo se pueden eliminar entradas, salidas o devoluciones');
+          return;
+        }
+        const updatedTxs = (current.transactions || []).filter((t) => t.id !== id);
+        const patch = applySessionTransactions(current, updatedTxs);
+        const nextSession: TpvRegisterSession = {
+          ...current,
+          ...patch,
+          summary: buildTpvRegisterSummary({ ...current, ...patch }),
+          removedTransactionIds: [id],
+        };
+
+        if (!isBrowserOnline()) {
+          enqueueTpvOfflineItem('register_tx', { userId: uid, session: nextSession, removedTransactionId: id });
+          setSessions((prev) => prev.map((s) => (s._id === sessionId ? { ...nextSession, removedTransactionIds: undefined } : s)));
+          const label = TPV_CASH_TX_LABELS[target.type] || 'Movimiento';
+          toast.info(`${label} eliminado en cola local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`);
+          return;
+        }
+
+        try {
+          const updated = await updateTpvRegisterSessionRequest(uid, nextSession);
+          setSessions((prev) => prev.map((s) => (s._id === updated._id ? updated : s)));
+          const label = TPV_CASH_TX_LABELS[target.type] || 'Movimiento';
+          toast.success(
+            `${label} de ${Number(target.amount || 0).toFixed(2)}€ eliminada. Efectivo esperado: ${calcTpvExpectedCash(updated).toFixed(2)}€`,
+          );
+          return;
+        } catch {
+          if (attempt < 4) {
+            try {
+              const refreshed = await listTpvRegisterSessionsRequest(uid, {
+                businessId: scopeBusinessIdRef.current || undefined,
+              });
+              setSessions((prev) =>
+                mergeTpvRegisterSessionsPreservingOpen(
+                  prev,
+                  refreshed.filter((s) =>
+                    shouldKeepTpvSessionInList(s, pointsOfSale, scopeBusinessIdRef.current),
+                  ),
+                ),
+              );
+            } catch {
+              /* reintento */
+            }
+            continue;
+          }
+          toast.error('No se pudo eliminar el movimiento de caja');
+        }
+      }
+    };
+
+    txQueueRef.current = txQueueRef.current.then(run, run);
+    await txQueueRef.current;
+  }, [applySessionTransactions, pointsOfSale]);
+
   const performCashCount = useCallback(async (countedBy: string, denominations: CashDenominationCount, notes?: string) => {
     if (!dataUserId || !activeSession) return;
     const actualCash = calcDenominationTotal(denominations);
@@ -4895,8 +5049,12 @@ export function TpvRegisterGate({
           minimal={compactRegisterChrome}
           quickActions={statusBarQuickActions}
         />
-        {!compactRegisterChrome && !isRestaurantVerticalChrome && (
-          <RegisterCashOpsStrip session={activeSession} />
+        {!isRestaurantVerticalChrome && (
+          <RegisterCashOpsStrip
+            session={activeSession}
+            compact={compactRegisterChrome}
+            onRemove={(txId) => { void removeCashMovement(txId); }}
+          />
         )}
         <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
           {!clockInGate.allowed && !showClockIn && (

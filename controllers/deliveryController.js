@@ -114,6 +114,7 @@ import {
   ensureDeliveryOrderRefundServer,
 } from '../services/deliveryOrderFinanceService.js';
 import { triggerReactiveAlert } from '../services/deliveryAlertEngine.js';
+import { mergeTpvRegisterTransactions } from '../services/tpvRegisterTransactionMerge.js';
 import {
   canEmitCatalogStockAlerts,
   filterStockTrackedCatalogItems,
@@ -2933,23 +2934,6 @@ export async function createTpvRegisterSession(req, res) {
   }
 }
 
-function mergeTpvRegisterTransactions(existingTxs, incomingTxs) {
-  const existing = Array.isArray(existingTxs) ? existingTxs : [];
-  const incoming = Array.isArray(incomingTxs) ? incomingTxs : [];
-  const byId = new Map();
-  for (const t of existing) {
-    if (t && t.id) byId.set(t.id, t);
-  }
-  for (const t of incoming) {
-    if (t && t.id) byId.set(t.id, t);
-  }
-  return [...byId.values()].sort((a, b) => {
-    const ta = new Date(a.date || 0).getTime();
-    const tb = new Date(b.date || 0).getTime();
-    return ta - tb;
-  });
-}
-
 export async function updateTpvRegisterSession(req, res) {
   try {
     const { userId, sessionId } = req.params;
@@ -2960,15 +2944,23 @@ export async function updateTpvRegisterSession(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const db = getDeliveryDbName();
-    const mergedTransactions = mergeTpvRegisterTransactions(existing.transactions, session.transactions);
+    const removedTransactionIds = Array.isArray(session.removedTransactionIds)
+      ? session.removedTransactionIds
+      : [];
+    const { removedTransactionIds: _dropRemoved, ...sessionWithoutRemovedFlag } = session;
+    const mergedTransactions = mergeTpvRegisterTransactions(
+      existing.transactions,
+      sessionWithoutRemovedFlag.transactions,
+      removedTransactionIds,
+    );
     const linkedOrderIds = [...new Set([
       ...(existing.linkedOrderIds || []),
-      ...(session.linkedOrderIds || []),
+      ...(sessionWithoutRemovedFlag.linkedOrderIds || []),
       ...mergedTransactions.map((t) => String(t.linkedDeliveryOrderId || t.orderId || '').trim()).filter(Boolean),
     ])];
     const doc = buildTpvRegisterSessionDocument(userId, {
       ...existing,
-      ...session,
+      ...sessionWithoutRemovedFlag,
       transactions: mergedTransactions,
       linkedOrderIds,
     }, existing);
