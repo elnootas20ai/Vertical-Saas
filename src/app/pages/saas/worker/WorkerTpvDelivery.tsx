@@ -1184,9 +1184,8 @@ export function WorkerTpvDelivery({
       limit: 1,
       skip: 0,
       lite: true,
-      businessId: businessId || undefined,
     }).catch(() => undefined);
-  }, [userId, businessId, view]);
+  }, [userId, view]);
 
   // CEO TPV rápido = misma UI compacta que tablet (antes !ceoMode forzaba el layout grande "antiguo").
   const isTabletUi = ceoMode || isTabletSession;

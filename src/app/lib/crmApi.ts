@@ -562,6 +562,12 @@ export async function importClientsFromBusinessRequest(
   };
 }
 
+export type ClientPhoneSearchPayload = {
+  clients: Client[];
+  /** Tamaño de la cartera cargada en servidor (0 = carga fallida / vacía). */
+  portfolioSize: number;
+};
+
 /** Busca clientes por dígitos de teléfono y/o por nombre (substring, sin acentos en servidor). */
 export async function searchClientsByPhoneRequest(
   userId: string,
@@ -570,19 +576,26 @@ export async function searchClientsByPhoneRequest(
   signal?: AbortSignal,
   businessId?: string,
   options?: { includeLegacy?: boolean; fallbackAll?: boolean; refresh?: boolean },
-): Promise<Client[]> {
+): Promise<ClientPhoneSearchPayload> {
   const params = new URLSearchParams({ q: query, limit: String(limit) });
   if (businessId?.trim()) params.set('businessId', businessId.trim());
   if (options?.includeLegacy) params.set('includeLegacy', '1');
   if (options?.fallbackAll) params.set('fallbackAll', '1');
   if (options?.refresh) params.set('refresh', '1');
-  const payload = await request<{ ok: boolean; clients: unknown[] }>(
+  const payload = await request<{ ok: boolean; clients: unknown[]; portfolioSize?: number }>(
     `/api/clients/${encodeURIComponent(userId)}/search-by-phone?${params.toString()}`,
     signal ? { signal } : undefined,
   );
-  return (payload.clients || [])
+  const clients = (payload.clients || [])
     .map(normalizeClientRecord)
     .filter((c): c is Client => Boolean(c));
+  const portfolioSize =
+    typeof payload.portfolioSize === 'number' && Number.isFinite(payload.portfolioSize)
+      ? Math.max(0, Math.floor(payload.portfolioSize))
+      : clients.length > 0
+        ? clients.length
+        : -1;
+  return { clients, portfolioSize };
 }
 
 export async function checkClientDuplicatesRequest(userId: string, client: Partial<Client>): Promise<Client[]> {

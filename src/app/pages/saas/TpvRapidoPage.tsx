@@ -9,7 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
+import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
   createDeliveryOrderWithCajaStatus,
@@ -113,7 +113,6 @@ import {
   resolveBusinessScopeId,
   DELIVERY_CONFIG_CHANGED,
 } from '../../lib/deliverySetup';
-import { resolveClientSearchBusinessId } from '../../lib/clientSearchScope';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
 import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
@@ -800,16 +799,19 @@ export function TpvRapidoOrderFlow({
     () => resolveRetailOpsWriteBusinessId(businessId, businesses),
     [businesses, businessId],
   );
-  const clientSearchUserId = useMemo(
-    () => userId || resolveBusinessDataUserId(user, currentBusiness),
-    [userId, user, currentBusiness],
-  );
-  const clientSearchBusinessId = resolveClientSearchBusinessId(
-    currentBusiness,
-    writeBusinessId || businessId,
-  );
+  const clientSearchUserId = useMemo(() => {
+    const fromScope = String(userId || '').trim();
+    const fromBusiness = resolveBusinessDataUserId(user, currentBusiness);
+    const selfId = String(user?.user_id || user?.id || '').trim();
+    const invitedBy = String(user?.invitedBy || '').trim();
+    // Blindaje TPV: nunca buscar con el userId del trabajador; los clientes viven en el titular.
+    const candidate = fromScope || fromBusiness || invitedBy || selfId;
+    if (invitedBy && candidate === selfId) return invitedBy;
+    return candidate;
+  }, [userId, user, currentBusiness]);
 
   // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
+  // Sin businessId: carga toda la cartera del titular (no filtrar por empresa events/otra).
   // Sin refresh=1: invalidar aquí tiraba la caché y la 1.ª búsqueda volvía a tardar ~10s.
   useEffect(() => {
     if (!clientSearchUserId) return;
@@ -817,9 +819,8 @@ export function TpvRapidoOrderFlow({
       limit: 1,
       skip: 0,
       lite: true,
-      businessId: clientSearchBusinessId || undefined,
     }).catch(() => undefined);
-  }, [clientSearchUserId, clientSearchBusinessId]);
+  }, [clientSearchUserId]);
 
   /** Evita TPV sobre limpieza/otra vertical: cambia al delivery de la cuenta. */
   const autoSwitchOrderFlowRef = useRef(false);
@@ -1893,6 +1894,7 @@ export function TpvRapidoOrderFlow({
         toast.error('No se pudo crear el cliente. Inténtalo de nuevo.');
         return;
       }
+      clearClientPhoneSearchCache();
       toast.success('Cliente creado');
       setShowCreateForm(false);
       setNewClientName('');

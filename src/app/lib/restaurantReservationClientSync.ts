@@ -44,11 +44,11 @@ export async function ensureReservationCrmClient(input: EnsureReservationClientI
     undefined,
     searchBusinessId,
   );
-  if (matches.length > 0) {
-    const exact = matches.find(
+  if (matches.clients.length > 0) {
+    const exact = matches.clients.find(
       (m) => String(m.phone || '').replace(/\D/g, '') === phoneDigits,
     );
-    return (exact || matches[0]).id;
+    return (exact || matches.clients[0]).id;
   }
 
   const clientPayload = {

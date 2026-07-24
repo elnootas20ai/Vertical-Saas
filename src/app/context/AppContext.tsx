@@ -1497,7 +1497,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     setIsLoadingClients(true);
 
-    listClientsPageRequest(authUser.user_id, { limit: 1, skip: 0, lite: true })
+    listClientsPageRequest(
+      // Titular: trabajadores ven el mismo total que el dueño (Pau ~6k).
+      String((authUser as { invitedBy?: string }).invitedBy || '').trim() || authUser.user_id,
+      { limit: 1, skip: 0, lite: true },
+    )
       .then(({ meta }) => {
         if (!cancelled) {
           setClients([]);
@@ -2488,7 +2492,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshClients = async () => {
     if (!authUser?.user_id) return;
     try {
-      const { meta } = await listClientsPageRequest(authUser.user_id, { limit: 1, skip: 0, lite: true });
+      const dataUserId =
+        String((authUser as { invitedBy?: string }).invitedBy || '').trim() || authUser.user_id;
+      const { meta } = await listClientsPageRequest(dataUserId, { limit: 1, skip: 0, lite: true });
       setClientsTotalCount(meta.total);
     } catch {
       // Silenciado: el total actual permanece como fallback.

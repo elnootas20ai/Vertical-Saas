@@ -275,18 +275,76 @@ export async function getDocument(req, dbName, docId) {
 
 /**
  * Cache en memoria por titular (evita el tope 5MB del LRU global en cuentas grandes).
- * TTL fijo largo: la carga fría de Couch (~6k clientes) tarda varios segundos.
- * Altas/ediciones ya invalidan con invalidateClientDocumentsForUser (put/bulk/delete).
+ * TTL: balance entre TPV frío (~6k docs) y ver altas nuevas sin reiniciar.
+ * Altas/ediciones: upsert en caché + bump de generación (no reescribir carga stale).
  */
-const CLIENT_DOCS_TTL_MS = 15 * 60_000;
+const CLIENT_DOCS_TTL_MS = 3 * 60_000;
 const clientDocumentsByUser = new Map();
+/** Generación por titular: si sube durante un _find, no se escribe esa carga en caché. */
+const clientDocumentsGeneration = new Map();
 const clientsUserIndexReady = new Set();
+const clientDocumentsInflight = new Map();
+
+function bumpClientDocumentsGeneration(uid) {
+  const next = (clientDocumentsGeneration.get(uid) || 0) + 1;
+  clientDocumentsGeneration.set(uid, next);
+  return next;
+}
 
 export function invalidateClientDocumentsForUser(userId) {
   const uid = String(userId || '').trim();
   if (!uid) return;
+  bumpClientDocumentsGeneration(uid);
   clientDocumentsByUser.delete(uid);
   cacheService.invalidateByPrefix(`clients_user:${uid}:`);
+}
+
+/**
+ * Tras alta/edición: mete el cliente en la caché viva para que el TPV lo encuentre al instante
+ * sin esperar un reload de toda la cartera.
+ */
+export function upsertClientDocumentInCache(userId, document) {
+  const uid = String(userId || '').trim();
+  if (!uid || !document || document.type !== 'client') return;
+  if (document.deletedAt) {
+    removeClientDocumentFromCache(uid, document._id || document.id);
+    return;
+  }
+  const entry = clientDocumentsByUser.get(uid);
+  if (!entry || !Array.isArray(entry.docs) || entry.docs.length === 0) {
+    // Sin cartera en RAM: invalidar para forzar reload limpio en la próxima búsqueda.
+    invalidateClientDocumentsForUser(uid);
+    return;
+  }
+  const id = String(document._id || document.id || '').trim();
+  if (!id) {
+    invalidateClientDocumentsForUser(uid);
+    return;
+  }
+  bumpClientDocumentsGeneration(uid);
+  const next = entry.docs.filter((d) => String(d?._id || d?.id || '') !== id);
+  next.push(document);
+  writeClientDocumentsCache(uid, next);
+  const cacheKey = cacheService.buildKey('clients_user', uid, 'all');
+  cacheService.set(cacheKey, next, CLIENT_DOCS_TTL_MS);
+}
+
+function removeClientDocumentFromCache(uid, rawId) {
+  const id = String(rawId || '').trim();
+  const entry = clientDocumentsByUser.get(uid);
+  if (!entry || !Array.isArray(entry.docs) || !id) {
+    invalidateClientDocumentsForUser(uid);
+    return;
+  }
+  bumpClientDocumentsGeneration(uid);
+  const next = entry.docs.filter((d) => String(d?._id || d?.id || '') !== id);
+  if (next.length === 0) {
+    invalidateClientDocumentsForUser(uid);
+    return;
+  }
+  writeClientDocumentsCache(uid, next);
+  const cacheKey = cacheService.buildKey('clients_user', uid, 'all');
+  cacheService.set(cacheKey, next, CLIENT_DOCS_TTL_MS);
 }
 
 function readClientDocumentsCache(uid) {
@@ -378,7 +436,7 @@ export async function putDocument(req, dbName, docId, document) {
   cacheService.invalidateByPrefix('kpi:');
   cacheService.invalidateByPrefix('view:');
   if (document?.type === 'client' && document?.user_id) {
-    invalidateClientDocumentsForUser(document.user_id);
+    upsertClientDocumentInCache(document.user_id, document);
   }
 
   return payload;
@@ -401,7 +459,7 @@ export async function bulkPutDocuments(req, dbName, docs) {
   cacheService.invalidateByPrefix('view:');
   for (const doc of docs || []) {
     if (doc?.type === 'client' && doc?.user_id) {
-      invalidateClientDocumentsForUser(doc.user_id);
+      upsertClientDocumentInCache(doc.user_id, doc);
     }
   }
 
@@ -3833,9 +3891,7 @@ export function sanitizeClientSummary(client) {
   };
 }
 
-/** Índice en memoria por titular: evita releer notas/promos en cada búsqueda TPV con miles de clientes. */
-const clientDocumentsInflight = new Map();
-
+/** Índice type+user_id para _find de carteras grandes (TPV). */
 async function ensureClientsUserTypeIndex(req, dbName) {
   if (clientsUserIndexReady.has(dbName)) return;
   const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
@@ -3862,6 +3918,8 @@ export async function getClientDocumentsForUser(req, userId) {
     return clientDocumentsInflight.get(uid);
   }
 
+  const loadGeneration = clientDocumentsGeneration.get(uid) || 0;
+
   const promise = (async () => {
     const db = getClientsDbName();
     await ensureDatabase(req, db);
@@ -3885,6 +3943,13 @@ export async function getClientDocumentsForUser(req, userId) {
     const clients = docs.filter(
       (doc) => doc?.type === 'client' && !doc?.deletedAt && doc?.user_id === uid,
     );
+    const genNow = clientDocumentsGeneration.get(uid) || 0;
+    // Si hubo alta/edición durante el _find, no pisar la caché con una foto stale.
+    if (genNow !== loadGeneration) {
+      const live = readClientDocumentsCache(uid);
+      if (Array.isArray(live) && live.length > 0) return live;
+      return clients;
+    }
     // No cachear vacío: evita que un _find momentáneo a 0 deje el TPV ciego.
     if (clients.length > 0) {
       writeClientDocumentsCache(uid, clients);
@@ -3983,21 +4048,48 @@ export function filterClientDocsBySearch(docs, searchIndex, phoneQuery, userId, 
   return scored.map((row) => row.doc);
 }
 
-/** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
-export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, options = {}) {
+/**
+ * Carga cartera + índice para búsqueda TPV/CRM.
+ * Si Couch devuelve 0 (índice frío / glitch), invalida y reintenta UNA vez
+ * para no dejar el TPV ciego en cuentas grandes (p. ej. Pau ~6k).
+ */
+async function loadClientSearchCorpus(req, userId) {
+  const uid = String(userId || '').trim();
+  let docs = await getClientDocumentsForUser(req, uid);
+  if (!Array.isArray(docs) || docs.length === 0) {
+    invalidateClientDocumentsForUser(uid);
+    docs = await getClientDocumentsForUser(req, uid);
+  }
+  const list = Array.isArray(docs) ? docs : [];
+  const bundle = readClientSearchBundle(uid);
+  return {
+    docs: list,
+    searchIndex: bundle?.searchIndex || null,
+    portfolioSize: list.length,
+  };
+}
+
+/** Búsqueda + tamaño de cartera (para blindar reintentos solo si la carga falló). */
+export async function searchClientsByPhoneWithMeta(req, userId, phoneQuery, limit = 20, options = {}) {
   const raw = String(phoneQuery || '').trim();
-  if (raw.length < 1) return [];
+  if (raw.length < 1) {
+    return { clients: [], portfolioSize: 0 };
+  }
 
-  const docs = await getClientDocumentsForUser(req, userId);
-  const bundle = readClientSearchBundle(userId);
-  const searchIndex = bundle?.searchIndex || null;
+  const { docs, searchIndex, portfolioSize } = await loadClientSearchCorpus(req, userId);
   const max = Math.min(50, Math.max(1, Number(limit) || 20));
-
-  return filterClientDocsBySearch(docs, searchIndex, raw, userId, {
+  const clients = filterClientDocsBySearch(docs, searchIndex, raw, userId, {
     ...options,
     limit: max,
     earlyStopExactPhone: true,
   });
+  return { clients, portfolioSize };
+}
+
+/** Búsqueda por teléfono y/o nombre del cliente (modos separados + puntuación). */
+export async function searchClientsByPhone(req, userId, phoneQuery, limit = 20, options = {}) {
+  const { clients } = await searchClientsByPhoneWithMeta(req, userId, phoneQuery, limit, options);
+  return clients;
 }
 
 /** Igual que searchClientsByPhone pero sin tope (listado CRM con paginación). */
@@ -4005,10 +4097,7 @@ export async function searchClientsForList(req, userId, phoneQuery, options = {}
   const raw = String(phoneQuery || '').trim();
   if (raw.length < 1) return [];
 
-  const docs = await getClientDocumentsForUser(req, userId);
-  const bundle = readClientSearchBundle(userId);
-  const searchIndex = bundle?.searchIndex || null;
-
+  const { docs, searchIndex } = await loadClientSearchCorpus(req, userId);
   return filterClientDocsBySearch(docs, searchIndex, raw, userId, options);
 }
 

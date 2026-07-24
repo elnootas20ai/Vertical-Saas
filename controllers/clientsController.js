@@ -22,7 +22,7 @@ import {
   buildClientPromotionDocument,
   sanitizeClientPromotion,
   listClientPromotionsByClient,
-  searchClientsByPhone,
+  searchClientsByPhoneWithMeta,
   searchClientsForList,
   getClientDocumentsForUser,
   listDeliveryOrdersByUser,
@@ -102,10 +102,11 @@ async function resolveCreateBusinessId(req, userId, client = {}) {
 }
 
 async function ensureClientOwner(req, userId, clientId) {
+  const { ownerUserId } = await resolveDataOwnerUserId(req, userId);
   const db = getClientsDbName();
   await ensureDatabase(req, db);
   const client = await getDocument(req, db, clientId);
-  if (!client || client.type !== 'client' || client.user_id !== userId) {
+  if (!client || client.type !== 'client' || client.user_id !== ownerUserId) {
     return null;
   }
   return client;
@@ -176,18 +177,18 @@ export async function createClient(req, res) {
       return res.status(400).json({ ok: false, error: 'El teléfono contiene caracteres no válidos', field: 'phone' });
     }
 
-    const account = await findAccountByUserId(req, userId);
+    const { ownerUserId, account } = await resolveDataOwnerUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    const businessId = await resolveCreateBusinessId(req, userId, client);
+    const businessId = await resolveCreateBusinessId(req, ownerUserId, client);
     if (businessId === null) {
       return badRequest(res, 'Falta businessId (empresa activa)');
     }
 
     const db = getClientsDbName();
     await ensureDatabase(req, db);
-    const listOptions = await resolveClientListOptions(req, userId, businessId);
-    const doc = buildClientDocument(userId, {
+    const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);
+    const doc = buildClientDocument(ownerUserId, {
       ...client,
       businessId,
       business_id: businessId,
@@ -197,7 +198,7 @@ export async function createClient(req, res) {
     await logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,
-      targetUserId: userId,
+      targetUserId: ownerUserId,
       type: 'client',
       action: `Creó cliente ${doc.name}`,
       entityId: doc._id,
@@ -210,7 +211,7 @@ export async function createClient(req, res) {
     if (doc.address && !doc.postalCode) warnings.push({ field: 'postalCode', message: 'Código postal no especificado' });
     if (!doc.email) warnings.push({ field: 'email', message: 'Sin email — no se podrán enviar comunicaciones' });
 
-    const duplicates = await findDuplicateClients(req, userId, doc, listOptions).catch(() => []);
+    const duplicates = await findDuplicateClients(req, ownerUserId, doc, listOptions).catch(() => []);
     return res.status(201).json({ ok: true, client: sanitizeClient({ ...doc, _rev: saved.rev }), duplicates, warnings });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear cliente' });
@@ -227,17 +228,17 @@ export async function updateClient(req, res) {
     const existing = await ensureClientOwner(req, userId, clientId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
 
-    const account = await findAccountByUserId(req, userId);
+    const { ownerUserId, account } = await resolveDataOwnerUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
     const db = getClientsDbName();
-    const doc = buildClientDocument(userId, { ...existing, ...client }, existing);
+    const doc = buildClientDocument(ownerUserId, { ...existing, ...client }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
 
     await logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,
-      targetUserId: userId,
+      targetUserId: ownerUserId,
       type: 'client',
       action: `Actualizó cliente ${doc.name}`,
       entityId: doc._id,
@@ -887,18 +888,30 @@ export async function searchByPhone(req, res) {
     if (String(req.query?.includeLegacy || '') === '1') {
       listOptions.excludeUnscopedLegacy = false;
     }
-    let clients = await searchClientsByPhone(req, ownerUserId, q, limit, listOptions);
+    let { clients, portfolioSize } = await searchClientsByPhoneWithMeta(
+      req,
+      ownerUserId,
+      q,
+      limit,
+      listOptions,
+    );
     // Si con filtro de empresa no hay nada, reintentar en toda la cuenta (mismo titular).
     if (
       (!clients || clients.length === 0)
       && businessId
       && String(req.query?.fallbackAll || '') === '1'
     ) {
-      clients = await searchClientsByPhone(req, ownerUserId, q, limit, {
+      const fallback = await searchClientsByPhoneWithMeta(req, ownerUserId, q, limit, {
         excludeUnscopedLegacy: false,
       });
+      clients = fallback.clients;
+      portfolioSize = Math.max(portfolioSize, fallback.portfolioSize);
     }
-    return res.json({ ok: true, clients: clients.map((c) => sanitizeClient(c)).filter(Boolean) });
+    return res.json({
+      ok: true,
+      portfolioSize,
+      clients: clients.map((c) => sanitizeClient(c)).filter(Boolean),
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al buscar clientes' });
   }

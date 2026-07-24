@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { searchClientsByPhoneRequest } from '../lib/crmApi';
+import { searchClientsByPhoneRequest, CRM_CLIENTS_SYNC_EVENT } from '../lib/crmApi';
 import type { Client } from '../context/AppContext';
 
 export interface ClientPhoneSearchResult {
@@ -12,9 +12,9 @@ export interface ClientPhoneSearchResult {
   clearResults: () => void;
 }
 
-/** Cache en el navegador: evita repetir la misma query mientras se escribe. */
-const CLIENT_SEARCH_CACHE_TTL_MS = 120_000;
-const CLIENT_SEARCH_CACHE_MAX = 60;
+/** Cache corta en el navegador (tras alta TPV se limpia a mano). */
+const CLIENT_SEARCH_CACHE_TTL_MS = 45_000;
+const CLIENT_SEARCH_CACHE_MAX = 40;
 const clientSearchResultCache = new Map<string, { at: number; clients: Client[] }>();
 
 /** Walk-in / atención rápida del TPV: no deben impedir buscar un cliente real. */
@@ -48,6 +48,13 @@ function writeSearchCache(key: string, clients: Client[]) {
 /** Limpia la caché en memoria del buscador TPV (p. ej. al abrir pedido o tras alta). */
 export function clearClientPhoneSearchCache(): void {
   clientSearchResultCache.clear();
+}
+
+/** Tras alta/edición CRM: invalidar resultados locales para ver el cliente nuevo. */
+if (typeof window !== 'undefined') {
+  window.addEventListener(CRM_CLIENTS_SYNC_EVENT, () => {
+    clearClientPhoneSearchCache();
+  });
 }
 
 export function useClientPhoneSearch(params: {
@@ -126,9 +133,9 @@ export function useClientPhoneSearch(params: {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        // No usar refresh=1 aquí: invalidar la caché del servidor en un miss
-        // fuerza otra carga completa de Couch (~6k clientes) y hace la búsqueda lenta.
-        const clients = await searchClientsByPhoneRequest(
+        // No refrescar en cada miss (nombre inexistente): eso recargaría ~6k docs.
+        // Solo refresh si el servidor dice que la cartera no cargó (portfolioSize === 0).
+        let payload = await searchClientsByPhoneRequest(
           userId,
           queryForApi,
           resultLimit,
@@ -136,7 +143,23 @@ export function useClientPhoneSearch(params: {
           businessId,
           { includeLegacy: true, fallbackAll: true },
         );
+        if (
+          payload.clients.length === 0
+          && payload.portfolioSize === 0
+          && !controller.signal.aborted
+          && seq === requestSeqRef.current
+        ) {
+          payload = await searchClientsByPhoneRequest(
+            userId,
+            queryForApi,
+            resultLimit,
+            controller.signal,
+            businessId,
+            { includeLegacy: true, fallbackAll: true, refresh: true },
+          );
+        }
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
+        const clients = payload.clients;
         // No cachear vacíos: evita “no hay clientes” pegado tras un fallo de filtro/red.
         if (clients.length > 0) writeSearchCache(key, clients);
         setResults(clients);
