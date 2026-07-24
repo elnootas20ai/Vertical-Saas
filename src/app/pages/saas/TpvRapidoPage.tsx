@@ -889,8 +889,7 @@ export function TpvRapidoOrderFlow({
       // TPV: buscar en toda la cuenta (los 7k+ clientes). El filtro por empresa
       // ocultaba fichas legacy / de otra sede y parecía que «no cargan».
       businessId: undefined,
-      // Solo en paso cliente: no buscar en productos/pago (evita abortes raros).
-      enabled: currentStep === 'client' && !showCreateForm,
+      enabled: !showCreateForm,
       matchByName: true,
       minQueryLength: 2,
       debounceMs: 400,
