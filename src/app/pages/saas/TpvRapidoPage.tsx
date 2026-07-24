@@ -9,7 +9,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { resolveTpvClientSearchUserId } from '../../lib/tpvClientSearchUserId';
 import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
@@ -800,16 +799,14 @@ export function TpvRapidoOrderFlow({
     () => resolveRetailOpsWriteBusinessId(businessId, businesses),
     [businesses, businessId],
   );
-  // Cartera CRM del local (fichas del TPV), no la cuenta del trabajador.
-  const clientSearchUserId = useMemo(
-    () =>
-      resolveTpvClientSearchUserId({
-        currentBusiness,
-        scopeDataUserId: userId,
-        authUser: user,
-      }),
-    [userId, user, currentBusiness],
-  );
+  // Mismo titular que el CRM (resolveBusinessDataUserId). Scope caja/tablet de respaldo.
+  const clientSearchUserId = useMemo(() => {
+    const fromCrm = resolveBusinessDataUserId(user, currentBusiness);
+    const fromScope = String(userId || '').trim();
+    const invitedBy = String(user?.invitedBy || '').trim();
+    const selfId = String(user?.user_id || user?.id || '').trim();
+    return fromCrm || fromScope || invitedBy || selfId;
+  }, [userId, user, currentBusiness]);
 
   // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
   // Sin businessId: carga toda la cartera del titular (no filtrar por empresa events/otra).
@@ -886,15 +883,13 @@ export function TpvRapidoOrderFlow({
     useClientPhoneSearch({
       userId: clientSearchUserId,
       phone: phoneInput,
-      // TPV: buscar en toda la cuenta (los 7k+ clientes). El filtro por empresa
-      // ocultaba fichas legacy / de otra sede y parecía que «no cargan».
+      // Toda la cartera del titular (como el CRM sin filtro raro de otra empresa).
       businessId: undefined,
       enabled: !showCreateForm,
       matchByName: true,
       minQueryLength: 2,
       debounceMs: 400,
       resultLimit: 20,
-      // Atención rápida / ficha elegida no deben apagar el buscador.
       keepSearchingWhileSelected: true,
     });
 

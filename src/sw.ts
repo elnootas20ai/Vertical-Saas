@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
-import { NetworkFirst, CacheFirst } from 'workbox-strategies';
+import { NetworkFirst, CacheFirst, NetworkOnly } from 'workbox-strategies';
 import { ExpirationPlugin } from 'workbox-expiration';
 import { CacheableResponsePlugin } from 'workbox-cacheable-response';
 
@@ -29,6 +29,16 @@ registerRoute(
       new ExpirationPlugin({ maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 7 }),
     ],
   }),
+);
+
+// Búsqueda CRM/TPV: nunca servir vacío/viejo desde SW (rompe «nuevo pedido»).
+registerRoute(
+  ({ url }) => {
+    if (!url.pathname.startsWith('/api/clients/')) return false;
+    if (url.pathname.includes('search-by-phone')) return true;
+    return url.searchParams.has('search') || url.searchParams.get('refresh') === '1';
+  },
+  new NetworkOnly(),
 );
 
 // ─── NetworkFirst para API ───────────────────────────────────────────────────
