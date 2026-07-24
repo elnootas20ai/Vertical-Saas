@@ -9,9 +9,9 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Blanco fijo al final (cocina 6 cm / ticket normal 12 cm); el cuerpo crece con el pedido. */
+/** Blanco fijo al final (cocina 6 cm / ticket normal 10 cm); el cuerpo crece con el pedido. */
 function bodyPaddingBottom(variant: TicketDocument['variant']): string {
-  return variant === 'kitchen' ? '6cm' : '12cm';
+  return variant === 'kitchen' ? '6cm' : '10cm';
 }
 
 const BASE_STYLES = `

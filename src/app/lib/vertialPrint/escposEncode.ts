@@ -124,8 +124,9 @@ function pushLineDetail(
 /** Blanco fijo al final (antes del corte). El cuerpo crece con el pedido. */
 export const TICKET_TAIL_FEED_CM = {
   kitchen: 6,
-  customer: 12,
-  delivery: 12,
+  /** Badalona/Tiana: un poco menos que 12 cm para no desperdiciar bobina abajo. */
+  customer: 10,
+  delivery: 10,
 } as const;
 
 /** 203 dpi típico Epson TM ≈ 8 dots/mm. */
@@ -150,7 +151,7 @@ function pushFeedDots(chunks: Uint8Array[], dots: number) {
 }
 
 /**
- * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~12 cm.
+ * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~10 cm.
  * Solo el pie en blanco: si hay más líneas, el ticket se alarga solo.
  */
 function pushFeedAndCut(chunks: Uint8Array[], feedCm: number) {
