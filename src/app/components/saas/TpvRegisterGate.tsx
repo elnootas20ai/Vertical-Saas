@@ -31,7 +31,10 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
-import { downloadUrielCajaClosingsExcel } from '../../lib/cajaUrielClosingsExcelExport';
+import {
+  canDownloadUrielCajaExcel,
+  downloadUrielCajaClosingsExcel,
+} from '../../lib/cajaUrielClosingsExcelExport';
 import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import {
@@ -4236,16 +4239,19 @@ export function TpvRegisterGate({
           ? `Caja cerrada (sin ventas, validada automáticamente). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`
           : `Caja cerrada. Pendiente de validación gerente. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
       );
-      try {
-        const { fileName, yearMonth } = downloadUrielCajaClosingsExcel(sessions, {
-          pointOfSaleId: String(updated.pointOfSaleId || session.pointOfSaleId || ''),
-          pointOfSaleName: updated.pointOfSaleName || session.pointOfSaleName || '',
-          closedSession: updated,
-        });
-        toast.success(`Excel de cierre descargado (${yearMonth}): ${fileName}`);
-      } catch (excelErr) {
-        console.error(excelErr);
-        toast.warning('Caja cerrada, pero no se pudo generar el Excel del mes');
+      // Excel Uriel solo para CEO / cuenta administradora (no trabajadores ni cajeros).
+      if (canDownloadUrielCajaExcel(user, businesses)) {
+        try {
+          const { fileName, yearMonth } = downloadUrielCajaClosingsExcel(sessions, {
+            pointOfSaleId: String(updated.pointOfSaleId || session.pointOfSaleId || ''),
+            pointOfSaleName: updated.pointOfSaleName || session.pointOfSaleName || '',
+            closedSession: updated,
+          });
+          toast.success(`Excel de cierre descargado (${yearMonth}): ${fileName}`);
+        } catch (excelErr) {
+          console.error(excelErr);
+          toast.warning('Caja cerrada, pero no se pudo generar el Excel del mes');
+        }
       }
       if (!autoValidated) {
         void createNotification({

@@ -2,9 +2,34 @@ import { describe, expect, it } from 'vitest';
 import {
   buildUrielCajaMonthSheet,
   buildUrielCajaSheetAoa,
+  canDownloadUrielCajaExcel,
   sessionToUrielAmounts,
   URIEL_CAJA_HEADERS,
 } from '../src/app/lib/cajaUrielClosingsExcelExport.ts';
+
+describe('canDownloadUrielCajaExcel', () => {
+  it('permite cuenta dueña (no worker) y Admin; bloquea cajero/trabajador', () => {
+    expect(canDownloadUrielCajaExcel({ user_id: 'ceo', accountType: 'company' })).toBe(true);
+    expect(canDownloadUrielCajaExcel({ user_id: 'a1', accountType: 'user', role: 'Admin' })).toBe(true);
+    expect(canDownloadUrielCajaExcel(
+      { user_id: 'own', accountType: 'user', invitedBy: 'x' },
+      [{ owner_user_id: 'own' }],
+    )).toBe(true);
+    expect(canDownloadUrielCajaExcel({
+      user_id: 'w1',
+      accountType: 'user',
+      invitedBy: 'ceo',
+      role: 'Encargado',
+    })).toBe(false);
+    expect(canDownloadUrielCajaExcel({
+      user_id: 'w2',
+      accountType: 'user',
+      invitedBy: 'ceo',
+      role: 'Gerente',
+    })).toBe(false);
+    expect(canDownloadUrielCajaExcel(null)).toBe(false);
+  });
+});
 
 function closedSession(partial) {
   return {

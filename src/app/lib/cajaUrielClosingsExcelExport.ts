@@ -16,10 +16,46 @@
  * - TOTAL PIZZAS = `productClosingCounts.pizza` (suma de cierres del día).
  *
  * Varios cierres el mismo día → se suman en una sola fila.
+ *
+ * Acceso: solo CEO / cuenta administradora (dueño o Admin). Trabajadores/cajeros no.
  */
 import * as XLSX from 'xlsx';
 import type { TpvRegisterSession } from './deliveryApi';
 import { localCalendarDayKey } from './tpvCajaScope';
+import { userOwnsAnyBusiness } from './workerProfileCompletion';
+
+/** Roles de cuenta administradora (no Encargado / cajero / Gerente de turno). */
+const URIEL_CAJA_ADMIN_ROLES = new Set(['Admin', 'Administrador', 'Superadmin']);
+
+type UrielCajaAccessUser = {
+  user_id?: string;
+  accountType?: string | null;
+  invitedBy?: string | null;
+  role?: string | null;
+};
+
+/** Misma regla que `isWorkerAccount` (sin importar authApi: evita side-effects en tests). */
+function isWorkerLikeAccount(user?: UrielCajaAccessUser | null): boolean {
+  if (!user) return false;
+  return user.accountType === 'user' || Boolean(String(user.invitedBy || '').trim());
+}
+
+/**
+ * Quién puede descargar el Excel Uriel de cierres.
+ * - Cuenta dueña (no worker invitado)
+ * - Dueño de alguna empresa (`owner_user_id`)
+ * - Rol Admin / Administrador / Superadmin
+ * Trabajadores, cajeros y gerentes de turno invitados → no.
+ */
+export function canDownloadUrielCajaExcel(
+  user?: UrielCajaAccessUser | null,
+  businesses?: ReadonlyArray<{ owner_user_id?: string | null }> | null,
+): boolean {
+  if (!user) return false;
+  if (!isWorkerLikeAccount(user)) return true;
+  if (userOwnsAnyBusiness(user.user_id, businesses)) return true;
+  return URIEL_CAJA_ADMIN_ROLES.has(String(user.role || '').trim());
+}
 
 const MONTH_NAMES_ES = [
   'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
