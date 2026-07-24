@@ -206,9 +206,10 @@ export function useClientPhoneSearch(params: {
     }, debounceMs);
 
     return () => {
+      // Solo cancela el debounce. NO abortar la petición en vuelo aquí:
+      // un cambio de deps (p. ej. tras atención rápida / titular) mataba la búsqueda buena.
+      // El seq + abort al arrancar la siguiente petición cubren el superseding.
       if (timerRef.current) clearTimeout(timerRef.current);
-      // Abort solo de la petición en vuelo; el seq nuevo ignora la respuesta vieja.
-      if (abortRef.current) abortRef.current.abort();
     };
   }, [shouldSearch, queryForApi, userId, businessId, debounceMs, resultLimit, selectedClient]);
 

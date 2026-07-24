@@ -209,11 +209,31 @@ export function scoreClientSearchMatch(doc, raw, qFold, qDigits, _preferPhone) {
   const qHasDigits = qDigits.length > 0;
 
   if (qFold.length >= 2) {
-    if (nameHay === qFold) score += 200;
-    else if (words.some((w) => w === qFold)) score += 180;
-    else if (words.some((w) => w.startsWith(qFold))) score += 160;
-    else if (foldedNameQueryMatches(qFold, nameHay)) score += 120;
-    else if (nameHay.includes(qFold)) score += 80;
+    if (nameHay === qFold) {
+      // Nombre completo exacto (p. ej. «uriel», «campi»).
+      score += 220;
+    } else if (words.some((w) => w === qFold)) {
+      // Palabra exacta («pau» en «pau», no «paula»).
+      score += 200;
+    } else {
+      // Prefijo: «pau»→«paula» debe puntuar MENOS que un «pau» exacto.
+      let bestPrefix = 0;
+      for (const w of words) {
+        if (!w.startsWith(qFold)) continue;
+        const extra = w.length - qFold.length;
+        // extra 0 ya cubierto arriba; extra 1 («anns»→«anna») ~170; «pau»→«paula» (2) ~140.
+        const prefixScore = Math.max(70, 170 - extra * 18);
+        if (prefixScore > bestPrefix) bestPrefix = prefixScore;
+      }
+      if (bestPrefix > 0) {
+        score += bestPrefix;
+      } else if (foldedNameQueryMatches(qFold, nameHay)) {
+        score += 120;
+      } else if (qFold.length >= 4 && nameHay.includes(qFold)) {
+        // includes solo con 4+ letras (evita «pau» dentro de basura).
+        score += 80;
+      }
+    }
   } else if (qFold.length === 1 && !qHasDigits) {
     if (words.some((w) => w.startsWith(qFold))) score += 160;
   }

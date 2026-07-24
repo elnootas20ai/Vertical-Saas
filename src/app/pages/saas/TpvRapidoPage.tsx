@@ -799,12 +799,14 @@ export function TpvRapidoOrderFlow({
     () => resolveRetailOpsWriteBusinessId(businessId, businesses),
     [businesses, businessId],
   );
+  // Cartera CRM del local (p. ej. fichas «uriel»/«pau»/«alfons» de Modomio), no la cuenta del trabajador.
   const clientSearchUserId = useMemo(() => {
+    const ownerId = String(currentBusiness?.owner_user_id || '').trim();
+    if (ownerId) return ownerId;
     const fromScope = String(userId || '').trim();
     const fromBusiness = resolveBusinessDataUserId(user, currentBusiness);
     const selfId = String(user?.user_id || user?.id || '').trim();
     const invitedBy = String(user?.invitedBy || '').trim();
-    // Blindaje TPV: nunca buscar con el userId del trabajador; los clientes viven en el titular.
     const candidate = fromScope || fromBusiness || invitedBy || selfId;
     if (invitedBy && candidate === selfId) return invitedBy;
     return candidate;
@@ -972,9 +974,13 @@ export function TpvRapidoOrderFlow({
   const [quickAttentionActive, setQuickAttentionActive] = useState(false);
 
   const startQuickAttentionFlow = useCallback(() => {
+    // Solo flag + cliente sintético en deliveryFlowClient.
+    // NO selectClient(...): eso metía un tpv-* en el hook de búsqueda y dejaba
+    // el buscador de fichas CRM (uriel/pau/alfons…) raro o “ciego” al volver.
     clearResults();
+    clearSelection();
+    clearClientPhoneSearchCache();
     setQuickAttentionActive(true);
-    selectClient(quickAttentionClient);
     setShowCreateForm(false);
     setDuplicateWarning(false);
     setPhoneInput('');
@@ -992,7 +998,7 @@ export function TpvRapidoOrderFlow({
     setSelectedClientPromoId('');
     setCompletedSteps(deliveryQuickAttentionCompletedSteps());
     setCurrentStep('products');
-  }, [selectClient, quickAttentionClient, clearResults]);
+  }, [clearSelection, clearResults]);
 
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
@@ -1744,6 +1750,7 @@ export function TpvRapidoOrderFlow({
     ) {
       setQuickAttentionActive(false);
       clearSelection();
+      clearClientPhoneSearchCache();
       setCompletedSteps(new Set());
       setDeliveryType(null);
       setCurrentStep('client');
@@ -2877,6 +2884,7 @@ export function TpvRapidoOrderFlow({
     setPhonePrefix('+34');
     clearSelection();
     clearResults();
+    clearClientPhoneSearchCache();
     setShowCreateForm(false);
     setNewClientName('');
     setNewClientPhone('');
