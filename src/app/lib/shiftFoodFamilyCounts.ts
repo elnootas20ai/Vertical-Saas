@@ -208,6 +208,24 @@ export function sumFoodFamilyCounts(list: FoodFamilyCounts[]): FoodFamilyCounts 
   return list.reduce((acc, c) => mergeCounts(acc, c), emptyFoodFamilyCounts());
 }
 
+/** Unidades TPV del turno = total − lo que ya va en apps (Glovo/Uber/…). */
+export function tpvOnlyFoodFromReport(report: ShiftFoodFamilyReport): FoodFamilyCounts {
+  const apps = sumFoodFamilyCounts(Object.values(report.byAggregator || {}));
+  return {
+    pizza: Math.max(0, (report.total?.pizza || 0) - apps.pizza),
+    burger: Math.max(0, (report.total?.burger || 0) - apps.burger),
+    taco: Math.max(0, (report.total?.taco || 0) - apps.taco),
+  };
+}
+
+/** Cierre: unidades TPV + suma de lo declarado por cada integración. */
+export function mergeTpvAndAppsFoodCounts(
+  tpv: FoodFamilyCounts,
+  appsByChannel: Record<string, FoodFamilyCounts>,
+): FoodFamilyCounts {
+  return mergeCounts(tpv, sumFoodFamilyCounts(Object.values(appsByChannel || {})));
+}
+
 export function foodFamilyCountsFromSession(
   session: Pick<TpvRegisterSession, 'productClosingCounts' | 'closedAt'>,
 ): FoodFamilyCounts | null {

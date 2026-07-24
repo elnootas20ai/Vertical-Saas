@@ -67,11 +67,13 @@ export function resolveTicketPaymentMethodLabel(
 /**
  * Cobro en ticket cliente/reparto. Cocina: vacío (no se imprime).
  * Si hay método (efectivo/tarjeta), siempre se muestra aunque el cobro esté pendiente.
+ * En efectivo, si hay cambio de la calculadora → «Efectivo (2.50€)».
  */
 export function resolveTicketPaymentFields(input: {
   variant: DeliveryTicketVariant;
   paymentMethod?: string | null;
   paymentStatus?: string | null;
+  changeGiven?: number | null;
 }): { paymentLabel: string; paymentStatusLabel: string } {
   if (input.variant === 'kitchen') {
     return { paymentLabel: '', paymentStatusLabel: '' };
@@ -79,9 +81,17 @@ export function resolveTicketPaymentFields(input: {
   const method = resolveTicketPaymentMethodLabel(input.paymentMethod);
   const isPaid = String(input.paymentStatus || '').toLowerCase() === 'paid';
   const paymentStatusLabel = isPaid ? 'Cobrado' : 'Pendiente de cobro';
-  if (method) {
+  const change = Number(input.changeGiven);
+  const withChange =
+    method &&
+    /efectivo/i.test(method) &&
+    Number.isFinite(change) &&
+    change > 0.001
+      ? `${method} (${change.toFixed(2)}€)`
+      : method;
+  if (withChange) {
     return {
-      paymentLabel: method,
+      paymentLabel: withChange,
       paymentStatusLabel,
     };
   }
@@ -166,6 +176,7 @@ export function buildTicketDocument({
     variant,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,
+    changeGiven: order.changeGiven,
   });
 
   const lines: TicketLine[] = (order.items || [])

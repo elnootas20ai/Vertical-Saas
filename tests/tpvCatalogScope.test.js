@@ -45,4 +45,33 @@ describe('tpvCatalogScope', () => {
     const items = filterTpvCatalogItems(rawItems, scope, []);
     expect(items).toEqual([]);
   });
+
+  it('filterTpvCatalogItems incluye carta con isStockItem (control stock)', () => {
+    const rawItems = [
+      {
+        _id: 'crispy',
+        name: 'Crispy Chicken',
+        brandIds: ['brand-bb'],
+        itemType: 'product',
+        module: 'catalog',
+        active: true,
+        isStockItem: true,
+        stockCategory: 'finished_product',
+      },
+      {
+        _id: 'flour',
+        name: 'Harina',
+        brandIds: [],
+        itemType: 'product',
+        module: 'catalog',
+        active: true,
+        isStockItem: true,
+        stockCategory: 'ingredient',
+      },
+    ];
+    const scope = resolveTpvCatalogLoadScope('del-1', businesses, 2);
+    const brands = [{ _id: 'brand-bb', name: 'blackburger' }];
+    const items = filterTpvCatalogItems(rawItems, scope, brands);
+    expect(items.map((i) => i._id)).toEqual(['crispy']);
+  });
 });

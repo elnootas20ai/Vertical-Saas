@@ -275,10 +275,10 @@ export async function getDocument(req, dbName, docId) {
 
 /**
  * Cache en memoria por titular (evita el tope 5MB del LRU global en cuentas grandes).
- * TTL corto y fijo: el TPV debe ver clientes nuevos/editados sin reiniciar el backend.
- * (Un TTL deslizante de 10 min hacía que la búsqueda no “actualizara” mientras la caja estaba abierta.)
+ * TTL fijo largo: la carga fría de Couch (~6k clientes) tarda varios segundos.
+ * Altas/ediciones ya invalidan con invalidateClientDocumentsForUser (put/bulk/delete).
  */
-const CLIENT_DOCS_TTL_MS = 120_000;
+const CLIENT_DOCS_TTL_MS = 15 * 60_000;
 const clientDocumentsByUser = new Map();
 const clientsUserIndexReady = new Set();
 
@@ -10043,6 +10043,10 @@ export function sanitizeCatalogItemForTpv(doc) {
   }
   if (rawCf.buildYourOwn === true) {
     customFields.buildYourOwn = true;
+  }
+  const byoMaxRaw = Number(rawCf.buildYourOwnMaxIngredients);
+  if (Number.isFinite(byoMaxRaw) && byoMaxRaw > 0) {
+    customFields.buildYourOwnMaxIngredients = Math.min(20, Math.floor(byoMaxRaw));
   }
   const buildYourOwnAllowed = Array.isArray(rawCf.buildYourOwnAllowedIngredientIds)
     ? rawCf.buildYourOwnAllowedIngredientIds.map((id) => String(id || '').trim()).filter(Boolean)

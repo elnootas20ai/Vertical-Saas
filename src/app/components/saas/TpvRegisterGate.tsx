@@ -45,24 +45,24 @@ import {
 import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
   buildAggregatorCashRows,
-  applyManualAggregatorTotals,
   getClosingAggregatorPlatforms,
   aggregatorRowsFromClosingTotals,
   sumAggregatorRows,
-  sumAggregatorCash,
-  sumAggregatorCard,
   parseAggregatorAmount,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
 import {
   buildShiftFoodFamilyReportForSession,
+  emptyFoodFamilyCounts,
+  mergeTpvAndAppsFoodCounts,
+  tpvOnlyFoodFromReport,
   type FoodFamilyCounts,
 } from '../../lib/shiftFoodFamilyCounts';
 import {
   buildShiftSalesBreakdown,
   filterOrdersForRegisterSession,
 } from '../../lib/registerShiftSalesBreakdown';
-import { AggregatorClosingEditor } from './AggregatorClosingEditor';
+import { AggregatorClosingEditor, type AggregatorClosingSnapshot } from './AggregatorClosingEditor';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import {
@@ -1368,15 +1368,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [notes, setNotes] = useState('');
   const [shiftOrders, setShiftOrders] = useState<DeliveryOrder[]>([]);
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
-  const [manualAggregatorTotals, setManualAggregatorTotals] = useState<Record<string, string>>({});
-  const [manualAggregatorCash, setManualAggregatorCash] = useState<Record<string, string>>({});
-  const [manualAggregatorCard, setManualAggregatorCard] = useState<Record<string, string>>({});
-  const [manualInitialized, setManualInitialized] = useState(false);
   const [cashSlot, setCashSlot] = useState('');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
   const [manualFood, setManualFood] = useState({ pizza: '', burger: '', taco: '' });
-  const [manualFoodByChannel, setManualFoodByChannel] = useState<Record<string, { pizza: string; burger: string; taco: string }>>({});
   const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(false);
+  const [appsSnapshot, setAppsSnapshot] = useState<AggregatorClosingSnapshot | null>(null);
   const [showExtraDetail, setShowExtraDetail] = useState(false);
   const [showDayOrders, setShowDayOrders] = useState(false);
   const countedTotal = calcDenominationTotal(counts);
@@ -1389,38 +1385,44 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     () => buildAggregatorCashRows(closingPlatforms, session, shiftOrders),
     [closingPlatforms, session, shiftOrders],
   );
-  const finalAggregatorRows = useMemo(
-    () => applyManualAggregatorTotals(aggregatorRows, manualAggregatorTotals, manualAggregatorCash, manualAggregatorCard),
-    [aggregatorRows, manualAggregatorTotals, manualAggregatorCash, manualAggregatorCard],
-  );
   const foodReport = useMemo(
     () => buildShiftFoodFamilyReportForSession(session, shiftOrders),
     [session, shiftOrders],
   );
+  const tpvSystemFood = useMemo(() => tpvOnlyFoodFromReport(foodReport), [foodReport]);
   const dayOrdersBreakdown = useMemo(() => {
     const scoped = filterOrdersForRegisterSession(session, shiftOrders);
     return buildShiftSalesBreakdown(scoped);
   }, [session, shiftOrders]);
-  const closingFood: FoodFamilyCounts = useMemo(() => {
-    if (!showDeliveryClosingSlots) return foodReport.total;
-    return {
-      pizza: parseClosingCountInput(manualFood.pizza, foodReport.total.pizza),
-      burger: parseClosingCountInput(manualFood.burger, foodReport.total.burger),
-      taco: parseClosingCountInput(manualFood.taco, foodReport.total.taco),
-    };
-  }, [showDeliveryClosingSlots, manualFood, foodReport.total]);
+
+  const handleAppsSnapshotChange = useCallback((snap: AggregatorClosingSnapshot) => {
+    setAppsSnapshot(snap);
+  }, []);
+
+  const closingFoodByChannel = appsSnapshot?.foodByChannel ?? {};
+  const appsFoodTotals = appsSnapshot?.foodTotals ?? emptyFoodFamilyCounts();
+  const finalAggregatorRows = appsSnapshot?.rows ?? aggregatorRows;
+  const aggregatorCashTotal = appsSnapshot?.cashTotal ?? 0;
+  const aggregatorCardTotal = appsSnapshot?.cardTotal ?? 0;
   const aggregatorEuroTotal = useMemo(
     () => sumAggregatorRows(finalAggregatorRows).totalSales,
     [finalAggregatorRows],
   );
-  const aggregatorCashTotal = useMemo(
-    () => sumAggregatorCash(finalAggregatorRows),
-    [finalAggregatorRows],
-  );
-  const aggregatorCardTotal = useMemo(
-    () => sumAggregatorCard(finalAggregatorRows),
-    [finalAggregatorRows],
-  );
+
+  const tpvClosingFood: FoodFamilyCounts = useMemo(() => {
+    if (!showDeliveryClosingSlots) return foodReport.total;
+    return {
+      pizza: parseClosingCountInput(manualFood.pizza, tpvSystemFood.pizza),
+      burger: parseClosingCountInput(manualFood.burger, tpvSystemFood.burger),
+      taco: parseClosingCountInput(manualFood.taco, tpvSystemFood.taco),
+    };
+  }, [showDeliveryClosingSlots, manualFood, tpvSystemFood, foodReport.total]);
+
+  const closingFood: FoodFamilyCounts = useMemo(() => {
+    if (!showDeliveryClosingSlots) return foodReport.total;
+    return mergeTpvAndAppsFoodCounts(tpvClosingFood, closingFoodByChannel);
+  }, [showDeliveryClosingSlots, foodReport.total, tpvClosingFood, closingFoodByChannel]);
+
   const expected = Math.round((expectedTpv + aggregatorCashTotal) * 100) / 100;
   const diff = countedTotal - expected;
   const grandEuroTotal = Math.round((expectedTpv + aggregatorEuroTotal) * 100) / 100;
@@ -1433,7 +1435,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const dayCashTotal = Math.round((tpvCashSales + aggregatorCashTotal) * 100) / 100;
   const dayCardTotal = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
   const appsMoneyTotal = Math.round((aggregatorCashTotal + aggregatorCardTotal) * 100) / 100;
-  /** Todo el dinero del día: cobros TPV (todos los métodos) + efectivo/tarjeta declarados de apps. */
   const dayMoneyTotal = Math.round((tpvAllSales + appsMoneyTotal) * 100) / 100;
   const dayFoodUnits = closingFood.pizza + closingFood.burger + closingFood.taco;
   const cashSlotDisplay = cashSlotFocused
@@ -1443,49 +1444,28 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       : cashSlot;
 
   useEffect(() => {
-    if (manualInitialized || aggregatorRows.length === 0) return;
-    const initialTotals: Record<string, string> = {};
-    const initialCash: Record<string, string> = {};
-    const initialCard: Record<string, string> = {};
-    for (const row of aggregatorRows) {
-      initialTotals[row.platform.channel] = row.totalSales > 0 ? row.totalSales.toFixed(2) : '';
-      initialCash[row.platform.channel] = '';
-      initialCard[row.platform.channel] = '';
-    }
-    setManualAggregatorTotals(initialTotals);
-    setManualAggregatorCash(initialCash);
-    setManualAggregatorCard(initialCard);
-    setManualInitialized(true);
-  }, [aggregatorRows, manualInitialized]);
+    if (!showDeliveryClosingSlots || foodSlotsInitialized) return;
+    setManualFood({
+      pizza: String(tpvSystemFood.pizza || 0),
+      burger: String(tpvSystemFood.burger || 0),
+      taco: String(tpvSystemFood.taco || 0),
+    });
+    setFoodSlotsInitialized(true);
+  }, [showDeliveryClosingSlots, foodSlotsInitialized, tpvSystemFood]);
 
   useEffect(() => {
-    if (!showDeliveryClosingSlots || foodSlotsInitialized || shiftOrdersLoading) return;
-    setManualFood({
-      pizza: String(foodReport.total.pizza || 0),
-      burger: String(foodReport.total.burger || 0),
-      taco: String(foodReport.total.taco || 0),
-    });
-    const byCh: Record<string, { pizza: string; burger: string; taco: string }> = {};
-    for (const platform of closingPlatforms) {
-      const ch = platform.channel;
-      const auto = foodReport.byAggregator[ch] || { pizza: 0, burger: 0, taco: 0 };
-      byCh[ch] = {
-        pizza: String(auto.pizza || 0),
-        burger: String(auto.burger || 0),
-        taco: String(auto.taco || 0),
+    if (!showDeliveryClosingSlots || !foodSlotsInitialized || shiftOrdersLoading) return;
+    setManualFood((prev) => {
+      const stillDefault = prev.pizza === '0' && prev.burger === '0' && prev.taco === '0';
+      if (!stillDefault) return prev;
+      if (tpvSystemFood.pizza === 0 && tpvSystemFood.burger === 0 && tpvSystemFood.taco === 0) return prev;
+      return {
+        pizza: String(tpvSystemFood.pizza || 0),
+        burger: String(tpvSystemFood.burger || 0),
+        taco: String(tpvSystemFood.taco || 0),
       };
-    }
-    setManualFoodByChannel(byCh);
-    setFoodSlotsInitialized(true);
-  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, foodReport.total, foodReport.byAggregator, closingPlatforms]);
-
-  const handleManualAggregatorCashChange = useCallback((channel: string, value: string) => {
-    setManualAggregatorCash((prev) => ({ ...prev, [channel]: formatMoneyAsYouType(value, true) }));
-  }, []);
-
-  const handleManualAggregatorCardChange = useCallback((channel: string, value: string) => {
-    setManualAggregatorCard((prev) => ({ ...prev, [channel]: formatMoneyAsYouType(value, true) }));
-  }, []);
+    });
+  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, tpvSystemFood]);
 
   const handleCashSlotChange = useCallback((value: string) => {
     const formatted = formatMoneyAsYouType(value, true);
@@ -1502,33 +1482,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     const cleaned = value.replace(/[^\d]/g, '');
     setManualFood((prev) => ({ ...prev, [key]: cleaned }));
   }, []);
-
-  const handleChannelFoodChange = useCallback((channel: string, key: keyof FoodFamilyCounts, value: string) => {
-    setManualFoodByChannel((prev) => ({
-      ...prev,
-      [channel]: {
-        pizza: prev[channel]?.pizza ?? '',
-        burger: prev[channel]?.burger ?? '',
-        taco: prev[channel]?.taco ?? '',
-        [key]: value.replace(/[^\d]/g, ''),
-      },
-    }));
-  }, []);
-
-  const closingFoodByChannel = useMemo(() => {
-    const out: Record<string, FoodFamilyCounts> = {};
-    for (const platform of closingPlatforms) {
-      const ch = platform.channel;
-      const auto = foodReport.byAggregator[ch] || { pizza: 0, burger: 0, taco: 0 };
-      const manual = manualFoodByChannel[ch];
-      out[ch] = {
-        pizza: parseClosingCountInput(manual?.pizza ?? '', auto.pizza),
-        burger: parseClosingCountInput(manual?.burger ?? '', auto.burger),
-        taco: parseClosingCountInput(manual?.taco ?? '', auto.taco),
-      };
-    }
-    return out;
-  }, [closingPlatforms, foodReport.byAggregator, manualFoodByChannel]);
 
   useEffect(() => {
     if (!dataUserId) {
@@ -1581,7 +1534,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <div>
                 <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">1. Totales del día</p>
                 <p className="text-[11px] text-emerald-800/70 dark:text-emerald-200/70 mt-0.5">
-                  Efectivo y tarjeta del TPV, y unidades de todos los pedidos del turno.
+                  Efectivo y tarjeta del TPV, y unidades vendidas en TPV (sin apps).
                 </p>
               </div>
 
@@ -1617,7 +1570,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     onChange={(e) => handleFoodSlotChange('pizza', e.target.value)}
                     className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
                   />
-                  <span className="text-[10px] text-gray-500">Sistema: {foodReport.total.pizza}</span>
+                  <span className="text-[10px] text-gray-500">Sistema: {tpvSystemFood.pizza}</span>
                 </label>
                 <label className="rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-orange-800 dark:text-orange-200">🍔 Burgers</span>
@@ -1629,7 +1582,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     onChange={(e) => handleFoodSlotChange('burger', e.target.value)}
                     className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-orange-200 dark:border-orange-800 rounded-lg bg-orange-50/50 dark:bg-orange-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/30"
                   />
-                  <span className="text-[10px] text-gray-500">Sistema: {foodReport.total.burger}</span>
+                  <span className="text-[10px] text-gray-500">Sistema: {tpvSystemFood.burger}</span>
                 </label>
                 <label className="rounded-xl border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-lime-800 dark:text-lime-200">🌮 Tacos</span>
@@ -1641,7 +1594,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     onChange={(e) => handleFoodSlotChange('taco', e.target.value)}
                     className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-lime-200 dark:border-lime-800 rounded-lg bg-lime-50/50 dark:bg-lime-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-lime-500/30"
                   />
-                  <span className="text-[10px] text-gray-500">Sistema: {foodReport.total.taco}</span>
+                  <span className="text-[10px] text-gray-500">Sistema: {tpvSystemFood.taco}</span>
                 </label>
               </div>
 
@@ -1649,8 +1602,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 <p className="text-[11px] text-gray-500">Cargando pedidos del turno…</p>
               ) : (
                 <p className="text-[11px] text-gray-500">
-                  Unidades de todos los pedidos del turno (TPV + apps). Puedes corregir si no cuadra.
-                  Los menús Individual / Dúo / Familiar suman 1 / 2 / 3 pizzas (según las pizzas del combo).
+                  Solo unidades del TPV. Las de Glovo / Uber / Just Eat / Flipdish se rellenan abajo por app y se suman en «TOTAL DE TODO».
                 </p>
               )}
 
@@ -1730,10 +1682,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     ? ` · cobros TPV con todos los métodos: ${tpvAllSales.toFixed(2)}€`
                     : ''}
                   {' · '}
-                  {closingFood.pizza + closingFood.burger + closingFood.taco} unidades
+                  {tpvClosingFood.pizza + tpvClosingFood.burger + tpvClosingFood.taco} unidades TPV
                 </p>
                 <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-200">
-                  Sí se suma abajo del todo en «TOTAL DE TODO» (+ lo que pongas en las apps).
+                  Abajo, en «TOTAL DE TODO», se suman estas unidades + las de cada app + efectivo/tarjeta de apps.
                 </p>
               </div>
             </div>
@@ -1761,18 +1713,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <div>
                 <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Apps de delivery</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Pasos 2 a 5: pizzas, burgers, tacos y efectivo de cada app.
+                  Pasos 2 a 5: por app, unidades + efectivo + tarjeta. El recuento se suma en «Total apps» y en «TOTAL DE TODO».
                 </p>
               </div>
               <AggregatorClosingEditor
                 autoRows={aggregatorRows}
                 foodByChannel={foodReport.byAggregator}
-                manualFoodByChannel={manualFoodByChannel}
-                onManualFoodChange={handleChannelFoodChange}
-                manualCashByChannel={manualAggregatorCash}
-                onManualCashChange={handleManualAggregatorCashChange}
-                manualCardByChannel={manualAggregatorCard}
-                onManualCardChange={handleManualAggregatorCardChange}
+                onSnapshotChange={handleAppsSnapshotChange}
                 title="Por integración"
                 startStep={2}
               />
@@ -1984,21 +1931,25 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <div>
                 <p className="text-sm font-bold uppercase tracking-wide">Total de todo</p>
                 <p className="text-[11px] opacity-70 mt-0.5">
-                  Unidades de arriba + cobros TPV (efectivo, tarjeta, Bizum…) + efectivo/tarjeta de todas las apps.
+                  TPV ({tpvClosingFood.pizza + tpvClosingFood.burger + tpvClosingFood.taco} uds) + apps (
+                  {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco} uds) + cobros.
                 </p>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
                   <p className="text-[10px] opacity-70">🍕 Pizzas</p>
                   <p className="text-xl font-bold tabular-nums">{closingFood.pizza}</p>
+                  <p className="text-[10px] opacity-60">apps {appsFoodTotals.pizza}</p>
                 </div>
                 <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
                   <p className="text-[10px] opacity-70">🍔 Burgers</p>
                   <p className="text-xl font-bold tabular-nums">{closingFood.burger}</p>
+                  <p className="text-[10px] opacity-60">apps {appsFoodTotals.burger}</p>
                 </div>
                 <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
                   <p className="text-[10px] opacity-70">🌮 Tacos</p>
                   <p className="text-xl font-bold tabular-nums">{closingFood.taco}</p>
+                  <p className="text-[10px] opacity-60">apps {appsFoodTotals.taco}</p>
                 </div>
                 <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
                   <p className="text-[10px] opacity-70">Unidades</p>
@@ -2059,6 +2010,29 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
           ) : null}
         </div>
+
+        {showDeliveryClosingSlots ? (
+          <div className="flex-shrink-0 px-4 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-gray-900 text-white dark:bg-gray-950 space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="font-bold uppercase tracking-wide text-emerald-300">TOTAL DE TODO (en vivo)</span>
+              <span className="tabular-nums font-bold text-sm">
+                🍕 {closingFood.pizza} · 🍔 {closingFood.burger} · 🌮 {closingFood.taco}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] opacity-90">
+              <span>
+                Unidades = TPV {tpvClosingFood.pizza}/{tpvClosingFood.burger}/{tpvClosingFood.taco}
+                {' + '}
+                apps {appsFoodTotals.pizza}/{appsFoodTotals.burger}/{appsFoodTotals.taco}
+              </span>
+              <span className="tabular-nums font-semibold">
+                💵 {dayCashTotal.toFixed(2)}€ (TPV {tpvCashSales.toFixed(2)} + apps {aggregatorCashTotal.toFixed(2)})
+                {' · '}
+                💳 {dayCardTotal.toFixed(2)}€ (TPV {tpvCardSales.toFixed(2)} + apps {aggregatorCardTotal.toFixed(2)})
+              </span>
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
           <button
@@ -2617,8 +2591,8 @@ function RegisterStatusBar({
     ...(showNativePrinter && onRequestPrinterSetup
       ? [{
           id: 'printer',
-          label: nativePrinterReady ? 'Impresora lista' : 'Configurar impresora',
-          title: nativePrinterReady ? 'Impresora lista' : 'Configurar impresora WiFi',
+          label: 'Ajustes impresora',
+          title: nativePrinterReady ? 'Ajustes impresora' : 'Configurar impresora WiFi',
           icon: <Printer className="w-5 h-5" />,
           onClick: onRequestPrinterSetup,
         }]
@@ -2867,7 +2841,7 @@ function RegisterStatusBar({
           <button
             type="button"
             onClick={onRequestPrinterSetup}
-            title={nativePrinterReady ? 'Impresora lista' : 'Configurar impresora WiFi'}
+            title={nativePrinterReady ? 'Ajustes impresora' : 'Configurar impresora WiFi'}
             className={`${actionBtn} relative`}
           >
             <Printer className="w-4 h-4 shrink-0" /> Impresora

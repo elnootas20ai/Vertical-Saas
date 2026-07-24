@@ -53,4 +53,34 @@ describe('sanitizeCatalogItemForTpv', () => {
     expect(sanitized.customFields.comboSlotAllowlists).toEqual({ side: ['cat-a', 'cat-b'] });
     expect(sanitized.customFields.comboStructureConfirmed).toBe(true);
   });
+
+  it('conserva buildYourOwn y tope 3/5 para pizzas al gusto', () => {
+    const doc = {
+      _id: 'byo-1',
+      user_id: 'owner-1',
+      name: 'Mitad y mitad',
+      category: 'Premium',
+      unitPrice: 15,
+      business_id: 'biz-a',
+      itemType: 'product',
+      customFields: {
+        buildYourOwn: true,
+        buildYourOwnMaxIngredients: 3,
+        halfHalf: true,
+      },
+    };
+    const sanitized = sanitizeCatalogItemForTpv(doc);
+    expect(sanitized.customFields.buildYourOwn).toBe(true);
+    expect(sanitized.customFields.buildYourOwnMaxIngredients).toBe(3);
+    // halfHalf también se conserva si venía; el front prioriza buildYourOwn
+    expect(sanitized.customFields.halfHalf).toBe(true);
+
+    const modomio = sanitizeCatalogItemForTpv({
+      ...doc,
+      _id: 'byo-5',
+      name: 'Modomio',
+      customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 5 },
+    });
+    expect(modomio.customFields.buildYourOwnMaxIngredients).toBe(5);
+  });
 });

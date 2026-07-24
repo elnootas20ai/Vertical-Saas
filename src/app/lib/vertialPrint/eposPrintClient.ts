@@ -101,7 +101,9 @@ export async function sendEposTicket(
   const host = String(config.networkHost || '').trim();
 
   return runEposAttempts(host, (service) => service.printWithBuilder((builder) => {
-    buildEposTicket(builder, doc, config.paperWidthMm);
+    buildEposTicket(builder, doc, config.paperWidthMm, {
+      customerTailFeedCm: config.ticketBottomFeedCm,
+    });
   }));
 }
 

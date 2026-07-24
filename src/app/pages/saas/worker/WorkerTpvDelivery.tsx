@@ -52,6 +52,7 @@ import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetai
 import { DecimalNumpadField } from '../../../components/saas/DecimalNumpadField';
 import { parseDecimalPadValue } from '../../../lib/decimalNumpadInput';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
+import { listClientsPageRequest } from '../../../lib/crmApi';
 import { isTpvOpsVerticalPending } from '../../../lib/deliveryOpsTypes';
 import { WorkerTpvStaffConsumption } from './WorkerTpvStaffConsumption';
 import { CancelOrderModal } from '../../../components/delivery/CancelOrderModal';
@@ -628,7 +629,10 @@ function DeliverPaymentModal({
   loading,
 }: {
   order: DeliveryOrder;
-  onConfirm: (method: DeliveryPaymentMethod) => void;
+  onConfirm: (
+    method: DeliveryPaymentMethod,
+    cash?: { amountReceived: number; changeGiven: number },
+  ) => void;
   onClose: () => void;
   loading: boolean;
 }) {
@@ -732,7 +736,16 @@ function DeliverPaymentModal({
             </button>
             <button
               type="button"
-              onClick={() => onConfirm('efectivo')}
+              onClick={() => {
+                const cash =
+                  changeAmount != null && changeAmount >= 0 && !isNaN(cashGivenAmount) && cashGivenAmount > 0
+                    ? {
+                        amountReceived: cashGivenAmount,
+                        changeGiven: Number(changeAmount.toFixed(2)),
+                      }
+                    : undefined;
+                onConfirm('efectivo', cash);
+              }}
               disabled={loading || (changeAmount !== null && changeAmount < 0)}
               className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2"
             >
@@ -1163,6 +1176,18 @@ export function WorkerTpvDelivery({
 
   useTpvOrderFlowChrome(view === 'new-order');
   useTpvSuppressBottomBar(view !== 'board');
+
+  // Mientras se ve el tablero, calienta la caché de clientes para que la 1.ª búsqueda no espere Couch.
+  useEffect(() => {
+    if (!userId || view === 'new-order') return;
+    void listClientsPageRequest(userId, {
+      limit: 1,
+      skip: 0,
+      lite: true,
+      businessId: businessId || undefined,
+    }).catch(() => undefined);
+  }, [userId, businessId, view]);
+
   // CEO TPV rápido = misma UI compacta que tablet (antes !ceoMode forzaba el layout grande "antiguo").
   const isTabletUi = ceoMode || isTabletSession;
   const workerPdv = useMemo(
@@ -1357,7 +1382,11 @@ export function WorkerTpvDelivery({
     setAdvancingIds(new Set(advancingIdsRef.current));
   }, []);
 
-  const advanceOrder = useCallback(async (order: DeliveryOrder, paymentMethod?: DeliveryPaymentMethod) => {
+  const advanceOrder = useCallback(async (
+    order: DeliveryOrder,
+    paymentMethod?: DeliveryPaymentMethod,
+    cash?: { amountReceived: number; changeGiven: number },
+  ) => {
     const next = tabletNextStatus(order);
     if (!next || !userId) return;
 
@@ -1399,6 +1428,15 @@ export function WorkerTpvDelivery({
           extras.paymentStatus = 'paid';
           extras.paidAmount = resolveDeliveryOrderChargeTotal(order);
           extras.paidAt = order.paidAt || now;
+          if (
+            resolvedPayment === 'efectivo' &&
+            cash &&
+            Number.isFinite(cash.changeGiven) &&
+            cash.changeGiven >= 0
+          ) {
+            extras.amountReceived = cash.amountReceived;
+            extras.changeGiven = cash.changeGiven;
+          }
         }
       }
       const payload: DeliveryOrder = {
@@ -1530,10 +1568,13 @@ export function WorkerTpvDelivery({
   ]);
 
   const confirmCompleteDelivery = useCallback(
-    (method: DeliveryPaymentMethod) => {
+    (
+      method: DeliveryPaymentMethod,
+      cash?: { amountReceived: number; changeGiven: number },
+    ) => {
       if (!deliveryCompleteOrder) return;
       const fresh = orders.find((o) => o._id === deliveryCompleteOrder._id) || deliveryCompleteOrder;
-      void advanceOrder(fresh, method);
+      void advanceOrder(fresh, method, cash);
     },
     [deliveryCompleteOrder, advanceOrder, orders],
   );

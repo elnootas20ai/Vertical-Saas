@@ -51,6 +51,16 @@ function decodeEscpos(bytes: Uint8Array): string {
 }
 
 describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => {
+  it('ticket cliente: efectivo con cambio de calculadora en el método', () => {
+    const opts = baseOptions();
+    opts.order.changeGiven = 1.5;
+    opts.order.amountReceived = 20;
+    const doc = buildTicketDocument({ ...opts, variant: 'customer' });
+    expect(doc.paymentLabel).toBe('Efectivo (1.50€)');
+    const text = decodeEscpos(encodeTicketEscpos(doc));
+    expect(text).toMatch(/Metodo: Efectivo \(1\.50EUR\)/);
+  });
+
   it('cocina: productos + mods + notas, sin importes ni datos de cliente', () => {
     const doc = buildTicketDocument({ ...baseOptions(), variant: 'kitchen' });
     expect(doc.title).toBe('COMANDA');

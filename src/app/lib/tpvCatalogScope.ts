@@ -87,6 +87,27 @@ export async function loadTpvCatalogBrands(
   return tryLoadBrands(scope.catalogBusinessId);
 }
 
+/**
+ * Almacén puro (no carta): no debe salir en TPV.
+ * OJO: muchas pizzas/burgers de carta tienen isStockItem=true (control de stock)
+ * y DEBEN seguir siendo vendibles.
+ */
+export function isTpvWarehouseOnlyCatalogItem(
+  item: Pick<CatalogItem, 'module' | 'isStockItem' | 'stockCategory'>,
+): boolean {
+  if (String(item.module || '').trim() === 'stock') return true;
+  if ((item.module || 'catalog') !== 'catalog') return true;
+  if (item.isStockItem === true) {
+    const sc = String(item.stockCategory || '').trim();
+    return ['ingredient', 'packaging', 'cleaning', 'consumable', 'raw_material'].includes(sc);
+  }
+  if (item.stockCategory && item.stockCategory !== 'finished_product') {
+    const stockLike = ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable'];
+    return stockLike.includes(item.stockCategory);
+  }
+  return false;
+}
+
 export function filterTpvCatalogItems(
   rawItems: CatalogItem[],
   scope: TpvCatalogLoadScope,
@@ -98,19 +119,8 @@ export function filterTpvCatalogItems(
   };
 
   // Solo carta vendible: nunca ingredientes/envases de almacén puro en el TPV.
-  // OJO: muchas pizzas de carta tienen isStockItem=true (control de stock) y DEBEN verse.
   const sellableRaw = rawItems.filter((item) => {
-    if ((item.module || 'catalog') !== 'catalog') return false;
-    if (String(item.module || '').trim() === 'stock') return false;
-    if (item.isStockItem === true) {
-      const sc = String(item.stockCategory || '').trim();
-      if (['ingredient', 'packaging', 'cleaning', 'consumable', 'raw_material'].includes(sc)) {
-        return false;
-      }
-    } else if (item.stockCategory && item.stockCategory !== 'finished_product') {
-      const stockLike = ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable'];
-      if (stockLike.includes(item.stockCategory)) return false;
-    }
+    if (isTpvWarehouseOnlyCatalogItem(item)) return false;
     return item.itemType === 'product' || item.itemType === 'combo';
   });
 

@@ -210,7 +210,46 @@ export function isTpvBuildYourOwnCatalogItem(
   if (item.itemType === 'combo') return false;
   const name = foldCatalogProductName(item.name || '');
   if (/al\s*gusto|a\s*gusto|build\s*your\s*own/.test(name)) return true;
+  // Modos Excel: «3 Ingredientes», «5 Ingredientes a elegir», etc.
+  if (/\d+\s*ingredientes?/.test(name)) return true;
+  // Premium DISARMINK: Modomio = pizza al gusto (no confundir con Combo Modomio).
+  if (/^(pizza\s+)?modomio(premium)?$/.test(name) || /^premium\s+modomio$/.test(name)) return true;
+  // «Mitad y mitad» BYO solo con flag buildYourOwn (arriba). Por nombre sigue siendo half-half clásico.
   return false;
+}
+
+/**
+ * Tope de ingredientes base en pizza al gusto (3 / 5).
+ * null = sin tope (elige los que quiera).
+ */
+export function resolveBuildYourOwnMaxIngredients(
+  item: Pick<CatalogItem, 'name' | 'customFields'>,
+): number | null {
+  const rawCf = Number(item.customFields?.buildYourOwnMaxIngredients);
+  if (Number.isFinite(rawCf) && rawCf > 0) return Math.min(20, Math.floor(rawCf));
+
+  const name = foldCatalogProductName(item.name || '');
+  // Nombres de carta DISARMINK / Excel sin número en el título.
+  if (/mitad\s*y\s*mitad/.test(name)) return 3;
+  if (/^(pizza\s+)?modomio(premium)?$/.test(name) || /^premium\s+modomio$/.test(name)) return 5;
+
+  const blobs = [
+    name,
+    foldIngredientLabel(
+      typeof item.customFields?.ingredients === 'string' ? item.customFields.ingredients : '',
+    ),
+  ];
+  for (const text of blobs) {
+    if (!text) continue;
+    const m =
+      text.match(/(\d+)\s*ingredientes?\s*(a\s*elegir)?/) ||
+      text.match(/\+\s*(\d+)\s*ingredientes?/);
+    if (m) {
+      const n = Number(m[1]);
+      if (Number.isFinite(n) && n > 0) return Math.min(20, Math.floor(n));
+    }
+  }
+  return null;
 }
 
 /** Ingredientes base que el cliente puede elegir en TPV (pizza al gusto). */
@@ -365,20 +404,9 @@ export function catalogBuildYourOwnIngredientOptions(
   const sortByName = (rows: StoreIngredient[]) =>
     [...rows].sort((a, b) => a.name.localeCompare(b.name, 'es'));
 
-  if (brandIngredientSelection && productBrandIds.length > 0 && scoped.length > 0) {
-    const fromSelection = resolveStoreIngredientsFromBrandSelection(
-      scoped,
-      brandIngredientSelection,
-      productBrandIds,
-    ).filter(
-      (ing) =>
-        isBuildYourOwnSelectableIngredient(ing, templateKey) &&
-        !ingredientChargesExtra(ing) &&
-        storeIngredientAppliesToProductPart(ing, templateKey),
-    );
-    if (fromSelection.length > 0) return sortByName(fromSelection);
-  }
-
+  // TPV: mostrar TODOS los ingredientes de pizza del catálogo (no un subconjunto de la línea).
+  // La lista blanca por producto (`buildYourOwnAllowedIngredientIds`) se aplica en candidates().
+  void brandIngredientSelection;
   const fromScoped = catalogBuildYourOwnIngredientPool(scoped, productBrandIds, templateKey);
   if (fromScoped.length > 0) return sortByName(fromScoped);
 
@@ -467,6 +495,7 @@ function isPizzaLikeCatalogProduct(
   const name = foldCatalogCategoryLabel(item.name || '');
   if (/combo|menu|menú/.test(cat)) return false;
   if (cat.includes('pizza') || name.includes('pizza')) return true;
+  if (/premium|especialidad|calzone/.test(cat)) return true;
   if (!scopeBrandIds.length || !brands?.length) return false;
   const itemBrandIds = Array.isArray(item.brandIds)
     ? item.brandIds.map((id) => String(id || '').trim()).filter(Boolean)
@@ -503,7 +532,7 @@ export function catalogPizzasForHalfHalf(
   const brands = options?.brands;
 
   let list = catalog.filter((c) => {
-    if (c.active === false || c.available === false) return false;
+    if (c.active === false) return false;
     if (halfHalfProductId && c._id === halfHalfProductId) return false;
     if (c.itemType === 'combo' || c.itemType === 'service') return false;
     if (isTpvHalfHalfCatalogItem(c)) return false;

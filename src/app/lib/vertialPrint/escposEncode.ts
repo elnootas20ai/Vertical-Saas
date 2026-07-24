@@ -124,7 +124,7 @@ function pushLineDetail(
 /** Blanco fijo al final (antes del corte). El cuerpo crece con el pedido. */
 export const TICKET_TAIL_FEED_CM = {
   kitchen: 6,
-  /** Badalona/Tiana: un poco menos que 12 cm para no desperdiciar bobina abajo. */
+  /** Default cliente/delivery; se puede sobrescribir por PDV (ticketBottomFeedCm). */
   customer: 10,
   delivery: 10,
 } as const;
@@ -151,7 +151,7 @@ function pushFeedDots(chunks: Uint8Array[], dots: number) {
 }
 
 /**
- * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~10 cm.
+ * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~10 cm (ajustable por PDV).
  * Solo el pie en blanco: si hay más líneas, el ticket se alarga solo.
  */
 function pushFeedAndCut(chunks: Uint8Array[], feedCm: number) {
@@ -161,8 +161,21 @@ function pushFeedAndCut(chunks: Uint8Array[], feedCm: number) {
   chunks.push(command([GS, 0x56, 0]));
 }
 
-export function tailFeedCmForVariant(variant: TicketDocument['variant']): number {
+export type EncodeTicketFeedOptions = {
+  /** Blanco abajo cliente/delivery (cm). Cocina ignora este valor. */
+  customerTailFeedCm?: number;
+};
+
+export function tailFeedCmForVariant(
+  variant: TicketDocument['variant'],
+  customerTailFeedCm?: number,
+): number {
   if (variant === 'kitchen') return TICKET_TAIL_FEED_CM.kitchen;
+  const n = Number(customerTailFeedCm);
+  if (Number.isFinite(n)) {
+    // Mismo rango que clampTicketBottomFeedCm (4–18); evitar import circular.
+    return Math.min(18, Math.max(4, Math.round(n)));
+  }
   if (variant === 'delivery') return TICKET_TAIL_FEED_CM.delivery;
   return TICKET_TAIL_FEED_CM.customer;
 }
@@ -197,9 +210,14 @@ function pushCenteredTitle(chunks: Uint8Array[], title: string, paperWidthMm: 58
   chunks.push(setSize(SIZE_NORMAL));
 }
 
-export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 80): Uint8Array {
+export function encodeTicketEscpos(
+  doc: TicketDocument,
+  paperWidthMm: 58 | 80 = 80,
+  feedOptions?: EncodeTicketFeedOptions,
+): Uint8Array {
   const width = colsForSize(paperWidthMm, SIZE_NORMAL);
   const tallCols = colsForSize(paperWidthMm, SIZE_TALL);
+  const customerFeed = feedOptions?.customerTailFeedCm;
   const chunks: Uint8Array[] = [
     command([ESC, 0x40]),
   ];
@@ -234,7 +252,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
     }
     chunks.push(command([ESC, 0x61, 1]));
     chunks.push(textLine(doc.footer, width));
-    pushFeedAndCut(chunks, tailFeedCmForVariant(doc.variant));
+    pushFeedAndCut(chunks, tailFeedCmForVariant(doc.variant, customerFeed));
     return concat(chunks);
   }
 
@@ -362,7 +380,7 @@ export function encodeTicketEscpos(doc: TicketDocument, paperWidthMm: 58 | 80 = 
   if (doc.variant === 'customer') {
     chunks.push(textLine('Gracias por su visita', width));
   }
-  pushFeedAndCut(chunks, tailFeedCmForVariant(doc.variant));
+  pushFeedAndCut(chunks, tailFeedCmForVariant(doc.variant, customerFeed));
 
   return concat(chunks);
 }
@@ -398,7 +416,10 @@ export function encodeIdentifyTicketEscpos(host: string, port: number, paperWidt
   ]);
 }
 
-export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
+export function encodeTestTicketEscpos(
+  paperWidthMm: 58 | 80 = 80,
+  feedOptions?: EncodeTicketFeedOptions,
+): Uint8Array {
   const now = new Date().toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
   return encodeTicketEscpos({
     variant: 'customer',
@@ -428,5 +449,5 @@ export function encodeTestTicketEscpos(paperWidthMm: 58 | 80 = 80): Uint8Array {
     orderNotes: '',
     footer: 'Si ves esto, la impresora funciona',
     isRefund: false,
-  }, paperWidthMm);
+  }, paperWidthMm, feedOptions);
 }

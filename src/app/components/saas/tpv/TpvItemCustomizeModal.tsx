@@ -10,6 +10,7 @@ import {
   isTpvHalfHalfCatalogItem,
   parseCatalogIngredients,
   parseCatalogSupplements,
+  resolveBuildYourOwnMaxIngredients,
   tpvBuildYourOwnIngredientPool,
   type StoreIngredient,
 } from '../../../lib/catalogCustomization';
@@ -102,6 +103,10 @@ export function TpvItemCustomizeModal({
         : [],
     [buildYourOwn, storeIngredients, brandIngredientSelection, brands, item],
   );
+  const buildYourOwnMax = useMemo(
+    () => (buildYourOwn ? resolveBuildYourOwnMaxIngredients(item) : null),
+    [buildYourOwn, item],
+  );
   const ingredients = useMemo(
     () =>
       parseCatalogIngredients(
@@ -188,9 +193,11 @@ export function TpvItemCustomizeModal({
 
   const toggleIngredient = (name: string) => {
     if (buildYourOwn) {
-      setAddedBase((prev) =>
-        prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
-      );
+      setAddedBase((prev) => {
+        if (prev.includes(name)) return prev.filter((n) => n !== name);
+        if (buildYourOwnMax != null && prev.length >= buildYourOwnMax) return prev;
+        return [...prev, name];
+      });
       return;
     }
     setRemoved((prev) =>
@@ -308,7 +315,11 @@ export function TpvItemCustomizeModal({
             {tabBtn(
               'ingredients',
               buildYourOwn ? 'Ingredientes' : 'Quitar',
-              buildYourOwn ? 'Toca lo que quieres añadir' : 'Toca lo que NO quieres',
+              buildYourOwn
+                ? buildYourOwnMax != null
+                  ? `Elige hasta ${buildYourOwnMax} · ${addedBaseCount}/${buildYourOwnMax}`
+                  : 'Toca lo que quieres añadir'
+                : 'Toca lo que NO quieres',
               buildYourOwn ? addedBaseCount : removedCount,
             )}
             {tabBtn(
@@ -394,17 +405,25 @@ export function TpvItemCustomizeModal({
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {filteredIngredients.map((name) => {
                     const isActive = buildYourOwn ? addedBase.includes(name) : removed.includes(name);
+                    const atMax =
+                      buildYourOwn &&
+                      buildYourOwnMax != null &&
+                      !isActive &&
+                      addedBaseCount >= buildYourOwnMax;
                     return (
                       <button
                         key={name}
                         type="button"
                         onClick={() => toggleIngredient(name)}
+                        disabled={atMax}
                         className={`min-h-[52px] px-3 py-3 rounded-xl text-sm font-semibold border-2 transition-all active:scale-[0.98] ${
                           isActive
                             ? buildYourOwn
                               ? 'border-emerald-500 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-600 dark:text-emerald-200'
                               : 'border-red-400 bg-red-50 text-red-800 line-through dark:bg-red-950/40 dark:border-red-700 dark:text-red-300'
-                            : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 shadow-sm'
+                            : atMax
+                              ? 'border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 text-gray-400 opacity-50 cursor-not-allowed'
+                              : 'border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 hover:border-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 shadow-sm'
                         }`}
                       >
                         <span className="flex items-center justify-center gap-1.5">

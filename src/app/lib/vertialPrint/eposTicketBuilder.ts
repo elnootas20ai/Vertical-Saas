@@ -116,10 +116,12 @@ export function buildEposTicket(
   builder: EposBuilder,
   doc: TicketDocument,
   paperWidthMm: 58 | 80 = 80,
+  feedOptions?: { customerTailFeedCm?: number },
 ): void {
   const width = colsForSize(paperWidthMm, false);
   const tallCols = colsForSize(paperWidthMm, false);
   const titleCols = colsForSize(paperWidthMm, true);
+  const customerFeed = feedOptions?.customerTailFeedCm;
 
   // Margen superior corto (medida Tiana); la base larga va al final.
   if (typeof builder.addFeedLine === 'function') {
@@ -169,7 +171,7 @@ export function buildEposTicket(
     }
     builder.addTextAlign('center');
     line(builder, doc.footer, width);
-    feedBaseCm(builder, tailFeedCmForVariant(doc.variant));
+    feedBaseCm(builder, tailFeedCmForVariant(doc.variant, customerFeed));
     if (typeof builder.addCut === 'function') {
       builder.addCut(builder.CUT_NO_FEED ?? builder.CUT_FEED ?? 1);
     }
@@ -284,7 +286,7 @@ export function buildEposTicket(
   line(builder, doc.footer, width);
   if (doc.variant === 'customer') line(builder, 'Gracias por su visita', width);
 
-  feedBaseCm(builder, tailFeedCmForVariant(doc.variant));
+  feedBaseCm(builder, tailFeedCmForVariant(doc.variant, customerFeed));
 
   if (typeof builder.addCut === 'function') {
     builder.addCut(builder.CUT_NO_FEED ?? builder.CUT_FEED ?? 1);

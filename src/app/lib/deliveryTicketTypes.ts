@@ -23,6 +23,10 @@ export interface DeliveryOrderLike {
   takenByName?: string;
   paymentMethod?: string;
   paymentStatus?: string;
+  /** Importe recibido en efectivo (calculadora de cambio TPV). */
+  amountReceived?: number;
+  /** Cambio dado al cliente (calculadora de cambio TPV). */
+  changeGiven?: number;
   totalAmount?: number;
   paidAmount?: number;
   /** Gastos de envío (domicilio); van en el total pero deben verse como línea. */

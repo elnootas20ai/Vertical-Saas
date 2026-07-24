@@ -39,6 +39,10 @@ import {
 } from '../../lib/vertialPrint/printerActiveScope';
 import {
   DEFAULT_PRINTER_CONFIG,
+  DEFAULT_TICKET_BOTTOM_FEED_CM,
+  MAX_TICKET_BOTTOM_FEED_CM,
+  MIN_TICKET_BOTTOM_FEED_CM,
+  clampTicketBottomFeedCm,
   loadLegacyPrinterConfig,
   loadPdvPrinterCache,
   cachePdvPrinterConfig,
@@ -197,7 +201,11 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     const port = Number(initialConfig(scope).networkPort || 9100);
     return Number.isFinite(port) && port > 0 ? port : 9100;
   });
+  const [manualBottomFeedCm, setManualBottomFeedCm] = useState(() =>
+    clampTicketBottomFeedCm(initialConfig(scope).ticketBottomFeedCm),
+  );
   const [ipDirty, setIpDirty] = useState(false);
+  const [feedDirty, setFeedDirty] = useState(false);
   const ipDirtyRef = useRef(false);
   const [testing, setTesting] = useState(false);
   const [pingingIp, setPingingIp] = useState(false);
@@ -215,11 +223,14 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
   const selectedHost = String(config.networkHost || '').trim();
   const selectedPort = Number(config.networkPort || 9100) || 9100;
   const isConfigured = isValidIpv4(selectedHost);
+  const savedBottomFeedCm = clampTicketBottomFeedCm(config.ticketBottomFeedCm);
   const hasUnsavedIp =
     ipDirty && (manualIp.trim() !== selectedHost || manualPort !== selectedPort);
+  const hasUnsavedFeed = feedDirty && manualBottomFeedCm !== savedBottomFeedCm;
+  const hasUnsavedChanges = hasUnsavedIp || hasUnsavedFeed;
   // IP siempre editable. Tras detectar red local (o si ya estaba concedida) se puede comprobar/probar.
   const canProbeNetwork = !isNative || lanConfirmed;
-  const canTest = isConfigured && !hasUnsavedIp && canProbeNetwork;
+  const canTest = isConfigured && !hasUnsavedChanges && canProbeNetwork;
 
   const refreshDiagnostics = useCallback(() => {
     if (!isNative) return;
@@ -274,6 +285,8 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     setConfig(next);
     setManualIp(String(next.networkHost || '').trim());
     setManualPort(Number(next.networkPort || 9100) || 9100);
+    setManualBottomFeedCm(clampTicketBottomFeedCm(next.ticketBottomFeedCm));
+    setFeedDirty(false);
   }, [scope?.pdv?._id, scope?.pdv?._rev, scope?.pdvId, scope?.terminalId]);
 
   const syncActiveScope = useCallback((next: VertialPrinterConfig, pdvDoc?: PointOfSale | null) => {
@@ -298,6 +311,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       networkHost: host,
       networkPort: safePort,
       paperWidthMm: 80,
+      ticketBottomFeedCm: clampTicketBottomFeedCm(manualBottomFeedCm),
     });
 
     const pdvId = String(pdv?._id || scope?.pdvId || '').trim();
@@ -365,8 +379,10 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setConfig(next);
       setManualIp(host);
       setManualPort(safePort);
+      setManualBottomFeedCm(clampTicketBottomFeedCm(next.ticketBottomFeedCm));
       ipDirtyRef.current = false;
       setIpDirty(false);
+      setFeedDirty(false);
       clearPrinterVerifiedHost();
       toast.success(
         syncedToStore
@@ -386,7 +402,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       setPendingSaveHost('');
       setPendingSavePort(9100);
     }
-  }, [config, pdv, scope, syncActiveScope, refreshDiagnostics]);
+  }, [config, manualBottomFeedCm, pdv, scope, syncActiveScope, refreshDiagnostics]);
 
   const handleRequestSave = useCallback(() => {
     const host = manualIp.trim();
@@ -505,8 +521,8 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       toast.error('Espera un segundo a que se active la red local, o pulsa «Volver a pedir permiso».');
       return;
     }
-    if (hasUnsavedIp) {
-      toast.error('Guarda primero la IP antes de probar el ticket.');
+    if (hasUnsavedChanges) {
+      toast.error('Guarda primero los cambios (IP o blanco del ticket) antes de probar.');
       return;
     }
     if (!isConfigured) {
@@ -539,7 +555,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
     } finally {
       setTesting(false);
     }
-  }, [hasUnsavedIp, isConfigured, refreshDiagnostics, scope?.pdv, scope?.terminalId, canProbeNetwork]);
+  }, [hasUnsavedChanges, isConfigured, refreshDiagnostics, scope?.pdv, scope?.terminalId, canProbeNetwork]);
 
   const handleManualIpChange = useCallback((raw: string) => {
     const value = sanitizeIpv4Input(raw);
@@ -617,6 +633,7 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
       if (!id || id === selectedStoreId) return;
       ipDirtyRef.current = false;
       setIpDirty(false);
+      setFeedDirty(false);
       scope?.onStoreSelect?.(id);
     },
     [scope, selectedStoreId],
@@ -799,17 +816,17 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
         title={isNative ? '2. IP y puerto' : 'IP y puerto'}
         description="Se guardan en la tienda seleccionada arriba (no se mezclan con otras tiendas)."
       >
-            {isConfigured && !hasUnsavedIp ? (
+            {isConfigured && !hasUnsavedChanges ? (
               <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 px-2.5 py-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-emerald-900 dark:text-emerald-100">Impresora guardada</p>
                   <p className="text-xs text-emerald-800/90 dark:text-emerald-200/90 font-mono">
-                    {selectedHost}:{selectedPort}
+                    {selectedHost}:{selectedPort} · abajo {savedBottomFeedCm} cm
                   </p>
                 </div>
               </div>
-            ) : hasUnsavedIp ? (
+            ) : hasUnsavedChanges ? (
               <div className="mb-2.5 flex items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50/60 dark:bg-amber-950/30 px-2.5 py-1.5">
                 <CircleAlert className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                 <p className="text-xs text-amber-900 dark:text-amber-100">
@@ -883,6 +900,35 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
               </div>
               <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
                 Por defecto <strong>9100</strong>. Si no conecta, prueba 9101 o 9102.
+              </p>
+            </label>
+            <label className="block mt-2.5">
+              <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                Blanco abajo del ticket (cm)
+              </span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={MIN_TICKET_BOTTOM_FEED_CM}
+                max={MAX_TICKET_BOTTOM_FEED_CM}
+                step={1}
+                autoComplete="off"
+                value={manualBottomFeedCm}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') {
+                    setManualBottomFeedCm(DEFAULT_TICKET_BOTTOM_FEED_CM);
+                    setFeedDirty(true);
+                    return;
+                  }
+                  setManualBottomFeedCm(clampTicketBottomFeedCm(Number(raw)));
+                  setFeedDirty(true);
+                }}
+                className="mt-1 w-full h-9 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2.5 text-sm font-medium text-gray-900 dark:text-gray-100 font-mono"
+              />
+              <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                Solo ticket cliente/delivery. Rango {MIN_TICKET_BOTTOM_FEED_CM}–{MAX_TICKET_BOTTOM_FEED_CM} cm
+                (por defecto {DEFAULT_TICKET_BOTTOM_FEED_CM}). Cocina sigue en 6 cm. Guarda y prueba.
               </p>
             </label>
             {isNative && (diagLoading || diagnostics) ? (
@@ -974,8 +1020,8 @@ export function TpvPrinterSetupPanel({ scope }: { scope?: TpvPrinterScope }) {
             </button>
             {!canTest && canProbeNetwork && (
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                {hasUnsavedIp
-                  ? 'Guarda la IP antes de imprimir la prueba.'
+                {hasUnsavedChanges
+                  ? 'Guarda la IP / blanco del ticket antes de imprimir la prueba.'
                   : 'Guarda primero la impresora.'}
               </p>
             )}

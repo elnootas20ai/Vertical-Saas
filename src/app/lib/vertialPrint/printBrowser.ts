@@ -9,9 +9,18 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Blanco fijo al final (cocina 6 cm / ticket normal 10 cm); el cuerpo crece con el pedido. */
-function bodyPaddingBottom(variant: TicketDocument['variant']): string {
-  return variant === 'kitchen' ? '6cm' : '10cm';
+/** Blanco fijo al final (cocina 6 cm / ticket normal 10 cm o ajuste PDV); el cuerpo crece con el pedido. */
+function bodyPaddingBottom(
+  variant: TicketDocument['variant'],
+  customerTailFeedCm?: number,
+): string {
+  if (variant === 'kitchen') return '6cm';
+  const n = Number(customerTailFeedCm);
+  if (Number.isFinite(n)) {
+    const cm = Math.min(18, Math.max(4, Math.round(n)));
+    return `${cm}cm`;
+  }
+  return '10cm';
 }
 
 const BASE_STYLES = `
@@ -65,7 +74,7 @@ function buildHeaderHtml(doc: TicketDocument): string {
 <div class="hr"></div>`;
 }
 
-function buildKitchenTicketHtml(doc: TicketDocument): string {
+function buildKitchenTicketHtml(doc: TicketDocument, customerTailFeedCm?: number): string {
   const rows = doc.lines.map((item) => {
     const detail = buildLineDetailHtml(item);
     return `<div class="item"><span class="big">${item.qty}x ${escapeHtml(item.name)}</span>${detail}</div>`;
@@ -73,7 +82,7 @@ function buildKitchenTicketHtml(doc: TicketDocument): string {
 
   return `<!DOCTYPE html><html><head><title>Comanda ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}
-body{padding-bottom:${bodyPaddingBottom(doc.variant)}}
+body{padding-bottom:${bodyPaddingBottom(doc.variant, customerTailFeedCm)}}
 </style></head><body>
 <div class="c">
   <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
@@ -89,7 +98,7 @@ ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderN
 </body></html>`;
 }
 
-function buildDeliverySlipHtml(doc: TicketDocument): string {
+function buildDeliverySlipHtml(doc: TicketDocument, customerTailFeedCm?: number): string {
   const rows = doc.lines.map((item) => {
     const detail = buildLineDetailHtml(item);
     return `<div class="item"><span class="b">${item.qty}x</span> ${escapeHtml(item.name)}${detail}</div>`;
@@ -97,7 +106,7 @@ function buildDeliverySlipHtml(doc: TicketDocument): string {
 
   return `<!DOCTYPE html><html><head><title>Reparto ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}
-body{padding-bottom:${bodyPaddingBottom(doc.variant)}}
+body{padding-bottom:${bodyPaddingBottom(doc.variant, customerTailFeedCm)}}
 </style></head><body>
 ${buildHeaderHtml(doc)}
 <p>Pedido: <strong>#${escapeHtml(doc.orderNumber)}</strong></p>
@@ -117,7 +126,7 @@ ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderN
 </body></html>`;
 }
 
-function buildCustomerTicketHtml(doc: TicketDocument): string {
+function buildCustomerTicketHtml(doc: TicketDocument, customerTailFeedCm?: number): string {
   const rows = doc.lines.map((item) => {
     const detail = buildLineDetailHtml(item);
     return `<tr><td style="padding:4px 0;vertical-align:top"><span class="b">${item.qty}x</span> ${escapeHtml(item.name)}${detail}</td><td style="text-align:right;padding:4px 0;vertical-align:top">${item.total.toFixed(2)}€</td></tr>`;
@@ -125,7 +134,7 @@ function buildCustomerTicketHtml(doc: TicketDocument): string {
 
   return `<!DOCTYPE html><html><head><title>${doc.isRefund ? 'Devolución' : 'Ticket'} ${escapeHtml(doc.ticketNo)}</title>
 <style>${BASE_STYLES}
-body{padding-bottom:${bodyPaddingBottom(doc.variant)}}
+body{padding-bottom:${bodyPaddingBottom(doc.variant, customerTailFeedCm)}}
 </style></head><body>
 ${buildHeaderHtml(doc)}
 ${doc.salesPointName ? `<p>Tienda: ${escapeHtml(doc.salesPointName)}</p>` : ''}
@@ -155,10 +164,10 @@ ${doc.refundReason ? `<p>Motivo: ${escapeHtml(doc.refundReason)}</p>` : ''}
 </body></html>`;
 }
 
-function buildTicketHtml(doc: TicketDocument): string {
-  if (doc.variant === 'kitchen') return buildKitchenTicketHtml(doc);
-  if (doc.variant === 'delivery') return buildDeliverySlipHtml(doc);
-  return buildCustomerTicketHtml(doc);
+function buildTicketHtml(doc: TicketDocument, customerTailFeedCm?: number): string {
+  if (doc.variant === 'kitchen') return buildKitchenTicketHtml(doc, customerTailFeedCm);
+  if (doc.variant === 'delivery') return buildDeliverySlipHtml(doc, customerTailFeedCm);
+  return buildCustomerTicketHtml(doc, customerTailFeedCm);
 }
 
 function printHtmlInHiddenFrame(html: string): boolean {
@@ -218,8 +227,9 @@ function printHtmlInPopup(html: string): void {
 export function printDeliveryTicketBrowser(
   _options: DeliveryTicketPrintOptions,
   doc: TicketDocument,
+  customerTailFeedCm?: number,
 ) {
-  const html = buildTicketHtml(doc);
+  const html = buildTicketHtml(doc, customerTailFeedCm);
   if (!printHtmlInHiddenFrame(html)) {
     printHtmlInPopup(html);
   }

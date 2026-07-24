@@ -141,6 +141,41 @@ describe('categoriesForTpvScope', () => {
     expect(visible.some((i) => i._id === 'tomate')).toBe(false);
   });
 
+  it('muestra carta con isStockItem=true (Crispy / Premium con control de stock)', () => {
+    const brands = [
+      { _id: 'bb', name: 'blackburger', active: true, catalogCategories: ['Burgers'] },
+    ];
+    const catalog = [
+      {
+        _id: 'crispy',
+        name: 'Crispy Chicken',
+        itemType: 'product',
+        category: 'Burger',
+        active: true,
+        brandIds: ['bb'],
+        module: 'catalog',
+        isStockItem: true,
+        stockCategory: 'finished_product',
+        unitPrice: 11,
+      },
+      {
+        _id: 'flour',
+        name: 'Harina',
+        itemType: 'product',
+        category: 'Ingredientes',
+        active: true,
+        brandIds: [],
+        module: 'catalog',
+        isStockItem: true,
+        stockCategory: 'ingredient',
+        unitPrice: 0,
+      },
+    ];
+    const index = buildTpvProductSearchIndex(catalog);
+    const visible = searchTpvProducts(index, catalog, '', { kind: 'all' }, null, {});
+    expect(visible.map((i) => i._id)).toEqual(['crispy']);
+  });
+
   it('muestra modomio y blackburger aunque aún no tengan productos asignados', () => {
     const brands = [
       { _id: 'mod', name: 'modomio', active: true, isDefault: true, catalogCategories: ['Pizzas'] },

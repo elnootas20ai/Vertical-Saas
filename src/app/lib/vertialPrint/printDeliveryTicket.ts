@@ -52,7 +52,9 @@ export async function printDeliveryTicket(
 ): Promise<PrintDeliveryTicketResult> {
   const config = withUnifiedTicketPaperWidth(resolvePrinterConfigForOrder(options));
   const doc = buildTicketDocument(options);
-  const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
+  const escpos = encodeTicketEscpos(doc, config.paperWidthMm, {
+    customerTailFeedCm: config.ticketBottomFeedCm,
+  });
 
   if (isVertialNativeApp()) {
     const prepared = resolveNativePrinterForPrint(config);
@@ -126,7 +128,7 @@ export async function printDeliveryTicket(
     return { method: 'native', ok: false };
   }
 
-  printDeliveryTicketBrowser(options, doc);
+  printDeliveryTicketBrowser(options, doc, config.ticketBottomFeedCm);
   return { method: 'browser', ok: true };
 }
 
@@ -164,7 +166,9 @@ export async function printTestTicket(overrideConfig?: VertialPrinterConfig): Pr
     ? normalizeVertialPrinterConfig({ ...resolveEffectivePrinterConfig(), ...overrideConfig })
     : resolveEffectivePrinterConfig();
   const { encodeTestTicketEscpos } = await import('./escposEncode');
-  const escpos = encodeTestTicketEscpos(config.paperWidthMm);
+  const escpos = encodeTestTicketEscpos(config.paperWidthMm, {
+    customerTailFeedCm: config.ticketBottomFeedCm,
+  });
 
   if (isVertialNativeApp()) {
     const prepared = resolveNativePrinterForPrint(config);

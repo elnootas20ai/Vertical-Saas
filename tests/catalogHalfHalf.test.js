@@ -9,6 +9,7 @@ import {
   isHalfHalfFlavorSelectionInvalid,
   mergeHalfHalfProductIngredients,
   normalizeHalfHalfAllowedProductIds,
+  resolveBuildYourOwnMaxIngredients,
   tpvBuildYourOwnIngredientPool,
 } from '../src/app/lib/catalogCustomization.js';
 
@@ -65,6 +66,25 @@ describe('isTpvBuildYourOwnCatalogItem', () => {
         itemType: 'product',
         name: 'Pizza al gusto',
         category: 'Pizzas',
+        customFields: {},
+      }),
+    ).toBe(true);
+  });
+
+  it('detects 3 / 5 ingredientes modes by name', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: '3 Ingredientes',
+        category: 'Pizzas',
+        customFields: {},
+      }),
+    ).toBe(true);
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: '5 Ingredientes a elegir',
+        category: 'Premium',
         customFields: {},
       }),
     ).toBe(true);
@@ -190,6 +210,113 @@ describe('isTpvComboCatalogItem half-half', () => {
         customFields: { halfHalf: true },
       }),
     ).toBe(false);
+  });
+});
+
+describe('resolveBuildYourOwnMaxIngredients', () => {
+  it('lee tope 3 / 5 del nombre o customFields', () => {
+    expect(
+      resolveBuildYourOwnMaxIngredients({
+        name: '3 Ingredientes',
+        customFields: { buildYourOwn: true },
+      }),
+    ).toBe(3);
+    expect(
+      resolveBuildYourOwnMaxIngredients({
+        name: 'Pizza al gusto',
+        customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 5 },
+      }),
+    ).toBe(5);
+    expect(
+      resolveBuildYourOwnMaxIngredients({
+        name: 'Pizza al gusto',
+        customFields: { buildYourOwn: true },
+      }),
+    ).toBe(null);
+  });
+
+  it('infiere 3 / 5 desde Mitad y mitad y Modomio sin número en el título', () => {
+    expect(
+      resolveBuildYourOwnMaxIngredients({
+        name: 'Mitad y mitad',
+        customFields: { buildYourOwn: true },
+      }),
+    ).toBe(3);
+    expect(
+      resolveBuildYourOwnMaxIngredients({
+        name: 'Modomio',
+        customFields: { buildYourOwn: true },
+      }),
+    ).toBe(5);
+    expect(
+      resolveBuildYourOwnMaxIngredients({
+        name: 'Mitad y mitad',
+        customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 3 },
+      }),
+    ).toBe(3);
+  });
+});
+
+describe('isTpvBuildYourOwnCatalogItem modomio', () => {
+  it('detecta Modomio por nombre (producto, no combo)', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: 'Modomio',
+        category: 'Premium',
+        customFields: {},
+      }),
+    ).toBe(true);
+  });
+
+  it('no trata Combo Modomio como BYO', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'combo',
+        name: 'Combo Modomio',
+        category: 'Combos',
+        customFields: {},
+      }),
+    ).toBe(false);
+  });
+
+  it('Mitad y mitad BYO solo con flag (por nombre sigue half-half)', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: 'Mitad y mitad',
+        category: 'Premium',
+        customFields: {},
+      }),
+    ).toBe(false);
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: 'Mitad y mitad',
+        category: 'Premium',
+        customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 3 },
+      }),
+    ).toBe(true);
+    expect(
+      isTpvHalfHalfCatalogItem({
+        itemType: 'product',
+        name: 'Mitad y mitad',
+        category: 'Premium',
+        customFields: { buildYourOwn: true, buildYourOwnMaxIngredients: 3 },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('catalogPizzasForHalfHalf premium', () => {
+  it('incluye Premium / Especialidad como sabores', () => {
+    const catalog = [
+      { _id: 'hh', name: 'Mitad y mitad', category: 'Pizzas', itemType: 'product', active: true, customFields: { halfHalf: true } },
+      { _id: 'p1', name: 'Margarita', category: 'Pizzas', itemType: 'product', active: true, customFields: {} },
+      { _id: 'p2', name: 'Pallesa', category: 'Premium', itemType: 'product', active: true, customFields: {} },
+      { _id: 'p3', name: 'Mortadella', category: 'Especialidad', itemType: 'product', active: true, customFields: {} },
+    ];
+    expect(catalogPizzasForHalfHalf(catalog, 'hh').map((p) => p._id).sort()).toEqual(['p1', 'p2', 'p3']);
   });
 });
 

@@ -9,7 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
-import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
+import { useClientPhoneSearch } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
   createDeliveryOrderWithCajaStatus,
@@ -810,15 +810,14 @@ export function TpvRapidoOrderFlow({
   );
 
   // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
+  // Sin refresh=1: invalidar aquí tiraba la caché y la 1.ª búsqueda volvía a tardar ~10s.
   useEffect(() => {
     if (!clientSearchUserId) return;
-    clearClientPhoneSearchCache();
     void listClientsPageRequest(clientSearchUserId, {
       limit: 1,
       skip: 0,
       lite: true,
       businessId: clientSearchBusinessId || undefined,
-      refresh: true,
     }).catch(() => undefined);
   }, [clientSearchUserId, clientSearchBusinessId]);
 
@@ -2188,6 +2187,13 @@ export function TpvRapidoOrderFlow({
           paymentCollected: !collectOnDelivery,
           paymentCollectedAt: collectOnDelivery ? '' : now,
           paymentCollectedBy: collectOnDelivery ? '' : takerName,
+          ...(() => {
+            if (collectOnDelivery || method !== 'efectivo') return {};
+            const given = parseDecimalPadValue(cashGiven);
+            if (isNaN(given) || given <= 0) return {};
+            const change = Math.max(0, Number((given - payableTotal).toFixed(2)));
+            return { amountReceived: given, changeGiven: change };
+          })(),
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
           // Mismo nº en ticket y servidor → imprimir en paralelo al crear.
@@ -2265,7 +2271,7 @@ export function TpvRapidoOrderFlow({
         setSubmitting(false);
       }
     },
-    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError],
+    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven],
   );
 
   const accountDue = useMemo(
@@ -2524,6 +2530,12 @@ export function TpvRapidoOrderFlow({
         paymentCollectedBy: takerName,
         orderNumber: `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`,
         ...(restaurantTable ? { tableNumber: restaurantTable.number, tableId: restaurantTable.id } : {}),
+        ...(method === 'efectivo' && changeAmount != null && changeAmount >= 0
+          ? {
+              amountReceived: cashGivenAmount,
+              changeGiven: Number(changeAmount.toFixed(2)),
+            }
+          : {}),
       };
 
       // Ticket en paralelo al POST de caja.
@@ -2621,6 +2633,8 @@ export function TpvRapidoOrderFlow({
     tpvCatalogBusinessId,
     businessId,
     phonePrefix,
+    changeAmount,
+    cashGivenAmount,
   ]);
 
   const handlePayFullAccount = useCallback(async () => {

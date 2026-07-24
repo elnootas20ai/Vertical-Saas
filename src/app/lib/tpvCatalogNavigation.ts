@@ -4,7 +4,7 @@ import { isDefaultBrandNamePlaceholder, isDefaultCommercialBrand, sortBrandsForD
 import { resolveBrandLogo } from './brandPlaceholders';
 import { UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
 import { shouldClearBrandForCategory, allCommercialLineBrands } from './deliveryCatalogImportLogic';
-import { isStockInventoryItem } from './stockInventoryScope';
+import { isTpvWarehouseOnlyCatalogItem } from './tpvCatalogScope';
 
 export type TpvCatalogScope =
   | { kind: 'all' }
@@ -55,14 +55,14 @@ export function parseTpvSectionId(id: string): TpvCatalogScope | null {
 
 /**
  * Vendible en TPV: productos/combos de carta.
- * Excluye inventario (ingredientes, envases…) aunque tengan itemType=product.
+ * Excluye almacén puro (ingredientes, envases…).
+ * Carta con isStockItem=true (control de stock) SÍ se vende.
  */
 export function isTpvSellableCatalogItem(item: CatalogItem | null | undefined): boolean {
   if (!item) return false;
   if (item.active === false) return false;
   if (item.itemType !== 'product' && item.itemType !== 'combo') return false;
-  if (isStockInventoryItem(item)) return false;
-  if ((item.module || 'catalog') !== 'catalog') return false;
+  if (isTpvWarehouseOnlyCatalogItem(item)) return false;
   return true;
 }
 

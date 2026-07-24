@@ -13,7 +13,7 @@ import {
 const MEMORY_TTL_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 30 * 60 * 1000;
 /** Bump al cambiar forma del snapshot (p. ej. placeholders TPV). Invalida sessionStorage antiguo. */
-export const TPV_CATALOG_CACHE_SCHEMA = 'v16-combo-allowlists-pizzas';
+export const TPV_CATALOG_CACHE_SCHEMA = 'v18-byo-max-ingredients';
 const TPV_CATALOG_SCHEMA_KEY = 'vertial.tpvCatalog.schema';
 const SESSION_PREFIX = `vertial.tpvCatalog:${TPV_CATALOG_CACHE_SCHEMA}:`;
 
@@ -63,6 +63,10 @@ function liteCatalogItem(item: CatalogItem): CatalogItem {
   }
   if (cf.buildYourOwn === true) {
     customFields.buildYourOwn = true;
+  }
+  const byoMaxRaw = Number(cf.buildYourOwnMaxIngredients);
+  if (Number.isFinite(byoMaxRaw) && byoMaxRaw > 0) {
+    customFields.buildYourOwnMaxIngredients = Math.min(20, Math.floor(byoMaxRaw));
   }
   const buildYourOwnAllowed = Array.isArray(cf.buildYourOwnAllowedIngredientIds)
     ? cf.buildYourOwnAllowedIngredientIds.map((id) => String(id || '').trim()).filter(Boolean)

@@ -12,9 +12,9 @@ export interface ClientPhoneSearchResult {
   clearResults: () => void;
 }
 
-/** Cache corto en el navegador para no repetir la misma query en ráfaga. */
-const CLIENT_SEARCH_CACHE_TTL_MS = 45_000;
-const CLIENT_SEARCH_CACHE_MAX = 40;
+/** Cache en el navegador: evita repetir la misma query mientras se escribe. */
+const CLIENT_SEARCH_CACHE_TTL_MS = 120_000;
+const CLIENT_SEARCH_CACHE_MAX = 60;
 const clientSearchResultCache = new Map<string, { at: number; clients: Client[] }>();
 
 /** Walk-in / atención rápida del TPV: no deben impedir buscar un cliente real. */
@@ -126,7 +126,9 @@ export function useClientPhoneSearch(params: {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        let clients = await searchClientsByPhoneRequest(
+        // No usar refresh=1 aquí: invalidar la caché del servidor en un miss
+        // fuerza otra carga completa de Couch (~6k clientes) y hace la búsqueda lenta.
+        const clients = await searchClientsByPhoneRequest(
           userId,
           queryForApi,
           resultLimit,
@@ -134,17 +136,6 @@ export function useClientPhoneSearch(params: {
           businessId,
           { includeLegacy: true, fallbackAll: true },
         );
-        // Si la caché servidor quedó vacía, un refresh recupera carteras reales (Pau ~6k).
-        if (clients.length === 0 && !controller.signal.aborted && seq === requestSeqRef.current) {
-          clients = await searchClientsByPhoneRequest(
-            userId,
-            queryForApi,
-            resultLimit,
-            controller.signal,
-            businessId,
-            { includeLegacy: true, fallbackAll: true, refresh: true },
-          );
-        }
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
         // No cachear vacíos: evita “no hay clientes” pegado tras un fallo de filtro/red.
         if (clients.length > 0) writeSearchCache(key, clients);

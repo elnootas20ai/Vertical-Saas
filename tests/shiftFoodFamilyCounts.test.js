@@ -3,6 +3,8 @@ import {
   buildShiftFoodFamilyReport,
   classifyFoodFamily,
   pizzaUnitsFromProductLabel,
+  tpvOnlyFoodFromReport,
+  mergeTpvAndAppsFoodCounts,
 } from '../src/app/lib/shiftFoodFamilyCounts.ts';
 
 describe('classifyFoodFamily', () => {
@@ -117,5 +119,31 @@ describe('buildShiftFoodFamilyReport', () => {
       },
     ]);
     expect(report.total).toEqual({ pizza: 0, burger: 1, taco: 0 });
+  });
+});
+
+describe('tpvOnly + merge cierre', () => {
+  it('separa TPV de apps y suma lo declarado por integración', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: '1',
+        channel: 'glovo',
+        status: 'entregado',
+        items: [{ name: 'Margarita', category: 'Pizzas', quantity: 2 }],
+      },
+      {
+        _id: '2',
+        channel: 'direct',
+        status: 'entregado',
+        items: [{ name: 'Simple', category: 'Burger', quantity: 1 }],
+      },
+    ]);
+    expect(tpvOnlyFoodFromReport(report)).toEqual({ pizza: 0, burger: 1, taco: 0 });
+    expect(
+      mergeTpvAndAppsFoodCounts(
+        { pizza: 0, burger: 1, taco: 0 },
+        { glovo: { pizza: 5, burger: 0, taco: 0 }, ubereats: { pizza: 1, burger: 2, taco: 0 } },
+      ),
+    ).toEqual({ pizza: 6, burger: 3, taco: 0 });
   });
 });

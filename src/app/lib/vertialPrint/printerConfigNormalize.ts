@@ -1,5 +1,5 @@
 import type { VertialPrinterConfig } from './printerConfig';
-import { DEFAULT_PRINTER_CONFIG } from './printerConfig';
+import { DEFAULT_PRINTER_CONFIG, clampTicketBottomFeedCm } from './printerConfig';
 import { isVertialNativeApp } from './isNativeApp';
 import { isValidIpv4 } from './printerSetupStatus';
 
@@ -23,6 +23,9 @@ export function normalizeVertialPrinterConfig(
     bridgeHost: String(raw?.bridgeHost || '').trim(),
     paperWidthMm: raw?.paperWidthMm === 58 ? 58 : 80,
     preferBridge: raw?.preferBridge !== false,
+    ticketBottomFeedCm: clampTicketBottomFeedCm(
+      raw?.ticketBottomFeedCm ?? DEFAULT_PRINTER_CONFIG.ticketBottomFeedCm,
+    ),
   };
 }
 

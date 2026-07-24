@@ -640,6 +640,18 @@ export async function mapImportEntryToCatalogItem(
       ...(item.customFields || {}),
       halfHalf: true,
     };
+  } else if (
+    /al\s*gusto|a\s*gusto|build\s*your\s*own|\d+\s*ingredientes?/i.test(name)
+  ) {
+    const maxMatch = name.match(/(\d+)\s*ingredientes?/i);
+    const maxN = maxMatch ? Number(maxMatch[1]) : NaN;
+    item.customFields = {
+      ...(item.customFields || {}),
+      buildYourOwn: true,
+      ...(Number.isFinite(maxN) && maxN > 0
+        ? { buildYourOwnMaxIngredients: Math.min(20, Math.floor(maxN)) }
+        : {}),
+    };
   }
 
   if (!String(item.image || '').trim()) {

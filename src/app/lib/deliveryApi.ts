@@ -129,6 +129,10 @@ export interface DeliveryOrder {
   paymentStatus: PaymentStatus;
   paidAmount: number;
   paidAt: string;
+  /** Importe recibido en efectivo (calculadora TPV). */
+  amountReceived?: number;
+  /** Cambio dado al cliente (calculadora TPV). */
+  changeGiven?: number;
 
   ticketNumber?: string;
 

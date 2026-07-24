@@ -30,7 +30,9 @@ export async function printTicketDocument(
     ...(options?.config ?? resolveEffectivePrinterConfig()),
     paperWidthMm: DELIVERY_TICKET_PAPER_WIDTH_MM,
   });
-  const escpos = encodeTicketEscpos(doc, config.paperWidthMm);
+  const escpos = encodeTicketEscpos(doc, config.paperWidthMm, {
+    customerTailFeedCm: config.ticketBottomFeedCm,
+  });
 
   if (isVertialNativeApp()) {
     const prepared = resolveNativePrinterForPrint(config);
@@ -84,6 +86,10 @@ export async function printTicketDocument(
     return { method: 'native', ok: false };
   }
 
-  printDeliveryTicketBrowser({} as import('../deliveryTicketTypes').DeliveryTicketPrintOptions, doc);
+  printDeliveryTicketBrowser(
+    {} as import('../deliveryTicketTypes').DeliveryTicketPrintOptions,
+    doc,
+    config.ticketBottomFeedCm,
+  );
   return { method: 'browser', ok: true };
 }

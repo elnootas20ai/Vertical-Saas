@@ -14,9 +14,9 @@ export function TpvPrinterSetupModal({
     <div className="fixed inset-0 z-[110] flex flex-col bg-gray-50 dark:bg-gray-950">
       <header className="shrink-0 flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="min-w-0">
-          <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Configurar impresora</h2>
+          <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Ajustes impresora</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-            Red local → IP + puerto → Guardar → Probar
+            Red local → IP + puerto → Margen → Guardar → Probar
           </p>
         </div>
         <button

@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
 import { Plug } from 'lucide-react';
 import {
   parseAggregatorAmount,
@@ -7,76 +8,229 @@ import {
 } from '../../lib/deliveryIntegrationsUi';
 import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import type { FoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
-import { emptyFoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
+import { emptyFoodFamilyCounts, sumFoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
 
 export type ManualFoodByChannel = Record<string, { pizza: string; burger: string; taco: string }>;
+
+export type AggregatorClosingSnapshot = {
+  foodByChannel: Record<string, FoodFamilyCounts>;
+  foodTotals: FoodFamilyCounts;
+  cashByChannel: Record<string, number>;
+  cardByChannel: Record<string, number>;
+  cashTotal: number;
+  cardTotal: number;
+  rows: AggregatorCashRow[];
+};
 
 interface AggregatorClosingEditorProps {
   autoRows: AggregatorCashRow[];
   /** Conteo sistema por canal (pizzas / burgers / tacos). */
   foodByChannel: Record<string, FoodFamilyCounts>;
-  manualFoodByChannel: ManualFoodByChannel;
-  onManualFoodChange: (channel: string, key: keyof FoodFamilyCounts, value: string) => void;
-  manualCashByChannel: Record<string, string>;
-  onManualCashChange: (channel: string, value: string) => void;
-  manualCardByChannel: Record<string, string>;
-  onManualCardChange: (channel: string, value: string) => void;
   title?: string;
   /** Número del primer paso (Glovo = startStep, Uber = startStep+1…). */
   startStep?: number;
+  /** Cada cambio en los cuadraditos → suma para TOTAL DE TODO. */
+  onSnapshotChange?: (snapshot: AggregatorClosingSnapshot) => void;
+}
+
+function parseCount(raw: string): number {
+  const t = String(raw ?? '').trim();
+  if (!t) return 0;
+  const n = Number.parseInt(t, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** Quita basura y ceros a la izquierda: "05"→"5", "050"→"50", ""→"". */
+function normalizeCountInput(raw: string): string {
+  const digits = String(raw || '').replace(/[^\d]/g, '');
+  if (!digits) return '';
+  const n = Number.parseInt(digits, 10);
+  if (!Number.isFinite(n) || n < 0) return '';
+  return String(n);
+}
+
+function buildSeedFood(
+  autoRows: AggregatorCashRow[],
+  foodByChannel: Record<string, FoodFamilyCounts>,
+): ManualFoodByChannel {
+  const out: ManualFoodByChannel = {};
+  for (const row of autoRows) {
+    const ch = row.platform.channel;
+    const auto = foodByChannel[ch] || emptyFoodFamilyCounts();
+    out[ch] = {
+      // Vacío si el sistema tiene 0 → al teclear "50" no sale "050".
+      pizza: auto.pizza > 0 ? String(auto.pizza) : '',
+      burger: auto.burger > 0 ? String(auto.burger) : '',
+      taco: auto.taco > 0 ? String(auto.taco) : '',
+    };
+  }
+  return out;
+}
+
+function buildSeedMoney(autoRows: AggregatorCashRow[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const row of autoRows) out[row.platform.channel] = '';
+  return out;
 }
 
 /**
  * Cierre TPV: por app → pizzas / burgers / tacos + efectivo + tarjeta.
- * Solo el efectivo se suma al arqueo de caja física.
+ * Estado local de los inputs (no lo pisa el padre al cargar pedidos).
  */
 export function AggregatorClosingEditor({
   autoRows,
   foodByChannel,
-  manualFoodByChannel,
-  onManualFoodChange,
-  manualCashByChannel,
-  onManualCashChange,
-  manualCardByChannel,
-  onManualCardChange,
   title = 'Integraciones',
   startStep = 2,
+  onSnapshotChange,
 }: AggregatorClosingEditorProps) {
-  const displayRows = autoRows.map((row) => {
-    const ch = row.platform.channel;
-    const parsedCash = parseAggregatorAmount(manualCashByChannel[ch] ?? '');
-    const parsedCard = parseAggregatorAmount(manualCardByChannel[ch] ?? '');
-    return {
-      ...row,
-      cashSales: parsedCash != null ? parsedCash : row.cashSales,
-      cardSales: parsedCard != null ? parsedCard : row.cardSales,
-    };
-  });
-  const cashTotal = sumAggregatorCash(displayRows);
-  const cardTotal = sumAggregatorCard(displayRows);
-  const foodTotals = autoRows.reduce(
-    (acc, row) => {
-      const ch = row.platform.channel;
-      const autoFood = foodByChannel[ch] || emptyFoodFamilyCounts();
-      const food = manualFoodByChannel[ch] || {
-        pizza: String(autoFood.pizza || 0),
-        burger: String(autoFood.burger || 0),
-        taco: String(autoFood.taco || 0),
-      };
-      const n = (raw: string, fallback: number) => {
-        const t = String(raw ?? '').trim();
-        if (!t) return fallback;
-        const v = Number.parseInt(t, 10);
-        return Number.isFinite(v) && v >= 0 ? v : fallback;
-      };
-      acc.pizza += n(food.pizza, autoFood.pizza);
-      acc.burger += n(food.burger, autoFood.burger);
-      acc.taco += n(food.taco, autoFood.taco);
-      return acc;
-    },
-    { pizza: 0, burger: 0, taco: 0 },
+  const seededRef = useRef(false);
+  const touchedRef = useRef<Set<string>>(new Set());
+  const [foodDraft, setFoodDraft] = useState<ManualFoodByChannel>(() =>
+    buildSeedFood(autoRows, foodByChannel),
   );
-  const appsMoneyTotal = Math.round((cashTotal + cardTotal) * 100) / 100;
+  const [cashDraft, setCashDraft] = useState<Record<string, string>>(() => buildSeedMoney(autoRows));
+  const [cardDraft, setCardDraft] = useState<Record<string, string>>(() => buildSeedMoney(autoRows));
+
+  // Primera siembra / canales nuevos (sin tocar lo que el usuario ya escribió).
+  useEffect(() => {
+    setFoodDraft((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const row of autoRows) {
+        const ch = row.platform.channel;
+        if (touchedRef.current.has(ch)) continue;
+        if (next[ch] && seededRef.current) continue;
+        const auto = foodByChannel[ch] || emptyFoodFamilyCounts();
+        next[ch] = {
+          pizza: auto.pizza > 0 ? String(auto.pizza) : '',
+          burger: auto.burger > 0 ? String(auto.burger) : '',
+          taco: auto.taco > 0 ? String(auto.taco) : '',
+        };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    setCashDraft((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const row of autoRows) {
+        const ch = row.platform.channel;
+        if (ch in next) continue;
+        next[ch] = '';
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    setCardDraft((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const row of autoRows) {
+        const ch = row.platform.channel;
+        if (ch in next) continue;
+        next[ch] = '';
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    seededRef.current = true;
+  }, [autoRows, foodByChannel]);
+
+  // Si el sistema trae conteos > 0 después, solo rellena canales no tocados que sigan en 0.
+  useEffect(() => {
+    setFoodDraft((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const row of autoRows) {
+        const ch = row.platform.channel;
+        if (touchedRef.current.has(ch)) continue;
+        const auto = foodByChannel[ch] || emptyFoodFamilyCounts();
+        const cur = next[ch];
+        const allZero =
+          !cur
+          || (parseCount(cur.pizza) === 0 && parseCount(cur.burger) === 0 && parseCount(cur.taco) === 0);
+        const autoHas =
+          auto.pizza > 0 || auto.burger > 0 || auto.taco > 0;
+        if (allZero && autoHas) {
+          next[ch] = {
+            pizza: auto.pizza > 0 ? String(auto.pizza) : '',
+            burger: auto.burger > 0 ? String(auto.burger) : '',
+            taco: auto.taco > 0 ? String(auto.taco) : '',
+          };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [autoRows, foodByChannel]);
+
+  const snapshot = useMemo((): AggregatorClosingSnapshot => {
+    const foodByCh: Record<string, FoodFamilyCounts> = {};
+    const cashByChannel: Record<string, number> = {};
+    const cardByChannel: Record<string, number> = {};
+    const rows: AggregatorCashRow[] = autoRows.map((row) => {
+      const ch = row.platform.channel;
+      const draft = foodDraft[ch] || { pizza: '', burger: '', taco: '' };
+      foodByCh[ch] = {
+        pizza: parseCount(draft.pizza),
+        burger: parseCount(draft.burger),
+        taco: parseCount(draft.taco),
+      };
+      const parsedCash = parseAggregatorAmount(cashDraft[ch] ?? '');
+      const parsedCard = parseAggregatorAmount(cardDraft[ch] ?? '');
+      const cashSales = parsedCash != null ? parsedCash : row.cashSales;
+      const cardSales = parsedCard != null ? parsedCard : row.cardSales;
+      cashByChannel[ch] = cashSales;
+      cardByChannel[ch] = cardSales;
+      let totalSales = row.totalSales;
+      const declared = Math.round((cashSales + cardSales) * 100) / 100;
+      if (declared > totalSales) totalSales = declared;
+      return {
+        ...row,
+        cashSales,
+        cardSales,
+        totalSales,
+        manualOverride: parsedCash != null || parsedCard != null,
+      };
+    });
+    return {
+      foodByChannel: foodByCh,
+      foodTotals: sumFoodFamilyCounts(Object.values(foodByCh)),
+      cashByChannel,
+      cardByChannel,
+      cashTotal: sumAggregatorCash(rows),
+      cardTotal: sumAggregatorCard(rows),
+      rows,
+    };
+  }, [autoRows, foodDraft, cashDraft, cardDraft]);
+
+  useEffect(() => {
+    onSnapshotChange?.(snapshot);
+  }, [snapshot, onSnapshotChange]);
+
+  const setFoodField = (channel: string, key: keyof FoodFamilyCounts, raw: string) => {
+    touchedRef.current.add(channel);
+    const cleaned = normalizeCountInput(raw);
+    setFoodDraft((prev) => {
+      const cur = prev[channel] || { pizza: '', burger: '', taco: '' };
+      return {
+        ...prev,
+        [channel]: {
+          pizza: cur.pizza,
+          burger: cur.burger,
+          taco: cur.taco,
+          [key]: cleaned,
+        },
+      };
+    });
+  };
+
+  const focusCountField = (e: FocusEvent<HTMLInputElement>) => {
+    const v = e.currentTarget.value;
+    if (!v || v === '0') {
+      e.currentTarget.select();
+    }
+  };
 
   return (
     <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 overflow-hidden">
@@ -85,24 +239,24 @@ export function AggregatorClosingEditor({
           <Plug className="w-3.5 h-3.5 text-purple-600" /> {title}
         </div>
         <div className="text-right text-[11px] font-semibold tabular-nums space-y-0.5">
-          <div className="text-emerald-700 dark:text-emerald-300">Efectivo apps → caja: {cashTotal.toFixed(2)}€</div>
-          <div className="text-blue-700 dark:text-blue-300">Tarjeta apps: {cardTotal.toFixed(2)}€</div>
+          <div className="text-emerald-700 dark:text-emerald-300">
+            Efectivo apps → caja: {snapshot.cashTotal.toFixed(2)}€
+          </div>
+          <div className="text-blue-700 dark:text-blue-300">
+            Tarjeta apps: {snapshot.cardTotal.toFixed(2)}€
+          </div>
         </div>
       </div>
 
       <p className="px-3 pt-2 text-[11px] text-gray-500 dark:text-gray-400">
-        Por cada app: unidades, efectivo (suma al arqueo) y tarjeta (solo registro).
+        Escribe en cada app. La suma aparece abajo al momento (Total apps y TOTAL DE TODO).
       </p>
 
       <div className="p-3 space-y-3">
         {autoRows.map((row, index) => {
           const ch = row.platform.channel;
           const autoFood = foodByChannel[ch] || emptyFoodFamilyCounts();
-          const food = manualFoodByChannel[ch] || {
-            pizza: String(autoFood.pizza || 0),
-            burger: String(autoFood.burger || 0),
-            taco: String(autoFood.taco || 0),
-          };
+          const food = foodDraft[ch] || { pizza: '', burger: '', taco: '' };
           const stepNum = startStep + index;
           const autoHint =
             row.orderCount > 0
@@ -129,63 +283,86 @@ export function AggregatorClosingEditor({
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                <label className="rounded-lg border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
+                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
                   <span className="text-[10px] font-bold text-amber-800 dark:text-amber-200">🍕 Pizzas</span>
                   <input
                     type="text"
                     inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="0"
                     value={food.pizza}
-                    onChange={(e) => onManualFoodChange(ch, 'pizza', e.target.value.replace(/[^\d]/g, ''))}
+                    onFocus={focusCountField}
+                    onChange={(e) => setFoodField(ch, 'pizza', e.target.value)}
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/40 dark:bg-amber-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Sist. {autoFood.pizza}</span>
-                </label>
-                <label className="rounded-lg border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
+                </div>
+                <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
                   <span className="text-[10px] font-bold text-orange-800 dark:text-orange-200">🍔 Burgers</span>
                   <input
                     type="text"
                     inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="0"
                     value={food.burger}
-                    onChange={(e) => onManualFoodChange(ch, 'burger', e.target.value.replace(/[^\d]/g, ''))}
+                    onFocus={focusCountField}
+                    onChange={(e) => setFoodField(ch, 'burger', e.target.value)}
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-orange-200 dark:border-orange-800 rounded-lg bg-orange-50/40 dark:bg-orange-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Sist. {autoFood.burger}</span>
-                </label>
-                <label className="rounded-lg border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
+                </div>
+                <div className="rounded-lg border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
                   <span className="text-[10px] font-bold text-lime-800 dark:text-lime-200">🌮 Tacos</span>
                   <input
                     type="text"
                     inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="0"
                     value={food.taco}
-                    onChange={(e) => onManualFoodChange(ch, 'taco', e.target.value.replace(/[^\d]/g, ''))}
+                    onFocus={focusCountField}
+                    onChange={(e) => setFoodField(ch, 'taco', e.target.value)}
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-lime-200 dark:border-lime-800 rounded-lg bg-lime-50/40 dark:bg-lime-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-lime-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Sist. {autoFood.taco}</span>
-                </label>
-                <label className="rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
+                </div>
+                <div className="rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
                   <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">💵 Efectivo (€)</span>
                   <input
                     type="text"
                     inputMode="decimal"
+                    autoComplete="off"
                     placeholder="0,00"
-                    value={manualCashByChannel[ch] ?? ''}
-                    onChange={(e) => onManualCashChange(ch, formatMoneyAsYouType(e.target.value, true))}
+                    value={cashDraft[ch] ?? ''}
+                    onChange={(e) => {
+                      touchedRef.current.add(ch);
+                      setCashDraft((prev) => ({
+                        ...prev,
+                        [ch]: formatMoneyAsYouType(e.target.value, true),
+                      }));
+                    }}
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Entra en caja</span>
-                </label>
-                <label className="rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
+                </div>
+                <div className="rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
                   <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300">💳 Tarjeta (€)</span>
                   <input
                     type="text"
                     inputMode="decimal"
+                    autoComplete="off"
                     placeholder="0,00"
-                    value={manualCardByChannel[ch] ?? ''}
-                    onChange={(e) => onManualCardChange(ch, formatMoneyAsYouType(e.target.value, true))}
+                    value={cardDraft[ch] ?? ''}
+                    onChange={(e) => {
+                      touchedRef.current.add(ch);
+                      setCardDraft((prev) => ({
+                        ...prev,
+                        [ch]: formatMoneyAsYouType(e.target.value, true),
+                      }));
+                    }}
                     className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-blue-200 dark:border-blue-800 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
                   />
                   <span className="text-[9px] text-gray-400">Solo registro</span>
-                </label>
+                </div>
               </div>
             </div>
           );
@@ -196,28 +373,30 @@ export function AggregatorClosingEditor({
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
               <p className="text-[10px] opacity-70">🍕 Pizzas</p>
-              <p className="text-base font-bold tabular-nums">{foodTotals.pizza}</p>
+              <p className="text-base font-bold tabular-nums">{snapshot.foodTotals.pizza}</p>
             </div>
             <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
               <p className="text-[10px] opacity-70">🍔 Burgers</p>
-              <p className="text-base font-bold tabular-nums">{foodTotals.burger}</p>
+              <p className="text-base font-bold tabular-nums">{snapshot.foodTotals.burger}</p>
             </div>
             <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
               <p className="text-[10px] opacity-70">🌮 Tacos</p>
-              <p className="text-base font-bold tabular-nums">{foodTotals.taco}</p>
+              <p className="text-base font-bold tabular-nums">{snapshot.foodTotals.taco}</p>
             </div>
             <div className="rounded-lg bg-emerald-500/20 dark:bg-emerald-600/15 px-2 py-1.5">
               <p className="text-[10px] opacity-70">💵 Efectivo</p>
-              <p className="text-base font-bold tabular-nums">{cashTotal.toFixed(2)}€</p>
+              <p className="text-base font-bold tabular-nums">{snapshot.cashTotal.toFixed(2)}€</p>
             </div>
             <div className="rounded-lg bg-blue-500/20 dark:bg-blue-600/15 px-2 py-1.5">
               <p className="text-[10px] opacity-70">💳 Tarjeta</p>
-              <p className="text-base font-bold tabular-nums">{cardTotal.toFixed(2)}€</p>
+              <p className="text-base font-bold tabular-nums">{snapshot.cardTotal.toFixed(2)}€</p>
             </div>
           </div>
           <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/15 dark:border-black/10">
             <span className="text-xs font-semibold opacity-80">Suma efectivo + tarjeta apps</span>
-            <span className="text-lg font-bold tabular-nums">{appsMoneyTotal.toFixed(2)}€</span>
+            <span className="text-lg font-bold tabular-nums">
+              {(Math.round((snapshot.cashTotal + snapshot.cardTotal) * 100) / 100).toFixed(2)}€
+            </span>
           </div>
         </div>
       </div>

@@ -9,6 +9,11 @@ export interface VertialPrinterConfig {
   bridgeHost: string;
   paperWidthMm: 58 | 80;
   preferBridge: boolean;
+  /**
+   * Blanco al final del ticket cliente/delivery (cm), antes del corte.
+   * Cocina sigue fija en 6 cm. Por defecto 10. Rango seguro 4–18.
+   */
+  ticketBottomFeedCm: number;
 }
 
 export const VERTIAL_PRINT_BRIDGE_PORT = 39201;
@@ -16,6 +21,11 @@ export const VERTIAL_PRINT_BRIDGE_URL = `http://127.0.0.1:${VERTIAL_PRINT_BRIDGE
 
 const LEGACY_STORAGE_KEY = 'vertial_printer_config_v1';
 const PDV_CACHE_PREFIX = 'vertial_printer_config_pdv_';
+
+/** Default blanco inferior cliente/delivery (cm). Cocina = 6 fijo en encode. */
+export const DEFAULT_TICKET_BOTTOM_FEED_CM = 10;
+export const MIN_TICKET_BOTTOM_FEED_CM = 4;
+export const MAX_TICKET_BOTTOM_FEED_CM = 18;
 
 export const DEFAULT_PRINTER_CONFIG: VertialPrinterConfig = {
   connectionType: 'browser',
@@ -25,7 +35,16 @@ export const DEFAULT_PRINTER_CONFIG: VertialPrinterConfig = {
   bridgeHost: '',
   paperWidthMm: 80,
   preferBridge: true,
+  ticketBottomFeedCm: DEFAULT_TICKET_BOTTOM_FEED_CM,
 };
+
+/** Normaliza el cm de blanco inferior; valores raros → default. */
+export function clampTicketBottomFeedCm(raw?: number | null): number {
+  if (raw == null) return DEFAULT_TICKET_BOTTOM_FEED_CM;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_TICKET_BOTTOM_FEED_CM;
+  return Math.min(MAX_TICKET_BOTTOM_FEED_CM, Math.max(MIN_TICKET_BOTTOM_FEED_CM, Math.round(n)));
+}
 
 /**
  * Ancho de papel del ticket delivery unificado (Tiana, Badalona y resto).
@@ -61,6 +80,7 @@ export function loadLegacyPrinterConfig(): VertialPrinterConfig {
       ...parsed,
       networkPort: Number(parsed.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
       paperWidthMm: parsed.paperWidthMm === 58 ? 58 : 80,
+      ticketBottomFeedCm: clampTicketBottomFeedCm(parsed.ticketBottomFeedCm),
     };
   } catch {
     return { ...DEFAULT_PRINTER_CONFIG };
@@ -81,6 +101,7 @@ export function loadPdvPrinterCache(pdvId: string): VertialPrinterConfig | null 
       ...parsed,
       networkPort: Number(parsed.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
       paperWidthMm: parsed.paperWidthMm === 58 ? 58 : 80,
+      ticketBottomFeedCm: clampTicketBottomFeedCm(parsed.ticketBottomFeedCm),
     };
   } catch {
     return null;
@@ -117,6 +138,7 @@ export function cacheServerPdvPrinterConfigs(
         networkHost: host,
         networkPort: Number(cfg.networkPort || DEFAULT_PRINTER_CONFIG.networkPort) || 9100,
         paperWidthMm: cfg.paperWidthMm === 58 ? 58 : 80,
+        ticketBottomFeedCm: clampTicketBottomFeedCm(cfg.ticketBottomFeedCm),
       });
     } catch {
       /* almacenamiento no disponible: seguimos sin caché */
