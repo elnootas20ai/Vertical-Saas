@@ -9,6 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveTpvClientSearchUserId } from '../../lib/tpvClientSearchUserId';
 import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
@@ -799,18 +800,16 @@ export function TpvRapidoOrderFlow({
     () => resolveRetailOpsWriteBusinessId(businessId, businesses),
     [businesses, businessId],
   );
-  // Cartera CRM del local (p. ej. fichas «uriel»/«pau»/«alfons» de Modomio), no la cuenta del trabajador.
-  const clientSearchUserId = useMemo(() => {
-    const ownerId = String(currentBusiness?.owner_user_id || '').trim();
-    if (ownerId) return ownerId;
-    const fromScope = String(userId || '').trim();
-    const fromBusiness = resolveBusinessDataUserId(user, currentBusiness);
-    const selfId = String(user?.user_id || user?.id || '').trim();
-    const invitedBy = String(user?.invitedBy || '').trim();
-    const candidate = fromScope || fromBusiness || invitedBy || selfId;
-    if (invitedBy && candidate === selfId) return invitedBy;
-    return candidate;
-  }, [userId, user, currentBusiness]);
+  // Cartera CRM del local (fichas del TPV), no la cuenta del trabajador.
+  const clientSearchUserId = useMemo(
+    () =>
+      resolveTpvClientSearchUserId({
+        currentBusiness,
+        scopeDataUserId: userId,
+        authUser: user,
+      }),
+    [userId, user, currentBusiness],
+  );
 
   // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
   // Sin businessId: carga toda la cartera del titular (no filtrar por empresa events/otra).
@@ -890,11 +889,14 @@ export function TpvRapidoOrderFlow({
       // TPV: buscar en toda la cuenta (los 7k+ clientes). El filtro por empresa
       // ocultaba fichas legacy / de otra sede y parecía que «no cargan».
       businessId: undefined,
-      enabled: !showCreateForm,
+      // Solo en paso cliente: no buscar en productos/pago (evita abortes raros).
+      enabled: currentStep === 'client' && !showCreateForm,
       matchByName: true,
       minQueryLength: 2,
       debounceMs: 400,
       resultLimit: 20,
+      // Atención rápida / ficha elegida no deben apagar el buscador.
+      keepSearchingWhileSelected: true,
     });
 
   // Step 2 - Delivery

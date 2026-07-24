@@ -116,6 +116,7 @@ export function CreateOrderWizard({ userId, catalogItems, pointsOfSale, onSubmit
     minQueryLength: 2,
     debounceMs: 350,
     resultLimit: 20,
+    keepSearchingWhileSelected: true,
   });
 
   const activePdvs = useMemo(() => pointsOfSale.filter((p) => p.active), [pointsOfSale]);

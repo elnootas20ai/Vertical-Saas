@@ -87,6 +87,11 @@ export function useClientPhoneSearch(params: {
   matchByName?: boolean;
   /** Longitud mínima del texto cuando matchByName (por defecto 2). */
   minQueryLength?: number;
+  /**
+   * TPV: no pausar la búsqueda aunque haya ficha seleccionada / atención rápida.
+   * Evita el buscador “ciego” al volver del pedido rápido o al cambiar de cliente.
+   */
+  keepSearchingWhileSelected?: boolean;
 }): ClientPhoneSearchResult {
   const {
     userId,
@@ -98,6 +103,7 @@ export function useClientPhoneSearch(params: {
     minDigits = 3,
     matchByName = false,
     minQueryLength = 2,
+    keepSearchingWhileSelected = false,
   } = params;
   const [results, setResults] = useState<Client[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -107,14 +113,26 @@ export function useClientPhoneSearch(params: {
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestSeqRef = useRef(0);
+  /** Tras elegir ficha: no re-disparar la misma query hasta que el usuario cambie el texto. */
+  const suppressQueryRef = useRef<string | null>(null);
   const trimmed = phone.trim();
   const digits = phone.replace(/\D/g, '');
   const queryForApi = matchByName ? trimmed : digits;
-  const blocksSearch = clientSelectionBlocksPhoneSearch(selectedClient);
+  if (suppressQueryRef.current != null && suppressQueryRef.current !== queryForApi) {
+    suppressQueryRef.current = null;
+  }
+  const blocksSearch = keepSearchingWhileSelected
+    ? false
+    : clientSelectionBlocksPhoneSearch(selectedClient);
+  const suppressed =
+    keepSearchingWhileSelected
+    && suppressQueryRef.current != null
+    && suppressQueryRef.current === queryForApi;
   const shouldSearch =
     enabled &&
     !!userId &&
     !blocksSearch &&
+    !suppressed &&
     (matchByName ? trimmed.length >= minQueryLength : digits.length >= minDigits);
 
   useEffect(() => {
@@ -213,6 +231,16 @@ export function useClientPhoneSearch(params: {
     };
   }, [shouldSearch, queryForApi, userId, businessId, debounceMs, resultLimit, selectedClient]);
 
+  // Al desmontar: abortar petición colgada (evita setState tras unmount).
+  useEffect(() => {
+    return () => {
+      requestSeqRef.current += 1;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (abortRef.current) abortRef.current.abort();
+      abortRef.current = null;
+    };
+  }, []);
+
   const selectClient = useCallback((client: Client) => {
     requestSeqRef.current += 1;
     if (abortRef.current) abortRef.current.abort();
@@ -221,9 +249,12 @@ export function useClientPhoneSearch(params: {
     setResults([]);
     setSettledQuery('');
     setIsSearching(false);
-  }, []);
+    // Misma query que había en el input: no volver a buscar hasta que cambie el texto.
+    suppressQueryRef.current = queryForApi || null;
+  }, [queryForApi]);
 
   const clearSelection = useCallback(() => {
+    suppressQueryRef.current = null;
     setSelectedClient(null);
   }, []);
 
@@ -231,6 +262,7 @@ export function useClientPhoneSearch(params: {
     requestSeqRef.current += 1;
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = null;
+    suppressQueryRef.current = null;
     setResults([]);
     setSettledQuery('');
     setIsSearching(false);
