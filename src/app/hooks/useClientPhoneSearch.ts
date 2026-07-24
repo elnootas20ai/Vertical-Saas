@@ -5,6 +5,11 @@ import type { Client } from '../context/AppContext';
 export interface ClientPhoneSearchResult {
   results: Client[];
   isSearching: boolean;
+  /**
+   * Query para la que ya terminó una petición (éxito o vacío).
+   * Evita el mensaje «No se encontró» mientras el debounce aún no ha buscado.
+   */
+  settledQuery: string;
   searchError: string | null;
   selectedClient: Client | null;
   selectClient: (client: Client) => void;
@@ -16,6 +21,10 @@ export interface ClientPhoneSearchResult {
 const CLIENT_SEARCH_CACHE_TTL_MS = 45_000;
 const CLIENT_SEARCH_CACHE_MAX = 40;
 const clientSearchResultCache = new Map<string, { at: number; clients: Client[] }>();
+
+/** Evita tormenta de refresh=1 si la cartera tarda en cargar (una vez / 20s / titular). */
+const portfolioRefreshAtByUser = new Map<string, number>();
+const PORTFOLIO_REFRESH_COOLDOWN_MS = 20_000;
 
 /** Walk-in / atención rápida del TPV: no deben impedir buscar un cliente real. */
 export function clientSelectionBlocksPhoneSearch(client: Client | null | undefined): boolean {
@@ -57,6 +66,12 @@ if (typeof window !== 'undefined') {
   });
 }
 
+function isAbortError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const name = String((err as { name?: string }).name || '');
+  return name === 'AbortError';
+}
+
 export function useClientPhoneSearch(params: {
   userId: string;
   phone: string;
@@ -86,6 +101,7 @@ export function useClientPhoneSearch(params: {
   } = params;
   const [results, setResults] = useState<Client[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [settledQuery, setSettledQuery] = useState('');
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -103,11 +119,14 @@ export function useClientPhoneSearch(params: {
 
   useEffect(() => {
     if (timerRef.current) clearTimeout(timerRef.current);
+
     if (!shouldSearch) {
       requestSeqRef.current += 1;
       if (abortRef.current) abortRef.current.abort();
+      abortRef.current = null;
       setResults([]);
       setIsSearching(false);
+      setSettledQuery('');
       setSearchError(null);
       return;
     }
@@ -117,14 +136,16 @@ export function useClientPhoneSearch(params: {
     if (cached) {
       requestSeqRef.current += 1;
       if (abortRef.current) abortRef.current.abort();
+      abortRef.current = null;
       setResults(cached);
       setIsSearching(false);
+      setSettledQuery(queryForApi);
       setSearchError(null);
       return;
     }
 
-    setIsSearching(true);
-    setSearchError(null);
+    // No poner “Buscando…” aquí: si no, cada tecla parpadea y aborta la anterior.
+    // Se marca solo cuando el debounce dispara la petición real.
     const seq = ++requestSeqRef.current;
 
     timerRef.current = setTimeout(async () => {
@@ -132,9 +153,9 @@ export function useClientPhoneSearch(params: {
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      setIsSearching(true);
+      setSearchError(null);
       try {
-        // No refrescar en cada miss (nombre inexistente): eso recargaría ~6k docs.
-        // Solo refresh si el servidor dice que la cartera no cargó (portfolioSize === 0).
         let payload = await searchClientsByPhoneRequest(
           userId,
           queryForApi,
@@ -143,12 +164,13 @@ export function useClientPhoneSearch(params: {
           businessId,
           { includeLegacy: true, fallbackAll: true },
         );
-        if (
+        const lastRefresh = portfolioRefreshAtByUser.get(userId) || 0;
+        const canRefresh =
           payload.clients.length === 0
           && payload.portfolioSize === 0
-          && !controller.signal.aborted
-          && seq === requestSeqRef.current
-        ) {
+          && Date.now() - lastRefresh >= PORTFOLIO_REFRESH_COOLDOWN_MS;
+        if (canRefresh && !controller.signal.aborted && seq === requestSeqRef.current) {
+          portfolioRefreshAtByUser.set(userId, Date.now());
           payload = await searchClientsByPhoneRequest(
             userId,
             queryForApi,
@@ -160,15 +182,20 @@ export function useClientPhoneSearch(params: {
         }
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
         const clients = payload.clients;
-        // No cachear vacíos: evita “no hay clientes” pegado tras un fallo de filtro/red.
         if (clients.length > 0) writeSearchCache(key, clients);
         setResults(clients);
+        setSettledQuery(queryForApi);
         setSearchError(null);
         setIsSearching(false);
       } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        if (controller.signal.aborted || seq !== requestSeqRef.current) return;
+        if (isAbortError(err) || controller.signal.aborted) {
+          // Si esta petición sigue siendo la vigente, apagar spinner (no dejar “Buscando…” colgado).
+          if (seq === requestSeqRef.current) setIsSearching(false);
+          return;
+        }
+        if (seq !== requestSeqRef.current) return;
         setResults([]);
+        setSettledQuery(queryForApi);
         setSearchError(
           err instanceof Error && err.message
             ? err.message
@@ -180,6 +207,7 @@ export function useClientPhoneSearch(params: {
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      // Abort solo de la petición en vuelo; el seq nuevo ignora la respuesta vieja.
       if (abortRef.current) abortRef.current.abort();
     };
   }, [shouldSearch, queryForApi, userId, businessId, debounceMs, resultLimit, selectedClient]);
@@ -187,8 +215,10 @@ export function useClientPhoneSearch(params: {
   const selectClient = useCallback((client: Client) => {
     requestSeqRef.current += 1;
     if (abortRef.current) abortRef.current.abort();
+    abortRef.current = null;
     setSelectedClient(client);
     setResults([]);
+    setSettledQuery('');
     setIsSearching(false);
   }, []);
 
@@ -199,7 +229,9 @@ export function useClientPhoneSearch(params: {
   const clearResults = useCallback(() => {
     requestSeqRef.current += 1;
     if (abortRef.current) abortRef.current.abort();
+    abortRef.current = null;
     setResults([]);
+    setSettledQuery('');
     setIsSearching(false);
     setSearchError(null);
   }, []);
@@ -207,6 +239,7 @@ export function useClientPhoneSearch(params: {
   return {
     results,
     isSearching,
+    settledQuery,
     searchError,
     selectedClient,
     selectClient,

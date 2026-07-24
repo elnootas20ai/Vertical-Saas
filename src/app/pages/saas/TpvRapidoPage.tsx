@@ -881,7 +881,7 @@ export function TpvRapidoOrderFlow({
   const [creatingClient, setCreatingClient] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
-  const { results, isSearching, searchError, selectedClient, selectClient, clearSelection, clearResults } =
+  const { results, isSearching, settledQuery, searchError, selectedClient, selectClient, clearSelection, clearResults } =
     useClientPhoneSearch({
       userId: clientSearchUserId,
       phone: phoneInput,
@@ -891,7 +891,7 @@ export function TpvRapidoOrderFlow({
       enabled: !showCreateForm,
       matchByName: true,
       minQueryLength: 2,
-      debounceMs: 200,
+      debounceMs: 400,
       resultLimit: 20,
     });
 
@@ -3017,6 +3017,11 @@ export function TpvRapidoOrderFlow({
   }
 
   const clientSearchReady = phoneInput.trim().length >= 2;
+  const clientSearchSettledEmpty =
+    !isSearching
+    && results.length === 0
+    && clientSearchReady
+    && settledQuery === phoneInput.trim();
 
   const needsOpenRegister =
     currentStep === 'products' || currentStep === 'payment';
@@ -3379,7 +3384,7 @@ export function TpvRapidoOrderFlow({
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   {searchError
                     ? 'Revisa la conexión e inténtalo otra vez.'
-                    : (!isSearching && results.length === 0 && clientSearchReady)
+                    : clientSearchSettledEmpty
                       ? 'No se encontró ningún cliente con esa búsqueda'
                       : 'Si no aparece, crea uno o usa atención rápida'}
                 </p>
