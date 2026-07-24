@@ -11,7 +11,7 @@ export interface VertialPrinterConfig {
   preferBridge: boolean;
   /**
    * Blanco al final del ticket cliente/delivery (cm), antes del corte.
-   * Cocina sigue fija en 6 cm. Por defecto 9. Rango seguro 4–18.
+   * Cocina sigue fija en 6 cm. Por defecto 8. Rango seguro 4–18.
    */
   ticketBottomFeedCm: number;
 }
@@ -23,7 +23,7 @@ const LEGACY_STORAGE_KEY = 'vertial_printer_config_v1';
 const PDV_CACHE_PREFIX = 'vertial_printer_config_pdv_';
 
 /** Default blanco inferior cliente/delivery (cm). Cocina = 6 fijo en encode. */
-export const DEFAULT_TICKET_BOTTOM_FEED_CM = 9;
+export const DEFAULT_TICKET_BOTTOM_FEED_CM = 8;
 export const MIN_TICKET_BOTTOM_FEED_CM = 4;
 export const MAX_TICKET_BOTTOM_FEED_CM = 18;
 

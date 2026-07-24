@@ -20,7 +20,7 @@ function bodyPaddingBottom(
     const cm = Math.min(18, Math.max(4, Math.round(n)));
     return `${cm}cm`;
   }
-  return '10cm';
+  return '8cm';
 }
 
 const BASE_STYLES = `
@@ -31,26 +31,35 @@ table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .t td{font-size:16px;font-weight:bold;padding-top:6px}
 .f{margin-top:20px;font-size:12px;text-align:center;color:#666;line-height:1.4}
 .small{font-size:12px;color:#444}
-.note{color:#b45309;font-size:12px;font-weight:bold}
-.add{color:#047857;font-size:12px;font-weight:bold}
-.rem{color:#b91c1c;font-size:12px;font-weight:bold;text-decoration:line-through}
+.note{color:#b45309;font-size:14px;font-weight:900}
+.add{color:#047857;font-size:15px;font-weight:900;letter-spacing:0.02em}
+.rem{color:#b91c1c;font-size:15px;font-weight:900;letter-spacing:0.02em;text-decoration:line-through}
 .item{padding:8px 0;border-bottom:1px dotted #ccc}
 .item:last-child{border-bottom:none}
 .big{font-size:16px;font-weight:bold}
+.kitchen-item{font-size:18px;font-weight:900}
 .order-note{background:#fef3c7;border:1px solid #f59e0b;padding:6px 8px;margin-top:8px;font-weight:bold;color:#92400e}
 @media print{body{margin:0}}
 `;
 
-function buildLineDetailHtml(line: TicketDocument['lines'][number]): string {
+function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = false): string {
   const bits: string[] = [];
   if (line.added?.length) {
     for (const name of line.added) {
-      bits.push(`<div class="add">+ ${escapeHtml(name)}</div>`);
+      bits.push(
+        kitchen
+          ? `<div class="add">+ DE MAS ${escapeHtml(name)}</div>`
+          : `<div class="add">+ ${escapeHtml(name)}</div>`,
+      );
     }
   }
   if (line.removed?.length) {
     for (const name of line.removed) {
-      bits.push(`<div class="rem">SIN ${escapeHtml(name)}</div>`);
+      bits.push(
+        kitchen
+          ? `<div class="rem">- DE MENOS ${escapeHtml(name)}</div>`
+          : `<div class="rem">SIN ${escapeHtml(name)}</div>`,
+      );
     }
   }
   if (line.note) {
@@ -76,8 +85,8 @@ function buildHeaderHtml(doc: TicketDocument): string {
 
 function buildKitchenTicketHtml(doc: TicketDocument, customerTailFeedCm?: number): string {
   const rows = doc.lines.map((item) => {
-    const detail = buildLineDetailHtml(item);
-    return `<div class="item"><span class="big">${item.qty}x ${escapeHtml(item.name)}</span>${detail}</div>`;
+    const detail = buildLineDetailHtml(item, true);
+    return `<div class="item"><span class="kitchen-item">${item.qty}x ${escapeHtml(item.name)}</span>${detail}</div>`;
   }).join('');
 
   return `<!DOCTYPE html><html><head><title>Comanda ${escapeHtml(doc.ticketNo)}</title>
@@ -85,12 +94,12 @@ function buildKitchenTicketHtml(doc: TicketDocument, customerTailFeedCm?: number
 body{padding-bottom:${bodyPaddingBottom(doc.variant, customerTailFeedCm)}}
 </style></head><body>
 <div class="c">
-  <strong style="font-size:22px">${escapeHtml(doc.title)}</strong><br/>
+  <strong style="font-size:24px;font-weight:900">${escapeHtml(doc.title)}</strong><br/>
   <span class="small">${escapeHtml(doc.ticketNo)} - ${escapeHtml(doc.dateLabel)}</span>
 </div>
 <div class="hr"></div>
-<p class="big">Pedido: #${escapeHtml(doc.orderNumber)}</p>
-${doc.deliveryTypeLabel ? `<p class="big">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
+<p class="kitchen-item">Pedido: #${escapeHtml(doc.orderNumber)}</p>
+${doc.deliveryTypeLabel ? `<p class="kitchen-item">${escapeHtml(doc.deliveryTypeLabel)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
 ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}

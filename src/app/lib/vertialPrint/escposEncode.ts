@@ -121,12 +121,62 @@ function pushLineDetail(
   }
 }
 
+/** ESC E n — negrita on/off. */
+function setBold(on: boolean): Uint8Array {
+  return command([ESC, 0x45, on ? 1 : 0]);
+}
+
+/** ESC r n — color (0 negro / 1 rojo si la impresora tiene 2 colores). */
+function setPrintColor(red: boolean): Uint8Array {
+  return command([ESC, 0x72, red ? 1 : 0]);
+}
+
+/**
+ * Línea de producto en comanda cocina: doble alto + negrita (+2 énfasis vs cuerpo normal).
+ * Mods de más / de menos: negrita + alto + rojo (si hay) para máximo contraste.
+ */
+function pushKitchenLineDetail(
+  chunks: Uint8Array[],
+  line: TicketDocument['lines'][number],
+  paperWidthMm: 58 | 80,
+) {
+  const tallCols = colsForSize(paperWidthMm, SIZE_TALL);
+  chunks.push(setSize(SIZE_TALL));
+  chunks.push(setBold(true));
+  chunks.push(textLine(`${line.qty}x ${line.name}`, tallCols));
+  chunks.push(setBold(false));
+
+  for (const name of line.added || []) {
+    chunks.push(setPrintColor(true));
+    chunks.push(setBold(true));
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(`  + DE MAS ${name}`, tallCols));
+    chunks.push(setBold(false));
+    chunks.push(setPrintColor(false));
+  }
+  for (const name of line.removed || []) {
+    chunks.push(setPrintColor(true));
+    chunks.push(setBold(true));
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(`  - DE MENOS ${name}`, tallCols));
+    chunks.push(setBold(false));
+    chunks.push(setPrintColor(false));
+  }
+  if (line.note) {
+    chunks.push(setBold(true));
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(`  NOTA: ${line.note}`, tallCols));
+    chunks.push(setBold(false));
+  }
+  chunks.push(setSize(SIZE_NORMAL));
+}
+
 /** Blanco fijo al final (antes del corte). El cuerpo crece con el pedido. */
 export const TICKET_TAIL_FEED_CM = {
   kitchen: 6,
   /** Default cliente/delivery; se puede sobrescribir por PDV (ticketBottomFeedCm). */
-  customer: 9,
-  delivery: 9,
+  customer: 8,
+  delivery: 8,
 } as const;
 
 /** 203 dpi típico Epson TM ≈ 8 dots/mm. */
@@ -153,7 +203,7 @@ function pushFeedDots(chunks: Uint8Array[], dots: number) {
 }
 
 /**
- * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~9 cm (ajustable por PDV).
+ * Avance de base en cm + corte. Cocina ~6 cm; ticket normal ~8 cm (ajustable por PDV).
  * Solo el pie en blanco: si hay más líneas, el ticket se alarga solo.
  */
 function pushFeedAndCut(chunks: Uint8Array[], feedCm: number) {
@@ -233,23 +283,29 @@ export function encodeTicketEscpos(
     chunks.push(textLine(sepLine(width), width));
     chunks.push(command([ESC, 0x61, 0]));
 
+    // +2 negrita: doble alto + ESC E (antes solo doble alto).
     chunks.push(setSize(SIZE_TALL));
+    chunks.push(setBold(true));
     chunks.push(textLine(`Pedido: #${doc.orderNumber}`, tallCols));
+    chunks.push(setBold(false));
     chunks.push(setSize(SIZE_NORMAL));
     if (doc.deliveryTypeLabel) {
       chunks.push(setSize(SIZE_TALL));
+      chunks.push(setBold(true));
       chunks.push(textLine(doc.deliveryTypeLabel, tallCols));
+      chunks.push(setBold(false));
       chunks.push(setSize(SIZE_NORMAL));
     }
     chunks.push(textLine(sepLine(width), width));
     for (const line of doc.lines) {
-      // Medida Tiana: doble alto (no 2×2, que sale inmenso).
-      pushLineDetail(chunks, line, width, paperWidthMm);
+      pushKitchenLineDetail(chunks, line, paperWidthMm);
     }
     if (doc.orderNotes) {
       chunks.push(textLine(sepLine(width), width));
       chunks.push(setSize(SIZE_TALL));
+      chunks.push(setBold(true));
       chunks.push(textLine(`NOTA: ${doc.orderNotes}`, tallCols));
+      chunks.push(setBold(false));
       chunks.push(setSize(SIZE_NORMAL));
     }
     chunks.push(command([ESC, 0x61, 1]));

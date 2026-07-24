@@ -22,6 +22,27 @@ describe('resolveTpvClientSearchUserId', () => {
     ).toBe('owner-pau');
   });
 
+  it('tablet sin invitedBy: scope gana frente a resolveBusinessDataUserId (cartera vacía del device)', () => {
+    expect(
+      resolveTpvClientSearchUserId({
+        currentBusiness: { owner_user_id: 'otro-owner', members: [] },
+        scopeDataUserId: 'owner-pau',
+        authUser: { user_id: 'device-auth-1' },
+      }),
+    ).toBe('owner-pau');
+  });
+
+  it('regresión: fromCrm/self no debe ganar al scope de caja (bug post-atención rápida)', () => {
+    // resolveBusinessDataUserId devolvería device-auth-1 (no es member → self).
+    expect(
+      resolveTpvClientSearchUserId({
+        currentBusiness: { owner_user_id: 'owner-pau', members: [] },
+        scopeDataUserId: 'owner-pau',
+        authUser: { user_id: 'device-auth-1' },
+      }),
+    ).toBe('owner-pau');
+  });
+
   it('CEO sin scope: usa owner de la empresa activa', () => {
     expect(
       resolveTpvClientSearchUserId({

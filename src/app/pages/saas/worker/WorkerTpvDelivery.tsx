@@ -1483,6 +1483,7 @@ export function WorkerTpvDelivery({
       if (
         next === 'entregado'
         && ticketBusiness
+        && shouldPrintCustomerTicketOnDispatch(order)
         && (payload.paymentStatus === 'paid' || orderAlreadyCobrado(payload))
       ) {
         void printDeliveryTicket({

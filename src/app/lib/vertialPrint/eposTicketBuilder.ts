@@ -100,6 +100,36 @@ function pushLineDetail(
   if (item.note) line(builder, `  NOTA: ${item.note}`, width);
 }
 
+/** Comanda cocina: doble alto + negrita; mods en rojo/énfasis si la Epson lo permite. */
+function pushKitchenLineDetail(
+  builder: EposBuilder,
+  item: TicketDocument['lines'][number],
+  paperWidthMm: 58 | 80,
+): void {
+  const tallCols = colsForSize(paperWidthMm, false);
+  setTextSize(builder, 1, 2);
+  boldLine(builder, `${item.qty}x ${item.name}`, tallCols);
+  for (const name of item.added || []) {
+    // reverse=false, underline=false, emphasize=true — máximo contraste en 1 color.
+    if (builder.addTextStyle) builder.addTextStyle(false, false, true);
+    setTextSize(builder, 1, 2);
+    line(builder, `  + DE MAS ${name}`, tallCols);
+    if (builder.addTextStyle) builder.addTextStyle(false, false, false);
+  }
+  for (const name of item.removed || []) {
+    // reverse=true + emphasize: se ve “de menos” aún en papel monocromo.
+    if (builder.addTextStyle) builder.addTextStyle(true, false, true);
+    setTextSize(builder, 1, 2);
+    line(builder, `  - DE MENOS ${name}`, tallCols);
+    if (builder.addTextStyle) builder.addTextStyle(false, false, false);
+  }
+  if (item.note) {
+    setTextSize(builder, 1, 2);
+    boldLine(builder, `  NOTA: ${item.note}`, tallCols);
+  }
+  setTextSize(builder, 1, 1);
+}
+
 function boldLine(builder: EposBuilder, text: string, width: number): void {
   if (builder.addTextStyle) builder.addTextStyle(false, false, true);
   line(builder, text, width);
@@ -136,33 +166,21 @@ export function buildEposTicket(
     sep(builder, width);
     builder.addTextAlign('left');
     setTextSize(builder, 1, 2);
-    line(builder, `Pedido: #${doc.orderNumber}`, tallCols);
+    boldLine(builder, `Pedido: #${doc.orderNumber}`, tallCols);
     setTextSize(builder, 1, 1);
     if (doc.deliveryTypeLabel) {
       setTextSize(builder, 1, 2);
-      line(builder, doc.deliveryTypeLabel, tallCols);
+      boldLine(builder, doc.deliveryTypeLabel, tallCols);
       setTextSize(builder, 1, 1);
     }
     sep(builder, width);
     for (const item of doc.lines) {
-      // Medida Tiana: doble alto (no 2×2).
-      setTextSize(builder, 1, 2);
-      line(builder, `${item.qty}x ${item.name}`, tallCols);
-      setTextSize(builder, 1, 1);
-      for (const name of item.added || []) {
-        line(builder, `  + ${name}`, width);
-      }
-      for (const name of item.removed || []) {
-        line(builder, `  SIN ${name}`, width);
-      }
-      if (item.note) {
-        line(builder, `  NOTA: ${item.note}`, width);
-      }
+      pushKitchenLineDetail(builder, item, paperWidthMm);
     }
     if (doc.orderNotes) {
       sep(builder, width);
       setTextSize(builder, 1, 2);
-      line(builder, `NOTA: ${doc.orderNotes}`, tallCols);
+      boldLine(builder, `NOTA: ${doc.orderNotes}`, tallCols);
       setTextSize(builder, 1, 1);
     }
     builder.addTextAlign('center');

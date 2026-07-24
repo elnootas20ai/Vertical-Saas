@@ -78,9 +78,31 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('Envio a domicilio');
     expect(text).toContain('Pizza Margarita');
     expect(text).toContain('Extra queso');
-    expect(text).toContain('SIN cebolla');
+    expect(text).toContain('DE MAS');
+    expect(text).toContain('DE MENOS');
+    expect(text).toContain('cebolla');
     expect(text).toContain('Bien hecha');
     expect(text).toContain('Sin timbre');
+    // +2 negrita cocina: ESC E on (0x1b 0x45 0x01) en el buffer.
+    const bytes = encodeTicketEscpos(doc);
+    expect(bytes).toContain(0x1b);
+    let sawBoldOn = false;
+    for (let i = 0; i < bytes.length - 2; i += 1) {
+      if (bytes[i] === 0x1b && bytes[i + 1] === 0x45 && bytes[i + 2] === 0x01) {
+        sawBoldOn = true;
+        break;
+      }
+    }
+    expect(sawBoldOn).toBe(true);
+    // Color rojo ESC r 1 para mods (impresoras 2 colores; en 1 color se ignora).
+    let sawRed = false;
+    for (let i = 0; i < bytes.length - 2; i += 1) {
+      if (bytes[i] === 0x1b && bytes[i + 1] === 0x72 && bytes[i + 2] === 0x01) {
+        sawRed = true;
+        break;
+      }
+    }
+    expect(sawRed).toBe(true);
     expect(text).not.toMatch(/TOTAL/);
     expect(text).not.toMatch(/Base imponible/);
     expect(text).not.toMatch(/Cliente:/);

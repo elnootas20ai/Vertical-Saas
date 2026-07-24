@@ -9,6 +9,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveTpvClientSearchUserId } from '../../lib/tpvClientSearchUserId';
 import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/useClientPhoneSearch';
 import {
   filterDeliveryOrdersRequest,
@@ -799,14 +800,16 @@ export function TpvRapidoOrderFlow({
     () => resolveRetailOpsWriteBusinessId(businessId, businesses),
     [businesses, businessId],
   );
-  // Mismo titular que el CRM (resolveBusinessDataUserId). Scope caja/tablet de respaldo.
-  const clientSearchUserId = useMemo(() => {
-    const fromCrm = resolveBusinessDataUserId(user, currentBusiness);
-    const fromScope = String(userId || '').trim();
-    const invitedBy = String(user?.invitedBy || '').trim();
-    const selfId = String(user?.user_id || user?.id || '').trim();
-    return fromCrm || fromScope || invitedBy || selfId;
-  }, [userId, user, currentBusiness]);
+  // Cartera CRM del local: scope caja/tablet primero (no la cuenta vacía del dispositivo).
+  const clientSearchUserId = useMemo(
+    () =>
+      resolveTpvClientSearchUserId({
+        currentBusiness,
+        scopeDataUserId: userId,
+        authUser: user,
+      }),
+    [userId, user, currentBusiness],
+  );
 
   // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
   // Sin businessId: carga toda la cartera del titular (no filtrar por empresa events/otra).
@@ -2227,8 +2230,8 @@ export function TpvRapidoOrderFlow({
           return;
         }
 
-        // Ticket en paralelo al POST: no esperar a que “cargue el sistema”.
-        if (currentBusiness && !collectOnDelivery) {
+        // Primer ticket automático = cocina (recogida y domicilio). Cliente/final no aquí.
+        if (currentBusiness) {
           const printableOrder = {
             ...orderData,
             _id: `local-${orderData.orderNumber}`,
@@ -2244,7 +2247,7 @@ export function TpvRapidoOrderFlow({
             business: businessTicketInfoFrom(currentBusiness),
             salesPointName: pdvName,
             cashierName: takerName,
-            variant: 'customer',
+            variant: 'kitchen',
             accountEmail: user?.email,
           });
         }

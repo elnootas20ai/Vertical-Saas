@@ -36,8 +36,10 @@ export function resolveTpvClientSearchUserId(params: {
   // Tablet / caja: el scope ya apunta al titular de la tienda.
   if (fromScope) {
     if (!ownerId || fromScope === ownerId) return fromScope;
-    // Scope y owner divergen: preferir owner del negocio activo (CEO cambió de empresa)
-    // salvo que el usuario sea invitado del scope (trabajador tablet).
+    // Scope y owner divergen:
+    // - Trabajador / sesión tablet (no eres el owner del selector) → confiar en el scope.
+    // - CEO que cambió de empresa en el selector → owner de la empresa activa.
+    if (selfId && ownerId && selfId !== ownerId) return fromScope;
     if (invitedBy && (invitedBy === fromScope || selfId === fromScope)) return fromScope;
     return ownerId;
   }

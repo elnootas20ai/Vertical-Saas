@@ -1,9 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  searchClientsByPhoneRequest,
-  listClientsPageRequest,
-  CRM_CLIENTS_SYNC_EVENT,
-} from '../lib/crmApi';
+import { searchClientsByPhoneRequest, CRM_CLIENTS_SYNC_EVENT } from '../lib/crmApi';
 import type { Client } from '../context/AppContext';
 
 export interface ClientPhoneSearchResult {
@@ -76,51 +72,6 @@ function isAbortError(err: unknown): boolean {
   return name === 'AbortError';
 }
 
-type SearchPayload = { clients: Client[]; portfolioSize: number };
-
-/**
- * Misma fuente que el CRM (GET /api/clients?search=…): si ahí salen, aquí también.
- * Si el listado viene vacío, respaldo con search-by-phone.
- */
-async function fetchTpvClientMatches(params: {
-  userId: string;
-  query: string;
-  limit: number;
-  signal: AbortSignal;
-  businessId?: string;
-  refresh?: boolean;
-}): Promise<SearchPayload> {
-  const { userId, query, limit, signal, businessId, refresh } = params;
-
-  const listed = await listClientsPageRequest(userId, {
-    limit,
-    skip: 0,
-    search: query,
-    lite: true,
-    businessId,
-    refresh: Boolean(refresh),
-    signal,
-  });
-  if (signal.aborted) {
-    return { clients: [], portfolioSize: listed.meta?.total ?? 0 };
-  }
-  if (listed.clients.length > 0) {
-    return {
-      clients: listed.clients,
-      portfolioSize: Math.max(listed.meta?.total ?? 0, listed.clients.length),
-    };
-  }
-
-  return searchClientsByPhoneRequest(
-    userId,
-    query,
-    limit,
-    signal,
-    businessId,
-    { includeLegacy: true, fallbackAll: true, refresh: Boolean(refresh) },
-  );
-}
-
 export function useClientPhoneSearch(params: {
   userId: string;
   phone: string;
@@ -181,6 +132,8 @@ export function useClientPhoneSearch(params: {
       if (abortRef.current) abortRef.current.abort();
       abortRef.current = null;
       setIsSearching(false);
+      // Solo limpiar cuando no hay query / no hay userId / bloqueo por selección.
+      // Si enabled=false (otro paso), conservar settled/results para no quedar «ciego» al volver.
       if (!trimmed || !userId || blocksSearch) {
         setResults([]);
         setSettledQuery('');
@@ -212,47 +165,34 @@ export function useClientPhoneSearch(params: {
       setIsSearching(true);
       setSearchError(null);
       try {
-        let payload: SearchPayload = matchByName
-          ? await fetchTpvClientMatches({
-              userId,
-              query: queryForApi,
-              limit: resultLimit,
-              signal: controller.signal,
-              businessId,
-            })
-          : await searchClientsByPhoneRequest(
-              userId,
-              queryForApi,
-              resultLimit,
-              controller.signal,
-              businessId,
-              { includeLegacy: true, fallbackAll: true },
-            );
+        // Siempre search-by-phone (includeLegacy + fallbackAll): es la ruta TPV que encuentra
+        // fichas legacy. No pasar por GET /api/clients?search= (más lento y sin includeLegacy).
+        let payload = await searchClientsByPhoneRequest(
+          userId,
+          queryForApi,
+          resultLimit,
+          controller.signal,
+          businessId,
+          { includeLegacy: true, fallbackAll: true },
+        );
 
         const lastRefresh = portfolioRefreshAtByUser.get(userId) || 0;
+        // Solo refresh si la cartera no cargó (0 / desconocido). Un miss real con cartera OK
+        // no debe invalidar ~6k docs ni disparar refresh en cada tipografía.
         const canRefresh =
           payload.clients.length === 0
-          && Date.now() - lastRefresh >= PORTFOLIO_REFRESH_COOLDOWN_MS
-          && (payload.portfolioSize === 0 || payload.portfolioSize < 0 || matchByName);
+          && (payload.portfolioSize === 0 || payload.portfolioSize < 0)
+          && Date.now() - lastRefresh >= PORTFOLIO_REFRESH_COOLDOWN_MS;
         if (canRefresh && !controller.signal.aborted && seq === requestSeqRef.current) {
           portfolioRefreshAtByUser.set(userId, Date.now());
-          payload = matchByName
-            ? await fetchTpvClientMatches({
-                userId,
-                query: queryForApi,
-                limit: resultLimit,
-                signal: controller.signal,
-                businessId,
-                refresh: true,
-              })
-            : await searchClientsByPhoneRequest(
-                userId,
-                queryForApi,
-                resultLimit,
-                controller.signal,
-                businessId,
-                { includeLegacy: true, fallbackAll: true, refresh: true },
-              );
+          payload = await searchClientsByPhoneRequest(
+            userId,
+            queryForApi,
+            resultLimit,
+            controller.signal,
+            businessId,
+            { includeLegacy: true, fallbackAll: true, refresh: true },
+          );
         }
         if (controller.signal.aborted || seq !== requestSeqRef.current) return;
         const clients = payload.clients;

@@ -186,7 +186,8 @@ export function buildOrderTicketOptions(
   };
 }
 
-/** Pedidos a domicilio (o sin tipo) → ticket cliente al salir a repartidor. */
+/** Pedidos a domicilio (o sin tipo) → ticket cliente al salir a repartidor / entrega.
+ * Recogida (pickup/takeaway) y sala (dine-in) → no ticket cliente automático. */
 export function shouldPrintCustomerTicketOnDispatch(
   order: Pick<DeliveryOrderLike, 'deliveryType'> | null | undefined,
 ): boolean {
