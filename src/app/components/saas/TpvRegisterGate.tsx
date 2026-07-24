@@ -31,6 +31,7 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
+import { downloadUrielCajaClosingsExcel } from '../../lib/cajaUrielClosingsExcelExport';
 import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import {
@@ -1713,7 +1714,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <div>
                 <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Apps de delivery</p>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Pasos 2 a 5: por app, unidades + efectivo + tarjeta. El recuento se suma en «Total apps» y en «TOTAL DE TODO».
+                  Por app: línea de pizzas, línea de burgers y línea de tacos (cantidad + efectivo + tarjeta).
                 </p>
               </div>
               <AggregatorClosingEditor
@@ -4235,6 +4236,17 @@ export function TpvRegisterGate({
           ? `Caja cerrada (sin ventas, validada automáticamente). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`
           : `Caja cerrada. Pendiente de validación gerente. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
       );
+      try {
+        const { fileName, yearMonth } = downloadUrielCajaClosingsExcel(sessions, {
+          pointOfSaleId: String(updated.pointOfSaleId || session.pointOfSaleId || ''),
+          pointOfSaleName: updated.pointOfSaleName || session.pointOfSaleName || '',
+          closedSession: updated,
+        });
+        toast.success(`Excel de cierre descargado (${yearMonth}): ${fileName}`);
+      } catch (excelErr) {
+        console.error(excelErr);
+        toast.warning('Caja cerrada, pero no se pudo generar el Excel del mes');
+      }
       if (!autoValidated) {
         void createNotification({
         level: Math.abs(diff) >= 20 ? 'warning' : 'info',

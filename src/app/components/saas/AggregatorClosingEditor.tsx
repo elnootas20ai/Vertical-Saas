@@ -7,10 +7,12 @@ import {
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
 import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
-import type { FoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
+import type { FoodFamilyCounts, FoodFamilyKey } from '../../lib/shiftFoodFamilyCounts';
 import { emptyFoodFamilyCounts, sumFoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
 
-export type ManualFoodByChannel = Record<string, { pizza: string; burger: string; taco: string }>;
+export type LineDraft = { qty: string; cash: string; card: string };
+export type ChannelLinesDraft = Record<FoodFamilyKey, LineDraft>;
+export type ManualLinesByChannel = Record<string, ChannelLinesDraft>;
 
 export type AggregatorClosingSnapshot = {
   foodByChannel: Record<string, FoodFamilyCounts>;
@@ -27,10 +29,50 @@ interface AggregatorClosingEditorProps {
   /** Conteo sistema por canal (pizzas / burgers / tacos). */
   foodByChannel: Record<string, FoodFamilyCounts>;
   title?: string;
-  /** Número del primer paso (Glovo = startStep, Uber = startStep+1…). */
   startStep?: number;
-  /** Cada cambio en los cuadraditos → suma para TOTAL DE TODO. */
   onSnapshotChange?: (snapshot: AggregatorClosingSnapshot) => void;
+}
+
+const FOOD_LINES: Array<{
+  key: FoodFamilyKey;
+  label: string;
+  emoji: string;
+  border: string;
+  bg: string;
+  title: string;
+}> = [
+  {
+    key: 'pizza',
+    label: 'Pizzas',
+    emoji: '🍕',
+    border: 'border-amber-200 dark:border-amber-800',
+    bg: 'bg-amber-50/50 dark:bg-amber-950/20',
+    title: 'text-amber-800 dark:text-amber-200',
+  },
+  {
+    key: 'burger',
+    label: 'Burgers',
+    emoji: '🍔',
+    border: 'border-orange-200 dark:border-orange-800',
+    bg: 'bg-orange-50/50 dark:bg-orange-950/20',
+    title: 'text-orange-800 dark:text-orange-200',
+  },
+  {
+    key: 'taco',
+    label: 'Tacos',
+    emoji: '🌮',
+    border: 'border-lime-200 dark:border-lime-800',
+    bg: 'bg-lime-50/50 dark:bg-lime-950/20',
+    title: 'text-lime-800 dark:text-lime-200',
+  },
+];
+
+function emptyLine(): LineDraft {
+  return { qty: '', cash: '', card: '' };
+}
+
+function emptyChannelLines(): ChannelLinesDraft {
+  return { pizza: emptyLine(), burger: emptyLine(), taco: emptyLine() };
 }
 
 function parseCount(raw: string): number {
@@ -40,7 +82,6 @@ function parseCount(raw: string): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-/** Quita basura y ceros a la izquierda: "05"→"5", "050"→"50", ""→"". */
 function normalizeCountInput(raw: string): string {
   const digits = String(raw || '').replace(/[^\d]/g, '');
   if (!digits) return '';
@@ -49,33 +90,33 @@ function normalizeCountInput(raw: string): string {
   return String(n);
 }
 
-function buildSeedFood(
+function buildSeedLines(
   autoRows: AggregatorCashRow[],
   foodByChannel: Record<string, FoodFamilyCounts>,
-): ManualFoodByChannel {
-  const out: ManualFoodByChannel = {};
+): ManualLinesByChannel {
+  const out: ManualLinesByChannel = {};
   for (const row of autoRows) {
     const ch = row.platform.channel;
     const auto = foodByChannel[ch] || emptyFoodFamilyCounts();
     out[ch] = {
-      // Vacío si el sistema tiene 0 → al teclear "50" no sale "050".
-      pizza: auto.pizza > 0 ? String(auto.pizza) : '',
-      burger: auto.burger > 0 ? String(auto.burger) : '',
-      taco: auto.taco > 0 ? String(auto.taco) : '',
+      pizza: { qty: auto.pizza > 0 ? String(auto.pizza) : '', cash: '', card: '' },
+      burger: { qty: auto.burger > 0 ? String(auto.burger) : '', cash: '', card: '' },
+      taco: { qty: auto.taco > 0 ? String(auto.taco) : '', cash: '', card: '' },
     };
   }
   return out;
 }
 
-function buildSeedMoney(autoRows: AggregatorCashRow[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const row of autoRows) out[row.platform.channel] = '';
-  return out;
+function channelQtyAllZero(lines: ChannelLinesDraft | undefined): boolean {
+  if (!lines) return true;
+  return parseCount(lines.pizza.qty) === 0
+    && parseCount(lines.burger.qty) === 0
+    && parseCount(lines.taco.qty) === 0;
 }
 
 /**
- * Cierre TPV: por app → pizzas / burgers / tacos + efectivo + tarjeta.
- * Estado local de los inputs (no lo pisa el padre al cargar pedidos).
+ * Cierre TPV por app: una línea por producto (pizzas / burgers / tacos)
+ * con cantidad + efectivo + tarjeta.
  */
 export function AggregatorClosingEditor({
   autoRows,
@@ -86,15 +127,12 @@ export function AggregatorClosingEditor({
 }: AggregatorClosingEditorProps) {
   const seededRef = useRef(false);
   const touchedRef = useRef<Set<string>>(new Set());
-  const [foodDraft, setFoodDraft] = useState<ManualFoodByChannel>(() =>
-    buildSeedFood(autoRows, foodByChannel),
+  const [draft, setDraft] = useState<ManualLinesByChannel>(() =>
+    buildSeedLines(autoRows, foodByChannel),
   );
-  const [cashDraft, setCashDraft] = useState<Record<string, string>>(() => buildSeedMoney(autoRows));
-  const [cardDraft, setCardDraft] = useState<Record<string, string>>(() => buildSeedMoney(autoRows));
 
-  // Primera siembra / canales nuevos (sin tocar lo que el usuario ya escribió).
   useEffect(() => {
-    setFoodDraft((prev) => {
+    setDraft((prev) => {
       const next = { ...prev };
       let changed = false;
       for (const row of autoRows) {
@@ -103,32 +141,10 @@ export function AggregatorClosingEditor({
         if (next[ch] && seededRef.current) continue;
         const auto = foodByChannel[ch] || emptyFoodFamilyCounts();
         next[ch] = {
-          pizza: auto.pizza > 0 ? String(auto.pizza) : '',
-          burger: auto.burger > 0 ? String(auto.burger) : '',
-          taco: auto.taco > 0 ? String(auto.taco) : '',
+          pizza: { qty: auto.pizza > 0 ? String(auto.pizza) : '', cash: '', card: '' },
+          burger: { qty: auto.burger > 0 ? String(auto.burger) : '', cash: '', card: '' },
+          taco: { qty: auto.taco > 0 ? String(auto.taco) : '', cash: '', card: '' },
         };
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-    setCashDraft((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const row of autoRows) {
-        const ch = row.platform.channel;
-        if (ch in next) continue;
-        next[ch] = '';
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-    setCardDraft((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const row of autoRows) {
-        const ch = row.platform.channel;
-        if (ch in next) continue;
-        next[ch] = '';
         changed = true;
       }
       return changed ? next : prev;
@@ -136,26 +152,21 @@ export function AggregatorClosingEditor({
     seededRef.current = true;
   }, [autoRows, foodByChannel]);
 
-  // Si el sistema trae conteos > 0 después, solo rellena canales no tocados que sigan en 0.
   useEffect(() => {
-    setFoodDraft((prev) => {
+    setDraft((prev) => {
       const next = { ...prev };
       let changed = false;
       for (const row of autoRows) {
         const ch = row.platform.channel;
         if (touchedRef.current.has(ch)) continue;
         const auto = foodByChannel[ch] || emptyFoodFamilyCounts();
-        const cur = next[ch];
-        const allZero =
-          !cur
-          || (parseCount(cur.pizza) === 0 && parseCount(cur.burger) === 0 && parseCount(cur.taco) === 0);
-        const autoHas =
-          auto.pizza > 0 || auto.burger > 0 || auto.taco > 0;
-        if (allZero && autoHas) {
+        const autoHas = auto.pizza > 0 || auto.burger > 0 || auto.taco > 0;
+        if (channelQtyAllZero(next[ch]) && autoHas) {
+          const cur = next[ch] || emptyChannelLines();
           next[ch] = {
-            pizza: auto.pizza > 0 ? String(auto.pizza) : '',
-            burger: auto.burger > 0 ? String(auto.burger) : '',
-            taco: auto.taco > 0 ? String(auto.taco) : '',
+            pizza: { ...cur.pizza, qty: auto.pizza > 0 ? String(auto.pizza) : '' },
+            burger: { ...cur.burger, qty: auto.burger > 0 ? String(auto.burger) : '' },
+            taco: { ...cur.taco, qty: auto.taco > 0 ? String(auto.taco) : '' },
           };
           changed = true;
         }
@@ -168,31 +179,48 @@ export function AggregatorClosingEditor({
     const foodByCh: Record<string, FoodFamilyCounts> = {};
     const cashByChannel: Record<string, number> = {};
     const cardByChannel: Record<string, number> = {};
+
     const rows: AggregatorCashRow[] = autoRows.map((row) => {
       const ch = row.platform.channel;
-      const draft = foodDraft[ch] || { pizza: '', burger: '', taco: '' };
-      foodByCh[ch] = {
-        pizza: parseCount(draft.pizza),
-        burger: parseCount(draft.burger),
-        taco: parseCount(draft.taco),
-      };
-      const parsedCash = parseAggregatorAmount(cashDraft[ch] ?? '');
-      const parsedCard = parseAggregatorAmount(cardDraft[ch] ?? '');
-      const cashSales = parsedCash != null ? parsedCash : row.cashSales;
-      const cardSales = parsedCard != null ? parsedCard : row.cardSales;
+      const lines = draft[ch] || emptyChannelLines();
+      const pizzaQty = parseCount(lines.pizza.qty);
+      const burgerQty = parseCount(lines.burger.qty);
+      const tacoQty = parseCount(lines.taco.qty);
+      foodByCh[ch] = { pizza: pizzaQty, burger: burgerQty, taco: tacoQty };
+
+      const cashParts = [
+        parseAggregatorAmount(lines.pizza.cash),
+        parseAggregatorAmount(lines.burger.cash),
+        parseAggregatorAmount(lines.taco.cash),
+      ];
+      const cardParts = [
+        parseAggregatorAmount(lines.pizza.card),
+        parseAggregatorAmount(lines.burger.card),
+        parseAggregatorAmount(lines.taco.card),
+      ];
+      const cashSales = Math.round(
+        cashParts.reduce((s, n) => s + (n ?? 0), 0) * 100,
+      ) / 100;
+      const cardSales = Math.round(
+        cardParts.reduce((s, n) => s + (n ?? 0), 0) * 100,
+      ) / 100;
       cashByChannel[ch] = cashSales;
       cardByChannel[ch] = cardSales;
+
       let totalSales = row.totalSales;
       const declared = Math.round((cashSales + cardSales) * 100) / 100;
       if (declared > totalSales) totalSales = declared;
+      const manualOverride = cashParts.some((n) => n != null) || cardParts.some((n) => n != null);
+
       return {
         ...row,
         cashSales,
         cardSales,
         totalSales,
-        manualOverride: parsedCash != null || parsedCard != null,
+        manualOverride,
       };
     });
+
     return {
       foodByChannel: foodByCh,
       foodTotals: sumFoodFamilyCounts(Object.values(foodByCh)),
@@ -202,24 +230,30 @@ export function AggregatorClosingEditor({
       cardTotal: sumAggregatorCard(rows),
       rows,
     };
-  }, [autoRows, foodDraft, cashDraft, cardDraft]);
+  }, [autoRows, draft]);
 
   useEffect(() => {
     onSnapshotChange?.(snapshot);
   }, [snapshot, onSnapshotChange]);
 
-  const setFoodField = (channel: string, key: keyof FoodFamilyCounts, raw: string) => {
+  const patchLine = (
+    channel: string,
+    family: FoodFamilyKey,
+    field: keyof LineDraft,
+    value: string,
+  ) => {
     touchedRef.current.add(channel);
-    const cleaned = normalizeCountInput(raw);
-    setFoodDraft((prev) => {
-      const cur = prev[channel] || { pizza: '', burger: '', taco: '' };
+    setDraft((prev) => {
+      const cur = prev[channel] || emptyChannelLines();
+      const line = cur[family] || emptyLine();
       return {
         ...prev,
         [channel]: {
-          pizza: cur.pizza,
-          burger: cur.burger,
-          taco: cur.taco,
-          [key]: cleaned,
+          ...cur,
+          [family]: {
+            ...line,
+            [field]: value,
+          },
         },
       };
     });
@@ -227,9 +261,7 @@ export function AggregatorClosingEditor({
 
   const focusCountField = (e: FocusEvent<HTMLInputElement>) => {
     const v = e.currentTarget.value;
-    if (!v || v === '0') {
-      e.currentTarget.select();
-    }
+    if (!v || v === '0') e.currentTarget.select();
   };
 
   return (
@@ -249,14 +281,14 @@ export function AggregatorClosingEditor({
       </div>
 
       <p className="px-3 pt-2 text-[11px] text-gray-500 dark:text-gray-400">
-        Escribe en cada app. La suma aparece abajo al momento (Total apps y TOTAL DE TODO).
+        Por cada app: una línea de pizzas, otra de burgers y otra de tacos (unidades + efectivo + tarjeta).
       </p>
 
       <div className="p-3 space-y-3">
         {autoRows.map((row, index) => {
           const ch = row.platform.channel;
           const autoFood = foodByChannel[ch] || emptyFoodFamilyCounts();
-          const food = foodDraft[ch] || { pizza: '', burger: '', taco: '' };
+          const lines = draft[ch] || emptyChannelLines();
           const stepNum = startStep + index;
           const autoHint =
             row.orderCount > 0
@@ -282,87 +314,75 @@ export function AggregatorClosingEditor({
                 <span className="text-[10px] text-gray-400 truncate shrink-0">{autoHint}</span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
-                  <span className="text-[10px] font-bold text-amber-800 dark:text-amber-200">🍕 Pizzas</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    placeholder="0"
-                    value={food.pizza}
-                    onFocus={focusCountField}
-                    onChange={(e) => setFoodField(ch, 'pizza', e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/40 dark:bg-amber-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                  />
-                  <span className="text-[9px] text-gray-400">Sist. {autoFood.pizza}</span>
-                </div>
-                <div className="rounded-lg border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
-                  <span className="text-[10px] font-bold text-orange-800 dark:text-orange-200">🍔 Burgers</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    placeholder="0"
-                    value={food.burger}
-                    onFocus={focusCountField}
-                    onChange={(e) => setFoodField(ch, 'burger', e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-orange-200 dark:border-orange-800 rounded-lg bg-orange-50/40 dark:bg-orange-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/30"
-                  />
-                  <span className="text-[9px] text-gray-400">Sist. {autoFood.burger}</span>
-                </div>
-                <div className="rounded-lg border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
-                  <span className="text-[10px] font-bold text-lime-800 dark:text-lime-200">🌮 Tacos</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    placeholder="0"
-                    value={food.taco}
-                    onFocus={focusCountField}
-                    onChange={(e) => setFoodField(ch, 'taco', e.target.value)}
-                    className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-lime-200 dark:border-lime-800 rounded-lg bg-lime-50/40 dark:bg-lime-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-lime-500/30"
-                  />
-                  <span className="text-[9px] text-gray-400">Sist. {autoFood.taco}</span>
-                </div>
-                <div className="rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
-                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-300">💵 Efectivo (€)</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    placeholder="0,00"
-                    value={cashDraft[ch] ?? ''}
-                    onChange={(e) => {
-                      touchedRef.current.add(ch);
-                      setCashDraft((prev) => ({
-                        ...prev,
-                        [ch]: formatMoneyAsYouType(e.target.value, true),
-                      }));
-                    }}
-                    className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-                  />
-                  <span className="text-[9px] text-gray-400">Entra en caja</span>
-                </div>
-                <div className="rounded-lg border border-blue-300 dark:border-blue-700 bg-white dark:bg-gray-900 p-2 flex flex-col gap-0.5">
-                  <span className="text-[10px] font-bold text-blue-700 dark:text-blue-300">💳 Tarjeta (€)</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    placeholder="0,00"
-                    value={cardDraft[ch] ?? ''}
-                    onChange={(e) => {
-                      touchedRef.current.add(ch);
-                      setCardDraft((prev) => ({
-                        ...prev,
-                        [ch]: formatMoneyAsYouType(e.target.value, true),
-                      }));
-                    }}
-                    className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-blue-200 dark:border-blue-800 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                  />
-                  <span className="text-[9px] text-gray-400">Solo registro</span>
-                </div>
+              <div className="space-y-2">
+                {FOOD_LINES.map((line) => {
+                  const draftLine = lines[line.key];
+                  const sist = autoFood[line.key];
+                  return (
+                    <div
+                      key={line.key}
+                      className={`rounded-lg border ${line.border} ${line.bg} p-2.5`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <span className={`text-[11px] font-bold ${line.title}`}>
+                          {line.emoji} {line.label}
+                        </span>
+                        <span className="text-[9px] text-gray-400">Sist. {sist}</span>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <label className="flex flex-col gap-0.5 min-w-0">
+                          <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">
+                            Cantidad
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            placeholder="0"
+                            value={draftLine.qty}
+                            onFocus={focusCountField}
+                            onChange={(e) =>
+                              patchLine(ch, line.key, 'qty', normalizeCountInput(e.target.value))
+                            }
+                            className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-400/40"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5 min-w-0">
+                          <span className="text-[9px] font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                            Efectivo €
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            placeholder="0,00"
+                            value={draftLine.cash}
+                            onChange={(e) =>
+                              patchLine(ch, line.key, 'cash', formatMoneyAsYouType(e.target.value, true))
+                            }
+                            className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5 min-w-0">
+                          <span className="text-[9px] font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
+                            Tarjeta €
+                          </span>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            autoComplete="off"
+                            placeholder="0,00"
+                            value={draftLine.card}
+                            onChange={(e) =>
+                              patchLine(ch, line.key, 'card', formatMoneyAsYouType(e.target.value, true))
+                            }
+                            className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-blue-200 dark:border-blue-800 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );
