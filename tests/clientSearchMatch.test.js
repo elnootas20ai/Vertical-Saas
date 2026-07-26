@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   clientMatchesBusinessScope,
+  foldSearchText,
   scoreClientSearchMatch,
   scorePhoneDigitsMatch,
   buildClientSearchIndex,
   candidateIndicesForClientSearch,
 } from '../shared/clients/clientSearchMatch.js';
+
+function scoreName(doc, q) {
+  const qFold = foldSearchText(q);
+  const qDigits = String(q || '').replace(/\D/g, '');
+  return scoreClientSearchMatch(doc, q, qFold, qDigits, false);
+}
 
 describe('clientMatchesBusinessScope', () => {
   it('incluye clientes legacy sin business_id si no hay filtro estricto', () => {
@@ -90,6 +97,28 @@ describe('scoreClientSearchMatch', () => {
     const doc = { name: 'María García', phone: '666123456' };
     expect(scoreClientSearchMatch(doc, 'm', 'm', '', false)).toBeGreaterThan(0);
     expect(scoreClientSearchMatch(doc, 'z', 'z', '', false)).toBe(0);
+  });
+
+  it('ignora acentos en query y en el nombre', () => {
+    const doc = { name: 'José María Núñez', phone: '600111222' };
+    expect(scoreName(doc, 'jose')).toBeGreaterThan(0);
+    expect(scoreName(doc, 'josé')).toBeGreaterThan(0);
+    expect(scoreName(doc, 'maria')).toBeGreaterThan(0);
+    expect(scoreName(doc, 'maría')).toBeGreaterThan(0);
+    expect(scoreName(doc, 'nunez')).toBeGreaterThan(0);
+    expect(scoreName(doc, 'nuñez')).toBeGreaterThan(0);
+    expect(foldSearchText('José')).toBe('jose');
+    expect(foldSearchText('Núñez')).toBe('nunez');
+  });
+
+  it('índice encuentra candidatos aunque busques sin tilde', () => {
+    const docs = [
+      { name: 'José García', phone: '600111222', type: 'client' },
+      { name: 'Luis Pérez', phone: '611222333', type: 'client' },
+    ];
+    const index = buildClientSearchIndex(docs);
+    const hits = candidateIndicesForClientSearch(index, foldSearchText('jose'), '');
+    expect([...hits]).toContain(0);
   });
 
   it('sigue encontrando cliente tras recrearlo con mismo teléfono (datos nuevos)', () => {

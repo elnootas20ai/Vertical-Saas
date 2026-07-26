@@ -900,7 +900,7 @@ export function TpvRapidoOrderFlow({
       // Con atención rápida el buscador CRM está apagado del todo.
       enabled: !showCreateForm && !quickAttentionActive,
       matchByName: true,
-      minQueryLength: 2,
+      minQueryLength: 1,
       debounceMs: 400,
       resultLimit: 20,
       keepSearchingWhileSelected: true,
@@ -2242,7 +2242,8 @@ export function TpvRapidoOrderFlow({
           return;
         }
 
-        // Primer ticket automático = cocina (recogida y domicilio). Cliente/final no aquí.
+        // Primer ticket automático al crear = cocina (recogida y domicilio).
+        // Cliente/final se imprime al pasar a reparto o con el botón manual.
         if (currentBusiness) {
           const printableOrder = {
             ...orderData,
@@ -3035,7 +3036,7 @@ export function TpvRapidoOrderFlow({
     );
   }
 
-  const clientSearchReady = phoneInput.trim().length >= 2;
+  const clientSearchReady = phoneInput.trim().length >= 1;
   const clientSearchSettledEmpty =
     !isSearching
     && results.length === 0
@@ -3369,20 +3370,14 @@ export function TpvRapidoOrderFlow({
                 {!clientSearchUserId
                   ? 'No se pudo identificar la cuenta para buscar clientes. Cierra sesión y vuelve a entrar.'
                   : clientsTotalCount >= 500
-                  ? `Tienes ${clientsTotalCount.toLocaleString('es-ES')} clientes: busca por teléfono (3+ dígitos) o nombre (2+ letras). No se listan todos a la vez.`
-                  : 'Busca por número (al menos 3 dígitos) o por nombre (2 letras o más).'}
+                  ? `Tienes ${clientsTotalCount.toLocaleString('es-ES')} clientes: busca por teléfono o nombre (desde la 1.ª letra). No se listan todos a la vez.`
+                  : 'Escribe nombre o teléfono: la búsqueda empieza en la primera letra.'}
               </p>
             </div>
 
             {searchError && (
               <div className="mt-3 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 text-red-800 dark:text-red-300 text-sm">
                 {searchError}
-              </div>
-            )}
-
-            {isSearching && (
-              <div className="flex items-center gap-2 mt-3 text-sm text-gray-400">
-                <Loader2 className="w-4 h-4 animate-spin" /> Buscando...
               </div>
             )}
 

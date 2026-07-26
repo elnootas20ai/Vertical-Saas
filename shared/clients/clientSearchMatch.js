@@ -21,12 +21,20 @@ export function clientMatchesBusinessScope(doc, businessId, options = {}) {
   return false;
 }
 
-function foldSearchText(s) {
+/**
+ * Texto de búsqueda sin acentos/diacríticos.
+ * «jose» ↔ «José», «maria» ↔ «María», «nunez» ↔ «Núñez».
+ */
+export function foldSearchText(s) {
   return String(s || '')
     .normalize('NFKC')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .normalize('NFD')
+    // Todas las marcas combinantes (no solo el bloque U+0300–036F).
+    .replace(/\p{M}/gu, '')
     .replace(/[\u0300-\u036f]/g, '')
+    // Acentos “sueltos” que a veces se pegan al teclear (´ ` ¨ ^ ~).
+    .replace(/[\u00B4\u0060\u00A8\u02C6\u02DC\u02CA\u02CB\u02C9\u02D8\u02D9]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
