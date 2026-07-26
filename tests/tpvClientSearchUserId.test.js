@@ -2,58 +2,47 @@ import { describe, expect, it } from 'vitest';
 import { resolveTpvClientSearchUserId } from '../src/app/lib/tpvClientSearchUserId.ts';
 
 describe('resolveTpvClientSearchUserId', () => {
-  it('usa scope de caja/tablet cuando coincide con el owner', () => {
+  it('trabajador: invitedBy (titular) gana siempre', () => {
     expect(
       resolveTpvClientSearchUserId({
         currentBusiness: { owner_user_id: 'owner-pau' },
-        scopeDataUserId: 'owner-pau',
+        scopeDataUserId: 'device-empty',
         authUser: { user_id: 'worker-1', invitedBy: 'owner-pau' },
       }),
     ).toBe('owner-pau');
   });
 
-  it('trabajador tablet: scope (titular) gana aunque el selector traiga otro owner', () => {
-    expect(
-      resolveTpvClientSearchUserId({
-        currentBusiness: { owner_user_id: 'otro-owner' },
-        scopeDataUserId: 'owner-pau',
-        authUser: { user_id: 'worker-1', invitedBy: 'owner-pau' },
-      }),
-    ).toBe('owner-pau');
-  });
-
-  it('tablet sin invitedBy: scope gana frente a resolveBusinessDataUserId (cartera vacía del device)', () => {
-    expect(
-      resolveTpvClientSearchUserId({
-        currentBusiness: { owner_user_id: 'otro-owner', members: [] },
-        scopeDataUserId: 'owner-pau',
-        authUser: { user_id: 'device-auth-1' },
-      }),
-    ).toBe('owner-pau');
-  });
-
-  it('regresión: fromCrm/self no debe ganar al scope de caja (bug post-atención rápida)', () => {
-    // resolveBusinessDataUserId devolvería device-auth-1 (no es member → self).
-    expect(
-      resolveTpvClientSearchUserId({
-        currentBusiness: { owner_user_id: 'owner-pau', members: [] },
-        scopeDataUserId: 'owner-pau',
-        authUser: { user_id: 'device-auth-1' },
-      }),
-    ).toBe('owner-pau');
-  });
-
-  it('CEO sin scope: usa owner de la empresa activa', () => {
+  it('CEO: owner de la empresa activa', () => {
     expect(
       resolveTpvClientSearchUserId({
         currentBusiness: { owner_user_id: 'owner-pau' },
-        scopeDataUserId: '',
+        scopeDataUserId: 'owner-pau',
         authUser: { user_id: 'owner-pau' },
       }),
     ).toBe('owner-pau');
   });
 
-  it('si no hay owner, usa invitedBy cuando el candidato es el trabajador', () => {
+  it('CEO: owner gana frente a scope raro del device', () => {
+    expect(
+      resolveTpvClientSearchUserId({
+        currentBusiness: { owner_user_id: 'owner-pau', members: [] },
+        scopeDataUserId: 'device-auth-1',
+        authUser: { user_id: 'owner-pau' },
+      }),
+    ).toBe('owner-pau');
+  });
+
+  it('sin owner: usa scope de caja/tablet', () => {
+    expect(
+      resolveTpvClientSearchUserId({
+        currentBusiness: { owner_user_id: '', members: [] },
+        scopeDataUserId: 'owner-pau',
+        authUser: { user_id: 'device-auth-1' },
+      }),
+    ).toBe('owner-pau');
+  });
+
+  it('sin owner ni scope: invitedBy cuando el candidato sería el trabajador', () => {
     expect(
       resolveTpvClientSearchUserId({
         currentBusiness: { owner_user_id: '', members: [] },

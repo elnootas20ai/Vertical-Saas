@@ -800,16 +800,20 @@ export function TpvRapidoOrderFlow({
     () => resolveRetailOpsWriteBusinessId(businessId, businesses),
     [businesses, businessId],
   );
-  // Cartera CRM del local: scope caja/tablet primero (no la cuenta vacía del dispositivo).
-  const clientSearchUserId = useMemo(
-    () =>
-      resolveTpvClientSearchUserId({
-        currentBusiness,
-        scopeDataUserId: userId,
-        authUser: user,
-      }),
-    [userId, user, currentBusiness],
-  );
+  // Misma cartera que el contador «Tienes N clientes» (AppContext).
+  // Si diverge, ves 6489 y la búsqueda sale vacía (bug recurrente Pau).
+  const clientSearchUserId = useMemo(() => {
+    const fromAppCount =
+      String(user?.invitedBy || '').trim() ||
+      String(user?.user_id || user?.id || '').trim();
+    const fromResolver = resolveTpvClientSearchUserId({
+      currentBusiness,
+      scopeDataUserId: userId,
+      authUser: user,
+    });
+    const ownerId = String(currentBusiness?.owner_user_id || '').trim();
+    return ownerId || fromResolver || fromAppCount;
+  }, [userId, user, currentBusiness]);
 
   // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
   // Sin businessId: carga toda la cartera del titular (no filtrar por empresa events/otra).

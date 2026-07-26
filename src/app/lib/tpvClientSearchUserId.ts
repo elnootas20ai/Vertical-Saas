@@ -14,39 +14,26 @@ type BusinessLike = {
 /**
  * Titular de la cartera CRM del TPV (fichas del local).
  *
- * Orden:
- * 1) scope caja/tablet (`effectiveDataUserId` / binding) — es el dueño de datos del TPV
- * 2) owner_user_id de la empresa activa
- * 3) resolveBusiness / invitedBy / self
+ * Misma idea que el contador «Tienes N clientes» (AppContext):
+ * invitedBy (trabajador) → owner de la empresa → scope caja → resolveBusiness → self.
  *
- * Antes priorizar solo el owner de currentBusiness podía buscar en otra cartera
- * si el selector global no coincidía con el binding de tablet.
+ * Importante: no buscar con la cuenta vacía del dispositivo/tablet.
  */
 export function resolveTpvClientSearchUserId(params: {
   currentBusiness?: BusinessLike;
   scopeDataUserId?: string | null;
   authUser?: AuthLike;
 }): string {
-  const fromScope = String(params.scopeDataUserId || '').trim();
-  const ownerId = String(params.currentBusiness?.owner_user_id || '').trim();
-  const fromBusiness = resolveBusinessDataUserId(params.authUser, params.currentBusiness);
-  const selfId = String(params.authUser?.user_id || params.authUser?.id || '').trim();
   const invitedBy = String(params.authUser?.invitedBy || '').trim();
+  if (invitedBy) return invitedBy;
 
-  // Tablet / caja: el scope ya apunta al titular de la tienda.
-  if (fromScope) {
-    if (!ownerId || fromScope === ownerId) return fromScope;
-    // Scope y owner divergen:
-    // - Trabajador / sesión tablet (no eres el owner del selector) → confiar en el scope.
-    // - CEO que cambió de empresa en el selector → owner de la empresa activa.
-    if (selfId && ownerId && selfId !== ownerId) return fromScope;
-    if (invitedBy && (invitedBy === fromScope || selfId === fromScope)) return fromScope;
-    return ownerId;
-  }
-
+  const ownerId = String(params.currentBusiness?.owner_user_id || '').trim();
   if (ownerId) return ownerId;
 
-  const candidate = fromBusiness || invitedBy || selfId;
-  if (invitedBy && candidate === selfId) return invitedBy;
-  return candidate;
+  const fromScope = String(params.scopeDataUserId || '').trim();
+  if (fromScope) return fromScope;
+
+  const fromBusiness = resolveBusinessDataUserId(params.authUser, params.currentBusiness);
+  const selfId = String(params.authUser?.user_id || params.authUser?.id || '').trim();
+  return fromBusiness || selfId;
 }

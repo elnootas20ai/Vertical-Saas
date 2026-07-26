@@ -4033,7 +4033,10 @@ export function filterClientDocsBySearch(docs, searchIndex, phoneQuery, userId, 
       if (!d) continue;
       if (consider(d) === 'stop') break;
     }
-  } else {
+  }
+  // Índice desfasado / candidatos vacíos de score → scan completo (Pau TPV: «uriel» no encontrado).
+  if (!useIndex || scored.length === 0) {
+    if (useIndex) scored.length = 0;
     for (const d of list) {
       if (consider(d) === 'stop') break;
     }
