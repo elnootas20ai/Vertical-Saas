@@ -49,9 +49,10 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType, loadDeliveryStores } from '../../lib/deliverySetup';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
-import { listClientsPageRequest, CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
+import { CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
+import { fetchClientAcquisitionSample } from '../../lib/clientAcquisitionSample';
 import { listBrandsRequest, type Brand } from '../../lib/brandApi';
-import { computePortfolioMetrics, computePortfolioClientMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, deliveryOrderRevenueAmount, applyTpvCashMetrics, prevCalendarMonthKey, type PortfolioMetrics } from '../../lib/portfolioMetrics';
+import { computePortfolioMetrics, computePortfolioClientMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, deliveryOrderRevenueAmount, applyTpvCashMetrics, type PortfolioMetrics } from '../../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import {
   buildSoldProductDailySeries,
@@ -811,34 +812,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     }
     try {
       const monthKey = localCalendarDayKey().slice(0, 7);
-      const prevMonthStart = `${prevCalendarMonthKey(monthKey)}-01T00:00:00.000Z`;
-      const collected: Array<{
-        createdAt?: Date | string;
-        stats?: { acquisitionKind?: string; createdFrom?: string; excludeFromNewMetrics?: boolean } | null;
-      }> = [];
-      let skip = 0;
-      let totalClients = 0;
-      const pageSize = 500;
-      while (true) {
-        const { clients, meta } = await listClientsPageRequest(financeUserId, {
-          limit: pageSize,
-          skip,
-          lite: true,
-          businessId: businessId || undefined,
-          sort: '-createdAt',
-        });
-        if (skip === 0) totalClients = Number(meta?.total || 0);
-        collected.push(...clients);
-        const oldest = clients[clients.length - 1];
-        const reachedPrevMonth =
-          oldest &&
-          new Date(oldest.createdAt instanceof Date ? oldest.createdAt : oldest.createdAt || 0) <
-            new Date(prevMonthStart);
-        if (!meta.hasMore || clients.length === 0 || reachedPrevMonth) break;
-        skip += pageSize;
-      }
-      const metrics = computePortfolioClientMetrics(collected, monthKey);
-      setCrmClientsCount(totalClients || collected.length);
+      // Capado: no bajar los ~6k de Pau (saturaba API y dejaba el TPV ciego).
+      const { totalClients, sample } = await fetchClientAcquisitionSample(financeUserId, {
+        monthKey,
+        businessId: businessId || undefined,
+      });
+      const metrics = computePortfolioClientMetrics(sample, monthKey);
+      setCrmClientsCount(totalClients || sample.length);
       setCrmNewClientsMonth(metrics.newClientsMonth);
     } catch {
       setCrmClientsCount(null);

@@ -21,7 +21,7 @@ import {
 } from '../lib/deliverySetup';
 import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../lib/deliveryOpsTypes';
 import { loadRestaurantStores } from '../verticals/restaurant/loadRestaurantStores';
-import { listClientsPageRequest } from '../lib/crmApi';
+import { fetchClientAcquisitionSample } from '../lib/clientAcquisitionSample';
 import {
   applyTpvCashMetrics,
   computeCompanyBillingBreakdown,
@@ -333,41 +333,16 @@ async function loadClientMetricsForBusiness(
   businessId: string,
   monthKey: string,
 ): Promise<PortfolioClientMetrics> {
-  const prevMonthStart = `${prevCalendarMonthKey(monthKey)}-01T00:00:00.000Z`;
-  const collected: Array<{
-    createdAt?: Date | string;
-    stats?: { acquisitionKind?: string; createdFrom?: string; excludeFromNewMetrics?: boolean } | null;
-  }> = [];
-  let skip = 0;
-  let totalClients = 0;
-  const pageSize = 500;
+  // Capado: nunca descargar ~6k clientes (Pau). Eso saturaba API/TPV tras el deploy.
+  const { totalClients, sample } = await fetchClientAcquisitionSample(dataUserId, {
+    monthKey,
+    businessId,
+  }).catch(() => ({ totalClients: 0, sample: [] }));
 
-  while (true) {
-    const { clients, meta } = await listClientsPageRequest(dataUserId, {
-      limit: pageSize,
-      skip,
-      lite: true,
-      businessId,
-      sort: '-createdAt',
-    }).catch(() => ({ clients: [], meta: { total: 0, skip: 0, limit: pageSize, hasMore: false } }));
-
-    if (skip === 0) totalClients = meta.total;
-    collected.push(...clients);
-
-    const oldest = clients[clients.length - 1];
-    const reachedPrevMonth =
-      oldest &&
-      new Date(oldest.createdAt instanceof Date ? oldest.createdAt : oldest.createdAt) <
-        new Date(prevMonthStart);
-
-    if (!meta.hasMore || clients.length === 0 || reachedPrevMonth) break;
-    skip += pageSize;
-  }
-
-  const metrics = computePortfolioClientMetrics(collected, monthKey);
+  const metrics = computePortfolioClientMetrics(sample, monthKey);
   return {
     ...metrics,
-    totalClients: totalClients || collected.length,
+    totalClients: totalClients || sample.length,
   };
 }
 
