@@ -26,10 +26,15 @@ const clientSearchResultCache = new Map<string, { at: number; clients: Client[] 
 const portfolioRefreshAtByUser = new Map<string, number>();
 const PORTFOLIO_REFRESH_COOLDOWN_MS = 20_000;
 
-/** Walk-in / atención rápida del TPV: no deben impedir buscar un cliente real. */
+/** Solo una ficha CRM real pausa la búsqueda. Los ids `tpv-*` no existen en este hook. */
 export function clientSelectionBlocksPhoneSearch(client: Client | null | undefined): boolean {
   if (!client) return false;
-  return !String(client.id || '').startsWith('tpv-');
+  if (String(client.id || '').startsWith('tpv-')) return false;
+  return true;
+}
+
+function isSyntheticTpvClientId(clientId: string | undefined): boolean {
+  return String(clientId || '').startsWith('tpv-');
 }
 
 function cacheKey(userId: string, businessId: string | undefined, query: string, limit: number) {
@@ -243,6 +248,8 @@ export function useClientPhoneSearch(params: {
   }, []);
 
   const selectClient = useCallback((client: Client) => {
+    // Atención rápida / walk-in: fuera de este hook (flujo paralelo en TPV).
+    if (isSyntheticTpvClientId(client?.id)) return;
     requestSeqRef.current += 1;
     if (abortRef.current) abortRef.current.abort();
     abortRef.current = null;
