@@ -19,10 +19,15 @@ import {
   candidateIndicesForClientSearch,
   clientMatchesBusinessScope,
   clientSearchPrefersPhone,
+  foldSearchText,
   normalizeClientBusinessScopeId,
   scoreClientSearchMatch,
 } from '../shared/clients/clientSearchMatch.js';
 import { resolveTerminalLoginFromDocs } from './terminalLoginResolve.js';
+import {
+  mergeCatalogCustomFields,
+  resolveCatalogItemIsStockItem,
+} from '../shared/catalog/catalogStockGuard.js';
 
 export { clientMatchesBusinessScope };
 
@@ -3973,17 +3978,6 @@ export async function listClientsByUser(req, userId, options = {}) {
     ? base.filter((doc) => clientMatchesBusinessScope(doc, bid, options))
     : base;
   return scoped.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-}
-
-function foldSearchText(s) {
-  return String(s || '')
-    .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
 }
 
 /**
@@ -10014,14 +10008,8 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
     salesChannels: sanitizeSalesChannels(data.salesChannels ?? existing?.salesChannels),
     stockCategory: VALID_STOCK_CATEGORIES.includes(data.stockCategory) ? data.stockCategory : (existing?.stockCategory || 'other'),
     stockSubcategory: String(data.stockSubcategory || existing?.stockSubcategory || ''),
-    isStockItem: (() => {
-      if (data.isStockItem !== undefined) return Boolean(data.isStockItem);
-      if (existing?.isStockItem) return true;
-      if (data.module === 'stock' || existing?.module === 'stock') return true;
-      const whStock = Array.isArray(data.warehouseStock) ? data.warehouseStock : (existing?.warehouseStock || []);
-      if (whStock.some((ws) => ws?.warehouseId)) return true;
-      return false;
-    })(),
+    // Carta (module catalog): no sticky isStockItem. Ver shared/catalog/catalogStockGuard.js
+    isStockItem: resolveCatalogItemIsStockItem({ data, existing, module }),
     isCritical: data.isCritical !== undefined ? Boolean(data.isCritical) : (existing?.isCritical ?? false),
     workCenterId: String(data.workCenterId || existing?.workCenterId || ''),
     workCenterName: String(data.workCenterName || existing?.workCenterName || ''),
@@ -10036,7 +10024,7 @@ export function buildCatalogItemDocument(userId, data = {}, existing = null) {
     maxStock: Number(data.maxStock ?? existing?.maxStock ?? 0),
     lastPurchasePrice: Number(data.lastPurchasePrice ?? existing?.lastPurchasePrice ?? 0),
     lastPurchaseDate: String(data.lastPurchaseDate || existing?.lastPurchaseDate || ''),
-    customFields: (data.customFields && typeof data.customFields === 'object') ? { ...data.customFields } : (existing?.customFields || {}),
+    customFields: mergeCatalogCustomFields(existing?.customFields, data.customFields),
     business_id: String(data.business_id || data.businessId || existing?.business_id || existing?.businessId || '').trim(),
     createdAt: existing?.createdAt || now,
     updatedAt: now,

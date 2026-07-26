@@ -4,18 +4,8 @@ import {
   candidateIndicesForClientSearch,
   scoreClientSearchMatch,
   clientSearchPrefersPhone,
+  foldSearchText,
 } from '../shared/clients/clientSearchMatch.js';
-
-function foldSearchText(s) {
-  return String(s || '')
-    .normalize('NFKC')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
 
 /** Réplica mínima del filtro TPV (sin businessId). */
 function searchDocs(docs, q) {
