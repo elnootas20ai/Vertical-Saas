@@ -301,6 +301,8 @@ export interface CatalogItem {
   business_id?: string;
   salesPointId?: string;
   salesPointName?: string;
+  /** Soft-delete; null/ausente = visible. Import Excel carta lo limpia al reactivar. */
+  deletedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

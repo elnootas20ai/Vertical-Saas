@@ -282,6 +282,24 @@ describe('deliveryCatalogExcelTemplate', () => {
     expect(mapped?.item.isStockItem).toBe(false);
     expect(mapped?.item.stockCategory).toBe('finished_product');
     expect(mapped?.item.module).toBe('catalog');
+    expect(mapped?.item.active).toBe(true);
+    expect(mapped?.item.deletedAt).toBe(null);
+  });
+
+  it('mapImportEntryToCatalogItem marca mitad y mitad y reactiva flags carta', async () => {
+    const { mapImportEntryToCatalogItem } = await import('../src/app/lib/deliveryCatalogImport.ts');
+    const mapped = await mapImportEntryToCatalogItem(
+      {
+        name: 'Premium mitad y mitad',
+        category: 'Premium',
+        price: '14,50',
+      },
+      { businessId: 'biz-1', brandCache: [], vertical: 'delivery' },
+    );
+    expect(mapped?.item.customFields?.halfHalf).toBe(true);
+    expect(mapped?.item.isStockItem).toBe(false);
+    expect(mapped?.item.stockCategory).toBe('finished_product');
+    expect(mapped?.item.active).toBe(true);
   });
 
   it('isOfficialCatalogTemplateHeaders detects official column row', async () => {

@@ -39,19 +39,48 @@ export function resolveCatalogItemIsStockItem({ data = {}, existing = null, modu
 }
 
 /**
- * Fusiona customFields sin borrar allowlists/surcharges de combos
- * si el cliente no los manda en el update.
+ * Fusiona customFields sin borrar allowlists/surcharges/halfHalf de carta
+ * si el cliente no los manda en el update (evita “perder” menús al editar).
  */
 export function mergeCatalogCustomFields(existingCf, incomingCf) {
   const prev = existingCf && typeof existingCf === 'object' ? { ...existingCf } : {};
   if (!incomingCf || typeof incomingCf !== 'object') return prev;
   const merged = { ...prev, ...incomingCf };
-  for (const key of ['comboSlotAllowlists', 'comboSlotSurcharges']) {
+  for (const key of [
+    'comboSlotAllowlists',
+    'comboSlotSurcharges',
+    'halfHalf',
+    'halfHalfAllowedProductIds',
+    'buildYourOwn',
+    'buildYourOwnMaxIngredients',
+    'comboStructure',
+    'comboStructureConfirmed',
+  ]) {
     if (incomingCf[key] === undefined && prev[key] != null) {
       merged[key] = prev[key];
     }
   }
   return merged;
+}
+
+/**
+ * Import Excel carta: fuerza flags para que el producto no quede oculto en TPV.
+ * No convierte módulos stock; solo module catalog / default.
+ */
+export function applyCatalogImportCartaStockGuard(data = {}, existing = null) {
+  const mod = String(data.module || existing?.module || 'catalog').trim() || 'catalog';
+  if (mod !== 'catalog') return { ...data };
+  return {
+    ...data,
+    module: 'catalog',
+    isStockItem: false,
+    stockCategory: data.stockCategory || 'finished_product',
+    active: true,
+    available: data.available !== undefined ? data.available : true,
+    webVisible: data.webVisible !== undefined ? data.webVisible : true,
+    // Reactivar soft-delete si el producto vuelve en el Excel.
+    deletedAt: null,
+  };
 }
 
 export { WAREHOUSE_STOCK_CATEGORIES };

@@ -234,6 +234,45 @@ describe('catalogComboSlots', () => {
     ).toEqual(['d1', 'm1']);
   });
 
+  it('allowlist muestra complemento con isStockItem (no almacén puro)', () => {
+    const catalog = [
+      item({
+        _id: 'm1',
+        name: 'Patatas Monalisa',
+        category: 'Complementos',
+        isStockItem: true,
+        stockCategory: 'other',
+      }),
+      item({
+        _id: 's1',
+        name: 'Salchipapas Supreme',
+        category: 'Complementos',
+        isStockItem: true,
+      }),
+      item({
+        _id: 'flour',
+        name: 'Harina',
+        category: 'Complementos',
+        module: 'stock',
+        isStockItem: true,
+        stockCategory: 'ingredient',
+      }),
+    ];
+    const section = {
+      catalogCategory: 'Complementos',
+      slotKind: 'side',
+      expectedCount: 0,
+      required: true,
+      slotQuota: 1,
+      groupBySlotKind: true,
+    };
+    expect(
+      catalogProductsForComboSection(section, catalog, undefined, {
+        allowlistIds: ['m1', 's1', 'flour'],
+      }).map((p) => p._id),
+    ).toEqual(['m1', 's1']);
+  });
+
   it('comboSlotSurcharges aplica suplemento Tequeños/Salchipapas sin tocar extras de pizza', async () => {
     const { resolveComboSlotSurcharge, applyComboSlotSurcharges } = await import(
       '../src/app/lib/catalogComboSlots.ts'

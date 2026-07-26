@@ -7,6 +7,12 @@ import {
 } from './catalogBusinessScope';
 import { deliveryBusinessIdForTpv, resolveTpvCatalogBusinessId } from './tpvRegisterScope';
 import { isRestaurantBusinessType } from './deliveryOpsTypes';
+import {
+  collectComboReferencedProductIds,
+  isTpvWarehouseOnlyCatalogItem,
+} from './tpvWarehouseCatalog';
+
+export { collectComboReferencedProductIds, isTpvWarehouseOnlyCatalogItem } from './tpvWarehouseCatalog';
 
 export type TpvCatalogBusinessRef = {
   business_id?: string;
@@ -87,27 +93,6 @@ export async function loadTpvCatalogBrands(
   return tryLoadBrands(scope.catalogBusinessId);
 }
 
-/**
- * Almacén puro (no carta): no debe salir en TPV.
- * OJO: muchas pizzas/burgers de carta tienen isStockItem=true (control de stock)
- * y DEBEN seguir siendo vendibles.
- */
-export function isTpvWarehouseOnlyCatalogItem(
-  item: Pick<CatalogItem, 'module' | 'isStockItem' | 'stockCategory'>,
-): boolean {
-  if (String(item.module || '').trim() === 'stock') return true;
-  if ((item.module || 'catalog') !== 'catalog') return true;
-  if (item.isStockItem === true) {
-    const sc = String(item.stockCategory || '').trim();
-    return ['ingredient', 'packaging', 'cleaning', 'consumable', 'raw_material'].includes(sc);
-  }
-  if (item.stockCategory && item.stockCategory !== 'finished_product') {
-    const stockLike = ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable'];
-    return stockLike.includes(item.stockCategory);
-  }
-  return false;
-}
-
 export function filterTpvCatalogItems(
   rawItems: CatalogItem[],
   scope: TpvCatalogLoadScope,
@@ -118,9 +103,13 @@ export function filterTpvCatalogItems(
     activeBusinessType: scope.activeBusinessType,
   };
 
+  const comboReferencedIds = collectComboReferencedProductIds(rawItems);
+
   // Solo carta vendible: nunca ingredientes/envases de almacén puro en el TPV.
+  // Productos de allowlist/suplemento de menú se conservan aunque tengan isStockItem.
   const sellableRaw = rawItems.filter((item) => {
-    if (isTpvWarehouseOnlyCatalogItem(item)) return false;
+    const comboMenuReferenced = comboReferencedIds.has(String(item._id || '').trim());
+    if (isTpvWarehouseOnlyCatalogItem(item, { comboMenuReferenced })) return false;
     return item.itemType === 'product' || item.itemType === 'combo';
   });
 

@@ -47,6 +47,7 @@ import {
   type ComboStructureSlot,
 } from './catalogComboSlots';
 import { buildStableImportCatalogSku, catalogLooseIdentityKey } from '../../../shared/catalog/catalogItemIdentity.js';
+import { applyCatalogImportCartaStockGuard } from '../../../shared/catalog/catalogStockGuard.js';
 
 function inferInventoryBusinessType(
   brands: Array<{ deliveryLineKind?: string }>,
@@ -569,7 +570,7 @@ export async function mapImportEntryToCatalogItem(
     unmatchedLineNames.push(...resolved.unmatchedNames);
   }
 
-  const item: Partial<CatalogItem> = {
+  const itemBase: Partial<CatalogItem> = {
     name,
     category,
     brandIds: resolveCatalogImportBrandIds(explicitBrandIds, category, brandCache, name),
@@ -578,7 +579,7 @@ export async function mapImportEntryToCatalogItem(
       if (explicit === 'combo' || isImportComboCategory(category)) return 'combo' as const;
       if (['product', 'service'].includes(explicit)) return explicit as CatalogItem['itemType'];
       return 'product' as const;
-   })(),
+    })(),
     description: String(entry.description || '').trim(),
     unitPrice: (() => {
       const p = parseImportPrice(String(entry.price || entry.unitPrice || ''));
@@ -587,9 +588,6 @@ export async function mapImportEntryToCatalogItem(
     costPrice: Number(String(entry.costPrice || '').replace(',', '.')) || 0,
     stockQuantity: 0,
     minStock: 0,
-    /** Carta TPV: nunca inventario. Evita que un flag viejo sticky oculte el producto en el TPV. */
-    isStockItem: false,
-    stockCategory: 'finished_product' as CatalogItem['stockCategory'],
     allergens: String(entry.allergens || '')
       .split(',')
       .map((a) => a.trim())
@@ -605,11 +603,8 @@ export async function mapImportEntryToCatalogItem(
       }) ||
       undefined,
     unit: String(entry.unit || entry.unidad || 'ud').trim() || 'ud',
-    active: true,
-    available: true,
-    webVisible: true,
-    module: 'catalog',
     taxRate: resolveImportTaxRate(entry, options.vertical),
+    module: 'catalog',
     ...(options.businessId
       ? {
           business_id: options.businessId,
@@ -617,6 +612,8 @@ export async function mapImportEntryToCatalogItem(
         }
       : {}),
   };
+  /** Carta TPV: isStockItem false, finished_product, active, sin deletedAt sticky. */
+  const item = applyCatalogImportCartaStockGuard(itemBase, null) as Partial<CatalogItem>;
 
   const ingredientsRaw = String(entry.ingredients || entry.ingredientes || '').trim();
   if (ingredientsRaw) {
@@ -630,6 +627,8 @@ export async function mapImportEntryToCatalogItem(
   }
 
   if (item.itemType === 'combo') {
+    // Solo estructura del Excel: allowlists/surcharges se conservan en merge al guardar
+    // (mergeCatalogCustomFields) si el import no los envía.
     item.customFields = {
       ...(item.customFields || {}),
       comboStructure: resolveImportComboStructure(entry, { vertical: options.vertical }),

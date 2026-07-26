@@ -104,6 +104,11 @@ import {
   isSameLooseCatalogProduct,
   resolveExistingCatalogItemForImport,
 } from '../shared/catalog/catalogItemIdentity.js';
+import { applyCatalogImportCartaStockGuard } from '../shared/catalog/catalogStockGuard.js';
+import {
+  collectComboReferencedProductIds,
+  isTpvWarehouseOnlyCatalogItem,
+} from '../shared/catalog/tpvWarehouseCatalog.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import { assertCanCreatePointOfSale } from '../services/entitlementEnforcement.js';
 import { recordMovement } from '../services/stockMovementService.js';
@@ -1626,15 +1631,12 @@ export async function listCatalogItems(req, res) {
     const filterModule = req.query.module || undefined;
     const view = String(req.query.view || '').trim().toLowerCase();
     let items = await listCatalogItemsByUser(req, userId, { module: filterModule });
-    // TPV: nunca devolver inventario/ingredientes como vendibles.
+    // TPV: solo ocultar almacén puro. Carta con isStockItem (control stock) SÍ se vende.
     if (view === 'tpv') {
+      const comboReferencedIds = collectComboReferencedProductIds(items);
       items = items.filter((doc) => {
-        if ((doc.module || 'catalog') !== 'catalog') return false;
-        if (doc.isStockItem === true) return false;
-        const sc = String(doc.stockCategory || '');
-        if (sc && sc !== 'finished_product' && ['ingredient', 'beverage', 'packaging', 'cleaning', 'consumable'].includes(sc)) {
-          return false;
-        }
+        const comboMenuReferenced = comboReferencedIds.has(String(doc._id || '').trim());
+        if (isTpvWarehouseOnlyCatalogItem(doc, { comboMenuReferenced })) return false;
         return doc.itemType === 'product' || doc.itemType === 'combo';
       });
     }
@@ -1694,17 +1696,21 @@ export async function bulkCreateCatalogItems(req, res) {
 
     const rawItems = items.filter(item => item && typeof item === 'object' && item.name);
     const docs = rawItems.map(item => {
-      const prepared = { ...item };
+      let prepared = { ...item };
       if (!String(prepared.sku || '').trim()) {
         const stableSku = buildStableImportCatalogSku(prepared);
         if (stableSku) prepared.sku = stableSku;
+      }
+      if (String(prepared.module || 'catalog').trim() === 'catalog') {
+        prepared = applyCatalogImportCartaStockGuard(prepared, null);
       }
       return buildCatalogItemDocument(userId, prepared);
     });
 
     if (docs.length === 0) return badRequest(res, 'Ningún item válido para importar');
 
-    const existingItems = await listCatalogItemsByUser(req, userId);
+    // Incluye soft-deleted: si vuelve en el Excel, se reactiva (no duplicar).
+    const existingItems = await listCatalogItemsByUser(req, userId, { includeDeleted: true });
     const importIndexes = buildCatalogImportIndexes(existingItems);
 
     const batchIdentityKeys = new Set();
@@ -1771,32 +1777,49 @@ export async function bulkCreateCatalogItems(req, res) {
         // Si el import envía brandIds (aunque sea []), manda el Excel: corrige la
         // línea/organizador TPV en re-imports. Si no viene el campo, se conserva.
         const incomingBrandIds = rawItems[index]?.brandIds;
-        const mergedDoc = buildCatalogItemDocument(
-          userId,
-          {
-            name: doc.name || existing.name,
-            category: doc.category || existing.category,
-            unitPrice: doc.unitPrice ?? existing.unitPrice,
-            costPrice: doc.costPrice ?? existing.costPrice,
-            brandIds: Array.isArray(incomingBrandIds) ? doc.brandIds : existing.brandIds,
-            description: doc.description || existing.description,
-            business_id:
-              String(doc.business_id || doc.businessId || '').trim() ||
-              String(existing.business_id || existing.businessId || '').trim(),
-            vertical:
-              String(doc.vertical || '').trim() ||
-              String(existing.vertical || '').trim() ||
-              (String(doc.business_id || doc.businessId || existing.business_id || '').trim()
-                ? 'delivery'
-                : ''),
-            itemType: doc.itemType || existing.itemType,
-            customFields: {
-              ...(existing.customFields && typeof existing.customFields === 'object' ? existing.customFields : {}),
-              ...(doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {}),
-            },
+        const isCatalogModule =
+          String(doc.module || existing.module || 'catalog').trim() === 'catalog';
+        const basePayload = {
+          name: doc.name || existing.name,
+          category: doc.category || existing.category,
+          unitPrice: doc.unitPrice ?? existing.unitPrice,
+          costPrice: doc.costPrice ?? existing.costPrice,
+          brandIds: Array.isArray(incomingBrandIds) ? doc.brandIds : existing.brandIds,
+          description: doc.description || existing.description,
+          business_id:
+            String(doc.business_id || doc.businessId || '').trim() ||
+            String(existing.business_id || existing.businessId || '').trim(),
+          vertical:
+            String(doc.vertical || '').trim() ||
+            String(existing.vertical || '').trim() ||
+            (String(doc.business_id || doc.businessId || existing.business_id || '').trim()
+              ? 'delivery'
+              : ''),
+          itemType: doc.itemType || existing.itemType,
+          module: doc.module || existing.module || 'catalog',
+          customFields: {
+            ...(existing.customFields && typeof existing.customFields === 'object'
+              ? existing.customFields
+              : {}),
+            ...(doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {}),
           },
-          existing,
-        );
+        };
+        // Carta Excel: isStockItem false + finished_product + reactivar soft-delete.
+        // No borra productos ausentes del Excel (import no destructivo).
+        const mergePayload = isCatalogModule
+          ? applyCatalogImportCartaStockGuard(
+              {
+                ...basePayload,
+                isStockItem: doc.isStockItem,
+                stockCategory: doc.stockCategory || 'finished_product',
+                active: true,
+                available: doc.available !== undefined ? doc.available : true,
+                webVisible: doc.webVisible !== undefined ? doc.webVisible : true,
+              },
+              existing,
+            )
+          : basePayload;
+        const mergedDoc = buildCatalogItemDocument(userId, mergePayload, existing);
         updateDocs.push({ mergedDoc, index, doc });
       } catch (error) {
         errors.push({

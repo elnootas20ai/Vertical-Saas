@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyCatalogImportCartaStockGuard,
   mergeCatalogCustomFields,
   resolveCatalogItemIsStockItem,
 } from '../shared/catalog/catalogStockGuard.js';
@@ -67,5 +68,38 @@ describe('mergeCatalogCustomFields', () => {
       { comboSlotAllowlists: { side: ['x'] } },
     );
     expect(merged.comboSlotAllowlists).toEqual({ side: ['x'] });
+  });
+
+  it('no borra halfHalf si el update no lo manda', () => {
+    const merged = mergeCatalogCustomFields(
+      { halfHalf: true, halfHalfAllowedProductIds: ['p1', 'p2'], ingredients: 'viejo' },
+      { ingredients: 'nuevo' },
+    );
+    expect(merged.halfHalf).toBe(true);
+    expect(merged.halfHalfAllowedProductIds).toEqual(['p1', 'p2']);
+    expect(merged.ingredients).toBe('nuevo');
+  });
+});
+
+describe('applyCatalogImportCartaStockGuard', () => {
+  it('fuerza carta vendible y reactiva soft-delete', () => {
+    const guarded = applyCatalogImportCartaStockGuard(
+      { name: 'Carbonara', module: 'catalog', isStockItem: true },
+      { isStockItem: true, deletedAt: '2026-01-01', active: false },
+    );
+    expect(guarded.isStockItem).toBe(false);
+    expect(guarded.stockCategory).toBe('finished_product');
+    expect(guarded.active).toBe(true);
+    expect(guarded.deletedAt).toBe(null);
+    expect(guarded.module).toBe('catalog');
+  });
+
+  it('no toca módulo stock', () => {
+    const guarded = applyCatalogImportCartaStockGuard(
+      { name: 'Harina', module: 'stock', isStockItem: true },
+      null,
+    );
+    expect(guarded.module).toBe('stock');
+    expect(guarded.isStockItem).toBe(true);
   });
 });
