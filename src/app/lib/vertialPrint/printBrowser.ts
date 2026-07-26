@@ -38,12 +38,23 @@ table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .item:last-child{border-bottom:none}
 .big{font-size:16px;font-weight:bold}
 .kitchen-item{font-size:18px;font-weight:900}
+.comp{font-size:17px;font-weight:900;letter-spacing:0.02em}
+.kitchen-comp{font-size:18px;font-weight:900;letter-spacing:0.03em}
 .order-note{background:#fef3c7;border:1px solid #f59e0b;padding:6px 8px;margin-top:8px;font-weight:bold;color:#92400e}
 @media print{body{margin:0}}
 `;
 
 function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = false): string {
   const bits: string[] = [];
+  if (line.composition?.length) {
+    for (const name of line.composition) {
+      bits.push(
+        kitchen
+          ? `<div class="kitchen-comp">&gt; ${escapeHtml(name)}</div>`
+          : `<div class="comp">&gt; ${escapeHtml(name)}</div>`,
+      );
+    }
+  }
   if (line.added?.length) {
     for (const name of line.added) {
       bits.push(

@@ -110,6 +110,9 @@ function pushLineDetail(
   chunks.push(setSize(SIZE_TALL));
   chunks.push(textLine(`${line.qty}x ${line.name}`, tallCols));
   chunks.push(setSize(SIZE_NORMAL));
+  for (const name of line.composition || []) {
+    chunks.push(textLine(`  > ${name}`, width));
+  }
   for (const name of line.added || []) {
     chunks.push(textLine(`  + ${name}`, width));
   }
@@ -133,7 +136,7 @@ function setPrintColor(red: boolean): Uint8Array {
 
 /**
  * Línea de producto en comanda cocina: doble alto + negrita (+2 énfasis vs cuerpo normal).
- * Mods de más / de menos: negrita + alto + rojo (si hay) para máximo contraste.
+ * Composición del menú (▸) remarcada; mods de más / de menos: negrita + alto + rojo (si hay).
  */
 function pushKitchenLineDetail(
   chunks: Uint8Array[],
@@ -146,6 +149,12 @@ function pushKitchenLineDetail(
   chunks.push(textLine(`${line.qty}x ${line.name}`, tallCols));
   chunks.push(setBold(false));
 
+  for (const name of line.composition || []) {
+    chunks.push(setBold(true));
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(`  > ${name}`, tallCols));
+    chunks.push(setBold(false));
+  }
   for (const name of line.added || []) {
     chunks.push(setPrintColor(true));
     chunks.push(setBold(true));
@@ -395,6 +404,9 @@ export function encodeTicketEscpos(
       chunks.push(setSize(SIZE_TALL));
       pushMoneyRow(chunks, `${line.qty}x ${line.name}`, money(line.total), tallCols);
       chunks.push(setSize(SIZE_NORMAL));
+      for (const name of line.composition || []) {
+        chunks.push(textLine(`  > ${name}`, width));
+      }
       for (const name of line.added || []) {
         chunks.push(textLine(`  + ${name}`, width));
       }

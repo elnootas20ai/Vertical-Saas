@@ -82,7 +82,8 @@ export function buildTpvRegisterSummary(session: TpvRegisterSession): TpvRegiste
 }
 
 /**
- * Total vivo de la barra TPV: cobros efectivo + tarjeta + entradas − salidas.
+ * Total vivo de la barra TPV: cobros netos (ventas − cancelaciones/devoluciones)
+ * en efectivo + tarjeta + entradas − salidas.
  * (No incluye fondo inicial; ese va al arqueo de efectivo.)
  */
 export function calcTpvShiftCollectionsTotal(session: TpvRegisterSession): {
@@ -93,12 +94,70 @@ export function calcTpvShiftCollectionsTotal(session: TpvRegisterSession): {
   total: number;
 } {
   const summary = buildTpvRegisterSummary(session);
-  const efectivo = Number(summary.salesByMethod.efectivo || 0);
-  const tarjeta = Number(summary.salesByMethod.tarjeta || 0);
+  const returnsByMethod = sumReturnsByPaymentMethod(session);
+  const efectivo = round2(
+    Math.max(0, Number(summary.salesByMethod.efectivo || 0) - returnsByMethod.efectivo),
+  );
+  const tarjeta = round2(
+    Math.max(0, Number(summary.salesByMethod.tarjeta || 0) - returnsByMethod.tarjeta),
+  );
   const cashIn = Number(summary.totalCashIn || 0);
   const cashOut = Number(summary.totalCashOut || 0);
-  const total = Number((efectivo + tarjeta + cashIn - cashOut).toFixed(2));
+  const total = round2(efectivo + tarjeta + cashIn - cashOut);
   return { efectivo, tarjeta, cashIn, cashOut, total };
+}
+
+function round2(n: number): number {
+  return Math.round(Number(n || 0) * 100) / 100;
+}
+
+function sumReturnsByPaymentMethod(session: Pick<TpvRegisterSession, 'transactions'>): Record<TpvPaymentMethod, number> {
+  const out: Record<TpvPaymentMethod, number> = {
+    efectivo: 0,
+    tarjeta: 0,
+    bizum: 0,
+    online: 0,
+    otro: 0,
+  };
+  for (const t of session.transactions || []) {
+    if (t?.type !== 'return') continue;
+    const method = normalizeTpvPaymentMethod(t.paymentMethod);
+    out[method] = round2(out[method] + Number(t.amount || 0));
+  }
+  return out;
+}
+
+/**
+ * Ops de cobro vivos en la barra: pedidos (o ventas sueltas) cuyo neto venta−devolución > 0.
+ * Así al cancelar un pedido deja de contar en «N ops».
+ */
+export function countNetSaleOperations(session: Pick<TpvRegisterSession, 'transactions'>): number {
+  const txs = session.transactions || [];
+  const netByOrder = new Map<string, number>();
+  let anonNet = 0;
+  let anonSaleCount = 0;
+
+  for (const t of txs) {
+    if (!t || (t.type !== 'sale' && t.type !== 'return')) continue;
+    const amount = Number(t.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const signed = t.type === 'sale' ? amount : -amount;
+    const orderId = String(t.orderId || t.linkedDeliveryOrderId || '').trim();
+    if (!orderId) {
+      anonNet = round2(anonNet + signed);
+      if (t.type === 'sale') anonSaleCount += 1;
+      continue;
+    }
+    netByOrder.set(orderId, round2((netByOrder.get(orderId) || 0) + signed));
+  }
+
+  let count = 0;
+  for (const net of netByOrder.values()) {
+    if (net > 0.001) count += 1;
+  }
+  // Ventas sin orderId (apps/manuales): si el neto sigue positivo, cuentan las ventas brutas sueltas.
+  if (anonNet > 0.001) count += Math.max(1, anonSaleCount);
+  return count;
 }
 
 export function isCajaRegistrationOk(status: string | null | undefined): boolean {

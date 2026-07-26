@@ -48,21 +48,50 @@ export function orderItemCustomizationDetail(
 }
 
 export type OrderItemCustomizationParts = {
+  /** Componentes del menú/combo (▸ pizza, guarnición…) y mitades (½). */
+  composition: string[];
   added: string[];
   removed: string[];
   note: string;
 };
 
-/** Desglose para UI e impresión (extras, sin ingredientes, nota cocina). */
+/** Etiqueta legible para ticket (ASCII-safe en cocina). */
+function compositionLabelFromExtra(trimmed: string): string | null {
+  if (/^▸/.test(trimmed)) {
+    const name = trimmed.replace(/^▸\s*/, '').trim();
+    return name || null;
+  }
+  if (/^½/.test(trimmed) || /^1\s*\/\s*2\b/i.test(trimmed)) {
+    const name = trimmed.replace(/^½\s*/, '').replace(/^1\s*\/\s*2\s*/i, '').trim();
+    return name ? `1/2 ${name}` : null;
+  }
+  if (/^·/.test(trimmed)) {
+    const name = trimmed.replace(/^·\s*/, '').trim();
+    return name ? `Nota: ${name}` : null;
+  }
+  return null;
+}
+
+/** Desglose para UI e impresión (combo ▸, extras, sin ingredientes, nota cocina). */
 export function orderItemCustomizationParts(
   item: Pick<DeliveryOrderItem, 'notes' | 'extras' | 'ingredients'>,
 ): OrderItemCustomizationParts {
+  const composition: string[] = [];
+  const compositionKeys = new Set<string>();
   const added: string[] = [];
   const removed: string[] = [];
   const removedKeys = new Set<string>();
   const addedKeys = new Set<string>();
   for (const line of orderItemCustomizationDetail(item)) {
     const trimmed = line.trim();
+    const compositionLabel = compositionLabelFromExtra(trimmed);
+    if (compositionLabel) {
+      const key = compositionLabel.toLowerCase();
+      if (compositionKeys.has(key)) continue;
+      compositionKeys.add(key);
+      composition.push(compositionLabel);
+      continue;
+    }
     if (trimmed.startsWith('+')) {
       const name = trimmed.slice(1).trim();
       const key = name.toLowerCase();
@@ -83,15 +112,21 @@ export function orderItemCustomizationParts(
       removed.push(name);
     }
   }
-  return { added, removed, note: String(item.notes || '').trim() };
+  return {
+    composition,
+    added,
+    removed,
+    note: String(item.notes || '').trim(),
+  };
 }
 
-/** Notas de cocina / detalle: nota del ítem + quitar + extras. */
+/** Notas de cocina / detalle: nota del ítem + menú + quitar + extras. */
 export function orderItemKitchenNotes(
   item: Pick<DeliveryOrderItem, 'notes' | 'extras' | 'ingredients'>,
 ): string {
-  const { added, removed, note } = orderItemCustomizationParts(item);
+  const { composition, added, removed, note } = orderItemCustomizationParts(item);
   const lines = [
+    ...composition.map((n) => `> ${n}`),
     ...added.map((n) => `+ ${n}`),
     ...removed.map((n) => `- sin ${n}`),
     note,

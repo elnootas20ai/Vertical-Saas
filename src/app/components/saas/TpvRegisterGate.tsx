@@ -30,7 +30,7 @@ import {
   type DeliveryOrder,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
-import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
+import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, countNetSaleOperations, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
 import {
   canDownloadUrielCajaExcel,
   downloadUrielCajaClosingsExcel,
@@ -2631,7 +2631,7 @@ function RegisterStatusBar({
 }) {
   const expected = calcTpvExpectedCash(session);
   const collections = calcTpvShiftCollectionsTotal(session);
-  const txCount = session.transactions.length;
+  const txCount = countNetSaleOperations(session);
   const incidentCount = session.incidents?.filter(i => !i.resolvedAt).length || 0;
   const storeLabel = String(session.pointOfSaleName || '').trim();
   const terminalLabel = String(session.terminalName || '').trim();

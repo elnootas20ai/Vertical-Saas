@@ -95,12 +95,13 @@ function pushLineDetail(
   setTextSize(builder, 1, 2);
   line(builder, `${item.qty}x ${item.name}`, tallCols);
   setTextSize(builder, 1, 1);
+  for (const name of item.composition || []) line(builder, `  > ${name}`, width);
   for (const name of item.added || []) line(builder, `  + ${name}`, width);
   for (const name of item.removed || []) line(builder, `  SIN ${name}`, width);
   if (item.note) line(builder, `  NOTA: ${item.note}`, width);
 }
 
-/** Comanda cocina: doble alto + negrita; mods en rojo/énfasis si la Epson lo permite. */
+/** Comanda cocina: doble alto + negrita; menú completo remarcado; mods con énfasis. */
 function pushKitchenLineDetail(
   builder: EposBuilder,
   item: TicketDocument['lines'][number],
@@ -109,6 +110,12 @@ function pushKitchenLineDetail(
   const tallCols = colsForSize(paperWidthMm, false);
   setTextSize(builder, 1, 2);
   boldLine(builder, `${item.qty}x ${item.name}`, tallCols);
+  for (const name of item.composition || []) {
+    if (builder.addTextStyle) builder.addTextStyle(false, false, true);
+    setTextSize(builder, 1, 2);
+    line(builder, `  > ${name}`, tallCols);
+    if (builder.addTextStyle) builder.addTextStyle(false, false, false);
+  }
   for (const name of item.added || []) {
     // reverse=false, underline=false, emphasize=true — máximo contraste en 1 color.
     if (builder.addTextStyle) builder.addTextStyle(false, false, true);
@@ -270,6 +277,7 @@ export function buildEposTicket(
       setTextSize(builder, 1, 2);
       moneyRow(builder, `${item.qty}x ${item.name}`, money(item.total), tallCols);
       setTextSize(builder, 1, 1);
+      for (const name of item.composition || []) line(builder, `  > ${name}`, width);
       for (const name of item.added || []) line(builder, `  + ${name}`, width);
       for (const name of item.removed || []) line(builder, `  SIN ${name}`, width);
       if (item.note) line(builder, `  NOTA: ${item.note}`, width);

@@ -3,6 +3,7 @@ import {
   buildTpvRegisterSummary,
   calcTpvExpectedCash,
   calcTpvShiftCollectionsTotal,
+  countNetSaleOperations,
   normalizeTpvPaymentMethod,
   sumCashReturns,
   sumCashStaffConsumption,
@@ -50,6 +51,22 @@ describe('calcTpvShiftCollectionsTotal', () => {
     expect(row.cashOut).toBe(3);
     // 20 + 15 + 10 - 3 = 42 (fondo 100 no entra)
     expect(row.total).toBe(42);
+  });
+
+  it('al cancelar un pedido deja de sumar ese importe en Ef/Tj', () => {
+    const session = {
+      initialCashAmount: 50,
+      transactions: [
+        { type: 'sale', paymentMethod: 'efectivo', amount: 16.9, orderId: 'o1' },
+        { type: 'sale', paymentMethod: 'tarjeta', amount: 2.8, orderId: 'o2' },
+        { type: 'return', paymentMethod: 'efectivo', amount: 16.9, orderId: 'o1' },
+      ],
+    };
+    const row = calcTpvShiftCollectionsTotal(session);
+    expect(row.efectivo).toBe(0);
+    expect(row.tarjeta).toBe(2.8);
+    expect(row.total).toBe(2.8);
+    expect(countNetSaleOperations(session)).toBe(1);
   });
 });
 

@@ -784,7 +784,7 @@ export async function cancelDeliveryOrder(req, res) {
     const trimmedReason = String(cancelReason).trim();
     const db = getDeliveryDbName();
 
-    // Restar de caja si el pedido ya había entrado como venta (TPV cobrado, entregado, etc.).
+    // Cancelación por error: quitar la venta de la caja abierta (no es devolución al cliente).
     const netSaleInCaja = await resolveOpenSessionNetSaleForOrder(req, userId, existing, actorAccount);
 
     const doc = buildDeliveryOrderDocument(userId, {
@@ -796,11 +796,9 @@ export async function cancelDeliveryOrder(req, res) {
       ...(netSaleInCaja > 0.001
         ? {
             paymentCollected: false,
-            paymentStatus: 'refunded',
-            refundAmount: netSaleInCaja,
-            refundReason: trimmedReason,
-            refundedAt: now,
-            refundedBy: actorName,
+            // Pendiente/anulado: no marcar como "refunded" (eso es devolución formal).
+            paymentStatus: 'pending',
+            paidAmount: 0,
           }
         : {}),
       stageHistory: [
@@ -824,13 +822,19 @@ export async function cancelDeliveryOrder(req, res) {
 
     let cajaRegistration = { status: 'nothing_to_register' };
     if (netSaleInCaja > 0.001) {
-      cajaRegistration = await autoRegisterTpvReturnForOrder(req, userId, { ...doc, _rev: saved.rev }, {
-        amount: netSaleInCaja,
-        paymentMethod: existing.paymentMethod || 'efectivo',
-        registeredBy: actorName,
-        description: `Eliminación pedido ${doc.orderNumber || ''} — ${trimmedReason}`.trim(),
+      cajaRegistration = await removeTpvOrderSalesFromOpenSession(req, userId, { ...doc, _rev: saved.rev }, {
         callerAccount: actorAccount,
       });
+      // Si no se pudo borrar la venta (conflicto), compensar quitando el importe sin llamarlo devolución.
+      if (cajaRegistration?.status !== 'registered' && cajaRegistration?.status !== 'already_registered') {
+        cajaRegistration = await autoRegisterTpvReturnForOrder(req, userId, { ...doc, _rev: saved.rev }, {
+          amount: netSaleInCaja,
+          paymentMethod: existing.paymentMethod || 'efectivo',
+          registeredBy: actorName,
+          description: `Cancelación pedido ${doc.orderNumber || ''} — ${trimmedReason}`.trim(),
+          callerAccount: actorAccount,
+        });
+      }
       await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
     }
 
@@ -1191,7 +1195,7 @@ async function autoRegisterTpvReturnForOrder(req, userId, orderDoc, {
   return appendTpvSessionTransaction(req, userId, orderDoc, {
     type: 'return',
     paymentMethod: paymentMethod || 'efectivo',
-    description: description || `Devolución ${orderDoc.orderNumber || ''} — ${orderDoc.customerName || ''}`.trim(),
+    description: description || `Cancelación ${orderDoc.orderNumber || ''} — ${orderDoc.customerName || ''}`.trim(),
     registeredBy: registeredBy || 'Sistema',
     amount: Number(amount || 0),
   }, {
@@ -1199,6 +1203,82 @@ async function autoRegisterTpvReturnForOrder(req, userId, orderDoc, {
     targetAmount: Number(amount || 0),
     callerAccount,
   });
+}
+
+/**
+ * Cancelación: elimina las ventas del pedido en la caja abierta del PDV (como si no hubieran existido).
+ * No crea movimiento de devolución.
+ */
+async function removeTpvOrderSalesFromOpenSession(req, userId, orderDoc, { callerAccount } = {}) {
+  const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount);
+  if (!orderPdvId) {
+    return { status: 'no_pdv', message: 'No se pudo identificar el punto de venta del pedido para ajustar caja.' };
+  }
+
+  const db = getDeliveryDbName();
+  const orderId = String(orderDoc._id || '').trim();
+  const orderNumber = String(orderDoc.orderNumber || '').trim();
+  const maxAttempts = 5;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
+    if (!openSession) {
+      return {
+        status: 'no_open_session',
+        message: 'No hay caja abierta en esta tienda para quitar la venta cancelada.',
+      };
+    }
+
+    const txs = Array.isArray(openSession.transactions) ? openSession.transactions : [];
+    const isOrderTx = (t) => {
+      const oid = String(t?.orderId || t?.linkedDeliveryOrderId || '').trim();
+      const num = String(t?.orderNumber || '').trim();
+      return (orderId && oid === orderId) || (orderNumber && num === orderNumber);
+    };
+    const removed = txs.filter((t) => t?.type === 'sale' && isOrderTx(t));
+    if (removed.length === 0) {
+      return { status: 'already_registered', message: 'Esa venta ya no estaba en la caja abierta.' };
+    }
+
+    const kept = txs.filter((t) => !(t?.type === 'sale' && isOrderTx(t)));
+    const salesByChannel = {};
+    for (const t of kept) {
+      if (t.type === 'sale' && t.channel) {
+        salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + Number(t.amount || 0);
+      }
+    }
+    const linkedOrderIds = (openSession.linkedOrderIds || []).filter((id) => String(id) !== orderId);
+    const sessionDoc = buildTpvRegisterSessionDocument(userId, {
+      ...openSession,
+      transactions: kept,
+      salesByChannel,
+      linkedOrderIds,
+    }, openSession);
+
+    try {
+      const saved = await putDocument(req, db, sessionDoc._id, sessionDoc);
+      const account = callerAccount || await findAccountByUserId(req, userId);
+      const sanitized = sanitizeTpvRegisterSession({ ...sessionDoc, _rev: saved.rev });
+      broadcastTpvSessionLive(account, userId, sanitized);
+      return {
+        status: 'registered',
+        session: sanitized,
+        removedAmount: removed.reduce((s, t) => s + Number(t.amount || 0), 0),
+      };
+    } catch (err) {
+      const isConflict = /conflict|409/i.test(String(err?.message || ''));
+      if (!isConflict || attempt === maxAttempts - 1) {
+        logger.error({ tag: 'CAJA', orderId, err: err?.message, attempt }, 'Error quitando venta cancelada de caja TPV');
+        return {
+          status: 'error',
+          message: err?.message || 'No se pudo quitar la venta de la caja abierta.',
+        };
+      }
+    }
+  }
+
+  return { status: 'error', message: 'No se pudo ajustar la caja tras varios intentos.' };
 }
 
 async function maybeRegisterTpvSaleOnTpvChannelOrderCreate(req, userId, doc, account) {

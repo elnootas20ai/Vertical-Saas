@@ -177,7 +177,10 @@ export function buildCeoTpvStoreRows(
       })
     : retailBase;
 
-  const scopedPdvs = filterPointsOfSaleForWorkCenters(pointsOfSale, retail);
+  // Pasar businessId: si el WC está vacío/roto, no perder PDVs de la empresa (p. ej. Badalona).
+  const scopedPdvs = filterPointsOfSaleForWorkCenters(pointsOfSale, retail, {
+    businessId,
+  });
   return buildDeliverySidebarStoreRows(retail, scopedPdvs).filter(
     (r) => !r.inactive && !r.needsPdv && Boolean(r.pdvId),
   );

@@ -26,7 +26,142 @@ describe('orderItemCustomizationDetail — sin duplicar SIN', () => {
     });
     expect(parts.removed).toEqual(['cebolla']);
     expect(parts.added).toEqual(['búfala']);
+    expect(parts.composition).toEqual([]);
     expect(parts.note).toBe('tostada');
+  });
+
+  it('incluye composición del menú/combo (▸) y mitades (½)', () => {
+    const parts = orderItemCustomizationParts({
+      extras: [
+        '▸ Margarita',
+        '▸ Patatas',
+        '▸ Coca Cola',
+        '+ Extra queso',
+        '- sin cebolla',
+        '½ Diávola',
+        '½ Barbacoa',
+      ],
+    });
+    expect(parts.composition).toEqual([
+      'Margarita',
+      'Patatas',
+      'Coca Cola',
+      '1/2 Diávola',
+      '1/2 Barbacoa',
+    ]);
+    expect(parts.added).toEqual(['Extra queso']);
+    expect(parts.removed).toEqual(['cebolla']);
+  });
+});
+
+describe('ticket cocina — todos los productos: notas y detalle', () => {
+  function kitchenDoc(items, orderNotes = '') {
+    return buildTicketDocument({
+      business: { name: 'hoypecamos', taxId: 'B67284315' },
+      order: {
+        _id: 'o-kit',
+        orderNumber: 'PED-K',
+        customerName: 'cli',
+        deliveryType: 'recogida',
+        paymentStatus: 'pending',
+        totalAmount: 40,
+        notes: orderNotes || undefined,
+        items,
+      },
+      variant: 'kitchen',
+    });
+  }
+
+  it('producto simple: nota de línea + nota de pedido', () => {
+    const doc = kitchenDoc(
+      [{ quantity: 1, name: 'Margarita', total: 10, notes: 'poco hecha', extras: [] }],
+      'llamar al llegar',
+    );
+    expect(doc.lines[0].note).toBe('poco hecha');
+    expect(doc.lines[0].composition).toBeUndefined();
+    expect(doc.orderNotes).toBe('llamar al llegar');
+  });
+
+  it('producto con extras y sin: +/− y nota', () => {
+    const doc = kitchenDoc([
+      {
+        quantity: 2,
+        name: 'Diávola',
+        total: 24,
+        notes: 'cortar',
+        extras: ['+ Extra queso', '- sin cebolla'],
+        ingredients: [{ name: 'cebolla', quantity: 'sin' }],
+      },
+    ]);
+    expect(doc.lines[0].added).toEqual(['Extra queso']);
+    expect(doc.lines[0].removed).toEqual(['cebolla']);
+    expect(doc.lines[0].note).toBe('cortar');
+  });
+
+  it('combo: composición + extras + nota de componente + nota de línea', () => {
+    const doc = kitchenDoc([
+      {
+        quantity: 1,
+        name: 'Menú Individual',
+        total: 18,
+        notes: 'sin picante',
+        extras: [
+          '▸ Margarita',
+          '▸ Tequeños',
+          '▸ Agua',
+          '+ Extra bacon',
+          '- sin orégano',
+          '· bien caliente',
+        ],
+      },
+    ]);
+    expect(doc.lines[0].composition).toEqual([
+      'Margarita',
+      'Tequeños',
+      'Agua',
+      'Nota: bien caliente',
+    ]);
+    expect(doc.lines[0].added).toEqual(['Extra bacon']);
+    expect(doc.lines[0].removed).toEqual(['orégano']);
+    expect(doc.lines[0].note).toBe('sin picante');
+  });
+
+  it('mitad y mitad: 1/2 + extras', () => {
+    const doc = kitchenDoc([
+      {
+        quantity: 1,
+        name: 'Pizza mitad',
+        total: 14,
+        extras: ['½ Diávola', '½ Barbacoa', '+ Extra mozzarella'],
+      },
+    ]);
+    expect(doc.lines[0].composition).toEqual(['1/2 Diávola', '1/2 Barbacoa']);
+    expect(doc.lines[0].added).toEqual(['Extra mozzarella']);
+  });
+
+  it('varios productos en el mismo pedido: cada uno conserva su detalle', () => {
+    const doc = kitchenDoc([
+      { quantity: 1, name: 'Agua', total: 2, notes: 'fria' },
+      {
+        quantity: 1,
+        name: 'Menú Dúo',
+        total: 22,
+        extras: ['▸ Pepperoni', '▸ Margarita', '▸ Patatas', '▸ Coca'],
+      },
+      {
+        quantity: 1,
+        name: 'Burger',
+        total: 11,
+        notes: 'punto medio',
+        extras: ['- sin pepinillo', '+ Extra cheddar'],
+      },
+    ]);
+    expect(doc.lines).toHaveLength(3);
+    expect(doc.lines[0].note).toBe('fria');
+    expect(doc.lines[1].composition).toEqual(['Pepperoni', 'Margarita', 'Patatas', 'Coca']);
+    expect(doc.lines[2].note).toBe('punto medio');
+    expect(doc.lines[2].added).toEqual(['Extra cheddar']);
+    expect(doc.lines[2].removed).toEqual(['pepinillo']);
   });
 });
 

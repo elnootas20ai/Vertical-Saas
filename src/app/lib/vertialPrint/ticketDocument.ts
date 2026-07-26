@@ -6,6 +6,8 @@ export interface TicketLine {
   name: string;
   total: number;
   note?: string;
+  /** Componentes del menú/combo (pizzas, guarnición, bebida…) y mitades. */
+  composition?: string[];
   added?: string[];
   removed?: string[];
 }
@@ -187,6 +189,7 @@ export function buildTicketDocument({
         name: String(item.name || '').trim(),
         total: Number(item.total || 0),
         note: parts.note || undefined,
+        composition: parts.composition.length > 0 ? parts.composition : undefined,
         added: parts.added.length > 0 ? parts.added : undefined,
         removed: parts.removed.length > 0 ? parts.removed : undefined,
       };
