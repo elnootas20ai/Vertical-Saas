@@ -878,6 +878,11 @@ export function TpvRapidoOrderFlow({
   const [newClientPayment, setNewClientPayment] = useState<PaymentMethod | ''>('');
   const [creatingClient, setCreatingClient] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
+  /**
+   * Atención rápida = flujo paralelo (carta → cobrar).
+   * No usa el buscador CRM ni selectClient del hook.
+   */
+  const [quickAttentionActive, setQuickAttentionActive] = useState(false);
 
   const { results, isSearching, settledQuery, searchError, selectedClient, selectClient, clearSelection, clearResults } =
     useClientPhoneSearch({
@@ -885,7 +890,8 @@ export function TpvRapidoOrderFlow({
       phone: phoneInput,
       // Toda la cartera del titular (como el CRM sin filtro raro de otra empresa).
       businessId: undefined,
-      enabled: !showCreateForm,
+      // Con atención rápida el buscador CRM está apagado del todo.
+      enabled: !showCreateForm && !quickAttentionActive,
       matchByName: true,
       minQueryLength: 2,
       debounceMs: 400,
@@ -966,13 +972,8 @@ export function TpvRapidoOrderFlow({
   const [companyPromos, setCompanyPromos] = useState<StoredPromotion[]>(() =>
     typeof window !== 'undefined' ? readStoredPromotions() : [],
   );
-  /** Recogida en local sin ficha CRM; va en paralelo a la búsqueda de clientes. */
-  const [quickAttentionActive, setQuickAttentionActive] = useState(false);
-
   const startQuickAttentionFlow = useCallback(() => {
-    // Solo flag + cliente sintético en deliveryFlowClient.
-    // NO selectClient(...): eso metía un tpv-* en el hook de búsqueda y dejaba
-    // el buscador de fichas CRM (uriel/pau/alfons…) raro o “ciego” al volver.
+    // Paralelo al CRM: apaga buscador, limpia estado, va a carta. Sin selectClient.
     clearResults();
     clearSelection();
     clearClientPhoneSearchCache();
@@ -1734,6 +1735,19 @@ export function TpvRapidoOrderFlow({
     setSelectedClientPromoId('');
   }, [clearSelection, catalogSections, catalog]);
 
+  const exitQuickAttentionToClientSearch = useCallback(() => {
+    setQuickAttentionActive(false);
+    clearSelection();
+    clearResults();
+    clearClientPhoneSearchCache();
+    setPhoneInput('');
+    setShowCreateForm(false);
+    setCompletedSteps(new Set());
+    setDeliveryType(null);
+    setCurrentStep('client');
+    setTimeout(() => phoneRef.current?.focus(), 150);
+  }, [clearSelection, clearResults]);
+
   const goToPreviousStep = useCallback(() => {
     if (isRestaurantMode) {
       if (currentStep === 'payment') setCurrentStep('products');
@@ -1744,13 +1758,7 @@ export function TpvRapidoOrderFlow({
       && (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient))
       && deliveryType === 'recogida'
     ) {
-      setQuickAttentionActive(false);
-      clearSelection();
-      clearClientPhoneSearchCache();
-      setCompletedSteps(new Set());
-      setDeliveryType(null);
-      setCurrentStep('client');
-      setTimeout(() => phoneRef.current?.focus(), 150);
+      exitQuickAttentionToClientSearch();
       return;
     }
     const order: Step[] = ['client', 'delivery', 'products', 'payment'];
@@ -1758,7 +1766,7 @@ export function TpvRapidoOrderFlow({
     if (idx > 0) {
       setCurrentStep(order[idx - 1]);
     }
-  }, [currentStep, isRestaurantMode, selectedClient, deliveryType, clearSelection, quickAttentionActive]);
+  }, [currentStep, isRestaurantMode, selectedClient, deliveryType, quickAttentionActive, exitQuickAttentionToClientSearch]);
 
   // ─── Client selection ─────────────────────────────────────────────────────
   const handleSelectClient = useCallback(
