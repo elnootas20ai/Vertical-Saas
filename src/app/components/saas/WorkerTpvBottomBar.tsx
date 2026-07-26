@@ -1,8 +1,9 @@
 import { useNavigate } from 'react-router-dom';
 import { ClipboardCheck, LogOut } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
-import { exitTpvTabletSessionPath, isTpvTabletBound } from '../../lib/tpvTabletSession';
+import { isTpvTabletBound, leaveTpvTabletSession } from '../../lib/tpvTabletSession';
 import { requestTpvStockReviewOpen } from '../../lib/tpvStockReview';
 import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 
@@ -16,6 +17,7 @@ export function WorkerTpvBottomBar({
   onExitCeo?: () => void;
 } = {}) {
   const navigate = useNavigate();
+  const { logout } = useAuth();
   const { currentBusiness } = useBusiness();
   const { config } = useVerticalCatalog();
   const tabletBound = isTpvTabletBound();
@@ -26,7 +28,7 @@ export function WorkerTpvBottomBar({
   if (!showStock && !showExit) return null;
 
   const handleExitTablet = () => {
-    navigate(exitTpvTabletSessionPath(), { replace: true });
+    void leaveTpvTabletSession(logout);
   };
 
   const handleExitCeo = () => {

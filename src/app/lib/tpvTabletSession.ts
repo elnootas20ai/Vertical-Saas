@@ -139,10 +139,30 @@ export function clearTpvTabletBinding(): void {
   }
 }
 
+/** Pantalla pública de código de tienda (fuera del SaaS). */
+export const TPV_TABLET_LOGIN_PATH = '/auth/tpv-tablet';
+
 /** Desvincula la tablet y devuelve la ruta de login por código. */
 export function exitTpvTabletSessionPath(): string {
   clearTpvTabletBinding();
-  return '/auth/tpv-tablet';
+  return TPV_TABLET_LOGIN_PATH;
+}
+
+/**
+ * Salir del TPV tablet: quita el vínculo de tienda, cierra sesión auth
+ * y sale del SaaS a la pantalla de código (no dashboard / no Modomio).
+ * Usa location.replace para evitar races de redirect a /saas.
+ */
+export async function leaveTpvTabletSession(logout: () => Promise<void>): Promise<void> {
+  clearTpvTabletBinding();
+  try {
+    await logout();
+  } catch {
+    // Seguir igual a la pantalla de código.
+  }
+  if (typeof window !== 'undefined') {
+    window.location.replace(TPV_TABLET_LOGIN_PATH);
+  }
 }
 
 export function isTpvTabletBound(): boolean {

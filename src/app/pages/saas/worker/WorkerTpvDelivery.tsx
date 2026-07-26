@@ -22,7 +22,7 @@ import {
 } from '../../../lib/deliveryApi';
 import { normalizeStaffConsumptionConfig } from '../../../lib/staffConsumptionUtils';
 import { resolvePdvIdFromStoreRef, filterOrdersForActivePdv } from '../../../lib/pdvScope';
-import { exitTpvTabletSessionPath, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
+import { leaveTpvTabletSession, readTpvTabletBinding } from '../../../lib/tpvTabletSession';
 import { useTpvRegisterBoardReady, useTpvRegisterIfOpen, useTpvStatusBarQuickActions } from '../../../components/saas/TpvRegisterGate';
 import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
@@ -1120,7 +1120,7 @@ export function WorkerTpvDelivery({
   forcedPdvId = null,
   onChangeStore,
 }: WorkerTpvDeliveryProps = {}) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const activeStoreScope = useActiveStoreScope();
   const navigate = useNavigate();
@@ -1632,8 +1632,8 @@ export function WorkerTpvDelivery({
   }, [loadOrders]);
 
   const exitTabletTpv = useCallback(() => {
-    navigate(exitTpvTabletSessionPath(), { replace: true });
-  }, [navigate]);
+    void leaveTpvTabletSession(logout);
+  }, [logout]);
 
   const openOrderHistory = useCallback(() => {
     setShowDelivered(true);

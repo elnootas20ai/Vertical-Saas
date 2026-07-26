@@ -1,12 +1,16 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
   TPV_TABLET_DELIVERY_PATH,
+  TPV_TABLET_LOGIN_PATH,
   TPV_TABLET_RESTAURANT_PATH,
+  exitTpvTabletSessionPath,
   isTpvTabletAllowedPath,
   isTpvTabletWorkerPath,
+  leaveTpvTabletSession,
   resolveTpvTabletWorkerPath,
   writeTpvTabletBinding,
   clearTpvTabletBinding,
+  readTpvTabletBinding,
   TPV_TABLET_VERTICAL_RESTAURANT,
 } from '../src/app/lib/tpvTabletSession.ts';
 
@@ -76,5 +80,47 @@ describe('tpvTabletSession — rutas tablet', () => {
     });
     expect(isTpvTabletAllowedPath('/saas/user-dashboard')).toBe(false);
     expect(isTpvTabletAllowedPath(resolveTpvTabletWorkerPath())).toBe(true);
+  });
+
+  it('exitTpvTabletSessionPath limpia binding y apunta a login tablet', () => {
+    writeTpvTabletBinding({
+      terminalCode: 'STORE-001',
+      pdvId: 'pdv-1',
+      workCenterId: 'wc-1',
+      businessId: 'biz-1',
+      dataUserId: 'owner-1',
+    });
+    expect(exitTpvTabletSessionPath()).toBe(TPV_TABLET_LOGIN_PATH);
+    expect(readTpvTabletBinding()).toBeNull();
+  });
+
+  it('leaveTpvTabletSession hace logout y sale a pantalla de código (fuera SaaS)', async () => {
+    writeTpvTabletBinding({
+      terminalCode: 'STORE-001',
+      pdvId: 'pdv-1',
+      workCenterId: 'wc-1',
+      businessId: 'biz-1',
+      dataUserId: 'owner-1',
+    });
+    let logoutCalls = 0;
+    const replaced = [];
+    const prev = globalThis.window;
+    globalThis.window = {
+      location: {
+        replace: (url) => {
+          replaced.push(url);
+        },
+      },
+    };
+    try {
+      await leaveTpvTabletSession(async () => {
+        logoutCalls += 1;
+      });
+      expect(logoutCalls).toBe(1);
+      expect(readTpvTabletBinding()).toBeNull();
+      expect(replaced).toEqual([TPV_TABLET_LOGIN_PATH]);
+    } finally {
+      globalThis.window = prev;
+    }
   });
 });

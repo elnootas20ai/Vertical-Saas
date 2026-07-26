@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Monitor, Store } from 'lucide-react';
+import { Monitor, Store } from 'lucide-react';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
-import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
@@ -223,14 +222,8 @@ export function TpvTabletLogin() {
           </form>
         </div>
 
-        <button
-          type="button"
-          onClick={() => navigate(AUTH_PATHS.entry)}
-          className="mt-6 mx-auto flex items-center gap-2 text-sm text-white/70 hover:text-white transition-colors"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Volver al acceso
-        </button>
+        {/* Sin “Volver al acceso”: la tablet de tienda debe quedarse fuera del SaaS
+            (evitar saltar a cuenta Modomio / dashboard). */}
       </div>
     </div>
   );

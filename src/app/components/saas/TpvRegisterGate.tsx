@@ -95,7 +95,7 @@ import {
   shouldApplyTpvRegisterLoadResult,
 } from '../../lib/tpvRegisterScope';
 import {
-  exitTpvTabletSessionPath,
+  leaveTpvTabletSession,
   mergeTabletBindingPdv,
   readTpvTabletBinding,
 } from '../../lib/tpvTabletSession';
@@ -383,7 +383,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
   restaurantOpening?: boolean;
 }) {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { currentBusiness } = useBusiness();
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
@@ -679,7 +679,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const goBack = () => {
     if (isTabletMode) {
-      navigate(exitTpvTabletSessionPath(), { replace: true });
+      void leaveTpvTabletSession(logout);
       return;
     }
     try {
