@@ -15,6 +15,14 @@ describe('classifyFoodFamily', () => {
     expect(classifyFoodFamily('Tacos', 'Pastor')).toBe('taco');
     expect(classifyFoodFamily('Extras', 'Coca Cola')).toBe(null);
   });
+
+  it('Premium, Especialidad y Mitad y mitad cuentan como pizza', () => {
+    expect(classifyFoodFamily('Premium', 'Trufada')).toBe('pizza');
+    expect(classifyFoodFamily('Especialidad', 'Sanginaccio')).toBe('pizza');
+    expect(classifyFoodFamily('Calzone', 'Calzone jamón')).toBe('pizza');
+    expect(classifyFoodFamily('Pizzas', 'Mitad y mitad')).toBe('pizza');
+    expect(classifyFoodFamily('Premium', 'Premium mitad y mitad')).toBe('pizza');
+  });
 });
 
 describe('pizzaUnitsFromProductLabel', () => {
@@ -119,6 +127,48 @@ describe('buildShiftFoodFamilyReport', () => {
       },
     ]);
     expect(report.total).toEqual({ pizza: 0, burger: 1, taco: 0 });
+  });
+
+  it('Mitad y mitad = 1 pizza (no 2 por los sabores ½)', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 'hh1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          {
+            name: 'Mitad y mitad',
+            category: 'Pizzas',
+            quantity: 1,
+            extras: ['½ Margarita', '½ Pepperoni'],
+          },
+          {
+            name: 'Premium mitad y mitad',
+            category: 'Premium',
+            quantity: 2,
+            extras: ['½ Trufada', '½ Carbonara'],
+          },
+        ],
+      },
+    ]);
+    // 1 + 2×1 = 3 (cada mitad-y-mitad es una pizza)
+    expect(report.total).toEqual({ pizza: 3, burger: 0, taco: 0 });
+  });
+
+  it('Premium y Especialidad sueltas suman como pizza', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 'p1',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          { name: 'Trufada', category: 'Premium', quantity: 1 },
+          { name: 'Sanginaccio', category: 'Especialidad', quantity: 2 },
+          { name: 'Margarita', category: 'Pizzas', quantity: 1 },
+        ],
+      },
+    ]);
+    expect(report.total).toEqual({ pizza: 4, burger: 0, taco: 0 });
   });
 });
 

@@ -34,6 +34,15 @@ function fold(s: string): string {
     .replace(/\p{M}/gu, '');
 }
 
+/** ¿Nombre/categoría de producto «mitad y mitad» (1 pizza con 2 sabores)? */
+export function isHalfHalfFoodLabel(
+  category: string | undefined,
+  name: string | undefined,
+): boolean {
+  const blob = `${fold(category || '')} ${fold(name || '')}`.trim();
+  return /mitad\s*y\s*mitad|half\s*(and|&|-)?\s*half|halfhalf/.test(blob);
+}
+
 /** Clasifica una línea de pedido en pizza / burger / taco (o null si no aplica). */
 export function classifyFoodFamily(
   category: string | undefined,
@@ -43,7 +52,15 @@ export function classifyFoodFamily(
   const nm = fold(name || '');
   if (/taco/.test(cat) || /\btacos?\b/.test(nm)) return 'taco';
   if (/burger|hamburg|smash/.test(cat) || /burger|hamburg|smash/.test(nm)) return 'burger';
-  if (/pizza|calzone/.test(cat) || /pizza|calzone/.test(nm)) return 'pizza';
+  // Carta delivery: Pizzas + Premium + Especialidad + Calzone + Mitad y mitad = pizza.
+  // Sin esto, «Trufada» (Premium) o «Mitad y mitad» en Premium no sumaban al cierre.
+  if (
+    /pizza|calzone|premium|especialidad/.test(cat) ||
+    /pizza|calzone/.test(nm) ||
+    isHalfHalfFoodLabel(category, name)
+  ) {
+    return 'pizza';
+  }
   return null;
 }
 
@@ -115,6 +132,12 @@ function countItem(item: DeliveryOrderItem): FoodFamilyCounts {
   const comboParts = extras
     .map((raw) => parseComboExtraLine(raw))
     .filter((p): p is { name: string; units: number } => Boolean(p));
+
+  // Mitad y mitad: 1 pizza (2 sabores en extras «½ …»). No sumar cada mitad.
+  if (isHalfHalfFoodLabel(item.category, item.name)) {
+    addCounts(out, 'pizza', qty);
+    return out;
+  }
 
   // Menús TPV: las pizzas reales van en extras (▸ Pizza), no en el nombre del combo.
   if (comboParts.length > 0) {
