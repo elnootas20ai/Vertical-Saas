@@ -160,6 +160,10 @@ export function useClientPhoneSearch(params: {
       return;
     }
 
+    // Feedback al instante (tras deploy la 1.ª carga puede ir a ~10s).
+    setIsSearching(true);
+    setSearchError(null);
+
     const seq = ++requestSeqRef.current;
 
     timerRef.current = setTimeout(async () => {
@@ -167,8 +171,6 @@ export function useClientPhoneSearch(params: {
       if (abortRef.current) abortRef.current.abort();
       const controller = new AbortController();
       abortRef.current = controller;
-      setIsSearching(true);
-      setSearchError(null);
       try {
         // Siempre search-by-phone (includeLegacy + fallbackAll): es la ruta TPV que encuentra
         // fichas legacy. No pasar por GET /api/clients?search= (más lento y sin includeLegacy).
@@ -208,7 +210,7 @@ export function useClientPhoneSearch(params: {
         setIsSearching(false);
       } catch (err: unknown) {
         if (isAbortError(err) || controller.signal.aborted) {
-          if (seq === requestSeqRef.current) setIsSearching(false);
+          // No apagar loading si ya hay otra búsqueda vigente (el usuario sigue escribiendo).
           return;
         }
         if (seq !== requestSeqRef.current) return;
@@ -225,6 +227,11 @@ export function useClientPhoneSearch(params: {
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      // Al cambiar la query, aborta el fetch anterior (el servidor sigue calentando la cartera en inflight).
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
+      }
     };
   }, [
     shouldSearch,

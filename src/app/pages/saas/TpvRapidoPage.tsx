@@ -23,7 +23,7 @@ import {
   type TpvPaymentMethod,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
-import { updateClientRequest, getClientDetailRequest, listClientsPageRequest } from '../../lib/crmApi';
+import { updateClientRequest, getClientDetailRequest, listClientsPageRequest, searchClientsByPhoneRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -815,16 +815,34 @@ export function TpvRapidoOrderFlow({
     return ownerId || fromResolver || fromAppCount;
   }, [userId, user, currentBusiness]);
 
-  // Precalienta la caché de clientes en el servidor al abrir el TPV (cuentas grandes).
-  // Sin businessId: carga toda la cartera del titular (no filtrar por empresa events/otra).
-  // Sin refresh=1: invalidar aquí tiraba la caché y la 1.ª búsqueda volvía a tardar ~10s.
+  // Precalienta la cartera + índice de búsqueda al abrir el TPV (tras deploy puede tardar ~10s).
+  // Así la 1.ª tecla del usuario no se come el cold start.
   useEffect(() => {
     if (!clientSearchUserId) return;
-    void listClientsPageRequest(clientSearchUserId, {
-      limit: 1,
-      skip: 0,
-      lite: true,
-    }).catch(() => undefined);
+    let cancelled = false;
+    void (async () => {
+      try {
+        await listClientsPageRequest(clientSearchUserId, {
+          limit: 1,
+          skip: 0,
+          lite: true,
+        });
+        if (cancelled) return;
+        await searchClientsByPhoneRequest(
+          clientSearchUserId,
+          'a',
+          1,
+          undefined,
+          undefined,
+          { includeLegacy: true, fallbackAll: true },
+        );
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [clientSearchUserId]);
 
   /** Evita TPV sobre limpieza/otra vertical: cambia al delivery de la cuenta. */
@@ -2247,29 +2265,8 @@ export function TpvRapidoOrderFlow({
           return;
         }
 
-        // Primer ticket automático al crear = cocina (recogida y domicilio).
-        // Cliente/final se imprime al pasar a reparto o con el botón manual.
-        if (currentBusiness) {
-          const printableOrder = {
-            ...orderData,
-            _id: `local-${orderData.orderNumber}`,
-            id: `local-${orderData.orderNumber}`,
-            type: 'delivery_order',
-            user_id: userId,
-            orderNumber: orderData.orderNumber || '',
-            createdAt: now,
-            updatedAt: now,
-          } as DeliveryOrder;
-          void printDeliveryTicket({
-            order: printableOrder,
-            business: businessTicketInfoFrom(currentBusiness),
-            salesPointName: pdvName,
-            cashierName: takerName,
-            variant: 'kitchen',
-            accountEmail: user?.email,
-          });
-        }
-
+        // Primero guardar pedido y mostrar éxito; luego ticket cocina.
+        // Si se imprime antes, en tablet el bridge nativo puede dejar la UI en «Enviando…».
         const { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
         notifyDeliveryOpsLive({
           reason: 'order_created',
@@ -2281,6 +2278,20 @@ export function TpvRapidoOrderFlow({
           toast.success('Pedido creado, pero no quedó en caja — revisa que esté abierta');
         } else {
           toast.success('Pedido creado y registrado en caja');
+        }
+
+        if (currentBusiness) {
+          const ticketBusiness = businessTicketInfoFrom(currentBusiness);
+          window.setTimeout(() => {
+            void printDeliveryTicket({
+              order: created,
+              business: ticketBusiness,
+              salesPointName: pdvName,
+              cashierName: takerName,
+              variant: 'kitchen',
+              accountEmail: user?.email,
+            });
+          }, 0);
         }
 
         if (restaurantTable && !restaurantTable.isCounter && userId) {
@@ -2564,7 +2575,9 @@ export function TpvRapidoOrderFlow({
           : {}),
       };
 
-      // Ticket en paralelo al POST de caja.
+      const { order: cajaOrder } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+
+      // Ticket cliente después de cobrar (no bloquear la UI con el bridge nativo).
       if (currentBusiness) {
         const ticketItems = splitLabel
           ? orderData.items
@@ -2574,27 +2587,22 @@ export function TpvRapidoOrderFlow({
               total: line.lineTotal,
               notes: line.notes,
             }));
-        void printDeliveryTicket({
-          order: {
-            ...orderData,
-            _id: `local-${orderData.orderNumber}`,
-            id: `local-${orderData.orderNumber}`,
-            type: 'delivery_order',
-            user_id: userId,
-            orderNumber: orderData.orderNumber || '',
-            createdAt: now,
-            updatedAt: now,
-            items: ticketItems as DeliveryOrder['items'],
-          } as DeliveryOrder,
-          business: businessTicketInfoFrom(currentBusiness),
-          salesPointName: pdvName,
-          cashierName: takerName,
-          variant: 'customer',
-          accountEmail: user?.email,
-        });
+        const ticketBusiness = businessTicketInfoFrom(currentBusiness);
+        const ticketOrder = {
+          ...cajaOrder,
+          items: ticketItems as DeliveryOrder['items'],
+        } as DeliveryOrder;
+        window.setTimeout(() => {
+          void printDeliveryTicket({
+            order: ticketOrder,
+            business: ticketBusiness,
+            salesPointName: pdvName,
+            cashierName: takerName,
+            variant: 'customer',
+            accountEmail: user?.email,
+          });
+        }, 0);
       }
-
-      const { order: cajaOrder } = await createDeliveryOrderWithCajaStatus(userId, orderData);
       notifyDeliveryOpsLive({
         reason: 'order_paid',
         businessId: cajaOrder.business_id || writeBusinessId || businessId,
@@ -3386,6 +3394,12 @@ export function TpvRapidoOrderFlow({
               </div>
             )}
 
+            {isSearching && results.length === 0 && clientSearchReady && (
+              <p className="mt-3 text-sm text-indigo-700 dark:text-indigo-300 font-medium">
+                Buscando clientes…
+              </p>
+            )}
+
             {results.length > 0 && (
               <div className="mt-3 space-y-2">
                 {results.map((client) => (
@@ -3403,7 +3417,9 @@ export function TpvRapidoOrderFlow({
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   {searchError
                     ? 'Revisa la conexión e inténtalo otra vez.'
-                    : clientSearchSettledEmpty
+                    : isSearching
+                      ? 'Un momento, cargando la cartera…'
+                      : clientSearchSettledEmpty
                       ? 'No se encontró ningún cliente con esa búsqueda'
                       : 'Si no aparece, crea uno o usa atención rápida'}
                 </p>
