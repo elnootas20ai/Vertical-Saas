@@ -16,7 +16,7 @@ import {
 } from '../../../lib/catalogCustomization';
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import { useModalClose } from '../../../hooks/useModalClose';
-import { TpvModalRoot } from './TpvModalRoot';
+import { dismissTpvKeyboard, TpvModalRoot } from './TpvModalRoot';
 
 type CustomizeTab = 'ingredients' | 'extras' | 'notes';
 
@@ -260,7 +260,8 @@ export function TpvItemCustomizeModal({
 
   return (
     <TpvModalRoot>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      {/* Tap fuera = solo bajar teclado; no cancelar la personalización. */}
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={dismissTpvKeyboard} />
       <div
         className="relative w-full sm:max-w-3xl h-[94dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col border-2 border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"

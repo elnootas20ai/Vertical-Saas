@@ -1,4 +1,5 @@
 import {
+  cancelledOrderHistoryLabel,
   isCompletedHistoryBoardOrder,
   isCompletedShiftOrder,
   isDeliveredBoardOrder,
@@ -25,7 +26,7 @@ describe('isDeliveredBoardOrder', () => {
 });
 
 describe('isCompletedHistoryBoardOrder', () => {
-  it('incluye entregados y eliminados que sí se entregaron', () => {
+  it('incluye entregados y cualquier eliminado del turno', () => {
     expect(isCompletedHistoryBoardOrder({ status: 'entregado' })).toBe(true);
     expect(isCompletedHistoryBoardOrder({
       status: 'cancelled',
@@ -36,13 +37,31 @@ describe('isCompletedHistoryBoardOrder', () => {
       status: 'cancelled',
       stageHistory: [{ status: 'entregado', date: '2026-07-23T12:00:00.000Z' }],
     })).toBe(true);
-  });
-
-  it('no mete cancelados que nunca se entregaron', () => {
     expect(isCompletedHistoryBoardOrder({
       status: 'cancelled',
       stageHistory: [{ status: 'nuevo', date: '2026-07-23T10:00:00.000Z' }],
-    })).toBe(false);
+    })).toBe(true);
+    expect(isCompletedHistoryBoardOrder({
+      status: 'cancelled',
+      stageHistory: [{ status: 'en_reparto', date: '2026-07-23T11:00:00.000Z' }],
+    })).toBe(true);
+  });
+});
+
+describe('cancelledOrderHistoryLabel', () => {
+  it('distingue eliminado entregado, reparto y montaje', () => {
+    expect(cancelledOrderHistoryLabel({
+      status: 'cancelled',
+      deliveredAt: '2026-07-23T12:00:00.000Z',
+    })).toBe('Eliminado · entregado');
+    expect(cancelledOrderHistoryLabel({
+      status: 'cancelled',
+      stageHistory: [{ status: 'en_reparto', date: '2026-07-23T11:00:00.000Z' }],
+    })).toBe('Eliminado · reparto');
+    expect(cancelledOrderHistoryLabel({
+      status: 'cancelled',
+      stageHistory: [{ status: 'listo', date: '2026-07-23T10:00:00.000Z' }],
+    })).toBe('Eliminado · montaje');
   });
 });
 

@@ -28,6 +28,7 @@ import { getWorkerInitials } from '../../../lib/tpvClockedInWorkers';
 import { pickDefaultActivePdvId } from '../../../lib/deliveryOpsPdvSelection';
 import { useTpvOrderFlowChrome, useTpvSuppressBottomBar } from '../../../context/TpvChromeContext';
 import {
+  cancelledOrderHistoryLabel,
   isCancelledDeliveryOrder,
   isCompletedHistoryBoardOrder,
   isDeliveredBoardOrder,
@@ -150,7 +151,7 @@ function isCompletedBoardOrder(order: DeliveryOrder): boolean {
   return isDeliveredBoardOrder(order);
 }
 
-/** Completados del turno: incluye eliminados que ya estaban entregados. */
+/** Historial del turno: entregados + eliminados (también los de montaje/reparto). */
 function isHistoryCompletedBoardOrder(order: DeliveryOrder): boolean {
   return isCompletedHistoryBoardOrder(order);
 }
@@ -1742,8 +1743,8 @@ export function WorkerTpvDelivery({
       },
       {
         id: 'history',
-        label: 'Historial de pedidos',
-        title: `Completados del turno (${stats.delivered})`,
+        label: `Historial del turno (${stats.delivered})`,
+        title: `Completados y eliminados del turno (${stats.delivered})`,
         active: showDelivered,
         icon: <History />,
         onClick: openOrderHistory,
@@ -2091,11 +2092,11 @@ export function WorkerTpvDelivery({
                 : 'text-emerald-800 bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-300'
             } ${isTabletUi ? 'px-1 py-1.5' : 'px-1.5 py-2'}`}
             aria-expanded={showDelivered}
-            title="Ver pedidos completados del turno"
+            title="Ver historial del turno (completados y eliminados)"
           >
             <p className={`font-bold leading-none tabular-nums ${isTabletUi ? 'text-base' : 'text-lg sm:text-xl'}`}>{stats.delivered}</p>
             <p className={`font-semibold uppercase tracking-wide opacity-80 flex items-center justify-center gap-0.5 ${isTabletUi ? 'text-[9px] mt-0.5' : 'text-[9px] sm:text-[10px] mt-1'}`}>
-              Completados
+              Historial
               {showDelivered ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </p>
           </button>
@@ -2114,7 +2115,7 @@ export function WorkerTpvDelivery({
           <div className="flex items-center gap-2 min-w-0">
             <CheckCircle2 className={`text-emerald-600 shrink-0 ${isTabletUi ? 'w-5 h-5' : 'w-4 h-4'}`} />
             <span className={`font-bold text-emerald-800 dark:text-emerald-300 truncate ${isTabletUi ? 'text-sm' : 'text-xs sm:text-sm'}`}>
-              Completados del turno ({completedShiftOrders.length})
+              Historial del turno ({completedShiftOrders.length})
             </span>
           </div>
           {showDelivered ? (
@@ -2163,7 +2164,7 @@ export function WorkerTpvDelivery({
                       {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
                     </p>
                     <p className={`font-semibold ${deleted ? 'text-red-600 dark:text-red-400' : statusCfg.color} ${isTabletUi ? 'text-[9px]' : 'text-[10px]'}`}>
-                      {deleted ? 'Eliminado' : statusCfg.label}
+                      {deleted ? cancelledOrderHistoryLabel(order) : statusCfg.label}
                     </p>
                   </div>
                 </button>

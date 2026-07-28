@@ -31,17 +31,45 @@ export function isDeliveredBoardOrder(order: Pick<DeliveryOrder, 'status' | 'pay
 }
 
 /**
- * Historial «Completados del turno»: entregados + pedidos que se eliminaron
- * después de haber sido entregados (siguen visibles como Eliminado).
+ * Historial del turno (abajo en TPV): entregados + cualquier eliminado del turno
+ * (aunque se borrara en montaje/reparto y no hubiera llegado a entregado).
  */
 export function isCompletedHistoryBoardOrder(
   order: Pick<DeliveryOrder, 'status' | 'paymentStatus' | 'deliveredAt' | 'stageHistory'>,
 ): boolean {
   if (isDeliveredBoardOrder(order)) return true;
-  if (!isCancelledDeliveryOrder(order)) return false;
-  if (String(order.deliveredAt || '').trim()) return true;
+  return isCancelledDeliveryOrder(order);
+}
+
+/** Fase en la que estaba el pedido al eliminarlo (para la etiqueta del historial). */
+export function cancelledOrderBoardPhase(
+  order: Pick<DeliveryOrder, 'deliveredAt' | 'stageHistory' | 'status'>,
+): 'entregado' | 'reparto' | 'montaje' {
+  if (String(order.deliveredAt || '').trim()) return 'entregado';
   const stages = Array.isArray(order.stageHistory) ? order.stageHistory : [];
-  return stages.some((s) => String(s?.status || '').toLowerCase() === 'entregado');
+  let sawEntregado = false;
+  let sawReparto = false;
+  let sawMontaje = false;
+  for (const row of stages) {
+    const s = String(row?.status || '').toLowerCase();
+    if (s === 'entregado') sawEntregado = true;
+    else if (s === 'en_reparto') sawReparto = true;
+    else if (s === 'nuevo' || s === 'cocina' || s === 'listo') sawMontaje = true;
+  }
+  if (sawEntregado) return 'entregado';
+  if (sawReparto) return 'reparto';
+  if (sawMontaje) return 'montaje';
+  return 'montaje';
+}
+
+/** Etiqueta corta en el historial del tablero. */
+export function cancelledOrderHistoryLabel(
+  order: Pick<DeliveryOrder, 'deliveredAt' | 'stageHistory' | 'status'>,
+): string {
+  const phase = cancelledOrderBoardPhase(order);
+  if (phase === 'entregado') return 'Eliminado · entregado';
+  if (phase === 'reparto') return 'Eliminado · reparto';
+  return 'Eliminado · montaje';
 }
 
 /** Recuento caja / ventas del turno: entregados o ya cobrados en TPV. */

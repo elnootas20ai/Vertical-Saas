@@ -36,7 +36,7 @@ import {
 } from '../../../lib/catalogCustomization';
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import { useModalClose } from '../../../hooks/useModalClose';
-import { TpvModalRoot } from './TpvModalRoot';
+import { dismissTpvKeyboard, TpvModalRoot } from './TpvModalRoot';
 import { TpvItemCustomizeModal } from './TpvItemCustomizeModal';
 
 type PendingMainCustomize = {
@@ -412,7 +412,7 @@ export function TpvComboCustomizeModal({
 
   return (
     <TpvModalRoot>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={dismissTpvKeyboard} />
       <div
         className="relative flex flex-col w-full sm:max-w-4xl h-[94dvh] sm:h-auto sm:max-h-[92dvh] min-h-0 overflow-hidden bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-700 pb-[env(safe-area-inset-bottom)]"
         role="dialog"
