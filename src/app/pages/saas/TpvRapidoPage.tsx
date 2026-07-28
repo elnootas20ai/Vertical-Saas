@@ -2035,10 +2035,46 @@ export function TpvRapidoOrderFlow({
     }
 
     const phoneDigits = quickPhoneDraft.replace(/\D/g, '');
+    // Teléfono opcional: solo cuenta si tiene 9+ dígitos. Menos = se ignora (no bloquea).
     const hasPhone = phoneDigits.length >= 9;
     const bizId = writeBusinessId || businessId || '';
     const selectedCashier = selectedOrderTaker;
     const primaryBranchId = currentBusiness?.branches?.[0]?.branch_id || '';
+
+    const finishWithClient = (crmClient: Client | null, phoneForFlow: string) => {
+      clearResults();
+      clearClientPhoneSearchCache();
+      setQuickAttentionName(name);
+      setQuickAttentionPhone(phoneForFlow);
+      setQuickNamePromptOpen(false);
+      setQuickNameDraft('');
+      setQuickPhoneDraft('');
+      setShowCreateForm(false);
+      setDuplicateWarning(false);
+      setPhoneInput(phoneForFlow);
+      setPhoneShake(false);
+      setDeliveryType('recogida');
+      setSelectedAddressId(null);
+      setShowNewAddress(false);
+      setAddressWarning(false);
+      setEditingAddressId(null);
+      setPaymentMethod(null);
+      setAppliedPromo(null);
+      setPromoCodeInput('');
+      setPromoMode('none');
+      setClientPromos([]);
+      setSelectedClientPromoId('');
+      if (crmClient) {
+        setQuickAttentionActive(false);
+        handleSelectClient(crmClient);
+      } else {
+        // Sin ficha CRM: flujo sintético (nombre en cocina/ticket).
+        clearSelection();
+        setQuickAttentionActive(true);
+        setCompletedSteps(new Set(['client']));
+      }
+      setCurrentStep('delivery');
+    };
 
     setCreatingClient(true);
     try {
@@ -2065,79 +2101,73 @@ export function TpvRapidoOrderFlow({
 
       if (crmClient) {
         toast.success('Cliente encontrado en CRM');
-      } else {
-        const lost = !hasPhone;
-        const clientData: Omit<Client, 'id' | 'createdAt'> = {
-          type: 'client',
-          user_id: searchUid,
-          ...(bizId ? { businessId: bizId, business_id: bizId } : {}),
-          clientType: 'particular',
-          name,
-          phone: hasPhone ? phoneDigits : '',
-          phonePrefix: '+34',
-          email: '',
-          status: 'active',
-          responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
-          branch_id: primaryBranchId,
-          tags: lost
-            ? ['tpv', 'quick-attention', 'cliente-perdido']
-            : ['tpv', 'quick-attention'],
-          address: '',
-          city: '',
-          notes: lost
-            ? 'Atención rápida TPV — no dejó teléfono (cliente perdido)'
-            : 'Alta desde atención rápida TPV',
-          consents: { dataProcessing: false, commercial: false, thirdParty: false },
-          defaultPaymentMethod: '',
-          addresses: [],
-          commercialStatus: lost ? 'prospect' : 'active',
-          stats: {
-            totalOrders: 0,
-            lastOrderDate: null,
-            orderFrequencyDays: 0,
-            favoriteAddressId: null,
-            totalSpent: 0,
-            createdFrom: 'tpv',
-            acquisitionKind: 'organic',
-            ...(lost ? { lostFromQuickAttention: true } : {}),
-          },
-        };
-        const created = await addClient(clientData);
-        if (!created) {
-          toast.error('No se pudo guardar el cliente. Inténtalo de nuevo.');
-          return;
-        }
-        crmClient = created;
-        toast.success(lost ? 'Guardado como cliente perdido' : 'Cliente guardado en CRM');
+        finishWithClient(crmClient, phoneDigits);
+        return;
       }
 
-      clearResults();
-      clearClientPhoneSearchCache();
-      setQuickAttentionName(name);
-      setQuickAttentionPhone(hasPhone ? phoneDigits : '');
-      setQuickAttentionActive(false);
-      setQuickNamePromptOpen(false);
-      setQuickNameDraft('');
-      setQuickPhoneDraft('');
-      setShowCreateForm(false);
-      setDuplicateWarning(false);
-      setPhoneInput(hasPhone ? phoneDigits : '');
-      setPhoneShake(false);
-      setDeliveryType('recogida');
-      setSelectedAddressId(null);
-      setShowNewAddress(false);
-      setAddressWarning(false);
-      setEditingAddressId(null);
-      setPaymentMethod(null);
-      setAppliedPromo(null);
-      setPromoCodeInput('');
-      setPromoMode('none');
-      setClientPromos([]);
-      setSelectedClientPromoId('');
-      handleSelectClient(crmClient);
-      setCurrentStep('delivery');
+      const lost = !hasPhone;
+      const clientData: Omit<Client, 'id' | 'createdAt'> = {
+        type: 'client',
+        user_id: searchUid,
+        ...(bizId ? { businessId: bizId, business_id: bizId } : {}),
+        clientType: 'particular',
+        name,
+        phone: hasPhone ? phoneDigits : '',
+        phonePrefix: '+34',
+        email: '',
+        status: 'active',
+        responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
+        branch_id: primaryBranchId,
+        tags: lost
+          ? ['tpv', 'quick-attention', 'cliente-perdido']
+          : ['tpv', 'quick-attention'],
+        address: '',
+        city: '',
+        notes: lost
+          ? 'Atención rápida TPV — no dejó teléfono (cliente perdido)'
+          : 'Alta desde atención rápida TPV',
+        consents: { dataProcessing: false, commercial: false, thirdParty: false },
+        defaultPaymentMethod: '',
+        addresses: [],
+        commercialStatus: lost ? 'prospect' : 'active',
+        stats: {
+          totalOrders: 0,
+          lastOrderDate: null,
+          orderFrequencyDays: 0,
+          favoriteAddressId: null,
+          totalSpent: 0,
+          createdFrom: 'tpv',
+          acquisitionKind: 'organic',
+          ...(lost ? { lostFromQuickAttention: true } : {}),
+        },
+      };
+
+      try {
+        const created = await addClient(clientData);
+        if (created) {
+          toast.success(lost ? 'Guardado como cliente perdido' : 'Cliente guardado en CRM');
+          finishWithClient(created, hasPhone ? phoneDigits : '');
+          return;
+        }
+      } catch {
+        // Sin teléfono no bloqueamos el pedido: seguimos en modo rápido.
+      }
+
+      if (lost) {
+        toast.message('Pedido rápido sin teléfono', {
+          description: 'Puedes cobrar igual; el CRM se sincronizará cuando el servidor lo permita.',
+        });
+        finishWithClient(null, '');
+        return;
+      }
+
+      toast.error('No se pudo guardar el cliente. Revisa el teléfono o continúa sin él.');
     } catch (err: unknown) {
-      toast.error(toUserFacingMessage(err, 'No se pudo guardar el cliente'));
+      // Último recurso: no impedir el pedido rápido.
+      toast.message('Continuamos sin guardar en CRM', {
+        description: toUserFacingMessage(err, 'El pedido rápido sigue disponible'),
+      });
+      finishWithClient(null, hasPhone ? phoneDigits : '');
     } finally {
       setCreatingClient(false);
     }
@@ -2154,6 +2184,7 @@ export function TpvRapidoOrderFlow({
     user?.firstName,
     addClient,
     clearResults,
+    clearSelection,
     handleSelectClient,
   ]);
 
@@ -4864,7 +4895,7 @@ export function TpvRapidoOrderFlow({
                   Pedido rápido
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Pide nombre y teléfono: si los da, se guarda en el CRM. Si no deja teléfono, se guarda como cliente perdido.
+                  Solo hace falta el nombre. El teléfono es opcional: si lo da, se guarda en el CRM; si no, cliente perdido.
                 </p>
               </div>
               <button
@@ -4905,7 +4936,7 @@ export function TpvRapidoOrderFlow({
             </div>
             <div>
               <label className={LABEL_CLASS} htmlFor="tpv-quick-attention-phone">
-                Teléfono
+                Teléfono <span className="normal-case font-medium text-gray-400">(opcional)</span>
               </label>
               <div className="flex gap-2 items-stretch">
                 <span className="inline-flex items-center px-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-semibold text-gray-700 dark:text-gray-200 shrink-0">
@@ -4916,7 +4947,7 @@ export function TpvRapidoOrderFlow({
                   value={quickPhoneDraft}
                   onChange={(e) => setQuickPhoneDraft(e.target.value)}
                   className={INPUT_CLASS}
-                  placeholder="600 000 000"
+                  placeholder="Si no lo da, déjalo vacío"
                   inputMode="tel"
                   name="vertial-quick-attention-phone"
                   autoComplete="off"
@@ -4934,7 +4965,7 @@ export function TpvRapidoOrderFlow({
                 />
               </div>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Con teléfono (9 dígitos) → CRM. Sin teléfono → etiqueta «cliente-perdido».
+                No es obligatorio. Vacío = cliente perdido en CRM.
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-1">
