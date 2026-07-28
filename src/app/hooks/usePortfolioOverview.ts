@@ -27,10 +27,14 @@ import {
   computeCompanyBillingBreakdown,
   computePortfolioClientMetrics,
   computePortfolioMetrics,
+  buildStoreOpsPulse,
   computeStoreDeliveryMetrics,
   consolidatePortfolioFinance,
   emptyPortfolioClientMetrics,
   emptyPortfolioMetrics,
+  emptyStoreOpsPulse,
+  listMonthToDateDayKeys,
+  listTrailingDayKeys,
   pickPrimaryPdvIdFromList,
   portfolioOrderFetchFrom,
   prevCalendarMonthKey,
@@ -40,6 +44,7 @@ import {
   type PortfolioFinanceTotals,
   type PortfolioMetrics,
   type StoreDeliveryMetrics,
+  type StoreOpsPulse,
 } from '../lib/portfolioMetrics';
 import { localCalendarDayKey } from '../lib/tpvCajaScope';
 import { computeEbitdaForMonth } from '../lib/ebitdaMetrics';
@@ -67,6 +72,10 @@ export type PortfolioStore = {
   hasPdv: boolean;
   pdvId?: string;
   delivery: StoreDeliveryMetrics;
+  /** Últimos 7 días (comida + €) para el resumen operativo. */
+  ops7d: StoreOpsPulse;
+  /** Mes en curso hasta hoy. */
+  opsMonth: StoreOpsPulse;
 };
 
 export type PortfolioBrandStoreBreakdown = {
@@ -190,7 +199,11 @@ function mapStores(
   orders: Awaited<ReturnType<typeof filterDeliveryOrdersRequest>>['orders'],
   todayKey: string,
   monthKey: string,
+  businessId: string,
+  businessName: string,
 ): PortfolioStore[] {
+  const keys7d = listTrailingDayKeys(todayKey, 7);
+  const keysMonth = listMonthToDateDayKeys(todayKey);
   return workCenters
     .filter(
       (wc) =>
@@ -202,6 +215,31 @@ function mapStores(
       const delivery = pdvId
         ? computeStoreDeliveryMetrics(orders, pdvId, todayKey, monthKey, wc._id)
         : EMPTY_STORE_DELIVERY;
+      const pulseBase = {
+        storeId: wc._id,
+        storeName: wc.name,
+        businessId,
+        businessName,
+        pdvId: pdvId || '',
+        workCenterId: wc._id,
+        todayKey,
+      };
+      const ops7d = pdvId
+        ? buildStoreOpsPulse(orders, { ...pulseBase, dayKeys: keys7d })
+        : emptyStoreOpsPulse({
+            storeId: wc._id,
+            storeName: wc.name,
+            businessId,
+            businessName,
+          });
+      const opsMonth = pdvId
+        ? buildStoreOpsPulse(orders, { ...pulseBase, dayKeys: keysMonth })
+        : emptyStoreOpsPulse({
+            storeId: wc._id,
+            storeName: wc.name,
+            businessId,
+            businessName,
+          });
       return {
         id: wc._id,
         name: wc.name,
@@ -211,6 +249,8 @@ function mapStores(
         hasPdv: pdvWorkCenterIds.has(wc._id),
         pdvId,
         delivery,
+        ops7d,
+        opsMonth,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -596,6 +636,8 @@ export function usePortfolioOverview(
             orders,
             todayKey,
             monthKey,
+            s.business.business_id,
+            s.business.name || 'Empresa',
           );
           const brandsBase = buildBrandRows(s.brandsRaw, stores, stores.length);
           let metrics = emptyPortfolioMetrics();

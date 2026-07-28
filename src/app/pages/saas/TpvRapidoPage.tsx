@@ -38,7 +38,7 @@ import {
   getClientAppliedPromo,
 } from '../../lib/promoCodes';
 import { listPromotionsRequest } from '../../lib/promotionsApi';
-import { printDeliveryTicket } from '../../lib/deliveryTicketPrint';
+import { prefetchDeliveryTicketPrint, printDeliveryTicket } from '../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, formatTicketCustomerAddress, formatTicketCustomerPhone } from '../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../components/delivery/OrderTicketButtons';
 import { fetchClientPromotionsRequest, type ClientPromotion } from '../../lib/clientPromotionsApi';
@@ -1071,6 +1071,11 @@ export function TpvRapidoOrderFlow({
       cancelled = true;
     };
   }, [userId]);
+
+  // Precarga impresora: al cobrar el ticket arranca sin esperar el import.
+  useEffect(() => {
+    prefetchDeliveryTicketPrint();
+  }, []);
 
   const reloadDeliveryCustomization = useCallback(() => {
     if (!userId) return;

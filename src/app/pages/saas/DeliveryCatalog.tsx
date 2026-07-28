@@ -127,10 +127,12 @@ import {
   catalogImportReportFromBulkErrors,
   catalogImportReportFromValidation,
   catalogImportReportSimple,
+  consolidateCatalogImportWarnings,
   type CatalogImportProgressReporter,
   type CatalogImportReport,
   type CatalogImportRunResult,
 } from '../../lib/catalogImportReport';
+import { MISSING_BRAND_IMPORT_CODE } from '../../lib/deliveryCatalogImportLogic';
 import { throwIfAborted, yieldToUi, isImportAbortError } from '../../lib/importAbort';
 import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import { CatalogMoveModal } from '../../components/saas/CatalogMoveModal';
@@ -2851,7 +2853,7 @@ export function CatalogPage() {
 
     if (importRows.length === 0) {
       const validation = { ok: false, issues: importIssues };
-      const report = catalogImportReportFromValidation(validation);
+      const report = catalogImportReportFromValidation(validation, brands);
       toast.error(
         importIssues.some((i) => i.severity === 'error')
           ? 'Ninguna fila válida en el Excel — revisa nombre, categoría y precio'
@@ -2862,11 +2864,17 @@ export function CatalogPage() {
 
     const warnings = importIssues.filter((i) => i.severity === 'warning');
     const errors = importIssues.filter((i) => i.severity === 'error');
-    const warningLines = warnings.map((w) => ({
-      row: w.row,
-      field: w.field,
-      message: w.message,
-    }));
+    const warningLines = consolidateCatalogImportWarnings(
+      warnings.map((w) => ({
+        row: w.row,
+        field: w.field,
+        message: w.message,
+        code: w.code,
+        value: w.value,
+      })),
+      brands,
+    );
+    const missingBrandWarningCount = warningLines.filter((w) => w.code === MISSING_BRAND_IMPORT_CODE).length;
     if (errors.length > 0) {
       toast.message(
         `Se importan ${importRows.length} fila(s). ${errors.length} fila(s) omitida(s) por error (revisa el informe).`,
@@ -3012,9 +3020,13 @@ export function CatalogPage() {
       at: Date.now(),
       summary:
         totalOk > 0
-          ? errors.length > 0 || warningLines.length > 0
+          ? errors.length > 0
             ? `Importación completada: ${totalOk} producto(s) · ${errors.length} fila(s) omitida(s)${warningLines.length > 0 ? ` · ${warningLines.length} aviso(s)` : ''}`
-            : 'Importación completada'
+            : missingBrandWarningCount > 0 && missingBrandWarningCount === warningLines.length
+              ? `Importación completada (${totalOk} productos) — aviso: falta marca en Ajustes → Marca`
+              : warningLines.length > 0
+                ? `Importación completada (${totalOk} productos) · ${warningLines.length} aviso(s)`
+                : 'Importación completada'
           : result.errors > 0
             ? result.errors > 0 &&
               (result.errorDetails || []).every((e) =>

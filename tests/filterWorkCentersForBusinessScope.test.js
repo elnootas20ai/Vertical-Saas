@@ -53,4 +53,22 @@ describe('rescueRetailForBusinessWithoutStores', () => {
     const rescued = rescueRetailForBusinessWithoutStores(centers, BIZ, [BIZ, OTHER]);
     expect(rescued[0].businessId).toBe(BIZ);
   });
+
+  it('reasigna tienda única con UUID de empresa muerta (no está en known)', () => {
+    const centers = [wc({ _id: 'store-1', name: 'Badalona', businessId: 'dead-old-uuid' })];
+    const rescued = rescueRetailForBusinessWithoutStores(centers, BIZ, [BIZ, OTHER]);
+    expect(rescued[0].businessId).toBe(BIZ);
+  });
+
+  it('reclama varias tiendas con UUID muerto sin tocar las de otra empresa viva', () => {
+    const centers = [
+      wc({ _id: 'pau-1', name: 'Pau Badalona', businessId: OTHER }),
+      wc({ _id: 'modo-1', name: 'Badalona', businessId: 'dead-modomio-v1' }),
+      wc({ _id: 'modo-2', name: 'Tiana', businessId: 'dead-modomio-v1' }),
+    ];
+    const rescued = rescueRetailForBusinessWithoutStores(centers, BIZ, [BIZ, OTHER]);
+    expect(rescued.find((r) => r._id === 'pau-1')?.businessId).toBe(OTHER);
+    expect(rescued.find((r) => r._id === 'modo-1')?.businessId).toBe(BIZ);
+    expect(rescued.find((r) => r._id === 'modo-2')?.businessId).toBe(BIZ);
+  });
 });

@@ -466,7 +466,7 @@ export function CrmImportWizard({
               ? { businessId: importBusinessId, signal: abortController.signal }
               : { signal: abortController.signal },
           );
-          created = result.created.length;
+          created = result.createdCount;
           failed = clientsToCreate.length - created;
           setImportProgress(null);
           await refreshClients();

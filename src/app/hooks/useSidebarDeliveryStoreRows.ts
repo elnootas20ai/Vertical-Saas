@@ -130,7 +130,9 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
             !wc.deletedAt &&
             (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
         );
-        const scopedPdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail);
+        const scopedPdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail, {
+          businessId,
+        });
         const rows = buildDeliverySidebarStoreRows(retail, scopedPdvs);
         if (rows.length > 0) {
           stableRowsRef.current = rows;

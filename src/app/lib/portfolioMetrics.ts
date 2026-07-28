@@ -372,6 +372,8 @@ export function applyTpvCashMetrics(
   const open = dedupeOpenRegisterSessions(
     sessions.filter((s) => s.status === 'open' && pdvSet.has(String(s.pointOfSaleId || '').trim())),
   );
+  // Dinero físico en cajón = fondo de apertura + ventas en efectivo.
+  // No es “ingreso/ganancia”: el fondo es capital del cajón, no cobro del día.
   const cashIn = open.reduce((sum, s) => {
     const sales = (s.transactions || [])
       .filter((t) => t.type === 'sale' && t.paymentMethod === 'efectivo')
@@ -815,5 +817,276 @@ export function computeCompanyBillingBreakdown(
     unbrandedRevenueMonth,
     brands,
     stores,
+  };
+}
+
+// ─── Pulso operativo por tienda (7 días / mes) ───────────────────────────────
+
+export type StoreOpsDay = {
+  dayKey: string;
+  /** Ej. "Lun 22" */
+  label: string;
+  /** Ej. "Lunes" */
+  weekdayLabel: string;
+  revenue: number;
+  orders: number;
+  pizza: number;
+  burger: number;
+  taco: number;
+  kebab: number;
+  /** vs día anterior; null el primero del rango */
+  revenueDeltaPct: number | null;
+};
+
+export type StoreOpsPulse = {
+  storeId: string;
+  storeName: string;
+  businessId: string;
+  businessName: string;
+  pdvId: string;
+  days: StoreOpsDay[];
+  revenuePeriod: number;
+  revenuePrevPeriod: number;
+  revenueMomPct: number | null;
+  ordersPeriod: number;
+  avgTicket: number;
+  pizza: number;
+  burger: number;
+  taco: number;
+  kebab: number;
+  revenueToday: number;
+  /** % del total del ranking; 0 hasta rankStoreOpsPulses */
+  sharePercent: number;
+};
+
+const WEEKDAY_SHORT_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+const WEEKDAY_LONG_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+
+function parseDayKeyLocal(dayKey: string): Date {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function formatOpsDayLabel(dayKey: string): { label: string; weekdayLabel: string } {
+  const dt = parseDayKeyLocal(dayKey);
+  const wd = dt.getDay();
+  const dayNum = dt.getDate();
+  return {
+    label: `${WEEKDAY_SHORT_ES[wd]} ${dayNum}`,
+    weekdayLabel: WEEKDAY_LONG_ES[wd],
+  };
+}
+
+/** Claves de día locales consecutivas hacia atrás desde todayKey (incluye hoy). */
+export function listTrailingDayKeys(todayKey: string, days: number): string[] {
+  const n = Math.max(1, Math.floor(days));
+  const base = parseDayKeyLocal(todayKey);
+  const out: string[] = [];
+  for (let i = n - 1; i >= 0; i -= 1) {
+    const dt = new Date(base.getFullYear(), base.getMonth(), base.getDate() - i);
+    out.push(localCalendarDayKey(dt));
+  }
+  return out;
+}
+
+/** Del día 1 del mes de todayKey hasta todayKey inclusive. */
+export function listMonthToDateDayKeys(todayKey: string): string[] {
+  const monthStart = `${todayKey.slice(0, 7)}-01`;
+  const start = parseDayKeyLocal(monthStart);
+  const end = parseDayKeyLocal(todayKey);
+  const out: string[] = [];
+  for (let dt = new Date(start); dt <= end; dt.setDate(dt.getDate() + 1)) {
+    out.push(localCalendarDayKey(dt));
+  }
+  return out.length > 0 ? out : [todayKey];
+}
+
+function shiftDayKey(dayKey: string, deltaDays: number): string {
+  const dt = parseDayKeyLocal(dayKey);
+  dt.setDate(dt.getDate() + deltaDays);
+  return localCalendarDayKey(dt);
+}
+
+function foodCountsForDay(orders: DeliveryOrder[], dayKey: string): {
+  pizza: number;
+  burger: number;
+  taco: number;
+  kebab: number;
+} {
+  const food = foodFamilyCountsFromOrdersToday(orders, dayKey);
+  const sold = soldProductCountsForDay(orders, dayKey);
+  return {
+    pizza: Math.max(food.pizza, sold.pizza || 0),
+    burger: Math.max(food.burger, sold.burger || 0),
+    taco: Math.max(food.taco, sold.taco || 0),
+    kebab: sold.kebab || 0,
+  };
+}
+
+function sumDayFood(days: StoreOpsDay[]): Pick<StoreOpsPulse, 'pizza' | 'burger' | 'taco' | 'kebab'> {
+  return days.reduce(
+    (acc, d) => ({
+      pizza: acc.pizza + d.pizza,
+      burger: acc.burger + d.burger,
+      taco: acc.taco + d.taco,
+      kebab: acc.kebab + d.kebab,
+    }),
+    { pizza: 0, burger: 0, taco: 0, kebab: 0 },
+  );
+}
+
+export function emptyStoreOpsPulse(partial?: Partial<StoreOpsPulse>): StoreOpsPulse {
+  return {
+    storeId: '',
+    storeName: '',
+    businessId: '',
+    businessName: '',
+    pdvId: '',
+    days: [],
+    revenuePeriod: 0,
+    revenuePrevPeriod: 0,
+    revenueMomPct: null,
+    ordersPeriod: 0,
+    avgTicket: 0,
+    pizza: 0,
+    burger: 0,
+    taco: 0,
+    kebab: 0,
+    revenueToday: 0,
+    sharePercent: 0,
+    ...partial,
+  };
+}
+
+/**
+ * Serie operativa de un PDV/tienda para un rango de días (p. ej. 7d o mes a la fecha).
+ * Incluye comparación vs la ventana anterior de la misma longitud.
+ */
+export function buildStoreOpsPulse(
+  orders: DeliveryOrder[],
+  opts: {
+    storeId: string;
+    storeName: string;
+    businessId: string;
+    businessName: string;
+    pdvId: string;
+    workCenterId?: string | null;
+    todayKey: string;
+    dayKeys: string[];
+  },
+): StoreOpsPulse {
+  const { storeId, storeName, businessId, businessName, pdvId, workCenterId, todayKey, dayKeys } = opts;
+  if (!pdvId || dayKeys.length === 0) {
+    return emptyStoreOpsPulse({ storeId, storeName, businessId, businessName, pdvId });
+  }
+
+  const pdvSet = new Set([pdvId]);
+  const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, pdvId, workCenterId));
+
+  const days: StoreOpsDay[] = dayKeys.map((dayKey, index) => {
+    const food = foodCountsForDay(scoped, dayKey);
+    const revenueOrders = scoped.filter((o) => isRevenueOnDay(o, dayKey));
+    const revenue = Math.round(revenueOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0) * 100) / 100;
+    const ordersCount = revenueOrders.length;
+    const prevKey = index > 0 ? dayKeys[index - 1] : null;
+    let revenueDeltaPct: number | null = null;
+    if (prevKey) {
+      const prevRev = scoped
+        .filter((o) => isRevenueOnDay(o, prevKey))
+        .reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+      revenueDeltaPct = monthOverMonthPct(revenue, prevRev);
+    }
+    const labels = formatOpsDayLabel(dayKey);
+    return {
+      dayKey,
+      label: labels.label,
+      weekdayLabel: labels.weekdayLabel,
+      revenue,
+      orders: ordersCount,
+      pizza: food.pizza,
+      burger: food.burger,
+      taco: food.taco,
+      kebab: food.kebab,
+      revenueDeltaPct,
+    };
+  });
+
+  const revenuePeriod = Math.round(days.reduce((s, d) => s + d.revenue, 0) * 100) / 100;
+  const ordersPeriod = days.reduce((s, d) => s + d.orders, 0);
+  const foodTot = sumDayFood(days);
+
+  const span = dayKeys.length;
+  const firstKey = dayKeys[0];
+  const prevEnd = shiftDayKey(firstKey, -1);
+  const prevKeys = listTrailingDayKeys(prevEnd, span);
+  let revenuePrevPeriod = 0;
+  for (const pk of prevKeys) {
+    revenuePrevPeriod += scoped
+      .filter((o) => isRevenueOnDay(o, pk))
+      .reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+  }
+  revenuePrevPeriod = Math.round(revenuePrevPeriod * 100) / 100;
+
+  const todayDay = days.find((d) => d.dayKey === todayKey);
+
+  return {
+    storeId,
+    storeName,
+    businessId,
+    businessName,
+    pdvId,
+    days,
+    revenuePeriod,
+    revenuePrevPeriod,
+    revenueMomPct: monthOverMonthPct(revenuePeriod, revenuePrevPeriod),
+    ordersPeriod,
+    avgTicket: ordersPeriod > 0 ? Math.round((revenuePeriod / ordersPeriod) * 100) / 100 : 0,
+    pizza: foodTot.pizza,
+    burger: foodTot.burger,
+    taco: foodTot.taco,
+    kebab: foodTot.kebab,
+    revenueToday: todayDay?.revenue ?? 0,
+    sharePercent: 0,
+  };
+}
+
+/** Ordena por € del periodo y rellena sharePercent. */
+export function rankStoreOpsPulses(pulses: StoreOpsPulse[]): StoreOpsPulse[] {
+  const sorted = [...pulses].sort(
+    (a, b) => b.revenuePeriod - a.revenuePeriod || a.storeName.localeCompare(b.storeName, 'es'),
+  );
+  const total = sorted.reduce((s, p) => s + p.revenuePeriod, 0);
+  return sorted.map((p) => ({
+    ...p,
+    sharePercent: total > 0 ? Math.round((p.revenuePeriod / total) * 1000) / 10 : 0,
+  }));
+}
+
+export function aggregateStoreOpsPulses(pulses: StoreOpsPulse[]): {
+  revenuePeriod: number;
+  revenuePrevPeriod: number;
+  revenueMomPct: number | null;
+  ordersPeriod: number;
+  avgTicket: number;
+  pizza: number;
+  burger: number;
+  taco: number;
+  kebab: number;
+  revenueToday: number;
+} {
+  const revenuePeriod = Math.round(pulses.reduce((s, p) => s + p.revenuePeriod, 0) * 100) / 100;
+  const revenuePrevPeriod = Math.round(pulses.reduce((s, p) => s + p.revenuePrevPeriod, 0) * 100) / 100;
+  const ordersPeriod = pulses.reduce((s, p) => s + p.ordersPeriod, 0);
+  return {
+    revenuePeriod,
+    revenuePrevPeriod,
+    revenueMomPct: monthOverMonthPct(revenuePeriod, revenuePrevPeriod),
+    ordersPeriod,
+    avgTicket: ordersPeriod > 0 ? Math.round((revenuePeriod / ordersPeriod) * 100) / 100 : 0,
+    pizza: pulses.reduce((s, p) => s + p.pizza, 0),
+    burger: pulses.reduce((s, p) => s + p.burger, 0),
+    taco: pulses.reduce((s, p) => s + p.taco, 0),
+    kebab: pulses.reduce((s, p) => s + p.kebab, 0),
+    revenueToday: Math.round(pulses.reduce((s, p) => s + p.revenueToday, 0) * 100) / 100,
   };
 }

@@ -210,7 +210,11 @@ function OpenRegisterHero({
                   <div className="text-sm font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                     {summary.totalSales.toFixed(2)}€
                   </div>
-                  <div className="text-[11px] text-gray-400 tabular-nums">Efectivo {expected.toFixed(2)}€</div>
+                  <div className="text-[11px] text-gray-400 tabular-nums">
+                    {summary.totalSales <= 0 && Number(session.initialCashAmount || 0) > 0
+                      ? `Fondo ${Number(session.initialCashAmount || 0).toFixed(2)}€`
+                      : `En cajón ${expected.toFixed(2)}€`}
+                  </div>
                 </div>
                 {expanded ? <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />}
               </button>
@@ -456,7 +460,13 @@ function RegisterCard({
                     Dif: {ts.difference >= 0 ? '+' : ''}{ts.difference.toFixed(2)}€
                   </span>
                 )}
-                {ts.status === 'open' && <span className="text-emerald-600 font-semibold">Efectivo: {expected.toFixed(2)}€</span>}
+                {ts.status === 'open' && (
+                  <span className="text-emerald-600 font-semibold">
+                    {summary.totalSales <= 0 && Number(ts.initialCashAmount || 0) > 0
+                      ? `Fondo apertura: ${Number(ts.initialCashAmount || 0).toFixed(2)}€`
+                      : `En cajón: ${expected.toFixed(2)}€`}
+                  </span>
+                )}
               </div>
             </div>
             {ts.status === 'closed' && onViewClosing && (

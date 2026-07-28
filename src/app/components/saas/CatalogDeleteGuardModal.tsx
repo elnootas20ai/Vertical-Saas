@@ -9,7 +9,7 @@ const BULK_PHRASE_NO_PIN = 'BORRADO MASIVO';
 
 export type CatalogDeleteGuardPayload =
   | { mode: 'single'; itemName: string }
-  | { mode: 'bulk'; count: number; organizerLabel?: string };
+  | { mode: 'bulk'; count: number; organizerLabel?: string; confirmPhrase?: string };
 
 function normalizePhrase(s: string) {
   return s.trim().replace(/\s+/g, ' ');
@@ -47,6 +47,10 @@ export function CatalogDeleteGuardModal({
 
   const pinConfigured = PIN_FROM_ENV.length > 0;
   const canSubmit = pinConfigured ? pin.length > 0 : phrase.trim().length > 0;
+  const bulkPhrase =
+    payload.mode === 'bulk' && payload.confirmPhrase?.trim()
+      ? payload.confirmPhrase.trim().toUpperCase()
+      : BULK_PHRASE_NO_PIN;
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -62,8 +66,8 @@ export function CatalogDeleteGuardModal({
         setError('El texto no coincide con el nombre del producto');
         return;
       }
-    } else if (normalizePhrase(phrase).toUpperCase() !== BULK_PHRASE_NO_PIN) {
-      setError(`Escribe exactamente: ${BULK_PHRASE_NO_PIN}`);
+    } else if (normalizePhrase(phrase).toUpperCase() !== bulkPhrase) {
+      setError(`Escribe exactamente: ${bulkPhrase}`);
       return;
     }
 
@@ -142,7 +146,7 @@ export function CatalogDeleteGuardModal({
               <label htmlFor="catalog-delete-phrase" className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">
                 {payload.mode === 'single'
                   ? 'Escribe el nombre exacto del producto'
-                  : `Escribe la frase: ${BULK_PHRASE_NO_PIN}`}
+                  : `Escribe la frase: ${bulkPhrase}`}
               </label>
               <input
                 id="catalog-delete-phrase"
@@ -151,7 +155,7 @@ export function CatalogDeleteGuardModal({
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
                 className={inp}
-                placeholder={payload.mode === 'single' ? payload.itemName : BULK_PHRASE_NO_PIN}
+                placeholder={payload.mode === 'single' ? payload.itemName : bulkPhrase}
               />
             </div>
           )}

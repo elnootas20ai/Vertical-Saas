@@ -18,6 +18,8 @@
  * Varios cierres el mismo día → se suman en una sola fila.
  *
  * Acceso: solo CEO / cuenta administradora (dueño o Admin). Trabajadores/cajeros no.
+ * No se descarga al cerrar la caja: el cierre se guarda en servidor y el CEO
+ * lo exporta a mano desde la pantalla Caja.
  */
 import * as XLSX from 'xlsx';
 import type { TpvRegisterSession } from './deliveryApi';

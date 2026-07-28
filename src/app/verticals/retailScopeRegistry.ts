@@ -18,6 +18,7 @@ import {
   dedupeRetailWorkCentersForBusiness,
   filterPointsOfSaleForWorkCenters,
   filterWorkCentersForBusinessScope,
+  knownBusinessIdsFromList,
   loadDeliveryStores,
   loadTpvPointsOfSaleForBusiness,
   shouldUseDeliveryStores,
@@ -221,7 +222,9 @@ export function writeRetailScopeCacheForBusiness(
   }
 
   const scoped = filterRetailWorkCentersForScope(snapshot.retailWorkCenters, ctx);
-  const pdvs = filterPointsOfSaleForWorkCenters(snapshot.allPointsOfSale, scoped);
+  const pdvs = filterPointsOfSaleForWorkCenters(snapshot.allPointsOfSale, scoped, {
+    businessId: bid,
+  });
   if (scoped.length === 0 && pdvs.length === 0) return;
 
   writeRetailScopeCache(bid, { retailWorkCenters: scoped, allPointsOfSale: pdvs }, opts);
@@ -286,7 +289,7 @@ export async function loadRetailStoresForBusiness(
   const tpvBootstrap = options?.tpvBootstrap === true;
   const loadOpts = {
     accountBusinessCount: options?.accountBusinessCount,
-    knownBusinessIds: options?.knownBusinessIds,
+    knownBusinessIds: options?.knownBusinessIds ?? knownBusinessIdsFromList(businesses),
     includeInactivePdvs: options?.includeInactivePdvs,
     skipPdvMerge: options?.skipPdvMerge ?? !tpvBootstrap,
     ensureTabletCodes: options?.ensureTabletCodes ?? tpvBootstrap,

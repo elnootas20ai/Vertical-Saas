@@ -44,6 +44,7 @@ import { salesMetricsRouter } from './routers/salesMetricsRouter.js';
 import { reservationRouter } from './routers/reservationRouter.js';
 import { leadsRouter } from './routers/leadsRouter.js';
 import { clientsRouter } from './routers/clientsRouter.js';
+import { bulkRemoveClients } from './controllers/clientsController.js';
 import { financeRouter } from './routers/financeRouter.js';
 import { bankReconciliationRouter } from './routers/bankReconciliationRouter.js';
 import { invoicesRouter } from './routers/invoicesRouter.js';
@@ -1073,6 +1074,14 @@ for (const [path, ...middlewares] of internalRouters) {
   // B-02: Alias /api/v2/* — misma implementación, prefijo versionado
   app.use(path.replace('/api/', '/api/v2/'), ...middlewares);
 }
+
+// CRM: borrado masivo de clientes (ruta explícita; evita 404 si el router no recargó).
+app.post('/api/clients/:userId/delete-all', ...saasAuthGate, bulkRemoveClients);
+app.post('/api/v2/clients/:userId/delete-all', ...saasAuthGate, bulkRemoveClients);
+app.post('/api/clients/:userId/bulk-delete', ...saasAuthGate, bulkRemoveClients);
+app.post('/api/v2/clients/:userId/bulk-delete', ...saasAuthGate, bulkRemoveClients);
+logger.info({ tag: 'BOOT', routes: ['POST /api/clients/:userId/delete-all', 'POST /api/clients/:userId/bulk-delete'] }, 'Rutas de borrado masivo CRM listas');
+
 // LEG-01/02: Panel RGPD — consentimientos, derechos y derecho al olvido
 
 // ADM: Settings — branding, pipeline, email templates, horarios, export/import, impersonation, changelog

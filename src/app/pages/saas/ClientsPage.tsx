@@ -56,12 +56,14 @@ import {
   fetchAllClientsForExport,
   listClientsPageRequest,
   deleteClientRequest,
+  bulkDeleteClientsRequest,
   importClientsFromBusinessRequest,
   type AssignmentRule,
   type SlaConfig,
 } from '../../lib/crmApi';
 import { downloadClientsExport, mapClientToExportRow } from '../../lib/crmImportTemplates';
 import { InvoiceCreationModal, type InvoiceTypeSelection } from '../../components/saas/InvoiceCreationModal';
+import { CatalogDeleteGuardModal } from '../../components/saas/CatalogDeleteGuardModal';
 import {
   Users, Plus, Eye, Phone, Mail, UserPlus, Search, MapPin,
   TrendingUp, FileText, ExternalLink, Car, LayoutGrid, List,
@@ -1599,7 +1601,12 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const [leadsView,               setLeadsView]               = useState<'cards' | 'table'>('table');
   const [clientsView,             setClientsView]             = useState<'cards' | 'table'>('table');
   const [deletingClientId,        setDeletingClientId]        = useState<string | null>(null);
-  const [bulkDeletingClients,   setBulkDeletingClients]     = useState(false);
+  const [clientSelectMode,        setClientSelectMode]        = useState(false);
+  const [selectedClientIds,       setSelectedClientIds]       = useState<Set<string>>(() => new Set());
+  const [selectAllInAccount,      setSelectAllInAccount]      = useState(false);
+  const [bulkDeleteConfirmStep,   setBulkDeleteConfirmStep]   = useState(false);
+  const [showClientsDeleteGuard,  setShowClientsDeleteGuard]  = useState(false);
+  const [bulkDeletingClients,     setBulkDeletingClients]     = useState(false);
   const [exportingClients,      setExportingClients]        = useState(false);
   const [billingView,             setBillingView]             = useState<'cards' | 'table'>('cards');
   const [selectedInvoice,         setSelectedInvoice]         = useState<Invoice | null>(null);
@@ -2047,7 +2054,6 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     setDeletingClientId(client.id);
     try {
       await deleteClientRequest(clientsDataUserId, { id: client.id, name: client.name } as AppContextClient);
-      await deleteClient(client.id);
       if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
       toast.success('Cliente eliminado');
     } catch (err) {
@@ -2055,61 +2061,181 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     } finally {
       setDeletingClientId(null);
     }
-  }, [clientsDataUserId, deleteClient, refreshPaginatedClients, useSegmentMode, useServerClients]);
+  }, [clientsDataUserId, refreshPaginatedClients, useSegmentMode, useServerClients]);
 
-  const handleDeleteAllDeliveryClients = useCallback(async () => {
-    if (!clientsDataUserId || !isDeliveryBusiness) return;
-    const total = clientsListTotal;
-    if (total <= 0) {
+  const exitClientSelectMode = useCallback(() => {
+    setClientSelectMode(false);
+    setSelectedClientIds(new Set());
+    setSelectAllInAccount(false);
+    setBulkDeleteConfirmStep(false);
+    setShowClientsDeleteGuard(false);
+  }, []);
+
+  const enterClientSelectMode = useCallback(() => {
+    if (!isDeliveryBusiness || clientsListTotal <= 0) {
       toast.info('No hay clientes que eliminar');
       return;
     }
-    if (!window.confirm(`¿Eliminar los ${total} clientes del negocio?`)) return;
-    if (!window.confirm('Última confirmación: esta acción no se puede deshacer.')) return;
+    setClientSelectMode(true);
+    setSelectedClientIds(new Set());
+    setSelectAllInAccount(false);
+    setBulkDeleteConfirmStep(false);
+    setShowClientsDeleteGuard(false);
+    toast.message('Marca los clientes y pulsa «Borrar»', { duration: 5000 });
+  }, [clientsListTotal, isDeliveryBusiness]);
+
+  const clientSelectScopeKey = `${debouncedSearch}|${filterBranch}|${filterWorkCenter}|${scopedClientsBusinessId || ''}`;
+  const clientSelectScopeKeyRef = useRef(clientSelectScopeKey);
+  useEffect(() => {
+    const prev = clientSelectScopeKeyRef.current;
+    clientSelectScopeKeyRef.current = clientSelectScopeKey;
+    if (!clientSelectMode) return;
+    if (prev === clientSelectScopeKey) return;
+    setSelectedClientIds(new Set());
+    setSelectAllInAccount(false);
+    setBulkDeleteConfirmStep(false);
+    setShowClientsDeleteGuard(false);
+  }, [clientSelectMode, clientSelectScopeKey]);
+
+  const isClientSelected = useCallback(
+    (id: string) => selectAllInAccount || selectedClientIds.has(id),
+    [selectAllInAccount, selectedClientIds],
+  );
+
+  const toggleClientSelected = useCallback((id: string) => {
+    setBulkDeleteConfirmStep(false);
+    if (selectAllInAccount) {
+      setSelectAllInAccount(false);
+      const next = new Set(
+        paginatedClients
+          .map((c) => String(c.id || '').trim())
+          .filter((cid) => cid && cid !== id),
+      );
+      setSelectedClientIds(next);
+      return;
+    }
+    setSelectedClientIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, [paginatedClients, selectAllInAccount]);
+
+  const selectAllMatchingClients = useCallback(() => {
+    if (!isDeliveryBusiness || clientsListTotal <= 0) return;
+    setBulkDeleteConfirmStep(false);
+    if (!useServerClients || useSegmentMode) {
+      setSelectAllInAccount(false);
+      setSelectedClientIds(
+        new Set(filteredClients.map((c) => String(c.id || '').trim()).filter(Boolean)),
+      );
+      return;
+    }
+    setSelectAllInAccount(true);
+    setSelectedClientIds(new Set());
+  }, [
+    clientsListTotal,
+    filteredClients,
+    isDeliveryBusiness,
+    useSegmentMode,
+    useServerClients,
+  ]);
+
+  const clearClientSelection = useCallback(() => {
+    setSelectedClientIds(new Set());
+    setSelectAllInAccount(false);
+    setBulkDeleteConfirmStep(false);
+  }, []);
+
+  const selectedClientsCount = selectAllInAccount ? clientsListTotal : selectedClientIds.size;
+  const allMatchingClientsSelected =
+    clientsListTotal > 0
+    && (selectAllInAccount || selectedClientIds.size >= clientsListTotal);
+
+  const handleBulkDeleteSelectedClients = () => {
+    if (!clientsDataUserId || !isDeliveryBusiness) {
+      toast.error('No hay sesión para borrar clientes');
+      return;
+    }
+    if (selectedClientsCount <= 0) {
+      toast.error('Selecciona al menos un cliente');
+      return;
+    }
+    if (!bulkDeleteConfirmStep) {
+      setBulkDeleteConfirmStep(true);
+      toast.message(
+        `Pulsa «Estoy seguro» y confirma el borrado de ${selectedClientsCount} cliente${selectedClientsCount === 1 ? '' : 's'}`,
+        { duration: 6000 },
+      );
+      return;
+    }
+    setShowClientsDeleteGuard(true);
+  };
+
+  const executeClientsBulkDeleteAfterGuard = useCallback(async () => {
+    if (!clientsDataUserId || !isDeliveryBusiness) return;
+    const deleteAll = selectAllInAccount;
+    const ids = [...selectedClientIds];
+    const count = deleteAll ? clientsListTotal : ids.length;
+    if (count <= 0) return;
+
     setBulkDeletingClients(true);
+    const toastId = toast.loading(`Eliminando ${count} clientes…`);
     try {
-      const ids: string[] = [];
-      const limit = 200;
-      let skip = 0;
-      // Recoger IDs primero (sin borrar a la vez) para no romper la paginación.
-      while (true) {
-        const { clients, meta } = await listClientsPageRequest(clientsDataUserId, {
-          limit,
-          skip,
-          lite: true,
-          businessId: businessScopeId || undefined,
-        });
-        for (const c of clients) {
-          const id = String(c.id || '').trim();
-          if (id) ids.push(id);
-        }
-        if (clients.length === 0 || skip + clients.length >= meta.total) break;
-        skip += clients.length;
+      const result = deleteAll
+        ? await bulkDeleteClientsRequest(clientsDataUserId, {
+            allMatching: true,
+            businessId: scopedClientsBusinessId || businessScopeId || undefined,
+            search: debouncedSearch,
+            branchId: filterBranch,
+            workCenterId: filterWorkCenter,
+          })
+        : await bulkDeleteClientsRequest(clientsDataUserId, { ids });
+      if (result.removed > 0) {
+        toast.success(
+          result.removed === 1 ? 'Cliente eliminado' : `Eliminados ${result.removed} clientes`,
+          { id: toastId },
+        );
+      } else {
+        toast.info('No se eliminó ningún cliente', { id: toastId });
       }
-      let removed = 0;
-      for (const id of ids) {
-        try {
-          // Una sola borrado por API con el titular de datos (no AppContext.deleteClient:
-          // hacía doble DELETE y usaba authUser en vez de clientsDataUserId).
-          await deleteClientRequest(clientsDataUserId, { id } as AppContextClient);
-          removed += 1;
-        } catch {
-          // seguir con el resto
-        }
+      if (result.failed.length > 0) {
+        toast.warning(`${result.failed.length} no se pudieron borrar`);
       }
+      exitClientSelectMode();
       if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
-      toast.success(`Eliminados ${removed} cliente${removed === 1 ? '' : 's'}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al eliminar clientes');
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : 'Error al eliminar clientes';
+      toast.error(
+        /ruta no encontrada/i.test(msg)
+          ? 'El servidor no tiene el borrado masivo. Reinicia el backend y recarga.'
+          : msg || 'Error al eliminar clientes',
+        { id: toastId },
+      );
+      setBulkDeleteConfirmStep(false);
     } finally {
       setBulkDeletingClients(false);
+      setShowClientsDeleteGuard(false);
     }
   }, [
     businessScopeId,
     clientsDataUserId,
     clientsListTotal,
+    debouncedSearch,
+    exitClientSelectMode,
+    filterBranch,
+    filterWorkCenter,
     isDeliveryBusiness,
     refreshPaginatedClients,
+    scopedClientsBusinessId,
+    selectAllInAccount,
+    selectedClientIds,
     useSegmentMode,
     useServerClients,
   ]);
@@ -2987,34 +3113,94 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   // ─── Tab: Clients ─────────────────────────────────────────────────────────
 
   const renderClientsToolbar = () => (
-    <div className="flex items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:px-4">
-      <ViewToggle view={clientsView} setView={setClientsView} />
-      <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
-        <ClientsActionsMenu
-          isDeliveryBusiness={isDeliveryBusiness}
-          canUseSegments={listPlan.canUseSegments}
-          canExport={listPlan.canExport}
-          canImportFromBusiness={listPlan.canImportFromBusiness}
-          hasOtherBusinesses={otherBusinesses.length > 0}
-          segmentConditionsCount={segmentConditions.length}
-          exportTotalCount={clientsListTotal}
-          exportClients={clientExportRows}
-          onExportAllClients={useServerClients ? handleExportAllClients : undefined}
-          exportingClients={exportingClients}
-          requiredPlanLabel={listPlan.requiredPlanLabel}
-          onQuickAddClient={() => setShowAddClientModal(true)}
-          onAIAddClient={() => setShowAIClientModal(true)}
-          onImportClients={() => setCrmImportMode('clients')}
-          onToggleSegmentBuilder={() => setShowSegmentBuilder((prev) => !prev)}
-          onImportFromBusiness={() => {
-            setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
-            setShowImportFromBusiness(true);
-          }}
-          onDeleteAllClients={isDeliveryBusiness ? () => void handleDeleteAllDeliveryClients() : undefined}
-          deleteAllCount={isDeliveryBusiness ? clientsListTotal : 0}
-          deletingAll={bulkDeletingClients}
-        />
-      </ActivationFieldWrap>
+    <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:px-4">
+      <div className="flex items-center justify-between gap-2">
+        <ViewToggle view={clientsView} setView={setClientsView} />
+        <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
+          <ClientsActionsMenu
+            isDeliveryBusiness={isDeliveryBusiness}
+            canUseSegments={listPlan.canUseSegments}
+            canExport={listPlan.canExport}
+            canImportFromBusiness={listPlan.canImportFromBusiness}
+            hasOtherBusinesses={otherBusinesses.length > 0}
+            segmentConditionsCount={segmentConditions.length}
+            exportTotalCount={clientsListTotal}
+            exportClients={clientExportRows}
+            onExportAllClients={useServerClients ? handleExportAllClients : undefined}
+            exportingClients={exportingClients}
+            requiredPlanLabel={listPlan.requiredPlanLabel}
+            onQuickAddClient={() => setShowAddClientModal(true)}
+            onAIAddClient={() => setShowAIClientModal(true)}
+            onImportClients={() => setCrmImportMode('clients')}
+            onToggleSegmentBuilder={() => setShowSegmentBuilder((prev) => !prev)}
+            onImportFromBusiness={() => {
+              setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
+              setShowImportFromBusiness(true);
+            }}
+            onStartDeleteClients={isDeliveryBusiness ? enterClientSelectMode : undefined}
+            canDeleteClients={isDeliveryBusiness && clientsListTotal > 0}
+          />
+        </ActivationFieldWrap>
+      </div>
+
+      {isDeliveryBusiness && clientSelectMode ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50/70 px-3 py-2 dark:border-red-900/40 dark:bg-red-950/20">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-red-800 dark:text-red-200">
+              <input
+                type="checkbox"
+                checked={allMatchingClientsSelected}
+                disabled={bulkDeletingClients}
+                onChange={() => {
+                  if (allMatchingClientsSelected) clearClientSelection();
+                  else selectAllMatchingClients();
+                }}
+                className="h-4 w-4 rounded border-red-300 text-red-600 focus:ring-red-500"
+              />
+              Seleccionar todos ({clientsListTotal})
+            </label>
+            <span className="text-xs text-red-700/80 dark:text-red-300/80">
+              {selectedClientsCount} seleccionado{selectedClientsCount === 1 ? '' : 's'}
+              {selectAllInAccount ? ' (toda la cuenta)' : ''}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={exitClientSelectMode}
+              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={selectedClientsCount === 0 || bulkDeletingClients}
+              onClick={handleBulkDeleteSelectedClients}
+              className={
+                bulkDeleteConfirmStep
+                  ? 'inline-flex items-center gap-1.5 rounded-lg border border-red-800 bg-red-700 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-40'
+                  : 'inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40'
+              }
+            >
+              {bulkDeletingClients ? (
+                <>Borrando…</>
+              ) : bulkDeleteConfirmStep ? (
+                <>Estoy seguro ({selectedClientsCount})</>
+              ) : (
+                <>
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Borrar{selectedClientsCount > 0 ? ` (${selectedClientsCount})` : ''}
+                </>
+              )}
+            </button>
+          </div>
+          {bulkDeleteConfirmStep && selectedClientsCount > 0 ? (
+            <p className="w-full text-[11px] font-medium text-red-800 dark:text-red-200">
+              Pulsa «Estoy seguro» y escribe ESTOY SEGURO en el aviso para confirmar.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 
@@ -3101,12 +3287,32 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           <div className="space-y-3">
             {paginatedClients.map(client => {
               const deliveryStats = getClientDeliveryStats(client);
+              const clientId = String(client.id || '').trim();
+              const isSelected = clientSelectMode && isClientSelected(clientId);
               return (
               <div key={client.id}
-                className={`group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${client.status === 'active' ? 'border-l-emerald-500' : 'border-l-slate-400'} rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer`}
-                onClick={() => viewClientDetail(client.id)}>
+                className={`group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${client.status === 'active' ? 'border-l-emerald-500' : 'border-l-slate-400'} rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer ${
+                  isSelected ? 'ring-2 ring-red-400 dark:ring-red-500' : ''
+                }`}
+                onClick={() => {
+                  if (clientSelectMode) {
+                    toggleClientSelected(clientId);
+                    return;
+                  }
+                  viewClientDetail(client.id);
+                }}>
                 <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="min-w-0">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    {clientSelectMode ? (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleClientSelected(clientId)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                      />
+                    ) : null}
+                    <div className="min-w-0">
                     {isDeliveryBusiness ? (
                       <DeliveryClientNameCell
                         name={client.name}
@@ -3121,6 +3327,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                         <span className="font-mono text-xs text-gray-400 dark:text-gray-500">{client.dni}</span>
                       </>
                     )}
+                    </div>
                   </div>
                   <ClientStatusBadge status={client.status} />
                 </div>
@@ -3152,7 +3359,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   )}
                   {isDeliveryBusiness && <div />}
                   <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                    {isDeliveryBusiness ? (
+                    {isDeliveryBusiness && !clientSelectMode ? (
                       <DeliveryClientRowActions
                         onView={() => viewClientDetail(client.id)}
                         onNewOrder={() => goToDeliveryTpvForClient(client.id)}
@@ -3160,13 +3367,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                         deleting={deletingClientId === client.id}
                         alwaysVisible
                       />
-                    ) : (
+                    ) : !isDeliveryBusiness ? (
                       <>
                         <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
                         <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
                         <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                       </>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -3229,6 +3436,21 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               <thead>
                 <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800">
                   <th className="w-1 px-0" />
+                  {clientSelectMode ? (
+                    <th className="px-3 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={allMatchingClientsSelected}
+                        disabled={bulkDeletingClients}
+                        onChange={() => {
+                          if (allMatchingClientsSelected) clearClientSelection();
+                          else selectAllMatchingClients();
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        title={`Seleccionar todos (${clientsListTotal})`}
+                      />
+                    </th>
+                  ) : null}
                   {effectiveVisibleClientCols.includes('nombre') && (
                     <th className="px-5 py-3 text-left">
                       <ColFilter label="Cliente" options={cNameOptions} selected={cFilterName} onChange={setCFilterName}
@@ -3305,14 +3527,38 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {isClientsTabLoading ? (
-                  <tr><td colSpan={effectiveVisibleClientCols.length + lockedDeliveryColIds.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Cargando clientes…</td></tr>
+                  <tr><td colSpan={effectiveVisibleClientCols.length + lockedDeliveryColIds.length + 2 + (clientSelectMode ? 1 : 0)} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Cargando clientes…</td></tr>
                 ) : paginatedClients.length === 0 ? (
-                  <tr><td colSpan={effectiveVisibleClientCols.length + lockedDeliveryColIds.length + 2} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Sin resultados</td></tr>
+                  <tr><td colSpan={effectiveVisibleClientCols.length + lockedDeliveryColIds.length + 2 + (clientSelectMode ? 1 : 0)} className="py-12 text-center text-sm text-gray-400 dark:text-gray-500">Sin resultados</td></tr>
                 ) : paginatedClients.map(client => {
                   const deliveryStats = getClientDeliveryStats(client);
+                  const clientId = String(client.id || '').trim();
+                  const isSelected = clientSelectMode && isClientSelected(clientId);
                   return (
-                  <tr key={client.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer" onClick={() => viewClientDetail(client.id)}>
+                  <tr
+                    key={client.id}
+                    className={`group hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors cursor-pointer ${
+                      isSelected ? 'bg-red-50/70 dark:bg-red-950/20' : ''
+                    }`}
+                    onClick={() => {
+                      if (clientSelectMode) {
+                        toggleClientSelected(clientId);
+                        return;
+                      }
+                      viewClientDetail(client.id);
+                    }}
+                  >
                     <td className="pl-3 pr-0 py-0"><div className={`w-1 h-14 rounded-full ${client.status === 'active' ? 'bg-emerald-500' : 'bg-slate-400'}`} /></td>
+                    {clientSelectMode ? (
+                      <td className="px-3 py-3.5" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleClientSelected(clientId)}
+                          className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        />
+                      </td>
+                    ) : null}
                     {effectiveVisibleClientCols.includes('nombre') && (
                       <td className="px-5 py-3.5">
                         {isDeliveryBusiness ? (
@@ -3377,20 +3623,20 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                     ))}
                     <td className="px-4 py-3.5">
                       <div onClick={e => e.stopPropagation()}>
-                        {isDeliveryBusiness ? (
+                        {isDeliveryBusiness && !clientSelectMode ? (
                           <DeliveryClientRowActions
                             onView={() => viewClientDetail(client.id)}
                             onNewOrder={() => goToDeliveryTpvForClient(client.id)}
                             onDelete={() => void handleDeleteDeliveryClient(client)}
                             deleting={deletingClientId === client.id}
                           />
-                        ) : (
+                        ) : !isDeliveryBusiness ? (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
                             <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
                             <button onClick={() => viewClientDetail(client.id)} className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg" title="Ver ficha"><Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" /></button>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -4209,6 +4455,25 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         contexto="crm"
         businessId={businessScopeId || scopedClientsBusinessId}
         dataUserId={clientsDataUserId}
+      />
+      <CatalogDeleteGuardModal
+        open={showClientsDeleteGuard}
+        payload={
+          showClientsDeleteGuard && selectedClientsCount > 0
+            ? {
+                mode: 'bulk',
+                count: selectedClientsCount,
+                confirmPhrase: 'ESTOY SEGURO',
+              }
+            : null
+        }
+        onClose={() => {
+          setShowClientsDeleteGuard(false);
+          setBulkDeleteConfirmStep(false);
+        }}
+        onVerified={() => {
+          void executeClientsBulkDeleteAfterGuard();
+        }}
       />
       {leadToConvert && (
         <SAAS__ConvertToClientModal isOpen={showConvertModal} onClose={() => { setShowConvertModal(false); setLeadToConvert(null); }}

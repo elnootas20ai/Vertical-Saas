@@ -31,10 +31,6 @@ import {
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, countNetSaleOperations, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
-import {
-  canDownloadUrielCajaExcel,
-  downloadUrielCajaClosingsExcel,
-} from '../../lib/cajaUrielClosingsExcelExport';
 import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
 import {
@@ -1550,7 +1546,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <p className="mt-1 text-xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
                     {summary.salesByMethod.efectivo.toFixed(2)}€
                   </p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros en efectivo (TPV)</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros en efectivo (caja)</p>
                 </div>
                 <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 p-3">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300 flex items-center gap-1">
@@ -1559,7 +1555,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   <p className="mt-1 text-xl font-bold tabular-nums text-blue-800 dark:text-blue-200">
                     {summary.salesByMethod.tarjeta.toFixed(2)}€
                   </p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros con tarjeta (TPV)</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros con tarjeta (caja)</p>
                 </div>
               </div>
 
@@ -1804,7 +1800,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             )}
             {showDeliveryClosingSlots && (
               <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
-                Ventas apps: {aggregatorEuroTotal.toFixed(2)}€ · TPV + apps: {grandEuroTotal.toFixed(2)}€
+                Ventas apps: {aggregatorEuroTotal.toFixed(2)}€ · Efectivo TPV + ventas apps: {grandEuroTotal.toFixed(2)}€
+                {' '}(no incluye tarjeta TPV; el total del día está en «TOTAL DE TODO»)
               </p>
             )}
           </div>
@@ -2076,9 +2073,9 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 apps {appsFoodTotals.pizza}/{appsFoodTotals.burger}/{appsFoodTotals.taco}
               </span>
               <span className="tabular-nums font-semibold">
-                💵 {dayCashTotal.toFixed(2)}€ (TPV {tpvCashSales.toFixed(2)} + apps {aggregatorCashTotal.toFixed(2)})
+                💵 {dayCashTotal.toFixed(2)}€ (caja {tpvCashSales.toFixed(2)} + apps {aggregatorCashTotal.toFixed(2)})
                 {' · '}
-                💳 {dayCardTotal.toFixed(2)}€ (TPV {tpvCardSales.toFixed(2)} + apps {aggregatorCardTotal.toFixed(2)})
+                💳 {dayCardTotal.toFixed(2)}€ (caja {tpvCardSales.toFixed(2)} + apps {aggregatorCardTotal.toFixed(2)})
               </span>
             </div>
           </div>
@@ -4325,20 +4322,8 @@ export function TpvRegisterGate({
           ? `Caja cerrada (sin ventas, validada automáticamente). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`
           : `Caja cerrada. Pendiente de validación gerente. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
       );
-      // Excel Uriel solo para CEO / cuenta administradora (no trabajadores ni cajeros).
-      if (canDownloadUrielCajaExcel(user, businesses)) {
-        try {
-          const { fileName, yearMonth } = downloadUrielCajaClosingsExcel(sessions, {
-            pointOfSaleId: String(updated.pointOfSaleId || session.pointOfSaleId || ''),
-            pointOfSaleName: updated.pointOfSaleName || session.pointOfSaleName || '',
-            closedSession: updated,
-          });
-          toast.success(`Excel de cierre descargado (${yearMonth}): ${fileName}`);
-        } catch (excelErr) {
-          console.error(excelErr);
-          toast.warning('Caja cerrada, pero no se pudo generar el Excel del mes');
-        }
-      }
+      // El Excel Uriel no se descarga al cerrar: queda guardado en el servidor;
+      // el CEO lo baja a mano desde Caja → Excel.
       if (!autoValidated) {
         void createNotification({
         level: Math.abs(diff) >= 20 ? 'warning' : 'info',

@@ -38,6 +38,7 @@ import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { PortfolioBrandStoreBilling } from './PortfolioBrandStoreBilling';
 import { PortfolioCompanyLeague } from './PortfolioCompanyLeague';
 import { PortfolioAlertsPanel } from './PortfolioAlertsPanel';
+import { PortfolioOpsPulse } from './PortfolioOpsPulse';
 import { getRetailOpsUiCopyForRows, getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { VertialBillingUpgradeLink } from './VertialBillingUpgradeLink';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
@@ -159,9 +160,6 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
 
   const displayFinance = businessFilter === 'all' ? finance : filteredFinance;
 
-  const incomeMomPct = monthOverMonthPct(displayFinance.incomeMonth, displayFinance.incomePrevMonth);
-  const newClientsMomPct = monthOverMonthPct(filteredTotals.newClientsMonth, filteredTotals.newClientsPrevMonth);
-
   const liveStatusText = liveSseOk
     ? 'En vivo'
     : isRefreshing
@@ -234,25 +232,12 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           portfolioLocked={portfolioPlan.portfolioLocked}
         />
 
-        {/* Resumen portfolio: empresas, clientes y variación mes a mes */}
+        {/* Resumen operativo por PDV (sustituye los StatCards genéricos) */}
         {showGroupSections && (
-        <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-indigo-500" />
-              Resumen del portfolio
-            </h3>
-            <PortfolioRefreshButton onRefresh={handlePortfolioRefresh} />
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <StatCard label="Empresas" value={String(filteredTotals.businesses)} icon={<Building2 className="w-4 h-4" />} tone="blue" sub={`${filteredTotals.brands} marcas · ${filteredTotals.stores} tiendas`} />
-            <StatCard label="Clientes totales" value={String(filteredTotals.totalClients)} icon={<Users className="w-4 h-4" />} tone="violet" sub="Base CRM activa" />
-            <StatCard label="Clientes nuevos" value={String(filteredTotals.newClientsMonth)} icon={<Users className="w-4 h-4" />} tone="emerald" sub={<MomBadge pct={newClientsMomPct} prev={filteredTotals.newClientsPrevMonth} suffix=" vs mes ant." />} />
-            <StatCard label={opsCopy.ventasOperativa} value={fmtEuro(filteredTotals.revenueMonth)} icon={<TrendingUp className="w-4 h-4" />} tone="emerald" sub={<MomBadge pct={revenueMomPct} prevLabel={fmtEuro(filteredTotals.revenuePrevMonth)} />} />
-            <StatCard label="Ingresos finanzas" value={fmtEuro(displayFinance.incomeMonth)} icon={<Wallet className="w-4 h-4" />} tone="blue" sub={<MomBadge pct={incomeMomPct} prevLabel={fmtEuro(displayFinance.incomePrevMonth)} />} />
-            <StatCard label={opsCopy.ordersMonthLabel} value={String(filteredTotals.ordersMonth)} icon={<ShoppingBag className="w-4 h-4" />} tone="amber" sub={`Mes ant.: ${filteredTotals.ordersPrevMonth}`} />
-          </div>
-        </section>
+          <PortfolioOpsPulse
+            rows={filteredRows}
+            refreshButton={<PortfolioRefreshButton onRefresh={handlePortfolioRefresh} />}
+          />
         )}
 
         {/* Clasificación del grupo — comparativa tipo ranking */}
@@ -821,7 +806,7 @@ function BusinessCard({
             ) : row.isRestaurant ? (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <MetricPill label="Cajas abiertas" value={String(m.openCashRegisters)} highlight />
-                <MetricPill label="Efectivo en caja" value={fmtEuro(m.cashInRegisters)} />
+                <MetricPill label="Dinero en cajón" value={fmtEuro(m.cashInRegisters)} />
                 <MetricPill label="Ingresos finanzas" value={fmtEuro(f.incomeMonth)} />
               </div>
             ) : (
@@ -836,7 +821,7 @@ function BusinessCard({
               >
                 <Banknote className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
                 <span className="text-xs font-semibold text-amber-900 dark:text-amber-100">
-                  Panel de caja — {m.openCashRegisters} abierta{m.openCashRegisters !== 1 ? 's' : ''} · {fmtEuro(m.cashInRegisters)} en efectivo
+                  Panel de caja — {m.openCashRegisters} abierta{m.openCashRegisters !== 1 ? 's' : ''} · {fmtEuro(m.cashInRegisters)} en cajón (fondo + cobros)
                 </span>
                 <ArrowRight className="w-3.5 h-3.5 text-amber-700 ml-auto shrink-0" />
               </button>

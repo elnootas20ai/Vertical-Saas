@@ -308,6 +308,51 @@ export function invalidateClientDocumentsForUser(userId) {
  * Tras alta/edición: mete el cliente en la caché viva para que el TPV lo encuentre al instante
  * sin esperar un reload de toda la cartera.
  */
+/**
+ * Fusiona un lote de clientes en la caché viva (un solo rebuild del índice de búsqueda).
+ * Si no hay cartera en RAM, invalida: no sembramos parciales (TPV vería solo el lote).
+ */
+export function mergeClientDocumentsIntoCache(userId, documents) {
+  const uid = String(userId || '').trim();
+  if (!uid || !Array.isArray(documents) || documents.length === 0) return;
+
+  const entry = clientDocumentsByUser.get(uid);
+  if (!entry || !Array.isArray(entry.docs) || entry.docs.length === 0) {
+    invalidateClientDocumentsForUser(uid);
+    return;
+  }
+
+  const byId = new Map();
+  for (const d of entry.docs) {
+    const id = String(d?._id || d?.id || '').trim();
+    if (id) byId.set(id, d);
+  }
+
+  let changed = false;
+  for (const document of documents) {
+    if (!document || document.type !== 'client') continue;
+    const id = String(document._id || document.id || '').trim();
+    if (!id) continue;
+    if (document.deletedAt) {
+      if (byId.delete(id)) changed = true;
+      continue;
+    }
+    byId.set(id, document);
+    changed = true;
+  }
+  if (!changed) return;
+
+  bumpClientDocumentsGeneration(uid);
+  const next = Array.from(byId.values());
+  if (next.length === 0) {
+    invalidateClientDocumentsForUser(uid);
+    return;
+  }
+  writeClientDocumentsCache(uid, next);
+  const cacheKey = cacheService.buildKey('clients_user', uid, 'all');
+  cacheService.set(cacheKey, next, CLIENT_DOCS_TTL_MS);
+}
+
 export function upsertClientDocumentInCache(userId, document) {
   const uid = String(userId || '').trim();
   if (!uid || !document || document.type !== 'client') return;
@@ -462,10 +507,21 @@ export async function bulkPutDocuments(req, dbName, docs) {
   cacheService.invalidateDb(dbName);
   cacheService.invalidateByPrefix('kpi:');
   cacheService.invalidateByPrefix('view:');
+  const clientsByUser = new Map();
   for (const doc of docs || []) {
-    if (doc?.type === 'client' && doc?.user_id) {
-      upsertClientDocumentInCache(doc.user_id, doc);
+    if (doc?.type !== 'client' || !doc?.user_id) continue;
+    const uid = String(doc.user_id).trim();
+    if (!uid) continue;
+    if (!clientsByUser.has(uid)) clientsByUser.set(uid, []);
+    clientsByUser.get(uid).push(doc);
+  }
+  for (const [uid, list] of clientsByUser) {
+    // Soft-delete masivo: invalidar es barato; merge doc-a-doc reconstruye el índice miles de veces.
+    if (list.length > 0 && list.every((d) => d?.deletedAt)) {
+      invalidateClientDocumentsForUser(uid);
+      continue;
     }
+    mergeClientDocumentsIntoCache(uid, list);
   }
 
   return Array.isArray(payload) ? payload : [];
@@ -6650,6 +6706,10 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     data.terminalCode || existing?.terminalCode || generateTerminalCode(),
   ).trim().toUpperCase();
 
+  const businessId = normalizeBusinessScopeId(
+    data.businessId || data.business_id || existing?.businessId || existing?.business_id,
+  );
+
   return {
     _id: id,
     _rev: existing?._rev,
@@ -6661,6 +6721,7 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
     code: String(data.code || existing?.code || ''),
     terminalCode,
     address: String(data.address || existing?.address || ''),
+    ...(businessId ? { businessId, business_id: businessId } : {}),
     terminals,
     ...resolvePrinterConfigField(data, existing),
     active: data.active !== undefined ? Boolean(data.active) : (existing?.active !== false),
@@ -6671,6 +6732,7 @@ export function buildPointOfSaleDocument(userId, data = {}, existing = null) {
 
 export function sanitizePointOfSale(doc) {
   if (!doc) return null;
+  const businessId = normalizeBusinessScopeId(doc.businessId || doc.business_id);
   return {
     _id: doc._id,
     _rev: doc._rev,
@@ -6682,6 +6744,7 @@ export function sanitizePointOfSale(doc) {
     code: doc.code || '',
     terminalCode: String(doc.terminalCode || '').trim().toUpperCase(),
     address: doc.address || '',
+    ...(businessId ? { businessId, business_id: businessId } : {}),
     terminals: Array.isArray(doc.terminals)
       ? doc.terminals.map((t) => ({
           id: t.id || '',

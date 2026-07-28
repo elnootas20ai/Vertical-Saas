@@ -214,7 +214,9 @@ export function isTpvBuildYourOwnCatalogItem(
   if (/al\s*gusto|a\s*gusto|build\s*your\s*own/.test(name)) return true;
   // Modos Excel: «3 Ingredientes», «5 Ingredientes a elegir», etc.
   if (/\d+\s*ingredientes?/.test(name)) return true;
-  // Carta Modomio: pizza al gusto (no Combo Modomio).
+  // Carta: pizza al gusto Modommio / Modomio (nunca menús «Combo …»).
+  if (/^combo\b/.test(name)) return false;
+  if (/^(pizza\s+)?modommio(premium)?$/.test(name) || /^premium\s+modommio$/.test(name)) return true;
   if (/^(pizza\s+)?modomio(premium)?$/.test(name) || /^premium\s+modomio$/.test(name)) return true;
   return false;
 }
@@ -233,16 +235,20 @@ export function resolveBuildYourOwnMaxIngredients(
   const name = foldCatalogProductName(item.name || '');
   const cat = foldIngredientLabel(String(item.category || ''));
   if (/mitad\s*y\s*mitad|half\s*and\s*half/.test(name)) return null;
+  // Menú «Combo …»: no es pizza al gusto.
+  if (/^combo\b/.test(name)) return null;
 
   const isPremiumModomio =
+    /premium\s*modommio|modommio\s*premium|modommiopremium/.test(name) ||
     /premium\s*modomio|modomio\s*premium|modomiopremium/.test(name) ||
-    (/modomio/.test(name) && /premium/.test(cat)) ||
-    (/modomio/.test(name) && /\b5\s*ingredientes?\b/.test(name));
+    (/(modommio|modomio)/.test(name) && /premium/.test(cat)) ||
+    (/(modommio|modomio)/.test(name) && /\b5\s*ingredientes?\b/.test(name));
   if (isPremiumModomio) return 5;
 
   const isPlainModomio =
+    /^(pizza\s+)?modommio$/.test(name) ||
     /^(pizza\s+)?modomio$/.test(name) ||
-    (/modomio/.test(name) && /\b3\s*ingredientes?\b/.test(name));
+    (/(modommio|modomio)/.test(name) && /\b3\s*ingredientes?\b/.test(name));
   if (isPlainModomio) return 3;
 
   const blobs = [

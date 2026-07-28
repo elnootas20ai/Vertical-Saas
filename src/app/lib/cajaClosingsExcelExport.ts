@@ -1,11 +1,11 @@
 /**
  * Core — export Excel acumulativo de cierres de caja TPV.
  * Sirve a cualquier vertical (delivery, restaurant, …) desde la sesión `TpvRegisterSession`.
- * Las columnas de apps delivery solo se añaden si hay datos de integradores.
+ * Las columnas de apps delivery solo se añaden por plataforma si hay algún valor ≠ 0.
  */
 import * as XLSX from 'xlsx';
 import type { TpvRegisterSession } from './deliveryApi';
-import { AGGREGATOR_PLATFORMS } from './deliveryIntegrationsUi';
+import { AGGREGATOR_PLATFORMS, type AggregatorPlatformDef } from './deliveryIntegrationsUi';
 import { localCalendarDayKey } from './tpvCajaScope';
 
 function round2(n: number): number {
@@ -48,40 +48,69 @@ function channelFood(
   return Math.max(0, Math.floor(Number(session.productClosingCounts?.byChannel?.[channel]?.[key] || 0)));
 }
 
-function sessionHasAggregatorData(session: TpvRegisterSession): boolean {
-  const cash = session.aggregatorClosingCash || {};
-  const card = session.aggregatorClosingCard || {};
-  const totals = session.aggregatorClosingTotals || {};
-  const byCh = session.productClosingCounts?.byChannel || {};
-  return (
-    Object.keys(cash).some((k) => Number(cash[k]) > 0)
-    || Object.keys(card).some((k) => Number(card[k]) > 0)
-    || Object.keys(totals).some((k) => Number(totals[k]) > 0)
-    || Object.keys(byCh).length > 0
-  );
+function platformHasNonZeroData(sessions: TpvRegisterSession[], channel: string): boolean {
+  for (const s of sessions) {
+    if (channelCash(s, channel) > 0) return true;
+    if (channelCard(s, channel) > 0) return true;
+    if (round2(Number(s.aggregatorClosingTotals?.[channel] || 0)) > 0) return true;
+    if (channelFood(s, channel, 'pizza') > 0) return true;
+    if (channelFood(s, channel, 'burger') > 0) return true;
+    if (channelFood(s, channel, 'taco') > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Solo plataformas con algún importe/unidades ≠ 0 en el lote a exportar.
+ * Evita columnas Glovo/Uber/Just Eat/Flipdish llenas de ceros.
+ */
+export function selectAggregatorPlatformsForExcel(
+  sessions: TpvRegisterSession[],
+): AggregatorPlatformDef[] {
+  return AGGREGATOR_PLATFORMS.filter((p) => platformHasNonZeroData(sessions, p.channel));
+}
+
+/**
+ * Quita basura técnica de notas de cierre para el Excel (IDs de sesión TPV).
+ * Conserva el texto humano. Ej.: `tpvreg-…`, `tpvrge.…`, `tpv_session:…`.
+ */
+export function sanitizeClosingNotesForExcel(raw: string | null | undefined): string {
+  let s = String(raw ?? '');
+  // Notas de sync financiero primero (incluye el id embebido)
+  s = s.replace(/\btpv_session:[^\s;,)]*/gi, '');
+  // Sesión CouchDB: tpvreg-<uuid> (también tpvrge.… / puntos si el ID se truncó al copiar)
+  s = s.replace(/\btpvr(?:eg|ge)[-.][a-z0-9][a-z0-9.-]*/gi, '');
+  // Restos tipo orders_synced:12.50 pegados a notas técnicas
+  s = s.replace(/\borders_synced:[^\s;,)]*/gi, '');
+  s = s.replace(/\s{2,}/g, ' ').replace(/^[\s.,;:·|/\-–—]+|[\s.,;:·|/\-–—]+$/g, '').trim();
+  return s;
 }
 
 export type CajaClosingsExcelOptions = {
   fileName?: string;
-  /** Si no se pasa, se detecta automáticamente según los cierres. */
+  /**
+   * `true` → incluir apps (solo plataformas con datos).
+   * `false` → nunca columnas de apps.
+   * omitido → auto (plataformas con datos).
+   */
   includeAggregatorApps?: boolean;
 };
 
-/**
- * Excel acumulativo: una fila por cierre (histórico completo, no un archivo por día).
- */
-export function downloadAccumulatedCajaClosingsExcel(
+/** Cabecera + filas de la hoja principal (sin escribir archivo). Útil en tests. */
+export function buildAccumulatedCajaClosingsAoa(
   sessions: TpvRegisterSession[],
-  opts?: CajaClosingsExcelOptions,
-): { rows: number } {
+  opts?: Pick<CajaClosingsExcelOptions, 'includeAggregatorApps'>,
+): { header: string[]; rows: unknown[][]; platforms: AggregatorPlatformDef[] } {
   const closed = sessions
     .filter((s) => String(s.status || '').toLowerCase() !== 'open')
     .slice()
     .sort((a, b) => String(a.openedAt || '').localeCompare(String(b.openedAt || '')));
 
-  const includeApps =
-    opts?.includeAggregatorApps
-    ?? closed.some(sessionHasAggregatorData);
+  const platforms =
+    opts?.includeAggregatorApps === false
+      ? []
+      : selectAggregatorPlatformsForExcel(closed);
+  const includeApps = platforms.length > 0;
 
   const header = [
     'Fecha',
@@ -103,7 +132,7 @@ export function downloadAccumulatedCajaClosingsExcel(
     'Otros TPV',
     'Cobros TPV total',
     ...(includeApps
-      ? AGGREGATOR_PLATFORMS.flatMap((p) => [
+      ? platforms.flatMap((p) => [
           `${p.label} pizzas`,
           `${p.label} burgers`,
           `${p.label} tacos`,
@@ -143,7 +172,7 @@ export function downloadAccumulatedCajaClosingsExcel(
     let appsCard = 0;
     const appCols: unknown[] = [];
     if (includeApps) {
-      for (const p of AGGREGATOR_PLATFORMS) {
+      for (const p of platforms) {
         const ch = p.channel;
         const cash = channelCash(s, ch);
         const card = channelCard(s, ch);
@@ -199,14 +228,33 @@ export function downloadAccumulatedCajaClosingsExcel(
       fmtNum(Number(s.expectedCash || 0)),
       fmtNum(Number(s.finalCashAmount || 0)),
       fmtNum(Number(s.difference || 0)),
-      s.closingNotes || '',
+      sanitizeClosingNotesForExcel(s.closingNotes),
     ]);
   }
+
+  return { header, rows, platforms };
+}
+
+/**
+ * Excel acumulativo: una fila por cierre (histórico completo, no un archivo por día).
+ */
+export function downloadAccumulatedCajaClosingsExcel(
+  sessions: TpvRegisterSession[],
+  opts?: CajaClosingsExcelOptions,
+): { rows: number } {
+  const { header, rows, platforms } = buildAccumulatedCajaClosingsAoa(sessions, opts);
+  const includeApps = platforms.length > 0;
+  const closedCount = rows.length - 1;
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(rows);
   ws['!cols'] = header.map((h) => ({ wch: Math.min(28, Math.max(12, String(h).length + 2)) }));
   XLSX.utils.book_append_sheet(wb, ws, 'Cierres acumulados');
+
+  const closed = sessions
+    .filter((s) => String(s.status || '').toLowerCase() !== 'open')
+    .slice()
+    .sort((a, b) => String(a.openedAt || '').localeCompare(String(b.openedAt || '')));
 
   const byDay = new Map<string, {
     pizza: number;
@@ -237,7 +285,7 @@ export function downloadAccumulatedCajaClosingsExcel(
     cur.taco += Math.max(0, Math.floor(Number(s.productClosingCounts?.taco || 0)));
     cur.tpv += round2(Number(s.summary?.totalSales || 0));
     if (includeApps) {
-      for (const p of AGGREGATOR_PLATFORMS) {
+      for (const p of platforms) {
         cur.appsCash += channelCash(s, p.channel);
         cur.appsCard += channelCard(s, p.channel);
       }
@@ -285,5 +333,5 @@ export function downloadAccumulatedCajaClosingsExcel(
   const stamp = localCalendarDayKey(new Date());
   const fileName = opts?.fileName || `cierres-caja-acumulado-${stamp}.xlsx`;
   XLSX.writeFile(wb, fileName);
-  return { rows: closed.length };
+  return { rows: closedCount };
 }

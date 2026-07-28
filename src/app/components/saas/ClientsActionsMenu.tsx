@@ -56,9 +56,9 @@ export interface ClientsActionsMenuProps {
   onImportClients: () => void;
   onToggleSegmentBuilder: () => void;
   onImportFromBusiness?: () => void;
-  onDeleteAllClients?: () => void;
-  deleteAllCount?: number;
-  deletingAll?: boolean;
+  /** Entra en modo selección para elegir qué clientes borrar. */
+  onStartDeleteClients?: () => void;
+  canDeleteClients?: boolean;
 }
 
 export function ClientsActionsMenu({
@@ -78,9 +78,8 @@ export function ClientsActionsMenu({
   onImportClients,
   onToggleSegmentBuilder,
   onImportFromBusiness,
-  onDeleteAllClients,
-  deleteAllCount = 0,
-  deletingAll = false,
+  onStartDeleteClients,
+  canDeleteClients = false,
 }: ClientsActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -157,17 +156,15 @@ export function ClientsActionsMenu({
             close();
           },
         },
-        ...(onDeleteAllClients
+        ...(onStartDeleteClients
           ? [{
-              id: 'delete-all',
-              label: deletingAll ? 'Eliminando…' : 'Eliminar todos',
-              description: deleteAllCount > 0
-                ? `Borrar ${deleteAllCount} cliente${deleteAllCount === 1 ? '' : 's'} del negocio`
-                : 'No hay clientes que eliminar',
+              id: 'delete-clients',
+              label: 'Eliminar clientes',
+              description: 'Elige en el listado a quién borrar',
               icon: <Trash2 className="w-4 h-4 text-red-500" />,
-              disabled: deletingAll || deleteAllCount === 0,
+              disabled: !canDeleteClients,
               action: () => {
-                onDeleteAllClients();
+                onStartDeleteClients();
                 close();
               },
             }]

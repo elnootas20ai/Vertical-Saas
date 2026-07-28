@@ -5,7 +5,8 @@ import { authFetch, getAuthHeaders } from './authApi';
 import { getApiBase } from './apiBase';
 
 interface ApiEnvelope {
-  error?: string;
+  error?: string | { message?: string; reason?: string; error?: string };
+  message?: string;
 }
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
@@ -26,6 +27,30 @@ function getCouchHeaders(): Record<string, string> {
   return headers;
 }
 
+function formatCrmApiError(payload: ApiEnvelope | unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') {
+    if (typeof payload === 'string' && payload.trim()) return payload.trim();
+    return fallback;
+  }
+  const body = payload as ApiEnvelope & Record<string, unknown>;
+  const err = body.error;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  if (err && typeof err === 'object') {
+    const obj = err as Record<string, unknown>;
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message.trim();
+    if (typeof obj.reason === 'string' && obj.reason.trim()) return obj.reason.trim();
+    if (typeof obj.error === 'string' && obj.error.trim()) return obj.error.trim();
+  }
+  if (typeof body.message === 'string' && body.message.trim()) return body.message.trim();
+  try {
+    const raw = JSON.stringify(payload);
+    if (raw && raw !== '{}' && raw !== '[object Object]') return raw.slice(0, 300);
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await authFetch(`${API_BASE}${path}`, {
     headers: {
@@ -44,7 +69,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    throw new Error(payload?.error || 'Error inesperado guardando CRM');
+    throw new Error(formatCrmApiError(payload, `Error CRM (${response.status})`));
   }
 
   return payload;
@@ -261,15 +286,15 @@ export async function bulkCreateClientsRequest(userId: string, clients: Client[]
   return result.created;
 }
 
-const CRM_BULK_CHUNK_SIZE = 250;
+const CRM_BULK_CHUNK_SIZE = 500;
 
 export async function bulkCreateClientsInChunks(
   userId: string,
   clients: Client[],
   onProgress?: (done: number, total: number) => void,
   options?: { businessId?: string; signal?: AbortSignal },
-): Promise<{ created: Client[]; errors: unknown[] }> {
-  const created: Client[] = [];
+): Promise<{ createdCount: number; errors: unknown[] }> {
+  let createdCount = 0;
   const errors: unknown[] = [];
   const total = clients.length;
   const businessId = options?.businessId?.trim();
@@ -283,12 +308,12 @@ export async function bulkCreateClientsInChunks(
       businessId ? { ...c, businessId, business_id: businessId } : c
     ));
     const result = await bulkCreateClientsV2Request(userId, chunk, { businessId, signal });
-    created.push(...result.created);
+    createdCount += Math.max(0, Number(result.total ?? result.created.length ?? 0));
     errors.push(...result.errors);
     onProgress?.(Math.min(i + chunk.length, total), total);
   }
 
-  return { created, errors };
+  return { createdCount, errors };
 }
 
 export async function bulkCreateLeadsRequest(userId: string, leads: Lead[]): Promise<Lead[]> {
@@ -678,6 +703,50 @@ export async function deleteClientRequest(userId: string, client: Client): Promi
   notifyCrmClientsSync();
 }
 
+/** Soft-delete de varios clientes, o de todo el alcance del listado. */
+export async function bulkDeleteClientsRequest(
+  userId: string,
+  options: {
+    ids?: string[];
+    allMatching?: boolean;
+    businessId?: string;
+    search?: string;
+    branchId?: string;
+    workCenterId?: string;
+  },
+): Promise<{ removed: number; skipped: number; failed: string[] }> {
+  const body: Record<string, unknown> = {};
+  if (options.allMatching) {
+    body.allMatching = true;
+    if (options.businessId?.trim()) body.businessId = options.businessId.trim();
+    if (options.search?.trim()) body.search = options.search.trim();
+    if (options.branchId && options.branchId !== 'all') body.branchId = options.branchId;
+    if (options.workCenterId && options.workCenterId !== 'all') body.workCenterId = options.workCenterId;
+  } else {
+    body.ids = Array.isArray(options.ids) ? options.ids : [];
+  }
+
+  const result = await request<{
+    ok: boolean;
+    removed?: number;
+    skipped?: number;
+    failed?: string[];
+  }>(
+    // delete-all: ruta explícita en index.js (evita 404 de backends viejos sin bulk-delete en el router)
+    `/api/clients/${encodeURIComponent(userId)}/delete-all`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  );
+  notifyCrmClientsSync();
+  return {
+    removed: Number(result.removed) || 0,
+    skipped: Number(result.skipped) || 0,
+    failed: Array.isArray(result.failed) ? result.failed.map(String) : [],
+  };
+}
+
 // ─── MERGE DUPLICADOS ─────────────────────────────────────────────────────────
 
 export async function mergeLeadRequest(userId: string, keepId: string, deleteId: string): Promise<Lead | null> {
@@ -829,8 +898,13 @@ export async function bulkCreateClientsV2Request(
   userId: string,
   clients: Client[],
   options?: { businessId?: string; signal?: AbortSignal },
-): Promise<{ created: Client[]; errors: unknown[] }> {
-  const result = await request<{ ok: boolean; clients: unknown[]; errors: unknown[] }>(
+): Promise<{ created: Client[]; errors: unknown[]; total: number }> {
+  const result = await request<{
+    ok: boolean;
+    clients: unknown[];
+    errors: unknown[];
+    total?: number;
+  }>(
     `/api/clients/${encodeURIComponent(userId)}/bulk`,
     {
       method: 'POST',
@@ -841,9 +915,21 @@ export async function bulkCreateClientsV2Request(
       signal: options?.signal,
     },
   );
+  const created = (result.clients || [])
+    .map(normalizeClientRecord)
+    .filter((c): c is Client => Boolean(c));
+  const total = Math.max(
+    0,
+    Number(
+      result.total != null && Number.isFinite(Number(result.total))
+        ? result.total
+        : created.length,
+    ),
+  );
   return {
-    created: (result.clients || []).map(normalizeClientRecord).filter((c): c is Client => Boolean(c)),
+    created,
     errors: result.errors || [],
+    total,
   };
 }
 

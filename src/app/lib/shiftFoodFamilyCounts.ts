@@ -52,8 +52,10 @@ export function classifyFoodFamily(
   const nm = fold(name || '');
   if (/taco/.test(cat) || /\btacos?\b/.test(nm)) return 'taco';
   if (/burger|hamburg|smash/.test(cat) || /burger|hamburg|smash/.test(nm)) return 'burger';
+  // Postres tipo «Pizza Nutella» no son pizza de carta para el cierre.
+  if (/postre|dessert|helado|tiramisu/.test(cat)) return null;
+  if (/nutella/.test(nm) && /pizza/.test(nm)) return null;
   // Carta delivery: Pizzas + Premium + Especialidad + Calzone + Mitad y mitad = pizza.
-  // Sin esto, «Trufada» (Premium) o «Mitad y mitad» en Premium no sumaban al cierre.
   if (
     /pizza|calzone|premium|especialidad/.test(cat) ||
     /pizza|calzone/.test(nm) ||
@@ -66,7 +68,7 @@ export function classifyFoodFamily(
 
 /**
  * Unidades de pizza por producto de menú (cierre de caja).
- * Individual → 1, Dúo → 2, Familiar → 3. null si no es ese tipo de menú.
+ * Individual / Combo Modomio → 1, Dúo → 2, Familiar → 3. null si no es ese tipo de menú.
  */
 export function pizzaUnitsFromProductLabel(
   category: string | undefined,
@@ -77,6 +79,8 @@ export function pizzaUnitsFromProductLabel(
   // Familiar primero: más específico que un “combo” genérico.
   if (/\bfamiliar\b|\bfamily\b/.test(blob)) return 3;
   if (/\bduos?\b/.test(blob)) return 2;
+  // Combo Modomio/Modommio = 1 pizza (+ postre). No confundir con pizza «Modommio» suelta.
+  if (/combo\s*modomm?io|modomm?io\s*combo/.test(blob)) return 1;
   if (/\bindividual(es)?\b|\bestandar\b/.test(blob)) return 1;
   return null;
 }
@@ -98,7 +102,7 @@ export function parseComboExtraLine(raw: string): { name: string; units: number 
 
 function isLikelyNonMainComboExtra(name: string): boolean {
   const n = fold(name);
-  return /bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|patata|frita|complemento|acompan|postre|helado|nugget|alita|ensalada|salad|dip|salsa|brownie|cookie|batido|smoothie|zumo|nestea|aquarius|red.?bull|monster|maiz|pan\b|aros/.test(
+  return /bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|patata|frita|complemento|acompan|postre|helado|tiramisu|nugget|alita|ensalada|salad|dip|salsa|brownie|cookie|batido|smoothie|zumo|nestea|aquarius|red.?bull|monster|maiz|pan\b|aros|tequeno|salchipapa|chicken\s*balls?/.test(
     n,
   );
 }
@@ -261,6 +265,21 @@ export function foodFamilyCountsFromSession(
   };
 }
 
+/** Día de trabajo del cierre = día local de apertura (como Excel Uriel; turnos de madrugada). */
+function sessionWorkDayKey(session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt'>): string {
+  const opened = String(session.openedAt || '').trim();
+  if (opened) {
+    const d = new Date(opened);
+    if (!Number.isNaN(d.getTime())) return localCalendarDayKey(d);
+  }
+  const closed = String(session.closedAt || '').trim();
+  if (closed) {
+    const d = new Date(closed);
+    if (!Number.isNaN(d.getTime())) return localCalendarDayKey(d);
+  }
+  return '';
+}
+
 /** Suma conteos guardados en cierres del día; si no hay, null. */
 export function sumProductClosingCountsForDay(
   sessions: TpvRegisterSession[],
@@ -270,8 +289,7 @@ export function sumProductClosingCountsForDay(
   const pdvSet = pdvIds?.length ? new Set(pdvIds) : null;
   const closed = sessions.filter((s) => {
     if (String(s.status || '') !== 'closed') return false;
-    const day = String(s.closedAt || s.openedAt || '').slice(0, 10);
-    if (day !== dayKey) return false;
+    if (sessionWorkDayKey(s) !== dayKey) return false;
     if (pdvSet && !pdvSet.has(String(s.pointOfSaleId || '').trim())) return false;
     return Boolean(s.productClosingCounts);
   });

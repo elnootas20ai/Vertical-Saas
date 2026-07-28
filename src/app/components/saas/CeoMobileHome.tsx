@@ -284,7 +284,7 @@ export function CeoMobileHome() {
                     <p className="text-lg font-black text-gray-900 dark:text-gray-100 tabular-nums">
                       {eur(cash?.totalCashInRegisters || 0)}€
                     </p>
-                    <p className="text-[10px] text-gray-500 font-semibold">En caja</p>
+                    <p className="text-[10px] text-gray-500 font-semibold">En cajón</p>
                   </div>
                 </div>
                 {discrepancy >= 20 && (

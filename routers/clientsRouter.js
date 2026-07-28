@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  listClients, createClient, updateClient, removeClient,
+  listClients, createClient, updateClient, removeClient, bulkRemoveClients,
   checkClientDuplicates, getClientCLV,
   bulkCreateClients, mergeClient,
   importClientsFromBusiness,
@@ -23,6 +23,9 @@ clientsRouter.get('/:userId', listClients);
 clientsRouter.get('/:userId/search-by-phone', searchByPhone);
 clientsRouter.post('/:userId', createClient);
 clientsRouter.post('/:userId/bulk', bulkCreateClients);
+// Borrado masivo ANTES de rutas :clientId (y alias delete-all).
+clientsRouter.post('/:userId/delete-all', bulkRemoveClients);
+clientsRouter.post('/:userId/bulk-delete', bulkRemoveClients);
 clientsRouter.post('/:userId/import-from-business', importClientsFromBusiness);
 clientsRouter.post('/:userId/mark-acquisition', markClientsAcquisition);
 clientsRouter.get('/:userId/acquisition-peak-day', previewClientAcquisitionPeakDay);

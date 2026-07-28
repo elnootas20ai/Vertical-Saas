@@ -24,7 +24,6 @@ import {
   listClientPromotionsByClient,
   searchClientsByPhoneWithMeta,
   searchClientsForList,
-  getClientDocumentsForUser,
   listDeliveryOrdersByUser,
   resolveDataOwnerUserId,
   invalidateClientDocumentsForUser,
@@ -265,20 +264,175 @@ export async function removeClient(req, res) {
     const db = getClientsDbName();
     await softDeleteDocument(req, db, clientId);
 
-    await logAccountActivity(req, {
-      actorUserId: userId,
-      actorName: account.fullName,
-      targetUserId: userId,
-      type: 'client',
-      action: `Eliminó cliente ${existing.name}`,
-      entityId: existing._id,
-      entityLabel: existing.name,
-      metadata: {},
-    });
+    try {
+      await logAccountActivity(req, {
+        actorUserId: userId,
+        actorName: account.fullName,
+        targetUserId: userId,
+        type: 'client',
+        action: `Eliminó cliente ${existing.name}`,
+        entityId: existing._id,
+        entityLabel: existing.name,
+        metadata: {},
+      });
+    } catch (activityErr) {
+      console.error('[clients] activity tras delete (no bloquea):', activityErr?.message || activityErr);
+    }
 
     return res.json({ ok: true, id: clientId });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al eliminar cliente' });
+  }
+}
+
+/**
+ * Soft-delete de varios clientes.
+ * - ids[]: borrado de esa lista
+ * - allMatching: true → todos los del alcance (empresa / búsqueda / filtros), sin límite de 500
+ * Una sola actividad de resumen (no una por cliente).
+ */
+export async function bulkRemoveClients(req, res) {
+  try {
+    const { userId } = req.params;
+    const allMatching = req.body?.allMatching === true || req.body?.all === true;
+    const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids = [...new Set(rawIds.map((id) => String(id || '').trim()).filter(Boolean))];
+
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!allMatching && ids.length === 0) {
+      return badRequest(res, 'Indica ids[] o allMatching: true');
+    }
+    if (!allMatching && ids.length > 20_000) {
+      return badRequest(res, 'Máximo 20000 clientes por borrado; usa allMatching para toda la cuenta');
+    }
+
+    const { ownerUserId, account } = await resolveDataOwnerUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const db = getClientsDbName();
+    await ensureDatabase(req, db);
+
+    const now = new Date().toISOString();
+    const toDelete = [];
+    const skipped = [];
+
+    if (allMatching) {
+      const businessId = normalizeBusinessScopeId(
+        req.body?.businessId || req.body?.business_id || resolveQueryBusinessId(req),
+      );
+      const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);
+      const searchParam = typeof req.body?.search === 'string' ? req.body.search.trim() : '';
+      let raw;
+      if (searchParam) {
+        raw = await searchClientsForList(req, ownerUserId, searchParam, listOptions);
+      } else {
+        raw = await listClientsByUser(req, ownerUserId, listOptions);
+      }
+
+      const filter = {};
+      const branchId = String(req.body?.branchId || req.body?.branch_id || '').trim();
+      const workCenterId = String(req.body?.workCenterId || '').trim();
+      if (branchId && branchId !== 'all') filter.branch_id = branchId;
+      if (workCenterId && workCenterId !== 'all') filter.workCenterId = workCenterId;
+
+      const { items } = applyQueryOptions(raw, Object.keys(filter).length ? { filter } : {});
+      for (const doc of items) {
+        if (!doc || doc.type !== 'client' || doc.user_id !== ownerUserId || doc.deletedAt) {
+          if (doc?._id) skipped.push(doc._id);
+          continue;
+        }
+        toDelete.push({
+          ...doc,
+          deletedAt: now,
+          updatedAt: now,
+        });
+      }
+    } else {
+      for (const clientId of ids) {
+        const doc = await getDocument(req, db, clientId);
+        if (!doc || doc.type !== 'client' || doc.user_id !== ownerUserId || doc.deletedAt) {
+          skipped.push(clientId);
+          continue;
+        }
+        toDelete.push({
+          ...doc,
+          deletedAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
+    // Invalidar antes: si la caché está caliente (~6k), cada lote de soft-delete
+    // reconstruía el índice de búsqueda y el borrado se iba a minutos.
+    invalidateClientDocumentsForUser(ownerUserId);
+
+    let removed = 0;
+    const failed = [];
+    const { batchSize } = resolveBulkImportLimits();
+    const deleteChunkSize = Math.min(500, Math.max(50, batchSize));
+    console.info(
+      `[clients] bulk-delete start user=${ownerUserId} toDelete=${toDelete.length} chunk=${deleteChunkSize} allMatching=${Boolean(allMatching)}`,
+    );
+    for (const chunk of chunkDocs(toDelete, deleteChunkSize)) {
+      try {
+        const results = await bulkPutDocuments(req, db, chunk);
+        for (let i = 0; i < results.length; i += 1) {
+          const row = results[i];
+          if (row?.ok || row?.rev) removed += 1;
+          else failed.push(chunk[i]?._id || chunk[i]?.id);
+        }
+      } catch (chunkErr) {
+        console.error('[clients] bulk-delete chunk:', chunkErr?.message || chunkErr);
+        for (const doc of chunk) {
+          try {
+            await softDeleteDocument(req, db, doc._id);
+            removed += 1;
+          } catch {
+            failed.push(doc._id);
+          }
+        }
+      }
+    }
+
+    invalidateClientDocumentsForUser(ownerUserId);
+    console.info(`[clients] bulk-delete done user=${ownerUserId} removed=${removed} failed=${failed.length}`);
+
+    void logAccountActivity(req, {
+      actorUserId: ownerUserId,
+      actorName: account.fullName,
+      targetUserId: ownerUserId,
+      type: 'client',
+      action: allMatching
+        ? `Eliminó ${removed} cliente${removed === 1 ? '' : 's'} (toda la cuenta / filtro)`
+        : `Eliminó ${removed} cliente${removed === 1 ? '' : 's'} (borrado masivo)`,
+      entityId: ownerUserId,
+      entityLabel: account.fullName,
+      metadata: {
+        removed,
+        requested: allMatching ? toDelete.length + skipped.length : ids.length,
+        skipped: skipped.length,
+        failed: failed.length,
+        allMatching: Boolean(allMatching),
+      },
+    }).catch((activityErr) => {
+      console.error('[clients] activity tras bulk-delete (no bloquea):', activityErr?.message || activityErr);
+    });
+
+    return res.json({
+      ok: true,
+      removed,
+      skipped: skipped.length,
+      failed: failed.filter(Boolean),
+      allMatching: Boolean(allMatching),
+    });
+  } catch (error) {
+    console.error('[clients] bulk-delete:', error);
+    const msg =
+      (typeof error?.message === 'string' && error.message)
+      || (typeof error?.reason === 'string' && error.reason)
+      || (typeof error === 'string' && error)
+      || 'Error al eliminar clientes';
+    return res.status(500).json({ ok: false, error: String(msg) });
   }
 }
 
@@ -993,14 +1147,15 @@ export async function bulkCreateClients(req, res) {
       });
     }
 
+    let createdCount = 0;
     for (const chunk of chunkDocs(pending, batchSize)) {
       const docs = chunk.map((item) => item.doc);
       try {
         const results = await bulkPutDocuments(req, db, docs);
         results.forEach((result, idx) => {
-          const { doc, sourceClient } = chunk[idx];
+          const { sourceClient } = chunk[idx];
           if (result?.ok) {
-            created.push(sanitizeClient({ ...doc, _rev: result.rev }));
+            createdCount += 1;
           } else {
             errors.push({
               client: sourceClient,
@@ -1015,22 +1170,32 @@ export async function bulkCreateClients(req, res) {
       }
     }
 
-    await logAccountActivity(req, {
+    // No bloquear el lote: el log de cuenta puede pelear por 409 y alargar mucho la importación.
+    void logAccountActivity(req, {
       actorUserId: userId,
       actorName: account.fullName,
       targetUserId: userId,
       type: 'client',
-      action: `Importación masiva: ${created.length} clientes creados`,
+      action: `Importación masiva: ${createdCount} clientes creados`,
       entityId: userId,
       entityLabel: 'Importación masiva',
-      metadata: { created: created.length, errors: errors.length, requested: clients.length },
-    });
+      metadata: { created: createdCount, errors: errors.length, requested: clients.length },
+    }).catch(() => {});
 
-    if (created.length > 0) {
-      await getClientDocumentsForUser(req, userId).catch(() => []);
+    // Invalidar caché; el listado/TPV recarga al terminar el wizard (refreshClients).
+    // Evita un _find de toda la cartera tras CADA lote HTTP (muy lento con miles de clientes).
+    if (createdCount > 0) {
+      invalidateClientDocumentsForUser(userId);
     }
 
-    return res.status(201).json({ ok: true, clients: created, errors, total: created.length });
+    // Respuesta ligera: el wizard solo necesita el conteo, no re-serializar miles de docs.
+    return res.status(201).json({
+      ok: true,
+      clients: [],
+      total: createdCount,
+      errors,
+      errorsCount: errors.length,
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error en importación masiva' });
   }

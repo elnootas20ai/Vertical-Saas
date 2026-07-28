@@ -6,6 +6,7 @@ import {
 import type { DeliveryOrder, TpvRegisterSession, TpvRegisterSummary } from '../../lib/deliveryApi';
 import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
+  AGGREGATOR_PLATFORMS,
   aggregatorRowsFromClosingTotals,
   getClosingAggregatorPlatforms,
   type AggregatorCashRow,
@@ -13,6 +14,11 @@ import {
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { buildTpvRegisterSummary, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
+import {
+  buildShiftFoodFamilyReportForSession,
+  emptyFoodFamilyCounts,
+  type FoodFamilyCounts,
+} from '../../lib/shiftFoodFamilyCounts';
 
 const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; label: string }> = {
   efectivo: { icon: Banknote, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', label: 'Efectivo' },
@@ -101,8 +107,42 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
       getClosingAggregatorPlatforms(),
       totals,
       session.aggregatorClosingCash,
+      session.aggregatorClosingCard,
     );
-  }, [aggregatorRowsProp, session.aggregatorClosingTotals, session.aggregatorClosingCash, summary.salesByChannel]);
+  }, [
+    aggregatorRowsProp,
+    session.aggregatorClosingTotals,
+    session.aggregatorClosingCash,
+    session.aggregatorClosingCard,
+    summary.salesByChannel,
+  ]);
+
+  /** Conteos por app: los del cierre si existen; si no, estimado desde pedidos del turno. */
+  const aggregatorFoodByChannel = useMemo(() => {
+    const saved = session.productClosingCounts?.byChannel;
+    const out: Record<string, FoodFamilyCounts> = {};
+    for (const platform of AGGREGATOR_PLATFORMS) {
+      const ch = platform.channel;
+      const fromSaved = saved?.[ch];
+      if (fromSaved) {
+        out[ch] = {
+          pizza: Math.max(0, Math.floor(Number(fromSaved.pizza) || 0)),
+          burger: Math.max(0, Math.floor(Number(fromSaved.burger) || 0)),
+          taco: Math.max(0, Math.floor(Number(fromSaved.taco) || 0)),
+        };
+      } else {
+        out[ch] = emptyFoodFamilyCounts();
+      }
+    }
+    const hasSaved = Object.values(out).some((c) => c.pizza + c.burger + c.taco > 0);
+    if (hasSaved) return out;
+    const fromOrders = buildShiftFoodFamilyReportForSession(session, shiftOrders).byAggregator;
+    for (const platform of AGGREGATOR_PLATFORMS) {
+      const ch = platform.channel;
+      out[ch] = fromOrders[ch] || emptyFoodFamilyCounts();
+    }
+    return out;
+  }, [session, shiftOrders]);
 
   const cashReturns = sumCashReturns(session);
   const cashStaffConsumption = sumCashStaffConsumption(session);
@@ -240,7 +280,11 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         </div>
       </div>
 
-      <AggregatorCashSummary rows={aggregatorRows} title="Cajas agregadores (declarado en cierre)" />
+      <AggregatorCashSummary
+        rows={aggregatorRows}
+        foodByChannel={aggregatorFoodByChannel}
+        title="Cajas agregadores (declarado en cierre)"
+      />
 
       {transactions.some((t) => t.type === 'cash_in' || t.type === 'cash_out' || t.type === 'return') && (
         <div>

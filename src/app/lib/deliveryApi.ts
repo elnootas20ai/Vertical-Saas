@@ -1082,6 +1082,9 @@ export interface PointOfSale {
   user_id: string;
   /** Si viene de un centro «punto de venta» en Ajustes, id del documento sales_point */
   workCenterId?: string;
+  /** Empresa dueña de la tienda (scope TPV / caja). */
+  businessId?: string;
+  business_id?: string;
   name: string;
   code: string;
   /** Código de activación TPV tablet (6 caracteres). */
@@ -1430,7 +1433,7 @@ export async function ensureDeliveryPdvForWorkCenter(
   wc: WorkCenter,
   options?: {
     existingPdvs?: PointOfSale[];
-    business?: { members?: { user_id?: string }[] } | null;
+    business?: { members?: { user_id?: string }[]; business_id?: string; id?: string } | null;
     /** Código PDV elegido en el formulario (si no, se sugiere automáticamente). */
     pdvCode?: string;
     /** Nombre visible en caja/menús (si no, se deriva del centro). */
@@ -1444,6 +1447,22 @@ export async function ensureDeliveryPdvForWorkCenter(
     (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen') && !wc.deletedAt;
   if (!isRetailLike) return null;
   const pdvActive = wc.active !== false;
+  const businessId = String(
+    options?.business?.business_id ||
+      (options?.business as { id?: string } | null | undefined)?.id ||
+      (wc as WorkCenter & { business_id?: string }).businessId ||
+      (wc as WorkCenter & { business_id?: string }).business_id ||
+      '',
+  )
+    .replace(/^business:/, '')
+    .trim();
+  const withBusinessScope = <T extends Partial<PointOfSale>>(payload: T): T =>
+    businessId
+      ? ({ ...payload, businessId, business_id: businessId } as T & {
+          businessId: string;
+          business_id: string;
+        })
+      : payload;
 
   let pdvData =
     options?.existingPdvs ??
@@ -1457,20 +1476,26 @@ export async function ensureDeliveryPdvForWorkCenter(
     const nextCode =
       sanitizePdvCodeInput(String(options?.pdvCode || linked.code || '')) || linked.code;
     const nextAddr = resolveWorkCenterPdvAddress(wc) || linked.address;
-    let next: PointOfSale = {
+    let next: PointOfSale = withBusinessScope({
       ...linked,
       name: nextName,
       code: nextCode,
       address: nextAddr,
       active: pdvActive,
-    };
+    });
     const withTerminal = ensurePdvHasDefaultTerminal(next);
     next = withTerminal.pdv;
+    const linkedBid = String(
+      (linked as PointOfSale & { business_id?: string }).businessId ||
+        (linked as PointOfSale & { business_id?: string }).business_id ||
+        '',
+    ).trim();
     const metaChanged =
       nextName !== linked.name ||
       nextCode !== linked.code ||
       nextAddr !== linked.address ||
-      pdvActive !== (linked.active !== false);
+      pdvActive !== (linked.active !== false) ||
+      (Boolean(businessId) && linkedBid !== businessId);
     if (metaChanged || withTerminal.changed) {
       try {
         return await ensurePdvHasTabletCode(id, await updatePointOfSaleRequest(id, next));
@@ -1495,12 +1520,15 @@ export async function ensureDeliveryPdvForWorkCenter(
     try {
       return await ensurePdvHasTabletCode(
         id,
-        await updatePointOfSaleRequest(id, {
-          ...orphan,
-          workCenterId: wc._id,
-          active: pdvActive,
-          address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
-        }),
+        await updatePointOfSaleRequest(
+          id,
+          withBusinessScope({
+            ...orphan,
+            workCenterId: wc._id,
+            active: pdvActive,
+            address: (orphan.address && String(orphan.address).trim()) ? orphan.address : addr,
+          }),
+        ),
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'No se pudo enlazar el PDV de caja';
@@ -1518,26 +1546,29 @@ export async function ensureDeliveryPdvForWorkCenter(
   try {
     return await ensurePdvHasTabletCode(
       id,
-      await createPointOfSaleRequest(id, {
-        name: pdvName,
-        ...(explicitCode ? { code: explicitCode } : {}),
-        ...(String(options?.pdvName || '').trim() ? { preserveDisplayName: true as const } : {}),
-        address: addr,
-        active: pdvActive,
-        workCenterId: wc._id,
-        terminals: [
-          {
-            id: termId,
-            code: 'TPV-1',
-            name: 'Terminal principal',
-            datafonName: '',
-            printerName: '',
-            scaleDeviceId: '',
-            scaleName: '',
-            active: true,
-          },
-        ],
-      }),
+      await createPointOfSaleRequest(
+        id,
+        withBusinessScope({
+          name: pdvName,
+          ...(explicitCode ? { code: explicitCode } : {}),
+          ...(String(options?.pdvName || '').trim() ? { preserveDisplayName: true as const } : {}),
+          address: addr,
+          active: pdvActive,
+          workCenterId: wc._id,
+          terminals: [
+            {
+              id: termId,
+              code: 'TPV-1',
+              name: 'Terminal principal',
+              datafonName: '',
+              printerName: '',
+              scaleDeviceId: '',
+              scaleName: '',
+              active: true,
+            },
+          ],
+        }),
+      ),
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'No se pudo crear el PDV de caja';

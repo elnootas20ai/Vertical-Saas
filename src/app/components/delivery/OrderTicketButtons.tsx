@@ -43,13 +43,17 @@ export function OrderTicketButtons({
   const print = (variant: DeliveryTicketVariant) => {
     if (printing) return;
     setPrinting(variant);
+    // Encola sin bloquear; el spinner es solo feedback visual corto.
     void printDeliveryTicket(
       buildOrderTicketOptions(order, business, {
         salesPointName,
         cashierName,
         variant,
       }),
-    ).finally(() => setPrinting(null));
+    );
+    window.setTimeout(() => {
+      setPrinting((cur) => (cur === variant ? null : cur));
+    }, 600);
   };
 
   const containerClass =

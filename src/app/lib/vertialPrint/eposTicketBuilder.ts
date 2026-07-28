@@ -101,40 +101,32 @@ function pushLineDetail(
   if (item.note) line(builder, `  NOTA: ${item.note}`, width);
 }
 
-/** Comanda cocina: doble alto + negrita; menú completo remarcado; mods con énfasis. */
+/** Comanda cocina: solo `xN Nombre` negrita+alto; resto normal. */
 function pushKitchenLineDetail(
   builder: EposBuilder,
   item: TicketDocument['lines'][number],
   paperWidthMm: 58 | 80,
 ): void {
-  const tallCols = colsForSize(paperWidthMm, false);
+  const cols = colsForSize(paperWidthMm, false);
   setTextSize(builder, 1, 2);
-  boldLine(builder, `${item.qty}x ${item.name}`, tallCols);
+  boldLine(builder, `${item.qty}x ${item.name}`, cols);
+  setTextSize(builder, 1, 1);
   for (const name of item.composition || []) {
-    if (builder.addTextStyle) builder.addTextStyle(false, false, true);
-    setTextSize(builder, 1, 2);
-    line(builder, `  > ${name}`, tallCols);
-    if (builder.addTextStyle) builder.addTextStyle(false, false, false);
+    line(builder, `  > ${name}`, cols);
   }
   for (const name of item.added || []) {
-    // reverse=false, underline=false, emphasize=true — máximo contraste en 1 color.
     if (builder.addTextStyle) builder.addTextStyle(false, false, true);
-    setTextSize(builder, 1, 2);
-    line(builder, `  + DE MAS ${name}`, tallCols);
+    line(builder, `  + DE MAS ${name}`, cols);
     if (builder.addTextStyle) builder.addTextStyle(false, false, false);
   }
   for (const name of item.removed || []) {
-    // reverse=true + emphasize: se ve “de menos” aún en papel monocromo.
-    if (builder.addTextStyle) builder.addTextStyle(true, false, true);
-    setTextSize(builder, 1, 2);
-    line(builder, `  - DE MENOS ${name}`, tallCols);
+    if (builder.addTextStyle) builder.addTextStyle(true, false, false);
+    line(builder, `  - DE MENOS ${name}`, cols);
     if (builder.addTextStyle) builder.addTextStyle(false, false, false);
   }
   if (item.note) {
-    setTextSize(builder, 1, 2);
-    boldLine(builder, `  NOTA: ${item.note}`, tallCols);
+    line(builder, `  NOTA: ${item.note}`, cols);
   }
-  setTextSize(builder, 1, 1);
 }
 
 function boldLine(builder: EposBuilder, text: string, width: number): void {

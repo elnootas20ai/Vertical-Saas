@@ -3278,6 +3278,24 @@ export async function createPointOfSale(req, res) {
         const nextCode = sanitizePdvCodeInput(String(body.code || '').trim());
         if (nextCode && !isPdvCodeAlreadyUsed(nextCode, codes)) updates.code = nextCode;
       }
+      const linkedBid = String(
+        body.businessId || body.business_id || linked.businessId || linked.business_id || '',
+      )
+        .replace(/^business:/, '')
+        .trim();
+      if (linkedBid) {
+        updates.businessId = linkedBid;
+        updates.business_id = linkedBid;
+      } else if (wcId) {
+        const wc = await findWorkCenterById(req, wcId).catch(() => null);
+        const fromWc = String(wc?.businessId || wc?.business_id || '')
+          .replace(/^business:/, '')
+          .trim();
+        if (fromWc) {
+          updates.businessId = fromWc;
+          updates.business_id = fromWc;
+        }
+      }
       const doc = buildPointOfSaleDocument(userId, { ...linked, ...updates }, linked);
       const saved = await putDocument(req, db, doc._id, doc);
       return res.json({
@@ -3348,6 +3366,15 @@ export async function createPointOfSale(req, res) {
       }
     }
 
+    // Tienda → empresa: si el Excel/cliente no manda businessId, heredar del centro.
+    if (!String(body.businessId || body.business_id || '').trim() && wcId) {
+      const wc = await findWorkCenterById(req, wcId).catch(() => null);
+      const fromWc = String(wc?.businessId || wc?.business_id || '').replace(/^business:/, '').trim();
+      if (fromWc) {
+        body = { ...body, businessId: fromWc, business_id: fromWc };
+      }
+    }
+
     const doc = buildPointOfSaleDocument(userId, body);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
@@ -3401,8 +3428,25 @@ export async function updatePointOfSale(req, res) {
       if (nameErr) return badRequest(res, nameErr);
       pointOfSale = { ...pointOfSale, name: sanitizeStoreDisplayName(pointOfSale.name) };
     }
+    const merged = { ...existing, ...pointOfSale };
+    const hasBiz = String(merged.businessId || merged.business_id || '')
+      .replace(/^business:/, '')
+      .trim();
+    if (!hasBiz) {
+      const wcId = String(merged.workCenterId || '').trim();
+      if (wcId) {
+        const wc = await findWorkCenterById(req, wcId).catch(() => null);
+        const fromWc = String(wc?.businessId || wc?.business_id || '')
+          .replace(/^business:/, '')
+          .trim();
+        if (fromWc) {
+          merged.businessId = fromWc;
+          merged.business_id = fromWc;
+        }
+      }
+    }
     const db = getDeliveryDbName();
-    const doc = buildPointOfSaleDocument(userId, { ...existing, ...pointOfSale }, existing);
+    const doc = buildPointOfSaleDocument(userId, merged, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId,

@@ -1,6 +1,10 @@
 import type { Business } from './businessApi';
 import type { AuthUser } from './authApi';
-import { repairMissingRetailDeliveryPdvs, type DeliveryStoresState } from './deliverySetup';
+import {
+  knownBusinessIdsFromList,
+  repairMissingRetailDeliveryPdvs,
+  type DeliveryStoresState,
+} from './deliverySetup';
 import type { PointOfSale } from './deliveryApi';
 import {
   loadRetailStoresForBusiness,
@@ -20,10 +24,11 @@ export async function bootstrapCeoTpvStores(
   authUser: AuthLike,
   business: Business,
   businesses: Business[],
-  options?: Pick<LoadRetailStoresOptions, 'accountBusinessCount'>,
+  options?: Pick<LoadRetailStoresOptions, 'accountBusinessCount' | 'knownBusinessIds'>,
 ): Promise<DeliveryStoresState> {
   let state = await loadRetailStoresForBusiness(authUser, business, businesses, {
     accountBusinessCount: options?.accountBusinessCount,
+    knownBusinessIds: options?.knownBusinessIds ?? knownBusinessIdsFromList(businesses),
     includeInactivePdvs: true,
     skipPdvMerge: false,
     ensureTabletCodes: true,

@@ -434,6 +434,9 @@ export function formatConfiguredCommercialLineNames(brands: ImportBrandLike[], l
   return `${shown.join(', ')}${extra}`;
 }
 
+/** Código de aviso: columna «línea» del Excel no coincide con ninguna marca. */
+export const MISSING_BRAND_IMPORT_CODE = 'missing_brand' as const;
+
 /** Aviso por fila cuando la columna «línea» del Excel no existe en Ajustes → Marca. */
 export function formatUnmatchedImportLineRowWarning(
   unmatchedLineName: string,
@@ -448,23 +451,55 @@ export function formatUnmatchedImportLineRowWarning(
   );
 }
 
+/**
+ * Aviso claro y resumido: falta una marca concreta.
+ * Pensado para el informe de importación (1 bloque por marca, no 1 por fila).
+ */
+export function formatMissingBrandImportNotice(
+  brandName: string,
+  productCount: number,
+  brands: ImportBrandLike[] = [],
+): string {
+  const name = String(brandName || '').trim() || 'desconocida';
+  const count = Math.max(1, productCount);
+  const countPart =
+    count === 1
+      ? '1 producto se importó sin pestaña de marca'
+      : `${count} productos se importaron sin pestaña de marca`;
+  const configured = brands.length > 0 ? formatConfiguredCommercialLineNames(brands, 8) : '';
+  const configuredHint = configured ? ` Ahora tienes: ${configured}.` : '';
+  return (
+    `Falta la marca «${name}» en Ajustes → Marca. ${countPart}.${configuredHint} ` +
+    'Crea la marca o cambia la columna línea en el Excel.'
+  );
+}
+
 export function formatUnmatchedCommercialBrandWarning(
   unmatchedNames: string[],
   brands: ImportBrandLike[] = [],
 ): string | null {
-  const unique = [...new Set(unmatchedNames.map((n) => String(n || '').trim()).filter(Boolean))];
-  if (unique.length === 0) return null;
-  const sample = unique.slice(0, 8).join(', ');
-  const extra = unique.length > 8 ? ` (+${unique.length - 8} más)` : '';
-  const configured = brands.length > 0 ? formatConfiguredCommercialLineNames(brands, 8) : '';
-  const configuredHint = configured
-    ? ` Líneas válidas en Ajustes → Marca: ${configured}.`
-    : '';
-  return (
-    `Varias filas tienen «línea» = ${sample}${extra}, que no existe en Ajustes → Marca.${configuredHint} ` +
-    'Esos productos se importan en la pestaña de su categoría (o en la línea principal). ' +
-    'El Excel no crea líneas nuevas: corrige el nombre en el Excel o crea la línea en Ajustes antes de importar.'
-  );
+  const counts = new Map<string, number>();
+  for (const raw of unmatchedNames) {
+    const key = String(raw || '').trim();
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  return [...counts.entries()]
+    .map(([name, count]) => formatMissingBrandImportNotice(name, count, brands))
+    .join(' ');
+}
+
+/** Extrae el nombre de marca de un aviso legacy de «línea» no encontrada. */
+export function extractMissingBrandNameFromWarningMessage(message: string): string | null {
+  const text = String(message || '');
+  const modern = text.match(/Falta la marca «([^»]+)»/i);
+  if (modern?.[1]) return modern[1].trim();
+  const legacy = text.match(/pusiste «([^»]+)»/i);
+  if (legacy?.[1]) return legacy[1].trim();
+  const quoted = text.match(/«línea»\s*=\s*([^,]+)/i);
+  if (quoted?.[1]) return quoted[1].trim();
+  return null;
 }
 
 export function buildBrandCategoryMapFromItems(

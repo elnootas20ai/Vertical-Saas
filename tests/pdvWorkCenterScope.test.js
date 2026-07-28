@@ -36,4 +36,14 @@ describe('filterPointsOfSaleForWorkCenters — no perder PDV de la empresa', () 
     const out = filterPointsOfSaleForWorkCenters(pdvs, retail);
     expect(out.map((p) => p._id)).toEqual(['pdv-badalona']);
   });
+
+  it('sin tiendas en scope: usa PDV legacy sin businessId (no deja el TPV vacío)', async () => {
+    const { filterPointsOfSaleForWorkCenters } = await import('../src/app/lib/deliverySetup.ts');
+    const pdvs = [
+      { _id: 'pdv-legacy', name: 'Badalona', workCenterId: 'wc-x', businessId: '' },
+      { _id: 'pdv-otra', name: 'Otra', workCenterId: 'wc-y', businessId: 'biz-otra' },
+    ];
+    const out = filterPointsOfSaleForWorkCenters(pdvs, [], { businessId: 'biz-modo' });
+    expect(out.map((p) => p._id)).toEqual(['pdv-legacy']);
+  });
 });

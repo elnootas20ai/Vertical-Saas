@@ -379,15 +379,20 @@ export function filterPointsOfSaleForWorkCenters(
     );
 
   if (wcIds.size === 0) {
-    // Sin tiendas en scope: si hay empresa, dejar sus PDV; si no, no inventar listado global.
+    // Sin tiendas en scope: PDV de la empresa; si aún no tienen businessId (legacy), no dejar el TPV vacío.
     if (!businessId) return [];
-    return pointsOfSale.filter((p) => pdvBusinessId(p) === businessId);
+    const tagged = pointsOfSale.filter((p) => pdvBusinessId(p) === businessId);
+    if (tagged.length > 0) return tagged;
+    return pointsOfSale.filter((p) => !pdvBusinessId(p));
   }
 
   return pointsOfSale.filter((p) => {
     const wcId = String(p.workCenterId || '').trim();
     if (wcId && wcIds.has(wcId)) return true;
-    if (businessId && pdvBusinessId(p) === businessId) return true;
+    const pBid = pdvBusinessId(p);
+    if (businessId && pBid === businessId) return true;
+    // Legacy: PDV sin empresa y sin WC (o WC roto) — solo si no hay duda de otra empresa.
+    if (businessId && !pBid && !wcId) return true;
     return false;
   });
 }
@@ -442,8 +447,8 @@ export function alignRetailWorkCentersToActiveBusiness(
 }
 
 /**
- * Empresa sin tienda retail pero con oficina etiquetada, o tienda única mal etiquetada a otra empresa.
- * Reasigna en memoria para que Ajustes y sidebar coincidan.
+ * Empresa sin tienda retail: recupera tiendas mal etiquetadas (UUID viejo al recrear empresa)
+ * o la tienda única de la cuenta. Reasigna en memoria para Ajustes / sidebar / TPV.
  */
 export function rescueRetailForBusinessWithoutStores(
   workCenters: WorkCenter[],
@@ -465,16 +470,28 @@ export function rescueRetailForBusinessWithoutStores(
 
   const known = new Set(knownBusinessIds.map(normalizeBusinessScopeId).filter(Boolean));
   const allRetail = workCenters.filter(isRetail);
-  if (allRetail.length !== 1) return workCenters;
+  if (allRetail.length === 0) return workCenters;
 
-  const only = allRetail[0];
-  const wb = readWorkCenterBusinessId(only);
-  if (!wb || wb === bid) return workCenters;
-  if (known.size > 0 && !known.has(wb)) return workCenters;
+  const stamp = (wc: WorkCenter): WorkCenter => ({ ...wc, businessId: bid, business_id: bid });
 
-  return workCenters.map((wc) =>
-    wc._id === only._id ? { ...wc, businessId: bid, business_id: bid } : wc,
-  );
+  // Tienda única de la cuenta (aunque esté etiquetada a otra empresa viva o a un UUID muerto).
+  if (allRetail.length === 1) {
+    const only = allRetail[0];
+    const wb = readWorkCenterBusinessId(only);
+    if (!wb || wb === bid) return workCenters;
+    return workCenters.map((wc) => (wc._id === only._id ? stamp(wc) : wc));
+  }
+
+  // Varias tiendas: solo reclamar las etiquetadas a un businessId que ya no existe en la cuenta
+  // (empresa recreada / UUID viejo). No tocar tiendas de otras empresas vivas (Pau, etc.).
+  const deadTagged = allRetail.filter((wc) => {
+    const wb = readWorkCenterBusinessId(wc);
+    return Boolean(wb) && wb !== bid && !known.has(wb);
+  });
+  if (deadTagged.length === 0) return workCenters;
+
+  const reclaimIds = new Set(deadTagged.map((wc) => String(wc._id || '').trim()).filter(Boolean));
+  return workCenters.map((wc) => (reclaimIds.has(String(wc._id || '').trim()) ? stamp(wc) : wc));
 }
 
 /** Fuente única: centros de trabajo + PDV de caja enlazados y deduplicados. */

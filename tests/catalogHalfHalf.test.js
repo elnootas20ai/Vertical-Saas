@@ -235,7 +235,7 @@ describe('resolveBuildYourOwnMaxIngredients', () => {
     ).toBe(null);
   });
 
-  it('infiere 3 / 5 desde Modomio (carta) y Premium Modomio', () => {
+  it('infiere 3 / 5 desde Modommio (carta) y Premium Modommio', () => {
     expect(
       resolveBuildYourOwnMaxIngredients({
         name: 'Mitad y mitad',
@@ -244,21 +244,21 @@ describe('resolveBuildYourOwnMaxIngredients', () => {
     ).toBe(null);
     expect(
       resolveBuildYourOwnMaxIngredients({
-        name: 'Modomio',
+        name: 'Modommio',
         category: 'Pizzas',
         customFields: { buildYourOwn: true },
       }),
     ).toBe(3);
     expect(
       resolveBuildYourOwnMaxIngredients({
-        name: 'Modomio',
+        name: 'Modommio',
         category: 'Premium',
         customFields: { buildYourOwn: true },
       }),
     ).toBe(5);
     expect(
       resolveBuildYourOwnMaxIngredients({
-        name: 'Premium Modomio',
+        name: 'Premium Modommio',
         category: 'Premium',
         customFields: { buildYourOwn: true },
       }),
@@ -266,8 +266,30 @@ describe('resolveBuildYourOwnMaxIngredients', () => {
   });
 });
 
-describe('isTpvBuildYourOwnCatalogItem modomio', () => {
-  it('detecta Modomio por nombre (producto, no combo)', () => {
+describe('isTpvBuildYourOwnCatalogItem modommio', () => {
+  it('detecta Modommio por nombre (producto, no combo)', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'product',
+        name: 'Modommio',
+        category: 'Premium',
+        customFields: {},
+      }),
+    ).toBe(true);
+  });
+
+  it('no trata Combo Modommio como BYO', () => {
+    expect(
+      isTpvBuildYourOwnCatalogItem({
+        itemType: 'combo',
+        name: 'Combo Modommio',
+        category: 'Combos',
+        customFields: {},
+      }),
+    ).toBe(false);
+  });
+
+  it('sigue detectando Modomio legacy', () => {
     expect(
       isTpvBuildYourOwnCatalogItem({
         itemType: 'product',
@@ -277,18 +299,9 @@ describe('isTpvBuildYourOwnCatalogItem modomio', () => {
       }),
     ).toBe(true);
   });
+});
 
-  it('no trata Combo Modomio como BYO', () => {
-    expect(
-      isTpvBuildYourOwnCatalogItem({
-        itemType: 'combo',
-        name: 'Combo Modomio',
-        category: 'Combos',
-        customFields: {},
-      }),
-    ).toBe(false);
-  });
-
+describe('isTpvBuildYourOwnCatalogItem mitad', () => {
   it('Mitad y mitad es siempre half-half (2 pizzas), nunca BYO', () => {
     expect(
       isTpvBuildYourOwnCatalogItem({

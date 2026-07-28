@@ -1,5 +1,6 @@
 import type { CatalogComboRef, CatalogItem } from './deliveryApi';
 import { normalizeImportCategory } from './deliveryCatalogImportLogic';
+import { isTpvWarehouseOnlyCatalogItem } from './tpvWarehouseCatalog';
 
 /** Tipo de componente dentro de un menú / combo. */
 export type ComboSlotKind = 'main' | 'drink' | 'dessert' | 'side' | 'other';
@@ -539,27 +540,38 @@ export function catalogProductsForComboSection(
   excludeItemId?: string,
   options?: { allowlistIds?: string[] | null },
 ): CatalogItem[] {
+  // Plato principal (pizzas/burgers): nunca limitar por allowlist — salir TODAS las de carta.
+  const allow = section.slotKind === 'main' ? null : options?.allowlistIds;
+
   let products: CatalogItem[];
-  if (section.groupByMainFamily) {
+  // Allowlist de menú = fuente de verdad: sale aunque isStockItem (control stock),
+  // salvo almacén puro (module stock / ingredient…).
+  if (allow && allow.length > 0) {
+    const byId = new Map(catalog.map((p) => [p._id, p]));
+    products = [];
+    for (const id of allow) {
+      const p = byId.get(id);
+      if (!p) continue;
+      if (p._id === excludeItemId) continue;
+      if (p.active === false) continue;
+      if (p.itemType === 'combo' || p.itemType === 'service') continue;
+      if (isExcludedComboPickerProduct(p)) continue;
+      if (isTpvWarehouseOnlyCatalogItem(p, { comboMenuReferenced: true })) continue;
+      products.push(p);
+    }
+  } else if (section.groupByMainFamily) {
     const family = section.groupByMainFamily;
     products = sellableCatalogProducts(catalog, excludeItemId).filter((p) =>
       isComboSelectableMainProduct(p, family),
     );
   } else if (section.groupBySlotKind) {
     products = catalogProductsForSlotKind(section.slotKind, catalog, excludeItemId).filter(
-      (p) => !isExcludedComboPickerProduct(p),
+      (p) => !isExcludedComboPickerProduct(p) && !isTpvWarehouseOnlyCatalogItem(p),
     );
   } else {
     products = catalogProductsForCategory(section.catalogCategory, catalog, excludeItemId).filter(
-      (p) => !isExcludedComboPickerProduct(p),
+      (p) => !isExcludedComboPickerProduct(p) && !isTpvWarehouseOnlyCatalogItem(p),
     );
-  }
-  // Plato principal (pizzas/burgers): nunca limitar por allowlist — salir TODAS las de carta.
-  const allow =
-    section.slotKind === 'main' ? null : options?.allowlistIds;
-  if (allow && allow.length > 0) {
-    const set = new Set(allow);
-    products = products.filter((p) => set.has(p._id));
   }
   return products.sort((a, b) => {
     const ca = foldCategory(normalizeImportCategory(a.category || ''));

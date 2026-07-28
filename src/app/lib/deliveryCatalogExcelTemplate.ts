@@ -11,6 +11,7 @@ import {
   shouldClearBrandForCategory,
   isImportComboCategory,
   formatUnmatchedImportLineRowWarning,
+  MISSING_BRAND_IMPORT_CODE,
   type ImportBrandLike,
 } from './deliveryCatalogImportLogic';
 
@@ -81,6 +82,10 @@ export type DeliveryCatalogImportIssue = {
   field: string;
   message: string;
   severity: 'error' | 'warning';
+  /** p. ej. missing_brand — permite agrupar avisos en el informe. */
+  code?: string;
+  /** Valor asociado al aviso (p. ej. nombre de marca no encontrada). */
+  value?: string;
 };
 
 export type DeliveryCatalogImportValidation = {
@@ -483,11 +488,14 @@ function collectDeliveryCatalogImportRowIssues(
   if (lineText) {
     const { unmatchedNames } = resolveCommercialLineIdsFromText(lineText, ctx.brands);
     if (unmatchedNames.length > 0) {
+      const missingBrand = unmatchedNames[0];
       issues.push({
         row,
         field: 'linea',
-        message: formatUnmatchedImportLineRowWarning(unmatchedNames[0], ctx.brands),
+        message: formatUnmatchedImportLineRowWarning(missingBrand, ctx.brands),
         severity: 'warning',
+        code: MISSING_BRAND_IMPORT_CODE,
+        value: missingBrand,
       });
     }
     // Si la linea existe en Ajustes → Marca, se respeta tal cual (el Excel manda),

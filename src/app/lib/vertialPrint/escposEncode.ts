@@ -108,7 +108,9 @@ function pushLineDetail(
 ) {
   const tallCols = colsForSize(paperWidthMm, SIZE_TALL);
   chunks.push(setSize(SIZE_TALL));
+  chunks.push(setBold(true));
   chunks.push(textLine(`${line.qty}x ${line.name}`, tallCols));
+  chunks.push(setBold(false));
   chunks.push(setSize(SIZE_NORMAL));
   for (const name of line.composition || []) {
     chunks.push(textLine(`  > ${name}`, width));
@@ -135,8 +137,8 @@ function setPrintColor(red: boolean): Uint8Array {
 }
 
 /**
- * Línea de producto en comanda cocina: doble alto + negrita (+2 énfasis vs cuerpo normal).
- * Composición del menú (▸) remarcada; mods de más / de menos: negrita + alto + rojo (si hay).
+ * Línea de producto en comanda cocina:
+ * solo `xN Nombre` va negrita + doble alto. Composición / extras / notas en normal.
  */
 function pushKitchenLineDetail(
   chunks: Uint8Array[],
@@ -148,36 +150,28 @@ function pushKitchenLineDetail(
   chunks.push(setBold(true));
   chunks.push(textLine(`${line.qty}x ${line.name}`, tallCols));
   chunks.push(setBold(false));
+  chunks.push(setSize(SIZE_NORMAL));
 
   for (const name of line.composition || []) {
-    chunks.push(setBold(true));
-    chunks.push(setSize(SIZE_TALL));
-    chunks.push(textLine(`  > ${name}`, tallCols));
-    chunks.push(setBold(false));
+    chunks.push(textLine(`  > ${name}`, widthFor(paperWidthMm)));
   }
   for (const name of line.added || []) {
     chunks.push(setPrintColor(true));
-    chunks.push(setBold(true));
-    chunks.push(setSize(SIZE_TALL));
-    chunks.push(textLine(`  + DE MAS ${name}`, tallCols));
-    chunks.push(setBold(false));
+    chunks.push(textLine(`  + DE MAS ${name}`, widthFor(paperWidthMm)));
     chunks.push(setPrintColor(false));
   }
   for (const name of line.removed || []) {
     chunks.push(setPrintColor(true));
-    chunks.push(setBold(true));
-    chunks.push(setSize(SIZE_TALL));
-    chunks.push(textLine(`  - DE MENOS ${name}`, tallCols));
-    chunks.push(setBold(false));
+    chunks.push(textLine(`  - DE MENOS ${name}`, widthFor(paperWidthMm)));
     chunks.push(setPrintColor(false));
   }
   if (line.note) {
-    chunks.push(setBold(true));
-    chunks.push(setSize(SIZE_TALL));
-    chunks.push(textLine(`  NOTA: ${line.note}`, tallCols));
-    chunks.push(setBold(false));
+    chunks.push(textLine(`  NOTA: ${line.note}`, widthFor(paperWidthMm)));
   }
-  chunks.push(setSize(SIZE_NORMAL));
+}
+
+function widthFor(paperWidthMm: 58 | 80): number {
+  return colsForSize(paperWidthMm, SIZE_NORMAL);
 }
 
 /** Blanco fijo al final (antes del corte). El cuerpo crece con el pedido. */
@@ -402,7 +396,9 @@ export function encodeTicketEscpos(
 
     for (const line of doc.lines) {
       chunks.push(setSize(SIZE_TALL));
+      chunks.push(setBold(true));
       pushMoneyRow(chunks, `${line.qty}x ${line.name}`, money(line.total), tallCols);
+      chunks.push(setBold(false));
       chunks.push(setSize(SIZE_NORMAL));
       for (const name of line.composition || []) {
         chunks.push(textLine(`  > ${name}`, width));

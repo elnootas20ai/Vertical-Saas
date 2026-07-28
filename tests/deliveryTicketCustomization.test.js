@@ -157,11 +157,13 @@ describe('ticket cocina — todos los productos: notas y detalle', () => {
       },
     ]);
     expect(doc.lines).toHaveLength(3);
-    expect(doc.lines[0].note).toBe('fria');
-    expect(doc.lines[1].composition).toEqual(['Pepperoni', 'Margarita', 'Patatas', 'Coca']);
-    expect(doc.lines[2].note).toBe('punto medio');
-    expect(doc.lines[2].added).toEqual(['Extra cheddar']);
-    expect(doc.lines[2].removed).toEqual(['pepinillo']);
+    // Comida primero (menú/burger), bebida al final.
+    expect(doc.lines.map((l) => l.name)).toEqual(['Menú Dúo', 'Burger', 'Agua']);
+    expect(doc.lines[0].composition).toEqual(['Pepperoni', 'Margarita', 'Patatas', 'Coca']);
+    expect(doc.lines[1].note).toBe('punto medio');
+    expect(doc.lines[1].added).toEqual(['Extra cheddar']);
+    expect(doc.lines[1].removed).toEqual(['pepinillo']);
+    expect(doc.lines[2].note).toBe('fria');
   });
 });
 

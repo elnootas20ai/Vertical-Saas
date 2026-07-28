@@ -10,6 +10,35 @@ export interface TicketLine {
   composition?: string[];
   added?: string[];
   removed?: string[];
+  /** Categoría original del ítem (ordenar comida → bebidas en ticket). */
+  category?: string;
+}
+
+/** Prioridad de impresión: comida principal primero, bebidas/postres al final. */
+export function ticketLinePrintRank(line: Pick<TicketLine, 'name' | 'category'>): number {
+  const blob = `${String(line.category || '')} ${String(line.name || '')}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (/envio|delivery fee|gastos?\s*de\s*envio/.test(blob)) return 90;
+  if (/postre|dessert|helado|tiramisu|brownie|cookie|nutella/.test(blob)) return 50;
+  if (/bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|zumo|nestea|aquarius|batido|smoothie/.test(blob)) {
+    return 40;
+  }
+  if (/complemento|acompan|patata|frita|nugget|alita|ensalada|dip|salsa|aros|tequeno|salchipapa/.test(blob)) {
+    return 30;
+  }
+  if (/pizza|calzone|premium|especialidad|burger|hamburg|smash|taco|burrito|menu|combo|mitad/.test(blob)) {
+    return 10;
+  }
+  return 20;
+}
+
+export function sortTicketLinesForPrint<T extends Pick<TicketLine, 'name' | 'category'>>(lines: T[]): T[] {
+  return lines
+    .map((line, index) => ({ line, index, rank: ticketLinePrintRank(line) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((row) => row.line);
 }
 
 export interface TicketDocument {
@@ -181,20 +210,23 @@ export function buildTicketDocument({
     changeGiven: order.changeGiven,
   });
 
-  const lines: TicketLine[] = (order.items || [])
-    .map((item) => {
-      const parts = orderItemCustomizationParts(item);
-      return {
-        qty: Number(item.quantity || 0),
-        name: String(item.name || '').trim(),
-        total: Number(item.total || 0),
-        note: parts.note || undefined,
-        composition: parts.composition.length > 0 ? parts.composition : undefined,
-        added: parts.added.length > 0 ? parts.added : undefined,
-        removed: parts.removed.length > 0 ? parts.removed : undefined,
-      };
-    })
-    .filter((line) => line.name && line.qty > 0);
+  const lines: TicketLine[] = sortTicketLinesForPrint(
+    (order.items || [])
+      .map((item) => {
+        const parts = orderItemCustomizationParts(item);
+        return {
+          qty: Number(item.quantity || 0),
+          name: String(item.name || '').trim(),
+          total: Number(item.total || 0),
+          note: parts.note || undefined,
+          composition: parts.composition.length > 0 ? parts.composition : undefined,
+          added: parts.added.length > 0 ? parts.added : undefined,
+          removed: parts.removed.length > 0 ? parts.removed : undefined,
+          category: String(item.category || '').trim() || undefined,
+        };
+      })
+      .filter((line) => line.name && line.qty > 0),
+  );
 
   const deliveryFee = Math.max(0, Number(order.deliveryFee || 0));
   if (deliveryFee > 0 && variant !== 'kitchen') {
@@ -202,6 +234,7 @@ export function buildTicketDocument({
       qty: 1,
       name: 'Envio a domicilio',
       total: deliveryFee,
+      category: 'envio',
     });
   }
 

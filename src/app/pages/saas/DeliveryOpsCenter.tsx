@@ -930,7 +930,7 @@ function CashW({ cs, onNavigate, opsDate, nowMs }: { cs: OpsCenterData['cashStat
       <div className="p-3">
         <div className="text-center mb-3">
           <p className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">{eur(cs.totalCashInRegisters)} €</p>
-          <p className="text-xs text-gray-500 mt-0.5">Efectivo en cajas abiertas</p>
+          <p className="text-xs text-gray-500 mt-0.5">Dinero en cajón (fondo + cobros)</p>
         </div>
         {cs.openTpvSessions.slice(0, 2).map(s => (
           <div key={s._id} className="flex items-center justify-between text-xs bg-gray-50 dark:bg-gray-900/50 rounded-lg px-3 py-2 mb-1.5">

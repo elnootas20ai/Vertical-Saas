@@ -13,8 +13,11 @@ import {
   resolveCommercialLineIdsFromText,
   formatUnmatchedImportLineRowWarning,
   formatUnmatchedCommercialBrandWarning,
+  formatMissingBrandImportNotice,
   formatConfiguredCommercialLineNames,
+  MISSING_BRAND_IMPORT_CODE,
 } from '../src/app/lib/deliveryCatalogImportLogic.ts';
+import { consolidateCatalogImportWarnings } from '../src/app/lib/catalogImportReport.ts';
 
 describe('deliveryCatalogImport', () => {
   it('normalizeImportCategory maps delivery categories and fixes Dato N', () => {
@@ -107,12 +110,46 @@ describe('deliveryCatalogImport', () => {
     expect(formatConfiguredCommercialLineNames(brands)).toBe('holapizza');
   });
 
+  it('formatMissingBrandImportNotice summarizes missing brand clearly', () => {
+    const brands = [{ _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] }];
+    const msg = formatMissingBrandImportNotice('blackburger', 26, brands);
+    expect(msg).toContain('Falta la marca «blackburger»');
+    expect(msg).toContain('26 productos se importaron sin pestaña de marca');
+    expect(msg).toContain('modomio');
+    expect(msg).toContain('Ajustes → Marca');
+  });
+
   it('formatUnmatchedCommercialBrandWarning lists valid configured lines', () => {
     const brands = [{ _id: 'hp', name: 'holapizza', active: true, catalogCategories: ['Pizzas'] }];
-    const msg = formatUnmatchedCommercialBrandWarning(['burgerrodriguez', 'otra'], brands);
+    const msg = formatUnmatchedCommercialBrandWarning(['burgerrodriguez', 'otra', 'burgerrodriguez'], brands);
     expect(msg).toContain('burgerrodriguez');
+    expect(msg).toContain('Falta la marca');
     expect(msg).toContain('holapizza');
-    expect(msg).toContain('no crea líneas nuevas');
+    expect(msg).toContain('2 productos');
+    expect(msg).toContain('otra');
+  });
+
+  it('consolidateCatalogImportWarnings collapses many missing-brand rows into one notice', () => {
+    const brands = [{ _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] }];
+    const warnings = Array.from({ length: 26 }, (_, i) => ({
+      row: i + 2,
+      field: 'linea',
+      code: MISSING_BRAND_IMPORT_CODE,
+      value: 'blackburger',
+      message: formatUnmatchedImportLineRowWarning('blackburger', brands),
+    }));
+    warnings.push({
+      row: 99,
+      field: 'precio',
+      message: 'Precio 0: el producto no se podrá vender en TPV',
+    });
+    const consolidated = consolidateCatalogImportWarnings(warnings, brands);
+    expect(consolidated).toHaveLength(2);
+    expect(consolidated[0].code).toBe(MISSING_BRAND_IMPORT_CODE);
+    expect(consolidated[0].message).toContain('Falta la marca «blackburger»');
+    expect(consolidated[0].message).toContain('26 productos');
+    expect(consolidated[0].row).toBeUndefined();
+    expect(consolidated[1].field).toBe('precio');
   });
 
   it('la columna linea explícita del Excel gana a la heurística por nombre', () => {

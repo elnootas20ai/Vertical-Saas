@@ -38,7 +38,10 @@ export function CeoTpvStorePicker({
   const navigate = useNavigate();
   const copy = getRetailOpsUiCopy(restaurantMode ? 'restaurant' : null);
   const rows = useMemo(() => {
-    if (storeRows.length > 0) return storeRows.filter((r) => !r.inactive);
+    const fromStores = storeRows.filter((r) => !r.inactive);
+    const openableFromStores = fromStores.filter((r) => r.pdvId && !r.needsPdv);
+    if (openableFromStores.length > 0) return fromStores;
+    // Si el emparejado WC→PDV falla pero hay PDVs de la empresa, mostrarlos igual.
     return pointsOfSale
       .filter((p) => p.active !== false)
       .map((pdv) => ({

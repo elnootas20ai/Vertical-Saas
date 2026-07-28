@@ -45,7 +45,7 @@ import {
   formatElapsedMinutes,
   getTpvPhaseTimer,
 } from '../../../lib/deliveryOpsLiveTimes';
-import { printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
+import { prefetchDeliveryTicketPrint, printDeliveryTicket } from '../../../lib/deliveryTicketPrint';
 import { businessTicketInfoFrom, resolveDeliveryOrderChargeTotal, shouldPrintCustomerTicketOnDispatch } from '../../../lib/deliveryTicketHelpers';
 import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButtons';
 import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetailCard';
@@ -1187,6 +1187,11 @@ export function WorkerTpvDelivery({
     }).catch(() => undefined);
   }, [userId, view]);
 
+  // Precarga impresora: el ticket al cobrar no espera el import del módulo.
+  useEffect(() => {
+    prefetchDeliveryTicketPrint();
+  }, []);
+
   // CEO TPV rápido = misma UI compacta que tablet (antes !ceoMode forzaba el layout grande "antiguo").
   const isTabletUi = ceoMode || isTabletSession;
   const workerPdv = useMemo(
@@ -1458,7 +1463,7 @@ export function WorkerTpvDelivery({
         ],
       };
 
-      // Calle 1: ticket cliente al pasar a repartidor (no await). Calle 2: guardar estado.
+      // Ticket cliente solo al pasar a repartidor (no await). Al marcar entregado no se imprime.
       const ticketBusiness =
         currentBusiness
         || businesses.find((b) => {
@@ -1479,21 +1484,6 @@ export function WorkerTpvDelivery({
         } else {
           toast.error('No se pudo imprimir el ticket de cliente: falta empresa activa');
         }
-      }
-      if (
-        next === 'entregado'
-        && ticketBusiness
-        && shouldPrintCustomerTicketOnDispatch(order)
-        && (payload.paymentStatus === 'paid' || orderAlreadyCobrado(payload))
-      ) {
-        void printDeliveryTicket({
-          order: payload,
-          business: businessTicketInfoFrom(ticketBusiness),
-          salesPointName: payload.salesPointName,
-          cashierName: user?.fullName,
-          variant: 'customer',
-          accountEmail: user?.email,
-        });
       }
 
       if (!isBrowserOnline()) {
@@ -1848,12 +1838,13 @@ export function WorkerTpvDelivery({
       <div className={`shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 ${isTabletUi ? 'px-2 py-1.5' : 'px-4 py-3'}`}>
         {isTabletUi ? (
           <>
-            <div className="flex items-center gap-1.5">
+            {/* Una sola fila limpia: Nuevo/Consumo + filtros. Tienda/Avisos/Actualizar van al menú ☰ de la barra de caja. */}
+            <div className="flex items-stretch gap-1.5 min-w-0">
               <button
                 type="button"
                 onClick={() => setView('new-order')}
                 title="Nuevo pedido"
-                className="flex items-center justify-center gap-1 min-h-[40px] min-w-[5.5rem] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm shadow-emerald-900/20 transition-colors touch-manipulation shrink-0"
+                className="flex items-center justify-center gap-1 min-h-[40px] shrink-0 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm shadow-emerald-900/20 transition-colors touch-manipulation"
               >
                 <Plus className="w-4 h-4" strokeWidth={2.5} />
                 Nuevo
@@ -1863,19 +1854,19 @@ export function WorkerTpvDelivery({
                   type="button"
                   onClick={() => setView('staff-consumption')}
                   title="Consumo equipo"
-                  className="flex items-center justify-center gap-1 min-h-[40px] min-w-[5.5rem] px-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm shadow-amber-900/15 transition-colors touch-manipulation shrink-0"
+                  className="flex items-center justify-center gap-1 min-h-[40px] shrink-0 px-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm shadow-amber-900/15 transition-colors touch-manipulation"
                 >
                   <UtensilsCrossed className="w-4 h-4" />
-                  Consumo
+                  <span className="hidden min-[380px]:inline">Consumo</span>
                 </button>
               )}
-              <div className="flex flex-1 min-w-0 rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5 gap-0.5">
+              <div className="flex flex-1 min-w-0 rounded-xl bg-gray-100 dark:bg-gray-800 p-0.5 gap-0.5 overflow-hidden">
                 {FULFILLMENT_FILTERS.map((f) => (
                   <button
                     key={f.id}
                     type="button"
                     onClick={() => setFulfillmentFilter(f.id)}
-                    className={`flex-1 flex items-center justify-center gap-0.5 min-h-[36px] px-1 rounded-lg font-semibold text-[11px] transition-all touch-manipulation ${
+                    className={`flex-1 min-w-0 flex items-center justify-center gap-0.5 min-h-[36px] px-1 rounded-lg font-semibold text-[11px] transition-all touch-manipulation ${
                       fulfillmentFilter === f.id
                         ? f.id === 'recogida'
                           ? 'bg-violet-600 text-white shadow-sm'
@@ -1886,60 +1877,18 @@ export function WorkerTpvDelivery({
                     }`}
                   >
                     <span className="truncate">{f.label}</span>
-                    <span className={`min-w-[1.1rem] h-4 px-0.5 rounded-full text-[9px] font-bold flex items-center justify-center ${
-                      fulfillmentFilter === f.id ? 'bg-white/20' : 'bg-gray-300/80 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
-                    }`}>
+                    <span
+                      className={`shrink-0 min-w-[1.1rem] h-4 px-0.5 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                        fulfillmentFilter === f.id
+                          ? 'bg-white/20'
+                          : 'bg-gray-300/80 dark:bg-gray-600 text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
                       {filterCounts[f.id]}
                     </span>
                   </button>
                 ))}
               </div>
-              {ceoMode && onChangeStore && (
-                <button
-                  type="button"
-                  onClick={onChangeStore}
-                  className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 text-indigo-700 touch-manipulation shrink-0"
-                  title="Cambiar tienda"
-                  aria-label="Cambiar tienda"
-                >
-                  <Store className="w-4 h-4" />
-                  <span className="text-[9px] font-bold leading-none">Tienda</span>
-                </button>
-              )}
-              {tabletBinding && !ceoMode && (
-                <button
-                  type="button"
-                  onClick={exitTabletTpv}
-                  className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 touch-manipulation shrink-0"
-                  title="Salir del TPV"
-                  aria-label="Salir del TPV"
-                >
-                  <DoorOpen className="w-4 h-4" />
-                  <span className="text-[9px] font-bold leading-none">Salir</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setSoundEnabled((v) => !v)}
-                className={`flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl touch-manipulation shrink-0 hover:bg-gray-100 dark:hover:bg-gray-800 ${
-                  soundEnabled ? 'text-indigo-600' : 'text-gray-400'
-                }`}
-                title={soundEnabled ? 'Silenciar avisos de pedidos (Glovo, web…)' : 'Activar avisos de pedidos nuevos'}
-                aria-label={soundEnabled ? 'Silenciar avisos' : 'Activar avisos'}
-              >
-                {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-                <span className="text-[9px] font-bold leading-none">{soundEnabled ? 'Avisos' : 'Silencio'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => void loadOrders()}
-                className="flex flex-col items-center justify-center gap-0.5 min-h-[44px] min-w-[3.25rem] px-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400 touch-manipulation shrink-0"
-                title="Actualizar pedidos"
-                aria-label="Actualizar pedidos"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                <span className="text-[9px] font-bold leading-none">Actua.</span>
-              </button>
             </div>
           </>
         ) : (

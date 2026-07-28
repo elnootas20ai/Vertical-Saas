@@ -82,12 +82,29 @@ function dedupeRetailWorkCentersForBusiness(workCenters: WorkCenter[]): WorkCent
 function filterPointsOfSaleForWorkCenters(
   pointsOfSale: PointOfSale[],
   workCenters: WorkCenter[],
+  options?: { businessId?: string | null },
 ): PointOfSale[] {
   const wcIds = new Set(workCenters.map((wc) => String(wc._id || '').trim()).filter(Boolean));
-  if (wcIds.size === 0) return [];
+  const businessId = normalizeBusinessScopeId(options?.businessId);
+  const pdvBusinessId = (p: PointOfSale) =>
+    normalizeBusinessScopeId(
+      String((p as PointOfSale & { business_id?: string }).business_id || p.businessId || ''),
+    );
+
+  if (wcIds.size === 0) {
+    if (!businessId) return [];
+    const tagged = pointsOfSale.filter((p) => pdvBusinessId(p) === businessId);
+    if (tagged.length > 0) return tagged;
+    return pointsOfSale.filter((p) => !pdvBusinessId(p));
+  }
+
   return pointsOfSale.filter((p) => {
     const wcId = String(p.workCenterId || '').trim();
-    return wcId && wcIds.has(wcId);
+    if (wcId && wcIds.has(wcId)) return true;
+    const pBid = pdvBusinessId(p);
+    if (businessId && pBid === businessId) return true;
+    if (businessId && !pBid && !wcId) return true;
+    return false;
   });
 }
 
@@ -130,7 +147,7 @@ export function sanitizeRetailScopeSnapshot(
   }
 
   const allPointsOfSale = dedupePointsOfSale(
-    filterPointsOfSaleForWorkCenters(snapshot.allPointsOfSale, retail),
+    filterPointsOfSaleForWorkCenters(snapshot.allPointsOfSale, retail, { businessId: bid }),
   );
 
   return { retailWorkCenters: retail, allPointsOfSale };
