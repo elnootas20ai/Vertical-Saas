@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   appendComboMainUnit,
+  availableComboMainFamilies,
   buildComboMenuSections,
   catalogProductsForCategory,
   catalogProductsForComboSection,
@@ -356,12 +357,78 @@ describe('catalogComboSlots', () => {
     expect(mainFamilyForCatalogCategory('Pizzas')).toBe('pizza');
     expect(mainFamilyForCatalogCategory('Top Burgers')).toBe('burger');
     expect(mainFamilyForCatalogCategory('Smash Burgers')).toBe('burger');
+    expect(mainFamilyForCatalogCategory('Tacos')).toBe('taco');
     const pizzaOnly = filterComboMenuSectionsForMainFamily(sections, 'pizza');
     expect(pizzaOnly.some((s) => s.catalogCategory === 'Pizzas')).toBe(true);
     expect(pizzaOnly.some((s) => s.catalogCategory === 'Burgers')).toBe(false);
     expect(pizzaOnly.some((s) => s.catalogCategory === 'Bebidas')).toBe(true);
     const picks = [{ productId: 'b1', productName: 'Classic', quantity: 1, slotKind: 'main' }];
     expect(inferMainFamilyFromComboSelections(picks, catalog)).toBe('burger');
+  });
+
+  it('Menú Taco solo ofrece tacos aunque el catálogo tenga pizza/burger', () => {
+    const catalog = [
+      item({ _id: 't1', name: 'Pastor', category: 'Tacos' }),
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'b1', name: 'Classic', category: 'Burgers' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Complementos' }),
+      item({ _id: 'd1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const combo = item({
+      _id: 'menu-taco',
+      name: 'Menú Taco',
+      itemType: 'combo',
+      category: 'Combos',
+      customFields: {
+        comboStructureConfirmed: true,
+        comboStructure: [
+          { slotKind: 'main', label: 'Taco', required: true, expectedCount: 1 },
+          { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
+          { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
+        ],
+      },
+    });
+    const sections = resolveTpvComboMenuSections(combo, catalog);
+    expect(comboMenuHasMainFamilyChoice(sections)).toBe(false);
+    expect(sections.filter((s) => s.slotKind === 'main').map((s) => s.groupByMainFamily)).toEqual([
+      'taco',
+    ]);
+    expect(
+      catalogProductsForComboSection(
+        sections.find((s) => s.slotKind === 'main'),
+        catalog,
+      ).map((p) => p._id),
+    ).toEqual(['t1']);
+  });
+
+  it('Menú Taco ignora etiqueta «Pizza o burger» del hueco', () => {
+    const catalog = [
+      item({ _id: 't1', name: 'Pastor', category: 'Tacos' }),
+      item({ _id: 'p1', name: 'Margarita', category: 'Pizzas' }),
+      item({ _id: 'b1', name: 'Classic', category: 'Burgers' }),
+      item({ _id: 'c1', name: 'Patatas', category: 'Complementos' }),
+      item({ _id: 'd1', name: 'Coca', category: 'Bebidas' }),
+    ];
+    const combo = item({
+      _id: 'menu-taco-2',
+      name: 'Menú Taco',
+      itemType: 'combo',
+      category: 'Combos',
+      customFields: {
+        comboStructureConfirmed: true,
+        comboStructure: [
+          { slotKind: 'main', label: 'Pizza o burger', required: true, expectedCount: 1 },
+          { slotKind: 'side', label: 'Complemento', required: true, expectedCount: 1 },
+          { slotKind: 'drink', label: 'Bebida', required: true, expectedCount: 1 },
+        ],
+      },
+    });
+    const sections = resolveTpvComboMenuSections(combo, catalog);
+    expect(comboMenuHasMainFamilyChoice(sections)).toBe(false);
+    expect(availableComboMainFamilies(sections)).toEqual(['taco']);
+    expect(sections.filter((s) => s.slotKind === 'main').map((s) => s.groupByMainFamily)).toEqual([
+      'taco',
+    ]);
   });
 
   it('pizza de especialidad cuenta como plato del menú (1 pizza o premium)', () => {

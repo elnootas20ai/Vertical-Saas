@@ -299,6 +299,15 @@ function isDeliveryQuickAttentionClient(client: Client | null | undefined): bool
   return Boolean(client && client.id === DELIVERY_QUICK_ATTENTION_CLIENT_ID);
 }
 
+/** Ficha CRM creada desde atención rápida (con o sin teléfono / perdido). */
+function isQuickAttentionCrmClient(client: Client | null | undefined): boolean {
+  return Boolean(client?.tags?.includes('quick-attention'));
+}
+
+function isQuickAttentionFlowClient(client: Client | null | undefined): boolean {
+  return isDeliveryQuickAttentionClient(client) || isQuickAttentionCrmClient(client);
+}
+
 function getInitials(name: string): string {
   return name
     .split(' ')
@@ -1024,41 +1033,6 @@ export function TpvRapidoOrderFlow({
     setQuickPhoneDraft('');
     setQuickNamePromptOpen(true);
   }, []);
-
-  const confirmQuickAttentionName = useCallback(() => {
-    const name = quickNameDraft.trim();
-    if (name.length < 2) {
-      toast.error('Escribe un nombre (mín. 2 letras) para el pedido rápido');
-      return;
-    }
-    const phoneDigits = quickPhoneDraft.replace(/\D/g, '');
-    clearResults();
-    clearSelection();
-    clearClientPhoneSearchCache();
-    setQuickAttentionName(name);
-    setQuickAttentionPhone(phoneDigits);
-    setQuickAttentionActive(true);
-    setQuickNamePromptOpen(false);
-    setQuickNameDraft('');
-    setQuickPhoneDraft('');
-    setShowCreateForm(false);
-    setDuplicateWarning(false);
-    setPhoneInput('');
-    setPhoneShake(false);
-    setDeliveryType('recogida');
-    setSelectedAddressId(null);
-    setShowNewAddress(false);
-    setAddressWarning(false);
-    setEditingAddressId(null);
-    setPaymentMethod(null);
-    setAppliedPromo(null);
-    setPromoCodeInput('');
-    setPromoMode('none');
-    setClientPromos([]);
-    setSelectedClientPromoId('');
-    setCompletedSteps(new Set(['client']));
-    setCurrentStep('delivery');
-  }, [quickNameDraft, quickPhoneDraft, clearSelection, clearResults]);
 
   const cancelQuickAttentionNamePrompt = useCallback(() => {
     setQuickNamePromptOpen(false);
@@ -1848,14 +1822,14 @@ export function TpvRapidoOrderFlow({
     }
     if (
       currentStep === 'delivery'
-      && (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient))
+      && (quickAttentionActive || isQuickAttentionFlowClient(selectedClient))
     ) {
       exitQuickAttentionToClientSearch();
       return;
     }
     if (
       currentStep === 'products'
-      && (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient))
+      && (quickAttentionActive || isQuickAttentionFlowClient(selectedClient))
       && deliveryType === 'recogida'
     ) {
       setCurrentStep('delivery');
@@ -2046,6 +2020,141 @@ export function TpvRapidoOrderFlow({
     currentBusiness?.branches,
     user?.fullName,
     user?.firstName,
+  ]);
+
+  const confirmQuickAttentionName = useCallback(async () => {
+    const name = quickNameDraft.trim();
+    if (name.length < 2) {
+      toast.error('Escribe un nombre (mín. 2 letras) para el pedido rápido');
+      return;
+    }
+    const searchUid = clientSearchUserId || userId;
+    if (!searchUid) {
+      toast.error('No se pudo identificar la empresa');
+      return;
+    }
+
+    const phoneDigits = quickPhoneDraft.replace(/\D/g, '');
+    const hasPhone = phoneDigits.length >= 9;
+    const bizId = writeBusinessId || businessId || '';
+    const selectedCashier = selectedOrderTaker;
+    const primaryBranchId = currentBusiness?.branches?.[0]?.branch_id || '';
+
+    setCreatingClient(true);
+    try {
+      let crmClient: Client | null = null;
+
+      if (hasPhone) {
+        try {
+          const { clients: matches } = await searchClientsByPhoneRequest(
+            searchUid,
+            phoneDigits,
+            5,
+            undefined,
+            undefined,
+            { includeLegacy: true, fallbackAll: true },
+          );
+          const exact = matches.find(
+            (c) => String(c.phone || '').replace(/\D/g, '') === phoneDigits,
+          );
+          if (exact) crmClient = exact;
+        } catch {
+          // Si falla la búsqueda, intentamos crear igual.
+        }
+      }
+
+      if (crmClient) {
+        toast.success('Cliente encontrado en CRM');
+      } else {
+        const lost = !hasPhone;
+        const clientData: Omit<Client, 'id' | 'createdAt'> = {
+          type: 'client',
+          user_id: searchUid,
+          ...(bizId ? { businessId: bizId, business_id: bizId } : {}),
+          clientType: 'particular',
+          name,
+          phone: hasPhone ? phoneDigits : '',
+          phonePrefix: '+34',
+          email: '',
+          status: 'active',
+          responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
+          branch_id: primaryBranchId,
+          tags: lost
+            ? ['tpv', 'quick-attention', 'cliente-perdido']
+            : ['tpv', 'quick-attention'],
+          address: '',
+          city: '',
+          notes: lost
+            ? 'Atención rápida TPV — no dejó teléfono (cliente perdido)'
+            : 'Alta desde atención rápida TPV',
+          consents: { dataProcessing: false, commercial: false, thirdParty: false },
+          defaultPaymentMethod: '',
+          addresses: [],
+          commercialStatus: lost ? 'prospect' : 'active',
+          stats: {
+            totalOrders: 0,
+            lastOrderDate: null,
+            orderFrequencyDays: 0,
+            favoriteAddressId: null,
+            totalSpent: 0,
+            createdFrom: 'tpv',
+            acquisitionKind: 'organic',
+            ...(lost ? { lostFromQuickAttention: true } : {}),
+          },
+        };
+        const created = await addClient(clientData);
+        if (!created) {
+          toast.error('No se pudo guardar el cliente. Inténtalo de nuevo.');
+          return;
+        }
+        crmClient = created;
+        toast.success(lost ? 'Guardado como cliente perdido' : 'Cliente guardado en CRM');
+      }
+
+      clearResults();
+      clearClientPhoneSearchCache();
+      setQuickAttentionName(name);
+      setQuickAttentionPhone(hasPhone ? phoneDigits : '');
+      setQuickAttentionActive(false);
+      setQuickNamePromptOpen(false);
+      setQuickNameDraft('');
+      setQuickPhoneDraft('');
+      setShowCreateForm(false);
+      setDuplicateWarning(false);
+      setPhoneInput(hasPhone ? phoneDigits : '');
+      setPhoneShake(false);
+      setDeliveryType('recogida');
+      setSelectedAddressId(null);
+      setShowNewAddress(false);
+      setAddressWarning(false);
+      setEditingAddressId(null);
+      setPaymentMethod(null);
+      setAppliedPromo(null);
+      setPromoCodeInput('');
+      setPromoMode('none');
+      setClientPromos([]);
+      setSelectedClientPromoId('');
+      handleSelectClient(crmClient);
+      setCurrentStep('delivery');
+    } catch (err: unknown) {
+      toast.error(toUserFacingMessage(err, 'No se pudo guardar el cliente'));
+    } finally {
+      setCreatingClient(false);
+    }
+  }, [
+    quickNameDraft,
+    quickPhoneDraft,
+    clientSearchUserId,
+    userId,
+    writeBusinessId,
+    businessId,
+    selectedOrderTaker,
+    currentBusiness?.branches,
+    user?.fullName,
+    user?.firstName,
+    addClient,
+    clearResults,
+    handleSelectClient,
   ]);
 
   // ─── Address creation ─────────────────────────────────────────────────────
@@ -2279,7 +2388,7 @@ export function TpvRapidoOrderFlow({
             : null;
 
         const orderData: Partial<DeliveryOrder> = {
-          // Walk-in / atención rápida: sin ficha CRM (no contaminar clientes ni sync).
+          // Atención rápida ya crea ficha CRM (o cliente perdido); walk-in sala sigue sin clientId.
           clientId: walkInSale ? '' : saleClient.id,
           customerName: saleClient.name,
           customerPhone: walkInSale
@@ -3475,7 +3584,7 @@ export function TpvRapidoOrderFlow({
                       const value = e.target.value;
                       setPhoneInput(value);
                       if (selectedClient || quickAttentionActive) {
-                        if (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient)) {
+                        if (quickAttentionActive || isQuickAttentionFlowClient(selectedClient)) {
                           setQuickAttentionActive(false);
                           clearSelection();
                           setShowCreateForm(false);
@@ -4042,7 +4151,7 @@ export function TpvRapidoOrderFlow({
                         <button
                           type="button"
                           onClick={() => {
-                            if (quickAttentionActive || isDeliveryQuickAttentionClient(saleClient)) {
+                            if (quickAttentionActive || isQuickAttentionFlowClient(saleClient)) {
                               setQuickAttentionActive(false);
                               clearSelection();
                               setCompletedSteps(new Set());
@@ -4054,17 +4163,18 @@ export function TpvRapidoOrderFlow({
                           className="mt-0.5 flex items-center gap-1 max-w-full text-left touch-manipulation"
                           title="Cambiar cliente"
                         >
-                          {isDeliveryQuickAttentionClient(saleClient) ? (
+                          {isQuickAttentionFlowClient(saleClient) ? (
                             <Zap className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
                           ) : (
                             <User className="w-3 h-3 text-gray-400 shrink-0" />
                           )}
                           <span className={`truncate font-semibold ${
-                            isDeliveryQuickAttentionClient(saleClient)
+                            isQuickAttentionFlowClient(saleClient)
                               ? 'text-emerald-700 dark:text-emerald-300 text-[11px]'
                               : 'text-gray-500 dark:text-gray-400 text-[11px]'
                           }`}>
                             {saleClient.name}
+                            {saleClient.tags?.includes('cliente-perdido') ? ' · Perdido' : ''}
                             {deliveryType === 'recogida' ? ' · Recogida' : deliveryType === 'domicilio' ? ' · Domicilio' : ''}
                           </span>
                         </button>
@@ -4742,7 +4852,10 @@ export function TpvRapidoOrderFlow({
             type="button"
             className="absolute inset-0 bg-black/55 backdrop-blur-[2px] border-0 cursor-default"
             aria-label="Cerrar"
-            onClick={cancelQuickAttentionNamePrompt}
+            disabled={creatingClient}
+            onClick={() => {
+              if (!creatingClient) cancelQuickAttentionNamePrompt();
+            }}
           />
           <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5 sm:p-6 space-y-4 max-h-[min(88svh,520px)] overflow-y-auto">
             <div className="flex items-start justify-between gap-3">
@@ -4751,7 +4864,7 @@ export function TpvRapidoOrderFlow({
                   Pedido rápido
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Pon un nombre para saber de quién es el pedido (en montaje y cocina).
+                  Pide nombre y teléfono: si los da, se guarda en el CRM. Si no deja teléfono, se guarda como cliente perdido.
                 </p>
               </div>
               <button
@@ -4759,6 +4872,7 @@ export function TpvRapidoOrderFlow({
                 onClick={cancelQuickAttentionNamePrompt}
                 className="shrink-0 p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation"
                 aria-label="Cerrar"
+                disabled={creatingClient}
               >
                 <X className="w-5 h-5" />
               </button>
@@ -4776,10 +4890,11 @@ export function TpvRapidoOrderFlow({
                 autoFocus
                 name="vertial-quick-attention-name"
                 autoComplete="off"
+                disabled={creatingClient}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    confirmQuickAttentionName();
+                    void confirmQuickAttentionName();
                   }
                   if (e.key === 'Escape') {
                     e.preventDefault();
@@ -4805,10 +4920,11 @@ export function TpvRapidoOrderFlow({
                   inputMode="tel"
                   name="vertial-quick-attention-phone"
                   autoComplete="off"
+                  disabled={creatingClient}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      confirmQuickAttentionName();
+                      void confirmQuickAttentionName();
                     }
                     if (e.key === 'Escape') {
                       e.preventDefault();
@@ -4818,23 +4934,25 @@ export function TpvRapidoOrderFlow({
                 />
               </div>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                Opcional. Sale en el pedido / ticket.
+                Con teléfono (9 dígitos) → CRM. Sin teléfono → etiqueta «cliente-perdido».
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={cancelQuickAttentionNamePrompt}
-                className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-300 touch-manipulation"
+                disabled={creatingClient}
+                className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-300 touch-manipulation disabled:opacity-50"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                onClick={confirmQuickAttentionName}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold touch-manipulation"
+                onClick={() => void confirmQuickAttentionName()}
+                disabled={creatingClient}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold touch-manipulation disabled:opacity-50"
               >
-                Continuar
+                {creatingClient ? 'Guardando…' : 'Continuar'}
               </button>
             </div>
           </div>

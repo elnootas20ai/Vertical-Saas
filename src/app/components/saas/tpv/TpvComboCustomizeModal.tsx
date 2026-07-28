@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronUp, Minus, Plus, Search, X } from 'lucide-react';
 import type { CatalogComboRef, CatalogItem } from '../../../lib/deliveryApi';
 import {
+  COMBO_MAIN_FAMILY_META,
   COMBO_SLOT_META,
   appendComboMainUnit,
   applyComboSlotSurcharges,
+  availableComboMainFamilies,
   catalogProductsForComboSection,
   comboItemsInCatalogSection,
   comboMenuHasMainFamilyChoice,
@@ -101,12 +103,15 @@ function firstOpenSection(
 }
 
 function defaultMainFamily(sections: ComboMenuCatalogSection[]): ComboMainFamily | null {
-  const mains = sections.filter((s) => s.slotKind === 'main' && s.slotQuota > 0);
-  const hasPizza = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'pizza');
-  const hasBurger = mains.some((s) => mainFamilyForCatalogCategory(s.catalogCategory) === 'burger');
-  if (hasPizza && !hasBurger) return 'pizza';
-  if (hasBurger && !hasPizza) return 'burger';
-  return null;
+  const families = availableComboMainFamilies(sections);
+  return families.length === 1 ? families[0] : null;
+}
+
+function mainFamilyChoiceTitle(families: ComboMainFamily[]): string {
+  if (families.length <= 1) return '¿Qué principal?';
+  const labels = families.map((f) => COMBO_MAIN_FAMILY_META[f].label.toLowerCase());
+  if (labels.length === 2) return `¿${labels[0][0].toUpperCase()}${labels[0].slice(1)} o ${labels[1]}?`;
+  return `¿${labels.slice(0, -1).join(', ')} o ${labels[labels.length - 1]}?`;
 }
 
 function advanceExpandedKey(
@@ -150,9 +155,14 @@ export function TpvComboCustomizeModal({
     [menuSections],
   );
 
-  const needsMainFamilyPick = useMemo(
-    () => comboMenuHasMainFamilyChoice(visibleSections),
+  const availableMainFamilies = useMemo(
+    () => availableComboMainFamilies(visibleSections),
     [visibleSections],
+  );
+
+  const needsMainFamilyPick = useMemo(
+    () => availableMainFamilies.length >= 2,
+    [availableMainFamilies],
   );
 
   const [selections, setSelections] = useState<CatalogComboRef[]>(() => {
@@ -475,29 +485,29 @@ export function TpvComboCustomizeModal({
           {needsMainFamilyPick && !mainFamily && (
             <section className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 p-4">
               <p className="text-sm font-bold text-gray-900 dark:text-gray-100 text-center mb-3">
-                ¿Pizza o burger?
+                {mainFamilyChoiceTitle(availableMainFamilies)}
               </p>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleMainFamilyPick('pizza')}
-                  className="min-h-[72px] flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-bold text-gray-900 dark:text-gray-100 touch-manipulation active:scale-[0.98] transition-all"
-                >
-                  <span className="text-2xl" aria-hidden>
-                    🍕
-                  </span>
-                  <span className="text-sm">Pizza</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleMainFamilyPick('burger')}
-                  className="min-h-[72px] flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-bold text-gray-900 dark:text-gray-100 touch-manipulation active:scale-[0.98] transition-all"
-                >
-                  <span className="text-2xl" aria-hidden>
-                    🍔
-                  </span>
-                  <span className="text-sm">Burger</span>
-                </button>
+              <div
+                className={`grid gap-2 ${
+                  availableMainFamilies.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'
+                }`}
+              >
+                {availableMainFamilies.map((family) => {
+                  const meta = COMBO_MAIN_FAMILY_META[family];
+                  return (
+                    <button
+                      key={family}
+                      type="button"
+                      onClick={() => handleMainFamilyPick(family)}
+                      className="min-h-[72px] flex flex-col items-center justify-center gap-1 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 font-bold text-gray-900 dark:text-gray-100 touch-manipulation active:scale-[0.98] transition-all"
+                    >
+                      <span className="text-2xl" aria-hidden>
+                        {meta.emoji}
+                      </span>
+                      <span className="text-sm">{meta.label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -512,7 +522,7 @@ export function TpvComboCustomizeModal({
                 onClick={handleChangeMainFamily}
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-xs font-semibold text-gray-700 dark:text-gray-200"
               >
-                {mainFamily === 'pizza' ? '🍕 Pizza' : '🍔 Burger'}
+                {COMBO_MAIN_FAMILY_META[mainFamily].emoji} {COMBO_MAIN_FAMILY_META[mainFamily].label}
                 <span className="text-gray-400 font-normal">· cambiar</span>
               </button>
             </div>

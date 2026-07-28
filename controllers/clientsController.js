@@ -166,14 +166,24 @@ export async function createClient(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     if (!client || typeof client !== 'object') return badRequest(res, 'Falta el objeto client en el body');
     if (!client.name?.trim()) return badRequest(res, 'El nombre del cliente es obligatorio');
-    if (!client.phone?.trim()) return badRequest(res, 'El teléfono del cliente es obligatorio');
 
-    const cleanPhone = String(client.phone || '').replace(/\D/g, '');
-    if (cleanPhone.length < 9) {
+    const tags = Array.isArray(client.tags) ? client.tags.map((t) => String(t || '').trim()).filter(Boolean) : [];
+    // Atención rápida TPV sin teléfono → ficha CRM «cliente perdido» (sin exigir móvil).
+    const allowEmptyPhone =
+      tags.includes('cliente-perdido') || client.allowEmptyPhone === true || client.stats?.lostFromQuickAttention === true;
+
+    const rawPhone = String(client.phone || '').trim();
+    const cleanPhone = rawPhone.replace(/\D/g, '');
+    if (!allowEmptyPhone) {
+      if (!rawPhone) return badRequest(res, 'El teléfono del cliente es obligatorio');
+      if (cleanPhone.length < 9) {
+        return res.status(400).json({ ok: false, error: 'El teléfono debe tener al menos 9 dígitos', field: 'phone' });
+      }
+      if (!/^[\d\s+\-().]+$/.test(rawPhone)) {
+        return res.status(400).json({ ok: false, error: 'El teléfono contiene caracteres no válidos', field: 'phone' });
+      }
+    } else if (rawPhone && cleanPhone.length > 0 && cleanPhone.length < 9) {
       return res.status(400).json({ ok: false, error: 'El teléfono debe tener al menos 9 dígitos', field: 'phone' });
-    }
-    if (!/^[\d\s+\-().]+$/.test(client.phone.trim())) {
-      return res.status(400).json({ ok: false, error: 'El teléfono contiene caracteres no válidos', field: 'phone' });
     }
 
     const { ownerUserId, account } = await resolveDataOwnerUserId(req, userId);

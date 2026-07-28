@@ -3805,6 +3805,9 @@ export function buildClientDocument(userId, data = {}, existing = null) {
         excludeFromNewMetrics: excludeExplicit != null
           ? Boolean(excludeExplicit)
           : acquisitionKind === 'migration',
+        ...(Boolean(data.stats?.lostFromQuickAttention ?? existing?.stats?.lostFromQuickAttention)
+          ? { lostFromQuickAttention: true }
+          : {}),
       };
     })(),
     loyalty: {
@@ -3887,6 +3890,7 @@ export function sanitizeClient(client) {
         client.stats?.excludeFromNewMetrics
         || client.stats?.acquisitionKind === 'migration',
       ),
+      ...(client.stats?.lostFromQuickAttention ? { lostFromQuickAttention: true } : {}),
     },
     loyalty: {
       enrolled: Boolean(client.loyalty?.enrolled),
@@ -3938,6 +3942,7 @@ export function sanitizeClientSummary(client) {
         client.stats?.excludeFromNewMetrics
         || client.stats?.acquisitionKind === 'migration',
       ),
+      ...(client.stats?.lostFromQuickAttention ? { lostFromQuickAttention: true } : {}),
     },
     loyalty: {
       enrolled: Boolean(client.loyalty?.enrolled),

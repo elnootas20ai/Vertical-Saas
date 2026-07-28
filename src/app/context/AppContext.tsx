@@ -440,6 +440,8 @@ export interface ClientStats {
   /** Si 'migration', no cuenta como “cliente nuevo” en KPIs del mes. */
   acquisitionKind?: ClientAcquisitionKind;
   excludeFromNewMetrics?: boolean;
+  /** Atención rápida TPV sin teléfono → ficha «cliente perdido». */
+  lostFromQuickAttention?: boolean;
 }
 
 export type LoyaltyLevel = 'bronze' | 'silver' | 'gold' | 'platinum';

@@ -259,6 +259,9 @@ function normalizeClientRecord(value: unknown): Client | null {
           acquisitionKind: ((raw.stats as Record<string, unknown>).acquisitionKind as ClientStats['acquisitionKind']) || undefined,
           excludeFromNewMetrics: Boolean((raw.stats as Record<string, unknown>).excludeFromNewMetrics)
             || ((raw.stats as Record<string, unknown>).acquisitionKind === 'migration'),
+          ...((raw.stats as Record<string, unknown>).lostFromQuickAttention
+            ? { lostFromQuickAttention: true as const }
+            : {}),
         }
       : undefined,
     loyalty: raw.loyalty && typeof raw.loyalty === 'object'
