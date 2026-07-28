@@ -32,6 +32,11 @@ export interface StoredPromotion {
   fixedUnitPrice?: number;
   /** `auto` = se aplica sola en TPV sin código. */
   applyMode?: PromoApplyMode;
+  /**
+   * Si hay ids, la promo solo aplica en esos PDV.
+   * Vacío/undefined = todas las tiendas de la cuenta.
+   */
+  salesPointIds?: string[];
 }
 
 export type AppliedPromo = {
@@ -108,6 +113,23 @@ export function isPromotionActiveNow(p: StoredPromotion, now = new Date()): bool
   if (!isWithinPromoDates(p, now)) return false;
   if (!isPromoWeekdayActive(p, now)) return false;
   return true;
+}
+
+/** Vacío = todas las tiendas. Si hay lista, el PDV (o un id relacionado) debe estar. */
+export function promoAppliesToSalesPoint(
+  p: Pick<StoredPromotion, 'salesPointIds'>,
+  salesPointId?: string | null,
+  relatedIds: Array<string | null | undefined> = [],
+): boolean {
+  const allowed = (Array.isArray(p.salesPointIds) ? p.salesPointIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  if (allowed.length === 0) return true;
+  const candidates = [salesPointId, ...relatedIds]
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  if (candidates.length === 0) return false;
+  return candidates.some((id) => allowed.includes(id));
 }
 
 /** Coincide por token/frase con límites de palabra (no substring suelto). */
@@ -202,11 +224,15 @@ export function computePromoDiscount(total: number, promo: AppliedPromo | null):
 export function listAutoFixedUnitPricePromotions(
   promos: StoredPromotion[] = readStoredPromotions(),
   now = new Date(),
+  options?: { salesPointId?: string | null; relatedSalesPointIds?: Array<string | null | undefined> },
 ): StoredPromotion[] {
   return promos.filter((p) => {
     if (p.type !== 'fixed_unit_price') return false;
     if ((p.applyMode || 'auto') !== 'auto') return false;
     if (!isPromotionActiveNow(p, now)) return false;
+    if (!promoAppliesToSalesPoint(p, options?.salesPointId, options?.relatedSalesPointIds || [])) {
+      return false;
+    }
     const price = Number(p.fixedUnitPrice ?? p.discountValue ?? 0);
     return Number.isFinite(price) && price >= 0;
   });

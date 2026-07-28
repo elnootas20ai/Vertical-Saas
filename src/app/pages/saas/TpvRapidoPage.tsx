@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { toastActionError, toUserFacingMessage } from '../../lib/userFacingError';
@@ -266,12 +267,20 @@ function buildDeliveryQuickAttentionClient(
   userId: string,
   businessId: string,
   displayName = 'Atención rápida',
+  phone = '',
+  phonePrefix = '+34',
 ): Client {
-  return buildTpvWalkInClient(userId, businessId, {
+  const base = buildTpvWalkInClient(userId, businessId, {
     id: DELIVERY_QUICK_ATTENTION_CLIENT_ID,
     name: displayName,
     tags: ['tpv', 'quick-attention'],
   });
+  const digits = String(phone || '').replace(/\D/g, '');
+  return {
+    ...base,
+    phone: digits,
+    phonePrefix: phonePrefix || '+34',
+  };
 }
 
 function restaurantFlowResetStep(): Step {
@@ -872,9 +881,27 @@ export function TpvRapidoOrderFlow({
     return buildRestaurantWalkInClient(userId || 'tpv', writeBusinessId || businessId || 'tpv', label);
   }, [restaurantTable, walkInClient, userId, writeBusinessId, businessId]);
 
+  /**
+   * Atención rápida = flujo paralelo (carta → cobrar).
+   * No usa el buscador CRM ni selectClient del hook.
+   * Debe declararse antes de `quickAttentionClient` (usa el nombre).
+   */
+  const [quickAttentionActive, setQuickAttentionActive] = useState(false);
+  const [quickAttentionName, setQuickAttentionName] = useState('Atención rápida');
+  const [quickAttentionPhone, setQuickAttentionPhone] = useState('');
+  const [quickNamePromptOpen, setQuickNamePromptOpen] = useState(false);
+  const [quickNameDraft, setQuickNameDraft] = useState('');
+  const [quickPhoneDraft, setQuickPhoneDraft] = useState('');
+
   const quickAttentionClient = useMemo(
-    () => buildDeliveryQuickAttentionClient(userId || 'tpv', writeBusinessId || businessId || 'tpv'),
-    [userId, writeBusinessId, businessId],
+    () => buildDeliveryQuickAttentionClient(
+      userId || 'tpv',
+      writeBusinessId || businessId || 'tpv',
+      quickAttentionName.trim() || 'Atención rápida',
+      quickAttentionPhone,
+      '+34',
+    ),
+    [userId, writeBusinessId, businessId, quickAttentionName, quickAttentionPhone],
   );
 
   const startAsRestaurant = Boolean(
@@ -903,11 +930,6 @@ export function TpvRapidoOrderFlow({
   const [newClientPayment, setNewClientPayment] = useState<PaymentMethod | ''>('');
   const [creatingClient, setCreatingClient] = useState(false);
   const [duplicateWarning, setDuplicateWarning] = useState(false);
-  /**
-   * Atención rápida = flujo paralelo (carta → cobrar).
-   * No usa el buscador CRM ni selectClient del hook.
-   */
-  const [quickAttentionActive, setQuickAttentionActive] = useState(false);
 
   const { results, isSearching, settledQuery, searchError, selectedClient, selectClient, clearSelection, clearResults } =
     useClientPhoneSearch({
@@ -998,11 +1020,27 @@ export function TpvRapidoOrderFlow({
     typeof window !== 'undefined' ? readStoredPromotions() : [],
   );
   const startQuickAttentionFlow = useCallback(() => {
-    // Paralelo al CRM: apaga buscador, limpia estado, va a carta. Sin selectClient.
+    setQuickNameDraft('');
+    setQuickPhoneDraft('');
+    setQuickNamePromptOpen(true);
+  }, []);
+
+  const confirmQuickAttentionName = useCallback(() => {
+    const name = quickNameDraft.trim();
+    if (name.length < 2) {
+      toast.error('Escribe un nombre (mín. 2 letras) para el pedido rápido');
+      return;
+    }
+    const phoneDigits = quickPhoneDraft.replace(/\D/g, '');
     clearResults();
     clearSelection();
     clearClientPhoneSearchCache();
+    setQuickAttentionName(name);
+    setQuickAttentionPhone(phoneDigits);
     setQuickAttentionActive(true);
+    setQuickNamePromptOpen(false);
+    setQuickNameDraft('');
+    setQuickPhoneDraft('');
     setShowCreateForm(false);
     setDuplicateWarning(false);
     setPhoneInput('');
@@ -1018,9 +1056,15 @@ export function TpvRapidoOrderFlow({
     setPromoMode('none');
     setClientPromos([]);
     setSelectedClientPromoId('');
-    setCompletedSteps(deliveryQuickAttentionCompletedSteps());
-    setCurrentStep('products');
-  }, [clearSelection, clearResults]);
+    setCompletedSteps(new Set(['client']));
+    setCurrentStep('delivery');
+  }, [quickNameDraft, quickPhoneDraft, clearSelection, clearResults]);
+
+  const cancelQuickAttentionNamePrompt = useCallback(() => {
+    setQuickNamePromptOpen(false);
+    setQuickNameDraft('');
+    setQuickPhoneDraft('');
+  }, []);
 
   // Post-creation
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
@@ -1447,8 +1491,12 @@ export function TpvRapidoOrderFlow({
       unitPrice: cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization),
       quantity: ci.quantity,
     }));
-    return computeFixedUnitPriceDiscount(lines, listAutoFixedUnitPricePromotions(companyPromos));
-  }, [cart, companyPromos]);
+    const salesPointId = String(register?.session?.pointOfSaleId || '').trim();
+    return computeFixedUnitPriceDiscount(
+      lines,
+      listAutoFixedUnitPricePromotions(companyPromos, new Date(), { salesPointId }),
+    );
+  }, [cart, companyPromos, register?.session?.pointOfSaleId]);
 
   const clientPromoSelected = useMemo(() => {
     if (!selectedClientPromoId) return null;
@@ -1591,6 +1639,16 @@ export function TpvRapidoOrderFlow({
 
   const canSubmit = orderReady && !!paymentMethod;
   const isProductsFocus = currentStep === 'products' && isStepReachable('products');
+
+  const deliveryStepReady =
+    deliveryType === 'recogida'
+    || (deliveryType === 'domicilio' && !!selectedAddressId);
+  const deliveryCanContinue = deliveryStepReady && !!paymentMethod;
+
+  const choosePaymentMethod = useCallback((key: PaymentMethod) => {
+    setPaymentMethod(key);
+    if (key !== 'efectivo') setCashGiven('');
+  }, []);
 
   const commitCartLine = useCallback(
     (item: CatalogItem, customization: CartLineCustomization, editLineId: string | null) => {
@@ -1767,6 +1825,11 @@ export function TpvRapidoOrderFlow({
 
   const exitQuickAttentionToClientSearch = useCallback(() => {
     setQuickAttentionActive(false);
+    setQuickAttentionName('Atención rápida');
+    setQuickAttentionPhone('');
+    setQuickNamePromptOpen(false);
+    setQuickNameDraft('');
+    setQuickPhoneDraft('');
     clearSelection();
     clearResults();
     clearClientPhoneSearchCache();
@@ -1784,11 +1847,18 @@ export function TpvRapidoOrderFlow({
       return;
     }
     if (
+      currentStep === 'delivery'
+      && (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient))
+    ) {
+      exitQuickAttentionToClientSearch();
+      return;
+    }
+    if (
       currentStep === 'products'
       && (quickAttentionActive || isDeliveryQuickAttentionClient(selectedClient))
       && deliveryType === 'recogida'
     ) {
-      exitQuickAttentionToClientSearch();
+      setCurrentStep('delivery');
       return;
     }
     const order: Step[] = ['client', 'delivery', 'products', 'payment'];
@@ -1805,7 +1875,12 @@ export function TpvRapidoOrderFlow({
       selectClient(client);
       setShowCreateForm(false);
       setDuplicateWarning(false);
-      setPaymentMethod(null);
+      const pref = String(client.defaultPaymentMethod || '').trim().toLowerCase();
+      if (pref === 'efectivo' || pref === 'tarjeta' || pref === 'bizum' || pref === 'otro') {
+        setPaymentMethod(pref);
+      } else {
+        setPaymentMethod(null);
+      }
       const assigned = getClientAppliedPromo(client.id);
       if (assigned) {
         setAppliedPromo(assigned);
@@ -1876,8 +1951,8 @@ export function TpvRapidoOrderFlow({
 
   const handleCreateClient = useCallback(async () => {
     const phoneDigits = newClientPhone.replace(/\D/g, '');
-    if (!newClientName.trim() || phoneDigits.length < 9 || !newClientStreet.trim()) {
-      toast.error('Completa nombre, teléfono (mín. 9 dígitos) y calle');
+    if (!newClientName.trim() || phoneDigits.length < 9) {
+      toast.error('Completa nombre y teléfono (mín. 9 dígitos)');
       return;
     }
     if (!userId) {
@@ -1886,9 +1961,9 @@ export function TpvRapidoOrderFlow({
     }
     setCreatingClient(true);
     try {
-      const addressId = uuidv4();
       const selectedCashier = selectedOrderTaker;
       const primaryBranchId = currentBusiness?.branches?.[0]?.branch_id || '';
+      const street = newClientStreet.trim();
       const clientData: Omit<Client, 'id' | 'createdAt'> = {
         type: 'client',
         user_id: userId,
@@ -1904,22 +1979,25 @@ export function TpvRapidoOrderFlow({
         responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
         branch_id: primaryBranchId,
         tags: ['tpv'],
-        address: newClientStreet.trim(),
+        address: street,
         city: isDeliveryBusiness ? newClientCity.trim() : '',
         notes: newClientNotes.trim(),
         consents: { dataProcessing: false, commercial: false, thirdParty: false },
         defaultPaymentMethod: (newClientPayment || '') as Client['defaultPaymentMethod'],
-        addresses: [
-          {
-            id: addressId,
-            label: 'Casa',
-            street: newClientStreet.trim(),
-            city: isDeliveryBusiness ? (newClientCity.trim() || undefined) : undefined,
-            isPrimary: true,
-            usageCount: 0,
-            lastUsedAt: null,
-          },
-        ],
+        // Dirección opcional: solo se guarda si hay calle (recogida / cliente sin domicilio aún).
+        addresses: street
+          ? [
+              {
+                id: uuidv4(),
+                label: 'Casa',
+                street,
+                city: isDeliveryBusiness ? (newClientCity.trim() || undefined) : undefined,
+                isPrimary: true,
+                usageCount: 0,
+                lastUsedAt: null,
+              },
+            ]
+          : [],
         stats: {
           totalOrders: 0,
           lastOrderDate: null,
@@ -2137,7 +2215,9 @@ export function TpvRapidoOrderFlow({
         return;
       }
 
-      const collectOnDelivery = deliveryType === 'domicilio';
+      // Domicilio o tablet: no cobrar al crear → en montaje/reparto sale «No pagado»
+      // y se cobra con el botón Pagar del detalle (efectivo/tarjeta + calculadora).
+      const collectOnDelivery = deliveryType === 'domicilio' || tabletMode;
 
       setSubmitting(true);
       actionBusyRef.current = true;
@@ -2186,12 +2266,26 @@ export function TpvRapidoOrderFlow({
           : '';
 
         const walkInSale = isTpvSyntheticClientId(saleClient.id);
+        const cashReceived = (() => {
+          if (method !== 'efectivo') return null;
+          const given = parseDecimalPadValue(cashGiven);
+          if (!isNaN(given) && given > 0) return given;
+          if (payableTotal > 0) return payableTotal;
+          return null;
+        })();
+        const cashChange =
+          cashReceived != null
+            ? Math.max(0, Number((cashReceived - payableTotal).toFixed(2)))
+            : null;
+
         const orderData: Partial<DeliveryOrder> = {
           // Walk-in / atención rápida: sin ficha CRM (no contaminar clientes ni sync).
           clientId: walkInSale ? '' : saleClient.id,
           customerName: saleClient.name,
           customerPhone: walkInSale
-            ? ''
+            ? (saleClient.phone
+              ? formatTicketCustomerPhone(saleClient.phone, saleClient.phonePrefix || phonePrefix)
+              : '')
             : formatTicketCustomerPhone(
                 saleClient.phone,
                 saleClient.phonePrefix || phonePrefix,
@@ -2230,13 +2324,9 @@ export function TpvRapidoOrderFlow({
           paymentCollected: !collectOnDelivery,
           paymentCollectedAt: collectOnDelivery ? '' : now,
           paymentCollectedBy: collectOnDelivery ? '' : takerName,
-          ...(() => {
-            if (collectOnDelivery || method !== 'efectivo') return {};
-            const given = parseDecimalPadValue(cashGiven);
-            if (isNaN(given) || given <= 0) return {};
-            const change = Math.max(0, Number((given - payableTotal).toFixed(2)));
-            return { amountReceived: given, changeGiven: change };
-          })(),
+          ...(cashReceived != null && cashChange != null && !collectOnDelivery
+            ? { amountReceived: cashReceived, changeGiven: cashChange }
+            : {}),
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
           // Mismo nº en ticket y servidor → imprimir en paralelo al crear.
@@ -2358,6 +2448,16 @@ export function TpvRapidoOrderFlow({
 
   /** Calculadora de cambio siempre que paguen en efectivo (también domicilio: ayuda a anotar billete/cambio). */
   const showCashChangeCalculator = paymentMethod === 'efectivo';
+
+  // Si eligen efectivo y aún no hay billete tecleado, poner "exacto" cuando haya total.
+  useEffect(() => {
+    if (paymentMethod !== 'efectivo') return;
+    if (cashChargeTotal <= 0) return;
+    setCashGiven((prev) => {
+      if (prev.trim()) return prev;
+      return cashChargeTotal.toFixed(2);
+    });
+  }, [paymentMethod, cashChargeTotal]);
 
   const accountLines = useMemo(
     () => (restaurantDiningOrder ? flattenDiningAccountLines(restaurantDiningOrder) : []),
@@ -3167,9 +3267,19 @@ export function TpvRapidoOrderFlow({
     }
     if (currentStep === 'client' && selectedClient) return 'Continuar';
     if (currentStep === 'client') return 'Selecciona un cliente';
-    if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) return 'Continuar';
-    if (currentStep === 'products' && orderReady) return 'Continuar al pago';
-    if (currentStep === 'payment' && deliveryType === 'domicilio') return 'Enviar pedido';
+    if (currentStep === 'delivery') {
+      if (!deliveryType) return 'Elige tipo de entrega';
+      if (deliveryType === 'domicilio' && !selectedAddressId) return 'Selecciona dirección';
+      if (!paymentMethod) return 'Elige forma de pago';
+      return 'Continuar a la carta';
+    }
+    if (currentStep === 'products' && orderReady) {
+      if (submitting) return 'Enviando...';
+      if (deliveryType === 'domicilio' || tabletMode) return 'Enviar pedido';
+      return 'Cobrar y enviar';
+    }
+    if (currentStep === 'products') return 'Añade productos';
+    if (currentStep === 'payment' && (deliveryType === 'domicilio' || tabletMode)) return 'Enviar pedido';
     if (submitting) return 'Enviando...';
     return 'Cobrar y enviar';
   })();
@@ -3177,8 +3287,11 @@ export function TpvRapidoOrderFlow({
   const footerPrimaryDisabled = (() => {
     if (currentStep === 'client' && showCreateForm) return creatingClient;
     if (currentStep === 'client' && selectedClient) return false;
-    if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) return false;
-    if (currentStep === 'products') return !orderReady || submitting;
+    if (currentStep === 'delivery') return !deliveryCanContinue;
+    if (currentStep === 'products') {
+      if (isRestaurantMode) return !orderReady || submitting;
+      return !canSubmit || submitting;
+    }
     if (currentStep === 'payment') return !canSubmit || submitting;
     return !canSubmit || submitting;
   })();
@@ -3192,12 +3305,21 @@ export function TpvRapidoOrderFlow({
       completeStep('client');
       return;
     }
-    if (currentStep === 'delivery' && deliveryType === 'domicilio' && selectedAddressId) {
+    if (currentStep === 'delivery' && deliveryCanContinue) {
       completeStep('delivery');
       return;
     }
     if (currentStep === 'products' && orderReady) {
-      completeStep('products');
+      if (isRestaurantMode) {
+        completeStep('products');
+        return;
+      }
+      if (!paymentMethod) {
+        setCurrentStep('delivery');
+        toast.error('Elige cómo va a pagar en la pestaña de entrega');
+        return;
+      }
+      void handleSubmitOrder(tabletMode ? 'listo' : initialStatus);
       return;
     }
     void handleSubmitOrder(tabletMode ? 'listo' : initialStatus);
@@ -3301,6 +3423,7 @@ export function TpvRapidoOrderFlow({
   );
 
   return (
+    <>
     <TpvFullscreenShell
       onBack={() => void handleGoBack()}
       embedded
@@ -3484,12 +3607,12 @@ export function TpvRapidoOrderFlow({
                   />
                 </div>
                 <div>
-                  <label className={LABEL_CLASS}>Calle *</label>
+                  <label className={LABEL_CLASS}>Calle <span className="font-normal text-gray-400">(opcional)</span></label>
                   <input value={newClientStreet} onChange={(e) => setNewClientStreet(e.target.value)} className={INPUT_CLASS} placeholder="Calle, número, piso…" />
                 </div>
                 {isDeliveryBusiness && (
                   <div>
-                    <label className={LABEL_CLASS}>Ciudad</label>
+                    <label className={LABEL_CLASS}>Ciudad <span className="font-normal text-gray-400">(opcional)</span></label>
                     <input value={newClientCity} onChange={(e) => setNewClientCity(e.target.value)} className={INPUT_CLASS} placeholder="Opcional" />
                   </div>
                 )}
@@ -3534,14 +3657,16 @@ export function TpvRapidoOrderFlow({
           </StepContainer>
         ) : null}
 
-        {/* ═══════════════ STEP 2: DELIVERY TYPE ═══════════════ */}
+        {/* ═══════════════ STEP 2: DELIVERY TYPE + PAGO ═══════════════ */}
         {currentStep === 'delivery' && isStepReachable('delivery') ? (
-          <StepContainer step={2} title="Tipo de entrega" visible>
+          <StepContainer step={2} title="Entrega y pago" visible>
             <div className="grid grid-cols-2 gap-3">
               <button
+                type="button"
                 onClick={() => {
                   setDeliveryType('recogida');
-                  completeStep('delivery');
+                  setSelectedAddressId(null);
+                  setAddressWarning(false);
                 }}
                 className={`flex flex-col items-center gap-3 p-6 min-h-[88px] rounded-2xl border-2 transition-all touch-manipulation ${
                   deliveryType === 'recogida'
@@ -3553,6 +3678,7 @@ export function TpvRapidoOrderFlow({
                 <span className="font-semibold text-gray-900 dark:text-gray-100">Recogida en local</span>
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setDeliveryType('domicilio');
                   const primary = deliveryAddresses.find((a) => isPrimaryClientAddress(a, deliveryAddresses));
@@ -3630,6 +3756,7 @@ export function TpvRapidoOrderFlow({
 
                 {!showNewAddress && !editingAddressId && (
                   <button
+                    type="button"
                     onClick={() => {
                       setShowNewAddress(true);
                       setEditingAddressId(null);
@@ -3663,12 +3790,14 @@ export function TpvRapidoOrderFlow({
                     </div>
                     <div className="flex justify-end gap-2 pt-1">
                       <button
+                        type="button"
                         onClick={() => setEditingAddressId(null)}
                         className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                       >
                         Cancelar
                       </button>
                       <button
+                        type="button"
                         onClick={handleSaveEditedAddress}
                         disabled={savingAddress || !editAddrStreet.trim()}
                         className="px-5 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50"
@@ -3687,6 +3816,7 @@ export function TpvRapidoOrderFlow({
                         {['Casa', 'Trabajo', 'Otro'].map((lbl) => (
                           <button
                             key={lbl}
+                            type="button"
                             onClick={() => setNewAddrLabel(lbl)}
                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
                               newAddrLabel === lbl
@@ -3725,26 +3855,150 @@ export function TpvRapidoOrderFlow({
                       Predeterminada
                     </label>
                     <div className="flex justify-end gap-2 pt-1">
-                      <button onClick={() => setShowNewAddress(false)} className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                      <button type="button" onClick={() => setShowNewAddress(false)} className="px-4 py-2 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
                         Cancelar
                       </button>
-                      <button onClick={handleSaveNewAddress} disabled={savingAddress || !newAddrStreet.trim()} className="px-5 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50">
+                      <button type="button" onClick={handleSaveNewAddress} disabled={savingAddress || !newAddrStreet.trim()} className="px-5 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50">
                         {savingAddress ? 'Guardando...' : 'Guardar'}
                       </button>
                     </div>
                   </div>
                 )}
 
-                {selectedAddressId && (
-                  <div className="flex justify-end">
+                {configuredDeliveryFee > 0 ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                    {waiveDeliveryFee ? (
+                      <>
+                        <span>Envío quitado (era {formatPrice(configuredDeliveryFee)})</span>
+                        <button
+                          type="button"
+                          onClick={() => setWaiveDeliveryFee(false)}
+                          className="px-2 h-7 rounded-lg border border-gray-300 dark:border-gray-600 text-xs font-semibold"
+                        >
+                          Restaurar envío
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span>Envío +{formatPrice(configuredDeliveryFee)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setWaiveDeliveryFee(true)}
+                          className="px-2 h-7 rounded-lg border border-gray-300 dark:border-gray-600 text-xs font-semibold"
+                        >
+                          Quitar envío
+                        </button>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {deliveryType && (deliveryType === 'recogida' || selectedAddressId) && (
+              <div className="mt-5 space-y-2">
+                <p className={LABEL_CLASS}>Cómo va a pagar</p>
+                {deliveryType === 'domicilio' && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1 mb-1">
+                    El cobro se confirma al entregar; si cambia, lo marcas entonces.
+                  </p>
+                )}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {([
+                    { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
+                    { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
+                    { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
+                    { key: 'otro' as const, label: 'Otros', icon: Wallet },
+                  ]).map(({ key, label, icon: Icon }) => (
                     <button
-                      onClick={() => completeStep('delivery')}
-                      className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                      key={key}
+                      type="button"
+                      onClick={() => choosePaymentMethod(key)}
+                      className={`flex flex-col items-center gap-1.5 rounded-xl border-2 transition-all touch-manipulation ${
+                        tabletMode ? 'p-2.5 min-h-[56px]' : 'p-4 min-h-[80px] gap-2'
+                      } ${
+                        paymentMethod === key
+                          ? 'border-gray-900 dark:border-gray-300 bg-gray-50 dark:bg-gray-800'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
+                      }`}
                     >
-                      Continuar
+                      <Icon className={`text-gray-700 dark:text-gray-300 ${tabletMode ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                      <span className={`font-medium text-gray-900 dark:text-gray-100 ${tabletMode ? 'text-xs' : 'text-sm'}`}>{label}</span>
                     </button>
+                  ))}
+                </div>
+
+                {showCashChangeCalculator && (
+                  <div className="mt-2.5 space-y-2">
+                    {cashChargeTotal <= 0 ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Añade productos en la carta: el total y el cambio se calcularán solos (puedes volver aquí).
+                      </p>
+                    ) : (
+                      <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 tabular-nums">
+                        A cobrar {formatPrice(cashChargeTotal)}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mr-0.5">
+                        Entrega
+                      </span>
+                      {cashQuickAmounts.map((amount) => {
+                        const label = Math.abs(amount - cashChargeTotal) < 0.001
+                          ? 'Exacto'
+                          : `${amount % 1 === 0 ? amount.toFixed(0) : amount.toFixed(2)}€`;
+                        const selected = !isNaN(cashGivenAmount) && Math.abs(cashGivenAmount - amount) < 0.001;
+                        return (
+                          <button
+                            key={label + String(amount)}
+                            type="button"
+                            onClick={() => setCashGiven(amount.toFixed(2))}
+                            className={`min-h-[32px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation transition-colors ${
+                              selected
+                                ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
+                                : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                      {changeAmount !== null && changeAmount > 0.001 ? (
+                        <span className="ml-auto text-xs font-semibold text-emerald-700 dark:text-emerald-400 tabular-nums">
+                          Cambio {formatPrice(changeAmount)}
+                        </span>
+                      ) : changeAmount !== null && changeAmount < -0.001 ? (
+                        <span className="ml-auto text-xs font-semibold text-red-600 dark:text-red-400 tabular-nums">
+                          Falta {formatPrice(Math.abs(changeAmount))}
+                        </span>
+                      ) : null}
+                    </div>
+                    <DecimalNumpadField
+                      value={cashGiven}
+                      onChange={setCashGiven}
+                      placeholder={cashChargeTotal > 0 ? cashChargeTotal.toFixed(2) : '0.00'}
+                      showNumpad
+                      compactNumpad={tabletMode}
+                      inputClassName={`${INPUT_CLASS} pr-8 text-lg font-semibold tabular-nums`}
+                      numpadClassName="mt-2"
+                      suffix={
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 font-medium">€</span>
+                      }
+                    />
                   </div>
                 )}
+              </div>
+            )}
+
+            {deliveryCanContinue && (
+              <div className="flex justify-end mt-4">
+                <button
+                  type="button"
+                  onClick={() => completeStep('delivery')}
+                  className="px-5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium text-sm hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+                >
+                  Continuar a la carta
+                </button>
               </div>
             )}
           </StepContainer>
@@ -4475,6 +4729,119 @@ export function TpvRapidoOrderFlow({
         />
       ) : null}
     </TpvFullscreenShell>
+    {quickNamePromptOpen
+      && typeof document !== 'undefined'
+      && createPortal(
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tpv-quick-name-title"
+        >
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/55 backdrop-blur-[2px] border-0 cursor-default"
+            aria-label="Cerrar"
+            onClick={cancelQuickAttentionNamePrompt}
+          />
+          <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl p-5 sm:p-6 space-y-4 max-h-[min(88svh,520px)] overflow-y-auto">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 id="tpv-quick-name-title" className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                  Pedido rápido
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                  Pon un nombre para saber de quién es el pedido (en montaje y cocina).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={cancelQuickAttentionNamePrompt}
+                className="shrink-0 p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 touch-manipulation"
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div>
+              <label className={LABEL_CLASS} htmlFor="tpv-quick-attention-name">
+                Nombre *
+              </label>
+              <input
+                id="tpv-quick-attention-name"
+                value={quickNameDraft}
+                onChange={(e) => setQuickNameDraft(e.target.value)}
+                className={INPUT_CLASS}
+                placeholder="Ej. Mesa 3, Juan, Recado…"
+                autoFocus
+                name="vertial-quick-attention-name"
+                autoComplete="off"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    confirmQuickAttentionName();
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    cancelQuickAttentionNamePrompt();
+                  }
+                }}
+              />
+            </div>
+            <div>
+              <label className={LABEL_CLASS} htmlFor="tpv-quick-attention-phone">
+                Teléfono
+              </label>
+              <div className="flex gap-2 items-stretch">
+                <span className="inline-flex items-center px-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-semibold text-gray-700 dark:text-gray-200 shrink-0">
+                  +34
+                </span>
+                <input
+                  id="tpv-quick-attention-phone"
+                  value={quickPhoneDraft}
+                  onChange={(e) => setQuickPhoneDraft(e.target.value)}
+                  className={INPUT_CLASS}
+                  placeholder="600 000 000"
+                  inputMode="tel"
+                  name="vertial-quick-attention-phone"
+                  autoComplete="off"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      confirmQuickAttentionName();
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault();
+                      cancelQuickAttentionNamePrompt();
+                    }
+                  }}
+                />
+              </div>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                Opcional. Sale en el pedido / ticket.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={cancelQuickAttentionNamePrompt}
+                className="px-4 py-2.5 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-medium text-gray-600 dark:text-gray-300 touch-manipulation"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmQuickAttentionName}
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold touch-manipulation"
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 

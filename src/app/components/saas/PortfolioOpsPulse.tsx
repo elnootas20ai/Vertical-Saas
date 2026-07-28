@@ -16,7 +16,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import type { PortfolioBusiness } from '../../hooks/usePortfolioOverview';
 import {
   aggregateStoreOpsPulses,
   fmtEuro,
@@ -28,8 +27,13 @@ import {
 type RangeMode = '7d' | 'month';
 
 type Props = {
-  rows: PortfolioBusiness[];
+  /** Pulses de últimos 7 días (uno por PDV/tienda). */
+  pulses7d: StoreOpsPulse[];
+  /** Pulses del mes en curso. */
+  pulsesMonth: StoreOpsPulse[];
   refreshButton: ReactNode;
+  /** Dashboard de una sola empresa: no repetir el nombre de empresa bajo cada tienda. */
+  singleBusiness?: boolean;
 };
 
 function DeltaBadge({ pct }: { pct: number | null }) {
@@ -72,20 +76,19 @@ function MixLine({
   );
 }
 
-export function PortfolioOpsPulse({ rows, refreshButton }: Props) {
+export function PortfolioOpsPulse({
+  pulses7d,
+  pulsesMonth,
+  refreshButton,
+  singleBusiness = false,
+}: Props) {
   const [range, setRange] = useState<RangeMode>('7d');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
 
-  const pulses = useMemo(() => {
-    const list: StoreOpsPulse[] = [];
-    for (const row of rows) {
-      for (const store of row.stores) {
-        if (!store.hasPdv || !store.pdvId) continue;
-        list.push(range === '7d' ? store.ops7d : store.opsMonth);
-      }
-    }
-    return rankStoreOpsPulses(list);
-  }, [rows, range]);
+  const pulses = useMemo(
+    () => rankStoreOpsPulses(range === '7d' ? pulses7d : pulsesMonth),
+    [pulses7d, pulsesMonth, range],
+  );
 
   const totals = useMemo(() => aggregateStoreOpsPulses(pulses), [pulses]);
 
@@ -256,7 +259,9 @@ export function PortfolioOpsPulse({ rows, refreshButton }: Props) {
                       <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
                       <div>
                         <p className="font-bold text-gray-900 dark:text-gray-100 text-xs">{p.storeName}</p>
-                        <p className="text-[10px] text-gray-400">{p.businessName}</p>
+                        {!singleBusiness && (
+                          <p className="text-[10px] text-gray-400">{p.businessName}</p>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -312,7 +317,9 @@ export function PortfolioOpsPulse({ rows, refreshButton }: Props) {
             <div className="flex items-center justify-between mb-2">
               <div>
                 <p className="text-xs font-black text-gray-900 dark:text-gray-100">{selected.storeName}</p>
-                <p className="text-[10px] text-gray-400">{selected.businessName} · € / día</p>
+                <p className="text-[10px] text-gray-400">
+                  {singleBusiness ? '€ / día' : `${selected.businessName} · € / día`}
+                </p>
               </div>
               <TrendingUp className="w-4 h-4 text-indigo-500" />
             </div>

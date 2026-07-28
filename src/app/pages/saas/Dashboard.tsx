@@ -52,7 +52,26 @@ import { RestaurantLiveDashboardPanelFromContext } from '../../components/saas/r
 import { CRM_CLIENTS_SYNC_EVENT } from '../../lib/crmApi';
 import { fetchClientAcquisitionSample } from '../../lib/clientAcquisitionSample';
 import { listBrandsRequest, type Brand } from '../../lib/brandApi';
-import { computePortfolioMetrics, computePortfolioClientMetrics, emptyPortfolioMetrics, pickPrimaryPdvIdFromList, filterOrdersToPortfolioScope, sumDeliveredRevenueOnDay, countOrdersCreatedOnDay, getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered, deliveryOrderRevenueAmount, applyTpvCashMetrics, type PortfolioMetrics } from '../../lib/portfolioMetrics';
+import {
+  computePortfolioMetrics,
+  computePortfolioClientMetrics,
+  emptyPortfolioMetrics,
+  pickPrimaryPdvIdFromList,
+  filterOrdersToPortfolioScope,
+  sumDeliveredRevenueOnDay,
+  countOrdersCreatedOnDay,
+  getDeliveryOrderDeliveredAtIso,
+  isDeliveryOrderDelivered,
+  deliveryOrderRevenueAmount,
+  applyTpvCashMetrics,
+  buildStoreOpsPulse,
+  emptyStoreOpsPulse,
+  listTrailingDayKeys,
+  listMonthToDateDayKeys,
+  type PortfolioMetrics,
+  type StoreOpsPulse,
+} from '../../lib/portfolioMetrics';
+import { PortfolioOpsPulse } from '../../components/saas/PortfolioOpsPulse';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import {
   buildSoldProductDailySeries,
@@ -675,6 +694,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     /** Total de pedidos de la empresa (meta del filtro API). */
     ordersTotal: number;
   } | null>(null);
+  const [deliveryOpsPulses, setDeliveryOpsPulses] = useState<{
+    pulses7d: StoreOpsPulse[];
+    pulsesMonth: StoreOpsPulse[];
+  } | null>(null);
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
   const isCompraventaVertical = vertical === 'carDealership';
@@ -684,6 +707,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     if (!isDeliveryVertical || !authUser || !currentBusiness) {
       setDeliveryMetrics(null);
       setDeliveryScope(null);
+      setDeliveryOpsPulses(null);
       return;
     }
     const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
@@ -691,6 +715,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     const scopeBusinessId = String(currentBusiness.business_id || currentBusiness.id || '')
       .replace(/^business:/, '')
       .trim();
+    const businessName = String(currentBusiness.name || 'Empresa');
     const todayKey = localCalendarDayKey();
     const monthKey = todayKey.slice(0, 7);
     const monthStart = `${monthKey}-01T00:00:00.000Z`;
@@ -732,8 +757,45 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         .filter((wc) => !wc.deletedAt && (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'))
         .map((wc) => wc._id);
       const wcScope = new Set(storeIds);
+      const keys7d = listTrailingDayKeys(todayKey, 7);
+      const keysMonth = listMonthToDateDayKeys(todayKey);
+      const pdvByWorkCenterId = new Map<string, string>();
+      for (const p of pointsOfSale) {
+        const wcId = String(p.workCenterId || '').trim();
+        if (wcId) pdvByWorkCenterId.set(wcId, p._id);
+      }
+      const buildPulses = (dayKeys: string[]): StoreOpsPulse[] =>
+        workCenters
+          .filter(
+            (wc) =>
+              !wc.deletedAt &&
+              (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+          )
+          .map((wc) => {
+            const pdvId = pdvByWorkCenterId.get(wc._id);
+            const pulseBase = {
+              storeId: wc._id,
+              storeName: wc.name,
+              businessId: scopeBusinessId,
+              businessName,
+              pdvId: pdvId || '',
+              workCenterId: wc._id,
+              todayKey,
+            };
+            return pdvId
+              ? buildStoreOpsPulse(orderResult.orders || [], { ...pulseBase, dayKeys })
+              : emptyStoreOpsPulse({
+                  storeId: wc._id,
+                  storeName: wc.name,
+                  businessId: scopeBusinessId,
+                  businessName,
+                });
+          })
+          .filter((p) => Boolean(p.pdvId));
+
       if (pdvIds.length === 0 && wcScope.size === 0 && (orderResult.orders || []).length === 0) {
         setDeliveryMetrics(emptyPortfolioMetrics());
+        setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
         setDeliveryScope({
           orders: orderResult.orders,
           pdvIds,
@@ -757,6 +819,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               wcScope,
             );
       setDeliveryMetrics(applyTpvCashMetrics(baseMetrics, tpvSessions || [], scopePdvIds, todayKey));
+      setDeliveryOpsPulses({
+        pulses7d: buildPulses(keys7d),
+        pulsesMonth: buildPulses(keysMonth),
+      });
       const scopedForTotal = filterOrdersToPortfolioScope(
         orderResult.orders || [],
         scopePdvIds,
@@ -777,6 +843,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     } catch {
       setDeliveryMetrics(null);
       setDeliveryScope(null);
+      setDeliveryOpsPulses(null);
     }
   }, [isDeliveryVertical, authUser, currentBusiness]);
 
@@ -1028,6 +1095,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     fetchDashboardData(authUser.user_id)
       .then((data) => { setServerData(data); setServerUpdatedAt(data.updatedAt); setServerLoading(false); })
       .catch(() => setServerLoading(false));
+    if (isDeliveryVertical) {
+      void loadDeliveryDashboard();
+    }
     if (businessId) {
       Promise.all([
         fetchActiveNow(businessId),
@@ -1059,7 +1129,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setClockinsLoading(false);
       setTeamLoading(false);
     }
-  }, [authUser?.user_id, businessId, teamMembers, serverLoading]);
+  }, [authUser?.user_id, businessId, teamMembers, serverLoading, isDeliveryVertical, loadDeliveryDashboard]);
 
   // ── KPI values (server → local fallback) ──
   const sk = serverData?.kpis;
@@ -1361,6 +1431,26 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
               Ver planes
             </VertialBillingUpgradeLink>
           </div>
+        )}
+
+        {/* Resumen operativo por tienda (solo empresa delivery) */}
+        {isDeliveryVertical && deliveryOpsPulses && (
+          <PortfolioOpsPulse
+            pulses7d={deliveryOpsPulses.pulses7d}
+            pulsesMonth={deliveryOpsPulses.pulsesMonth}
+            singleBusiness
+            refreshButton={
+              <button
+                type="button"
+                onClick={() => void loadDeliveryDashboard()}
+                disabled={deliveryDataLoading}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40"
+                title="Actualizar resumen operativo"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${deliveryDataLoading ? 'animate-spin' : ''}`} />
+              </button>
+            }
+          />
         )}
 
         {/* ═══ KPIs PRINCIPALES — 8 tarjetas ═══ */}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate, useLocation } from 'react-router';
@@ -12,6 +13,7 @@ import {
   updateDeliveryOrderRequest,
   correctDeliveryOrderPaymentRequest,
   cancelDeliveryOrderRequest,
+  registerPaymentRequest,
   getDeliveryConfigRequest,
   isTpvRegisterSessionOpen,
   TPV_SESSION_SYNC_EVENT,
@@ -30,15 +32,14 @@ import { useTpvOrderFlowChrome, useTpvSuppressBottomBar } from '../../../context
 import {
   cancelledOrderHistoryLabel,
   isCancelledDeliveryOrder,
-  isCompletedHistoryBoardOrder,
   isDeliveredBoardOrder,
   isTpvMontajeBoardOrder,
   isTpvRepartoBoardOrder,
   localCalendarDayKey,
   localDayBounds,
   orderAlreadyCobrado,
-  orderInRegisterSession,
   orderLoadBoundsForOpenSession,
+  orderOnCompletedTpvHistoryBoard,
   orderOnOpenTpvOpsBoard,
 } from '../../../lib/tpvCajaScope';
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
@@ -151,11 +152,6 @@ function isCompletedBoardOrder(order: DeliveryOrder): boolean {
   return isDeliveredBoardOrder(order);
 }
 
-/** Historial del turno: entregados + eliminados (también los de montaje/reparto). */
-function isHistoryCompletedBoardOrder(order: DeliveryOrder): boolean {
-  return isCompletedHistoryBoardOrder(order);
-}
-
 /** Pedido cobrado en TPV (Cobrar y enviar): tiene canal y método de pago. */
 function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryPaymentMethod {
   const pm = String(raw || '').trim().toLowerCase();
@@ -164,16 +160,34 @@ function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryP
   return 'efectivo';
 }
 
-/** Al entregar a domicilio hay que preguntar cómo pagó salvo que ya conste cobrado. */
+/** Pedir cobro si aún no está cobrado (montaje→reparto, montaje→entregar recogida, etc.). */
 function shouldAskPaymentOnDelivery(order: DeliveryOrder): boolean {
-  const fullyCollected =
-    Boolean(order.paymentCollected)
-    && order.paymentStatus === 'paid'
-    && Number(order.paidAmount || 0) >= Number(order.totalAmount || 0)
-    && Number(order.totalAmount || 0) > 0;
-  if (fullyCollected) return false;
-  if (String(order.deliveryType || '').toLowerCase() === 'domicilio') return true;
   return !orderAlreadyCobrado(order);
+}
+
+/** Al entregar (recogida/domicilio) o al pasar a reparto (domicilio): pedir cobro si aún no está cobrado. */
+function shouldAskPaymentOnAdvance(
+  order: DeliveryOrder,
+  next: DeliveryOrderStatus,
+): boolean {
+  if (next !== 'entregado' && next !== 'en_reparto') return false;
+  return shouldAskPaymentOnDelivery(order);
+}
+
+function orderItemsBoardSummary(order: Pick<DeliveryOrder, 'items'>): string {
+  const items = Array.isArray(order.items) ? order.items : [];
+  if (items.length === 0) return '';
+  const preview = items
+    .slice(0, 2)
+    .map((i) => {
+      const qty = Math.max(1, Number(i.quantity) || 1);
+      const name = String(i.name || 'Artículo').trim();
+      const short = name.length > 22 ? `${name.slice(0, 20)}…` : name;
+      return qty > 1 ? `${qty}× ${short}` : short;
+    })
+    .join(' · ');
+  const extra = items.length > 2 ? ` +${items.length - 2}` : '';
+  return `${preview}${extra}`;
 }
 
 function orderPaymentBoardBadge(order: DeliveryOrder): {
@@ -181,13 +195,19 @@ function orderPaymentBoardBadge(order: DeliveryOrder): {
   statusLabel: string;
   paid: boolean;
 } | null {
+  const paid = orderAlreadyCobrado(order);
+  if (paid) {
+    const method = order.paymentMethod
+      ? resolveDeliveryPaymentMethod(order.paymentMethod)
+      : 'efectivo';
+    return { method, statusLabel: 'Pagado', paid: true };
+  }
   if (!order.paymentMethod) return null;
   const method = resolveDeliveryPaymentMethod(order.paymentMethod);
-  const paid = orderAlreadyCobrado(order);
   return {
     method,
-    statusLabel: paid ? 'Cobrado' : 'Pago',
-    paid,
+    statusLabel: 'Pago',
+    paid: false,
   };
 }
 
@@ -250,6 +270,7 @@ const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string;
   en_reparto: { label: 'En reparto', color: 'text-cyan-700',    bg: 'bg-cyan-50 border-cyan-200',     Icon: Truck },
   entregado:  { label: 'Entregado',  color: 'text-green-700',   bg: 'bg-green-50 border-green-200',   Icon: CheckCircle2 },
   cancelled:  { label: 'Cancelado',  color: 'text-gray-500',    bg: 'bg-gray-50 border-gray-200',     Icon: X },
+  devuelto:   { label: 'Devuelto',   color: 'text-red-700',     bg: 'bg-red-50 border-red-200',       Icon: X },
   incident:   { label: 'Incidencia', color: 'text-red-700',     bg: 'bg-red-50 border-red-200',       Icon: AlertTriangle },
 };
 
@@ -393,11 +414,9 @@ function OrderCard({
   const TypeIcon = typeBadge.Icon;
   const isUrgent = order.priority === 'urgent' || order.priority === 'high';
   const itemCount = order.items.reduce((s, i) => s + i.quantity, 0);
-  const itemPreview = order.items
-    .slice(0, 2)
-    .map((i) => `${i.quantity}× ${i.name}`)
-    .join(' · ');
+  const itemPreview = orderItemsBoardSummary(order);
   const paymentBadge = orderPaymentBoardBadge(order);
+  const isPaid = orderAlreadyCobrado(order);
   const timerTitle =
     order.deliveryType === 'recogida'
       ? 'Tiempo en montaje (hasta entregar en tienda)'
@@ -456,6 +475,15 @@ function OrderCard({
               <TypeIcon className={compact ? 'w-3 h-3' : 'w-3 h-3'} />
               {typeBadge.label}
             </span>
+            {isPaid ? (
+              <span className={`inline-flex items-center px-1 py-px rounded font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-700 ${compact ? 'text-[9px]' : 'text-[9px]'}`}>
+                Pagado
+              </span>
+            ) : !readOnly ? (
+              <span className={`inline-flex items-center px-1 py-px rounded font-bold bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950/50 dark:text-amber-100 dark:border-amber-700 ${compact ? 'text-[9px]' : 'text-[9px]'}`}>
+                No pagado
+              </span>
+            ) : null}
             <OrderChannelBadge channel={order.channel} compact={compact} />
             {isUrgent && (
               <span className={`px-1 py-px bg-red-100 text-red-700 font-bold rounded ${compact ? 'text-[9px]' : 'text-[9px]'}`}>!</span>
@@ -466,6 +494,11 @@ function OrderCard({
               {order.customerName}
             </p>
           )}
+          {itemPreview ? (
+            <p className={`text-gray-600 dark:text-gray-300 truncate font-semibold ${compact ? 'text-[10px] mt-0.5' : 'text-[11px] mt-0.5'}`}>
+              {itemPreview}
+            </p>
+          ) : null}
           {!compact && order.takenByName && (
             <p className="flex items-center gap-1 mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
               <span
@@ -475,12 +508,6 @@ function OrderCard({
                 {getWorkerInitials(order.takenByName)}
               </span>
               <span className="truncate">{order.takenByName.split(' ')[0]}</span>
-            </p>
-          )}
-          {!compact && (
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate mt-0.5">
-              {itemPreview}
-              {order.items.length > 2 ? ` +${order.items.length - 2}` : ''}
             </p>
           )}
           <div className={`flex items-center gap-1 flex-wrap ${compact ? 'mt-0.5 text-xs' : 'mt-0.5 text-[11px]'}`}>
@@ -508,7 +535,7 @@ function OrderCard({
               </>
             )}
           </div>
-          {paymentBadge && !compact && (
+          {paymentBadge && !compact && !isPaid && (
             <div className="mt-1.5">
               <PaymentMethodBoardChip
                 method={paymentBadge.method}
@@ -625,11 +652,13 @@ function OrderLane({
 
 function DeliverPaymentModal({
   order,
+  purpose = 'entregar',
   onConfirm,
   onClose,
   loading,
 }: {
   order: DeliveryOrder;
+  purpose?: 'entregar' | 'reparto' | 'pagado';
   onConfirm: (
     method: DeliveryPaymentMethod,
     cash?: { amountReceived: number; changeGiven: number },
@@ -649,12 +678,48 @@ function DeliverPaymentModal({
     const exact = Math.ceil(chargeTotal * 100) / 100;
     return Array.from(new Set([exact, ...base])).filter((v) => v > 0).slice(0, 6);
   })();
+  const isReparto = purpose === 'reparto';
+  const isMarkPaid = purpose === 'pagado';
+  const askPayment = isMarkPaid || shouldAskPaymentOnDelivery(order);
+  const title = isMarkPaid ? 'Pagar pedido' : isReparto ? 'Enviar a reparto' : 'Entregar pedido';
+  const askQuestion = askPayment
+    ? (isMarkPaid
+      ? '¿Cómo paga?'
+      : isReparto
+        ? '¿Cómo paga el cliente? Elige efectivo, tarjeta, bizum u otros.'
+        : '¿Cómo ha pagado? Elige efectivo, tarjeta, bizum u otros.')
+    : (isReparto ? 'Confirma el envío a reparto (ya cobrado en caja)' : 'Confirma la entrega (ya cobrado en caja)');
+  const confirmAlreadyPaidLabel = isMarkPaid
+    ? 'Confirmar cobro'
+    : isReparto
+      ? 'Confirmar reparto'
+      : 'Confirmar entrega';
+
+  const shell = (body: ReactNode) => {
+    if (typeof document === 'undefined') return null;
+    return createPortal(
+      <div
+        className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0 cursor-default"
+          aria-label="Cerrar"
+          onClick={loading ? undefined : onClose}
+          disabled={loading}
+        />
+        {body}
+      </div>,
+      document.body,
+    );
+  };
 
   if (cashStep) {
-    return (
-      <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={loading ? undefined : onClose} />
-        <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto">
+    return shell(
+      <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-5 max-h-[90vh] overflow-y-auto">
           <button
             type="button"
             onClick={onClose}
@@ -754,14 +819,11 @@ function DeliverPaymentModal({
               Confirmar
             </button>
           </div>
-        </div>
-      </div>
+        </div>,
     );
   }
 
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={loading ? undefined : onClose} />
+  return shell(
       <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-5">
         <button
           type="button"
@@ -775,29 +837,27 @@ function DeliverPaymentModal({
           <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-green-100 dark:bg-green-900/40 flex items-center justify-center">
             <CheckCircle2 className="w-6 h-6 text-green-600" />
           </div>
-          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Entregar pedido</h3>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">{title}</h3>
           <p className="text-sm text-gray-500 mt-1 font-mono">#{order.orderNumber}</p>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2 tabular-nums">
             {formatCurrency(chargeTotal)}
           </p>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">
-            {shouldAskPaymentOnDelivery(order)
-              ? '¿Cómo ha pagado?'
-              : 'Confirma la entrega (ya cobrado en caja)'}
+            {askQuestion}
           </p>
-          {shouldAskPaymentOnDelivery(order) && order.paymentMethod && (
+          {askPayment && order.paymentMethod && (
             <p className="text-xs text-cyan-700 dark:text-cyan-300 mt-1 font-medium">
               Previsto: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
             </p>
           )}
-          {!shouldAskPaymentOnDelivery(order) && order.paymentMethod && (
+          {!askPayment && order.paymentMethod && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
               Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
             </p>
           )}
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {shouldAskPaymentOnDelivery(order) ? (
+          {askPayment ? (
             <>
               <button
                 type="button"
@@ -864,12 +924,11 @@ function DeliverPaymentModal({
               ) : (
                 <CheckCircle2 className="w-5 h-5" />
               )}
-              Confirmar entrega
+              {confirmAlreadyPaidLabel}
             </button>
           )}
         </div>
-      </div>
-    </div>
+      </div>,
   );
 }
 
@@ -879,8 +938,10 @@ function OrderDetail({
   onAdvance,
   onDelete,
   onCorrectPayment,
+  onMarkPaid,
   advancing,
   correctingPayment,
+  markingPaid,
   nowMs,
 }: {
   order: DeliveryOrder;
@@ -888,8 +949,10 @@ function OrderDetail({
   onAdvance: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
   onCorrectPayment?: (o: DeliveryOrder, method: DeliveryPaymentMethod) => void;
+  onMarkPaid?: (o: DeliveryOrder) => void;
   advancing: boolean;
   correctingPayment?: boolean;
+  markingPaid?: boolean;
   nowMs: number;
 }) {
   useModalClose(true, onClose);
@@ -909,6 +972,8 @@ function OrderDetail({
     Boolean(onCorrectPayment) && isCompletedBoardOrder(order) && orderAlreadyCobrado(order);
   const currentPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
   const phaseTimer = getTpvPhaseTimer(order, nowMs);
+  const isPaid = orderAlreadyCobrado(order);
+  const canMarkPaid = Boolean(onMarkPaid) && !isPaid && !isCancelledDeliveryOrder(order);
 
   return (
     <div className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center ${compact ? 'p-0 sm:p-2' : 'p-4 sm:p-6'}`}>
@@ -1024,10 +1089,19 @@ function OrderDetail({
                 <p className={`text-gray-600 dark:text-gray-400 font-medium ${compact ? 'text-[10px]' : 'text-xs'}`}>
                   {order.ticketNumber ? `Ticket ${order.ticketNumber}` : 'Total'}
                 </p>
-                {order.paymentMethod && (
+                {isPaid ? (
                   <p className={`font-semibold text-emerald-800 dark:text-emerald-300 ${compact ? 'text-[10px] mt-px' : 'text-xs mt-0.5'}`}>
-                    {order.paymentStatus === 'paid' ? 'Cobrado' : 'Pago previsto'} ·{' '}
-                    {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+                    Pagado
+                    {order.paymentMethod
+                      ? ` · ${PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}`
+                      : ''}
+                  </p>
+                ) : (
+                  <p className={`font-semibold text-amber-800 dark:text-amber-300 ${compact ? 'text-[10px] mt-px' : 'text-xs mt-0.5'}`}>
+                    No pagado
+                    {order.paymentMethod
+                      ? ` · ${PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}`
+                      : ''}
                   </p>
                 )}
               </div>
@@ -1035,6 +1109,24 @@ function OrderDetail({
                 {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
               </p>
             </div>
+            {canMarkPaid && (
+              <button
+                type="button"
+                onClick={() => onMarkPaid?.(order)}
+                disabled={advancing || markingPaid}
+                title="Pagar con tarjeta o efectivo"
+                className={`w-full flex items-center justify-center gap-1.5 rounded-lg border-2 border-emerald-500 bg-white dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-100 font-bold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 disabled:opacity-50 touch-manipulation ${
+                  compact ? 'px-2 py-2 text-xs' : 'px-3 py-2.5 text-sm rounded-xl'
+                }`}
+              >
+                {markingPaid ? (
+                  <Loader2 className={`animate-spin ${compact ? 'w-4 h-4' : 'w-5 h-5'}`} />
+                ) : (
+                  <Banknote className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
+                )}
+                Pagar · Efectivo / Tarjeta
+              </button>
+            )}
             {currentBusiness && (
               <OrderTicketButtons
                 order={order}
@@ -1080,7 +1172,7 @@ function OrderDetail({
             <button
               type="button"
               onClick={() => onAdvance(order)}
-              disabled={advancing}
+              disabled={advancing || markingPaid}
               className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50 touch-manipulation ${
                 compact ? 'px-2 py-2 text-sm' : 'px-3 py-3 rounded-xl text-base shadow-md gap-2'
               }`}
@@ -1092,7 +1184,7 @@ function OrderDetail({
           <button
             type="button"
             onClick={() => onDelete(order)}
-            disabled={advancing}
+            disabled={advancing || markingPaid}
             aria-label="Eliminar pedido"
             className={`flex items-center justify-center rounded-lg border-2 border-red-300 dark:border-red-900/60 text-red-600 dark:text-red-400 font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 touch-manipulation ${
               nextLabel
@@ -1137,6 +1229,8 @@ export function WorkerTpvDelivery({
   const [correctingPaymentId, setCorrectingPaymentId] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
   const [deliveryCompleteOrder, setDeliveryCompleteOrder] = useState<DeliveryOrder | null>(null);
+  const [paymentPromptPurpose, setPaymentPromptPurpose] = useState<'entregar' | 'reparto' | 'pagado'>('entregar');
+  const [markingPaidId, setMarkingPaidId] = useState<string | null>(null);
   const [deleteOrder, setDeleteOrder] = useState<DeliveryOrder | null>(null);
   const [staffConsumptionEnabled, setStaffConsumptionEnabled] = useState(true);
 
@@ -1396,11 +1490,13 @@ export function WorkerTpvDelivery({
     if (!next || !userId) return;
 
     let resolvedPayment = paymentMethod;
-    if (next === 'entregado' && !resolvedPayment) {
-      if (shouldAskPaymentOnDelivery(order)) {
-        setDeliveryCompleteOrder(order);
-        return;
-      }
+    if (!resolvedPayment && shouldAskPaymentOnAdvance(order, next)) {
+      setPaymentPromptPurpose(next === 'en_reparto' ? 'reparto' : 'entregar');
+      setSelectedOrder(null);
+      setDeliveryCompleteOrder(order);
+      return;
+    }
+    if (!resolvedPayment) {
       resolvedPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
     }
 
@@ -1425,23 +1521,28 @@ export function WorkerTpvDelivery({
         if (order.deliveryType === 'recogida' && !order.departedAt) {
           extras.departedAt = now;
         }
-        if (resolvedPayment && !orderAlreadyCobrado(order)) {
-          extras.paymentMethod = resolvedPayment;
-          extras.paymentCollected = true;
-          extras.paymentCollectedAt = now;
-          extras.paymentCollectedBy = user?.user_id || user?.id || user?.fullName || 'Tablet';
-          extras.paymentStatus = 'paid';
-          extras.paidAmount = resolveDeliveryOrderChargeTotal(order);
-          extras.paidAt = order.paidAt || now;
-          if (
-            resolvedPayment === 'efectivo' &&
-            cash &&
-            Number.isFinite(cash.changeGiven) &&
-            cash.changeGiven >= 0
-          ) {
-            extras.amountReceived = cash.amountReceived;
-            extras.changeGiven = cash.changeGiven;
-          }
+      }
+      // Cobro al pasar a reparto (domicilio) o al entregar (recogida / fin de domicilio).
+      if (
+        (next === 'en_reparto' || next === 'entregado')
+        && resolvedPayment
+        && !orderAlreadyCobrado(order)
+      ) {
+        extras.paymentMethod = resolvedPayment;
+        extras.paymentCollected = true;
+        extras.paymentCollectedAt = now;
+        extras.paymentCollectedBy = user?.user_id || user?.id || user?.fullName || 'Tablet';
+        extras.paymentStatus = 'paid';
+        extras.paidAmount = resolveDeliveryOrderChargeTotal(order);
+        extras.paidAt = order.paidAt || now;
+        if (
+          resolvedPayment === 'efectivo' &&
+          cash &&
+          Number.isFinite(cash.changeGiven) &&
+          cash.changeGiven >= 0
+        ) {
+          extras.amountReceived = cash.amountReceived;
+          extras.changeGiven = cash.changeGiven;
         }
       }
       const payload: DeliveryOrder = {
@@ -1459,7 +1560,9 @@ export function WorkerTpvDelivery({
                 ? `Recogida en tienda · ${resolvedPayment ? PAYMENT_LABELS[resolvedPayment] : 'entregado'}`
                 : next === 'entregado' && resolvedPayment
                   ? `Entregado · ${PAYMENT_LABELS[resolvedPayment]}`
-                  : undefined,
+                  : next === 'en_reparto' && resolvedPayment && !orderAlreadyCobrado(order)
+                    ? `A reparto · cobrado ${PAYMENT_LABELS[resolvedPayment]}`
+                    : undefined,
           },
         ],
       };
@@ -1490,9 +1593,10 @@ export function WorkerTpvDelivery({
       if (!isBrowserOnline()) {
         enqueueTpvOfflineItem('order_update', { userId, order: payload });
         setOrders(prev => prev.map(o => o._id === payload._id ? payload : o));
+        setDeliveryCompleteOrder(null);
         if (next === 'entregado') {
+          setShowDelivered(true);
           setSelectedOrder(null);
-          setDeliveryCompleteOrder(null);
           toast.info(`Sin conexión — entrega guardada en cola (#${order.orderNumber})`);
         } else {
           if (selectedOrder?._id === payload._id) setSelectedOrder(payload);
@@ -1527,16 +1631,21 @@ export function WorkerTpvDelivery({
 
       const updated = await submitUpdate(payload);
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
+      setDeliveryCompleteOrder(null);
+      if (next === 'entregado') setShowDelivered(true);
       if (next === 'entregado') {
         setSelectedOrder(null);
-        setDeliveryCompleteOrder(null);
         toast.success(
           `Pedido #${order.orderNumber} entregado · ${PAYMENT_LABELS[resolvedPayment!]}`,
         );
       } else {
         if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
         const label = LANE_STATUS_LABEL[next] || STATUS_CONFIG[next].label;
-        toast.success(`Pedido #${order.orderNumber} → ${label}`);
+        const paidNote =
+          next === 'en_reparto' && extras.paymentCollected && resolvedPayment
+            ? ` · ${PAYMENT_LABELS[resolvedPayment]}`
+            : '';
+        toast.success(`Pedido #${order.orderNumber} → ${label}${paidNote}`);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al avanzar pedido');
@@ -1558,6 +1667,63 @@ export function WorkerTpvDelivery({
     businesses,
   ]);
 
+  const markOrderPaid = useCallback(
+    async (
+      order: DeliveryOrder,
+      method: DeliveryPaymentMethod,
+      cash?: { amountReceived: number; changeGiven: number },
+    ) => {
+      if (!userId) return;
+      if (orderAlreadyCobrado(order)) {
+        setDeliveryCompleteOrder(null);
+        return;
+      }
+      setMarkingPaidId(order._id);
+      try {
+        const amount = resolveDeliveryOrderChargeTotal(order);
+        const updated = await registerPaymentRequest(
+          userId,
+          order._id,
+          method,
+          amount,
+          method === 'efectivo' && cash
+            ? { amountReceived: cash.amountReceived, changeGiven: cash.changeGiven }
+            : undefined,
+        );
+        const merged: DeliveryOrder = {
+          ...updated,
+          paymentCollected: true,
+          paymentCollectedAt: updated.paymentCollectedAt || new Date().toISOString(),
+          paymentCollectedBy:
+            updated.paymentCollectedBy
+            || user?.user_id
+            || user?.id
+            || user?.fullName
+            || 'Tablet',
+          paymentMethod: method,
+          ...(method === 'efectivo' && cash
+            ? { amountReceived: cash.amountReceived, changeGiven: cash.changeGiven }
+            : {}),
+        };
+        setOrders((prev) => prev.map((o) => (o._id === merged._id ? merged : o)));
+        setSelectedOrder((prev) => (prev?._id === merged._id ? merged : prev));
+        setDeliveryCompleteOrder(null);
+        toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo marcar como pagado');
+      } finally {
+        setMarkingPaidId(null);
+      }
+    },
+    [userId, user?.user_id, user?.id, user?.fullName],
+  );
+
+  const requestMarkPaid = useCallback((order: DeliveryOrder) => {
+    if (orderAlreadyCobrado(order)) return;
+    setPaymentPromptPurpose('pagado');
+    setDeliveryCompleteOrder(order);
+  }, []);
+
   const confirmCompleteDelivery = useCallback(
     (
       method: DeliveryPaymentMethod,
@@ -1565,9 +1731,13 @@ export function WorkerTpvDelivery({
     ) => {
       if (!deliveryCompleteOrder) return;
       const fresh = orders.find((o) => o._id === deliveryCompleteOrder._id) || deliveryCompleteOrder;
+      if (paymentPromptPurpose === 'pagado') {
+        void markOrderPaid(fresh, method, cash);
+        return;
+      }
       void advanceOrder(fresh, method, cash);
     },
-    [deliveryCompleteOrder, advanceOrder, orders],
+    [deliveryCompleteOrder, advanceOrder, orders, paymentPromptPurpose, markOrderPaid],
   );
 
   const requestDeleteOrder = useCallback((order: DeliveryOrder) => {
@@ -1584,6 +1754,7 @@ export function WorkerTpvDelivery({
         reason,
       );
       setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
+      setShowDelivered(true);
       setDeleteOrder(null);
       if (selectedOrder?._id === updated._id) setSelectedOrder(null);
       if (deliveryCompleteOrder?._id === updated._id) setDeliveryCompleteOrder(null);
@@ -1642,10 +1813,7 @@ export function WorkerTpvDelivery({
     const enReparto = orders.filter(
       (o) => isTpvRepartoBoardOrder(o) && orderOnOpenTpvOpsBoard(o, openSession),
     );
-    const completados = orders.filter((o) => {
-      if (!orderInRegisterSession(o, openSession)) return false;
-      return isHistoryCompletedBoardOrder(o);
-    });
+    const completados = orders.filter((o) => orderOnCompletedTpvHistoryBoard(o, openSession));
     return {
       montaje: montaje.length,
       delivery: enReparto.length,
@@ -1678,12 +1846,9 @@ export function WorkerTpvDelivery({
 
   const completedShiftOrders = useMemo(
     () => orders
-      .filter((o) => {
-        if (!orderInRegisterSession(o, openSession)) return false;
-        return isHistoryCompletedBoardOrder(o);
-      })
+      .filter((o) => orderOnCompletedTpvHistoryBoard(o, openSession))
       .sort((a, b) => new Date(b.deliveredAt || b.cancelledAt || b.createdAt).getTime() - new Date(a.deliveredAt || a.cancelledAt || a.createdAt).getTime())
-      .slice(0, 50),
+      .slice(0, 200),
     [orders, openSession],
   );
 
@@ -2183,16 +2348,19 @@ export function WorkerTpvDelivery({
           onAdvance={advanceOrder}
           onDelete={requestDeleteOrder}
           onCorrectPayment={handleCorrectPayment}
+          onMarkPaid={requestMarkPaid}
           advancing={advancingIds.has(selectedOrder._id)}
           correctingPayment={correctingPaymentId === selectedOrder._id}
+          markingPaid={markingPaidId === selectedOrder._id}
           nowMs={nowMs}
         />
       )}
 
-      {/* Cobro al entregar */}
+      {/* Cobro al entregar o al enviar a reparto */}
       {deliveryCompleteOrder && (
         <DeliverPaymentModal
           order={deliveryCompleteOrder}
+          purpose={paymentPromptPurpose}
           onConfirm={confirmCompleteDelivery}
           onClose={() => setDeliveryCompleteOrder(null)}
           loading={advancingIds.has(deliveryCompleteOrder._id)}

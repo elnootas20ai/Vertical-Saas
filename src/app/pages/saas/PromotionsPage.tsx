@@ -73,6 +73,7 @@ interface Promotion {
   productIds?: string[];
   fixedUnitPrice?: number;
   applyMode?: PromoApplyMode;
+  salesPointIds?: string[];
 }
 
 const WEEKDAY_OPTIONS: { value: PromoWeekday; label: string }[] = [
@@ -106,6 +107,7 @@ function toStoredPromotion(p: Promotion): StoredPromotion {
     },
     fixedUnitPrice: p.fixedUnitPrice,
     applyMode: p.applyMode,
+    salesPointIds: Array.isArray(p.salesPointIds) ? p.salesPointIds : [],
   };
 }
 
@@ -131,6 +133,7 @@ function fromStoredPromotion(p: StoredPromotion): Promotion {
     productIds: p.productMatch?.productIds || [],
     fixedUnitPrice: p.fixedUnitPrice != null ? Number(p.fixedUnitPrice) : undefined,
     applyMode: p.applyMode || (p.type === 'fixed_unit_price' ? 'auto' : undefined),
+    salesPointIds: Array.isArray(p.salesPointIds) ? p.salesPointIds : [],
   };
 }
 

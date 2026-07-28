@@ -38,7 +38,6 @@ import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { PortfolioBrandStoreBilling } from './PortfolioBrandStoreBilling';
 import { PortfolioCompanyLeague } from './PortfolioCompanyLeague';
 import { PortfolioAlertsPanel } from './PortfolioAlertsPanel';
-import { PortfolioOpsPulse } from './PortfolioOpsPulse';
 import { getRetailOpsUiCopyForRows, getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { VertialBillingUpgradeLink } from './VertialBillingUpgradeLink';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
@@ -231,14 +230,6 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
           canUsePortfolioView={portfolioPlan.canUsePortfolioView}
           portfolioLocked={portfolioPlan.portfolioLocked}
         />
-
-        {/* Resumen operativo por PDV (sustituye los StatCards genéricos) */}
-        {showGroupSections && (
-          <PortfolioOpsPulse
-            rows={filteredRows}
-            refreshButton={<PortfolioRefreshButton onRefresh={handlePortfolioRefresh} />}
-          />
-        )}
 
         {/* Clasificación del grupo — comparativa tipo ranking */}
         {showGroupSections && filteredRows.length > 0 && (

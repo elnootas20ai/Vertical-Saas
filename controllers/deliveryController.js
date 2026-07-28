@@ -1301,17 +1301,28 @@ async function maybeRegisterTpvSaleOnTpvChannelOrderCreate(req, userId, doc, acc
 }
 
 async function maybeRegisterDeliveryPaymentInTpvSession(req, userId, doc, existing, registeredBy, callerAccount) {
-  const isDelivered = String(doc.status || '').toLowerCase() === DELIVERED_ORDER_STATUS;
-  if (!isDelivered) return { status: 'nothing_to_register' };
+  const status = String(doc.status || '').toLowerCase();
+  const isDelivered = status === DELIVERED_ORDER_STATUS;
+  const isDispatch = status === 'en_reparto';
+  // Cobro al entregar, o al pasar a reparto tras el popup del TPV.
+  if (!isDelivered && !isDispatch) return { status: 'nothing_to_register' };
 
   const targetPaid = Number(doc.paidAmount || 0);
   const hasPayment = Boolean(doc.paymentMethod || doc.paymentCollected || targetPaid > 0);
   if (!hasPayment) return { status: 'nothing_to_register' };
 
-  const becameDelivered = String(existing.status || '').toLowerCase() !== DELIVERED_ORDER_STATUS;
   const paidIncreased = targetPaid > Number(existing.paidAmount || 0);
   const collectedNow = Boolean(doc.paymentCollected && !existing.paymentCollected);
-  if (!becameDelivered && !paidIncreased && !collectedNow) return { status: 'nothing_to_register' };
+
+  if (isDispatch) {
+    // Solo si en este paso se cobró (popup tarjeta/efectivo). No tocar Glovo/apps.
+    if (!collectedNow && !paidIncreased) return { status: 'nothing_to_register' };
+  } else {
+    const becameDelivered = String(existing.status || '').toLowerCase() !== DELIVERED_ORDER_STATUS;
+    if (!becameDelivered && !paidIncreased && !collectedNow) {
+      return { status: 'nothing_to_register' };
+    }
+  }
 
   const amount = targetPaid > 0 ? targetPaid : Number(doc.totalAmount || 0);
   if (amount <= 0) return { status: 'nothing_to_register' };
@@ -1336,7 +1347,7 @@ async function maybeAssignDeliveryTicketNumber(req, userId, doc, existing) {
 export async function registerPayment(req, res) {
   try {
     const { userId, orderId } = req.params;
-    const { paymentMethod, paidAmount } = req.body || {};
+    const { paymentMethod, paidAmount, amountReceived, changeGiven } = req.body || {};
     if (!assertUserScope(req, res, userId)) return;
     if (!paymentMethod) return badRequest(res, 'Falta el método de pago');
     if (!paidAmount || Number(paidAmount) <= 0) return badRequest(res, 'El importe debe ser mayor que 0');
@@ -1348,6 +1359,16 @@ export async function registerPayment(req, res) {
     const newPaid = Number(existing.paidAmount || 0) + Number(paidAmount);
     const total = Number(existing.totalAmount || 0);
     const paymentStatus = newPaid >= total ? 'paid' : (newPaid > 0 ? 'partial' : 'pending');
+    const received = Number(amountReceived);
+    const change = Number(changeGiven);
+    const cashExtras =
+      String(paymentMethod).toLowerCase() === 'efectivo' &&
+      Number.isFinite(received) &&
+      received > 0 &&
+      Number.isFinite(change) &&
+      change >= 0
+        ? { amountReceived: received, changeGiven: change }
+        : {};
     const db = getDeliveryDbName();
     const mergedForTicket = {
       ...existing,
@@ -1355,6 +1376,13 @@ export async function registerPayment(req, res) {
       paidAmount: newPaid,
       paidAt: now,
       paymentStatus,
+      paymentCollected: paymentStatus === 'paid',
+      paymentCollectedAt: paymentStatus === 'paid' ? now : (existing.paymentCollectedAt || ''),
+      paymentCollectedBy:
+        paymentStatus === 'paid'
+          ? (account.fullName || 'Sistema')
+          : (existing.paymentCollectedBy || ''),
+      ...cashExtras,
     };
     const ticketNumber = await maybeAssignDeliveryTicketNumber(req, userId, mergedForTicket, existing);
     const doc = buildDeliveryOrderDocument(userId, {
@@ -1370,7 +1398,7 @@ export async function registerPayment(req, res) {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId,
       type: 'delivery_order', action: `Cobro ${Number(paidAmount).toFixed(2)}€ en ${doc.orderNumber}`,
       entityId: doc._id, entityLabel: doc.orderNumber,
-      metadata: { paymentMethod, paidAmount: newPaid, paymentStatus },
+      metadata: { paymentMethod, paidAmount: newPaid, paymentStatus, ...cashExtras },
     });
 
     // CAJA-03/10: auto-register transaction on open TPV register session (misma tienda)

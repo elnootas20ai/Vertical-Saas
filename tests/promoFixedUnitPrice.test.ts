@@ -4,6 +4,7 @@ import {
   getIsoWeekday,
   isPromoWeekdayActive,
   isPromotionActiveNow,
+  listAutoFixedUnitPricePromotions,
   matchPromoProduct,
   type StoredPromotion,
 } from '../src/app/lib/promoCodes';
@@ -79,6 +80,14 @@ describe('promo fixed_unit_price', () => {
     expect(discount).toBeCloseTo(6);
     expect(matchedLineCount).toBe(2);
     expect(applied.map((p) => p.id)).toEqual(['promo-pizzas-11']);
+  });
+
+  it('respeta salesPointIds: solo tiendas listadas', () => {
+    const scoped = { ...pizzaPromo, salesPointIds: ['pdv-badalona'] };
+    expect(listAutoFixedUnitPricePromotions([scoped], mondayAtNoon(), { salesPointId: 'pdv-tiana' })).toEqual([]);
+    expect(
+      listAutoFixedUnitPricePromotions([scoped], mondayAtNoon(), { salesPointId: 'pdv-badalona' }).map((p) => p.id),
+    ).toEqual(['promo-pizzas-11']);
   });
 
   it('no discount on Friday', () => {

@@ -5,6 +5,7 @@ import {
   isDeliveredBoardOrder,
   isRefundedDeliveryOrder,
   orderAlreadyCobrado,
+  orderOnCompletedTpvHistoryBoard,
   registerSessionOrderLoadBounds,
 } from '../src/app/lib/tpvCajaScope.js';
 
@@ -26,7 +27,7 @@ describe('isDeliveredBoardOrder', () => {
 });
 
 describe('isCompletedHistoryBoardOrder', () => {
-  it('incluye entregados y cualquier eliminado del turno', () => {
+  it('incluye entregados, eliminados y devueltos', () => {
     expect(isCompletedHistoryBoardOrder({ status: 'entregado' })).toBe(true);
     expect(isCompletedHistoryBoardOrder({
       status: 'cancelled',
@@ -45,6 +46,34 @@ describe('isCompletedHistoryBoardOrder', () => {
       status: 'cancelled',
       stageHistory: [{ status: 'en_reparto', date: '2026-07-23T11:00:00.000Z' }],
     })).toBe(true);
+    expect(isCompletedHistoryBoardOrder({ status: 'devuelto' })).toBe(true);
+    expect(isCompletedHistoryBoardOrder({ status: 'en_reparto' })).toBe(false);
+  });
+});
+
+describe('orderOnCompletedTpvHistoryBoard', () => {
+  it('mantiene entregados del mismo día aunque se crearan antes de reabrir caja', () => {
+    const session = {
+      openedAt: '2026-06-16T20:00:00.000Z',
+      closedAt: '',
+      status: 'open',
+    };
+    expect(orderOnCompletedTpvHistoryBoard(
+      { createdAt: '2026-06-16T15:00:00.000Z', status: 'entregado', deliveredAt: '2026-06-16T21:00:00.000Z' },
+      session,
+    )).toBe(true);
+    expect(orderOnCompletedTpvHistoryBoard(
+      { createdAt: '2026-06-16T15:00:00.000Z', status: 'cancelled' },
+      session,
+    )).toBe(true);
+    expect(orderOnCompletedTpvHistoryBoard(
+      { createdAt: '2026-06-15T15:00:00.000Z', status: 'entregado' },
+      session,
+    )).toBe(false);
+    expect(orderOnCompletedTpvHistoryBoard(
+      { createdAt: '2026-06-16T15:00:00.000Z', status: 'en_reparto' },
+      session,
+    )).toBe(false);
   });
 });
 

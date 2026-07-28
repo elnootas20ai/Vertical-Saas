@@ -31,14 +31,43 @@ export function isDeliveredBoardOrder(order: Pick<DeliveryOrder, 'status' | 'pay
 }
 
 /**
- * Historial del turno (abajo en TPV): entregados + cualquier eliminado del turno
+ * Historial del turno (abajo en TPV): entregados + eliminados + devueltos
  * (aunque se borrara en montaje/reparto y no hubiera llegado a entregado).
  */
 export function isCompletedHistoryBoardOrder(
   order: Pick<DeliveryOrder, 'status' | 'paymentStatus' | 'deliveredAt' | 'stageHistory'>,
 ): boolean {
   if (isDeliveredBoardOrder(order)) return true;
-  return isCancelledDeliveryOrder(order);
+  if (isCancelledDeliveryOrder(order)) return true;
+  return String(order.status || '').toLowerCase() === 'devuelto';
+}
+
+/**
+ * Pedido cerrado que debe verse abajo en el historial del tablero.
+ * Usa el mismo día local que montaje/reparto (no solo createdAt ≥ openedAt),
+ * para que al reabrir caja o completar un Glovo de antes de abrir no “desaparezca”.
+ * La caja/ventas siguen usando `orderInRegisterSession`.
+ */
+export function orderOnCompletedTpvHistoryBoard(
+  order: {
+    createdAt?: string;
+    status?: string | null;
+    paymentStatus?: string | null;
+    deliveredAt?: string;
+    stageHistory?: DeliveryOrder['stageHistory'];
+  },
+  session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt' | 'status'> | null | undefined,
+): boolean {
+  if (!session || String(session.status || '') !== 'open') return false;
+  if (!isCompletedHistoryBoardOrder(order)) return false;
+  const createdAt = String(order.createdAt || '').trim();
+  const openedAt = String(session.openedAt || '').trim();
+  if (!createdAt || !openedAt) return false;
+  const createdMs = new Date(createdAt).getTime();
+  if (Number.isNaN(createdMs)) return false;
+  const openDayStart = new Date(localDayBoundsForKey(localCalendarDayKey(new Date(openedAt))).from).getTime();
+  if (Number.isNaN(openDayStart) || createdMs < openDayStart) return false;
+  return true;
 }
 
 /** Fase en la que estaba el pedido al eliminarlo (para la etiqueta del historial). */

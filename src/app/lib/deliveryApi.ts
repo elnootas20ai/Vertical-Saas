@@ -508,11 +508,25 @@ export async function deleteDeliveryOrderRequest(userId: string, orderId: string
   );
 }
 
-export async function registerPaymentRequest(userId: string, orderId: string, paymentMethod: string, paidAmount: number): Promise<DeliveryOrder> {
+export async function registerPaymentRequest(
+  userId: string,
+  orderId: string,
+  paymentMethod: string,
+  paidAmount: number,
+  cash?: { amountReceived?: number; changeGiven?: number },
+): Promise<DeliveryOrder> {
   const id = normalizeUserId(userId);
   const result = await request<{ ok: boolean; order: DeliveryOrder; cajaRegistration?: CajaRegistrationResult }>(
     `/api/delivery/orders/${encodeURIComponent(id)}/${encodeURIComponent(orderId)}/payment`,
-    { method: 'PUT', body: JSON.stringify({ paymentMethod, paidAmount }) },
+    {
+      method: 'PUT',
+      body: JSON.stringify({
+        paymentMethod,
+        paidAmount,
+        ...(cash?.amountReceived != null ? { amountReceived: cash.amountReceived } : {}),
+        ...(cash?.changeGiven != null ? { changeGiven: cash.changeGiven } : {}),
+      }),
+    },
   );
   const updated = unwrapOrderResponse(result);
   queueDeliveryOrderFinanceSync(id, updated);

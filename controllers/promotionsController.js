@@ -60,6 +60,9 @@ function sanitizePromotion(doc) {
     productMatch,
     fixedUnitPrice: doc.fixedUnitPrice != null ? Number(doc.fixedUnitPrice) : undefined,
     applyMode: doc.applyMode === 'manual_code' ? 'manual_code' : (doc.applyMode === 'auto' ? 'auto' : undefined),
+    salesPointIds: Array.isArray(doc.salesPointIds)
+      ? [...new Set(doc.salesPointIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [],
   };
 }
 
@@ -73,6 +76,13 @@ function buildPromotionDocument(userId, data, existing = null) {
   const weekdays = data.weekdays !== undefined
     ? sanitizeWeekdays(data.weekdays)
     : sanitizeWeekdays(existing?.weekdays);
+  const salesPointIds = data.salesPointIds !== undefined
+    ? [...new Set((Array.isArray(data.salesPointIds) ? data.salesPointIds : [])
+      .map((id) => String(id || '').trim())
+      .filter(Boolean))]
+    : (Array.isArray(existing?.salesPointIds)
+      ? [...new Set(existing.salesPointIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : []);
   const fixedUnitPriceRaw = data.fixedUnitPrice !== undefined
     ? data.fixedUnitPrice
     : existing?.fixedUnitPrice;
@@ -107,6 +117,7 @@ function buildPromotionDocument(userId, data, existing = null) {
     ordersUsed: Number(data.ordersUsed ?? existing?.ordersUsed ?? 0),
     weekdays,
     productMatch,
+    salesPointIds,
     fixedUnitPrice: fixedUnitPriceRaw != null && fixedUnitPriceRaw !== ''
       ? Number(fixedUnitPriceRaw)
       : (promoType === 'fixed_unit_price' ? Number(data.discountValue ?? existing?.discountValue ?? 0) : undefined),
