@@ -10013,13 +10013,13 @@ export async function listBrandsByBusiness(req, businessId) {
         req,
         db,
         { type: 'brand', business_id: bid },
-        { pageSize: 200, maxDocs: 500, use_index: `idx-${String(db).replace(/[^a-z0-9]/g, '-')}-type-business_id` },
+        { pageSize: 200, maxDocs: 500 },
       );
       return docs
         .filter((doc) => doc && !doc.deletedAt)
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
     } catch {
-      // Fallback si el índice aún no está listo o _find falla.
+      // Fallback si _find falla (índice aún no listo, etc.).
       const docs = await getCatalogDatabaseDocumentsInflight(req);
       return docs
         .filter((doc) => doc?.type === 'brand' && !doc?.deletedAt && doc?.business_id === bid)
