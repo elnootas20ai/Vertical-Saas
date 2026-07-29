@@ -1356,23 +1356,36 @@ export async function registerPayment(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     const now = new Date().toISOString();
-    const newPaid = Number(existing.paidAmount || 0) + Number(paidAmount);
+    const partAmount = Number(paidAmount);
+    const newPaid = Number(existing.paidAmount || 0) + partAmount;
     const total = Number(existing.totalAmount || 0);
     const paymentStatus = newPaid >= total ? 'paid' : (newPaid > 0 ? 'partial' : 'pending');
     const received = Number(amountReceived);
     const change = Number(changeGiven);
+    const pm = normalizeTpvPaymentMethod(paymentMethod);
     const cashExtras =
-      String(paymentMethod).toLowerCase() === 'efectivo' &&
+      pm === 'efectivo' &&
       Number.isFinite(received) &&
       received > 0 &&
       Number.isFinite(change) &&
       change >= 0
         ? { amountReceived: received, changeGiven: change }
         : {};
+    const paymentPart = {
+      id: `pay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+      method: pm,
+      amount: partAmount,
+      paidAt: now,
+      ...cashExtras,
+    };
+    const prevPayments = Array.isArray(existing.payments) ? existing.payments : [];
+    const payments = [...prevPayments, paymentPart];
+    const methods = [...new Set(payments.map((p) => normalizeTpvPaymentMethod(p.method)).filter(Boolean))];
+    const orderPaymentMethod = methods.length > 1 ? 'mixto' : (methods[0] || pm);
     const db = getDeliveryDbName();
     const mergedForTicket = {
       ...existing,
-      paymentMethod,
+      paymentMethod: orderPaymentMethod,
       paidAmount: newPaid,
       paidAt: now,
       paymentStatus,
@@ -1382,6 +1395,7 @@ export async function registerPayment(req, res) {
         paymentStatus === 'paid'
           ? (account.fullName || 'Sistema')
           : (existing.paymentCollectedBy || ''),
+      payments,
       ...cashExtras,
     };
     const ticketNumber = await maybeAssignDeliveryTicketNumber(req, userId, mergedForTicket, existing);
@@ -1390,21 +1404,21 @@ export async function registerPayment(req, res) {
       ...(ticketNumber ? { ticketNumber } : {}),
       stageHistory: [
         ...(existing.stageHistory || []),
-        { status: existing.status, date: now, user: account.fullName || 'Sistema', notes: `Cobro registrado: ${paymentMethod} — ${Number(paidAmount).toFixed(2)}€` },
+        { status: existing.status, date: now, user: account.fullName || 'Sistema', notes: `Cobro registrado: ${pm} — ${partAmount.toFixed(2)}€` },
       ],
     }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     await logAccountActivity(req, {
       actorUserId: userId, actorName: account.fullName, targetUserId: userId,
-      type: 'delivery_order', action: `Cobro ${Number(paidAmount).toFixed(2)}€ en ${doc.orderNumber}`,
+      type: 'delivery_order', action: `Cobro ${partAmount.toFixed(2)}€ en ${doc.orderNumber}`,
       entityId: doc._id, entityLabel: doc.orderNumber,
-      metadata: { paymentMethod, paidAmount: newPaid, paymentStatus, ...cashExtras },
+      metadata: { paymentMethod: pm, paidAmount: newPaid, paymentStatus, paymentsCount: payments.length, ...cashExtras },
     });
 
     // CAJA-03/10: auto-register transaction on open TPV register session (misma tienda)
     const cajaRegistration = await autoRegisterTpvSaleForOrder(req, userId, doc, {
-      amount: Number(paidAmount),
-      paymentMethod: paymentMethod || 'efectivo',
+      amount: partAmount,
+      paymentMethod: pm || 'efectivo',
       registeredBy: account.fullName || 'Sistema',
       mode: 'increment',
       callerAccount: req.callerAccount || account,

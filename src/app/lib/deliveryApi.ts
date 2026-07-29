@@ -133,6 +133,15 @@ export interface DeliveryOrder {
   amountReceived?: number;
   /** Cambio dado al cliente (calculadora TPV). */
   changeGiven?: number;
+  /** Tramos de cobro (pago dividido / parciales). */
+  payments?: Array<{
+    id: string;
+    method: string;
+    amount: number;
+    amountReceived?: number;
+    changeGiven?: number;
+    paidAt?: string;
+  }>;
 
   ticketNumber?: string;
 

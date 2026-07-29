@@ -108,6 +108,12 @@ import {
 import { RestaurantChangeTableModal } from '../../components/saas/restaurant/RestaurantChangeTableModal';
 import { RestaurantSplitBillModal, type SplitBillResult } from '../../components/saas/restaurant/RestaurantSplitBillModal';
 import { RestaurantAccountDiscountModal } from '../../components/saas/restaurant/RestaurantAccountDiscountModal';
+import { TpvSplitPaymentModal } from '../../components/saas/tpv/TpvSplitPaymentModal';
+import {
+  formatSplitPartsSummary,
+  type TpvSplitPaymentPart,
+} from '../../lib/tpvSplitPayment';
+import { registerSplitPaymentsRequest } from '../../lib/tpvSplitPaymentApi';
 import type { DiningTable } from '../../lib/salaApi';
 import type { RestaurantTpvPermissions } from '../../lib/restaurantTpvPermissions';
 import {
@@ -164,7 +170,7 @@ import {
 } from 'lucide-react';
 
 type Step = 'client' | 'delivery' | 'products' | 'payment';
-type PaymentMethod = TpvPaymentMethod;
+type PaymentMethod = TpvPaymentMethod | 'mixto';
 
 interface CartItem {
   lineId: string;
@@ -1013,6 +1019,8 @@ export function TpvRapidoOrderFlow({
 
   // Step 4 - Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [paymentSplitOpen, setPaymentSplitOpen] = useState(false);
+  const [pendingSplitParts, setPendingSplitParts] = useState<TpvSplitPaymentPart[] | null>(null);
   const [cashGiven, setCashGiven] = useState('');
   // Propina (solo cobro de cuenta de mesa en restaurante/bar)
   const [tipInput, setTipInput] = useState('');
@@ -1619,6 +1627,7 @@ export function TpvRapidoOrderFlow({
 
   const choosePaymentMethod = useCallback((key: PaymentMethod) => {
     setPaymentMethod(key);
+    setPendingSplitParts(null);
     if (key !== 'efectivo') setCashGiven('');
   }, []);
 
@@ -2323,7 +2332,7 @@ export function TpvRapidoOrderFlow({
 
   // ─── Submit order ─────────────────────────────────────────────────────────
   const handleSubmitOrder = useCallback(
-    async (status: DeliveryOrderStatus, methodOverride?: PaymentMethod) => {
+    async (status: DeliveryOrderStatus, methodOverride?: PaymentMethod, splitParts?: TpvSplitPaymentPart[] | null) => {
       if (!saleClient || !deliveryType || cart.length === 0) return;
       if (!register || !isTpvRegisterSessionOpen(register.session)) {
         toast.error('Abre la caja de la tienda para cobrar y enviar');
@@ -2334,7 +2343,8 @@ export function TpvRapidoOrderFlow({
         setAddressWarning(true);
         return;
       }
-      const method = methodOverride || paymentMethod;
+      const parts = splitParts ?? pendingSplitParts;
+      const method = methodOverride || paymentMethod || (parts?.length ? 'mixto' : null);
       if (!method) return;
 
       const incompleteHalfHalf = cart.find(
@@ -2355,7 +2365,11 @@ export function TpvRapidoOrderFlow({
 
       // Domicilio o tablet: no cobrar al crear → en montaje/reparto sale «No pagado»
       // y se cobra con el botón Pagar del detalle (efectivo/tarjeta + calculadora).
-      const collectOnDelivery = deliveryType === 'domicilio' || tabletMode;
+      // Pago dividido en recogida desktop: crear pendiente y registrar tramos después.
+      const collectOnDelivery =
+        deliveryType === 'domicilio'
+        || tabletMode
+        || (Boolean(parts?.length) && method === 'mixto');
 
       setSubmitting(true);
       actionBusyRef.current = true;
@@ -2455,7 +2469,7 @@ export function TpvRapidoOrderFlow({
           ]
             .filter(Boolean)
             .join(' · '),
-          paymentMethod: normalizeTpvPaymentMethod(method),
+          paymentMethod: method === 'mixto' ? 'mixto' : normalizeTpvPaymentMethod(method),
           paymentStatus: collectOnDelivery ? 'pending' : 'paid',
           paidAmount: collectOnDelivery ? 0 : payableTotal,
           paidAt: collectOnDelivery ? '' : now,
@@ -2465,6 +2479,7 @@ export function TpvRapidoOrderFlow({
           ...(cashReceived != null && cashChange != null && !collectOnDelivery
             ? { amountReceived: cashReceived, changeGiven: cashChange }
             : {}),
+          ...(parts?.length ? { payments: [] } : {}),
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
           // Mismo nº en ticket y servidor → imprimir en paralelo al crear.
@@ -2495,15 +2510,30 @@ export function TpvRapidoOrderFlow({
 
         // Primero guardar pedido y mostrar éxito; luego ticket cocina.
         // Si se imprime antes, en tablet el bridge nativo puede dejar la UI en «Enviando…».
-        const { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+        let { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+
+        // Recogida: cobro dividido tras crear (caja por tramo).
+        if (
+          parts?.length
+          && method === 'mixto'
+          && deliveryType !== 'domicilio'
+          && !tabletMode
+        ) {
+          created = await registerSplitPaymentsRequest(userId, created._id, parts);
+          cajaStatus = null;
+        }
+
         notifyDeliveryOpsLive({
           reason: 'order_created',
           businessId: created.business_id || writeBusinessId || businessId,
         });
 
         setCreatedOrder(created);
+        setPendingSplitParts(null);
         if (cajaStatus && !isCajaRegistrationOk(cajaStatus)) {
           toast.success('Pedido creado, pero no quedó en caja — revisa que esté abierta');
+        } else if (parts?.length && method === 'mixto') {
+          toast.success(`Pedido cobrado · ${formatSplitPartsSummary(parts)}`);
         } else {
           toast.success('Pedido creado y registrado en caja');
         }
@@ -2536,7 +2566,7 @@ export function TpvRapidoOrderFlow({
         setSubmitting(false);
       }
     },
-    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven],
+    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven],
   );
 
   const accountDue = useMemo(
@@ -3281,6 +3311,21 @@ export function TpvRapidoOrderFlow({
           onApply={(payload) => void handleApplyAccountDiscount(payload)}
           onClear={() => void handleClearAccountDiscount()}
           onClose={() => setDiscountOpen(false)}
+        />
+      ) : null}
+      {paymentSplitOpen ? (
+        <TpvSplitPaymentModal
+          total={payableTotal}
+          title="Pago dividido"
+          loading={submitting}
+          onClose={() => setPaymentSplitOpen(false)}
+          onConfirm={(parts) => {
+            setPendingSplitParts(parts);
+            setPaymentMethod('mixto');
+            setPaymentSplitOpen(false);
+            setCashGiven('');
+            void handleSubmitOrder(tabletMode ? 'listo' : initialStatus, 'mixto', parts);
+          }}
         />
       ) : null}
     </TpvFullscreenShell>
@@ -4060,6 +4105,28 @@ export function TpvRapidoOrderFlow({
                       <span className={`font-medium text-gray-900 dark:text-gray-100 ${tabletMode ? 'text-xs' : 'text-sm'}`}>{label}</span>
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (deliveryType === 'domicilio' || tabletMode) {
+                        choosePaymentMethod('mixto');
+                        return;
+                      }
+                      setPaymentSplitOpen(true);
+                    }}
+                    className={`col-span-2 flex flex-col items-center gap-1.5 rounded-xl border-2 transition-all touch-manipulation ${
+                      tabletMode ? 'p-2.5 min-h-[52px]' : 'p-3 min-h-[64px]'
+                    } ${
+                      paymentMethod === 'mixto'
+                        ? 'border-violet-600 bg-violet-50 dark:bg-violet-950/40'
+                        : 'border-violet-200 dark:border-violet-800 hover:border-violet-400'
+                    }`}
+                  >
+                    <Split className={`text-violet-700 dark:text-violet-300 ${tabletMode ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                    <span className={`font-medium text-gray-900 dark:text-gray-100 ${tabletMode ? 'text-xs' : 'text-sm'}`}>
+                      Pago dividido
+                    </span>
+                  </button>
                 </div>
 
                 {showCashChangeCalculator && (
@@ -4628,6 +4695,7 @@ export function TpvRapidoOrderFlow({
                   type="button"
                   onClick={() => {
                     setPaymentMethod(key);
+                    setPendingSplitParts(null);
                     if (key === 'efectivo') {
                       // Exacto por defecto: no hace falta teclear; solo cambiar si entrega otro billete.
                       setCashGiven(cashChargeTotal.toFixed(2));
@@ -4647,6 +4715,30 @@ export function TpvRapidoOrderFlow({
                   <span className={`font-medium text-gray-900 dark:text-gray-100 ${tabletMode ? 'text-xs' : 'text-sm'}`}>{label}</span>
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => {
+                  if (deliveryType === 'domicilio' || tabletMode) {
+                    setPaymentMethod('mixto');
+                    setPendingSplitParts(null);
+                    setCashGiven('');
+                    return;
+                  }
+                  setPaymentSplitOpen(true);
+                }}
+                className={`col-span-2 flex flex-col items-center gap-1.5 rounded-xl border-2 transition-all touch-manipulation ${
+                  tabletMode ? 'p-2.5 min-h-[52px]' : 'p-3 min-h-[64px]'
+                } ${
+                  paymentMethod === 'mixto'
+                    ? 'border-violet-600 bg-violet-50 dark:bg-violet-950/40'
+                    : 'border-violet-200 dark:border-violet-800 hover:border-violet-400'
+                }`}
+              >
+                <Split className={`text-violet-700 dark:text-violet-300 ${tabletMode ? 'w-5 h-5' : 'w-6 h-6'}`} />
+                <span className={`font-medium text-gray-900 dark:text-gray-100 ${tabletMode ? 'text-xs' : 'text-sm'}`}>
+                  Pago dividido
+                </span>
+              </button>
             </div>
 
             {showCashChangeCalculator && (
@@ -4859,6 +4951,21 @@ export function TpvRapidoOrderFlow({
           onApply={(payload) => void handleApplyAccountDiscount(payload)}
           onClear={() => void handleClearAccountDiscount()}
           onClose={() => setDiscountOpen(false)}
+        />
+      ) : null}
+      {paymentSplitOpen ? (
+        <TpvSplitPaymentModal
+          total={payableTotal}
+          title="Pago dividido"
+          loading={submitting}
+          onClose={() => setPaymentSplitOpen(false)}
+          onConfirm={(parts) => {
+            setPendingSplitParts(parts);
+            setPaymentMethod('mixto');
+            setPaymentSplitOpen(false);
+            setCashGiven('');
+            void handleSubmitOrder(tabletMode ? 'listo' : initialStatus, 'mixto', parts);
+          }}
         />
       ) : null}
     </TpvFullscreenShell>

@@ -5949,6 +5949,11 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
     paymentCollected: Boolean(data.paymentCollected ?? existing?.paymentCollected),
     paymentCollectedAt: String(data.paymentCollectedAt || existing?.paymentCollectedAt || ''),
     paymentCollectedBy: String(data.paymentCollectedBy || existing?.paymentCollectedBy || ''),
+    amountReceived: Number(data.amountReceived ?? existing?.amountReceived ?? 0) || undefined,
+    changeGiven: Number(data.changeGiven ?? existing?.changeGiven ?? 0) || undefined,
+    payments: Array.isArray(data.payments)
+      ? data.payments
+      : (Array.isArray(existing?.payments) ? existing.payments : []),
 
     assignedDriver: String(data.assignedDriver || ''),
     estimatedDelivery: String(data.estimatedDelivery || ''),
@@ -6032,6 +6037,9 @@ export function sanitizeDeliveryOrder(doc) {
     paymentCollected: Boolean(doc.paymentCollected),
     paymentCollectedAt: doc.paymentCollectedAt || '',
     paymentCollectedBy: doc.paymentCollectedBy || '',
+    amountReceived: Number(doc.amountReceived || 0) || undefined,
+    changeGiven: Number(doc.changeGiven || 0) || undefined,
+    payments: Array.isArray(doc.payments) ? doc.payments : [],
 
     ticketNumber: doc.ticketNumber || '',
 

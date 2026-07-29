@@ -53,6 +53,12 @@ import { OrderTicketButtons } from '../../../components/delivery/OrderTicketButt
 import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetailCard';
 import { DecimalNumpadField } from '../../../components/saas/DecimalNumpadField';
 import { parseDecimalPadValue } from '../../../lib/decimalNumpadInput';
+import { TpvSplitPaymentModal } from '../../../components/saas/tpv/TpvSplitPaymentModal';
+import {
+  formatSplitPartsSummary,
+  type TpvSplitPaymentPart,
+} from '../../../lib/tpvSplitPayment';
+import { registerSplitPaymentsRequest } from '../../../lib/tpvSplitPaymentApi';
 import { TpvRapidoOrderFlow } from '../TpvRapidoPage';
 import { listClientsPageRequest } from '../../../lib/crmApi';
 import { isTpvOpsVerticalPending } from '../../../lib/deliveryOpsTypes';
@@ -78,6 +84,7 @@ import {
   Plus,
   Banknote,
   CreditCard,
+  Split,
   Wallet,
   Trash2,
   Smartphone,
@@ -654,6 +661,7 @@ function DeliverPaymentModal({
   order,
   purpose = 'entregar',
   onConfirm,
+  onConfirmSplit,
   onClose,
   loading,
 }: {
@@ -663,12 +671,14 @@ function DeliverPaymentModal({
     method: DeliveryPaymentMethod,
     cash?: { amountReceived: number; changeGiven: number },
   ) => void;
+  onConfirmSplit: (parts: TpvSplitPaymentPart[]) => void;
   onClose: () => void;
   loading: boolean;
 }) {
   useModalClose(!loading, onClose);
   const chargeTotal = resolveDeliveryOrderChargeTotal(order);
   const [cashStep, setCashStep] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [cashGiven, setCashGiven] = useState('');
   const cashGivenAmount = parseDecimalPadValue(cashGiven);
   const changeAmount =
@@ -686,8 +696,8 @@ function DeliverPaymentModal({
     ? (isMarkPaid
       ? '¿Cómo paga?'
       : isReparto
-        ? '¿Cómo paga el cliente? Elige efectivo o tarjeta.'
-        : '¿Cómo ha pagado? Elige efectivo o tarjeta.')
+        ? '¿Cómo paga el cliente? Elige efectivo, tarjeta o dividido.'
+        : '¿Cómo ha pagado? Elige efectivo, tarjeta o dividido.')
     : (isReparto ? 'Confirma el envío a reparto (ya cobrado en caja)' : 'Confirma la entrega (ya cobrado en caja)');
   const confirmAlreadyPaidLabel = isMarkPaid
     ? 'Confirmar cobro'
@@ -716,6 +726,19 @@ function DeliverPaymentModal({
       document.body,
     );
   };
+
+  if (splitOpen && askPayment) {
+    return (
+      <TpvSplitPaymentModal
+        total={chargeTotal}
+        title="Pago dividido"
+        subtitle={`#${order.orderNumber}`}
+        loading={loading}
+        onClose={() => setSplitOpen(false)}
+        onConfirm={(parts) => onConfirmSplit(parts)}
+      />
+    );
+  }
 
   if (cashStep) {
     return shell(
@@ -847,12 +870,12 @@ function DeliverPaymentModal({
           </p>
           {askPayment && order.paymentMethod && (
             <p className="text-xs text-cyan-700 dark:text-cyan-300 mt-1 font-medium">
-              Previsto: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+              Previsto: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)] || order.paymentMethod}
             </p>
           )}
           {!askPayment && order.paymentMethod && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-semibold">
-              Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)]}
+              Cobrado: {PAYMENT_LABELS[resolveDeliveryPaymentMethod(order.paymentMethod)] || order.paymentMethod}
             </p>
           )}
         </div>
@@ -884,6 +907,15 @@ function DeliverPaymentModal({
                   <CreditCard className="w-7 h-7 text-blue-700 dark:text-blue-400" />
                 )}
                 <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Tarjeta</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSplitOpen(true)}
+                disabled={loading}
+                className="col-span-2 flex flex-col items-center gap-2 py-3.5 px-2 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors disabled:opacity-50"
+              >
+                <Split className="w-6 h-6 text-violet-700 dark:text-violet-300" />
+                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Pago dividido</span>
               </button>
             </>
           ) : (
@@ -1713,6 +1745,33 @@ export function WorkerTpvDelivery({
     [deliveryCompleteOrder, advanceOrder, orders, paymentPromptPurpose, markOrderPaid],
   );
 
+  const confirmSplitCompleteDelivery = useCallback(
+    async (parts: TpvSplitPaymentPart[]) => {
+      if (!userId || !deliveryCompleteOrder) return;
+      const fresh = orders.find((o) => o._id === deliveryCompleteOrder._id) || deliveryCompleteOrder;
+      if (orderAlreadyCobrado(fresh)) {
+        setDeliveryCompleteOrder(null);
+        return;
+      }
+      setMarkingPaidId(fresh._id);
+      try {
+        const paid = await registerSplitPaymentsRequest(userId, fresh._id, parts);
+        setOrders((prev) => prev.map((o) => (o._id === paid._id ? paid : o)));
+        setSelectedOrder((prev) => (prev?._id === paid._id ? paid : prev));
+        toast.success(`Pedido #${fresh.orderNumber} pagado · ${formatSplitPartsSummary(parts)}`);
+        setDeliveryCompleteOrder(null);
+        if (paymentPromptPurpose === 'pagado') return;
+        // Ya cobrado: avanzar estado sin volver a pedir método.
+        await advanceOrder(paid);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo cobrar el pago dividido');
+      } finally {
+        setMarkingPaidId(null);
+      }
+    },
+    [userId, deliveryCompleteOrder, orders, paymentPromptPurpose, advanceOrder],
+  );
+
   const requestDeleteOrder = useCallback((order: DeliveryOrder) => {
     setDeleteOrder(order);
   }, []);
@@ -2335,8 +2394,12 @@ export function WorkerTpvDelivery({
           order={deliveryCompleteOrder}
           purpose={paymentPromptPurpose}
           onConfirm={confirmCompleteDelivery}
+          onConfirmSplit={(parts) => void confirmSplitCompleteDelivery(parts)}
           onClose={() => setDeliveryCompleteOrder(null)}
-          loading={advancingIds.has(deliveryCompleteOrder._id)}
+          loading={
+            advancingIds.has(deliveryCompleteOrder._id)
+            || markingPaidId === deliveryCompleteOrder._id
+          }
         />
       )}
 

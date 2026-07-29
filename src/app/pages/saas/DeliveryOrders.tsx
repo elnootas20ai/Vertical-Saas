@@ -11,6 +11,12 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { TpvSplitPaymentModal } from '../../components/saas/tpv/TpvSplitPaymentModal';
+import {
+  formatSplitPartsSummary,
+  type TpvSplitPaymentPart,
+} from '../../lib/tpvSplitPayment';
+import { registerSplitPaymentsRequest } from '../../lib/tpvSplitPaymentApi';
 import {
   deliveryOrderMatchesPdvFilter,
   pickDefaultActivePdvId,
@@ -46,7 +52,7 @@ import { DeliveryAlertsBar, type DeliveryAlert } from '../../components/delivery
 import {
   Plus, Search, X, Clock, ChefHat, Package, CheckCircle2, AlertTriangle,
   Phone, MapPin, ArrowRight, Filter, RefreshCw, Truck, ShoppingBag,
-  Store, CreditCard, Banknote, XCircle, RotateCcw,
+  Store, CreditCard, Banknote, XCircle, RotateCcw, Split,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { AIAddModal, type AIFieldDef } from '../../components/saas/AIAddModal';
@@ -147,6 +153,7 @@ export function DeliveryOrders() {
   const [reopenOrder, setReopenOrder] = useState<DeliveryOrder | null>(null);
   const [refundOrder, setRefundOrder] = useState<DeliveryOrder | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<DeliveryOrder | null>(null);
+  const [paymentSplitOpen, setPaymentSplitOpen] = useState(false);
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
   const [actionLoading, setActionLoading] = useState(false);
   const [showAIModal, setShowAIModal] = useState(false);
@@ -358,6 +365,23 @@ export function DeliveryOrders() {
       toast.success(`Cobro registrado: ${PAYMENT_LABELS[method] || method}`);
     } catch {
       toast.error('Error al registrar cobro');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSplitPayment = async (parts: TpvSplitPaymentPart[]) => {
+    if (!userId || !paymentOrder) return;
+    setActionLoading(true);
+    try {
+      const updated = await registerSplitPaymentsRequest(userId, paymentOrder._id, parts);
+      setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
+      setPaymentOrder(null);
+      setPaymentSplitOpen(false);
+      if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
+      toast.success(`Cobro dividido: ${formatSplitPartsSummary(parts)}`);
+    } catch {
+      toast.error('Error al registrar cobro dividido');
     } finally {
       setActionLoading(false);
     }
@@ -813,7 +837,7 @@ export function DeliveryOrders() {
       )}
 
       {/* Quick payment modal */}
-      {paymentOrder && (
+      {paymentOrder && !paymentSplitOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPaymentOrder(null)} />
           <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-6 animate-in zoom-in-95">
@@ -826,10 +850,29 @@ export function DeliveryOrders() {
                   {PAYMENT_LABELS[method]}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setPaymentSplitOpen(true)}
+                disabled={actionLoading}
+                className="col-span-2 py-3 rounded-xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 text-sm font-bold text-violet-900 dark:text-violet-100 inline-flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Split className="w-4 h-4" />
+                Pago dividido
+              </button>
             </div>
             <button onClick={() => setPaymentOrder(null)} className="w-full mt-3 py-2 text-sm text-gray-500 hover:text-gray-700">Cancelar</button>
           </div>
         </div>
+      )}
+      {paymentOrder && paymentSplitOpen && (
+        <TpvSplitPaymentModal
+          total={Math.max(0, paymentOrder.totalAmount - paymentOrder.paidAmount)}
+          title="Pago dividido"
+          subtitle={`#${paymentOrder.orderNumber}`}
+          loading={actionLoading}
+          onClose={() => setPaymentSplitOpen(false)}
+          onConfirm={(parts) => void handleSplitPayment(parts)}
+        />
       )}
     
       <AIAddModal
