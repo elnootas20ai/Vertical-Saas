@@ -200,6 +200,7 @@ export function CajaTimelineBoard({
               type="button"
               onClick={onExcelClick}
               disabled={excelClosedCount === 0}
+              title="Descarga Excel del mes: hoja Modomio + hoja Black Burger (plantilla Uriel)"
               className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
             >
               <Download className="w-3.5 h-3.5" />

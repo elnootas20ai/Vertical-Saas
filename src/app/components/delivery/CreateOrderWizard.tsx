@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   X, ArrowLeft, ArrowRight, Home, Briefcase, Truck, ShoppingBag,
-  Search, Plus, Minus, CreditCard, Banknote, Smartphone, Wallet,
+  Search, Plus, Minus, CreditCard, Banknote,
   ChevronRight, Check, MapPin, User as UserIcon, Store,
   Loader2,
 } from 'lucide-react';
@@ -78,8 +78,6 @@ const CHANNELS = [
 const PAYMENT_OPTIONS: { value: PaymentMethod; label: string; icon: typeof CreditCard }[] = [
   { value: 'efectivo', label: 'Efectivo', icon: Banknote },
   { value: 'tarjeta', label: 'Tarjeta', icon: CreditCard },
-  { value: 'bizum', label: 'Bizum', icon: Smartphone },
-  { value: 'online', label: 'Online', icon: Wallet },
 ];
 
 const STEPS = ['Tipo y canal', 'Cliente', 'PDV', 'Productos', 'Pago y confirmar'];

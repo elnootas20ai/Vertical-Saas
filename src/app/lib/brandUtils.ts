@@ -115,7 +115,7 @@ export function brandStoreAssignment(
   return { mode: 'partial', stores };
 }
 
-export type BrandSetupPendingKey = 'display_name' | 'delivery_kind' | 'catalog_categories';
+export type BrandSetupPendingKey = 'display_name' | 'delivery_kind';
 
 export type BrandSetupContext = {
   isDelivery: boolean;
@@ -154,9 +154,6 @@ export function getBrandSetupPending(
   const lineKind = effectiveDeliveryLineKind(brand);
   if (ctx.isDelivery && !lineKind) {
     pending.push('delivery_kind');
-  }
-  if (ctx.isDelivery && effectiveCatalogCategories(brand, lineKind).length === 0) {
-    pending.push('catalog_categories');
   }
   return pending;
 }
@@ -216,7 +213,6 @@ export function brandSetupPendingLabels(
   return keys.map((k) => {
     if (k === 'display_name') return 'Pon el nombre de tu negocio o carta';
     if (k === 'delivery_kind') return 'Indica qué tipo de producto vendes (pizza, comida preparada, etc.)';
-    if (k === 'catalog_categories') return 'Añade al menos una categoría de catálogo';
     return '';
   }).filter(Boolean);
 }

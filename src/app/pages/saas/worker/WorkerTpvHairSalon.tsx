@@ -613,7 +613,7 @@ export function WorkerTpvHairSalon() {
                 Método de pago
               </p>
               <div className="flex flex-wrap gap-2 mb-4">
-                {(['efectivo', 'tarjeta', 'bizum'] as const).map((m) => (
+                {(['efectivo', 'tarjeta'] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -625,7 +625,7 @@ export function WorkerTpvHairSalon() {
                     }`}
                   >
                     {paymentIcons[m]}
-                    {m === 'efectivo' ? 'Efectivo' : m === 'tarjeta' ? 'Tarjeta' : 'Bizum'}
+                    {m === 'efectivo' ? 'Efectivo' : 'Tarjeta'}
                   </button>
                 ))}
               </div>

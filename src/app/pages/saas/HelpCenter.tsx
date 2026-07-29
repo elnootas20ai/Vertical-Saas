@@ -150,7 +150,7 @@ const quickLinks: QuickLink[] = [
   { label: 'Crear una operacion', href: '/saas/help#operaciones' },
   { label: 'Documentos y plantillas', href: '/saas/help#documentos' },
   { label: 'Integracion ANCOVE', href: '/saas/help#ancove' },
-  { label: 'Facturacion', href: '/saas/help#facturacion' },
+  { label: 'Mi plan', href: '/saas/help#facturacion' },
 ];
 
 const platformFlow = [
@@ -192,7 +192,7 @@ const guides: Guide[] = [
     steps: [
       'Revisa la informacion de empresa, usuarios y roles para que cada perfil vea solo lo necesario.',
       'Configura ubicaciones, plantillas de documentos e integraciones que vayas a utilizar desde el arranque.',
-      'Valida el plan y los datos de facturacion para evitar bloqueos operativos mas adelante.',
+      'Valida el plan y los datos de suscripción para evitar bloqueos operativos mas adelante.',
     ],
     tips: [
       'Empieza con un flujo simple: stock, operacion, documentacion y seguimiento.',
@@ -273,10 +273,10 @@ const guides: Guide[] = [
   },
   {
     id: 'facturacion',
-    title: 'Facturacion',
-    description: 'La facturacion de la cuenta se gestiona desde configuracion, donde puedes revisar el plan, el metodo de pago y los documentos asociados.',
+    title: 'Mi plan',
+    description: 'El plan de la cuenta se gestiona desde configuración, donde puedes revisar el plan activo, el método de pago y los documentos asociados.',
     route: '/saas/settings/facturacion',
-    routeLabel: 'Abrir facturacion',
+    routeLabel: 'Abrir Mi plan',
     icon: CreditCard,
     accent: ACCENTS.slate,
     steps: [
@@ -318,9 +318,9 @@ const faqs = [
       'Aporta contexto sectorial, comunicados y recursos de apoyo que ayudan a tomar mejores decisiones comerciales y operativas dentro del negocio de vehiculo de ocasion.',
   },
   {
-    question: '¿Donde reviso la facturacion de mi cuenta?',
+    question: '¿Dónde reviso el plan de mi cuenta?',
     answer:
-      'Desde Configuracion, en la pestana de facturacion. Ahí puedes comprobar el plan activo, metodo de pago, estado de la suscripcion y facturas emitidas.',
+      'Desde Configuración, en la pestaña Mi plan. Ahí puedes comprobar el plan activo, método de pago, estado y facturas emitidas.',
   },
   {
     question: '¿Que debo enviar al soporte para recibir ayuda mas rapido?',

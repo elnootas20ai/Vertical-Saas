@@ -524,11 +524,10 @@ export function WorkerTpvButcherShop() {
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">Confirmar pago</h2>
             <p className="text-2xl font-bold text-red-600 dark:text-red-400 mb-4">{formatCurrency(ticketTotal)}</p>
             <p className="text-xs font-semibold text-gray-500 mb-2">Método</p>
-            <div className="grid grid-cols-3 gap-2 mb-4">
+            <div className="grid grid-cols-2 gap-2 mb-4">
               {([
                 { id: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
                 { id: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                { id: 'bizum' as const, label: 'Bizum', icon: Smartphone },
               ]).map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}

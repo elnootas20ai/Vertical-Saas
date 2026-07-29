@@ -20,7 +20,7 @@ export function SAAS__FlowMap() {
     { id: 'ancove', name: 'ANCOVE', icon: Building2, path: '/saas/ancove', color: 'bg-orange-100 text-orange-600' },
     { id: 'team', name: 'Equipo', icon: UsersRound, path: '/saas/team', color: 'bg-violet-100 text-violet-600' },
     { id: 'finance', name: 'Finanzas', icon: DollarSign, path: '/saas/finance', color: 'bg-red-100 text-red-600' },
-    { id: 'billing', name: 'Facturación', icon: CreditCard, path: '/saas/billing', color: 'bg-teal-100 text-teal-600' },
+    { id: 'billing', name: 'Mi plan', icon: CreditCard, path: '/saas/billing', color: 'bg-teal-100 text-teal-600' },
     { id: 'settings', name: 'Sistema', icon: Settings, path: '/saas/settings', color: 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400' },
   ];
 

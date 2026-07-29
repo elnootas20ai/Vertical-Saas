@@ -1,6 +1,6 @@
 /**
  * Catálogo único de planes Vertial (precios, límites, bullets).
- * Onboarding, Ajustes → Facturación y entitlements deben alinearse aquí.
+ * Onboarding, Ajustes → Mi plan y entitlements deben alinearse aquí.
  */
 
 export type VertialPlanId = 'basic' | 'normal' | 'pro';

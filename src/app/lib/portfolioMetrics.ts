@@ -10,6 +10,7 @@ import {
   sumProductClosingCountsForDay,
 } from './shiftFoodFamilyCounts';
 import { soldProductCountsForDay } from './deliverySoldProductStats';
+import { attributeOrderRevenueByBrand } from '../../../shared/delivery/orderLineRevenueSplit.js';
 
 export type PortfolioMetrics = {
   revenueToday: number;
@@ -312,19 +313,17 @@ export function computePortfolioMetrics(
     const orderRev = deliveryOrderRevenueAmount(o);
     const ch = channelLabel(o.channel);
     revenueByChannel[ch] = (revenueByChannel[ch] || 0) + orderRev;
-    const items = o.items || [];
-    const itemsTotal = items.reduce((s, item) => {
-      const line = (Number(item.total) || 0) > 0 ? Number(item.total) : Number(item.unitPrice) * Number(item.quantity);
-      return s + (Number.isFinite(line) ? line : 0);
-    }, 0);
-    for (const item of items) {
-      const line = (Number(item.total) || 0) > 0 ? Number(item.total) : Number(item.unitPrice) * Number(item.quantity);
-      const shareBase = itemsTotal > 0 ? (line / itemsTotal) * orderRev : 0;
-      const brands = item.brandIds?.length ? item.brandIds : ['_sin_marca'];
-      for (const bid of brands) {
-        const key = String(bid || '_sin_marca');
-        revenueByBrand[key] = (revenueByBrand[key] || 0) + shareBase / brands.length;
-      }
+    const attributed = attributeOrderRevenueByBrand(o);
+    const attributedSum =
+      Object.values(attributed.byBrand).reduce((s, n) => s + (Number(n) || 0), 0)
+      + (Number(attributed.unbranded) || 0);
+    const scale = attributedSum > 0 && orderRev > 0 ? orderRev / attributedSum : 1;
+    for (const [bid, amt] of Object.entries(attributed.byBrand)) {
+      revenueByBrand[bid] = (revenueByBrand[bid] || 0) + (Number(amt) || 0) * scale;
+    }
+    if ((Number(attributed.unbranded) || 0) > 0) {
+      revenueByBrand._sin_marca =
+        (revenueByBrand._sin_marca || 0) + (Number(attributed.unbranded) || 0) * scale;
     }
   }
 
@@ -594,16 +593,6 @@ function emptyBillingCell(): BillingCellAcc {
   return { revenueMonth: 0, revenueToday: 0, deliveredMonth: 0, deliveredToday: 0 };
 }
 
-function lineItemRevenue(item: {
-  total?: number;
-  unitPrice?: number;
-  quantity?: number;
-}): number {
-  const total = Number(item?.total ?? 0);
-  if (total > 0) return total;
-  return Number(item?.unitPrice ?? 0) * Number(item?.quantity ?? 0);
-}
-
 function resolveOrderWorkCenterId(
   order: DeliveryOrder,
   primaryPdvId: string | null,
@@ -630,7 +619,7 @@ function bumpDeliveredCount(cell: BillingCellAcc, order: DeliveryOrder, todayKey
 
 /**
  * Facturación delivery del mes desglosada por marca comercial y tienda (centro de trabajo).
- * Usa líneas de pedido entregado con brandIds; bebidas/complementos sin marca → unbrandedRevenueMonth.
+ * Pedido 1 marca → todo a esa (incl. bebidas). Pedido cruzado → compartidos a partes iguales.
  */
 export function computeCompanyBillingBreakdown(
   orders: DeliveryOrder[],
@@ -674,50 +663,40 @@ export function computeCompanyBillingBreakdown(
     if (isRevenueOnDay(order, todayKey)) totalRevenueToday += orderTotal;
     totalDeliveredMonth += 1;
 
-    const items = order.items || [];
+    const attributed = attributeOrderRevenueByBrand(order);
+    const attributedSum =
+      Object.values(attributed.byBrand).reduce((s, n) => s + (Number(n) || 0), 0)
+      + (Number(attributed.unbranded) || 0);
+    const scale = attributedSum > 0 && orderTotal > 0 ? orderTotal / attributedSum : 1;
+
     const brandsInOrder = new Set<string>();
     let brandedAmount = 0;
-    const itemsTotal = items.reduce((s, item) => s + lineItemRevenue(item), 0);
 
-    for (const item of items) {
-      const amountRaw = lineItemRevenue(item);
-      if (amountRaw <= 0) continue;
-      const amount = itemsTotal > 0 ? (amountRaw / itemsTotal) * orderTotal : 0;
+    for (const [bid, rawAmt] of Object.entries(attributed.byBrand)) {
+      const amount = (Number(rawAmt) || 0) * scale;
       if (amount <= 0) continue;
-
-      const itemBrandIds = (item.brandIds ?? [])
-        .map((b) => String(b || '').trim())
-        .filter(Boolean);
-
-      if (itemBrandIds.length === 0) {
-        unbrandedRevenueMonth += amount;
-        continue;
-      }
-
       brandedAmount += amount;
-      const share = amount / itemBrandIds.length;
+      brandsInOrder.add(bid);
 
-      for (const bid of itemBrandIds) {
-        if (!brandMatrix.has(bid)) brandMatrix.set(bid, new Map());
-        brandsInOrder.add(bid);
+      if (!brandMatrix.has(bid)) brandMatrix.set(bid, new Map());
+      const byStore = brandMatrix.get(bid)!;
+      if (storeId) {
+        if (!byStore.has(storeId)) byStore.set(storeId, emptyBillingCell());
+        const cell = byStore.get(storeId)!;
+        cell.revenueMonth += amount;
+        if (isRevenueOnDay(order, todayKey)) cell.revenueToday += amount;
 
-        const byStore = brandMatrix.get(bid)!;
-        if (storeId) {
-          if (!byStore.has(storeId)) byStore.set(storeId, emptyBillingCell());
-          const cell = byStore.get(storeId)!;
-          cell.revenueMonth += share;
-          if (isRevenueOnDay(order, todayKey)) cell.revenueToday += share;
-
-          if (!storeBrandMatrix.get(storeId)!.has(bid)) {
-            storeBrandMatrix.get(storeId)!.set(bid, { revenueMonth: 0, deliveredMonth: 0 });
-          }
-          const sb = storeBrandMatrix.get(storeId)!.get(bid)!;
-          sb.revenueMonth += share;
+        if (!storeBrandMatrix.get(storeId)!.has(bid)) {
+          storeBrandMatrix.get(storeId)!.set(bid, { revenueMonth: 0, deliveredMonth: 0 });
         }
+        const sb = storeBrandMatrix.get(storeId)!.get(bid)!;
+        sb.revenueMonth += amount;
       }
     }
 
-    if (brandedAmount <= 0 && orderTotal > 0) {
+    unbrandedRevenueMonth += (Number(attributed.unbranded) || 0) * scale;
+
+    if (brandedAmount <= 0 && orderTotal > 0 && (Number(attributed.unbranded) || 0) <= 0) {
       unbrandedRevenueMonth += orderTotal;
     }
 

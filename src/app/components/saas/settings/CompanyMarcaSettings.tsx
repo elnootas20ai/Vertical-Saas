@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import {
-  AlertCircle,
   AlertTriangle,
   ArrowRight,
   Edit3,
@@ -13,7 +12,6 @@ import {
   Store,
   Tag,
   Trash2,
-  X,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -72,6 +70,7 @@ import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 import { listWorkCentersForDelivery, type WorkCenter } from '../../../lib/workCentersApi';
 import { resolveBrandLogo, resolveBrandPlaceholderUrl, shouldPersistBrandPlaceholderLogo } from '../../../lib/brandPlaceholders';
 import { BrandLogoPreview, isExtremeWideLogo } from './BrandLogoPreview';
+import { BrandBillingSettingsPanel } from './BrandBillingSettingsPanel';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
 import {
   settingsChipChoiceClass,
@@ -80,7 +79,6 @@ import {
   settingsEmptyStateClass,
   settingsFilterBtnClass,
   settingsInputClass,
-  settingsKpiCardClass,
   settingsLabelClass,
   settingsPrimaryBtnClass,
   settingsSearchInputClass,
@@ -97,7 +95,6 @@ const BRAND_WIZARD_STEP_HINTS: Record<string, string> = {
   negocio: 'Tipo de carta',
   identidad: 'Nombre y aspecto',
   tiendas: 'Locales donde vende',
-  operacion: 'Catálogo y códigos',
 };
 
 type BrandFormState = {
@@ -112,7 +109,7 @@ type BrandFormState = {
   catalogCategories: string[];
 };
 
-type WizardStep = 'negocio' | 'identidad' | 'tiendas' | 'operacion';
+type WizardStep = 'negocio' | 'identidad' | 'tiendas';
 
 const EMPTY_FORM: BrandFormState = {
   name: '',
@@ -154,7 +151,6 @@ function BrandLineModal({
 
   const isDefault = editingBrand ? isDefaultCommercialBrand(editingBrand) : false;
   const showDeliveryWizard = isDelivery;
-  const [newCategory, setNewCategory] = useState('');
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoFileName, setLogoFileName] = useState('');
   const [logoAspectHint, setLogoAspectHint] = useState(false);
@@ -182,13 +178,11 @@ function BrandLineModal({
         { id: 'negocio' as const, n: 1, title: 'Qué vendes' },
         { id: 'identidad' as const, n: 2, title: 'Identidad' },
         { id: 'tiendas' as const, n: 3, title: 'Tiendas' },
-        { id: 'operacion' as const, n: 4, title: 'Catálogo' },
       ];
     }
     return [
       { id: 'identidad' as const, n: 1, title: 'Identidad' },
       { id: 'tiendas' as const, n: 2, title: 'Tiendas' },
-      { id: 'operacion' as const, n: 3, title: 'Operación' },
     ];
   }, [showDeliveryWizard]);
 
@@ -276,7 +270,6 @@ function BrandLineModal({
         : 'identidad',
     );
     setFieldErrors({});
-    setNewCategory('');
     setLogoFileName('');
     setLogoAspectHint(false);
     shortCodeTouchedRef.current = false;
@@ -333,9 +326,6 @@ function BrandLineModal({
         if (selected === 0) errs.stores = 'Selecciona al menos una tienda o «Todas»';
       }
     }
-    if (s === 'operacion' && isDelivery && form.catalogCategories.length === 0) {
-      errs.categories = 'Añade al menos una categoría de catálogo';
-    }
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -369,15 +359,14 @@ function BrandLineModal({
         hasError:
           (row.id === 'negocio' && Boolean(fieldErrors.negocio)) ||
           (row.id === 'identidad' && Boolean(fieldErrors.name)) ||
-          (row.id === 'tiendas' && Boolean(fieldErrors.stores)) ||
-          (row.id === 'operacion' && Boolean(fieldErrors.categories)),
+          (row.id === 'tiendas' && Boolean(fieldErrors.stores)),
       })),
     [wizardRows, activeStepIndex, fieldErrors],
   );
 
   const wizardSubtitle = editingBrand
-    ? 'Revisa y ajusta cómo se muestra esta línea en catálogo, PDV e informes.'
-    : 'Configura la identidad de la marca y en qué tiendas estará disponible.';
+    ? 'Revisa y ajusta cómo se muestra esta línea en el PDV e informes.'
+    : 'Elige qué vendes, el nombre de la marca y en qué tiendas estará.';
 
   const handleSubmit = async () => {
     for (const s of stepOrder) {
@@ -419,16 +408,6 @@ function BrandLineModal({
     } finally {
       setLogoUploading(false);
     }
-  };
-
-  const addCategory = () => {
-    const c = newCategory.trim();
-    if (!c) return;
-    setForm((f) => ({
-      ...f,
-      catalogCategories: f.catalogCategories.includes(c) ? f.catalogCategories : [...f.catalogCategories, c],
-    }));
-    setNewCategory('');
   };
 
   const previewName = form.name.trim() || (defaultNameUnset ? 'Tu marca' : 'Marca');
@@ -760,6 +739,16 @@ function BrandLineModal({
                       <BrandLogoPreview src={formLogoDisplay} size="xl" boxClassName="min-h-[14rem] w-full" />
                     </div>
                   </div>
+                  <div>
+                    <label className={settingsLabelClass}>Web de la marca (opcional)</label>
+                    <input
+                      className={settingsInputClass}
+                      type="url"
+                      placeholder="https://…"
+                      value={form.website}
+                      onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))}
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -816,161 +805,7 @@ function BrandLineModal({
                 )}
               </div>
             )}
-
-            {step === 'operacion' && (
-              <div className={settingsWizardSectionClass}>
-                <p className={settingsWizardLeadClass}>
-                  Define cómo se organiza el catálogo y los códigos que verás en PDV e informes.
-                </p>
-                {isDelivery ? (
-                  <div>
-                    <label className={settingsLabelClass}>Categorías en catálogo *</label>
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {form.catalogCategories.map((cat) => (
-                        <span
-                          key={cat}
-                          className="inline-flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1 text-xs font-medium dark:bg-gray-700"
-                        >
-                          {cat}
-                          <button
-                            type="button"
-                            className="text-gray-500 hover:text-red-600"
-                            onClick={() =>
-                              setForm((f) => ({
-                                ...f,
-                                catalogCategories: f.catalogCategories.filter((c) => c !== cat),
-                              }))
-                            }
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        className={settingsInputClass}
-                        placeholder="Ej. Principales, Pizzas…"
-                        value={newCategory}
-                        onChange={(e) => setNewCategory(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            addCategory();
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={addCategory}
-                        className="shrink-0 rounded-xl border-2 border-gray-900 bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900"
-                      >
-                        Añadir
-                      </button>
-                    </div>
-                    {fieldErrors.categories ? <p className="mt-1 text-xs text-red-600">{fieldErrors.categories}</p> : null}
-                  </div>
-                ) : null}
-                <div>
-                  <label className={settingsLabelClass}>Código corto (PDV / informes)</label>
-                  <input
-                    className={settingsInputClass}
-                    placeholder="Ej. PIZ, BUR (opcional)"
-                    maxLength={12}
-                    value={form.shortCode}
-                    onChange={(e) => {
-                      shortCodeTouchedRef.current = true;
-                      setForm((f) => ({ ...f, shortCode: e.target.value.toUpperCase().replace(/\s/g, '') }));
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className={settingsLabelClass}>Web de la marca (opcional)</label>
-                  <input
-                    className={settingsInputClass}
-                    type="url"
-                    placeholder="https://…"
-                    value={form.website}
-                    onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))}
-                  />
-                </div>
-              </div>
-            )}
     </SettingsWizardShell>
-  );
-}
-
-function BrandMarcaHero({
-  brand,
-  storeLabel,
-  lineLabel,
-  onConfigure,
-}: {
-  brand: Brand;
-  storeLabel: string;
-  lineLabel?: string | null;
-  onConfigure: () => void;
-}) {
-  const color = brand.primaryColor || '#6366F1';
-  const nameUnset = isDefaultCommercialBrand(brand) && isDefaultBrandNamePlaceholder(brand.name);
-  const displayName = nameUnset ? 'Configura tu marca' : brand.name;
-
-  return (
-    <section
-      className="overflow-hidden rounded-2xl border-2 shadow-md transition-[border-color,box-shadow] duration-300 dark:shadow-gray-900/40"
-      style={{ borderColor: brandTint(color, '55') }}
-    >
-      <div className="px-5 py-6 text-white sm:px-8 sm:py-8" style={{ background: brandPreviewGradient(color) }}>
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-          <div className="mx-auto flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white/95 p-2 shadow-lg ring-2 ring-white/30 sm:mx-0">
-            <BrandLogoPreview
-              src={resolveBrandLogo(brand)}
-              size="lg"
-              boxClassName="h-full w-full min-h-[6rem]"
-            />
-          </div>
-          <div className="min-w-0 flex-1 text-center sm:text-left">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-white/75">Tu marca en Vertial</p>
-            <h2 className="mt-1 text-2xl font-bold leading-tight sm:text-3xl">{displayName}</h2>
-            {brand.shortCode ? (
-              <span className="mt-2 inline-block rounded-full bg-white/20 px-2.5 py-0.5 font-mono text-xs font-semibold backdrop-blur-sm">
-                {brand.shortCode}
-              </span>
-            ) : null}
-            {brand.description ? (
-              <p className="mt-2 line-clamp-2 text-sm text-white/85">{brand.description}</p>
-            ) : (
-              <p className="mt-2 text-sm text-white/70">Catálogo, PDV e informes usarán este color y logo.</p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onConfigure}
-            className="shrink-0 rounded-xl border-2 border-white/40 bg-white/15 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur-sm transition-colors hover:bg-white/25"
-          >
-            Configurar marca
-          </button>
-        </div>
-      </div>
-      <div className="flex flex-wrap gap-4 bg-white px-5 py-3 text-xs dark:bg-gray-800 sm:px-8">
-        <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-400">
-          <Store className="h-3.5 w-3.5" style={{ color }} />
-          <span className="font-medium text-gray-800 dark:text-gray-200">{storeLabel}</span>
-        </span>
-        {lineLabel ? (
-          <span className="font-medium" style={{ color }}>
-            {lineLabel}
-          </span>
-        ) : null}
-        <span
-          className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold"
-          style={{ backgroundColor: brandTint(color, '18'), color }}
-        >
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-          Color activo en esta pantalla
-        </span>
-      </div>
-    </section>
   );
 }
 
@@ -1167,18 +1002,6 @@ export function CompanyMarcaSettings() {
     );
   }, [brands, hoverBrandId]);
 
-  const accentColor = accentBrand?.primaryColor || '#6366F1';
-
-  const kpis = useMemo(() => {
-    const pending = brands.filter((b) => getBrandSetupPending(b, setupCtx).length > 0).length;
-    return {
-      total: brands.length,
-      active: brands.filter((b) => b.active !== false).length,
-      inactive: brands.filter((b) => b.active === false).length,
-      pending,
-    };
-  }, [brands, setupCtx]);
-
   const openEdit = (brand: Brand) => {
     setEditingBrand(brand);
     setShowModal(true);
@@ -1322,49 +1145,12 @@ export function CompanyMarcaSettings() {
   }
 
   return (
-    <div
-      className="space-y-6 rounded-2xl p-1 transition-[background] duration-500 sm:p-2"
-      style={{
-        background: `linear-gradient(180deg, ${brandTint(accentColor, '16')} 0%, transparent 320px)`,
-      }}
-    >
-      {accentBrand && !loading ? (
-        <BrandMarcaHero
-          brand={accentBrand}
-          storeLabel={brandStoreLabel(accentBrand.salesPointIds?.length ?? 0, retailStores.length)}
-          lineLabel={isDelivery && accentBrand.deliveryLineKind ? deliveryBrandLineKindLabel(accentBrand.deliveryLineKind) : null}
-          onConfigure={() => openEdit(accentBrand)}
-        />
-      ) : null}
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className={settingsKpiCardClass('indigo')}>
-          <Layers className="mb-2 h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-          <div className="text-2xl font-bold">{kpis.total}</div>
-          <div className="mt-0.5 text-xs opacity-80">Total marcas</div>
-        </div>
-        <div className={settingsKpiCardClass('green')}>
-          <div className="mb-2 h-5 w-5 rounded-full bg-green-500/30" />
-          <div className="text-2xl font-bold">{kpis.active}</div>
-          <div className="mt-0.5 text-xs opacity-80">Activas</div>
-        </div>
-        <div className={settingsKpiCardClass('amber')}>
-          <AlertCircle className="mb-2 h-5 w-5 text-amber-600 dark:text-amber-400" />
-          <div className="text-2xl font-bold">{kpis.pending}</div>
-          <div className="mt-0.5 text-xs opacity-80">Pendientes</div>
-        </div>
-        <div className={settingsKpiCardClass('violet')}>
-          <Store className="mb-2 h-5 w-5 text-violet-600 dark:text-violet-400" />
-          <div className="text-2xl font-bold">{retailStores.length}</div>
-          <div className="mt-0.5 text-xs opacity-80">Tiendas retail</div>
-        </div>
-      </div>
-
+    <div className="space-y-4 p-1 sm:p-2">
       {!entitlements.canCreateCommercialBrand && brands.length > 0 ? (
         <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-100">
           Tu plan <strong>{entitlements.planLabel}</strong> incluye una marca principal para operar con una
           sola línea de negocio. Para añadir líneas extra (p. ej. Pizzería, Burger) necesitas{' '}
-          {entitlements.needsCommercialBrandAddon ? 'ampliar el cupo en Facturación' : 'el plan PRO'}.
+          {entitlements.needsCommercialBrandAddon ? 'ampliar el cupo en Mi plan' : 'el plan PRO'}.
         </div>
       ) : null}
 
@@ -1411,7 +1197,7 @@ export function CompanyMarcaSettings() {
           </p>
           <p className="mt-1 text-sm">
             {brands.length === 0
-              ? 'Crea la carta de tu negocio con el asistente (nombre, categorías y tiendas).'
+              ? 'Crea la carta de tu negocio con el asistente (qué vendes, nombre y tiendas).'
               : 'Prueba con otros términos de búsqueda.'}
           </p>
           {brands.length === 0 ? (
@@ -1426,7 +1212,7 @@ export function CompanyMarcaSettings() {
           ) : null}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
           {filtered.map((brand) => {
             const color = brand.primaryColor || '#6366F1';
             const isDefault = isDefaultCommercialBrand(brand);
@@ -1449,35 +1235,35 @@ export function CompanyMarcaSettings() {
                 key={brand._id}
                 onMouseEnter={() => setHoverBrandId(brand._id)}
                 onMouseLeave={() => setHoverBrandId(null)}
-                className={`group overflow-hidden rounded-2xl border-2 bg-white text-left transition-all duration-200 hover:shadow-lg dark:bg-gray-800 ${
+                className={`group overflow-hidden rounded-xl border bg-white text-left transition-all duration-200 hover:shadow-md dark:bg-gray-800 ${
                   inactive ? 'border-dashed opacity-70' : ''
-                } ${needsSetup ? 'ring-2 ring-red-300/60 dark:ring-red-800/50' : ''}`}
+                } ${needsSetup ? 'ring-1 ring-red-300/60 dark:ring-red-800/50' : ''}`}
                 style={{
-                  borderColor: needsSetup ? undefined : isAccent ? color : brandTint(color, '44'),
-                  boxShadow: isAccent ? `0 10px 28px ${brandTint(color, '28')}` : undefined,
+                  borderColor: needsSetup ? undefined : isAccent ? color : brandTint(color, '40'),
+                  boxShadow: isAccent ? `0 4px 14px ${brandTint(color, '22')}` : undefined,
                 }}
               >
-                <div className="h-1.5 shrink-0" style={{ background: brandPreviewGradient(color) }} aria-hidden />
-                <div className="p-5">
-                <div className="mb-3 flex items-start justify-between gap-2">
+                <div className="h-1 shrink-0" style={{ background: brandPreviewGradient(color) }} aria-hidden />
+                <div className="p-2.5">
+                <div className="mb-1.5 flex items-start justify-between gap-1.5">
                   <button
                     type="button"
                     onClick={() => openEdit(brand)}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left outline-none transition-colors hover:bg-gray-50/80 focus-visible:ring-2 focus-visible:ring-gray-900 dark:hover:bg-gray-700/40 dark:focus-visible:ring-gray-100"
+                    className="flex min-w-0 flex-1 items-center gap-2 rounded-lg text-left outline-none transition-colors hover:bg-gray-50/80 focus-visible:ring-2 focus-visible:ring-gray-900 dark:hover:bg-gray-700/40 dark:focus-visible:ring-gray-100"
                   >
                     <div
-                      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border-2 bg-white p-1 dark:bg-gray-900"
-                      style={{ borderColor: brandTint(color, '44') }}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-white p-0.5 dark:bg-gray-900"
+                      style={{ borderColor: brandTint(color, '40') }}
                     >
                       <BrandLogoPreview
                         src={resolveBrandLogo(brand)}
                         size="md"
-                        boxClassName="h-full w-full min-h-[3rem]"
+                        boxClassName="h-full w-full max-h-8 max-w-8"
                       />
                     </div>
                     <div className="min-w-0">
                       <div
-                        className={`truncate text-sm font-semibold ${
+                        className={`truncate text-xs font-semibold ${
                           nameUnset
                             ? 'text-red-600 dark:text-red-400'
                             : 'text-gray-900 dark:text-gray-100'
@@ -1485,23 +1271,23 @@ export function CompanyMarcaSettings() {
                       >
                         {nameUnset ? 'Configura el nombre…' : brand.name}
                       </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
                         {isDefault ? (
                           <span
-                            className="inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase"
+                            className="inline-flex items-center gap-0.5 rounded-full px-1 py-0.5 text-[9px] font-bold uppercase"
                             style={{ backgroundColor: brandTint(color, '22'), color }}
                           >
-                            <Lock className="h-2.5 w-2.5" />
-                            Por defecto
+                            <Lock className="h-2 w-2" />
+                            Base
                           </span>
                         ) : null}
                         {brand.shortCode ? (
-                          <span className="font-mono text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+                          <span className="font-mono text-[9px] font-semibold text-gray-500 dark:text-gray-400">
                             {brand.shortCode}
                           </span>
                         ) : null}
                         {needsSetup ? (
-                          <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                          <span className="rounded-full bg-red-100 px-1 py-0.5 text-[9px] font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300">
                             Pendiente
                           </span>
                         ) : null}
@@ -1512,7 +1298,7 @@ export function CompanyMarcaSettings() {
                     type="button"
                     onClick={(e) => requestToggleBrandActive(brand, e)}
                     disabled={toggleLocked || toggleBusy}
-                    className={`relative z-10 shrink-0 ${settingsStatusPillClass(brandActive, toggleLocked || toggleBusy)}`}
+                    className={`relative z-10 shrink-0 !px-1.5 !py-0.5 !text-[10px] ${settingsStatusPillClass(brandActive, toggleLocked || toggleBusy)}`}
                     title={
                       toggleLocked
                         ? 'Debe quedar al menos una marca activa en la empresa'
@@ -1522,64 +1308,43 @@ export function CompanyMarcaSettings() {
                     }
                   >
                     <span
-                      className={`h-1.5 w-1.5 rounded-full ${brandActive ? 'bg-green-500' : 'bg-gray-400'}`}
+                      className={`h-1 w-1 rounded-full ${brandActive ? 'bg-green-500' : 'bg-gray-400'}`}
                     />
-                    {toggleBusy ? '…' : brandActive ? 'Activa' : 'Inactiva'}
+                    {toggleBusy ? '…' : brandActive ? 'On' : 'Off'}
                   </button>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => openEdit(brand)}
-                  className="w-full cursor-pointer rounded-xl text-left outline-none transition-colors hover:bg-gray-50/60 focus-visible:ring-2 focus-visible:ring-gray-900 dark:hover:bg-gray-700/30 dark:focus-visible:ring-gray-100"
+                  className="w-full cursor-pointer rounded-lg text-left outline-none transition-colors hover:bg-gray-50/60 focus-visible:ring-2 focus-visible:ring-gray-900 dark:hover:bg-gray-700/30 dark:focus-visible:ring-gray-100"
                 >
                 {isDelivery && brand.deliveryLineKind ? (
-                  <p className="mb-2 text-xs font-medium" style={{ color }}>
+                  <p className="mb-1 truncate text-[10px] font-medium" style={{ color }}>
                     {deliveryBrandLineKindLabel(brand.deliveryLineKind)}
                   </p>
                 ) : null}
 
-                {brand.description ? (
-                  <p className="mb-3 line-clamp-2 text-xs text-gray-500 dark:text-gray-400">{brand.description}</p>
-                ) : null}
-
                 <div
-                  className="space-y-2 border-t pt-3 text-xs text-gray-500 dark:text-gray-400"
+                  className="space-y-1 border-t pt-1.5 text-[10px] text-gray-500 dark:text-gray-400"
                   style={{ borderColor: brandTint(color, '28') }}
                 >
-                  <div className="flex items-center gap-2">
-                    <Store className="h-3.5 w-3.5 shrink-0" />
-                    <span className="font-medium text-gray-700 dark:text-gray-300">{storeLabel}</span>
+                  <div className="flex items-center gap-1.5">
+                    <Store className="h-3 w-3 shrink-0" />
+                    <span className="truncate font-medium text-gray-700 dark:text-gray-300">{storeLabel}</span>
                   </div>
                   {assignment.mode === 'partial' && assignment.stores.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {assignment.stores.map((s) => (
+                    <div className="flex flex-wrap gap-0.5">
+                      {assignment.stores.slice(0, 2).map((s) => (
                         <span
                           key={s.id}
-                          className="rounded-lg border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900/50 dark:text-gray-300"
+                          className="rounded border border-gray-200 bg-gray-50 px-1 py-0.5 text-[9px] font-medium text-gray-700 dark:border-gray-600 dark:bg-gray-900/50 dark:text-gray-300"
                         >
                           {s.name}
                         </span>
                       ))}
-                    </div>
-                  ) : null}
-                  {isDelivery && brand.catalogCategories && brand.catalogCategories.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {brand.catalogCategories.slice(0, 4).map((cat) => (
-                        <span
-                          key={cat}
-                          className="rounded-lg border px-2 py-0.5 text-[10px] font-medium"
-                          style={{
-                            borderColor: brandTint(color, '33'),
-                            backgroundColor: brandTint(color, '12'),
-                            color,
-                          }}
-                        >
-                          {cat}
-                        </span>
-                      ))}
-                      {brand.catalogCategories.length > 4 ? (
-                        <span className="text-[10px] text-gray-400">+{brand.catalogCategories.length - 4}</span>
+                      {assignment.stores.length > 2 ? (
+                        <span className="text-[9px] text-gray-400">+{assignment.stores.length - 2}</span>
                       ) : null}
                     </div>
                   ) : null}
@@ -1587,7 +1352,7 @@ export function CompanyMarcaSettings() {
                 </button>
 
                 <div
-                  className="mt-3 flex justify-end gap-1 border-t pt-2"
+                  className="mt-1.5 flex justify-end gap-0.5 border-t pt-1"
                   style={{ borderColor: brandTint(color, '22') }}
                 >
                   <button
@@ -1596,10 +1361,10 @@ export function CompanyMarcaSettings() {
                       e.stopPropagation();
                       openEdit(brand);
                     }}
-                    className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    className="rounded-md p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
                     title="Editar"
                   >
-                    <Edit3 className="h-4 w-4" />
+                    <Edit3 className="h-3.5 w-3.5" />
                   </button>
                   {!isDefault || incompleteShell ? (
                     <button
@@ -1608,10 +1373,10 @@ export function CompanyMarcaSettings() {
                         e.stopPropagation();
                         void handleDelete(brand);
                       }}
-                      className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30"
+                      className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30"
                       title="Eliminar"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   ) : null}
                 </div>
@@ -1627,6 +1392,8 @@ export function CompanyMarcaSettings() {
           {filtered.length} de {brands.length} marca{brands.length !== 1 ? 's' : ''}
         </p>
       )}
+
+      {!loading ? <BrandBillingSettingsPanel businessId={businessId} brands={brands} /> : null}
 
       <BrandLineModal
         isOpen={showModal}

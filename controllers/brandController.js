@@ -8,6 +8,9 @@ import {
   getDocument,
   putDocument,
   softDeleteDocument,
+  buildBrandBillingConfigDocument,
+  sanitizeBrandBillingConfig,
+  getBrandBillingConfigDoc,
 } from '../services/couchdb.js';
 import { isDefaultCommercialBrandName } from '../shared/brand/constants.js';
 import { assertCanCreateCommercialBrand } from '../services/entitlementEnforcement.js';
@@ -123,6 +126,67 @@ export async function deleteBrand(req, res) {
     return res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : 'Error al eliminar marca',
+    });
+  }
+}
+
+export async function getBrandBillingConfig(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) return badRequest(res, 'Falta businessId');
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const existing = await getBrandBillingConfigDoc(req, businessId);
+    if (!existing) {
+      const empty = buildBrandBillingConfigDocument(businessId, { sheets: [] });
+      return res.json({ ok: true, config: sanitizeBrandBillingConfig(empty) });
+    }
+    return res.json({ ok: true, config: sanitizeBrandBillingConfig(existing) });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar facturación de marcas',
+    });
+  }
+}
+
+export async function putBrandBillingConfig(req, res) {
+  try {
+    const { businessId } = req.params;
+    const { config } = req.body || {};
+    if (!businessId) return badRequest(res, 'Falta businessId');
+    if (!config || typeof config !== 'object') return badRequest(res, 'Falta config');
+
+    const business = await findBusinessById(req, businessId);
+    if (!business) return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+
+    const db = getCatalogDbName();
+    await ensureDatabase(req, db);
+
+    const writeOnce = async (existing) => {
+      const doc = buildBrandBillingConfigDocument(businessId, config, existing);
+      if (!doc._rev) delete doc._rev;
+      const saved = await putDocument(req, db, doc._id, doc);
+      return sanitizeBrandBillingConfig({ ...doc, _rev: saved.rev });
+    };
+
+    let existing = await getBrandBillingConfigDoc(req, businessId);
+    try {
+      const out = await writeOnce(existing);
+      return res.json({ ok: true, config: out });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err || '');
+      if (!/conflict/i.test(msg)) throw err;
+      const fresh = await getDocument(req, db, existing?._id || `brand-billing-${businessId}`);
+      const out = await writeOnce(fresh && fresh.type === 'brand_billing_config' ? fresh : null);
+      return res.json({ ok: true, config: out });
+    }
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al guardar facturación de marcas',
     });
   }
 }

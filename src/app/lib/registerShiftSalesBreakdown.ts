@@ -18,6 +18,10 @@ export type ShiftCategoryGroup = {
   category: string;
   quantity: number;
   revenue: number;
+  /** Importe de líneas cobradas en efectivo. */
+  revenueEfectivo: number;
+  /** Importe de líneas cobradas con tarjeta. */
+  revenueTarjeta: number;
   products: ShiftProductLine[];
 };
 
@@ -44,9 +48,23 @@ export type ShiftSalesBreakdown = {
   orderCount: number;
   totalUnits: number;
   totalRevenue: number;
+  totalEfectivo: number;
+  totalTarjeta: number;
   categories: ShiftCategoryGroup[];
   orders: ShiftOrderLine[];
 };
+
+/** Solo efectivo / tarjeta para el desglose por familia; el resto no se reparte ahí. */
+function orderCashOrCard(raw: string | undefined | null): 'efectivo' | 'tarjeta' | null {
+  const pm = String(raw || '')
+    .trim()
+    .toLowerCase();
+  if (pm === 'efectivo' || pm === 'cash') return 'efectivo';
+  if (pm === 'tarjeta' || pm === 'card' || pm === 'visa' || pm === 'datáfono' || pm === 'datafono') {
+    return 'tarjeta';
+  }
+  return null;
+}
 
 function lineRevenue(item: DeliveryOrderItem): number {
   const fromTotal = Number(item.total);
@@ -108,12 +126,15 @@ export function buildShiftSalesBreakdown(orders: DeliveryOrder[]): ShiftSalesBre
 
   let totalUnits = 0;
   let totalRevenue = 0;
+  let totalEfectivo = 0;
+  let totalTarjeta = 0;
 
   for (const order of orders) {
     const items = Array.isArray(order.items) ? order.items : [];
     const orderItemLines: ShiftOrderItemLine[] = [];
     let orderUnits = 0;
     let itemsSubtotal = 0;
+    const payKind = orderCashOrCard(order.paymentMethod);
 
     for (const item of items) {
       const qty = Number(item.quantity || 0);
@@ -167,6 +188,29 @@ export function buildShiftSalesBreakdown(orders: DeliveryOrder[]): ShiftSalesBre
         });
       }
 
+      const catName = line.category;
+      let group = categoryMap.get(catName);
+      if (!group) {
+        group = {
+          category: catName,
+          quantity: 0,
+          revenue: 0,
+          revenueEfectivo: 0,
+          revenueTarjeta: 0,
+          products: [],
+        };
+        categoryMap.set(catName, group);
+      }
+      group.quantity += line.qty;
+      group.revenue += revenue;
+      if (payKind === 'efectivo') {
+        group.revenueEfectivo += revenue;
+        totalEfectivo += revenue;
+      } else if (payKind === 'tarjeta') {
+        group.revenueTarjeta += revenue;
+        totalTarjeta += revenue;
+      }
+
       orderItemLines.push({
         name: line.name,
         quantity: line.qty,
@@ -190,26 +234,18 @@ export function buildShiftSalesBreakdown(orders: DeliveryOrder[]): ShiftSalesBre
     });
   }
 
+  // Adjuntar productos a su categoría (sin duplicar cantidades ya sumadas arriba).
   for (const product of productMap.values()) {
-    const catName = product.category;
-    const group = categoryMap.get(catName);
-    if (group) {
-      group.quantity += product.quantity;
-      group.revenue += product.revenue;
-      group.products.push(product);
-    } else {
-      categoryMap.set(catName, {
-        category: catName,
-        quantity: product.quantity,
-        revenue: product.revenue,
-        products: [product],
-      });
-    }
+    const group = categoryMap.get(product.category);
+    if (group) group.products.push(product);
   }
 
   const categories = [...categoryMap.values()]
     .map((g) => ({
       ...g,
+      revenue: Math.round(g.revenue * 100) / 100,
+      revenueEfectivo: Math.round(g.revenueEfectivo * 100) / 100,
+      revenueTarjeta: Math.round(g.revenueTarjeta * 100) / 100,
       products: [...g.products].sort((a, b) => b.quantity - a.quantity || b.revenue - a.revenue),
     }))
     .sort((a, b) => b.revenue - a.revenue || b.quantity - a.quantity);
@@ -220,6 +256,8 @@ export function buildShiftSalesBreakdown(orders: DeliveryOrder[]): ShiftSalesBre
     orderCount: orderLines.length,
     totalUnits,
     totalRevenue: Math.round(totalRevenue * 100) / 100,
+    totalEfectivo: Math.round(totalEfectivo * 100) / 100,
+    totalTarjeta: Math.round(totalTarjeta * 100) / 100,
     categories,
     orders: orderLines,
   };

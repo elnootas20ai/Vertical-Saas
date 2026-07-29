@@ -101,7 +101,6 @@ type PaymentMethod = 'efectivo' | 'tarjeta' | 'bizum' | 'transferencia';
 const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: React.ReactNode }[] = [
   { id: 'efectivo', label: 'Efectivo', icon: <Banknote className="w-4 h-4" /> },
   { id: 'tarjeta', label: 'Tarjeta', icon: <CreditCard className="w-4 h-4" /> },
-  { id: 'bizum', label: 'Bizum', icon: <Smartphone className="w-4 h-4" /> },
   { id: 'transferencia', label: 'Transferencia', icon: <ArrowDownUp className="w-4 h-4" /> },
 ];
 

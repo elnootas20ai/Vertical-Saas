@@ -250,7 +250,7 @@ export function BlockA1Checklist() {
             <div className="p-4 bg-green-50 border-l-4 border-green-600 rounded-lg">
               <h4 className="font-bold text-green-900 mb-2">3. Prueba navegación desde modales</h4>
               <p className="text-sm text-green-800">
-                Desde el modal de Perfil, haz clic en "Facturación" - debe navegar a /saas/billing.
+                Desde el modal de Perfil, haz clic en "Mi plan" - debe navegar a /saas/billing.
                 Desde Ayuda, los enlaces deben funcionar.
               </p>
             </div>

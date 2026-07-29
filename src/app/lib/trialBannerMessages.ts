@@ -24,7 +24,7 @@ export function getTrialActiveBannerContent(options: {
     return {
       title,
       detail: `Suscripción en periodo de prueba${endHint}. El primer cobro será automático al finalizar la prueba.`,
-      ctaLabel: 'Ver facturación',
+      ctaLabel: 'Ver Mi plan',
     };
   }
 
@@ -33,7 +33,7 @@ export function getTrialActiveBannerContent(options: {
     return {
       title,
       detail: `${cardHint}Sin cargo hasta que termine la prueba${endHint}.`,
-      ctaLabel: 'Ver facturación',
+      ctaLabel: 'Ver Mi plan',
     };
   }
 
@@ -58,7 +58,7 @@ export function getTrialExpiringBannerContent(options: {
     return {
       title,
       detail: 'El cobro del plan se realizará automáticamente al finalizar la prueba.',
-      ctaLabel: 'Ver facturación',
+      ctaLabel: 'Ver Mi plan',
     };
   }
 
@@ -66,8 +66,8 @@ export function getTrialExpiringBannerContent(options: {
     const cardHint = cardLastFour ? `Tarjeta ····${cardLastFour} registrada. ` : 'Tarjeta registrada. ';
     return {
       title,
-      detail: `${cardHint}Revisa facturación si quieres cambiar plan o método de pago.`,
-      ctaLabel: 'Ver facturación',
+      detail: `${cardHint}Revisa Mi plan si quieres cambiar plan o método de pago.`,
+      ctaLabel: 'Ver Mi plan',
     };
   }
 

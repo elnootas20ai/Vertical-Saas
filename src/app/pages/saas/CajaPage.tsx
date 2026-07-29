@@ -9,6 +9,7 @@ import {
   listCajaBootstrapRequest,
   updateTpvRegisterSessionRequest,
   filterDeliveryOrdersRequest,
+  pointOfSaleDisplayLabel,
   type TpvRegisterSession,
   type TpvRegisterSummary,
   type PointOfSale,
@@ -17,7 +18,7 @@ import {
   type DeliveryOrder,
 } from '../../lib/deliveryApi';
 import {
-  Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
+  Banknote, CreditCard, Phone as PhoneIcon, Wifi, Wallet, User, Monitor,
   Store, Clock, BarChart3, AlertTriangle, CheckCircle2, XCircle,
   ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, Calendar, Eye,
   MessageSquare, TrendingUp, TrendingDown, Hash,
@@ -30,7 +31,10 @@ import {
 } from '../../lib/deliveryIntegrationsUi';
 import { AggregatorCashSummary } from '../../components/saas/AggregatorCashSummary';
 import { CajaTimelineBoard } from '../../components/saas/caja/CajaTimelineBoard';
-import { downloadAccumulatedCajaClosingsExcel } from '../../lib/cajaClosingsExcelExport';
+import { downloadUrielCajaClosingsExcel } from '../../lib/cajaUrielClosingsExcelExport';
+import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
+import { listBrandsRequest } from '../../lib/brandApi';
+import { suggestBillingSheetsFromBrands } from '../../lib/brandBillingConfig';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
 import {
@@ -46,11 +50,15 @@ import {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const METHOD_CHIP =
+  'bg-zinc-100 text-zinc-700 border border-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:border-zinc-600';
+
 const METHOD_BADGES: Record<string, { icon: typeof Banknote; color: string; label: string }> = {
-  efectivo: { icon: Banknote, color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400', label: 'Efectivo' },
-  tarjeta: { icon: CreditCard, color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', label: 'Tarjeta' },
-  bizum: { icon: PhoneIcon, color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400', label: 'Bizum' },
-  online: { icon: Wifi, color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400', label: 'Online' },
+  efectivo: { icon: Banknote, color: METHOD_CHIP, label: 'Efectivo' },
+  tarjeta: { icon: CreditCard, color: METHOD_CHIP, label: 'Tarjeta' },
+  bizum: { icon: PhoneIcon, color: METHOD_CHIP, label: 'Bizum' },
+  online: { icon: Wifi, color: METHOD_CHIP, label: 'Online' },
+  otro: { icon: Wallet, color: METHOD_CHIP, label: 'Otros' },
 };
 
 const TPV_TX_LABELS: Record<string, string> = {
@@ -483,10 +491,10 @@ function RegisterCard({
                 <div key={tx.id} className="flex items-center justify-between text-xs py-1.5 px-2 hover:bg-gray-50 dark:hover:bg-gray-900 rounded-lg">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-gray-400 w-10 shrink-0">{new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${tx.type === 'sale' ? 'bg-green-100 text-green-700' : tx.type === 'return' || tx.type === 'cash_out' ? 'bg-red-100 text-red-700' : tx.type === 'cash_in' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>{TPV_TX_LABELS[tx.type] || tx.type}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase shrink-0 ${METHOD_CHIP}`}>{TPV_TX_LABELS[tx.type] || tx.type}</span>
                     <span className="text-gray-600 dark:text-gray-400 truncate">{tx.description || tx.orderNumber || '—'}</span>
                   </div>
-                  <span className={`font-semibold shrink-0 ml-2 ${tx.type === 'return' || tx.type === 'cash_out' || tx.type === 'expense' ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
+                  <span className="font-semibold shrink-0 ml-2 text-gray-900 dark:text-gray-100">
                     {tx.type === 'return' || tx.type === 'cash_out' || tx.type === 'expense' ? '-' : '+'}{tx.amount.toFixed(2)}€
                   </span>
                 </div>
@@ -574,23 +582,23 @@ function RegisterCard({
             if (!badge) return null;
             const Icon = badge.icon;
             return (
-              <span key={method} className={`px-2 py-0.5 rounded-lg text-[11px] font-medium flex items-center gap-1 ${badge.color}`}>
-                <Icon className="w-3 h-3" /> {badge.label}: {amount.toFixed(2)}€
+              <span key={method} className={`px-2 py-0.5 rounded-md text-[11px] font-medium flex items-center gap-1 ${badge.color}`}>
+                <Icon className="w-3 h-3 opacity-70" /> {badge.label}: {amount.toFixed(2)}€
               </span>
             );
           })}
           {lastCount && (
-            <span className={`px-2 py-0.5 rounded-lg text-[11px] font-medium ${lastCount.difference === 0 ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+            <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${METHOD_CHIP}`}>
               Último arqueo: {lastCount.difference >= 0 ? '+' : ''}{lastCount.difference.toFixed(2)}€
             </span>
           )}
           {summary.totalCashIn > 0 && (
-            <span className="px-2 py-0.5 rounded-lg text-[11px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+            <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${METHOD_CHIP}`}>
               Entradas: {summary.totalCashIn.toFixed(2)}€
             </span>
           )}
           {summary.totalCashOut > 0 && (
-            <span className="px-2 py-0.5 rounded-lg text-[11px] font-medium bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+            <span className={`px-2 py-0.5 rounded-md text-[11px] font-medium ${METHOD_CHIP}`}>
               Salidas: {summary.totalCashOut.toFixed(2)}€
             </span>
           )}
@@ -890,17 +898,55 @@ export function CajaPage() {
 
   const excelClosedCount = sessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
-  const handleExcel = () => {
+  const handleExcel = async () => {
     try {
-      const { rows } = downloadAccumulatedCajaClosingsExcel(sessions);
-      if (rows === 0) {
-        toast.info('Aún no hay cierres de caja para exportar');
+      const pdvId = String(
+        filterPdv
+        || activeStoreScope.activeSalesPointId
+        || sessions.find((s) => String(s.status || '') !== 'open')?.pointOfSaleId
+        || '',
+      ).trim();
+      if (!pdvId) {
+        toast.info('Elige un PDV para exportar el Excel de ingresos');
         return;
       }
-      toast.success(`Excel generado con ${rows} cierre${rows === 1 ? '' : 's'} acumulado${rows === 1 ? '' : 's'}`);
+      const pdv = pointsOfSale.find((p) => p._id === pdvId);
+      const yearMonth = selectedDate.slice(0, 7);
+
+      let billingSheets = null as ReturnType<typeof suggestBillingSheetsFromBrands> | null;
+      const businessId = String(currentBusiness?.business_id || currentBusiness?.id || currentBusiness?._id || '').trim();
+      if (businessId) {
+        try {
+          const [cfg, brands] = await Promise.all([
+            getBrandBillingConfigRequest(businessId),
+            listBrandsRequest(businessId),
+          ]);
+          if (cfg.sheets.length > 0) {
+            billingSheets = cfg.sheets;
+          } else {
+            const suggested = suggestBillingSheetsFromBrands(brands);
+            if (suggested.length > 0) billingSheets = suggested;
+          }
+        } catch (err) {
+          console.warn('Facturación marcas no disponible; Excel usa plantilla por defecto', err);
+        }
+      }
+
+      const { rows, fileName, sheetNames } = downloadUrielCajaClosingsExcel(sessions, {
+        pointOfSaleId: pdvId,
+        pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : pdvId,
+        yearMonth,
+        billingSheets,
+      });
+      if (rows === 0) {
+        toast.info('Aún no hay cierres de caja en este mes para ese PDV');
+        return;
+      }
+      const sheetsLabel = sheetNames.length ? sheetNames.join(' + ') : 'ingresos';
+      toast.success(`Excel ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
     } catch (err) {
       console.error(err);
-      toast.error('No se pudo generar el Excel');
+      toast.error(err instanceof Error ? err.message : 'No se pudo generar el Excel');
     }
   };
 

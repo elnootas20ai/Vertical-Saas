@@ -72,6 +72,7 @@ import {
   type StoreOpsPulse,
 } from '../../lib/portfolioMetrics';
 import { PortfolioOpsPulse } from '../../components/saas/PortfolioOpsPulse';
+import { CompanyBrandPerformancePanel } from '../../components/saas/CompanyBrandPerformancePanel';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 import {
   buildSoldProductDailySeries,
@@ -1452,6 +1453,15 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             }
           />
         )}
+
+        {isDeliveryVertical && businessId ? (
+          <CompanyBrandPerformancePanel
+            businessId={businessId}
+            brands={deliveryBrands}
+            orders={scopedDeliveryOrders}
+            loading={deliveryDataLoading}
+          />
+        ) : null}
 
         {/* ═══ KPIs PRINCIPALES — 8 tarjetas ═══ */}
         {isVisible('kpis_main') && (

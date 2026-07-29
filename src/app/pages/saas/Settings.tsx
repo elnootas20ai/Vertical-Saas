@@ -259,7 +259,7 @@ const SECTIONS: { id: SectionId; label: string; icon: React.ComponentType<{ clas
     icon: Building2,
     tabs: ['businesses', 'brands', 'salesPoints', 'tpvPrinter'],
   },
-  { id: 'billing', label: 'Facturación', icon: CreditCard, tabs: ['billing', 'numbering'] },
+  { id: 'billing', label: 'Mi plan', icon: CreditCard, tabs: ['billing', 'numbering'] },
   { id: 'config', label: 'Configuración', icon: SettingsIcon, tabs: ['templates', 'integrations', 'pipeline', 'emails', 'datos'] },
   { id: 'alerts', label: 'Alertas', icon: Bell, tabs: ['alertas', 'misNotificaciones'] },
 ];

@@ -101,7 +101,7 @@ export function SAAS__ProfileModal({ isOpen, onClose }: Props) {
     },
     {
       icon: CreditCard,
-      label: 'Facturación y suscripción',
+      label: 'Mi plan',
       description: isIosCustomerAccessOnlyApp()
         ? 'Consulta de plan (sin cobro en iOS)'
         : 'Plan actual y métodos de pago',

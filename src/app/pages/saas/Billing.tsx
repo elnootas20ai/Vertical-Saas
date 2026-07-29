@@ -5,8 +5,8 @@ import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAc
 import { useAuth } from '../../context/AuthContext';
 
 /**
- * Facturación Vertial (suscripción SaaS).
- * En web redirige a Configuración → Facturación.
+ * Plan Vertial (Ajustes → Mi plan).
+ * En web redirige a Ajustes → Mi plan.
  * En iOS no hay cobro in-app (Guideline 3.1.1).
  */
 export function Billing() {

@@ -47,7 +47,6 @@ import {
   buildAggregatorCashRows,
   getClosingAggregatorPlatforms,
   aggregatorRowsFromClosingTotals,
-  sumAggregatorRows,
   parseAggregatorAmount,
   type AggregatorCashRow,
 } from '../../lib/deliveryIntegrationsUi';
@@ -63,8 +62,17 @@ import {
   filterOrdersForRegisterSession,
 } from '../../lib/registerShiftSalesBreakdown';
 import { AggregatorClosingEditor, type AggregatorClosingSnapshot } from './AggregatorClosingEditor';
+import { DeliveryFoodUnitIcon } from './delivery/DeliveryFoodUnitIcon';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
+import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
+import { buildShiftBrandRevenue, getOrderBrandShares } from '../../lib/registerShiftBrandBilling';
+import { listBrandsRequest } from '../../lib/brandApi';
+import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
+import {
+  splitRulesFromBillingConfig,
+  type BrandBillingSplitRules,
+} from '../../lib/brandBillingConfig';
 import {
   filterStoresForWorkerAssignment,
   isInvitedWorkerUser,
@@ -1364,6 +1372,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   /** Delivery: slots Efectivo + pizzas/burgers/tacos editables. */
   showDeliveryClosingSlots?: boolean;
 }) {
+  const { currentBusiness } = useBusiness();
+  const businessId = resolveBusinessScopeId(currentBusiness) || '';
   const [counts, setCounts] = useState<CashDenominationCount>({});
   const [notes, setNotes] = useState('');
   const [shiftOrders, setShiftOrders] = useState<DeliveryOrder[]>([]);
@@ -1374,7 +1384,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(false);
   const [appsSnapshot, setAppsSnapshot] = useState<AggregatorClosingSnapshot | null>(null);
   const [showExtraDetail, setShowExtraDetail] = useState(false);
-  const [showDayOrders, setShowDayOrders] = useState(false);
+  const [showDayOrders, setShowDayOrders] = useState(true);
+  const [brandLabels, setBrandLabels] = useState<Record<string, string>>({});
+  const [billingRules, setBillingRules] = useState<BrandBillingSplitRules>(() =>
+    splitRulesFromBillingConfig(null),
+  );
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
   const summary = buildTpvRegisterSummary(session);
@@ -1395,6 +1409,17 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     return buildShiftSalesBreakdown(scoped);
   }, [session, shiftOrders]);
 
+  const orderBrandSharesById = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof getOrderBrandShares>>();
+    const scoped = filterOrdersForRegisterSession(session, shiftOrders);
+    for (const order of scoped) {
+      const id = String(order._id || order.id || '').trim();
+      if (!id) continue;
+      map.set(id, getOrderBrandShares(order, brandLabels, billingRules));
+    }
+    return map;
+  }, [session, shiftOrders, brandLabels, billingRules]);
+
   const handleAppsSnapshotChange = useCallback((snap: AggregatorClosingSnapshot) => {
     setAppsSnapshot(snap);
   }, []);
@@ -1404,10 +1429,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const finalAggregatorRows = appsSnapshot?.rows ?? aggregatorRows;
   const aggregatorCashTotal = appsSnapshot?.cashTotal ?? 0;
   const aggregatorCardTotal = appsSnapshot?.cardTotal ?? 0;
-  const aggregatorEuroTotal = useMemo(
-    () => sumAggregatorRows(finalAggregatorRows).totalSales,
-    [finalAggregatorRows],
-  );
 
   const tpvClosingFood: FoodFamilyCounts = useMemo(() => {
     if (!showDeliveryClosingSlots) return foodReport.total;
@@ -1425,7 +1446,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
   const expected = Math.round((expectedTpv + aggregatorCashTotal) * 100) / 100;
   const diff = countedTotal - expected;
-  const grandEuroTotal = Math.round((expectedTpv + aggregatorEuroTotal) * 100) / 100;
   const tpvCashSales = Math.round((Number(summary.salesByMethod.efectivo) || 0) * 100) / 100;
   const tpvCardSales = Math.round((Number(summary.salesByMethod.tarjeta) || 0) * 100) / 100;
   const tpvBizumSales = Math.round((Number(summary.salesByMethod.bizum) || 0) * 100) / 100;
@@ -1436,7 +1456,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const dayCardTotal = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
   const appsMoneyTotal = Math.round((aggregatorCashTotal + aggregatorCardTotal) * 100) / 100;
   const dayMoneyTotal = Math.round((tpvAllSales + appsMoneyTotal) * 100) / 100;
-  const dayFoodUnits = closingFood.pizza + closingFood.burger + closingFood.taco;
   const cashSlotDisplay = cashSlotFocused
     ? cashSlot
     : countedTotal > 0
@@ -1495,13 +1514,46 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       .finally(() => setShiftOrdersLoading(false));
   }, [dataUserId, session.pointOfSaleId, session.openedAt, session.closedAt, session.status]);
 
+  useEffect(() => {
+    if (!businessId || !showDeliveryClosingSlots) return;
+    let cancelled = false;
+    void Promise.all([
+      listBrandsRequest(businessId),
+      getBrandBillingConfigRequest(businessId).catch(() => null),
+    ])
+      .then(([brands, billingConfig]) => {
+        if (cancelled) return;
+        const labels: Record<string, string> = {};
+        for (const b of brands) {
+          const id = String(b._id || b.id || '').trim();
+          if (id) labels[id] = b.name;
+        }
+        setBrandLabels(labels);
+        setBillingRules(splitRulesFromBillingConfig(billingConfig));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBrandLabels({});
+          setBillingRules(splitRulesFromBillingConfig(null));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, showDeliveryClosingSlots]);
+
+  const brandBilling = useMemo(
+    () => buildShiftBrandRevenue(session, shiftOrders, brandLabels, billingRules),
+    [session, shiftOrders, brandLabels, billingRules],
+  );
+
   return (
     <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6`}>
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Lock className="w-5 h-5 text-red-500" /> Cierre de caja</h2>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Lock className="w-5 h-5 text-zinc-600" /> Cierre de caja</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                 {session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {session.workerName}
                 {showDeliveryClosingSlots ? ' · Contar efectivo + apps' : ''}
@@ -1513,16 +1565,16 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4">
           {restaurantWarnings.length > 0 ? (
-            <div className="rounded-xl border-2 border-amber-400 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-600 p-4 space-y-1">
-              <p className="text-sm font-bold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+            <div className="rounded-xl border border-zinc-300 bg-zinc-50 dark:bg-zinc-900/50 dark:border-zinc-600 p-4 space-y-1">
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0" /> Sala con actividad pendiente
               </p>
-              <ul className="text-xs text-amber-800 dark:text-amber-200 list-disc pl-5 space-y-0.5">
+              <ul className="text-xs text-zinc-700 dark:text-zinc-300 list-disc pl-5 space-y-0.5">
                 {restaurantWarnings.map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>
-              <p className="text-[11px] text-amber-700 dark:text-amber-300 pt-1">
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 pt-1">
                 Puedes cerrar la caja igualmente; revisa que no queden cuentas sin cobrar.
               </p>
             </div>
@@ -1530,98 +1582,123 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
           {/* 1) Totales del día */}
           {showDeliveryClosingSlots ? (
-            <div className="rounded-xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 p-3 sm:p-4 space-y-3">
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-900/30 p-3 sm:p-4 space-y-3">
               <div>
-                <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">1. Totales del día</p>
-                <p className="text-[11px] text-emerald-800/70 dark:text-emerald-200/70 mt-0.5">
+                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">1. Totales del día</p>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
                   Efectivo y tarjeta del TPV, y unidades vendidas en TPV (sin apps).
                 </p>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3">
+                <div className="rounded-xl border-2 border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/25 p-3 shadow-sm">
                   <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                    <Banknote className="w-3 h-3" /> Efectivo total
+                    <Banknote className="w-3.5 h-3.5" /> Efectivo total
                   </p>
-                  <p className="mt-1 text-xl font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
+                  <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-emerald-900 dark:text-emerald-100">
                     {summary.salesByMethod.efectivo.toFixed(2)}€
                   </p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros en efectivo (caja)</p>
+                  <p className="text-[10px] text-emerald-800/70 dark:text-emerald-200/60 mt-0.5">Cobros en efectivo (caja)</p>
                 </div>
-                <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 p-3">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300 flex items-center gap-1">
-                    <CreditCard className="w-3 h-3" /> Tarjeta total
+                <div className="rounded-xl border-2 border-sky-200/80 dark:border-sky-800/60 bg-sky-50/70 dark:bg-sky-950/25 p-3 shadow-sm">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300 flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5" /> Tarjeta total
                   </p>
-                  <p className="mt-1 text-xl font-bold tabular-nums text-blue-800 dark:text-blue-200">
+                  <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-sky-900 dark:text-sky-100">
                     {summary.salesByMethod.tarjeta.toFixed(2)}€
                   </p>
-                  <p className="text-[10px] text-gray-500 mt-0.5">Cobros con tarjeta (caja)</p>
+                  <p className="text-[10px] text-sky-800/70 dark:text-sky-200/60 mt-0.5">Cobros con tarjeta (caja)</p>
                 </div>
               </div>
 
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                Toca para editar unidades
+              </p>
               <div className="grid grid-cols-3 gap-2">
-                <label className="rounded-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200">🍕 Pizzas</span>
+                <label className="rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-700 bg-white dark:bg-zinc-900 p-3 flex flex-col gap-1 cursor-text shadow-sm hover:border-indigo-500 hover:shadow-md hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-all active:scale-[0.99]">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1.5">
+                    <DeliveryFoodUnitIcon unit="pizza" className="w-4 h-4" />
+                    Pizzas
+                  </span>
                   <input
                     type="text"
                     inputMode="numeric"
                     placeholder="0"
                     value={manualFood.pizza}
                     onChange={(e) => handleFoodSlotChange('pizza', e.target.value)}
-                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border-2 border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/50 dark:bg-indigo-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
-                  <span className="text-[10px] text-gray-500">Sistema: {tpvSystemFood.pizza}</span>
+                  {Number(manualFood.pizza || 0) !== tpvSystemFood.pizza ? (
+                    <span className="text-[10px] text-zinc-500">Sistema: {tpvSystemFood.pizza}</span>
+                  ) : null}
                 </label>
-                <label className="rounded-xl border border-orange-200 dark:border-orange-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-orange-800 dark:text-orange-200">🍔 Burgers</span>
+                <label className="rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-700 bg-white dark:bg-zinc-900 p-3 flex flex-col gap-1 cursor-text shadow-sm hover:border-indigo-500 hover:shadow-md hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-all active:scale-[0.99]">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1.5">
+                    <DeliveryFoodUnitIcon unit="burger" className="w-4 h-4" />
+                    Burgers
+                  </span>
                   <input
                     type="text"
                     inputMode="numeric"
                     placeholder="0"
                     value={manualFood.burger}
                     onChange={(e) => handleFoodSlotChange('burger', e.target.value)}
-                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-orange-200 dark:border-orange-800 rounded-lg bg-orange-50/50 dark:bg-orange-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500/30"
+                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border-2 border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/50 dark:bg-indigo-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
-                  <span className="text-[10px] text-gray-500">Sistema: {tpvSystemFood.burger}</span>
+                  {Number(manualFood.burger || 0) !== tpvSystemFood.burger ? (
+                    <span className="text-[10px] text-zinc-500">Sistema: {tpvSystemFood.burger}</span>
+                  ) : null}
                 </label>
-                <label className="rounded-xl border border-lime-200 dark:border-lime-800 bg-white dark:bg-gray-900 p-3 flex flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-lime-800 dark:text-lime-200">🌮 Tacos</span>
+                <label className="rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-700 bg-white dark:bg-zinc-900 p-3 flex flex-col gap-1 cursor-text shadow-sm hover:border-indigo-500 hover:shadow-md hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-all active:scale-[0.99]">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1.5">
+                    <DeliveryFoodUnitIcon unit="taco" className="w-4 h-4" />
+                    Tacos
+                  </span>
                   <input
                     type="text"
                     inputMode="numeric"
                     placeholder="0"
                     value={manualFood.taco}
                     onChange={(e) => handleFoodSlotChange('taco', e.target.value)}
-                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border border-lime-200 dark:border-lime-800 rounded-lg bg-lime-50/50 dark:bg-lime-950/30 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-lime-500/30"
+                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border-2 border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/50 dark:bg-indigo-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   />
-                  <span className="text-[10px] text-gray-500">Sistema: {tpvSystemFood.taco}</span>
+                  {Number(manualFood.taco || 0) !== tpvSystemFood.taco ? (
+                    <span className="text-[10px] text-zinc-500">Sistema: {tpvSystemFood.taco}</span>
+                  ) : null}
                 </label>
               </div>
 
-              {shiftOrdersLoading ? (
-                <p className="text-[11px] text-gray-500">Cargando pedidos del turno…</p>
-              ) : (
-                <p className="text-[11px] text-gray-500">
-                  Solo unidades del TPV. Las de Glovo / Uber / Just Eat / Flipdish se rellenan abajo por app y se suman en «TOTAL DE TODO».
-                </p>
-              )}
+              <ShiftBrandBillingSummary
+                rows={brandBilling.rows}
+                unbranded={brandBilling.unbranded}
+                total={brandBilling.total}
+                loading={shiftOrdersLoading}
+                compact
+              />
 
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 overflow-hidden shadow-sm">
                 <button
                   type="button"
                   onClick={() => setShowDayOrders((v) => !v)}
-                  className="w-full px-3 py-2.5 flex items-center justify-between text-left hover:bg-gray-50 dark:hover:bg-gray-800/80"
+                  className={`w-full px-3 py-3 flex items-center justify-between text-left transition-all active:scale-[0.99] cursor-pointer ${
+                    showDayOrders
+                      ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+                      : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70'
+                  }`}
                 >
-                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">
-                    Pedidos del día
-                    <span className="ml-1.5 font-normal text-gray-500">
+                  <span className={`text-xs font-bold ${showDayOrders ? 'text-white' : 'text-indigo-900 dark:text-indigo-100'}`}>
+                    Pedidos del turno
+                    <span className={`ml-1.5 font-semibold ${showDayOrders ? 'text-indigo-100' : 'text-indigo-600 dark:text-indigo-300'}`}>
                       ({dayOrdersBreakdown.orderCount})
+                    </span>
+                    <span className={`ml-2 text-[10px] font-semibold uppercase tracking-wide ${showDayOrders ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                      {showDayOrders ? 'Plegar' : 'Toca para abrir'}
                     </span>
                   </span>
                   {showDayOrders ? (
-                    <ChevronUp className="w-4 h-4 text-gray-400 shrink-0" />
+                    <ChevronUp className="w-5 h-5 text-white shrink-0" />
                   ) : (
-                    <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" />
+                    <ChevronDown className="w-5 h-5 text-indigo-600 dark:text-indigo-300 shrink-0" />
                   )}
                 </button>
                 {showDayOrders && (
@@ -1638,6 +1715,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                                 timeStyle: 'short',
                               })
                             : '—';
+                          const brandShares = orderBrandSharesById.get(order.orderId) || [];
                           return (
                             <li key={order.orderId} className="px-3 py-2.5">
                               <div className="flex items-start justify-between gap-2">
@@ -1653,6 +1731,32 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                                       .map((it) => `${it.quantity}× ${it.name}`)
                                       .join(' · ')}
                                   </p>
+                                  {brandShares.length > 0 ? (
+                                    <div className="mt-1.5 space-y-1">
+                                      {brandShares.map((s) => {
+                                        const showWhy =
+                                          brandShares.length > 1 || s.sharedAssigned > 0;
+                                        return (
+                                          <div
+                                            key={`${order.orderId}-${s.brandId || 'none'}`}
+                                            className="rounded-md bg-gray-900/5 px-1.5 py-1 dark:bg-white/10"
+                                          >
+                                            <div className="flex items-center justify-between gap-2 text-[10px] font-semibold text-gray-800 dark:text-gray-100">
+                                              <span className="truncate max-w-[8rem]">{s.name}</span>
+                                              <span className="tabular-nums shrink-0">
+                                                {s.amount.toFixed(2)}€
+                                              </span>
+                                            </div>
+                                            {showWhy && s.why ? (
+                                              <p className="mt-0.5 text-[9px] leading-snug text-gray-500 dark:text-gray-400">
+                                                {s.why}
+                                              </p>
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : null}
                                 </div>
                                 <span className="text-xs font-bold tabular-nums text-gray-900 dark:text-gray-100 shrink-0">
                                   {order.total.toFixed(2)}€
@@ -1665,28 +1769,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     )}
                   </div>
                 )}
-              </div>
-
-              <div className="rounded-xl border-2 border-emerald-600/40 dark:border-emerald-400/40 bg-white dark:bg-gray-900 px-3 py-2.5 space-y-1">
-                <div className="flex items-center justify-between gap-2 text-sm">
-                  <span className="font-semibold text-emerald-900 dark:text-emerald-100">
-                    Subtotal de esta sección (TPV)
-                  </span>
-                  <span className="text-lg font-bold tabular-nums text-emerald-800 dark:text-emerald-200">
-                    {(tpvCashSales + tpvCardSales).toFixed(2)}€
-                  </span>
-                </div>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  {tpvCashSales.toFixed(2)}€ efectivo + {tpvCardSales.toFixed(2)}€ tarjeta
-                  {tpvAllSales > tpvCashSales + tpvCardSales
-                    ? ` · cobros TPV con todos los métodos: ${tpvAllSales.toFixed(2)}€`
-                    : ''}
-                  {' · '}
-                  {tpvClosingFood.pizza + tpvClosingFood.burger + tpvClosingFood.taco} unidades TPV
-                </p>
-                <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-200">
-                  Abajo, en «TOTAL DE TODO», se suman estas unidades + las de cada app + efectivo/tarjeta de apps.
-                </p>
               </div>
             </div>
           ) : (
@@ -1727,15 +1809,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           )}
 
           {/* Arqueo */}
-          <div className="rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 p-4 space-y-3">
-            <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+          <div className="rounded-xl border-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900/50 p-4 space-y-3 shadow-sm">
+            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
               {showDeliveryClosingSlots ? `${1 + closingPlatforms.length + 1}. Arqueo` : 'Arqueo'}
             </p>
 
             {showDeliveryClosingSlots && (
-              <label className="block rounded-xl border-2 border-emerald-300 dark:border-emerald-700 bg-white dark:bg-gray-900 p-3">
+              <label className="block rounded-xl border-2 border-dashed border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-900 p-3 cursor-text shadow-md hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-all active:scale-[0.99]">
                 <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                  <Banknote className="w-3 h-3" /> Efectivo contado en caja
+                  <Banknote className="w-3.5 h-3.5" /> Efectivo contado · toca para escribir
                 </span>
                 <input
                   type="text"
@@ -1748,115 +1830,123 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   }}
                   onBlur={() => setCashSlotFocused(false)}
                   onChange={(e) => handleCashSlotChange(e.target.value)}
-                  className="mt-1.5 w-full px-2.5 py-2.5 text-lg font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/40 dark:bg-emerald-950/40 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  className="mt-1.5 w-full px-2.5 py-3 text-2xl font-black tabular-nums border-2 border-emerald-300 dark:border-emerald-700 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                 />
-                <span className="text-[10px] text-gray-500">Lo que hay físicamente en la caja</span>
+                <span className="text-[10px] text-zinc-500">Lo que hay físicamente en la caja</span>
               </label>
             )}
 
             <div className="flex justify-between text-sm">
-              <span className="text-gray-600 dark:text-gray-300">Efectivo TPV (pedidos + fondo − salidas)</span>
-              <span className="font-semibold tabular-nums">{expectedTpv.toFixed(2)}€</span>
+              <span className="text-zinc-600 dark:text-zinc-300">Efectivo TPV (pedidos + fondo − salidas)</span>
+              <span className="font-bold tabular-nums text-zinc-900 dark:text-zinc-100">{expectedTpv.toFixed(2)}€</span>
             </div>
             {showDeliveryClosingSlots && (
               <div className="flex justify-between text-sm">
-                <span className="text-purple-700 dark:text-purple-300">+ Efectivo integraciones</span>
-                <span className="font-semibold tabular-nums text-purple-700 dark:text-purple-300">{aggregatorCashTotal.toFixed(2)}€</span>
+                <span className="text-zinc-600 dark:text-zinc-300">+ Efectivo integraciones</span>
+                <span className="font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{aggregatorCashTotal.toFixed(2)}€</span>
               </div>
             )}
             {showDeliveryClosingSlots && aggregatorCardTotal > 0 && (
               <div className="flex justify-between text-sm">
-                <span className="text-blue-700 dark:text-blue-300">Tarjeta apps (info)</span>
-                <span className="font-semibold tabular-nums text-blue-700 dark:text-blue-300">{aggregatorCardTotal.toFixed(2)}€</span>
+                <span className="text-zinc-600 dark:text-zinc-300">Tarjeta apps (info)</span>
+                <span className="font-bold tabular-nums text-sky-700 dark:text-sky-300">{aggregatorCardTotal.toFixed(2)}€</span>
               </div>
             )}
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex justify-between font-bold">
-              <span className="text-gray-900 dark:text-gray-100">Esperado en caja</span>
-              <span className="text-emerald-700 dark:text-emerald-400 text-base tabular-nums">{expected.toFixed(2)}€</span>
+            <div className="border-t border-zinc-200 dark:border-zinc-700 pt-2 flex justify-between items-baseline">
+              <span className="text-zinc-900 dark:text-zinc-100 font-bold">Esperado en caja</span>
+              <span className="text-emerald-800 dark:text-emerald-200 text-xl font-black tabular-nums">{expected.toFixed(2)}€</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-gray-600 dark:text-gray-300">Contado</span>
-              <span className="font-semibold tabular-nums">{countedTotal.toFixed(2)}€</span>
+              <span className="text-zinc-600 dark:text-zinc-300">Contado</span>
+              <span className="font-bold tabular-nums text-zinc-900 dark:text-zinc-100">{countedTotal.toFixed(2)}€</span>
             </div>
             {countedTotal > 0 && (
-              <div className={`mt-1 p-3 rounded-xl border-2 ${diff === 0 ? 'bg-green-50 border-green-200 dark:bg-green-900/20 dark:border-green-800' : diff > 0 ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' : 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800'}`}>
+              <div className={`mt-1 p-3 rounded-xl border-2 ${diff === 0 ? 'bg-emerald-50 border-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-700' : 'bg-amber-50 border-amber-300 dark:bg-amber-950/30 dark:border-amber-700'}`}>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-gray-900 dark:text-gray-100">Diferencia</span>
-                  <span className={`text-xl font-bold tabular-nums ${diff === 0 ? 'text-green-600' : diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                  <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Diferencia</span>
+                  <span className={`text-2xl font-black tabular-nums ${diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>
                     {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
                   </span>
                 </div>
                 {diff === 0 && (
-                  <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" /> La caja cuadra
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1 flex items-center gap-1 font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> La caja cuadra
                   </p>
                 )}
                 {diff !== 0 && (
-                  <p className={`text-xs mt-1 flex items-center gap-1 ${diff > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                    <AlertTriangle className="w-3 h-3" /> {diff > 0 ? 'Sobrante' : 'Falta efectivo'}
+                  <p className="text-xs mt-1 flex items-center gap-1 text-amber-800 dark:text-amber-200 font-semibold">
+                    <AlertTriangle className="w-3.5 h-3.5" /> {diff > 0 ? 'Sobrante' : 'Falta efectivo'}
                   </p>
                 )}
               </div>
             )}
             {showDeliveryClosingSlots && (
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 pt-1">
-                Ventas apps: {aggregatorEuroTotal.toFixed(2)}€ · Efectivo TPV + ventas apps: {grandEuroTotal.toFixed(2)}€
-                {' '}(no incluye tarjeta TPV; el total del día está en «TOTAL DE TODO»)
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 pt-1">
+                El total del día (TPV + apps) está abajo en «Total del día».
               </p>
             )}
           </div>
 
           {/* Detalle opcional (plegado) */}
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+          <div className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 overflow-hidden shadow-sm">
             <button
               type="button"
               onClick={() => setShowExtraDetail((v) => !v)}
-              className="w-full px-3 py-2.5 flex items-center justify-between text-left text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/80"
+              className={`w-full px-3 py-3 flex items-center justify-between text-left text-xs font-bold transition-all active:scale-[0.99] cursor-pointer ${
+                showExtraDetail
+                  ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+                  : 'bg-indigo-50 text-indigo-900 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-100 dark:hover:bg-indigo-950/70'
+              }`}
             >
-              <span>{showExtraDetail ? 'Ocultar detalle del turno' : 'Ver detalle del turno (ventas, salidas…)'}</span>
-              {showExtraDetail ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              <span>
+                {showExtraDetail ? 'Ocultar detalle del turno' : 'Ver detalle del turno (ventas, salidas…)'}
+                {!showExtraDetail ? (
+                  <span className="ml-2 text-[10px] uppercase tracking-wide text-indigo-500 dark:text-indigo-300">Toca</span>
+                ) : null}
+              </span>
+              {showExtraDetail ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5 text-indigo-600 dark:text-indigo-300" />}
             </button>
             {showExtraDetail && (
               <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <div className="p-2.5 bg-green-50 dark:bg-green-900/20 rounded-lg">
-                    <div className="text-[10px] text-green-600">Ventas</div>
-                    <div className="text-sm font-bold text-green-700 dark:text-green-400">{summary.totalSales.toFixed(2)}€</div>
+                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <div className="text-[10px] text-zinc-500">Ventas</div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalSales.toFixed(2)}€</div>
                   </div>
-                  <div className="p-2.5 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                    <div className="text-[10px] text-red-600">Devoluciones</div>
-                    <div className="text-sm font-bold text-red-700 dark:text-red-400">{summary.totalReturns.toFixed(2)}€</div>
+                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <div className="text-[10px] text-zinc-500">Devoluciones</div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalReturns.toFixed(2)}€</div>
                   </div>
-                  <div className="p-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                    <div className="text-[10px] text-blue-600">Entradas</div>
-                    <div className="text-sm font-bold text-blue-700 dark:text-blue-400">{summary.totalCashIn.toFixed(2)}€</div>
+                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <div className="text-[10px] text-zinc-500">Entradas</div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalCashIn.toFixed(2)}€</div>
                   </div>
-                  <div className="p-2.5 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
-                    <div className="text-[10px] text-orange-600">Salidas</div>
-                    <div className="text-sm font-bold text-orange-700 dark:text-orange-400">{summary.totalCashOut.toFixed(2)}€</div>
+                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
+                    <div className="text-[10px] text-zinc-500">Salidas</div>
+                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalCashOut.toFixed(2)}€</div>
                   </div>
                 </div>
 
                 <div className="flex gap-2 flex-wrap text-[11px]">
-                  {summary.salesByMethod.efectivo > 0 && <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 rounded-lg font-medium">Efectivo: {summary.salesByMethod.efectivo.toFixed(2)}€</span>}
-                  {summary.salesByMethod.tarjeta > 0 && <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 rounded-lg font-medium">Tarjeta: {summary.salesByMethod.tarjeta.toFixed(2)}€</span>}
-                  {summary.salesByMethod.bizum > 0 && <span className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 rounded-lg font-medium">Bizum: {summary.salesByMethod.bizum.toFixed(2)}€</span>}
-                  {summary.salesByMethod.online > 0 && <span className="px-2 py-1 bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 rounded-lg font-medium">Online: {summary.salesByMethod.online.toFixed(2)}€</span>}
-                  <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium">{summary.totalTransactions} operaciones</span>
+                  {summary.salesByMethod.efectivo > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Efectivo: {summary.salesByMethod.efectivo.toFixed(2)}€</span>}
+                  {summary.salesByMethod.tarjeta > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Tarjeta: {summary.salesByMethod.tarjeta.toFixed(2)}€</span>}
+                  {summary.salesByMethod.bizum > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Bizum: {summary.salesByMethod.bizum.toFixed(2)}€</span>}
+                  {summary.salesByMethod.online > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Online: {summary.salesByMethod.online.toFixed(2)}€</span>}
+                  <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">{summary.totalTransactions} operaciones</span>
                 </div>
 
-                <div className="bg-white dark:bg-gray-800 rounded-lg p-3 space-y-1.5 text-xs">
-                  <div className="flex justify-between"><span className="text-gray-500">Fondo apertura</span><span className="font-semibold">{session.initialCashAmount.toFixed(2)}€</span></div>
-                  <div className="flex justify-between"><span className="text-green-600">+ Cobros efectivo</span><span className="font-semibold">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
+                <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1.5 text-xs">
+                  <div className="flex justify-between"><span className="text-zinc-500">Fondo apertura</span><span className="font-semibold">{session.initialCashAmount.toFixed(2)}€</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Cobros efectivo</span><span className="font-semibold">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
                   {cashStaffConsumption > 0 && (
-                    <div className="flex justify-between"><span className="text-green-600">+ Consumo equipo</span><span className="font-semibold">{cashStaffConsumption.toFixed(2)}€</span></div>
+                    <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Consumo equipo</span><span className="font-semibold">{cashStaffConsumption.toFixed(2)}€</span></div>
                   )}
-                  <div className="flex justify-between"><span className="text-blue-600">+ Entradas</span><span className="font-semibold">{summary.totalCashIn.toFixed(2)}€</span></div>
-                  <div className="flex justify-between"><span className="text-red-600">− Devoluciones</span><span className="font-semibold">{cashReturnsTotal.toFixed(2)}€</span></div>
-                  <div className="flex justify-between"><span className="text-orange-600">− Salidas</span><span className="font-semibold">{summary.totalCashOut.toFixed(2)}€</span></div>
-                  <div className="border-t border-gray-200 dark:border-gray-700 pt-1.5 flex justify-between font-bold">
+                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Entradas</span><span className="font-semibold">{summary.totalCashIn.toFixed(2)}€</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Devoluciones</span><span className="font-semibold">{cashReturnsTotal.toFixed(2)}€</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Salidas</span><span className="font-semibold">{summary.totalCashOut.toFixed(2)}€</span></div>
+                  <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1.5 flex justify-between font-semibold">
                     <span>= Efectivo TPV</span>
-                    <span className="text-emerald-700">{expectedTpv.toFixed(2)}€</span>
+                    <span className="text-zinc-900 dark:text-zinc-100">{expectedTpv.toFixed(2)}€</span>
                   </div>
                 </div>
 
@@ -1898,11 +1988,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                                 <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
                               ) : null}
                             </div>
-                            <span
-                              className={`shrink-0 font-bold tabular-nums ${
-                                tx.type === 'cash_in' ? 'text-green-600' : 'text-red-600'
-                              }`}
-                            >
+                            <span className="shrink-0 font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
                               {tx.type === 'cash_in' ? '+' : '−'}
                               {tx.amount.toFixed(2)}€
                             </span>
@@ -1936,7 +2022,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       {session.cashCounts.map((cc) => (
                         <div key={cc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
                           <span className="text-gray-500">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}</span>
-                          <span className={`font-semibold ${cc.difference === 0 ? 'text-green-600' : 'text-amber-600'}`}>
+                          <span className="font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
                             {cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€
                           </span>
                         </div>
@@ -1974,119 +2060,74 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           </div>
 
           {showDeliveryClosingSlots ? (
-            <div className="rounded-2xl border-2 border-gray-900 dark:border-gray-100 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 p-4 space-y-3">
-              <div>
-                <p className="text-sm font-bold uppercase tracking-wide">Total de todo</p>
-                <p className="text-[11px] opacity-70 mt-0.5">
-                  TPV ({tpvClosingFood.pizza + tpvClosingFood.burger + tpvClosingFood.taco} uds) + apps (
-                  {appsFoodTotals.pizza + appsFoodTotals.burger + appsFoodTotals.taco} uds) + cobros.
+            <div className="rounded-2xl border border-zinc-800 dark:border-zinc-200 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 p-4 space-y-3">
+              <div className="flex items-end justify-between gap-3">
+                <div>
+                  <p className="text-sm font-bold uppercase tracking-wide">Total del día</p>
+                  <p className="text-[11px] opacity-70 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span>TPV + apps</span>
+                    <span className="inline-flex items-center gap-1 opacity-90">
+                      <DeliveryFoodUnitIcon unit="pizza" className="w-3.5 h-3.5" muted />
+                      {closingFood.pizza}
+                    </span>
+                    <span className="inline-flex items-center gap-1 opacity-90">
+                      <DeliveryFoodUnitIcon unit="burger" className="w-3.5 h-3.5" muted />
+                      {closingFood.burger}
+                    </span>
+                    <span className="inline-flex items-center gap-1 opacity-90">
+                      <DeliveryFoodUnitIcon unit="taco" className="w-3.5 h-3.5" muted />
+                      {closingFood.taco}
+                    </span>
+                  </p>
+                </div>
+                <p className="text-3xl font-black tabular-nums shrink-0 tracking-tight">{dayMoneyTotal.toFixed(2)}€</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="rounded-xl bg-emerald-400/25 dark:bg-emerald-500/20 px-3 py-2.5 border border-emerald-300/40">
+                  <p className="text-[10px] font-bold uppercase tracking-wide opacity-80">Efectivo</p>
+                  <p className="text-xl font-black tabular-nums">{dayCashTotal.toFixed(2)}€</p>
+                  <p className="text-[10px] opacity-60">
+                    TPV {tpvCashSales.toFixed(2)} + apps {aggregatorCashTotal.toFixed(2)}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-sky-400/25 dark:bg-sky-500/20 px-3 py-2.5 border border-sky-300/40">
+                  <p className="text-[10px] font-bold uppercase tracking-wide opacity-80">Tarjeta</p>
+                  <p className="text-xl font-black tabular-nums">{dayCardTotal.toFixed(2)}€</p>
+                  <p className="text-[10px] opacity-60">
+                    TPV {tpvCardSales.toFixed(2)} + apps {aggregatorCardTotal.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+              {(tpvBizumSales > 0 || tpvOnlineSales > 0 || tpvOtherSales > 0) ? (
+                <p className="text-[11px] opacity-75">
+                  Otros cobros TPV:{' '}
+                  {tpvBizumSales > 0 ? `Bizum ${tpvBizumSales.toFixed(2)}€ ` : ''}
+                  {tpvOnlineSales > 0 ? `Online ${tpvOnlineSales.toFixed(2)}€ ` : ''}
+                  {tpvOtherSales > 0 ? `Otros ${tpvOtherSales.toFixed(2)}€` : ''}
                 </p>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
-                  <p className="text-[10px] opacity-70">🍕 Pizzas</p>
-                  <p className="text-xl font-bold tabular-nums">{closingFood.pizza}</p>
-                  <p className="text-[10px] opacity-60">apps {appsFoodTotals.pizza}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
-                  <p className="text-[10px] opacity-70">🍔 Burgers</p>
-                  <p className="text-xl font-bold tabular-nums">{closingFood.burger}</p>
-                  <p className="text-[10px] opacity-60">apps {appsFoodTotals.burger}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
-                  <p className="text-[10px] opacity-70">🌮 Tacos</p>
-                  <p className="text-xl font-bold tabular-nums">{closingFood.taco}</p>
-                  <p className="text-[10px] opacity-60">apps {appsFoodTotals.taco}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2">
-                  <p className="text-[10px] opacity-70">Unidades</p>
-                  <p className="text-xl font-bold tabular-nums">{dayFoodUnits}</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                <div className="rounded-xl bg-emerald-500/20 dark:bg-emerald-600/15 px-3 py-2 space-y-1">
-                  <div className="flex justify-between gap-2">
-                    <span className="opacity-80">Efectivo TPV</span>
-                    <span className="font-semibold tabular-nums">{tpvCashSales.toFixed(2)}€</span>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <span className="opacity-80">+ Efectivo apps</span>
-                    <span className="font-semibold tabular-nums">{aggregatorCashTotal.toFixed(2)}€</span>
-                  </div>
-                  <div className="flex justify-between gap-2 pt-1 border-t border-white/15 dark:border-black/10 font-bold">
-                    <span>Total efectivo</span>
-                    <span className="tabular-nums">{dayCashTotal.toFixed(2)}€</span>
-                  </div>
-                </div>
-                <div className="rounded-xl bg-blue-500/20 dark:bg-blue-600/15 px-3 py-2 space-y-1">
-                  <div className="flex justify-between gap-2">
-                    <span className="opacity-80">Tarjeta TPV</span>
-                    <span className="font-semibold tabular-nums">{tpvCardSales.toFixed(2)}€</span>
-                  </div>
-                  <div className="flex justify-between gap-2">
-                    <span className="opacity-80">+ Tarjeta apps</span>
-                    <span className="font-semibold tabular-nums">{aggregatorCardTotal.toFixed(2)}€</span>
-                  </div>
-                  <div className="flex justify-between gap-2 pt-1 border-t border-white/15 dark:border-black/10 font-bold">
-                    <span>Total tarjeta</span>
-                    <span className="tabular-nums">{dayCardTotal.toFixed(2)}€</span>
-                  </div>
-                </div>
-              </div>
-              <div className="rounded-xl bg-white/10 dark:bg-black/5 px-3 py-2 space-y-1 text-sm">
-                <div className="flex justify-between gap-2">
-                  <span className="opacity-80">Cobros TPV (efectivo+tarjeta+Bizum+online+otros)</span>
-                  <span className="font-semibold tabular-nums">{tpvAllSales.toFixed(2)}€</span>
-                </div>
-                {(tpvBizumSales > 0 || tpvOnlineSales > 0 || tpvOtherSales > 0) ? (
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] opacity-75">
-                    {tpvBizumSales > 0 ? <span>Bizum {tpvBizumSales.toFixed(2)}€</span> : null}
-                    {tpvOnlineSales > 0 ? <span>Online {tpvOnlineSales.toFixed(2)}€</span> : null}
-                    {tpvOtherSales > 0 ? <span>Otros {tpvOtherSales.toFixed(2)}€</span> : null}
-                  </div>
-                ) : null}
-                <div className="flex justify-between gap-2">
-                  <span className="opacity-80">+ Apps (efectivo + tarjeta declarados)</span>
-                  <span className="font-semibold tabular-nums">{appsMoneyTotal.toFixed(2)}€</span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between gap-3 pt-1 border-t border-white/20 dark:border-black/10">
-                <span className="text-sm font-bold">TOTAL DE TODO</span>
-                <span className="text-2xl font-bold tabular-nums">{dayMoneyTotal.toFixed(2)}€</span>
-              </div>
+              ) : null}
             </div>
           ) : null}
         </div>
 
         {showDeliveryClosingSlots ? (
-          <div className="flex-shrink-0 px-4 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-gray-900 text-white dark:bg-gray-950 space-y-1.5">
-            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <span className="font-bold uppercase tracking-wide text-emerald-300">TOTAL DE TODO (en vivo)</span>
-              <span className="tabular-nums font-bold text-sm">
-                🍕 {closingFood.pizza} · 🍔 {closingFood.burger} · 🌮 {closingFood.taco}
+          <div className="flex-shrink-0 px-4 py-2 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-900 text-white dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-semibold uppercase tracking-wide text-zinc-300">Total en vivo</span>
+            <span className="tabular-nums font-semibold">
+              {dayMoneyTotal.toFixed(2)}€
+              <span className="ml-2 font-medium opacity-80">
+                Ef. {dayCashTotal.toFixed(2)} · Tarj. {dayCardTotal.toFixed(2)}
               </span>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] opacity-90">
-              <span>
-                Unidades = TPV {tpvClosingFood.pizza}/{tpvClosingFood.burger}/{tpvClosingFood.taco}
-                {' + '}
-                apps {appsFoodTotals.pizza}/{appsFoodTotals.burger}/{appsFoodTotals.taco}
-              </span>
-              <span className="tabular-nums font-semibold">
-                💵 {dayCashTotal.toFixed(2)}€ (caja {tpvCashSales.toFixed(2)} + apps {aggregatorCashTotal.toFixed(2)})
-                {' · '}
-                💳 {dayCardTotal.toFixed(2)}€ (caja {tpvCardSales.toFixed(2)} + apps {aggregatorCardTotal.toFixed(2)})
-              </span>
-            </div>
+            </span>
           </div>
         ) : null}
 
-        <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+        <div className="flex-shrink-0 p-6 border-t border-zinc-200 dark:border-zinc-700 flex gap-3">
           <button
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+            className="px-5 py-3.5 border-2 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 rounded-xl font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
           >
             Cancelar
           </button>
@@ -2099,7 +2140,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               taco: closingFood.taco,
               byChannel: closingFoodByChannel,
             })}
-            className="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            className="flex-1 py-3.5 bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/25 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 ring-2 ring-indigo-400/40 ring-offset-2 ring-offset-white dark:ring-offset-zinc-800"
           >
             <Lock className="w-4 h-4" /> {busy ? 'Cerrando…' : 'Confirmar cierre de caja'}
           </button>
@@ -4584,7 +4625,6 @@ export function TpvRegisterGate({
     scopeBusiness?.businessType || currentBusiness?.businessType,
   );
   const restaurantTpvPermissions = useMemo(() => resolveRestaurantTpvPermissions(user), [user]);
-  const cajaHomePath = isRestaurantVertical ? '/saas/caja' : '/saas/vertical/delivery/caja';
   /** Home operativo bar/restaurante = Sala (no Caja). */
   const opsHomePath = isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops';
 
@@ -4663,19 +4703,14 @@ export function TpvRegisterGate({
   const leavePostCloseScreen = useCallback(() => {
     setPostCloseSession(null);
     setPostCloseAggregatorRows([]);
-    // En tablet nos quedamos en el TPV (pantalla de abrir caja), nunca history.back() al dashboard CEO.
-    if (isTabletSession) return;
-    if (isRestaurantVertical) {
-      navigate('/saas/caja/tpv', { replace: true });
+    // Tablet / código de tienda: salir del SaaS a la pantalla de código (antes del TPV).
+    if (isTabletSession) {
+      void leaveTpvTabletSession(logout);
       return;
     }
-    try {
-      if (window.history.length > 1) window.history.back();
-      else navigate(opsHomePath);
-    } catch {
-      // ignore
-    }
-  }, [isTabletSession, isRestaurantVertical, navigate, opsHomePath]);
+    // CEO / back office: volver a la operativa (no al TPV).
+    navigate(opsHomePath, { replace: true });
+  }, [isTabletSession, logout, navigate, opsHomePath]);
 
   const requestClockIn = useCallback(() => setShowClockIn(true), []);
 
@@ -4852,8 +4887,8 @@ export function TpvRegisterGate({
             >
               <X className="w-5 h-5 text-gray-500" />
             </button>
-            <div className="w-16 h-16 bg-red-100 dark:bg-red-900/30 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Lock className="w-8 h-8 text-red-600" />
+            <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-8 h-8 text-zinc-700 dark:text-zinc-300" />
             </div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Caja cerrada</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -4871,7 +4906,7 @@ export function TpvRegisterGate({
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Diferencia</span>
-              <span className={`font-bold ${Number(postCloseSession.difference || 0) === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+              <span className={`font-semibold tabular-nums text-zinc-900 dark:text-zinc-100 ${Number(postCloseSession.difference || 0) !== 0 ? 'underline decoration-zinc-400 underline-offset-2' : ''}`}>
                 {(postCloseSession.difference || 0) >= 0 ? '+' : ''}{Number(postCloseSession.difference || 0).toFixed(2)}€
               </span>
             </div>
@@ -4921,19 +4956,11 @@ export function TpvRegisterGate({
             >
               Abrir otra caja
             </button>
-            {!isTabletSession && (
-              <button
-                onClick={() => navigate(cajaHomePath)}
-                className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
-              >
-                Ir a Caja
-              </button>
-            )}
             <button
               onClick={leavePostCloseScreen}
-              className="flex-1 py-3 rounded-xl bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
             >
-              {isTabletSession ? 'Seguir en TPV' : isRestaurantVertical ? 'Volver a TPV sala' : 'Volver'}
+              {isTabletSession ? 'Salir al código' : 'Volver'}
             </button>
           </div>
         </div>

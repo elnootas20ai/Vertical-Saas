@@ -17,34 +17,24 @@ const PAYMENT_LABELS: Record<string, string> = {
   otro: 'Otro',
 };
 
-function fmtMoney(value: number): string {
-  return (Number.isFinite(value) ? value : 0).toFixed(2);
-}
-
-function ExpandPill({ open, tone }: { open: boolean; tone: 'indigo' | 'emerald' | 'amber' | 'slate' }) {
-  const closedStyles = {
-    indigo: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200',
-    emerald: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200',
-    amber: 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200',
-    slate: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200',
-  }[tone];
-  const openStyles = {
-    indigo: 'bg-white/25 text-white',
-    emerald: 'bg-white/25 text-white',
-    amber: 'bg-white/25 text-white',
-    slate: 'bg-white/20 text-white',
-  }[tone];
-
+/** Pastilla de abrir/plegar: se nota que se puede tocar. */
+function ExpandPill({ open }: { open: boolean }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide shrink-0 ${
-        open ? openStyles : closedStyles
+      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide shrink-0 border-2 shadow-sm ${
+        open
+          ? 'border-white/30 bg-white/20 text-white'
+          : 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-200'
       }`}
     >
-      {open ? 'Plegar' : 'Ver'}
+      {open ? 'Plegar' : 'Toca'}
       {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
     </span>
   );
+}
+
+function fmtMoney(value: number): string {
+  return (Number.isFinite(value) ? value : 0).toFixed(2);
 }
 
 function CategoryBlock({ group }: { group: ShiftCategoryGroup }) {
@@ -52,55 +42,66 @@ function CategoryBlock({ group }: { group: ShiftCategoryGroup }) {
 
   return (
     <div
-      className={`rounded-xl overflow-hidden transition-all ${
+      className={`rounded-lg overflow-hidden border transition-colors ${
         open
-          ? 'border-2 border-emerald-500 dark:border-emerald-600 shadow-sm shadow-emerald-100/80 dark:shadow-none'
-          : 'border-2 border-dashed border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900/40'
+          ? 'border-zinc-300 dark:border-zinc-600'
+          : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/40'
       }`}
     >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center justify-between gap-3 px-3 py-3 text-left transition-colors ${
+        className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left transition-all active:scale-[0.99] cursor-pointer ${
           open
-            ? 'bg-emerald-600 dark:bg-emerald-700 text-white'
-            : 'bg-white dark:bg-gray-900/60 hover:bg-emerald-50/60 dark:hover:bg-emerald-950/20'
+            ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+            : 'bg-white hover:bg-indigo-50 dark:bg-zinc-900/60 dark:hover:bg-indigo-950/40 border-b border-transparent hover:border-indigo-200'
         }`}
       >
         <div className="flex items-center gap-3 min-w-0">
           <span
-            className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black tabular-nums ${
-              open ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
+            className={`shrink-0 w-8 h-8 rounded-md flex items-center justify-center text-xs font-bold tabular-nums ${
+              open
+                ? 'bg-white/20 text-white'
+                : 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200'
             }`}
           >
             {group.products.length}
           </span>
           <div className="min-w-0">
-            <p className={`text-sm font-bold truncate ${open ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
+            <p className={`text-sm font-semibold truncate ${open ? 'text-white' : 'text-zinc-900 dark:text-zinc-100'}`}>
               {group.category}
             </p>
-            <p className={`text-[11px] ${open ? 'text-emerald-100' : 'text-gray-500 dark:text-gray-400'}`}>
+            <p className={`text-[11px] ${open ? 'text-indigo-100' : 'text-zinc-500 dark:text-zinc-400'}`}>
               {group.quantity} uds · {group.products.length} producto{group.products.length === 1 ? '' : 's'}
+            </p>
+            <p
+              className={`text-[11px] font-medium tabular-nums mt-0.5 ${
+                open ? 'text-indigo-50' : 'text-zinc-600 dark:text-zinc-300'
+              }`}
+            >
+              Efectivo {fmtMoney(group.revenueEfectivo)}€ · Tarjeta {fmtMoney(group.revenueTarjeta)}€
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className={`text-sm font-bold tabular-nums ${open ? 'text-white' : 'text-emerald-700 dark:text-emerald-400'}`}>
+          <span className={`text-sm font-semibold tabular-nums ${open ? 'text-white' : 'text-zinc-900 dark:text-zinc-100'}`}>
             {fmtMoney(group.revenue)}€
           </span>
-          <ExpandPill open={open} tone="emerald" />
+          <ExpandPill open={open} />
         </div>
       </button>
       {open && (
-        <div className="bg-emerald-50/40 dark:bg-emerald-950/15 border-t border-emerald-200 dark:border-emerald-900">
-          <div className="divide-y divide-emerald-100 dark:divide-emerald-900/60">
+        <div className="bg-zinc-50 dark:bg-zinc-900/50 border-t border-zinc-200 dark:border-zinc-700">
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {group.products.map((p) => (
-              <div key={p.key} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm bg-white/70 dark:bg-gray-900/30">
-                <div className="min-w-0 pl-1 border-l-2 border-emerald-400 dark:border-emerald-600">
-                  <p className="font-medium text-gray-800 dark:text-gray-200 truncate">{p.name}</p>
-                  <p className="text-[11px] text-gray-500">{p.quantity} uds</p>
+              <div key={p.key} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                <div className="min-w-0 pl-2 border-l border-zinc-300 dark:border-zinc-600">
+                  <p className="font-medium text-zinc-800 dark:text-zinc-200 truncate">{p.name}</p>
+                  <p className="text-[11px] text-zinc-500">{p.quantity} uds</p>
                 </div>
-                <span className="font-semibold tabular-nums text-gray-900 dark:text-gray-100 shrink-0">{fmtMoney(p.revenue)}€</span>
+                <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100 shrink-0">
+                  {fmtMoney(p.revenue)}€
+                </span>
               </div>
             ))}
           </div>
@@ -118,39 +119,44 @@ function OrderBlock({ order }: { order: ShiftOrderLine }) {
 
   return (
     <div
-      className={`ml-2 rounded-lg overflow-hidden transition-all ${
+      className={`ml-1 rounded-lg overflow-hidden border transition-colors ${
         open
-          ? 'border border-slate-400 dark:border-slate-500 bg-slate-50 dark:bg-slate-900/40'
-          : 'border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-gray-900/30'
+          ? 'border-zinc-300 dark:border-zinc-600'
+          : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/30'
       }`}
     >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors ${
-          open ? 'bg-slate-600 dark:bg-slate-700 text-white' : 'hover:bg-slate-50 dark:hover:bg-slate-900/50'
+          open
+            ? 'bg-zinc-800 text-white dark:bg-zinc-200 dark:text-zinc-900'
+            : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/60'
         }`}
       >
         <div className="min-w-0">
-          <p className={`text-xs font-semibold truncate ${open ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
+          <p className={`text-xs font-semibold truncate ${open ? 'text-inherit' : 'text-zinc-900 dark:text-zinc-100'}`}>
             #{order.orderNumber} · {order.customerName}
           </p>
-          <p className={`text-[10px] ${open ? 'text-slate-200' : 'text-gray-500'}`}>
+          <p className={`text-[10px] ${open ? 'text-zinc-300 dark:text-zinc-600' : 'text-zinc-500'}`}>
             {time} · {PAYMENT_LABELS[order.paymentMethod] || order.paymentMethod} · {order.itemCount} uds
           </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className={`text-xs font-bold tabular-nums ${open ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
+          <span className={`text-xs font-semibold tabular-nums ${open ? 'text-inherit' : 'text-zinc-900 dark:text-zinc-100'}`}>
             {fmtMoney(order.total)}€
           </span>
-          <ExpandPill open={open} tone="slate" />
+          <ExpandPill open={open} />
         </div>
       </button>
       {open && (
-        <div className="px-3 pb-2 pt-1 space-y-1 border-t border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-gray-900/50">
+        <div className="px-3 pb-2 pt-1 space-y-1 border-t border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/40">
           {order.items.map((item, idx) => (
-            <div key={`${item.name}-${idx}`} className="flex justify-between gap-2 text-[11px] py-1 pl-2 border-l border-slate-300 dark:border-slate-600">
-              <span className="text-gray-600 dark:text-gray-400 min-w-0 truncate">
+            <div
+              key={`${item.name}-${idx}`}
+              className="flex justify-between gap-2 text-[11px] py-1 pl-2 border-l border-zinc-300 dark:border-zinc-600"
+            >
+              <span className="text-zinc-600 dark:text-zinc-400 min-w-0 truncate">
                 {item.quantity}× {item.name}
                 {item.extras.length > 0 ? ` (${item.extras.join(', ')})` : ''}
               </span>
@@ -189,7 +195,7 @@ export function RegisterShiftSalesBreakdown({
 
   if (loading) {
     return (
-      <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-4 text-center text-sm text-gray-500">
+      <div className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-700 p-4 text-center text-sm text-zinc-500">
         Cargando recuento de ventas…
       </div>
     );
@@ -197,7 +203,7 @@ export function RegisterShiftSalesBreakdown({
 
   if (breakdown.orderCount === 0) {
     return (
-      <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 text-sm text-gray-500 text-center">
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900/40 p-4 text-sm text-zinc-500 text-center">
         Sin pedidos registrados en este turno
       </div>
     );
@@ -205,91 +211,108 @@ export function RegisterShiftSalesBreakdown({
 
   return (
     <section
-      className={`rounded-2xl overflow-hidden transition-all ${
+      className={`rounded-xl overflow-hidden border-2 transition-colors shadow-sm ${
         sectionOpen
-          ? 'border-2 border-indigo-500 dark:border-indigo-600 shadow-md shadow-indigo-100/60 dark:shadow-none'
-          : 'border-2 border-dashed border-indigo-300 dark:border-indigo-800'
+          ? 'border-indigo-400 dark:border-indigo-500'
+          : 'border-indigo-200 dark:border-indigo-800'
       }`}
     >
       <button
         type="button"
         onClick={() => setSectionOpen((v) => !v)}
-        className={`w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors ${
+        className={`w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left transition-all active:scale-[0.99] cursor-pointer shadow-sm ${
           sectionOpen
-            ? 'bg-indigo-600 dark:bg-indigo-700 text-white'
-            : 'bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100/80 dark:hover:bg-indigo-950/60'
+            ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+            : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-950/70'
         }`}
       >
         <div className="flex items-start gap-3 min-w-0">
           <div
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-              sectionOpen ? 'bg-white/20 text-white' : 'bg-indigo-600 text-white'
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+              sectionOpen
+                ? 'bg-white/20 text-white'
+                : 'bg-indigo-200 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-200'
             }`}
           >
-            <ShoppingBag className="w-5 h-5" />
+            <ShoppingBag className="w-4 h-4" />
           </div>
           <div className="min-w-0">
             <p className={`text-sm font-bold ${sectionOpen ? 'text-white' : 'text-indigo-950 dark:text-indigo-100'}`}>
               Recuento de lo vendido
             </p>
-            <p className={`text-xs mt-0.5 ${sectionOpen ? 'text-indigo-100' : 'text-indigo-800/80 dark:text-indigo-300/80'}`}>
+            <p className={`text-xs mt-0.5 ${sectionOpen ? 'text-indigo-100' : 'text-indigo-700/80 dark:text-indigo-300/80'}`}>
               {breakdown.orderCount} pedido{breakdown.orderCount === 1 ? '' : 's'} · {breakdown.totalUnits} uds ·{' '}
-              <strong>{fmtMoney(breakdown.totalRevenue)}€</strong>
+              <strong className={sectionOpen ? 'text-white' : 'text-indigo-900 dark:text-indigo-100'}>
+                {fmtMoney(breakdown.totalRevenue)}€
+              </strong>
             </p>
           </div>
         </div>
-        <ExpandPill open={sectionOpen} tone="indigo" />
+        <ExpandPill open={sectionOpen} />
       </button>
 
       {sectionOpen && (
-        <div className="px-4 pb-4 space-y-4 bg-indigo-50/40 dark:bg-indigo-950/20 border-t border-indigo-200 dark:border-indigo-900">
-          <div className="grid grid-cols-3 gap-2 pt-3">
-            <div className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-white dark:bg-gray-900/60 px-3 py-2 text-center">
-              <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400">Pedidos</p>
-              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{breakdown.orderCount}</p>
-            </div>
-            <div className="rounded-xl border border-indigo-200 dark:border-indigo-900 bg-white dark:bg-gray-900/60 px-3 py-2 text-center">
-              <p className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400">Unidades</p>
-              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{breakdown.totalUnits}</p>
-            </div>
-            <div className="rounded-xl border border-emerald-200 dark:border-emerald-900 bg-white dark:bg-gray-900/60 px-3 py-2 text-center">
-              <p className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">Total</p>
-              <p className="text-lg font-bold text-emerald-700 dark:text-emerald-400">{fmtMoney(breakdown.totalRevenue)}€</p>
-            </div>
+        <div className="px-4 pb-4 space-y-3 bg-white dark:bg-zinc-950/40 border-t border-zinc-200 dark:border-zinc-700">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3">
+            {[
+              { label: 'Pedidos', value: String(breakdown.orderCount) },
+              { label: 'Unidades', value: String(breakdown.totalUnits) },
+              { label: 'Efectivo', value: `${fmtMoney(breakdown.totalEfectivo)}€` },
+              { label: 'Tarjeta', value: `${fmtMoney(breakdown.totalTarjeta)}€` },
+            ].map((card) => (
+              <div
+                key={card.label}
+                className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50/80 dark:bg-zinc-900/60 px-3 py-2 text-center"
+              >
+                <p className="text-[10px] uppercase tracking-wide font-semibold text-zinc-500 dark:text-zinc-400">
+                  {card.label}
+                </p>
+                <p className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{card.value}</p>
+              </div>
+            ))}
           </div>
+          <p className="text-[11px] text-center text-zinc-500 dark:text-zinc-400 -mt-1">
+            Total recuento:{' '}
+            <strong className="text-zinc-800 dark:text-zinc-200">{fmtMoney(breakdown.totalRevenue)}€</strong>
+          </p>
 
           {reconciliation && (
             <div
-              className={`rounded-xl px-3 py-2.5 text-xs flex items-start gap-2 ${
+              className={`rounded-lg px-3 py-2.5 text-xs flex items-start gap-2 border ${
                 reconciliation.aligned
-                  ? 'bg-green-50 border border-green-200 text-green-800 dark:bg-green-950/30 dark:border-green-900 dark:text-green-200'
-                  : 'bg-amber-50 border border-amber-200 text-amber-900 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-100'
+                  ? 'bg-zinc-50 border-zinc-200 text-zinc-700 dark:bg-zinc-900/40 dark:border-zinc-700 dark:text-zinc-300'
+                  : 'bg-zinc-100 border-zinc-300 text-zinc-800 dark:bg-zinc-800/60 dark:border-zinc-600 dark:text-zinc-200'
               }`}
             >
               {reconciliation.aligned ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-zinc-500" />
               ) : (
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-zinc-600" />
               )}
               <div>
                 {reconciliation.aligned ? (
                   <p>
-                    Cuadra con ventas netas de caja: <strong>{fmtMoney(reconciliation.netRegisterSales)}€</strong>
+                    Cuadra con ventas netas de caja:{' '}
+                    <strong>{fmtMoney(reconciliation.netRegisterSales)}€</strong>
                     {' '}({reconciliation.orderCount} pedido{reconciliation.orderCount === 1 ? '' : 's'})
                   </p>
                 ) : (
                   <p>
                     Recuento pedidos: <strong>{fmtMoney(reconciliation.breakdownTotal)}€</strong>
                     {' · '}Ventas netas caja: <strong>{fmtMoney(reconciliation.netRegisterSales)}€</strong>
-                    {' · '}Diferencia: <strong>{reconciliation.difference >= 0 ? '+' : ''}{fmtMoney(reconciliation.difference)}€</strong>
+                    {' · '}Diferencia:{' '}
+                    <strong>
+                      {reconciliation.difference >= 0 ? '+' : ''}
+                      {fmtMoney(reconciliation.difference)}€
+                    </strong>
                   </p>
                 )}
               </div>
             </div>
           )}
 
-          <div className="rounded-xl border border-emerald-200/80 dark:border-emerald-900/60 bg-white/60 dark:bg-gray-900/30 p-3">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 mb-2 flex items-center gap-1.5">
+          <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-900/30 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-2 flex items-center gap-1.5">
               <Package className="w-3.5 h-3.5" />
               Por categoría y producto
             </p>
@@ -301,44 +324,54 @@ export function RegisterShiftSalesBreakdown({
           </div>
 
           <div
-            className={`rounded-xl overflow-hidden transition-all ${
+            className={`rounded-lg overflow-hidden border transition-colors ${
               ordersOpen
-                ? 'border-2 border-amber-500 dark:border-amber-600'
-                : 'border-2 border-dashed border-amber-300 dark:border-amber-800'
+                ? 'border-zinc-300 dark:border-zinc-600'
+                : 'border-zinc-200 dark:border-zinc-700'
             }`}
           >
             <button
               type="button"
               onClick={() => setOrdersOpen((v) => !v)}
-              className={`w-full flex items-center justify-between gap-3 px-3 py-3 transition-colors ${
+              className={`w-full flex items-center justify-between gap-3 px-3 py-3 transition-all active:scale-[0.99] cursor-pointer ${
                 ordersOpen
-                  ? 'bg-amber-500 dark:bg-amber-600 text-white'
-                  : 'bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100/80 dark:hover:bg-amber-950/50'
+                  ? 'bg-indigo-600 text-white dark:bg-indigo-500'
+                  : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70'
               }`}
             >
-              <span className={`inline-flex items-center gap-2 text-sm font-bold ${ordersOpen ? 'text-white' : 'text-amber-950 dark:text-amber-100'}`}>
-                <Receipt className="w-4 h-4 shrink-0" />
+              <span
+                className={`inline-flex items-center gap-2 text-sm font-bold ${
+                  ordersOpen ? 'text-white' : 'text-indigo-950 dark:text-indigo-100'
+                }`}
+              >
+                <Receipt className="w-4 h-4 shrink-0 opacity-80" />
                 Desglose por pedido
                 <span
-                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums ${
-                    ordersOpen ? 'bg-white/25 text-white' : 'bg-amber-200 text-amber-900 dark:bg-amber-900/50 dark:text-amber-100'
+                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold tabular-nums border ${
+                    ordersOpen
+                      ? 'border-white/30 bg-white/20 text-white'
+                      : 'border-indigo-200 bg-white text-indigo-700 dark:border-indigo-700 dark:bg-indigo-950 dark:text-indigo-200'
                   }`}
                 >
                   {breakdown.orders.length}
                 </span>
               </span>
-              <ExpandPill open={ordersOpen} tone="amber" />
+              <ExpandPill open={ordersOpen} />
             </button>
             {ordersOpen && (
-              <div className="border-t border-amber-200 dark:border-amber-900 bg-amber-50/30 dark:bg-amber-950/10">
+              <div className="border-t border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950/30">
                 <div className="p-3 space-y-2">
                   {breakdown.orders.map((order, idx) => (
                     <OrderBlock key={`${order.orderId || order.orderNumber}-${idx}`} order={order} />
                   ))}
                 </div>
-                <div className="px-3 py-2 border-t border-amber-200/80 dark:border-amber-900/60 text-[11px] text-amber-900/80 dark:text-amber-200/80 flex items-center justify-between gap-2">
-                  <span>{breakdown.orders.length} pedido{breakdown.orders.length === 1 ? '' : 's'} en el turno</span>
-                  <span className="font-bold tabular-nums">{fmtMoney(breakdown.totalRevenue)}€</span>
+                <div className="px-3 py-2 border-t border-zinc-100 dark:border-zinc-800 text-[11px] text-zinc-500 flex items-center justify-between gap-2">
+                  <span>
+                    {breakdown.orders.length} pedido{breakdown.orders.length === 1 ? '' : 's'} en el turno
+                  </span>
+                  <span className="font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
+                    {fmtMoney(breakdown.totalRevenue)}€
+                  </span>
                 </div>
               </div>
             )}

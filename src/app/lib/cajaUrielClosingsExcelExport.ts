@@ -1,32 +1,25 @@
 /**
- * Core — Excel de cierre de caja en layout Uriel (por PDV / mes).
+ * Core — Excel de cierre de caja (layout Uriel), hojas según Facturación marcas.
  *
- * Columnas: Día | EFECTIVO | VISA | JUST EAT | UBER | GLOVO | VERTIAL | TOTAL | TOTAL PIZZAS
- * (sin Bizum / columna "B").
+ * Plantilla por hoja (genérica, sin hardcode de marcas):
+ *   DIA | EFECTIVO | VISA | B | JUST EAT | UBER | GLOVVO | APP | TOTAL | [uds]
  *
- * Mapeo de importes (modelo mental Uriel):
- * - EFECTIVO / VISA = cobros TPV locales (`summary.salesByMethod.efectivo` / `tarjeta`).
- * - JUST EAT ← `aggregatorClosingTotals.justeat`
- * - UBER ← `aggregatorClosingTotals.ubereats`
- * - GLOVO ← `aggregatorClosingTotals.glovo`
- * - VERTIAL ← canal propio: `aggregatorClosingTotals.flipdish` (editor de cierre)
- *   + `app` si aparece en totals/salesByChannel (app Vertial / online propia).
- *   No se mete Flipdish en las columnas de aggregators externos.
- * - TOTAL = suma de columnas de dinero de la fila.
- * - TOTAL PIZZAS = `productClosingCounts.pizza` (suma de cierres del día).
+ * + pestaña COMPARATIVA: un día por fila con el TOTAL € y unidades de cada hoja
+ *   (p. ej. Modomio + Black Burger juntos para comparar).
  *
- * Varios cierres el mismo día → se suman en una sola fila.
+ * Dinero por hoja: se reparte según unidades configuradas en Facturación.
+ * VISA = tarjeta local. B = Bizum + otro. APP = Flipdish + app propia.
  *
- * Acceso: solo CEO / cuenta administradora (dueño o Admin). Trabajadores/cajeros no.
- * No se descarga al cerrar la caja: el cierre se guarda en servidor y el CEO
- * lo exporta a mano desde la pantalla Caja.
+ * Sin config → fallback histórico MODOMIO / BLACK BURGER / TACOS.
+ * Acceso: CEO / Admin (canDownloadUrielCajaExcel).
  */
 import * as XLSX from 'xlsx';
+import type { BrandBillingSheet } from './brandBillingConfig';
+import { sheetMoneyShares, type UnitCounts } from './brandBillingConfig';
 import type { TpvRegisterSession } from './deliveryApi';
 import { localCalendarDayKey } from './tpvCajaScope';
 import { userOwnsAnyBusiness } from './workerProfileCompletion';
 
-/** Roles de cuenta administradora (no Encargado / cajero / Gerente de turno). */
 const URIEL_CAJA_ADMIN_ROLES = new Set(['Admin', 'Administrador', 'Superadmin']);
 
 type UrielCajaAccessUser = {
@@ -36,19 +29,11 @@ type UrielCajaAccessUser = {
   role?: string | null;
 };
 
-/** Misma regla que `isWorkerAccount` (sin importar authApi: evita side-effects en tests). */
 function isWorkerLikeAccount(user?: UrielCajaAccessUser | null): boolean {
   if (!user) return false;
   return user.accountType === 'user' || Boolean(String(user.invitedBy || '').trim());
 }
 
-/**
- * Quién puede descargar el Excel Uriel de cierres.
- * - Cuenta dueña (no worker invitado)
- * - Dueño de alguna empresa (`owner_user_id`)
- * - Rol Admin / Administrador / Superadmin
- * Trabajadores, cajeros y gerentes de turno invitados → no.
- */
 export function canDownloadUrielCajaExcel(
   user?: UrielCajaAccessUser | null,
   businesses?: ReadonlyArray<{ owner_user_id?: string | null }> | null,
@@ -64,41 +49,87 @@ const MONTH_NAMES_ES = [
   'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE',
 ] as const;
 
-/** Canales que van a la columna VERTIAL (app propia / Flipdish). */
 const VERTIAL_CHANNELS = ['flipdish', 'app'] as const;
 
-export const URIEL_CAJA_HEADERS = [
-  'Día',
+/** @deprecated Preferir hojas desde BrandBillingConfig. */
+export type UrielBrandId = 'modomio' | 'blackburger' | 'tacos';
+
+/** Cabeceras de dinero — misma plantilla que el Excel manual Uriel (foto). */
+export const URIEL_CAJA_MONEY_HEADERS = [
+  'DIA',
   'EFECTIVO',
   'VISA',
+  'B',
   'JUST EAT',
   'UBER',
-  'GLOVO',
-  'VERTIAL',
+  'GLOVVO',
+  'APP',
   'TOTAL',
-  'TOTAL PIZZAS',
 ] as const;
+
+export const URIEL_MODOMIO_HEADERS = [
+  ...URIEL_CAJA_MONEY_HEADERS,
+  'TOTAL PIZZA',
+] as const;
+
+export const URIEL_BLACKBURGER_HEADERS = [
+  ...URIEL_CAJA_MONEY_HEADERS,
+  'TOTAL BURGUER',
+] as const;
+
+/** @deprecated Alias histórico. */
+export const URIEL_CAJA_HEADERS = URIEL_MODOMIO_HEADERS;
+
+/** Fallback si la empresa aún no configuró Facturación: 1 hoja por familia, sin mezclar tacos en burger. */
+export const LEGACY_URIEL_BILLING_SHEETS: BrandBillingSheet[] = [
+  {
+    id: 'modomio',
+    label: 'MODOMIO',
+    brandIds: [],
+    unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+  },
+  {
+    id: 'blackburger',
+    label: 'BLACK BURGER',
+    brandIds: [],
+    unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+  },
+  {
+    id: 'tacos',
+    label: 'TACOS',
+    brandIds: [],
+    unitColumns: [{ key: 'taco', header: 'TOTAL TACOS' }],
+  },
+];
 
 export type UrielCajaDayAmounts = {
   day: number;
   efectivo: number;
-  visa: number;
-  justEat: number;
+  tpv: number;
+  x: number;
+  app: number;
   uber: number;
+  justEat: number;
   glovo: number;
-  vertial: number;
   total: number;
+  totalPizza: number;
+  totalBurger: number;
+  totalTaco: number;
+  visa: number;
+  vertial: number;
   totalPizzas: number;
 };
 
 export type UrielCajaMonthSheet = {
   year: number;
-  month: number; // 1–12
+  month: number;
   monthLabel: string;
   daysInMonth: number;
   rows: UrielCajaDayAmounts[];
   monthTotal: number;
   monthTotalPizzas: number;
+  monthTotalBurgers: number;
+  monthTotalTacos: number;
 };
 
 function round2(n: number): number {
@@ -106,7 +137,6 @@ function round2(n: number): number {
 }
 
 function sessionDayKey(session: TpvRegisterSession): string {
-  // Día del turno: apertura (turno nocturno que cierra a las 2h sigue en el día de trabajo).
   return fmtDay(session.openedAt) || fmtDay(session.closedAt) || '';
 }
 
@@ -126,10 +156,23 @@ function channelTotal(session: TpvRegisterSession, channel: string): number {
   return round2(fromAgg || fromSummary || fromSession);
 }
 
-/**
- * Importes de un cierre en columnas Uriel (sin día).
- * EFECTIVO/VISA = solo TPV; plataformas = totals de cierre agregador.
- */
+function withAliases(row: Omit<UrielCajaDayAmounts, 'visa' | 'vertial' | 'totalPizzas'>): UrielCajaDayAmounts {
+  return {
+    ...row,
+    visa: row.tpv,
+    vertial: row.app,
+    totalPizzas: row.totalPizza,
+  };
+}
+
+function countsFromAmounts(amounts: Pick<UrielCajaDayAmounts, 'totalPizza' | 'totalBurger' | 'totalTaco'>): UnitCounts {
+  return {
+    pizza: amounts.totalPizza,
+    burger: amounts.totalBurger,
+    taco: amounts.totalTaco,
+  };
+}
+
 export function sessionToUrielAmounts(session: TpvRegisterSession): Omit<UrielCajaDayAmounts, 'day'> {
   const method = session.summary?.salesByMethod || {
     efectivo: 0,
@@ -139,47 +182,124 @@ export function sessionToUrielAmounts(session: TpvRegisterSession): Omit<UrielCa
     otro: 0,
   };
   const efectivo = round2(Number(method.efectivo || 0));
-  const visa = round2(Number(method.tarjeta || 0));
+  const tpv = round2(Number(method.tarjeta || 0));
+  /** Columna B de la plantilla Uriel: Bizum + otros pagos locales. */
+  const b = round2(Number(method.bizum || 0) + Number(method.otro || 0));
   const justEat = channelTotal(session, 'justeat');
   const uber = channelTotal(session, 'ubereats');
   const glovo = channelTotal(session, 'glovo');
-  // VERTIAL = Flipdish (cierre) + canal app propia si existe.
-  let vertial = 0;
+  let app = 0;
   for (const ch of VERTIAL_CHANNELS) {
-    vertial += channelTotal(session, ch);
+    app += channelTotal(session, ch);
   }
-  vertial = round2(vertial);
-  const total = round2(efectivo + visa + justEat + uber + glovo + vertial);
-  const totalPizzas = Math.max(0, Math.floor(Number(session.productClosingCounts?.pizza || 0)));
-  return { efectivo, visa, justEat, uber, glovo, vertial, total, totalPizzas };
+  app = round2(app);
+  const total = round2(efectivo + tpv + b + app + uber + justEat + glovo);
+  const totalPizza = Math.max(0, Math.floor(Number(session.productClosingCounts?.pizza || 0)));
+  const totalBurger = Math.max(0, Math.floor(Number(session.productClosingCounts?.burger || 0)));
+  const totalTaco = Math.max(0, Math.floor(Number(session.productClosingCounts?.taco || 0)));
+  return withAliases({
+    efectivo,
+    tpv,
+    x: b,
+    app,
+    uber,
+    justEat,
+    glovo,
+    total,
+    totalPizza,
+    totalBurger,
+    totalTaco,
+  });
+}
+
+/** @deprecated Usar sheetMoneyShares + LEGACY_URIEL_BILLING_SHEETS. */
+export function brandMoneyShares(pizza: number, burger: number, taco: number): {
+  modomio: number;
+  blackburger: number;
+} {
+  const shares = sheetMoneyShares(
+    { pizza, burger, taco },
+    LEGACY_URIEL_BILLING_SHEETS,
+  );
+  return {
+    modomio: shares.modomio ?? 0,
+    blackburger: shares.blackburger ?? 0,
+  };
+}
+
+export function splitUrielAmountsByBillingSheet(
+  amounts: Omit<UrielCajaDayAmounts, 'day'>,
+  billingSheet: BrandBillingSheet,
+  allSheets: BrandBillingSheet[],
+): Omit<UrielCajaDayAmounts, 'day'> {
+  const shares = sheetMoneyShares(countsFromAmounts(amounts), allSheets);
+  const share = shares[billingSheet.id] ?? 0;
+  const scale = (n: number) => round2(n * share);
+  const keys = new Set(billingSheet.unitColumns.map((c) => c.key));
+  return withAliases({
+    efectivo: scale(amounts.efectivo),
+    tpv: scale(amounts.tpv),
+    x: scale(amounts.x),
+    app: scale(amounts.app),
+    uber: scale(amounts.uber),
+    justEat: scale(amounts.justEat),
+    glovo: scale(amounts.glovo),
+    total: round2(
+      scale(amounts.efectivo)
+      + scale(amounts.tpv)
+      + scale(amounts.x)
+      + scale(amounts.app)
+      + scale(amounts.uber)
+      + scale(amounts.justEat)
+      + scale(amounts.glovo),
+    ),
+    totalPizza: keys.has('pizza') ? amounts.totalPizza : 0,
+    totalBurger: keys.has('burger') ? amounts.totalBurger : 0,
+    totalTaco: keys.has('taco') ? amounts.totalTaco : 0,
+  });
+}
+
+export function splitUrielAmountsByBrand(
+  amounts: Omit<UrielCajaDayAmounts, 'day'>,
+  brand: UrielBrandId,
+): Omit<UrielCajaDayAmounts, 'day'> {
+  const billingSheet = LEGACY_URIEL_BILLING_SHEETS.find((s) => s.id === brand)
+    || LEGACY_URIEL_BILLING_SHEETS[0];
+  return splitUrielAmountsByBillingSheet(amounts, billingSheet, LEGACY_URIEL_BILLING_SHEETS);
 }
 
 function emptyDay(day: number): UrielCajaDayAmounts {
-  return {
+  return withAliases({
     day,
     efectivo: 0,
-    visa: 0,
-    justEat: 0,
+    tpv: 0,
+    x: 0,
+    app: 0,
     uber: 0,
+    justEat: 0,
     glovo: 0,
-    vertial: 0,
     total: 0,
-    totalPizzas: 0,
-  };
+    totalPizza: 0,
+    totalBurger: 0,
+    totalTaco: 0,
+  });
 }
 
 function addAmounts(a: UrielCajaDayAmounts, b: Omit<UrielCajaDayAmounts, 'day'>): UrielCajaDayAmounts {
-  return {
+  return withAliases({
     day: a.day,
     efectivo: round2(a.efectivo + b.efectivo),
-    visa: round2(a.visa + b.visa),
-    justEat: round2(a.justEat + b.justEat),
+    tpv: round2(a.tpv + b.tpv),
+    x: round2(a.x + b.x),
+    app: round2(a.app + b.app),
     uber: round2(a.uber + b.uber),
+    justEat: round2(a.justEat + b.justEat),
     glovo: round2(a.glovo + b.glovo),
-    vertial: round2(a.vertial + b.vertial),
     total: round2(a.total + b.total),
-    totalPizzas: a.totalPizzas + b.totalPizzas,
-  };
+    totalPizza: a.totalPizza + b.totalPizza,
+    totalBurger: a.totalBurger + b.totalBurger,
+    totalTaco: a.totalTaco + b.totalTaco,
+  });
 }
 
 export function parseYearMonth(ym: string): { year: number; month: number } | null {
@@ -210,9 +330,6 @@ function matchesPdv(session: TpvRegisterSession, pointOfSaleId: string): boolean
   return String(session.pointOfSaleId || '').trim() === want;
 }
 
-/**
- * Agrupa cierres cerrados del PDV en el mes: una fila por día 1..N (días sin cierre = 0).
- */
 export function buildUrielCajaMonthSheet(
   sessions: TpvRegisterSession[],
   opts: { pointOfSaleId: string; yearMonth: string },
@@ -242,11 +359,15 @@ export function buildUrielCajaMonthSheet(
   const rows: UrielCajaDayAmounts[] = [];
   let monthTotal = 0;
   let monthTotalPizzas = 0;
+  let monthTotalBurgers = 0;
+  let monthTotalTacos = 0;
   for (let d = 1; d <= daysInMonth; d += 1) {
     const row = byDay.get(d) || emptyDay(d);
     rows.push(row);
     monthTotal = round2(monthTotal + row.total);
-    monthTotalPizzas += row.totalPizzas;
+    monthTotalPizzas += row.totalPizza;
+    monthTotalBurgers += row.totalBurger;
+    monthTotalTacos += row.totalTaco;
   }
 
   return {
@@ -257,31 +378,186 @@ export function buildUrielCajaMonthSheet(
     rows,
     monthTotal,
     monthTotalPizzas,
+    monthTotalBurgers,
+    monthTotalTacos,
   };
 }
 
-/** Construye la matriz AOA (cabecera mensual + columnas + filas) sin escribir archivo. */
-export function buildUrielCajaSheetAoa(sheet: UrielCajaMonthSheet): unknown[][] {
-  const aoa: unknown[][] = [
-    [sheet.monthLabel, '', '', '', '', '', '', 'TOTAL', sheet.monthTotal],
-    ['', '', '', '', '', '', '', 'TOTAL PIZZAS', sheet.monthTotalPizzas],
-    [],
-    [...URIEL_CAJA_HEADERS],
+export function buildUrielBrandMonthRows(
+  sheet: UrielCajaMonthSheet,
+  brand: UrielBrandId,
+): UrielCajaDayAmounts[] {
+  return sheet.rows.map((row) => {
+    const split = splitUrielAmountsByBrand(row, brand);
+    return withAliases({ day: row.day, ...split });
+  });
+}
+
+function cellBlankZero(n: number): number | '' {
+  const v = Number(n) || 0;
+  return v === 0 ? '' : v;
+}
+
+function unitValue(row: UrielCajaDayAmounts, key: string): number {
+  if (key === 'pizza') return row.totalPizza;
+  if (key === 'burger') return row.totalBurger;
+  if (key === 'taco') return row.totalTaco;
+  return 0;
+}
+
+function billingDayHasActivity(row: UrielCajaDayAmounts, billingSheet: BrandBillingSheet): boolean {
+  if (row.total > 0 || row.efectivo > 0 || row.tpv > 0 || row.x > 0 || row.app > 0
+    || row.uber > 0 || row.justEat > 0 || row.glovo > 0) {
+    return true;
+  }
+  return billingSheet.unitColumns.some((c) => unitValue(row, c.key) > 0);
+}
+
+/** DIA | EFECTIVO | VISA | B | JUST EAT | UBER | GLOVVO | APP | TOTAL */
+function moneyRowCells(row: UrielCajaDayAmounts): unknown[] {
+  return [
+    row.day,
+    cellBlankZero(row.efectivo),
+    cellBlankZero(row.tpv),
+    cellBlankZero(row.x),
+    cellBlankZero(row.justEat),
+    cellBlankZero(row.uber),
+    cellBlankZero(row.glovo),
+    cellBlankZero(row.app),
+    cellBlankZero(row.total),
   ];
-  for (const row of sheet.rows) {
+}
+
+export function resolveBillingSheetsForExcel(sheets?: BrandBillingSheet[] | null): BrandBillingSheet[] {
+  if (Array.isArray(sheets) && sheets.length > 0) return sheets;
+  return LEGACY_URIEL_BILLING_SHEETS;
+}
+
+/** AOA de una hoja de facturación (cabecera + días con movimiento). */
+export function buildUrielCajaBillingSheetAoa(
+  monthSheet: UrielCajaMonthSheet,
+  billingSheet: BrandBillingSheet,
+  allSheets: BrandBillingSheet[],
+): unknown[][] {
+  const allRows = monthSheet.rows.map((row) => {
+    const split = splitUrielAmountsByBillingSheet(row, billingSheet, allSheets);
+    return withAliases({ day: row.day, ...split });
+  });
+  const rows = allRows.filter((r) => billingDayHasActivity(r, billingSheet));
+  const monthMoney = round2(allRows.reduce((s, r) => s + r.total, 0));
+  const headers = [
+    ...URIEL_CAJA_MONEY_HEADERS,
+    ...billingSheet.unitColumns.map((c) => c.header),
+  ];
+
+  const aoa: unknown[][] = [
+    [`INGRESOS ${billingSheet.label} · ${monthSheet.monthLabel}`, '', '', '', '', '', '', '', 'TOTAL', monthMoney || ''],
+  ];
+  for (const col of billingSheet.unitColumns) {
+    const monthUnits = allRows.reduce((s, r) => s + unitValue(r, col.key), 0);
+    aoa.push(['', '', '', '', '', '', '', '', col.header, monthUnits || '']);
+  }
+  aoa.push([]);
+  aoa.push([...headers]);
+  for (const row of rows) {
     aoa.push([
-      row.day,
-      row.efectivo,
-      row.visa,
-      row.justEat,
-      row.uber,
-      row.glovo,
-      row.vertial,
-      row.total,
-      row.totalPizzas,
+      ...moneyRowCells(row),
+      ...billingSheet.unitColumns.map((c) => cellBlankZero(unitValue(row, c.key))),
     ]);
   }
   return aoa;
+}
+
+/**
+ * Pestaña COMPARATIVA genérica: un día por fila con TOTAL € + unidades
+ * de cada hoja de Facturación (p. ej. Modomio y Black Burger juntos).
+ */
+export function buildUrielCajaComparativaSheetAoa(
+  monthSheet: UrielCajaMonthSheet,
+  billingSheets?: BrandBillingSheet[] | null,
+): unknown[][] {
+  const sheets = resolveBillingSheetsForExcel(billingSheets);
+
+  const headers: string[] = ['DIA'];
+  for (const sheet of sheets) {
+    headers.push(`${sheet.label} TOTAL`);
+    for (const col of sheet.unitColumns) {
+      headers.push(col.header);
+    }
+  }
+  headers.push('TOTAL DÍA');
+
+  type DaySplit = {
+    day: number;
+    parts: Array<{ total: number; units: number[] }>;
+    dayTotal: number;
+  };
+
+  const daySplits: DaySplit[] = monthSheet.rows.map((row) => {
+    const parts = sheets.map((billing) => {
+      const split = splitUrielAmountsByBillingSheet(row, billing, sheets);
+      return {
+        total: split.total,
+        units: billing.unitColumns.map((c) => unitValue(split, c.key)),
+      };
+    });
+    return {
+      day: row.day,
+      parts,
+      dayTotal: round2(parts.reduce((s, p) => s + p.total, 0)),
+    };
+  });
+
+  const active = daySplits.filter((d) =>
+    d.dayTotal > 0 || d.parts.some((p) => p.total > 0 || p.units.some((u) => u > 0)),
+  );
+
+  const monthBySheet = sheets.map((_, idx) =>
+    round2(daySplits.reduce((s, d) => s + d.parts[idx].total, 0)),
+  );
+  const monthUnitsBySheet = sheets.map((sheet, idx) =>
+    sheet.unitColumns.map((_, uIdx) =>
+      daySplits.reduce((s, d) => s + (d.parts[idx].units[uIdx] || 0), 0),
+    ),
+  );
+  const monthDayTotal = round2(monthBySheet.reduce((s, n) => s + n, 0));
+
+  const aoa: unknown[][] = [
+    [`COMPARATIVA · ${monthSheet.monthLabel}`],
+    ['Días del mes con TOTAL € y unidades de cada marca/hoja (Facturación).'],
+    [],
+    headers,
+  ];
+
+  for (const d of active) {
+    const cells: unknown[] = [d.day];
+    for (const part of d.parts) {
+      cells.push(cellBlankZero(part.total));
+      for (const u of part.units) cells.push(cellBlankZero(u));
+    }
+    cells.push(cellBlankZero(d.dayTotal));
+    aoa.push(cells);
+  }
+
+  aoa.push([]);
+  const totalRow: unknown[] = ['TOTAL MES'];
+  for (let i = 0; i < sheets.length; i += 1) {
+    totalRow.push(cellBlankZero(monthBySheet[i]));
+    for (const u of monthUnitsBySheet[i]) totalRow.push(cellBlankZero(u));
+  }
+  totalRow.push(cellBlankZero(monthDayTotal));
+  aoa.push(totalRow);
+
+  return aoa;
+}
+
+export function buildUrielCajaSheetAoa(
+  sheet: UrielCajaMonthSheet,
+  brand: UrielBrandId = 'modomio',
+): unknown[][] {
+  const billingSheet = LEGACY_URIEL_BILLING_SHEETS.find((s) => s.id === brand)
+    || LEGACY_URIEL_BILLING_SHEETS[0];
+  return buildUrielCajaBillingSheetAoa(sheet, billingSheet, LEGACY_URIEL_BILLING_SHEETS);
 }
 
 function sanitizeFilePart(raw: string): string {
@@ -296,23 +572,41 @@ function sanitizeFilePart(raw: string): string {
   return s || 'pdv';
 }
 
+function sanitizeExcelSheetName(raw: string, used: Set<string>): string {
+  let base = String(raw || 'HOJA')
+    .replace(/[\\/*?:\[\]]/g, ' ')
+    .trim()
+    .slice(0, 31) || 'HOJA';
+  let name = base;
+  let i = 2;
+  while (used.has(name.toLowerCase())) {
+    const suffix = ` ${i}`;
+    name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`;
+    i += 1;
+  }
+  used.add(name.toLowerCase());
+  return name;
+}
+
 export type DownloadUrielCajaExcelOptions = {
   pointOfSaleId: string;
   pointOfSaleName?: string;
   yearMonth?: string;
-  /** Sesión recién cerrada: si no hay yearMonth, se toma de aquí. */
   closedSession?: TpvRegisterSession;
   fileName?: string;
+  /** Hojas desde Empresa → Marca → Facturación. */
+  billingSheets?: BrandBillingSheet[] | null;
 };
 
 /**
- * Descarga Excel Uriel del mes para un PDV.
- * Incluye todos los cierres del mes (sessions) + closedSession si se pasa.
+ * Descarga Excel del mes para un PDV:
+ * 1) COMPARATIVA (todas las hojas/marcas juntas, días + uds)
+ * 2) Una hoja por cubo de Facturación (plantilla Uriel).
  */
 export function downloadUrielCajaClosingsExcel(
   sessions: TpvRegisterSession[],
   opts: DownloadUrielCajaExcelOptions,
-): { rows: number; fileName: string; yearMonth: string } {
+): { rows: number; fileName: string; yearMonth: string; sheetNames: string[] } {
   const closed = opts.closedSession;
   const yearMonth =
     opts.yearMonth
@@ -331,27 +625,49 @@ export function downloadUrielCajaClosingsExcel(
       ]
     : sessions;
 
-  const sheet = buildUrielCajaMonthSheet(merged, { pointOfSaleId: pdvId, yearMonth });
-  if (!sheet) {
+  const monthSheet = buildUrielCajaMonthSheet(merged, { pointOfSaleId: pdvId, yearMonth });
+  if (!monthSheet) {
     throw new Error('Mes inválido para el Excel de cierre');
   }
 
-  const aoa = buildUrielCajaSheetAoa(sheet);
+  const billingSheets = resolveBillingSheetsForExcel(opts.billingSheets);
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = URIEL_CAJA_HEADERS.map((h) => ({
-    wch: Math.min(16, Math.max(10, String(h).length + 2)),
+  const usedNames = new Set<string>();
+  const sheetNames: string[] = [];
+
+  const comparativaAoa = buildUrielCajaComparativaSheetAoa(monthSheet, billingSheets);
+  const comparativaWs = XLSX.utils.aoa_to_sheet(comparativaAoa);
+  const comparativaHeaders = (comparativaAoa.find((r) => r[0] === 'DIA') || []) as string[];
+  comparativaWs['!cols'] = comparativaHeaders.map((h) => ({
+    wch: Math.min(18, Math.max(10, String(h).length + 2)),
   }));
-  const sheetName = sheet.monthLabel.slice(0, 31);
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const comparativaName = sanitizeExcelSheetName('COMPARATIVA', usedNames);
+  sheetNames.push(comparativaName);
+  XLSX.utils.book_append_sheet(wb, comparativaWs, comparativaName);
+
+  for (const billing of billingSheets) {
+    const aoa = buildUrielCajaBillingSheetAoa(monthSheet, billing, billingSheets);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const headers = [
+      ...URIEL_CAJA_MONEY_HEADERS,
+      ...billing.unitColumns.map((c) => c.header),
+    ];
+    ws['!cols'] = headers.map((h) => ({
+      wch: Math.min(16, Math.max(10, String(h).length + 2)),
+    }));
+    const name = sanitizeExcelSheetName(billing.label, usedNames);
+    sheetNames.push(name);
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  }
 
   const pdvSlug = sanitizeFilePart(opts.pointOfSaleName || closed?.pointOfSaleName || pdvId);
-  const fileName = opts.fileName || `cierre-${pdvSlug}-${yearMonth}.xlsx`;
+  const fileName = opts.fileName || `ingresos-${pdvSlug}-${yearMonth}.xlsx`;
   XLSX.writeFile(wb, fileName);
 
-  const activeDays = sheet.rows.filter((r) =>
-    r.total > 0 || r.totalPizzas > 0 || r.efectivo > 0 || r.visa > 0
-    || r.justEat > 0 || r.uber > 0 || r.glovo > 0 || r.vertial > 0,
+  const activeDays = monthSheet.rows.filter((r) =>
+    r.total > 0 || r.totalPizza > 0 || r.totalBurger > 0 || r.totalTaco > 0
+    || r.efectivo > 0 || r.tpv > 0 || r.x > 0
+    || r.justEat > 0 || r.uber > 0 || r.glovo > 0 || r.app > 0,
   ).length;
-  return { rows: activeDays, fileName, yearMonth };
+  return { rows: activeDays, fileName, yearMonth, sheetNames };
 }

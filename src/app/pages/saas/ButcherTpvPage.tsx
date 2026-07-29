@@ -1317,11 +1317,10 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
             <div className="p-5 space-y-4">
               <div>
                 <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wider">Método de pago</p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {([
                     { id: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
                     { id: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                    { id: 'bizum' as const, label: 'Bizum', icon: Smartphone },
                   ]).map(({ id, label, icon: Icon }) => (
                     <button
                       key={id}

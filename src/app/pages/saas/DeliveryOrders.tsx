@@ -820,7 +820,7 @@ export function DeliveryOrders() {
             <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-1">Registrar cobro</h3>
             <p className="text-sm text-gray-500 mb-4">#{paymentOrder.orderNumber} — {(paymentOrder.totalAmount - paymentOrder.paidAmount).toFixed(2)}€ pendiente</p>
             <div className="grid grid-cols-2 gap-2">
-              {['efectivo', 'tarjeta', 'bizum', 'online'].map((method) => (
+              {['efectivo', 'tarjeta'].map((method) => (
                 <button key={method} onClick={() => handlePayment(method)} disabled={actionLoading}
                   className="py-3 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-xl text-sm font-semibold text-gray-900 dark:text-gray-100 transition-colors capitalize disabled:opacity-50">
                   {PAYMENT_LABELS[method]}

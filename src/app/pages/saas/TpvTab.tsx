@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
-  Plus, X, Edit3, Trash2, Search, Check, CreditCard, Banknote, Phone,
+  Plus, X, Edit3, Trash2, Search, Check, CreditCard, Banknote,
   User, Settings, LayoutGrid, Receipt, Coffee, Hash,
-  Move, Eye, EyeOff, FileText, DollarSign, Printer, UserCheck,
+  Move, Eye, EyeOff, FileText, Printer, UserCheck,
   Calculator, Package, RefreshCw, AlertCircle, ZoomIn, ZoomOut,
   PenLine, MousePointer, History, LogOut, Users,
 } from 'lucide-react';
@@ -505,12 +505,10 @@ function BillModal({ isOpen, order, userName, initialReceived, onClose, onBill }
           {/* Payment method */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Método de pago</label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {[
                 { id: 'efectivo', label: 'Efectivo', icon: <Banknote className="w-4 h-4" /> },
                 { id: 'tarjeta', label: 'Tarjeta', icon: <CreditCard className="w-4 h-4" /> },
-                { id: 'bizum', label: 'Bizum', icon: <Phone className="w-4 h-4" /> },
-                { id: 'otro', label: 'Otro', icon: <DollarSign className="w-4 h-4" /> },
               ].map(m => (
                 <button key={m.id} onClick={() => setMethod(m.id)} className={`p-2.5 rounded-xl border-2 text-center text-xs font-medium transition-colors ${method === m.id ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 text-gray-700 dark:text-gray-300'}`}>
                   <div className="flex justify-center mb-1">{m.icon}</div>

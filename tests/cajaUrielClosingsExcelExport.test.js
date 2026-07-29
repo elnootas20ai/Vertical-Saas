@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildUrielCajaComparativaSheetAoa,
   buildUrielCajaMonthSheet,
   buildUrielCajaSheetAoa,
+  brandMoneyShares,
   canDownloadUrielCajaExcel,
   sessionToUrielAmounts,
-  URIEL_CAJA_HEADERS,
+  splitUrielAmountsByBrand,
+  URIEL_BLACKBURGER_HEADERS,
+  URIEL_CAJA_MONEY_HEADERS,
+  URIEL_MODOMIO_HEADERS,
 } from '../src/app/lib/cajaUrielClosingsExcelExport.ts';
 
 describe('canDownloadUrielCajaExcel', () => {
@@ -51,10 +56,10 @@ function closedSession(partial) {
 }
 
 describe('sessionToUrielAmounts', () => {
-  it('mapea TPV local + aggregators + Flipdish→VERTIAL (sin Bizum)', () => {
+  it('mapea VISA + B(Bizum/otro) + aggregators + Flipdish→App', () => {
     const amounts = sessionToUrielAmounts(closedSession({
       summary: {
-        salesByMethod: { efectivo: 100.5, tarjeta: 40, bizum: 99, online: 0, otro: 0 },
+        salesByMethod: { efectivo: 100.5, tarjeta: 40, bizum: 12, online: 0, otro: 3 },
         salesByChannel: { app: 10 },
         totalSales: 140.5,
       },
@@ -64,18 +69,48 @@ describe('sessionToUrielAmounts', () => {
         glovo: 20,
         flipdish: 15,
       },
-      productClosingCounts: { pizza: 7, burger: 1, taco: 0 },
+      productClosingCounts: { pizza: 7, burger: 2, taco: 1 },
     }));
 
     expect(amounts.efectivo).toBe(100.5);
+    expect(amounts.tpv).toBe(40);
     expect(amounts.visa).toBe(40);
+    expect(amounts.x).toBe(15);
     expect(amounts.justEat).toBe(50);
     expect(amounts.uber).toBe(30);
     expect(amounts.glovo).toBe(20);
-    // flipdish 15 + app 10
+    expect(amounts.app).toBe(25);
     expect(amounts.vertial).toBe(25);
-    expect(amounts.total).toBe(265.5);
-    expect(amounts.totalPizzas).toBe(7);
+    expect(amounts.total).toBe(280.5);
+    expect(amounts.totalPizza).toBe(7);
+    expect(amounts.totalBurger).toBe(2);
+    expect(amounts.totalTaco).toBe(1);
+  });
+});
+
+describe('brandMoneyShares / splitUrielAmountsByBrand', () => {
+  it('reparte € por familia; tacos no van con burger', () => {
+    expect(brandMoneyShares(7, 2, 1)).toEqual({
+      modomio: 0.7,
+      blackburger: 0.2,
+    });
+    const full = sessionToUrielAmounts(closedSession({
+      summary: {
+        salesByMethod: { efectivo: 100, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+        salesByChannel: {},
+        totalSales: 100,
+      },
+      productClosingCounts: { pizza: 7, burger: 2, taco: 1 },
+    }));
+    const modo = splitUrielAmountsByBrand(full, 'modomio');
+    const bb = splitUrielAmountsByBrand(full, 'blackburger');
+    expect(modo.efectivo).toBe(70);
+    expect(bb.efectivo).toBe(20);
+    expect(modo.totalPizza).toBe(7);
+    expect(modo.totalBurger).toBe(0);
+    expect(bb.totalBurger).toBe(2);
+    expect(bb.totalTaco).toBe(0);
+    expect(bb.totalPizza).toBe(0);
   });
 });
 
@@ -91,7 +126,7 @@ describe('buildUrielCajaMonthSheet', () => {
           totalSales: 15,
         },
         aggregatorClosingTotals: { justeat: 2 },
-        productClosingCounts: { pizza: 3, burger: 0, taco: 0 },
+        productClosingCounts: { pizza: 3, burger: 1, taco: 0 },
       }),
       closedSession({
         _id: 'b',
@@ -102,7 +137,7 @@ describe('buildUrielCajaMonthSheet', () => {
           totalSales: 21,
         },
         aggregatorClosingTotals: { glovo: 4, flipdish: 8 },
-        productClosingCounts: { pizza: 2, burger: 0, taco: 0 },
+        productClosingCounts: { pizza: 2, burger: 0, taco: 2 },
       }),
       closedSession({
         _id: 'other-pdv',
@@ -128,42 +163,78 @@ describe('buildUrielCajaMonthSheet', () => {
 
     const day5 = sheet.rows.find((r) => r.day === 5);
     expect(day5.efectivo).toBe(30);
-    expect(day5.visa).toBe(6);
+    expect(day5.tpv).toBe(6);
     expect(day5.justEat).toBe(2);
     expect(day5.glovo).toBe(4);
-    expect(day5.vertial).toBe(8);
+    expect(day5.app).toBe(8);
     expect(day5.total).toBe(50);
-    expect(day5.totalPizzas).toBe(5);
+    expect(day5.totalPizza).toBe(5);
+    expect(day5.totalBurger).toBe(1);
+    expect(day5.totalTaco).toBe(2);
 
     expect(sheet.monthTotal).toBe(50);
     expect(sheet.monthTotalPizzas).toBe(5);
-
-    const day1 = sheet.rows.find((r) => r.day === 1);
-    expect(day1.total).toBe(0);
-    expect(day1.totalPizzas).toBe(0);
   });
 
-  it('cabecera AOA incluye TOTAL y TOTAL PIZZAS del mes', () => {
+  it('AOA plantilla Uriel + COMPARATIVA con todas las hojas', () => {
     const sheet = buildUrielCajaMonthSheet([
       closedSession({
         openedAt: '2026-07-01T10:00:00',
         summary: {
-          salesByMethod: { efectivo: 10, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByMethod: { efectivo: 100, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
           salesByChannel: {},
-          totalSales: 10,
+          totalSales: 100,
         },
-        productClosingCounts: { pizza: 4, burger: 0, taco: 0 },
+        productClosingCounts: { pizza: 7, burger: 2, taco: 1 },
       }),
     ], { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
 
-    const aoa = buildUrielCajaSheetAoa(sheet);
-    expect(aoa[0][0]).toBe('JULIO 2026');
-    expect(aoa[0][7]).toBe('TOTAL');
-    expect(aoa[0][8]).toBe(10);
-    expect(aoa[1][7]).toBe('TOTAL PIZZAS');
-    expect(aoa[1][8]).toBe(4);
-    expect(aoa[3]).toEqual([...URIEL_CAJA_HEADERS]);
-    expect(URIEL_CAJA_HEADERS).not.toContain('B');
-    expect(URIEL_CAJA_HEADERS).not.toContain('Bizum');
+    expect(URIEL_CAJA_MONEY_HEADERS).toEqual([
+      'DIA', 'EFECTIVO', 'VISA', 'B', 'JUST EAT', 'UBER', 'GLOVVO', 'APP', 'TOTAL',
+    ]);
+    expect(URIEL_MODOMIO_HEADERS).toContain('VISA');
+    expect(URIEL_MODOMIO_HEADERS).toContain('GLOVVO');
+    expect(URIEL_MODOMIO_HEADERS).not.toContain('TPV');
+    expect(URIEL_MODOMIO_HEADERS).not.toContain('X');
+
+    const modo = buildUrielCajaSheetAoa(sheet, 'modomio');
+    expect(modo[0][0]).toContain('MODOMIO');
+    expect(modo[0][8]).toBe('TOTAL');
+    expect(modo[0][9]).toBe(70);
+    expect(modo[1][8]).toBe('TOTAL PIZZA');
+    expect(modo[1][9]).toBe(7);
+    expect(modo[3]).toEqual([...URIEL_MODOMIO_HEADERS]);
+    // Día 1 · 70 € pizzas; celdas a 0 en blanco
+    expect(modo[4]).toEqual([1, 70, '', '', '', '', '', '', 70, 7]);
+
+    const bb = buildUrielCajaSheetAoa(sheet, 'blackburger');
+    expect(bb[0][0]).toContain('BLACK BURGER');
+    expect(bb[0][9]).toBe(20);
+    expect(bb[1][8]).toBe('TOTAL BURGUER');
+    expect(bb[1][9]).toBe(2);
+    expect(bb[3]).toEqual([...URIEL_BLACKBURGER_HEADERS]);
+    expect(bb[4]).toEqual([1, 20, '', '', '', '', '', '', 20, 2]);
+
+    const tacos = buildUrielCajaSheetAoa(sheet, 'tacos');
+    expect(tacos[0][0]).toContain('TACOS');
+    expect(tacos[0][9]).toBe(10);
+    expect(tacos[1][8]).toBe('TOTAL TACOS');
+    expect(tacos[1][9]).toBe(1);
+
+    const comp = buildUrielCajaComparativaSheetAoa(sheet, null);
+    expect(comp[0][0]).toContain('COMPARATIVA');
+    const headerRow = comp.find((r) => r[0] === 'DIA');
+    expect(headerRow).toEqual([
+      'DIA',
+      'MODOMIO TOTAL',
+      'TOTAL PIZZA',
+      'BLACK BURGER TOTAL',
+      'TOTAL BURGUER',
+      'TACOS TOTAL',
+      'TOTAL TACOS',
+      'TOTAL DÍA',
+    ]);
+    const day1 = comp.find((r) => r[0] === 1);
+    expect(day1).toEqual([1, 70, 7, 20, 2, 10, 1, 100]);
   });
 });

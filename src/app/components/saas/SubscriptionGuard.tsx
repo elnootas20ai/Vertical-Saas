@@ -38,7 +38,7 @@ export function SubscriptionGuard({
                 href="/saas/billing"
                 className="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-xl transition-colors"
               >
-                Ver facturación
+                Ver Mi plan
               </a>
             ) : (
               <p className="text-sm text-gray-500">

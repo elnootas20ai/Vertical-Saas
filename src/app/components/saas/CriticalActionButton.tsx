@@ -81,7 +81,7 @@ export function CriticalActionButton({
                   href="/saas/billing"
                   className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-medium text-center transition-colors"
                 >
-                  Ir a facturación
+                  Ir a Mi plan
                 </a>
               ) : (
                 <button

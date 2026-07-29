@@ -1270,7 +1270,7 @@ const es = {
     // ── Configuración ─────────────────────────────────────────────────────────
     settings: {
       title: 'Ajustes',
-      subtitle: 'Gestiona tu cuenta, empresa, facturación y preferencias del sistema.',
+      subtitle: 'Gestiona tu cuenta, empresa, suscripción y preferencias del sistema.',
       myUser: 'Mi usuario',
       myUserDesc: 'Cambia nombre, avatar y datos básicos del acceso.',
       avatarHint: 'Puedes usar una URL de imagen para el avatar.',
@@ -1281,7 +1281,7 @@ const es = {
       tabs: {
         profile: 'Perfil',
         company: 'Empresa',
-        billing: 'Facturación',
+        billing: 'Mi plan',
         integrations: 'Integraciones',
         businesses: 'Empresas',
         users: 'Usuarios',
@@ -3162,7 +3162,7 @@ const en = {
       tabs: {
         profile: 'Profile',
         company: 'Company',
-        billing: 'Billing',
+        billing: 'My plan',
         integrations: 'Integrations',
         businesses: 'Businesses',
         users: 'Users',
@@ -4997,7 +4997,7 @@ const pt = {
       tabs: {
         profile: 'Perfil',
         company: 'Empresa',
-        billing: 'Faturação',
+        billing: 'O meu plano',
         integrations: 'Integrações',
         businesses: 'Empresas',
         users: 'Utilizadores',
@@ -6507,7 +6507,7 @@ const fr = {
       tabs: {
         profile: 'Profil',
         company: 'Entreprise',
-        billing: 'Facturation',
+        billing: 'Mon forfait',
         integrations: 'Intégrations',
         businesses: 'Entreprises',
         users: 'Utilisateurs',
@@ -8016,7 +8016,7 @@ const it = {
       tabs: {
         profile: 'Profilo',
         company: 'Azienda',
-        billing: 'Fatturazione',
+        billing: 'Il mio piano',
         integrations: 'Integrazioni',
         businesses: 'Aziende',
         users: 'Utenti',

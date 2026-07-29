@@ -9,6 +9,11 @@ import {
 import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
 import type { FoodFamilyCounts, FoodFamilyKey } from '../../lib/shiftFoodFamilyCounts';
 import { emptyFoodFamilyCounts, sumFoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
+import {
+  DELIVERY_FOOD_UNIT_ORDER,
+  DeliveryFoodUnitIcon,
+  deliveryFoodUnitTitle,
+} from './delivery/DeliveryFoodUnitIcon';
 
 export type LineDraft = { qty: string; cash: string; card: string };
 export type ChannelLinesDraft = Record<FoodFamilyKey, LineDraft>;
@@ -33,39 +38,21 @@ interface AggregatorClosingEditorProps {
   onSnapshotChange?: (snapshot: AggregatorClosingSnapshot) => void;
 }
 
-const FOOD_LINES: Array<{
-  key: FoodFamilyKey;
-  label: string;
-  emoji: string;
-  border: string;
-  bg: string;
-  title: string;
-}> = [
-  {
-    key: 'pizza',
-    label: 'Pizzas',
-    emoji: '🍕',
-    border: 'border-amber-200 dark:border-amber-800',
-    bg: 'bg-amber-50/50 dark:bg-amber-950/20',
-    title: 'text-amber-800 dark:text-amber-200',
-  },
-  {
-    key: 'burger',
-    label: 'Burgers',
-    emoji: '🍔',
-    border: 'border-orange-200 dark:border-orange-800',
-    bg: 'bg-orange-50/50 dark:bg-orange-950/20',
-    title: 'text-orange-800 dark:text-orange-200',
-  },
-  {
-    key: 'taco',
-    label: 'Tacos',
-    emoji: '🌮',
-    border: 'border-lime-200 dark:border-lime-800',
-    bg: 'bg-lime-50/50 dark:bg-lime-950/20',
-    title: 'text-lime-800 dark:text-lime-200',
-  },
-];
+const FOOD_LINES = DELIVERY_FOOD_UNIT_ORDER.map((key) => ({
+  key,
+  label: deliveryFoodUnitTitle(key),
+}));
+
+const LINE_BOX =
+  'rounded-lg border-2 border-dashed border-indigo-200 dark:border-indigo-800 bg-white dark:bg-zinc-900/50 p-2.5 hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors';
+const CHIP =
+  'px-2 py-0.5 rounded-md text-[10px] font-bold border border-zinc-300 bg-zinc-100 text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200';
+const INPUT_EDIT =
+  'w-full px-2 py-2 text-sm font-bold tabular-nums border-2 border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/60 dark:bg-indigo-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 cursor-text';
+const INPUT_CASH =
+  'w-full px-2 py-2 text-sm font-bold tabular-nums border-2 border-emerald-200 dark:border-emerald-800 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 cursor-text';
+const INPUT_CARD =
+  'w-full px-2 py-2 text-sm font-bold tabular-nums border-2 border-sky-200 dark:border-sky-800 rounded-lg bg-sky-50/60 dark:bg-sky-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500 cursor-text';
 
 function emptyLine(): LineDraft {
   return { qty: '', cash: '', card: '' };
@@ -265,22 +252,22 @@ export function AggregatorClosingEditor({
   };
 
   return (
-    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 overflow-hidden">
-      <div className="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 text-xs font-bold text-gray-800 dark:text-gray-100 uppercase tracking-wider">
-          <Plug className="w-3.5 h-3.5 text-purple-600" /> {title}
+    <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/40 overflow-hidden">
+      <div className="px-3 py-2.5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700 dark:text-zinc-200 uppercase tracking-wider">
+          <Plug className="w-3.5 h-3.5 opacity-70" /> {title}
         </div>
-        <div className="text-right text-[11px] font-semibold tabular-nums space-y-0.5">
+        <div className="text-right text-[11px] font-bold tabular-nums space-y-0.5">
           <div className="text-emerald-700 dark:text-emerald-300">
             Efectivo apps → caja: {snapshot.cashTotal.toFixed(2)}€
           </div>
-          <div className="text-blue-700 dark:text-blue-300">
+          <div className="text-sky-700 dark:text-sky-300">
             Tarjeta apps: {snapshot.cardTotal.toFixed(2)}€
           </div>
         </div>
       </div>
 
-      <p className="px-3 pt-2 text-[11px] text-gray-500 dark:text-gray-400">
+      <p className="px-3 pt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
         Por cada app: una línea de pizzas, otra de burgers y otra de tacos (unidades + efectivo + tarjeta).
       </p>
 
@@ -300,18 +287,16 @@ export function AggregatorClosingEditor({
           return (
             <div
               key={ch}
-              className={`rounded-xl border bg-gray-50/80 dark:bg-gray-800/60 p-3 ${row.platform.accentClass}`}
+              className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/80 dark:bg-zinc-800/50 p-3"
             >
               <div className="flex items-center justify-between gap-2 mb-2.5">
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs font-bold text-gray-500 dark:text-gray-400 tabular-nums">
+                  <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 tabular-nums">
                     {stepNum}.
                   </span>
-                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${row.platform.colorClass}`}>
-                    {row.platform.label}
-                  </span>
+                  <span className={CHIP}>{row.platform.label}</span>
                 </div>
-                <span className="text-[10px] text-gray-400 truncate shrink-0">{autoHint}</span>
+                <span className="text-[10px] text-zinc-400 truncate shrink-0">{autoHint}</span>
               </div>
 
               <div className="space-y-2">
@@ -319,19 +304,17 @@ export function AggregatorClosingEditor({
                   const draftLine = lines[line.key];
                   const sist = autoFood[line.key];
                   return (
-                    <div
-                      key={line.key}
-                      className={`rounded-lg border ${line.border} ${line.bg} p-2.5`}
-                    >
+                    <div key={line.key} className={LINE_BOX}>
                       <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className={`text-[11px] font-bold ${line.title}`}>
-                          {line.emoji} {line.label}
+                        <span className="text-[12px] font-bold text-zinc-900 dark:text-zinc-100 inline-flex items-center gap-2">
+                          <DeliveryFoodUnitIcon unit={line.key} className="w-5 h-5" />
+                          {line.label}
                         </span>
-                        <span className="text-[9px] text-gray-400">Sist. {sist}</span>
+                        <span className="text-[9px] text-zinc-400">Sist. {sist}</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
                         <label className="flex flex-col gap-0.5 min-w-0">
-                          <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide">
+                          <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wide">
                             Cantidad
                           </span>
                           <input
@@ -344,11 +327,11 @@ export function AggregatorClosingEditor({
                             onChange={(e) =>
                               patchLine(ch, line.key, 'qty', normalizeCountInput(e.target.value))
                             }
-                            className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-400/40"
+                            className={INPUT_EDIT}
                           />
                         </label>
                         <label className="flex flex-col gap-0.5 min-w-0">
-                          <span className="text-[9px] font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                          <span className="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
                             Efectivo €
                           </span>
                           <input
@@ -360,11 +343,11 @@ export function AggregatorClosingEditor({
                             onChange={(e) =>
                               patchLine(ch, line.key, 'cash', formatMoneyAsYouType(e.target.value, true))
                             }
-                            className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-emerald-200 dark:border-emerald-800 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                            className={INPUT_CASH}
                           />
                         </label>
                         <label className="flex flex-col gap-0.5 min-w-0">
-                          <span className="text-[9px] font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
+                          <span className="text-[9px] font-bold text-sky-700 dark:text-sky-300 uppercase tracking-wide">
                             Tarjeta €
                           </span>
                           <input
@@ -376,7 +359,7 @@ export function AggregatorClosingEditor({
                             onChange={(e) =>
                               patchLine(ch, line.key, 'card', formatMoneyAsYouType(e.target.value, true))
                             }
-                            className="w-full px-2 py-1.5 text-sm font-bold tabular-nums border border-blue-200 dark:border-blue-800 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                            className={INPUT_CARD}
                           />
                         </label>
                       </div>
@@ -388,28 +371,37 @@ export function AggregatorClosingEditor({
           );
         })}
 
-        <div className="rounded-xl border-2 border-gray-900 dark:border-gray-200 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 p-3 space-y-2">
-          <p className="text-[11px] font-bold uppercase tracking-wider opacity-80">Total apps</p>
+        <div className="rounded-xl border border-zinc-800 dark:border-zinc-200 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 p-3 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wider opacity-80">Total apps</p>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
-              <p className="text-[10px] opacity-70">🍕 Pizzas</p>
-              <p className="text-base font-bold tabular-nums">{snapshot.foodTotals.pizza}</p>
+              <p className="text-[10px] opacity-70 inline-flex items-center gap-1">
+                <DeliveryFoodUnitIcon unit="pizza" className="w-3.5 h-3.5" muted />
+                Pizzas
+              </p>
+              <p className="text-base font-semibold tabular-nums">{snapshot.foodTotals.pizza}</p>
             </div>
             <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
-              <p className="text-[10px] opacity-70">🍔 Burgers</p>
-              <p className="text-base font-bold tabular-nums">{snapshot.foodTotals.burger}</p>
+              <p className="text-[10px] opacity-70 inline-flex items-center gap-1">
+                <DeliveryFoodUnitIcon unit="burger" className="w-3.5 h-3.5" muted />
+                Burgers
+              </p>
+              <p className="text-base font-semibold tabular-nums">{snapshot.foodTotals.burger}</p>
             </div>
             <div className="rounded-lg bg-white/10 dark:bg-black/5 px-2 py-1.5">
-              <p className="text-[10px] opacity-70">🌮 Tacos</p>
-              <p className="text-base font-bold tabular-nums">{snapshot.foodTotals.taco}</p>
+              <p className="text-[10px] opacity-70 inline-flex items-center gap-1">
+                <DeliveryFoodUnitIcon unit="taco" className="w-3.5 h-3.5" muted />
+                Tacos
+              </p>
+              <p className="text-base font-semibold tabular-nums">{snapshot.foodTotals.taco}</p>
             </div>
-            <div className="rounded-lg bg-emerald-500/20 dark:bg-emerald-600/15 px-2 py-1.5">
-              <p className="text-[10px] opacity-70">💵 Efectivo</p>
-              <p className="text-base font-bold tabular-nums">{snapshot.cashTotal.toFixed(2)}€</p>
+            <div className="rounded-lg bg-emerald-400/25 dark:bg-emerald-500/20 px-2 py-1.5 border border-emerald-300/30">
+              <p className="text-[10px] opacity-70">Efectivo</p>
+              <p className="text-base font-black tabular-nums">{snapshot.cashTotal.toFixed(2)}€</p>
             </div>
-            <div className="rounded-lg bg-blue-500/20 dark:bg-blue-600/15 px-2 py-1.5">
-              <p className="text-[10px] opacity-70">💳 Tarjeta</p>
-              <p className="text-base font-bold tabular-nums">{snapshot.cardTotal.toFixed(2)}€</p>
+            <div className="rounded-lg bg-sky-400/25 dark:bg-sky-500/20 px-2 py-1.5 border border-sky-300/30">
+              <p className="text-[10px] opacity-70">Tarjeta</p>
+              <p className="text-base font-black tabular-nums">{snapshot.cardTotal.toFixed(2)}€</p>
             </div>
           </div>
           <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/15 dark:border-black/10">

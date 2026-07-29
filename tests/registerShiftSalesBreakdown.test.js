@@ -33,6 +33,46 @@ describe('registerShiftSalesBreakdown', () => {
     expect(breakdown.categories.map((c) => c.category)).toEqual(['Pizzas', 'Bebidas']);
     expect(breakdown.categories[0].products[0].name).toBe('Margarita');
     expect(breakdown.categories[0].products[0].quantity).toBe(2);
+    expect(breakdown.categories[0].revenueEfectivo).toBe(18);
+    expect(breakdown.categories[0].revenueTarjeta).toBe(0);
+    expect(breakdown.categories[1].revenueEfectivo).toBe(2);
+    expect(breakdown.totalEfectivo).toBe(20);
+    expect(breakdown.totalTarjeta).toBe(0);
+  });
+
+  it('separa efectivo y tarjeta por categoría', () => {
+    const orders = [
+      {
+        _id: 'o1',
+        status: 'entregado',
+        totalAmount: 18,
+        paymentMethod: 'efectivo',
+        createdAt: '2026-06-17T12:00:00.000Z',
+        items: [{ name: 'Margarita', quantity: 2, unitPrice: 9, total: 18, category: 'Pizzas' }],
+      },
+      {
+        _id: 'o2',
+        status: 'entregado',
+        totalAmount: 12,
+        paymentMethod: 'tarjeta',
+        createdAt: '2026-06-17T13:00:00.000Z',
+        items: [
+          { name: 'Burger', quantity: 1, unitPrice: 10, total: 10, category: 'Burgers' },
+          { name: 'Cola', quantity: 1, unitPrice: 2, total: 2, category: 'Bebidas' },
+        ],
+      },
+    ];
+    const breakdown = buildShiftSalesBreakdown(orders);
+    const pizzas = breakdown.categories.find((c) => c.category === 'Pizzas');
+    const burgers = breakdown.categories.find((c) => c.category === 'Burgers');
+    const bebidas = breakdown.categories.find((c) => c.category === 'Bebidas');
+    expect(pizzas?.revenueEfectivo).toBe(18);
+    expect(pizzas?.revenueTarjeta).toBe(0);
+    expect(burgers?.revenueEfectivo).toBe(0);
+    expect(burgers?.revenueTarjeta).toBe(10);
+    expect(bebidas?.revenueTarjeta).toBe(2);
+    expect(breakdown.totalEfectivo).toBe(18);
+    expect(breakdown.totalTarjeta).toBe(12);
   });
 
   it('incluye todos los completados del turno aunque no estén en linkedOrderIds', () => {

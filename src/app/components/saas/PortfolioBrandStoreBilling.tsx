@@ -57,8 +57,9 @@ export function PortfolioBrandStoreBilling({
               Facturación delivery — marca y tienda
             </h4>
             <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 max-w-xl">
-              Ingresos de pedidos entregados este mes, repartidos por línea comercial (marca) y centro de trabajo (tienda) dentro de{' '}
+              Ingresos de pedidos entregados este mes en{' '}
               <span className="font-semibold text-gray-700 dark:text-gray-300">{row.business.name}</span>.
+              Pedido de una sola marca → todo a esa (incl. bebidas). Pedidos mezclados → compartidos a partes iguales.
             </p>
           </div>
           <div className="flex rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-0.5 shrink-0">

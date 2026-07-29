@@ -24,7 +24,7 @@ export function SAAS__QA_Buttons() {
     { id: '9', category: 'Sidebar', item: 'ANCOVE navega correctamente', testPath: '/saas/ancove', checked: false },
     { id: '10', category: 'Sidebar', item: 'Equipo navega correctamente', testPath: '/saas/team', checked: false },
     { id: '11', category: 'Sidebar', item: 'Finanzas navega correctamente', testPath: '/saas/finance', checked: false },
-    { id: '12', category: 'Sidebar', item: 'Facturación navega correctamente', testPath: '/saas/billing', checked: false },
+    { id: '12', category: 'Sidebar', item: 'Mi plan navega correctamente', testPath: '/saas/billing', checked: false },
     { id: '13', category: 'Sidebar', item: 'Sistema navega correctamente', testPath: '/saas/settings', checked: false },
 
     // Topbar

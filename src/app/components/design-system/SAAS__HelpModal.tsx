@@ -64,7 +64,7 @@ export function SAAS__HelpModal({ isOpen, onClose }: Props) {
     { label: 'Crear una operación', link: '/saas/help#operaciones' },
     { label: 'Documentos y plantillas', link: '/saas/help#documentos' },
     { label: 'Integración ANCOVE', link: '/saas/help#ancove' },
-    { label: 'Facturación', link: '/saas/help#facturacion' },
+    { label: 'Mi plan', link: '/saas/help#facturacion' },
   ];
 
   const handleNavigate = (link: string) => {

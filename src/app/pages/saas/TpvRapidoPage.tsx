@@ -152,8 +152,6 @@ import {
   MapPin,
   CreditCard,
   Banknote,
-  Smartphone,
-  Wallet,
   ShoppingCart,
   CheckCircle2,
   Home,
@@ -1850,7 +1848,7 @@ export function TpvRapidoOrderFlow({
       setShowCreateForm(false);
       setDuplicateWarning(false);
       const pref = String(client.defaultPaymentMethod || '').trim().toLowerCase();
-      if (pref === 'efectivo' || pref === 'tarjeta' || pref === 'bizum' || pref === 'otro') {
+      if (pref === 'efectivo' || pref === 'tarjeta') {
         setPaymentMethod(pref);
       } else {
         setPaymentMethod(null);
@@ -3772,8 +3770,6 @@ export function TpvRapidoOrderFlow({
                     <option value="">Sin preferencia</option>
                     <option value="efectivo">Efectivo</option>
                     <option value="tarjeta">Tarjeta</option>
-                    <option value="bizum">Bizum</option>
-                    <option value="otro">Otros</option>
                   </select>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
@@ -4043,12 +4039,10 @@ export function TpvRapidoOrderFlow({
                     El cobro se confirma al entregar; si cambia, lo marcas entonces.
                   </p>
                 )}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   {([
                     { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
                     { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                    { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
-                    { key: 'otro' as const, label: 'Otros', icon: Wallet },
                   ]).map(({ key, label, icon: Icon }) => (
                     <button
                       key={key}
@@ -4624,12 +4618,10 @@ export function TpvRapidoOrderFlow({
               </div>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {([
                 { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
                 { key: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                { key: 'bizum' as const, label: 'Bizum', icon: Smartphone },
-                { key: 'otro' as const, label: 'Otros', icon: Wallet },
               ]).map(({ key, label, icon: Icon }) => (
                 <button
                   key={key}

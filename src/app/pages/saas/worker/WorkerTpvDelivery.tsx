@@ -686,8 +686,8 @@ function DeliverPaymentModal({
     ? (isMarkPaid
       ? '¿Cómo paga?'
       : isReparto
-        ? '¿Cómo paga el cliente? Elige efectivo, tarjeta, bizum u otros.'
-        : '¿Cómo ha pagado? Elige efectivo, tarjeta, bizum u otros.')
+        ? '¿Cómo paga el cliente? Elige efectivo o tarjeta.'
+        : '¿Cómo ha pagado? Elige efectivo o tarjeta.')
     : (isReparto ? 'Confirma el envío a reparto (ya cobrado en caja)' : 'Confirma la entrega (ya cobrado en caja)');
   const confirmAlreadyPaidLabel = isMarkPaid
     ? 'Confirmar cobro'
@@ -884,32 +884,6 @@ function DeliverPaymentModal({
                   <CreditCard className="w-7 h-7 text-blue-700 dark:text-blue-400" />
                 )}
                 <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Tarjeta</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onConfirm('bizum')}
-                disabled={loading}
-                className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors disabled:opacity-50"
-              >
-                {loading ? (
-                  <Loader2 className="w-7 h-7 animate-spin text-purple-600" />
-                ) : (
-                  <Smartphone className="w-7 h-7 text-purple-700 dark:text-purple-400" />
-                )}
-                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Bizum</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onConfirm('otro')}
-                disabled={loading}
-                className="flex flex-col items-center gap-2 py-4 px-2 rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
-              >
-                {loading ? (
-                  <Loader2 className="w-7 h-7 animate-spin text-gray-600" />
-                ) : (
-                  <Wallet className="w-7 h-7 text-gray-700 dark:text-gray-300" />
-                )}
-                <span className="text-xs font-bold text-gray-900 dark:text-gray-100">Otros</span>
               </button>
             </>
           ) : (
@@ -1139,11 +1113,10 @@ function OrderDetail({
           </div>
 
           {canCorrectPayment && (
-            <div className={`shrink-0 grid grid-cols-3 ${compact ? 'gap-1' : 'gap-2'}`}>
+            <div className={`shrink-0 grid grid-cols-2 ${compact ? 'gap-1' : 'gap-2'}`}>
               {([
                 { method: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
                 { method: 'tarjeta' as const, label: 'Tarjeta', icon: CreditCard },
-                { method: 'bizum' as const, label: 'Bizum', icon: Smartphone },
               ]).map(({ method, label, icon: Icon }) => {
                 const active = currentPayment === method;
                 return (

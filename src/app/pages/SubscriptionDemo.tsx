@@ -153,7 +153,7 @@ export function SubscriptionDemo() {
               Páginas
             </h3>
             <ul className="space-y-2 text-gray-700 dark:text-gray-300">
-              <li>✓ /saas/billing - Facturación</li>
+              <li>✓ /saas/billing - Mi plan</li>
               <li>✓ /saas/suspended - Suspensión</li>
               <li>✓ /subscription-demo - Esta demo</li>
             </ul>

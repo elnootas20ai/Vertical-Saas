@@ -9993,6 +9993,111 @@ export async function listBrandsByBusiness(req, businessId) {
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }
 
+// ─── BRAND BILLING CONFIG (Facturación entre marcas) ───────────────────────────
+
+export function brandBillingConfigId(businessId) {
+  return `brand-billing-${String(businessId || '').trim()}`;
+}
+
+function sanitizeBillingUnitColumns(cols) {
+  if (!Array.isArray(cols)) return [];
+  const allowed = new Set(['pizza', 'burger', 'taco']);
+  const defaults = {
+    pizza: 'TOTAL PIZZA',
+    burger: 'TOTAL BURGUER',
+    taco: 'TOTAL TACOS',
+  };
+  return cols
+    .map((c) => {
+      const key = String(c?.key || '').trim();
+      if (!allowed.has(key)) return null;
+      const header = String(c?.header || defaults[key] || key).trim().toUpperCase().slice(0, 24);
+      return { key, header };
+    })
+    .filter(Boolean);
+}
+
+export function buildBrandBillingConfigDocument(businessId, data = {}, existing = null) {
+  const now = new Date().toISOString();
+  const id = existing?._id || brandBillingConfigId(businessId);
+  const sheetsIn = Array.isArray(data.sheets) ? data.sheets : (Array.isArray(existing?.sheets) ? existing.sheets : []);
+  const sheetsRaw = sheetsIn
+    .map((s, idx) => {
+      if (!s || typeof s !== 'object') return null;
+      const sheetId = String(s.id || `sheet-${idx + 1}`).trim() || `sheet-${idx + 1}`;
+      const label = String(s.label || sheetId).trim().toUpperCase().slice(0, 31) || sheetId;
+      const brandIds = Array.isArray(s.brandIds)
+        ? s.brandIds.map((x) => String(x || '').trim()).filter(Boolean)
+        : [];
+      return {
+        id: sheetId,
+        label,
+        brandIds,
+        unitColumns: sanitizeBillingUnitColumns(s.unitColumns),
+      };
+    })
+    .filter(Boolean);
+
+  // Una marca solo en una hoja (la primera gana).
+  const seenBrand = new Set();
+  const sheets = sheetsRaw.map((s) => {
+    const brandIds = [];
+    for (const bid of s.brandIds) {
+      if (!bid || seenBrand.has(bid)) continue;
+      seenBrand.add(bid);
+      brandIds.push(bid);
+    }
+    return { ...s, brandIds };
+  });
+
+  const monoRaw =
+    data.monoBrandTakesAll !== undefined ? data.monoBrandTakesAll : existing?.monoBrandTakesAll;
+
+  const out = {
+    _id: id,
+    type: 'brand_billing_config',
+    business_id: String(businessId || ''),
+    sheets,
+    // Regla actual: lo compartido entero a la marca dominante (legacy → majority).
+    sharedSplitMode: 'majority',
+    monoBrandTakesAll: monoRaw !== false,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+  };
+  if (existing?._rev) out._rev = existing._rev;
+  return out;
+}
+
+export function sanitizeBrandBillingConfig(doc) {
+  if (!doc) return null;
+  return {
+    _id: doc._id,
+    _rev: doc._rev,
+    type: 'brand_billing_config',
+    business_id: doc.business_id || '',
+    sheets: Array.isArray(doc.sheets) ? doc.sheets : [],
+    sharedSplitMode: 'majority',
+    monoBrandTakesAll: doc.monoBrandTakesAll !== false,
+    createdAt: doc.createdAt || '',
+    updatedAt: doc.updatedAt || '',
+  };
+}
+
+export async function getBrandBillingConfigDoc(req, businessId) {
+  const db = getCatalogDbName();
+  await ensureDatabase(req, db);
+  const id = brandBillingConfigId(businessId);
+  try {
+    const doc = await getDocument(req, db, id);
+    // El _id ya fija la empresa; no fallar si business_id histórico no coincide 1:1
+    // (eso dejaba existing=null y el PUT sin _rev → conflict → «Guardar no va»).
+    if (!doc || doc.type !== 'brand_billing_config') return null;
+    return doc;
+  } catch {
+    return null;
+  }
+}
+
 // ─── CATALOG ITEMS ────────────────────────────────────────────────────────────
 
 export function buildCatalogItemDocument(userId, data = {}, existing = null) {

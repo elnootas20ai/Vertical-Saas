@@ -28,7 +28,7 @@ export function SAAS__Block4NavigationCompleteModal({ onComplete }: Props) {
           <div className="mb-8 p-6 bg-gradient-to-br from-blue-50 to-cyan-50 border-2 border-blue-200 rounded-xl">
             <h3 className="text-xl font-bold text-blue-900 mb-4">📱 Sidebar - 13 Items Activos</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {['Dashboard', 'Operaciones', 'Vehículos', 'Ubicaciones', 'Clientes', 'Documentos', 'Ventas', 'Llamadas (IA)', 'ANCOVE', 'Equipo', 'Finanzas', 'Facturación', 'Sistema'].map((item) => (
+              {['Dashboard', 'Operaciones', 'Vehículos', 'Ubicaciones', 'Clientes', 'Documentos', 'Ventas', 'Llamadas (IA)', 'ANCOVE', 'Equipo', 'Finanzas', 'Mi plan', 'Sistema'].map((item) => (
                 <div key={item} className="flex items-center gap-2 p-2 bg-white dark:bg-gray-800 rounded-lg">
                   <CheckCircle className="w-4 h-4 text-blue-600" />
                   <span className="text-sm font-medium text-blue-900">{item}</span>

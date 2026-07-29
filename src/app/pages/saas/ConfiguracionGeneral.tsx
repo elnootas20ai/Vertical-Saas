@@ -268,7 +268,7 @@ function computeAlerts(biz: Business | null, subscription: { status: string }): 
         id: 'plan-expired',
         type: 'critical',
         message: billingMsg,
-        action: subscription.status === 'trial_expired' ? 'Elegir plan' : 'Ir a facturación',
+        action: subscription.status === 'trial_expired' ? 'Elegir plan' : 'Ir a Mi plan',
         route: '/saas/settings/facturacion',
       });
     } else {
