@@ -9984,13 +9984,53 @@ export function sanitizeBrand(doc) {
   };
 }
 
+const catalogBrandIndexReady = new Set();
+const brandsByBusinessInflight = new Map();
+
+async function ensureCatalogBrandIndex(req, dbName) {
+  if (catalogBrandIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
+  await ensureIndex(req, dbName, ['type', 'business_id'], `idx-${safeDb}-type-business_id`).catch(() => null);
+  catalogBrandIndexReady.add(dbName);
+}
+
 export async function listBrandsByBusiness(req, businessId) {
+  const bid = String(businessId || '').trim();
+  if (!bid) return [];
+
   const db = getCatalogDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  return docs
-    .filter((doc) => doc?.type === 'brand' && !doc?.deletedAt && doc?.business_id === businessId)
-    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+
+  const inflightKey = `${db}:${bid}`;
+  if (brandsByBusinessInflight.has(inflightKey)) {
+    return brandsByBusinessInflight.get(inflightKey);
+  }
+
+  const promise = (async () => {
+    await ensureCatalogBrandIndex(req, db);
+    try {
+      const docs = await findDocuments(
+        req,
+        db,
+        { type: 'brand', business_id: bid },
+        { pageSize: 200, maxDocs: 500, use_index: `idx-${String(db).replace(/[^a-z0-9]/g, '-')}-type-business_id` },
+      );
+      return docs
+        .filter((doc) => doc && !doc.deletedAt)
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+    } catch {
+      // Fallback si el índice aún no está listo o _find falla.
+      const docs = await getCatalogDatabaseDocumentsInflight(req);
+      return docs
+        .filter((doc) => doc?.type === 'brand' && !doc?.deletedAt && doc?.business_id === bid)
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+    }
+  })().finally(() => {
+    brandsByBusinessInflight.delete(inflightKey);
+  });
+
+  brandsByBusinessInflight.set(inflightKey, promise);
+  return promise;
 }
 
 // ─── BRAND BILLING CONFIG (Facturación entre marcas) ───────────────────────────
