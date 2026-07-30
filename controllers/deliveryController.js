@@ -96,6 +96,7 @@ import {
   accumulateDeliveredOrderLines,
   roundRevenueMap,
 } from '../shared/delivery/orderLineRevenueSplit.js';
+import { buildFoodFamilyCountsFromOrders } from '../shared/delivery/foodFamilyCounts.js';
 import {
   buildStableImportCatalogSku,
   buildCatalogImportIndexes,
@@ -137,6 +138,7 @@ import {
   normalizeDeliveryOrderStatus,
 } from '../services/deliveryAlertStatusUtils.js';
 import { notifyManagersOrderCancelled, appendTpvIncidentForOrderCancel } from '../services/deliveryOrderNotifications.js';
+import { notifyTpvRegisterClosed } from '../services/tpvRegisterCloseNotifications.js';
 import { getApprovedVacationBlockingWork } from '../services/vacationClockinGate.js';
 import logger from '../services/logger.js';
 import {
@@ -3147,6 +3149,14 @@ export async function updateTpvRegisterSession(req, res) {
       } catch (finErr) {
         console.error('[CAJA-11] Error creating finance entry on register close:', finErr?.message);
       }
+
+      // Aviso CEO/gerentes: caja OK o con descuadre (in-app + push).
+      void notifyTpvRegisterClosed({
+        req,
+        dataUserId: userId,
+        actorUserId: req.authUser?.user_id || userId,
+        session: { ...doc, _rev: saved.rev },
+      });
     }
 
     const sanitizedSession = sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev });
@@ -3836,6 +3846,25 @@ function isSameDay(dateStr, targetDate) {
   return dateStr.slice(0, 10) === targetDate;
 }
 
+const OPS_ACTIVE_STATUSES = new Set(['nuevo', 'cocina', 'listo', 'en_reparto', 'incident']);
+
+/** Pedido que aporta a facturación/ticket/marcas en el centro operativo (cobrado o entregado). */
+function orderCountsAsOpsRevenue(order) {
+  if (!order) return false;
+  const status = String(order.status || '').toLowerCase();
+  if (status === 'cancelled' || status === 'cancelado') return false;
+  if (status === 'entregado') return true;
+  if (String(order.paymentStatus || '').toLowerCase() === 'refunded') return false;
+  if (order.paymentStatus === 'paid' || order.paymentCollected) return true;
+  const total = Number(order.totalAmount || 0);
+  const paid = Number(order.paidAmount || 0);
+  return paid > 0 && total > 0 && paid + 0.001 >= total;
+}
+
+function orderCreatedDayKey(order) {
+  return String(order?.createdAt || '').slice(0, 10);
+}
+
 const OPS_CASH_MOVEMENT_TYPES = new Set(['cash_in', 'cash_out', 'return']);
 
 function collectOpsCashMovements(tpvSessions, targetDate, salesPointId) {
@@ -4092,22 +4121,47 @@ export async function getOpsCenter(req, res) {
       slotObj = config.activeTimeSlots.find(s => s.id === timeSlot) || null;
     }
 
-    const allOrders = await listDeliveryOrdersByUser(req, userId);
-    let dayOrders = allOrders.filter(o => isSameDay(o.createdAt, targetDate));
+    const [allOrders, tpvSessions, driverSessions, pointsOfSaleAll] = await Promise.all([
+      listDeliveryOrdersByUser(req, userId),
+      listTpvRegisterSessionsByUser(req, userId),
+      listDriverCashSessionsByUser(req, userId),
+      listScopedPointsOfSaleForUser(req, userId).catch(() => []),
+    ]);
+    const pointsOfSale = businessPdvs || pointsOfSaleAll;
+    const scopedTpvSessions = scopeTpvSessionsForOps(tpvSessions, salesPointId, businessPdvs);
+    const scopedPointsOfSale = scopePointsOfSaleForOps(pointsOfSale, salesPointId, businessPdvs);
+    let openTpv = scopedTpvSessions.filter(s => s.status === 'open');
+    const openDriverSessions = driverSessions.filter(s => s.status === 'open');
 
-    if (salesPointId) {
-      const pdvs = businessPdvs || (await listScopedPointsOfSaleForUser(req, userId));
-      const primaryPdvId = pickPrimaryPdvId(pdvs);
-      const pdv = String(salesPointId).trim();
-      const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
-      const pdvName = String(pdvDoc?.name || '').trim();
-      const pdvWorkCenterId = String(pdvDoc?.workCenterId || '').trim();
-      dayOrders = dayOrders.filter((o) =>
-        orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName, pdvWorkCenterId),
-      );
-    } else if (businessPdvs && businessPdvs.length > 0) {
-      dayOrders = dayOrders.filter((o) => orderMatchesBusinessPdvs(o, businessPdvs));
+    // Ventana operativa: día elegido +, si hay caja abierta, desde el día de apertura
+    // (misma lógica que el TPV). Pedidos activos anteriores también entran (montaje/cocina…).
+    let ordersFromDay = targetDate;
+    for (const s of openTpv) {
+      const openedDay = String(s.openedAt || '').slice(0, 10);
+      if (openedDay && openedDay < ordersFromDay) ordersFromDay = openedDay;
     }
+
+    const pdvsForScope = businessPdvs || pointsOfSaleAll;
+    const primaryPdvId = salesPointId ? pickPrimaryPdvId(pdvsForScope) : null;
+    const pdv = salesPointId ? String(salesPointId).trim() : '';
+    const pdvDoc = pdv ? (pdvsForScope || []).find((p) => p && p._id === pdv) : null;
+    const pdvName = String(pdvDoc?.name || '').trim();
+    const pdvWorkCenterId = String(pdvDoc?.workCenterId || '').trim();
+
+    const matchesOpsPdv = (o) => {
+      if (pdv) return orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName, pdvWorkCenterId);
+      if (businessPdvs && businessPdvs.length > 0) return orderMatchesBusinessPdvs(o, businessPdvs);
+      return true;
+    };
+
+    let dayOrders = allOrders.filter((o) => {
+      if (!matchesOpsPdv(o)) return false;
+      const day = orderCreatedDayKey(o);
+      if (!day || day > targetDate) return false;
+      if (day >= ordersFromDay) return true;
+      return OPS_ACTIVE_STATUSES.has(String(o.status || '').toLowerCase());
+    });
+
     if (channel) dayOrders = dayOrders.filter(o => o.channel === channel);
     if (slotObj) dayOrders = dayOrders.filter(o => isInTimeSlot(o.createdAt, slotObj));
 
@@ -4120,8 +4174,9 @@ export async function getOpsCenter(req, res) {
     for (const o of orders) { if (byStatus[o.status] !== undefined) byStatus[o.status]++; }
 
     const delivered = orders.filter(o => o.status === 'entregado');
-    const revenue = delivered.reduce((s, o) => s + (o.totalAmount || 0), 0);
-    const avgTicket = delivered.length > 0 ? revenue / delivered.length : 0;
+    const revenueOrders = orders.filter(orderCountsAsOpsRevenue);
+    const revenue = revenueOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
+    const avgTicket = revenueOrders.length > 0 ? revenue / revenueOrders.length : 0;
 
     const prepTimes = delivered
       .map(o => o.kitchenStartedAt && o.assemblyCompletedAt ? (new Date(o.assemblyCompletedAt) - new Date(o.kitchenStartedAt)) / 60000 : null)
@@ -4140,17 +4195,6 @@ export async function getOpsCenter(req, res) {
     const delayThreshold = deliveryAlertCfg.delayThresholds?.delivery || config.delayThresholdMinutes || 40;
     const deliveredOnTime = deliveryTimes.filter(t => t <= delayThreshold).length;
     const deliveredLate = deliveryTimes.filter(t => t > delayThreshold).length;
-
-    const [tpvSessions, driverSessions, pointsOfSaleAll] = await Promise.all([
-      listTpvRegisterSessionsByUser(req, userId),
-      listDriverCashSessionsByUser(req, userId),
-      listScopedPointsOfSaleForUser(req, userId).catch(() => []),
-    ]);
-    const pointsOfSale = businessPdvs || pointsOfSaleAll;
-    const scopedTpvSessions = scopeTpvSessionsForOps(tpvSessions, salesPointId, businessPdvs);
-    const scopedPointsOfSale = scopePointsOfSaleForOps(pointsOfSale, salesPointId, businessPdvs);
-    let openTpv = scopedTpvSessions.filter(s => s.status === 'open');
-    const openDriverSessions = driverSessions.filter(s => s.status === 'open');
 
     let catalogItems = [];
     try { catalogItems = await listCatalogItemsByUser(req, userId, { module: 'stock' }); } catch { /* ignore */ }
@@ -4179,13 +4223,13 @@ export async function getOpsCenter(req, res) {
     const drivers = new Set(inDelivery.map(o => o.assignedDriver).filter(Boolean));
 
     const revenueByChannel = {};
-    for (const o of delivered) {
+    for (const o of revenueOrders) {
       const ch = o.channel || 'direct';
       revenueByChannel[ch] = (revenueByChannel[ch] || 0) + (o.totalAmount || 0);
     }
 
     const revenueByHour = {};
-    for (const o of delivered) {
+    for (const o of revenueOrders) {
       if (!o.createdAt) continue;
       const hour = o.createdAt.slice(11, 13) + ':00';
       if (!revenueByHour[hour]) revenueByHour[hour] = { hour, revenue: 0, orders: 0 };
@@ -4195,9 +4239,16 @@ export async function getOpsCenter(req, res) {
 
     const revenueByBrand = {};
     const revenueByCategory = {};
-    for (const o of delivered) {
+    for (const o of revenueOrders) {
       accumulateDeliveredOrderLines(o, revenueByBrand, revenueByCategory);
     }
+
+    // Unidades comida del día/sesión (no cancelados): pizza / burger / taco.
+    const foodCountable = orders.filter((o) => {
+      const st = String(o.status || '').toLowerCase();
+      return st !== 'cancelled' && st !== 'cancelado';
+    });
+    const foodFamilyCounts = buildFoodFamilyCountsFromOrders(foodCountable);
 
     const pdvs = pointsOfSale;
 
@@ -4247,24 +4298,33 @@ export async function getOpsCenter(req, res) {
         pendingClose: openTpv.filter(s => minutesSince(s.openedAt) / 60 > 14).length,
         pendingValidation: scopedTpvSessions.filter(s => s.status === 'closed' && s.closingValidationStatus === 'pending').length,
         todayTotalSales: (() => {
-          const todayStr = new Date().toISOString().slice(0, 10);
-          return scopedTpvSessions.filter(s => s.openedAt?.startsWith(todayStr)).reduce((sum, s) => {
-            return sum + (s.transactions || []).filter(t => t.type === 'sale').reduce((ts, t) => ts + (t.amount || 0), 0);
-          }, 0);
+          return scopedTpvSessions
+            .filter((s) =>
+              s.status === 'open'
+              || String(s.openedAt || '').startsWith(targetDate)
+              || String(s.closedAt || '').startsWith(targetDate),
+            )
+            .reduce((sum, s) => {
+              return sum + (s.transactions || []).filter((t) => t.type === 'sale').reduce((ts, t) => ts + (t.amount || 0), 0);
+            }, 0);
         })(),
         todaySalesByMethod: (() => {
-          const todayStr = new Date().toISOString().slice(0, 10);
           const result = { efectivo: 0, tarjeta: 0, bizum: 0, online: 0, otro: 0 };
-          for (const s of scopedTpvSessions.filter(s => s.openedAt?.startsWith(todayStr))) {
-            for (const t of (s.transactions || []).filter(t => t.type === 'sale')) {
+          for (const s of scopedTpvSessions.filter((sess) =>
+            sess.status === 'open'
+            || String(sess.openedAt || '').startsWith(targetDate)
+            || String(sess.closedAt || '').startsWith(targetDate),
+          )) {
+            for (const t of (s.transactions || []).filter((tx) => tx.type === 'sale')) {
               result[t.paymentMethod] = (result[t.paymentMethod] || 0) + (t.amount || 0);
             }
           }
           return result;
         })(),
         todayDiscrepancy: (() => {
-          const todayStr = new Date().toISOString().slice(0, 10);
-          return scopedTpvSessions.filter(s => s.status === 'closed' && s.closedAt?.startsWith(todayStr)).reduce((sum, s) => sum + (s.difference || 0), 0);
+          return scopedTpvSessions
+            .filter((s) => s.status === 'closed' && String(s.closedAt || '').startsWith(targetDate))
+            .reduce((sum, s) => sum + (s.difference || 0), 0);
         })(),
         openIncidentCount: scopedTpvSessions.reduce((sum, s) => sum + (s.incidents || []).filter(i => !i.resolvedAt).length, 0),
         recentCashMovements: collectOpsCashMovements(scopedTpvSessions, targetDate, salesPointId),
@@ -4286,6 +4346,7 @@ export async function getOpsCenter(req, res) {
       revenueByHour: Object.values(revenueByHour).sort((a, b) => a.hour.localeCompare(b.hour)),
       revenueByBrand: roundRevenueMap(revenueByBrand),
       revenueByCategory: roundRevenueMap(revenueByCategory),
+      foodFamilyCounts,
       brandLabels,
       pointsOfSale: pdvs.map(sanitizePointOfSale),
     });

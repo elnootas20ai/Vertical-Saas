@@ -3,8 +3,8 @@
  *
  * Excel de cierre: 1 hoja por «cubo» (sheet). Dinero se reparte por unidades
  * de las columnas de ese cubo vs el total de unidades de todos los cubos.
- * Pedidos cruzados: lo compartido va entero a la marca dominante del ticket
- * (más unidades; empate → más €).
+ * Pedidos cruzados: lo compartido (bebidas…) según sharedSplitMode
+ * (majority = dominante; equal = a medias 1/N).
  */
 import type { Brand } from './brandApi';
 import { isBrandActive, isDefaultBrandNamePlaceholder, isDefaultCommercialBrand } from './brandUtils';
@@ -36,7 +36,8 @@ export type BrandBillingConfig = {
   /**
    * Pedido cruzado (2+ marcas): cómo asignar lo sin marca (bebidas/postres…).
    * - majority: entero a la marca con más uds (empate → más €)
-   * - by_units / equal: legacy → se tratan como majority
+   * - equal: a medias (1/N) entre las marcas del ticket
+   * - by_units: legacy → equal
    */
   sharedSplitMode: BrandBillingSharedSplitMode;
   /** Pedido de 1 sola marca: bebidas/postres sin marca van enteros a esa marca. */
@@ -52,16 +53,32 @@ export type BrandBillingSplitRules = {
 };
 
 export const SHARED_SPLIT_MODE_OPTIONS: Array<{
-  value: BrandBillingSharedSplitMode;
+  value: 'majority' | 'equal';
   label: string;
   hint: string;
+  example: string;
 }> = [
   {
     value: 'majority',
     label: 'Marca dominante',
-    hint: 'Ej.: 2 de A + 1 de B → bebidas y postres van enteros a A. Si empatan en uds, gana la que más € lleva en el pedido.',
+    hint: 'Lo compartido (bebidas, postres…) va entero a la marca con más unidades.',
+    example: '2 de A + 1 de B + bebida 2,50 € → 2,50 € a A',
+  },
+  {
+    value: 'equal',
+    label: 'A medias (1 a 1)',
+    hint: 'Lo compartido se parte a partes iguales entre las marcas del ticket.',
+    example: 'A + B + bebida 2,50 € → 1,25 € a A y 1,25 € a B',
   },
 ];
+
+export function normalizeBillingSharedSplitMode(
+  raw: string | null | undefined,
+): 'majority' | 'equal' {
+  const mode = String(raw || 'majority').trim();
+  if (mode === 'equal' || mode === 'by_units') return 'equal';
+  return 'majority';
+}
 
 export const FOOD_UNIT_OPTIONS: Array<{ key: FoodUnitKey; defaultHeader: string; label: string }> = [
   { key: 'pizza', defaultHeader: 'TOTAL PIZZA', label: 'Pizzas' },
@@ -92,7 +109,7 @@ export function splitRulesFromBillingConfig(
   config: Pick<BrandBillingConfig, 'sharedSplitMode' | 'monoBrandTakesAll'> | null | undefined,
 ): BrandBillingSplitRules {
   return {
-    sharedSplitMode: 'majority',
+    sharedSplitMode: normalizeBillingSharedSplitMode(config?.sharedSplitMode),
     monoBrandTakesAll: config?.monoBrandTakesAll !== false,
   };
 }
@@ -339,7 +356,7 @@ export function normalizeBrandBillingConfig(
     _id: String(raw._id || base._id),
     _rev: raw._rev,
     sheets,
-    sharedSplitMode: 'majority',
+    sharedSplitMode: normalizeBillingSharedSplitMode(raw.sharedSplitMode),
     monoBrandTakesAll: raw.monoBrandTakesAll !== false,
     createdAt: String(raw.createdAt || base.createdAt || ''),
     updatedAt: String(raw.updatedAt || base.updatedAt),
@@ -386,13 +403,12 @@ export function sheetMoneyShares(
 }
 
 /**
- * Pedido cruzado: unidades compartidas → enteras a la marca dominante.
- * (majority; by_units/equal legacy se comportan igual).
+ * Pedido cruzado: unidades compartidas según mode (majority | equal).
  */
 export function allocateSharedUnitsByPresence(
   brandedUnitsByBrandId: Record<string, number>,
   sharedUnits: number,
-  _mode: BrandBillingSharedSplitMode = 'majority',
+  mode: BrandBillingSharedSplitMode = 'majority',
   brandedRevenueByBrandId: Record<string, number> = {},
 ): Record<string, number> {
   const result: Record<string, number> = {};
@@ -407,6 +423,22 @@ export function allocateSharedUnitsByPresence(
     .map(([id]) => id)
     .sort((a, b) => a.localeCompare(b));
   if (ids.length === 0) return result;
+
+  const normalized = normalizeBillingSharedSplitMode(mode);
+  if (normalized === 'equal') {
+    const each = shared / ids.length;
+    let assigned = 0;
+    for (let i = 0; i < ids.length; i += 1) {
+      const id = ids[i];
+      const part =
+        i === ids.length - 1
+          ? Math.round((shared - assigned) * 100) / 100
+          : Math.round(each * 100) / 100;
+      result[id] = (result[id] || 0) + part;
+      assigned += part;
+    }
+    return result;
+  }
 
   let best = ids[0];
   let bestU = -1;

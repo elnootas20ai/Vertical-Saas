@@ -33,6 +33,8 @@ describe('catalogCustomization TPV', () => {
       { id: '2', name: 'Extra queso', price: 0.9 },
     ]);
     expect(normalizeTpvDefaultExtraPrice('.90')).toBe(0.9);
+    expect(normalizeTpvDefaultExtraPrice('0,90')).toBe(0.9);
+    expect(normalizeTpvDefaultExtraPrice('1,5')).toBe(1.5);
     expect(ingredientChargesExtra(master[1])).toBe(true);
     expect(inferTpvDefaultExtraPrice(master, 2)).toBe(2);
   });
@@ -57,6 +59,43 @@ describe('catalogCustomization TPV', () => {
     expect(parseCatalogSupplements(item, undefined, undefined, undefined, masterMod, 0.9, [modomioBrand])).toEqual([
       { id: '2', name: 'Extra bacon', price: 0.9 },
     ]);
+  });
+
+  it('extras TPV: parte «queso y tomate», lista completa de marca y flags chargeExtra', () => {
+    const master = [
+      {
+        id: 'e1',
+        name: 'Queso y tomate',
+        role: 'extra',
+        brandIds: ['mod'],
+        productParts: ['hamburguesas'],
+      },
+      {
+        id: 'e2',
+        name: 'Bacon',
+        role: 'base',
+        tpvChargeExtra: true,
+        tpvAllowRemove: true,
+        brandIds: ['mod'],
+        productParts: ['pizzas'],
+      },
+      {
+        id: 'e3',
+        name: 'Cebolla',
+        role: 'extra',
+        brandIds: ['otra'],
+        productParts: ['pizzas'],
+      },
+    ];
+    const pizza = { category: 'Pizzas', brandIds: ['mod'], customFields: {}, name: 'Margarita' };
+    const extras = parseCatalogSupplements(pizza, undefined, undefined, undefined, master, 0.9, [modomioBrand]);
+    expect(extras.map((e) => e.name).sort((a, b) => a.localeCompare(b, 'es'))).toEqual([
+      'Bacon',
+      'Queso',
+      'tomate',
+    ]);
+    expect(extras.every((e) => e.price === 0.9)).toBe(true);
+    expect(extras.some((e) => e.name === 'Cebolla')).toBe(false);
   });
 
   it('TPV solo usa ingredientes del producto, no la lista maestra', () => {

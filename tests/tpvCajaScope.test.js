@@ -78,6 +78,29 @@ describe('resolveActiveTpvRegisterSession', () => {
     expect(r.nextSticky?._id).toBe('s1');
   });
 
+  it('CEO: pick desconocido no suelta la caja (evita parpadeo)', () => {
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [openPdv1],
+      sticky: openPdv1,
+      pickId: 'pdv-missing',
+      pointsOfSale: pdvs,
+      holdStickyWhileOpen: false,
+    });
+    expect(r.session?._id).toBe('s1');
+    expect(r.nextSticky?._id).toBe('s1');
+  });
+
+  it('CEO: sin PDVs cargados no suelta sticky (match WC↔PDV incompleto)', () => {
+    const r = resolveActiveTpvRegisterSession({
+      sessions: [openWc1],
+      sticky: openWc1,
+      pickId: 'pdv-1',
+      pointsOfSale: [],
+      holdStickyWhileOpen: false,
+    });
+    expect(r.session?._id).toBe('s1');
+  });
+
   it('CEO mid-order (holdSticky): keeps caja when pick flickers to another store', () => {
     const r = resolveActiveTpvRegisterSession({
       sessions: [openPdv1],

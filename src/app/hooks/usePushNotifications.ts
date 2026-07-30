@@ -1,9 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { getApiBase } from '../lib/apiBase';
 import { isVertialNativeApp } from '../lib/vertialPrint/isNativeApp';
+import { readPushConsent, writePushConsent } from '../lib/pushPermissionConsent';
 
 const env = (import.meta as ImportMeta & { env?: Record<string, string> }).env || {};
-
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
@@ -53,17 +53,13 @@ async function unregisterSubscription(
 }
 
 interface UsePushNotificationsOptions {
-  /** userId del usuario autenticado; null desactiva el hook */
   userId: string | null;
-  /** JWT access token */
   token: string | null;
 }
 
 /**
- * Hook que gestiona la suscripción Web Push del usuario.
- * - Solicita permiso al montarse si hay usuario autenticado.
- * - Registra la suscripción en el backend.
- * - Cancela y limpia al desmontar o cerrar sesión.
+ * Web Push (PWA). No llama a requestPermission solo:
+ * el soft prompt de PushPermissionGate pide 1 vez; aquí solo suscribe si granted.
  */
 export function usePushNotifications({ userId, token }: UsePushNotificationsOptions) {
   const subscriptionRef = useRef<PushSubscription | null>(null);
@@ -73,9 +69,14 @@ export function usePushNotifications({ userId, token }: UsePushNotificationsOpti
     if (!userId || !token) return;
     if (isVertialNativeApp()) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!('Notification' in window)) return;
 
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return;
+    // Solo si el usuario (o el soft prompt) ya concedió.
+    if (Notification.permission !== 'granted') return;
+
+    if (readPushConsent(userId).decision !== 'accepted') {
+      writePushConsent(userId, 'accepted');
+    }
 
     const vapidKey = env.VITE_VAPID_PUBLIC_KEY || (await getVapidPublicKey(apiBase));
     if (!vapidKey) {
@@ -108,15 +109,17 @@ export function usePushNotifications({ userId, token }: UsePushNotificationsOpti
 
   useEffect(() => {
     if (userId && token) {
-      subscribe().catch((err) =>
-        console.warn('[Push] Error al suscribirse a notificaciones push:', err?.message),
-      );
-    } else {
-      unsubscribe().catch(() => {});
+      const run = () => {
+        subscribe().catch((err) =>
+          console.warn('[Push] Error al suscribirse a notificaciones push:', err?.message),
+        );
+      };
+      run();
+      window.addEventListener('vertial:push-register-now', run);
+      return () => window.removeEventListener('vertial:push-register-now', run);
     }
 
-    return () => {
-      // No desuscribimos al desmontar para mantener el SW activo
-    };
+    unsubscribe().catch(() => {});
+    return undefined;
   }, [userId, token, subscribe, unsubscribe]);
 }

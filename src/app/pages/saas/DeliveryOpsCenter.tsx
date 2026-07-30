@@ -9,10 +9,14 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   DELIVERY_ACTIVE_STORE_CHANGED,
+  DELIVERY_OPS_LIVE_ALL_FILTER,
   coerceSelectedPdvId,
   readDeliveryOpsSelectedPdvId,
   writeDeliveryOpsSelectedPdvId,
+  readDeliveryOpsViewMode,
+  writeDeliveryOpsViewMode,
   notifyDeliveryActiveStoreChanged,
+  type DeliveryOpsViewMode,
 } from '../../lib/deliveryOpsPdvSelection';
 import { useSSE } from '../../hooks/useSSE';
 import { DELIVERY_OPS_LIVE_EVENT } from '../../lib/deliveryOpsLive';
@@ -118,9 +122,21 @@ function OrderBrandBadges({
 
 /* ── Filters Bar ─────────────────────────────────────────────────────────── */
 
-function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
-  filters: OpsCenterFilters; onChange: (f: OpsCenterFilters) => void;
-  config: DeliveryConfig | null; pdvs: PointOfSale[];
+function FiltersBar({
+  filters,
+  onChange,
+  config,
+  pdvs,
+  viewMode,
+  onViewModeChange,
+  sticky = false,
+}: {
+  filters: OpsCenterFilters;
+  onChange: (f: OpsCenterFilters) => void;
+  config: DeliveryConfig | null;
+  pdvs: PointOfSale[];
+  viewMode: DeliveryOpsViewMode;
+  onViewModeChange: (mode: DeliveryOpsViewMode, salesPointId?: string) => void;
   /** Solo útil fuera de paneles con scroll interno; dentro de Ops evita huecos raros */
   sticky?: boolean;
 }) {
@@ -190,21 +206,30 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
   ].join(' · ');
 
   const wrapClass = sticky ? 'sticky top-0 z-10' : '';
+  const selectValue =
+    viewMode === 'live_all'
+      ? DELIVERY_OPS_LIVE_ALL_FILTER
+      : filters.salesPointId && pdvs.some((p) => p._id === filters.salesPointId)
+        ? filters.salesPointId
+        : '';
 
   return (
     <div className={wrapClass}>
       <div className="bg-white/95 dark:bg-gray-900/90 backdrop-blur-sm border border-gray-200/90 dark:border-gray-700 rounded-xl px-3 py-2 shadow-sm flex flex-wrap gap-2 items-center">
         {pdvs.length > 1 ? (
           <select
-            className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none"
-            value={
-              filters.salesPointId && pdvs.some((p) => p._id === filters.salesPointId)
-                ? filters.salesPointId
-                : ''
-            }
-            onChange={(e) => onChange({ ...filters, salesPointId: e.target.value || undefined })}
+            className="px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none min-w-[12rem]"
+            value={selectValue}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === DELIVERY_OPS_LIVE_ALL_FILTER) {
+                onViewModeChange('live_all');
+                return;
+              }
+              onViewModeChange('single', v || undefined);
+            }}
           >
-            <option value="">Todas las tiendas</option>
+            <option value={DELIVERY_OPS_LIVE_ALL_FILTER}>En directo · todas</option>
             {pdvs.map((p) => (
               <option key={p._id} value={p._id}>
                 {pointOfSaleDisplayLabel(p)}
@@ -309,7 +334,9 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
                   type="button"
                   onClick={() => onChange({
                     date: today,
-                    ...(filters.salesPointId ? { salesPointId: filters.salesPointId } : {}),
+                    ...(viewMode === 'single' && filters.salesPointId
+                      ? { salesPointId: filters.salesPointId }
+                      : {}),
                   })}
                   className="w-full px-2.5 py-2 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 flex items-center justify-center gap-1 border-t border-gray-100 dark:border-gray-800 pt-3"
                 >
@@ -322,6 +349,329 @@ function FiltersBar({ filters, onChange, config, pdvs, sticky = false }: {
       </div>
     </div>
   );
+}
+
+/* ── Live multi-PDV column ───────────────────────────────────────────────── */
+
+function foodCountsOf(data: OpsCenterData | null): { pizza: number; burger: number; taco: number } {
+  const f = data?.foodFamilyCounts;
+  return {
+    pizza: Number(f?.pizza || 0),
+    burger: Number(f?.burger || 0),
+    taco: Number(f?.taco || 0),
+  };
+}
+
+function brandRowsOf(
+  data: OpsCenterData | null,
+  limit = 4,
+): Array<{ id: string; label: string; amount: number }> {
+  const map = data?.revenueByBrand || {};
+  const labels = data?.brandLabels || {};
+  return Object.entries(map)
+    .map(([id, amount]) => ({
+      id,
+      label: brandDisplayName(id, labels),
+      amount: Number(amount) || 0,
+    }))
+    .filter((r) => r.amount > 0.009)
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit);
+}
+
+function OpsPdvLiveColumn({
+  pdv,
+  data,
+  onFocusStore,
+}: {
+  pdv: PointOfSale;
+  data: OpsCenterData | null;
+  onFocusStore: (pdvId: string) => void;
+}) {
+  const byStatus = data?.kpis?.byStatus || {};
+  const phases = [
+    { key: 'nuevo' as const, short: 'Nuevos' },
+    { key: 'cocina' as const, short: 'Cocina' },
+    { key: 'listo' as const, short: 'Montaje' },
+    { key: 'en_reparto' as const, short: 'Reparto' },
+    { key: 'incident' as const, short: 'Incid.' },
+  ];
+  const openCash = data?.cashStatus?.openTpvSessions?.length || 0;
+  const pendingClose = data?.cashStatus?.pendingClose || 0;
+  const revenue = data?.kpis?.revenue ?? 0;
+  const orders = data?.kpis?.totalOrders ?? 0;
+  const food = foodCountsOf(data);
+  const brands = brandRowsOf(data, 3);
+  const inFlight =
+    (byStatus.nuevo || 0)
+    + (byStatus.cocina || 0)
+    + (byStatus.listo || 0)
+    + (byStatus.en_reparto || 0);
+  const label = pointOfSaleDisplayLabel(pdv);
+  const loading = !data;
+  const hasFood = food.pizza + food.burger + food.taco > 0;
+
+  return (
+    <div className="relative rounded-2xl border border-gray-200/90 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md hover:border-teal-300/70 dark:hover:border-teal-700/60 transition-all overflow-hidden flex flex-col min-h-0">
+      <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-teal-500 to-cyan-500" aria-hidden />
+      <div className="pl-3.5 pr-3 pt-3 pb-2 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-teal-700/80 dark:text-teal-400/90 mb-0.5">
+            Tienda
+          </p>
+          <p className="text-base font-bold text-gray-900 dark:text-gray-50 truncate leading-tight">
+            {label}
+          </p>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+            <span className="font-semibold text-gray-800 dark:text-gray-200">{orders} pedidos</span>
+            <span className="text-gray-300 dark:text-gray-600">·</span>
+            <span className="font-semibold text-emerald-700 dark:text-emerald-400">{eur(revenue)} €</span>
+            {inFlight > 0 && (
+              <>
+                <span className="text-gray-300 dark:text-gray-600">·</span>
+                <span className="font-semibold text-amber-700 dark:text-amber-400">{inFlight} en curso</span>
+              </>
+            )}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onFocusStore(pdv._id)}
+          className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/80 dark:bg-teal-950/40 px-2.5 py-1.5 text-[11px] font-bold text-teal-800 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/50 transition-colors"
+        >
+          Ver detalle
+        </button>
+      </div>
+
+      <div className="px-3 pb-2 space-y-2">
+        {loading ? (
+          <div className="h-[4.5rem] rounded-xl bg-gray-50 dark:bg-gray-800/80 animate-pulse" />
+        ) : (
+          <>
+            <div className="grid grid-cols-5 gap-1.5">
+              {phases.map(({ key, short }) => {
+                const c = STATUS_CFG[key];
+                if (!c) return null;
+                const n = byStatus[key] || 0;
+                const hot = n > 0;
+                return (
+                  <div
+                    key={key}
+                    className={`rounded-xl border px-1 py-2 text-center transition-colors ${
+                      hot
+                        ? `${c.bg} ${c.border}`
+                        : 'bg-gray-50/80 dark:bg-gray-800/50 border-gray-100 dark:border-gray-800'
+                    }`}
+                    title={c.label}
+                  >
+                    <div className={`text-lg font-black tabular-nums leading-none ${hot ? c.text : 'text-gray-400 dark:text-gray-500'}`}>
+                      {n}
+                    </div>
+                    <div className={`text-[9px] font-semibold mt-1 truncate ${hot ? c.text : 'text-gray-400 dark:text-gray-500'} opacity-90`}>
+                      {short}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                { key: 'pizza', label: 'Pizzas', n: food.pizza, tone: 'text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/40 border-rose-200/80 dark:border-rose-900' },
+                { key: 'burger', label: 'Burgers', n: food.burger, tone: 'text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-amber-200/80 dark:border-amber-900' },
+                { key: 'taco', label: 'Tacos', n: food.taco, tone: 'text-lime-800 dark:text-lime-300 bg-lime-50 dark:bg-lime-950/40 border-lime-200/80 dark:border-lime-900' },
+              ] as const).map((row) => (
+                <div
+                  key={row.key}
+                  className={`rounded-xl border px-1.5 py-1.5 text-center ${row.n > 0 ? row.tone : 'bg-gray-50/80 dark:bg-gray-800/40 border-gray-100 dark:border-gray-800 text-gray-400'}`}
+                >
+                  <div className="text-base font-black tabular-nums leading-none">{row.n}</div>
+                  <div className="text-[9px] font-semibold mt-0.5 opacity-90">{row.label}</div>
+                </div>
+              ))}
+            </div>
+
+            {brands.length > 0 ? (
+              <div className="rounded-xl border border-violet-100 dark:border-violet-900/50 bg-violet-50/40 dark:bg-violet-950/20 px-2.5 py-2 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-violet-700/80 dark:text-violet-300/90">
+                  Por marca
+                </p>
+                {brands.map((b) => (
+                  <div key={b.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate font-semibold text-gray-800 dark:text-gray-200">{b.label}</span>
+                    <span className="tabular-nums font-bold text-violet-700 dark:text-violet-300 shrink-0">
+                      {eur(b.amount)} €
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : !hasFood ? (
+              <p className="text-[11px] text-center text-gray-400 dark:text-gray-500 py-1">
+                Sin comida ni marcas aún hoy
+              </p>
+            ) : null}
+          </>
+        )}
+      </div>
+
+      <div className="mt-auto px-3 pb-3 pt-1 flex flex-wrap items-center gap-1.5 text-[11px] border-t border-gray-100/90 dark:border-gray-800/90 bg-gray-50/40 dark:bg-gray-950/30">
+        {openCash > 0 ? (
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 font-semibold border border-emerald-200/80 dark:border-emerald-800">
+            <Wallet className="w-3 h-3" />
+            {openCash} caja abierta{openCash !== 1 ? 's' : ''}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white dark:bg-gray-900 text-gray-500 font-medium border border-gray-200 dark:border-gray-700">
+            Sin caja
+          </span>
+        )}
+        {pendingClose > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 font-bold border border-red-200 dark:border-red-800">
+            {pendingClose} cierre pend.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OpsFoodAndBrandsStrip({
+  food,
+  brands,
+  title = 'Comida y marcas',
+}: {
+  food: { pizza: number; burger: number; taco: number };
+  brands: Array<{ id: string; label: string; amount: number }>;
+  title?: string;
+}) {
+  const hasFood = food.pizza + food.burger + food.taco > 0;
+  if (!hasFood && brands.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3.5 shadow-sm">
+      <h3 className="text-xs font-bold mb-2.5 uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+        <Package className="w-4 h-4 opacity-80" /> {title}
+      </h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-2">
+          {([
+            { label: 'Pizzas', n: food.pizza, cls: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300' },
+            { label: 'Burgers', n: food.burger, cls: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300' },
+            { label: 'Tacos', n: food.taco, cls: 'border-lime-200 bg-lime-50 text-lime-900 dark:border-lime-900 dark:bg-lime-950/40 dark:text-lime-300' },
+          ]).map((row) => (
+            <div key={row.label} className={`rounded-xl border px-2 py-2.5 text-center ${row.cls}`}>
+              <div className="text-xl font-black tabular-nums leading-none">{row.n}</div>
+              <div className="text-[10px] font-bold mt-1 opacity-90">{row.label}</div>
+            </div>
+          ))}
+        </div>
+        <div className="space-y-1.5 min-h-[4.5rem]">
+          {brands.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-4">Sin € por marca aún (hace falta cobrado/entregado)</p>
+          ) : (
+            brands.map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center justify-between gap-2 rounded-lg bg-violet-50/70 dark:bg-violet-950/30 border border-violet-100 dark:border-violet-900/40 px-2.5 py-1.5"
+              >
+                <span className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{b.label}</span>
+                <span className="text-xs font-bold tabular-nums text-violet-700 dark:text-violet-300 shrink-0">
+                  {eur(b.amount)} €
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function aggregateLiveOpsKpis(rows: OpsCenterData[]): OpsCenterData['kpis'] | null {
+  if (!rows.length) return null;
+  const byStatus: Record<string, number> = {
+    nuevo: 0, cocina: 0, listo: 0, en_reparto: 0, entregado: 0, cancelled: 0, incident: 0,
+  };
+  let revenue = 0;
+  let totalOrders = 0;
+  let deliveredOnTime = 0;
+  let deliveredLate = 0;
+  let prepSum = 0;
+  let prepN = 0;
+  let delSum = 0;
+  let delN = 0;
+  let ticketDenom = 0;
+  for (const r of rows) {
+    const k = r.kpis;
+    if (!k) continue;
+    totalOrders += Number(k.totalOrders || 0);
+    revenue += Number(k.revenue || 0);
+    deliveredOnTime += Number(k.deliveredOnTime || 0);
+    deliveredLate += Number(k.deliveredLate || 0);
+    for (const key of Object.keys(byStatus)) {
+      byStatus[key] += Number((k.byStatus as Record<string, number> | undefined)?.[key] || 0);
+    }
+    if (Number(k.avgPrepTimeMinutes) > 0) {
+      prepSum += Number(k.avgPrepTimeMinutes);
+      prepN += 1;
+    }
+    if (Number(k.avgDeliveryTimeMinutes) > 0) {
+      delSum += Number(k.avgDeliveryTimeMinutes);
+      delN += 1;
+    }
+    // Reconstruir nº de pedidos que alimentan el ticket (cobrados/entregados).
+    const avg = Number(k.averageTicket || 0);
+    const rev = Number(k.revenue || 0);
+    if (avg > 0.009 && rev > 0) {
+      ticketDenom += Math.max(1, Math.round(rev / avg));
+    } else if ((k.byStatus?.entregado || 0) > 0) {
+      ticketDenom += Number(k.byStatus.entregado);
+    }
+  }
+  const timed = deliveredOnTime + deliveredLate;
+  return {
+    totalOrders,
+    byStatus: byStatus as OpsCenterData['kpis']['byStatus'],
+    revenue: Math.round(revenue * 100) / 100,
+    averageTicket: ticketDenom > 0 ? Math.round((revenue / ticketDenom) * 100) / 100 : 0,
+    avgPrepTimeMinutes: prepN > 0 ? Math.round((prepSum / prepN) * 10) / 10 : 0,
+    avgDeliveryTimeMinutes: delN > 0 ? Math.round((delSum / delN) * 10) / 10 : 0,
+    deliveredOnTime,
+    deliveredLate,
+    onTimePercentage: timed > 0 ? Math.round((deliveredOnTime / timed) * 1000) / 10 : 100,
+  };
+}
+
+function aggregateLiveFoodFamilyCounts(
+  rows: OpsCenterData[],
+): OpsCenterData['foodFamilyCounts'] {
+  const out = { pizza: 0, burger: 0, taco: 0 };
+  for (const r of rows) {
+    const f = r.foodFamilyCounts;
+    out.pizza += Number(f?.pizza || 0);
+    out.burger += Number(f?.burger || 0);
+    out.taco += Number(f?.taco || 0);
+  }
+  return out;
+}
+
+function aggregateLiveRevenueByBrand(rows: OpsCenterData[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    for (const [id, amount] of Object.entries(r.revenueByBrand || {})) {
+      out[id] = Math.round(((out[id] || 0) + (Number(amount) || 0)) * 100) / 100;
+    }
+  }
+  return out;
+}
+
+function mergeLiveBrandLabels(rows: OpsCenterData[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    for (const [id, label] of Object.entries(r.brandLabels || {})) {
+      if (!out[id] && label) out[id] = label;
+    }
+  }
+  return out;
 }
 
 /* ── Status Pipeline ─────────────────────────────────────────────────────── */
@@ -740,22 +1090,69 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, activationFoc
 
 /* ── Metrics ──────────────────────────────────────────────────────────────── */
 
-function Metrics({ kpis }: { kpis: OpsCenterData['kpis'] | null }) {
+function Metrics({
+  kpis,
+  title = 'Métricas operativas',
+  hint,
+}: {
+  kpis: OpsCenterData['kpis'] | null;
+  title?: string;
+  hint?: string | null;
+}) {
   if (!kpis) return null;
+  const hasTimedDeliveries = (Number(kpis.deliveredOnTime) || 0) + (Number(kpis.deliveredLate) || 0) > 0;
+  const hasPrep = Number(kpis.avgPrepTimeMinutes) > 0;
+  const hasDeliveryAvg = Number(kpis.avgDeliveryTimeMinutes) > 0;
+  const hasTicket = Number(kpis.averageTicket) > 0 || Number(kpis.revenue) > 0;
   const cards = [
     { l: 'Facturación', v: `${eur(kpis.revenue)} €`, i: Euro, c: 'text-emerald-600 dark:text-emerald-400' },
     { l: 'Pedidos', v: String(kpis.totalOrders), i: ShoppingBag, c: 'text-blue-600 dark:text-blue-400' },
-    { l: 'Ticket medio', v: `${eur(kpis.averageTicket)} €`, i: Receipt, c: 'text-violet-600 dark:text-violet-400' },
-    { l: 'Prep. media', v: `${kpis.avgPrepTimeMinutes} min`, i: Timer, c: 'text-orange-600 dark:text-orange-400' },
-    { l: 'Entrega media', v: `${kpis.avgDeliveryTimeMinutes} min`, i: Truck, c: 'text-cyan-600 dark:text-cyan-400' },
-    { l: 'Puntualidad', v: `${kpis.onTimePercentage}%`, i: CheckCircle2, c: kpis.onTimePercentage >= 80 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400' },
+    {
+      l: 'Ticket medio',
+      v: hasTicket ? `${eur(kpis.averageTicket)} €` : '—',
+      i: Receipt,
+      c: 'text-violet-600 dark:text-violet-400',
+      tip: 'Media de pedidos cobrados o entregados',
+    },
+    {
+      l: 'Prep. media',
+      v: hasPrep ? `${kpis.avgPrepTimeMinutes} min` : '—',
+      i: Timer,
+      c: 'text-orange-600 dark:text-orange-400',
+      tip: 'Solo pedidos ya entregados con tiempos de cocina/montaje',
+    },
+    {
+      l: 'Entrega media',
+      v: hasDeliveryAvg ? `${kpis.avgDeliveryTimeMinutes} min` : '—',
+      i: Truck,
+      c: 'text-cyan-600 dark:text-cyan-400',
+      tip: 'Desde crear el pedido hasta marcarlo entregado',
+    },
+    {
+      l: 'Puntualidad',
+      v: hasTimedDeliveries ? `${kpis.onTimePercentage}%` : '—',
+      i: CheckCircle2,
+      c: hasTimedDeliveries
+        ? (kpis.onTimePercentage >= 80 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')
+        : 'text-gray-400 dark:text-gray-500',
+      tip: 'Entregas a tiempo vs umbral de retraso (hace falta al menos 1 entregado)',
+    },
   ];
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3.5">
-      <h3 className="text-xs font-bold mb-2.5 flex items-center gap-1.5 uppercase tracking-wide text-gray-500 dark:text-gray-400"><Activity className="w-4 h-4 opacity-80" /> Métricas del día</h3>
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-3.5 shadow-sm">
+      <div className="mb-2.5 flex items-end justify-between gap-2">
+        <h3 className="text-xs font-bold flex items-center gap-1.5 uppercase tracking-wide text-gray-500 dark:text-gray-400">
+          <Activity className="w-4 h-4 opacity-80" /> {title}
+        </h3>
+        {hint ? (
+          <span className="text-[10px] font-semibold text-teal-700 dark:text-teal-400 tabular-nums shrink-0">
+            {hint}
+          </span>
+        ) : null}
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
         {cards.map(c => (
-          <div key={c.l} className="text-center py-0.5">
+          <div key={c.l} className="text-center py-0.5 rounded-lg bg-gray-50/70 dark:bg-gray-900/40 px-1" title={c.tip}>
             <c.i className={`w-[18px] h-[18px] mx-auto mb-0.5 ${c.c}`} />
             <p className={`text-lg font-bold tabular-nums ${c.c}`}>{c.v}</p>
             <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 mt-0.5 leading-tight">{c.l}</p>
@@ -1150,6 +1547,7 @@ export function DeliveryOpsCenter() {
     return authHeader.replace(/^Bearer\s+/i, '').trim() || null;
   }, [user?.user_id]);
   const [data, setData] = useState<OpsCenterData | null>(null);
+  const [liveByPdv, setLiveByPdv] = useState<Record<string, OpsCenterData>>({});
   const [loading, setLoading] = useState(true);
   const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
 
@@ -1171,6 +1569,7 @@ export function DeliveryOpsCenter() {
     clearActivationFocus();
   }, [activationFocus, clearActivationFocus]);
   const [filters, setFilters] = useState<OpsCenterFilters>(() => ({ date: localDateInputValue() }));
+  const [opsViewMode, setOpsViewMode] = useState<DeliveryOpsViewMode>('single');
   const syncedTodayRef = useRef(false);
 
   useEffect(() => {
@@ -1179,6 +1578,16 @@ export function DeliveryOpsCenter() {
     const today = localDateInputValue();
     setFilters((f) => (f.date === today ? f : { ...f, date: today }));
   }, []);
+
+  /** Restaurar modo monitor (solo Ops) al cambiar de empresa. */
+  useEffect(() => {
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    if (!bid || !dataUserId) {
+      setOpsViewMode('single');
+      return;
+    }
+    setOpsViewMode(readDeliveryOpsViewMode(bid, dataUserId));
+  }, [dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [sseOk, setSseOk] = useState(false);
   const [lastUp, setLastUp] = useState<Date | null>(null);
@@ -1195,7 +1604,10 @@ export function DeliveryOpsCenter() {
     return (data?.pointsOfSale ?? []).filter((p) => p.active !== false);
   }, [activeStoreScope.pointsOfSale, activeStoreScope.allPointsOfSale, data?.pointsOfSale]);
 
+  const isLiveAll = opsViewMode === 'live_all' && opsPdvs.length > 1;
+
   const resolvedOpsPdvId = useMemo(() => {
+    if (isLiveAll) return null;
     if (opsPdvs.length === 0) return null;
     if (opsPdvs.length === 1) return opsPdvs[0]._id;
     const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
@@ -1207,6 +1619,7 @@ export function DeliveryOpsCenter() {
       saved || activeStoreScope.activeSalesPointId || activeStoreScope.activePreferenceRaw,
     );
   }, [
+    isLiveAll,
     opsPdvs,
     filters.salesPointId,
     currentBusiness?.business_id,
@@ -1221,25 +1634,50 @@ export function DeliveryOpsCenter() {
     return opsPdvs.length === 1 ? opsPdvs[0]._id : null;
   }, [opsPdvs]);
 
-  /** Con varias tiendas no pedimos datos hasta tener PDV elegido (evita mezclar KPIs al entrar). */
+  /** Con varias tiendas no pedimos datos hasta tener PDV elegido (salvo monitor en directo). */
   const opsPdvFilterReady = useMemo(() => {
     if (opsPdvs.length <= 1) return true;
+    if (isLiveAll) return true;
     return Boolean(resolvedOpsPdvId);
-  }, [opsPdvs.length, resolvedOpsPdvId]);
+  }, [opsPdvs.length, isLiveAll, resolvedOpsPdvId]);
 
-  /** Alinear filtro Ops con sidebar / localStorage en cuanto haya PDVs en scope. */
+  const handleViewModeChange = useCallback((mode: DeliveryOpsViewMode, salesPointId?: string) => {
+    const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
+    setOpsViewMode(mode);
+    if (bid && dataUserId) {
+      writeDeliveryOpsViewMode(bid, dataUserId, mode);
+    }
+    if (mode === 'live_all') {
+      // No tocar tienda del TPV/sidebar: solo modo Ops.
+      setFilters((f) => {
+        const { salesPointId: _drop, ...rest } = f;
+        return rest;
+      });
+      return;
+    }
+    const id = String(salesPointId || '').trim();
+    setFilters((f) => ({ ...f, salesPointId: id || undefined }));
+    if (bid && dataUserId && id) {
+      writeDeliveryOpsSelectedPdvId(bid, dataUserId, id);
+      notifyDeliveryActiveStoreChanged();
+    }
+  }, [currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
+
+  /** Alinear filtro Ops con sidebar / localStorage en cuanto haya PDVs en scope (modo 1 tienda). */
   useEffect(() => {
+    if (isLiveAll) return;
     if (!resolvedOpsPdvId || opsPdvs.length <= 1) return;
     setFilters((f) => (f.salesPointId === resolvedOpsPdvId ? f : { ...f, salesPointId: resolvedOpsPdvId }));
-  }, [resolvedOpsPdvId, opsPdvs.length]);
+  }, [isLiveAll, resolvedOpsPdvId, opsPdvs.length]);
 
   useEffect(() => {
     if (!singleActivePdvId) return;
+    if (opsViewMode === 'live_all') setOpsViewMode('single');
     setFilters((prev) => {
       if (prev.salesPointId === singleActivePdvId) return prev;
       return { ...prev, salesPointId: singleActivePdvId };
     });
-  }, [singleActivePdvId]);
+  }, [singleActivePdvId, opsViewMode]);
 
   const restoredOpsPdvSelectionRef = useRef(false);
   const persistBootRef = useRef(false);
@@ -1250,8 +1688,10 @@ export function DeliveryOpsCenter() {
     prevPersistedSalesPointRef.current = undefined;
   }, [dataUserId, currentBusiness?.business_id, currentBusiness?.id]);
 
-  /** Persistir tienda elegida para que el TPV rápido abra esa caja sin paso intermedio. */
+  /** Persistir tienda elegida para que el TPV rápido abra esa caja sin paso intermedio.
+   *  En «En directo · todas» no se escribe (el TPV sigue con la última tienda concreta). */
   useEffect(() => {
+    if (isLiveAll) return;
     const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
     if (!bid || !dataUserId) return;
     const id = filters.salesPointId?.trim() || null;
@@ -1269,9 +1709,13 @@ export function DeliveryOpsCenter() {
     prevPersistedSalesPointRef.current = toStore;
     writeDeliveryOpsSelectedPdvId(bid, dataUserId, toStore);
     notifyDeliveryActiveStoreChanged();
-  }, [filters.salesPointId, currentBusiness?.business_id, currentBusiness?.id, dataUserId, data?.pointsOfSale]);
+  }, [isLiveAll, filters.salesPointId, currentBusiness?.business_id, currentBusiness?.id, dataUserId, data?.pointsOfSale]);
 
   useEffect(() => {
+    if (isLiveAll) {
+      restoredOpsPdvSelectionRef.current = true;
+      return;
+    }
     if (!data?.pointsOfSale?.length || restoredOpsPdvSelectionRef.current) return;
     const activePdvs = data.pointsOfSale.filter((p) => p.active !== false);
     if (activePdvs.length <= 1) {
@@ -1289,10 +1733,11 @@ export function DeliveryOpsCenter() {
       setFilters((f) => (f.salesPointId === pdvId ? f : { ...f, salesPointId: pdvId }));
     }
     restoredOpsPdvSelectionRef.current = true;
-  }, [data?.pointsOfSale, currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
+  }, [isLiveAll, data?.pointsOfSale, currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
 
   /** Si el filtro apunta a un PDV que no está en esta empresa, corregirlo. */
   useEffect(() => {
+    if (isLiveAll) return;
     const list = data?.pointsOfSale?.filter((p) => p.active !== false) ?? [];
     if (list.length === 0) return;
     const current = filters.salesPointId?.trim();
@@ -1306,6 +1751,7 @@ export function DeliveryOpsCenter() {
       return { ...f, salesPointId: next };
     });
   }, [
+    isLiveAll,
     data?.pointsOfSale,
     filters.salesPointId,
     currentBusiness?.business_id,
@@ -1318,6 +1764,7 @@ export function DeliveryOpsCenter() {
   useEffect(() => {
     const bid = String(currentBusiness?.business_id || currentBusiness?.id || '');
     const onStore = () => {
+      if (isLiveAll) return;
       if (!bid || !dataUserId) return;
       const list = opsPdvs.length > 0 ? opsPdvs : (data?.pointsOfSale ?? []).filter((p) => p.active !== false);
       if (!list.length) return;
@@ -1333,6 +1780,7 @@ export function DeliveryOpsCenter() {
     window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
     return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
   }, [
+    isLiveAll,
     currentBusiness?.business_id,
     currentBusiness?.id,
     dataUserId,
@@ -1361,15 +1809,68 @@ export function DeliveryOpsCenter() {
     const seq = ++loadSeqRef.current;
     try {
       const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
-      const effectiveFilters = {
+      const baseFilters = {
         ...filters,
         date: filters.date || localDateInputValue(),
         ...(businessId ? { businessId } : {}),
-        ...(resolvedOpsPdvId ? { salesPointId: resolvedOpsPdvId } : {}),
       };
-      const r = await getOpsCenterRequest(authUserId, effectiveFilters);
-      if (seq !== loadSeqRef.current) return;
-      setData(r); setLastUp(new Date());
+
+      if (isLiveAll && opsPdvs.length > 1) {
+        const results = await Promise.all(
+          opsPdvs.map(async (pdv) => {
+            try {
+              const row = await getOpsCenterRequest(authUserId, {
+                ...baseFilters,
+                salesPointId: pdv._id,
+              });
+              return [pdv._id, row] as const;
+            } catch (e) {
+              console.error('ops-center live pdv error', pdv._id, e);
+              return null;
+            }
+          }),
+        );
+        if (seq !== loadSeqRef.current) return;
+        const next: Record<string, OpsCenterData> = {};
+        for (const item of results) {
+          if (item) next[item[0]] = item[1];
+        }
+        setLiveByPdv(next);
+        const rows = Object.values(next);
+        const first = rows[0] || null;
+        if (first) {
+          const mergedAlerts = rows.flatMap((r) => r.alerts || []);
+          const seen = new Set<string>();
+          const alerts = mergedAlerts.filter((a) => {
+            const id = String(a.id || `${a.type}:${a.sessionId || a.orderId || ''}`);
+            if (!id || seen.has(id)) return false;
+            seen.add(id);
+            return true;
+          });
+          const aggKpis = aggregateLiveOpsKpis(rows);
+          setData({
+            ...first,
+            alerts,
+            kpis: aggKpis || first.kpis,
+            foodFamilyCounts: aggregateLiveFoodFamilyCounts(rows),
+            revenueByBrand: aggregateLiveRevenueByBrand(rows),
+            brandLabels: mergeLiveBrandLabels(rows),
+            pointsOfSale: opsPdvs,
+            activeOrders: rows.flatMap((r) => r.activeOrders || []),
+          });
+        }
+        setLastUp(new Date());
+      } else {
+        const effectiveFilters = {
+          ...baseFilters,
+          ...(resolvedOpsPdvId ? { salesPointId: resolvedOpsPdvId } : {}),
+        };
+        const r = await getOpsCenterRequest(authUserId, effectiveFilters);
+        if (seq !== loadSeqRef.current) return;
+        setLiveByPdv({});
+        setData(r);
+        setLastUp(new Date());
+      }
     } catch (e) {
       if (seq === loadSeqRef.current) console.error('ops-center error', e);
     } finally {
@@ -1382,6 +1883,8 @@ export function DeliveryOpsCenter() {
     currentBusiness?.id,
     opsPdvFilterReady,
     resolvedOpsPdvId,
+    isLiveAll,
+    opsPdvs,
   ]);
 
   useEffect(() => { load(); }, [load]);
@@ -1487,6 +1990,9 @@ export function DeliveryOpsCenter() {
 
   /** Misma etiqueta que sidebar/topbar (sin parpadeo nombre centro → código PDV). */
   const effectiveOpsPdvLabel = useMemo(() => {
+    if (isLiveAll) {
+      return `En directo · ${opsPdvs.length} tiendas`;
+    }
     const list =
       (data?.pointsOfSale?.length ? data.pointsOfSale : activeStoreScope.pointsOfSale) ?? [];
     const id =
@@ -1500,6 +2006,8 @@ export function DeliveryOpsCenter() {
     const global = activeStoreScope.displayLabelForActive?.trim();
     return global || null;
   }, [
+    isLiveAll,
+    opsPdvs.length,
     filters.salesPointId,
     data?.pointsOfSale,
     activeStoreScope.pointsOfSale,
@@ -1510,6 +2018,15 @@ export function DeliveryOpsCenter() {
   const layoutSubtitle = effectiveOpsPdvLabel
     ? `${effectiveOpsPdvLabel} · ${subtitle}`
     : subtitle;
+
+  const liveAggCashPend = useMemo(() => {
+    if (!isLiveAll) return cajaAlertBadge(data?.cashStatus);
+    let n = 0;
+    for (const row of Object.values(liveByPdv)) {
+      n += cajaAlertBadge(row.cashStatus);
+    }
+    return n;
+  }, [isLiveAll, liveByPdv, data?.cashStatus]);
 
   return (
     <Layout title="Centro Operativo" subtitle={layoutSubtitle} noPadding>
@@ -1525,7 +2042,12 @@ export function DeliveryOpsCenter() {
               </span>
             </div>
             <span className="text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-50 truncate">
-              {effectiveOpsPdvLabel ? (
+              {isLiveAll ? (
+                <>
+                  <span className="text-teal-700 dark:text-teal-400">En directo · {opsPdvs.length} tiendas</span>
+                  <span className="font-normal text-gray-600 dark:text-gray-400"> · delivery</span>
+                </>
+              ) : effectiveOpsPdvLabel ? (
                 <>
                   Viendo <span className="text-teal-700 dark:text-teal-400">{effectiveOpsPdvLabel}</span>
                   <span className="font-normal text-gray-600 dark:text-gray-400"> · delivery</span>
@@ -1543,7 +2065,15 @@ export function DeliveryOpsCenter() {
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-1 pb-3 space-y-2.5">
 
-            <FiltersBar filters={filters} onChange={setFilters} config={cfg} pdvs={opsPdvs} sticky={false} />
+            <FiltersBar
+              filters={filters}
+              onChange={setFilters}
+              config={cfg}
+              pdvs={opsPdvs}
+              viewMode={isLiveAll ? 'live_all' : opsViewMode}
+              onViewModeChange={handleViewModeChange}
+              sticky={false}
+            />
 
             {data?.alerts && data.alerts.length > 0 && (
               <Alerts
@@ -1556,22 +2086,37 @@ export function DeliveryOpsCenter() {
               />
             )}
 
-            {!opsAlertsCoverCash(data?.alerts ?? []) && (
+            {!isLiveAll && !opsAlertsCoverCash(data?.alerts ?? []) && (
               <CashStatusBanner cashStatus={data?.cashStatus} onNavigate={quickNav} />
             )}
 
-            {data?.kpis && <Pipeline byStatus={data.kpis.byStatus} active={statusFilter} onFilter={setStatusFilter} />}
+            {/* En «todas»: el pipeline por fase vive en cada columna (evita duplicar). */}
+            {!isLiveAll && data?.kpis && (
+              <Pipeline byStatus={data.kpis.byStatus} active={statusFilter} onFilter={setStatusFilter} />
+            )}
 
             <QuickAccess
               cfg={cfg}
               kpis={data?.kpis || null}
-              cashPend={cajaAlertBadge(data?.cashStatus)}
+              cashPend={liveAggCashPend}
               incidents={data?.kpis?.byStatus?.incident || 0}
               onNavigate={quickNav}
               activationFocus={activationFocus}
             />
 
-            <Metrics kpis={data?.kpis || null} />
+            <Metrics
+              kpis={data?.kpis || null}
+              title={isLiveAll ? 'Métricas operativas · todas' : 'Métricas operativas'}
+              hint={isLiveAll ? `${opsPdvs.length} tiendas · en vivo` : null}
+            />
+
+            {data && (
+              <OpsFoodAndBrandsStrip
+                food={foodCountsOf(data)}
+                brands={brandRowsOf(data, isLiveAll ? 8 : 6)}
+                title={isLiveAll ? 'Comida y marcas · todas' : 'Comida y marcas'}
+              />
+            )}
 
             {loading && !data && opsPdvFilterReady ? (
               <div className="flex items-center justify-center py-20">
@@ -1583,6 +2128,28 @@ export function DeliveryOpsCenter() {
                 <p className="text-amber-800/90 dark:text-amber-200/90">
                   En <strong>Centros de trabajo</strong>, pulsa tu tienda para cargar la operativa de delivery.
                 </p>
+              </div>
+            ) : isLiveAll ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2 px-0.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5" />
+                    Por tienda
+                  </h3>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                    Totales arriba · detalle aquí
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {opsPdvs.map((pdv) => (
+                    <OpsPdvLiveColumn
+                      key={pdv._id}
+                      pdv={pdv}
+                      data={liveByPdv[pdv._id] || null}
+                      onFocusStore={(id) => handleViewModeChange('single', id)}
+                    />
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1616,13 +2183,14 @@ export function DeliveryOpsCenter() {
               </div>
             )}
 
+            {!isLiveAll && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
               {data?.revenueByChannel && Object.keys(data.revenueByChannel).length > 0 && (
                 <ChannelsW data={data.revenueByChannel} />
               )}
               {data?.revenueByBrand && Object.keys(data.revenueByBrand).length > 0 && (
                 <RevenueBreakdownW
-                  title="Facturación por marca (entregado)"
+                  title="Facturación por marca (cobrado / entregado)"
                   data={data.revenueByBrand}
                   labelForKey={(id) => brandDisplayName(id, data.brandLabels)}
                   barClass="bg-violet-500 dark:bg-violet-400"
@@ -1637,6 +2205,7 @@ export function DeliveryOpsCenter() {
                 />
               )}
             </div>
+            )}
           </div>
       </div>
       </div>

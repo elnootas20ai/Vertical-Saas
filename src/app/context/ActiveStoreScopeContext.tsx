@@ -327,8 +327,6 @@ function ActiveStoreScopeProviderImpl({
   const storeBusinessIdRef = useRef<string | null>(null);
 
   useLayoutEffect(() => {
-    setInitialLoading(false);
-
     // Tablet TPV: el código fija tienda antes de que el selector global cambie de empresa.
     // Solo si el binding pertenece a esta cuenta (no a Pau u otra).
     if (isTpvTabletWorkerPath(location.pathname)) {
@@ -343,6 +341,7 @@ function ActiveStoreScopeProviderImpl({
         const { retail, allPdvs } = buildTabletScopeRows(binding);
         if (retail.length > 0 || allPdvs.length > 0) {
           hasDisplayedStoresRef.current = true;
+          setInitialLoading(false);
           applyStores(retail, allPdvs);
           return;
         }
@@ -356,6 +355,7 @@ function ActiveStoreScopeProviderImpl({
       setPointsOfSale([]);
       setAllPointsOfSale([]);
       setRetailWorkCenters([]);
+      setInitialLoading(false);
       return;
     }
 
@@ -364,6 +364,7 @@ function ActiveStoreScopeProviderImpl({
 
     // Cambio de nº de empresas en cuenta: no vaciar sidebar (evita parpadeo).
     if (!businessChanged && hasDisplayedStoresRef.current) {
+      setInitialLoading(false);
       return;
     }
 
@@ -376,6 +377,7 @@ function ActiveStoreScopeProviderImpl({
     if (cached && (cached.retailWorkCenters.length > 0 || cached.allPointsOfSale.length > 0)) {
       emptyRetryDoneRef.current = false;
       hasDisplayedStoresRef.current = true;
+      setInitialLoading(false);
       applyStores(cached.retailWorkCenters, cached.allPointsOfSale);
       return;
     }
@@ -387,6 +389,15 @@ function ActiveStoreScopeProviderImpl({
       setAllPointsOfSale([]);
       setRetailWorkCenters([]);
       loadInflightRef.current = null;
+      // Evita un frame con loading=false y listas vacías → TPV «sin tiendas».
+      setInitialLoading(true);
+    } else if (
+      !hasDisplayedStoresRef.current
+      && retailWorkCentersRef.current.length === 0
+      && allPointsOfSaleRef.current.length === 0
+    ) {
+      // Primera carga / sin caché: no apagar el spinner mientras llega el fetch.
+      setInitialLoading(true);
     }
 
     const tabletBinding = resolveTabletBoundStoreScope(

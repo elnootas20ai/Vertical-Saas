@@ -65,7 +65,23 @@ describe('attributeOrderRevenueByBrand', () => {
     expect(r.byBrand.bb).toBe(18);
   });
 
-  it('legacy by_units/equal se comportan como majority', () => {
+  it('equal: compartidos a medias entre las marcas del ticket', () => {
+    const r = attributeOrderRevenueByBrand(
+      {
+        items: [
+          { brandIds: ['a'], quantity: 5, total: 50 },
+          { brandIds: ['b'], quantity: 4, total: 40 },
+          { category: 'Bebidas', quantity: 1, total: 2.5 },
+        ],
+      },
+      { sharedSplitMode: 'equal' },
+    );
+    expect(r.byBrand.a).toBe(51.25); // 50 + 1.25
+    expect(r.byBrand.b).toBe(41.25); // 40 + 1.25
+    expect(r.unbranded).toBe(0);
+  });
+
+  it('legacy by_units se comporta como equal', () => {
     const order = {
       items: [
         { brandIds: ['a'], quantity: 5, total: 50 },
@@ -74,11 +90,8 @@ describe('attributeOrderRevenueByBrand', () => {
       ],
     };
     const byUnits = attributeOrderRevenueByBrand(order, { sharedSplitMode: 'by_units' });
-    const equal = attributeOrderRevenueByBrand(order, { sharedSplitMode: 'equal' });
-    expect(byUnits.byBrand.a).toBe(52.5);
-    expect(byUnits.byBrand.b).toBe(40);
-    expect(equal.byBrand.a).toBe(52.5);
-    expect(equal.byBrand.b).toBe(40);
+    expect(byUnits.byBrand.a).toBe(51.25);
+    expect(byUnits.byBrand.b).toBe(41.25);
   });
 
   it('sin marcas: va a categoría', () => {
@@ -105,6 +118,22 @@ describe('attributeOrderUnitsByBrand', () => {
         { sharedSplitMode: 'majority' },
       ),
     ).toEqual({ a: 4, b: 1 });
+  });
+
+  it('equal: 2+1 + 2 compartidos → 1 ud compartida a cada marca', () => {
+    expect(
+      attributeOrderUnitsByBrand(
+        {
+          items: [
+            { brandIds: ['a'], quantity: 2 },
+            { brandIds: ['b'], quantity: 1 },
+            { category: 'Bebidas', quantity: 1 },
+            { category: 'Postres', quantity: 1 },
+          ],
+        },
+        { sharedSplitMode: 'equal' },
+      ),
+    ).toEqual({ a: 3, b: 2 });
   });
 });
 

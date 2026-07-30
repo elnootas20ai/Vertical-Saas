@@ -139,4 +139,36 @@ describe('registerShiftSalesBreakdown', () => {
   it('distributeOrderLineTotals cuadra céntimos', () => {
     expect(distributeOrderLineTotals([10, 10, 10], 29.99)).toEqual([10, 10, 9.99]);
   });
+
+  it('reparte mixto con payments en efectivo y tarjeta sin perder el total', () => {
+    const orders = [
+      {
+        _id: 'mix1',
+        status: 'entregado',
+        totalAmount: 30,
+        paymentMethod: 'mixto',
+        createdAt: '2026-06-17T12:00:00.000Z',
+        payments: [
+          { id: 'a', method: 'efectivo', amount: 18 },
+          { id: 'b', method: 'tarjeta', amount: 12 },
+        ],
+        items: [
+          { name: 'Margarita', quantity: 1, unitPrice: 18, total: 18, category: 'Pizzas' },
+          { name: 'Burger', quantity: 1, unitPrice: 12, total: 12, category: 'Burgers' },
+        ],
+      },
+    ];
+    const breakdown = buildShiftSalesBreakdown(orders);
+    expect(breakdown.totalRevenue).toBe(30);
+    expect(breakdown.totalEfectivo).toBe(18);
+    expect(breakdown.totalTarjeta).toBe(12);
+    const pizzas = breakdown.categories.find((c) => c.category === 'Pizzas');
+    const burgers = breakdown.categories.find((c) => c.category === 'Burgers');
+    expect(round2((pizzas?.revenueEfectivo || 0) + (pizzas?.revenueTarjeta || 0))).toBe(18);
+    expect(round2((burgers?.revenueEfectivo || 0) + (burgers?.revenueTarjeta || 0))).toBe(12);
+  });
 });
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}

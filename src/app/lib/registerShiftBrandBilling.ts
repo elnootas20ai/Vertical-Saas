@@ -158,7 +158,7 @@ function fmtEuro(n: number): string {
 function buildOrderBrandWhy(
   own: number,
   shared: number,
-  sharedReason: 'none' | 'mono' | 'majority',
+  sharedReason: 'none' | 'mono' | 'majority' | 'equal',
 ): string {
   const parts: string[] = [];
   if (own > 0) parts.push(`${fmtEuro(own)} € productos`);
@@ -167,6 +167,8 @@ function buildOrderBrandWhy(
       parts.push(`${fmtEuro(shared)} € compartidos (única marca del ticket)`);
     } else if (sharedReason === 'majority') {
       parts.push(`${fmtEuro(shared)} € compartidos (dominante: más uds / €)`);
+    } else if (sharedReason === 'equal') {
+      parts.push(`${fmtEuro(shared)} € compartidos (a medias)`);
     } else {
       parts.push(`${fmtEuro(shared)} € compartidos`);
     }
@@ -202,8 +204,9 @@ export function getOrderBrandShares(
     + (Number(attributed.unbranded) || 0);
   const scale = attributedSum > 0 && orderRev > 0 ? orderRev / attributedSum : 1;
   const brandCount = (attributed.presentBrandIds || []).length;
-  const sharedReason: 'none' | 'mono' | 'majority' =
-    brandCount === 1 ? 'mono' : brandCount >= 2 ? 'majority' : 'none';
+  const mode = splitRules.sharedSplitMode === 'equal' ? 'equal' : 'majority';
+  const sharedReason: 'none' | 'mono' | 'majority' | 'equal' =
+    brandCount === 1 ? 'mono' : brandCount >= 2 ? mode : 'none';
 
   const shares: OrderBrandShare[] = [];
   for (const [bid, amt] of Object.entries(attributed.byBrand)) {

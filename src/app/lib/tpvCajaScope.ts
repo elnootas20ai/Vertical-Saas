@@ -448,6 +448,20 @@ export function resolveActiveTpvRegisterSession(params: {
     return { session: candidate, nextSticky: candidate };
   }
 
+  // Sin PDVs cargados (o pick desconocido) el match WC↔PDV puede fallar un frame
+  // y soltar la caja → parpadeo «Recuperando caja…». Solo soltar si el pick es
+  // otra tienda real conocida (cambio deliberado del CEO).
+  if (pdvs.length === 0) {
+    return { session: candidate, nextSticky: candidate };
+  }
+  const pickIsKnownStore = pdvs.some(
+    (p) =>
+      p._id === pick || String(p.workCenterId || '').trim() === pick,
+  );
+  if (!pickIsKnownStore) {
+    return { session: candidate, nextSticky: candidate };
+  }
+
   // Pick apunta a otra tienda sin caja abierta → OpeningScreen, pero no olvidar la sticky.
   return { session: null, nextSticky: candidate };
 }

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { AlertTriangle, ExternalLink, Loader2, Trash2 } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { deleteUserRequest } from '../../lib/authApi';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { IOS_PRIVACY_POLICY_URL } from '../../lib/appStoreCompliance';
+import { ConfirmDestroyModal } from './ConfirmDestroyModal';
 
 const CONFIRM_WORD = 'ELIMINAR';
 
@@ -15,7 +16,7 @@ interface DeleteAccountSectionProps {
 export function DeleteAccountSection({ compact = false }: DeleteAccountSectionProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [confirmText, setConfirmText] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -24,18 +25,12 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
       setError('No hay sesión activa.');
       return;
     }
-    if (confirmText.trim().toUpperCase() !== CONFIRM_WORD) {
-      setError(`Escribe ${CONFIRM_WORD} para confirmar.`);
-      return;
-    }
-    if (!window.confirm('Se eliminará tu cuenta de Vertial y perderás el acceso. ¿Continuar?')) {
-      return;
-    }
 
     setLoading(true);
     setError('');
     try {
       await deleteUserRequest(user.user_id);
+      setModalOpen(false);
       await logout();
       navigate(AUTH_PATHS.entry);
     } catch (err: unknown) {
@@ -45,43 +40,74 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
     }
   };
 
+  const openModal = () => {
+    setError('');
+    setModalOpen(true);
+  };
+
+  const modal = (
+    <ConfirmDestroyModal
+      isOpen={modalOpen}
+      onClose={() => {
+        if (!loading) setModalOpen(false);
+      }}
+      onConfirm={handleDelete}
+      title="Eliminar cuenta / Delete account"
+      description="Se eliminará tu cuenta de Vertial de forma permanente y perderás el acceso. This permanently deletes your Vertial account and signs you out."
+      itemName={CONFIRM_WORD}
+      confirmLabel={`Escribe ${CONFIRM_WORD} / Type ${CONFIRM_WORD}`}
+      destructiveLabel="Eliminar permanentemente"
+      isDeleting={loading}
+      caseInsensitive
+    />
+  );
+
   if (compact) {
     return (
-      <div className="space-y-3 pt-2 border-t border-gray-100 dark:border-gray-700">
-        <p className="text-sm font-medium text-red-600 dark:text-red-400">Eliminar mi cuenta</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Borra tu cuenta de Vertial de forma permanente desde la app.
+      <div
+        id="eliminar-cuenta"
+        data-testid="delete-account-section"
+        className="space-y-3 pt-2 border-t border-red-100 dark:border-red-900/40"
+      >
+        <p className="text-sm font-semibold text-red-600 dark:text-red-400">
+          Eliminar cuenta / Delete account
         </p>
-        <input
-          type="text"
-          value={confirmText}
-          onChange={(e) => setConfirmText(e.target.value)}
-          placeholder={`Escribe ${CONFIRM_WORD}`}
-          className="w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700"
-        />
-        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Borra tu cuenta de Vertial de forma permanente desde la app. Permanently delete your account in-app.
+        </p>
+        {error && (
+          <div className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            {error}
+          </div>
+        )}
         <button
           type="button"
-          onClick={() => void handleDelete()}
-          disabled={loading || confirmText.trim().toUpperCase() !== CONFIRM_WORD}
+          onClick={openModal}
+          disabled={loading}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold disabled:opacity-50"
         >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+          <Trash2 className="w-4 h-4" />
           Eliminar mi cuenta
         </button>
+        {modal}
       </div>
     );
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-red-200 dark:border-red-900/50 p-6">
+    <div
+      id="eliminar-cuenta"
+      data-testid="delete-account-section"
+      className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-red-300 dark:border-red-800 p-6 scroll-mt-24"
+    >
       <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-1">
         <Trash2 className="w-5 h-5 text-red-500" />
-        Eliminar cuenta
+        Eliminar cuenta / Delete account
       </h3>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 leading-relaxed">
-        Borra tu cuenta de Vertial de forma permanente. Según tu rol, pueden conservarse datos legales o
-        contables exigidos por normativa. Consulta la{' '}
+        Borra tu cuenta de Vertial de forma permanente desde la app (requisito App Store). Según tu rol,
+        pueden conservarse datos legales o contables exigidos por normativa. Consulta la{' '}
         <a
           href={IOS_PRIVACY_POLICY_URL}
           target="_blank"
@@ -93,20 +119,6 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
         .
       </p>
 
-      <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">
-        Escribe <span className="font-mono text-red-600 dark:text-red-400">{CONFIRM_WORD}</span> para confirmar
-      </label>
-      <input
-        type="text"
-        value={confirmText}
-        onChange={(e) => {
-          setConfirmText(e.target.value);
-          if (error) setError('');
-        }}
-        autoComplete="off"
-        className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-xl text-sm bg-white dark:bg-gray-900 text-gray-900 dark:text-white mb-4"
-      />
-
       {error && (
         <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/30 px-3 py-2 text-sm text-red-700 dark:text-red-300">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -116,18 +128,20 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
 
       <button
         type="button"
-        onClick={() => void handleDelete()}
-        disabled={loading || confirmText.trim().toUpperCase() !== CONFIRM_WORD}
+        onClick={openModal}
+        disabled={loading}
         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
       >
-        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+        <Trash2 className="w-4 h-4" />
         Eliminar mi cuenta permanentemente
       </button>
 
       <p className="mt-4 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
         <ExternalLink className="w-3 h-3" />
-        Requisito App Store: la eliminación se inicia desde la app, sin contactar por email.
+        No hace falta email ni teléfono: el borrado se completa aquí en la app.
       </p>
+
+      {modal}
     </div>
   );
 }

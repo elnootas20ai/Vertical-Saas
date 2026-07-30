@@ -1,6 +1,7 @@
 /**
  * Entrada de importes estilo es-ES en modales de centro de trabajo:
- * miles con punto; decimales opcionales con coma (solo si allowDecimals).
+ * miles con punto; decimales con coma (solo si allowDecimals).
+ * En iPad/teclado EN el decimal suele ser «.» → se normaliza a «,».
  */
 
 export function formatMoneyAsYouType(raw: string, allowDecimals: boolean): string {
@@ -15,21 +16,35 @@ export function formatMoneyAsYouType(raw: string, allowDecimals: boolean): strin
     return n.toLocaleString('es-ES', { maximumFractionDigits: 0, useGrouping: true });
   }
 
-  if (s0.includes(',')) {
-    const lastComma = s0.lastIndexOf(',');
-    const intDigits = s0.slice(0, lastComma).replace(/\D/g, '');
-    const decDigits = s0.slice(lastComma + 1).replace(/\D/g, '').slice(0, 2);
-    if (intDigits === '' && decDigits === '' && !s0.endsWith(',')) return '';
+  // Si no hay coma aún, un punto con ≤2 decimales (o acabando en punto) = decimal iPad/EN.
+  let s = s0;
+  if (!s.includes(',')) {
+    const dots = (s.match(/\./g) || []).length;
+    if (dots === 1) {
+      const lastDot = s.lastIndexOf('.');
+      const afterDigits = s.slice(lastDot + 1).replace(/\D/g, '');
+      const endsWithDot = s.endsWith('.');
+      if (endsWithDot || afterDigits.length <= 2) {
+        s = `${s.slice(0, lastDot)},${s.slice(lastDot + 1)}`;
+      }
+    }
+  }
+
+  if (s.includes(',')) {
+    const lastComma = s.lastIndexOf(',');
+    const intDigits = s.slice(0, lastComma).replace(/\D/g, '');
+    const decDigits = s.slice(lastComma + 1).replace(/\D/g, '').slice(0, 2);
+    if (intDigits === '' && decDigits === '' && !s.endsWith(',')) return '';
     const intNum = intDigits ? parseInt(intDigits, 10) : 0;
     if (!Number.isFinite(intNum) || intNum < 0) return '';
     let out = intNum.toLocaleString('es-ES', { maximumFractionDigits: 0, useGrouping: true });
-    if (decDigits.length > 0 || s0.endsWith(',')) {
+    if (decDigits.length > 0 || s.endsWith(',')) {
       out += `,${decDigits}`;
     }
     return out;
   }
 
-  const intDigits = s0.replace(/\D/g, '');
+  const intDigits = s.replace(/\D/g, '');
   if (!intDigits) return '';
   const n = parseInt(intDigits, 10);
   if (!Number.isFinite(n) || n < 0) return '';

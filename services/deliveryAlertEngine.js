@@ -97,6 +97,7 @@ function applyEscalation(alertKey, priority, escalable) {
 
 const ALERT_CLASSIFICATION = {
   delivery_delayed_order:          { defaultPriority: 'medium', escalable: true  },
+  delivery_order_very_delayed:     { defaultPriority: 'high',   escalable: true  },
   delivery_kitchen_saturated:      { defaultPriority: 'high',   escalable: false },
   delivery_queue_overflow:         { defaultPriority: 'high',   escalable: false },
   delivery_product_out_of_stock:   { defaultPriority: 'high',   escalable: false },
@@ -212,6 +213,39 @@ function checkDelayedOrders(orders, config) {
       data: { orderId: o._id, orderNumber: o.orderNumber, phase: status, minutesInPhase: Math.floor(mins), threshold: thr },
       route: DELIVERY_OPS_ROUTE,
       targetRoles: PHASE_ROLES[phase] || ['manager', 'owner'],
+    });
+  }
+  return alerts;
+}
+
+/** Pedido activo demasiado tiempo desde creación (CEO / móvil). Default 60 min. */
+function checkOrderVeryDelayed(orders, config) {
+  if (!config.delayedOrderEnabled) return [];
+  const thr = Number(config.delayThresholds?.orderTotal) || 60;
+  if (thr <= 0) return [];
+  const now = Date.now();
+  const alerts = [];
+  for (const o of orders) {
+    const created = new Date(o.createdAt || o.orderedAt || 0);
+    if (Number.isNaN(created.getTime())) continue;
+    const mins = (now - created.getTime()) / 60_000;
+    if (mins < thr) continue;
+    const status = normalizeDeliveryOrderStatus(o.status) || o.status || 'activo';
+    alerts.push({
+      alertType: 'delivery_order_very_delayed',
+      dedupKey: `odelay-${o._id}`,
+      priority: mins >= thr * 1.5 ? 'high' : 'medium',
+      title: `Pedido ${o.orderNumber || ''} muy retrasado`,
+      message: `Lleva ${Math.floor(mins)} min desde que se creó (umbral: ${thr} min). Ahora: ${status}.`,
+      data: {
+        orderId: o._id,
+        orderNumber: o.orderNumber,
+        minutesTotal: Math.floor(mins),
+        threshold: thr,
+        status,
+      },
+      route: DELIVERY_OPS_ROUTE,
+      targetRoles: ['manager', 'owner'],
     });
   }
   return alerts;
@@ -600,6 +634,7 @@ function collectDeliveryAlerts({
 }) {
   return [
     ...checkDelayedOrders(active, config),
+    ...checkOrderVeryDelayed(active, config),
     ...checkKitchenSaturation(active, config),
     ...checkDeliveryStock(catItems, active, config, catalogInfraDocs),
     ...checkRiderSaturation(active, drvS, config, drivers),

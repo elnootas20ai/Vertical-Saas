@@ -14,8 +14,16 @@ test('sanitizeDeliveryOperational aplica defaults y límites', () => {
   });
   assert.equal(out.delayThresholds.kitchen, 120);
   assert.equal(out.delayThresholds.delivery, 5);
+  assert.equal(out.delayThresholds.orderTotal, 60);
   assert.equal(out.kitchenCapacity, 1);
   assert.equal(out.lowMarginThresholdPercent, 5);
+});
+
+test('orderTotal (pedido muy retrasado) acepta 15–240 y default 60', () => {
+  assert.equal(DEFAULT_DELIVERY_OPERATIONAL.delayThresholds.orderTotal, 60);
+  assert.equal(sanitizeDeliveryOperational({ delayThresholds: { orderTotal: 10 } }).delayThresholds.orderTotal, 15);
+  assert.equal(sanitizeDeliveryOperational({ delayThresholds: { orderTotal: 300 } }).delayThresholds.orderTotal, 240);
+  assert.equal(sanitizeDeliveryOperational({ delayThresholds: { orderTotal: 90 } }).delayThresholds.orderTotal, 90);
 });
 
 test('resolveDeliveryAlertConfig prioriza umbrales CEO sobre cuenta', () => {

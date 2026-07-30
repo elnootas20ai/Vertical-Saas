@@ -25,8 +25,20 @@ type RuleThresholdHelp = {
 
 const RULE_HELP: Record<string, RuleThresholdHelp> = {
   delivery_delayed_order: {
-    intro: 'Aviso si un pedido activo supera estos minutos en cada fase del flujo:',
-    footer: 'El reloj empieza al entrar en esa fase (no desde que se creó el pedido).',
+    intro: 'Aviso operativo por fase (in-app). Para el móvil del dueño usa «Pedido muy retrasado».',
+    footer: 'El reloj de cada fase empieza al entrar en ese estado.',
+  },
+  delivery_order_very_delayed: {
+    intro: 'Aviso al móvil si un pedido activo supera este tiempo desde que se creó:',
+    footer: 'Por defecto 60 minutos. Cámbialo aquí según tu operativa.',
+  },
+  delivery_register_closed_ok: {
+    intro: 'Te avisa al cerrar la caja cuando el contado cuadra (sin descuadre).',
+    footer: 'Ideal para saber que el turno cerró bien aunque no estés en el local.',
+  },
+  delivery_register_closed_discrepancy: {
+    intro: 'Te avisa al cerrar la caja si hay cualquier diferencia de efectivo:',
+    footer: 'Complementa el umbral de «Descuadre de caja» del motor de alertas.',
   },
   delivery_unattended: {
     intro: 'Aviso si un pedido recién entrado nadie lo atiende en este tiempo:',
@@ -91,6 +103,13 @@ const RULE_HELP: Record<string, RuleThresholdHelp> = {
 };
 
 const RULE_FIELDS: Record<string, ThresholdFieldDef[]> = {
+  delivery_order_very_delayed: [
+    {
+      source: 'delivery', path: 'delayThresholds.orderTotal', label: 'Tiempo total del pedido',
+      hint: 'Minutos desde que se crea el pedido hasta que sigue activo (default 60 = 1 h).',
+      suffix: 'min', min: 15, max: 240,
+    },
+  ],
   delivery_delayed_order: [
     {
       source: 'delivery', path: 'delayThresholds.pending', label: 'Estado «nuevo»',

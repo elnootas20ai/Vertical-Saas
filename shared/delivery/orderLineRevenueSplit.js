@@ -93,10 +93,16 @@ function itemBrandIds(item) {
     : [];
 }
 
-/** Legacy by_units/equal → majority (no partimos céntimos de un producto). */
+/**
+ * Pedido cruzado: cómo repartir lo sin marca (bebidas…).
+ * - majority: entero a la marca dominante
+ * - equal: a medias (1/N) entre las marcas del ticket
+ * - by_units: legacy → se trata como equal
+ */
 export function normalizeSharedSplitMode(raw) {
   const mode = String(raw || 'majority').trim();
-  if (mode === 'majority' || mode === 'by_units' || mode === 'equal') return 'majority';
+  if (mode === 'majority') return 'majority';
+  if (mode === 'equal' || mode === 'by_units') return 'equal';
   return 'majority';
 }
 
@@ -132,12 +138,35 @@ export function pickMajorityBrandId(presentBrandIds, brandedUnits, brandedRevenu
   return best;
 }
 
-/** Asigna `shared` entero a la marca dominante. */
+/**
+ * Asigna `shared` según mode:
+ * - majority: entero a la dominante
+ * - equal: 1/N a cada marca presente (a medias si hay 2)
+ */
 export function splitSharedAmount(presentBrandIds, brandedUnits, shared, mode, brandedRevenue) {
-  const ids = Array.isArray(presentBrandIds) ? presentBrandIds : [];
+  const ids = (Array.isArray(presentBrandIds) ? presentBrandIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
   const out = {};
   const amount = Number(shared) || 0;
   if (ids.length === 0 || amount === 0) return out;
+
+  const normalized = normalizeSharedSplitMode(mode);
+  if (normalized === 'equal') {
+    const each = amount / ids.length;
+    let assigned = 0;
+    for (let i = 0; i < ids.length; i += 1) {
+      const id = ids[i];
+      const part =
+        i === ids.length - 1
+          ? Math.round((amount - assigned) * 100) / 100
+          : Math.round(each * 100) / 100;
+      out[id] = part;
+      assigned += part;
+    }
+    return out;
+  }
 
   const winner = pickMajorityBrandId(ids, brandedUnits, brandedRevenue || {});
   if (winner) out[winner] = amount;

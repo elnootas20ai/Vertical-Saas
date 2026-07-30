@@ -3,6 +3,7 @@ import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
 import { getApiBase } from '../lib/apiBase';
 import { isVertialNativeApp } from '../lib/vertialPrint/isNativeApp';
+import { readPushConsent, writePushConsent } from '../lib/pushPermissionConsent';
 
 async function registerNativeToken(
   apiBase: string,
@@ -46,16 +47,14 @@ interface UseNativePushNotificationsOptions {
 }
 
 /**
- * Push nativo iOS/Android (APNs/FCM) — solo en app Capacitor.
- * Web Push queda en usePushNotifications para PWA/navegador.
+ * Push nativo iOS/Android — solo registra si el permiso ya está concedido.
+ * El aviso profesional y requestPermissions viven en PushPermissionGate.
  */
 export function useNativePushNotifications({ userId, token }: UseNativePushNotificationsOptions) {
   const deviceTokenRef = useRef<string | null>(null);
-  /** Último Bearer válido — se conserva un instante tras logout para poder desregistrar. */
   const lastAuthTokenRef = useRef<string | null>(null);
   const apiBase = getApiBase();
   const platform = Capacitor.getPlatform();
-
   const cleanupListeners = useRef<(() => void) | null>(null);
 
   if (token) {
@@ -66,14 +65,13 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
     if (!isVertialNativeApp() || !userId || !token) return;
     if (platform !== 'ios' && platform !== 'android') return;
 
+    // Nunca pedir el popup del sistema aquí (solo 1 vez vía soft prompt).
     const perm = await PushNotifications.checkPermissions();
-    let receive = perm.receive;
-    if (receive === 'prompt' || receive === 'prompt-with-rationale') {
-      const req = await PushNotifications.requestPermissions();
-      receive = req.receive;
-    }
-    if (receive !== 'granted') return;
+    if (perm.receive !== 'granted') return;
 
+    if (readPushConsent(userId).decision !== 'accepted') {
+      writePushConsent(userId, 'accepted');
+    }
     await PushNotifications.register();
   }, [userId, token, platform]);
 
@@ -98,11 +96,10 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
         console.warn('[NativePush] Error de registro:', err?.error);
       });
 
-      // Con presentationOptions en capacitor.config, iOS también muestra el aviso en primer plano.
       const receivedHandle = await PushNotifications.addListener(
         'pushNotificationReceived',
         () => {
-          /* El sistema presenta la notificación; no hace falta toast duplicado. */
+          /* presentationOptions muestra el aviso en primer plano */
         },
       );
 
@@ -126,15 +123,19 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
       await register();
     })();
 
+    const onRegisterNow = () => {
+      void register();
+    };
+    window.addEventListener('vertial:push-register-now', onRegisterNow);
+
     return () => {
       cancelled = true;
       cleanupListeners.current?.();
       cleanupListeners.current = null;
-      // No desregistrar el token en cada remount (Strict Mode / deps): solo en logout.
+      window.removeEventListener('vertial:push-register-now', onRegisterNow);
     };
   }, [userId, token, apiBase, platform, register]);
 
-  // Desregistrar solo cuando el usuario pierde la sesión (logout).
   useEffect(() => {
     if (userId && token) return;
 

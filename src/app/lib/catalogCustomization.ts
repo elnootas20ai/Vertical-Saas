@@ -1422,7 +1422,17 @@ function mergeLegacyExtrasIntoStoreIngredients(
 }
 
 export function normalizeTpvDefaultExtraPrice(raw: unknown): number | undefined {
-  const price = Number(raw);
+  if (raw == null || raw === '') return undefined;
+  const cleaned =
+    typeof raw === 'number'
+      ? raw
+      : Number(
+          String(raw)
+            .trim()
+            .replace(/\s/g, '')
+            .replace(',', '.'),
+        );
+  const price = Number(cleaned);
   if (!Number.isFinite(price) || price < 0) return undefined;
   return Math.round(price * 100) / 100;
 }
@@ -1473,38 +1483,47 @@ export function parseStoreIngredientExtras(
   brands?: TpvBrandHint[],
   resolveOptions?: Pick<ParseCatalogResolveOptions, 'comboSelections' | 'catalogItems'>,
 ): CatalogSupplement[] {
+  void brands;
+  void resolveOptions;
   const brandIds = productBrandIdsFromItem(item);
-  const productPart = resolveTpvCategoryTemplateKey(item, brands, resolveOptions);
   const seen = new Set<string>();
 
-  const collect = (ignoreBrand: boolean, ignorePart: boolean): CatalogSupplement[] => {
+  const collect = (ignoreBrand: boolean): CatalogSupplement[] => {
     const out: CatalogSupplement[] = [];
     for (const ing of storeIngredients || []) {
-      if (resolveIngredientRole(ing) !== 'extra') continue;
+      // Extras = lo que se cobra al añadir (flags TPV), no solo role legado.
+      if (!ingredientChargesExtra(ing)) continue;
       if (!ignoreBrand && !storeIngredientAppliesToBrands(ing, brandIds)) continue;
-      if (!ignorePart && !storeIngredientAppliesToProductPart(ing, productPart)) continue;
-      const nameKey = ingredientNameKey(ing.name);
-      if (seen.has(nameKey)) continue;
-      if (!ing.name) continue;
-      seen.add(nameKey);
-      out.push({
-        id: ing.id,
-        name: ing.name,
-        price: resolveIngredientExtraPrice(ing, brandIds, defaultExtraPrice),
-      });
+      // No filtrar por pizzas/burgers: en TPV hay buscador y debe salir toda la carta de extras.
+      const price = resolveIngredientExtraPrice(ing, brandIds, defaultExtraPrice);
+      const splitNames = parseIngredientsBulkText(ing.name);
+      const labels =
+        splitNames.length > 0
+          ? splitNames
+          : (() => {
+              const fallback = String(ing.name || '').trim();
+              return fallback ? [fallback] : [];
+            })();
+      for (const label of labels) {
+        const nameKey = ingredientNameKey(label);
+        if (!nameKey || seen.has(nameKey)) continue;
+        seen.add(nameKey);
+        out.push({
+          id:
+            labels.length === 1
+              ? ing.id
+              : `${ing.id}::${nameKey.replace(/\s+/g, '-')}`,
+          name: label,
+          price,
+        });
+      }
     }
     return out;
   };
 
-  const strict = collect(false, false);
-  if (strict.length > 0) return strict;
-  const strictNoPart = collect(false, true);
-  if (strictNoPart.length > 0) return strictNoPart;
-  if (brandIds.length === 0) {
-    const loose = collect(true, false);
-    if (loose.length > 0) return loose;
-    return collect(true, true);
-  }
+  const byBrand = collect(false);
+  if (byBrand.length > 0) return byBrand;
+  if (brandIds.length === 0) return collect(true);
   return [];
 }
 

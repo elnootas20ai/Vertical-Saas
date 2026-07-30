@@ -61,7 +61,7 @@ import {
   buildShiftSalesBreakdown,
   filterOrdersForRegisterSession,
 } from '../../lib/registerShiftSalesBreakdown';
-import { AggregatorClosingEditor, type AggregatorClosingSnapshot } from './AggregatorClosingEditor';
+import { AggregatorClosingEditor, type AggregatorClosingSnapshot, type ManualLinesByChannel } from './AggregatorClosingEditor';
 import { DeliveryFoodUnitIcon } from './delivery/DeliveryFoodUnitIcon';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
@@ -145,7 +145,7 @@ import {
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
   ChevronUp, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
   MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
-  MoreVertical,
+  MoreVertical, Save,
 } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 
@@ -1357,6 +1357,53 @@ function TpvGatePortal({ children }: { children: ReactNode }) {
 
 // ─── Closing Screen ─────────────────────────────────────────────────────────
 
+type ClosingFormDraft = {
+  v: 1;
+  counts: CashDenominationCount;
+  notes: string;
+  cashSlot: string;
+  manualFood: { pizza: string; burger: string; taco: string };
+  appsManualDraft: ManualLinesByChannel;
+};
+
+function closingDraftStorageKey(sessionId: string): string {
+  return `vertial.tpv.closingDraft.${String(sessionId || '').trim()}`;
+}
+
+function readClosingFormDraft(sessionId: string): ClosingFormDraft | null {
+  const id = String(sessionId || '').trim();
+  if (!id || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(closingDraftStorageKey(id));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ClosingFormDraft;
+    if (!parsed || parsed.v !== 1) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeClosingFormDraft(sessionId: string, draft: ClosingFormDraft): void {
+  const id = String(sessionId || '').trim();
+  if (!id || typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(closingDraftStorageKey(id), JSON.stringify(draft));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function clearClosingFormDraft(sessionId: string): void {
+  const id = String(sessionId || '').trim();
+  if (!id || typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(closingDraftStorageKey(id));
+  } catch {
+    /* ignore */
+  }
+}
+
 function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [], busy = false, showDeliveryClosingSlots = true }: {
   session: TpvRegisterSession;
   dataUserId: string;
@@ -1374,15 +1421,31 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 }) {
   const { currentBusiness } = useBusiness();
   const businessId = resolveBusinessScopeId(currentBusiness) || '';
-  const [counts, setCounts] = useState<CashDenominationCount>({});
-  const [notes, setNotes] = useState('');
+  const sessionId = String(session._id || '').trim();
+  const savedDraft = useMemo(() => readClosingFormDraft(sessionId), [sessionId]);
+  const [counts, setCounts] = useState<CashDenominationCount>(() => savedDraft?.counts || {});
+  const [notes, setNotes] = useState(() => savedDraft?.notes || '');
   const [shiftOrders, setShiftOrders] = useState<DeliveryOrder[]>([]);
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
-  const [cashSlot, setCashSlot] = useState('');
+  const [cashSlot, setCashSlot] = useState(() => savedDraft?.cashSlot || '');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
-  const [manualFood, setManualFood] = useState({ pizza: '', burger: '', taco: '' });
-  const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(false);
+  const [manualFood, setManualFood] = useState(
+    () => savedDraft?.manualFood || { pizza: '', burger: '', taco: '' },
+  );
+  const draftHasFood = Boolean(
+    savedDraft?.manualFood
+    && (
+      String(savedDraft.manualFood.pizza || '').trim()
+      || String(savedDraft.manualFood.burger || '').trim()
+      || String(savedDraft.manualFood.taco || '').trim()
+    ),
+  );
+  const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(() => draftHasFood);
   const [appsSnapshot, setAppsSnapshot] = useState<AggregatorClosingSnapshot | null>(null);
+  const [appsManualDraft, setAppsManualDraft] = useState<ManualLinesByChannel>(
+    () => savedDraft?.appsManualDraft || {},
+  );
+  const [draftRestored] = useState(() => Boolean(savedDraft));
   const [showExtraDetail, setShowExtraDetail] = useState(false);
   const [showDayOrders, setShowDayOrders] = useState(true);
   const [brandLabels, setBrandLabels] = useState<Record<string, string>>({});
@@ -1424,6 +1487,47 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     setAppsSnapshot(snap);
   }, []);
 
+  const handleAppsManualDraftChange = useCallback((draft: ManualLinesByChannel) => {
+    setAppsManualDraft(draft);
+  }, []);
+
+  const buildDraftPayload = useCallback((): ClosingFormDraft => ({
+    v: 1,
+    counts,
+    notes,
+    cashSlot,
+    manualFood,
+    appsManualDraft,
+  }), [counts, notes, cashSlot, manualFood, appsManualDraft]);
+
+  const persistDraft = useCallback(() => {
+    if (!sessionId) return;
+    writeClosingFormDraft(sessionId, buildDraftPayload());
+  }, [sessionId, buildDraftPayload]);
+
+  const handleSaveForLater = useCallback(() => {
+    if (busy) return;
+    persistDraft();
+    toast.success('Cierre guardado. Puedes seguir luego desde Cerrar caja.');
+    onCancel();
+  }, [busy, persistDraft, onCancel]);
+
+  // Auto-guarda mientras rellenan (por si cierran con Atrás / Cancelar).
+  useEffect(() => {
+    if (!sessionId) return;
+    const timer = window.setTimeout(() => {
+      writeClosingFormDraft(sessionId, {
+        v: 1,
+        counts,
+        notes,
+        cashSlot,
+        manualFood,
+        appsManualDraft,
+      });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, counts, notes, cashSlot, manualFood, appsManualDraft]);
+
   const closingFoodByChannel = appsSnapshot?.foodByChannel ?? {};
   const appsFoodTotals = appsSnapshot?.foodTotals ?? emptyFoodFamilyCounts();
   const finalAggregatorRows = appsSnapshot?.rows ?? aggregatorRows;
@@ -1464,16 +1568,20 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
   useEffect(() => {
     if (!showDeliveryClosingSlots || foodSlotsInitialized) return;
+    if (draftHasFood) {
+      setFoodSlotsInitialized(true);
+      return;
+    }
     setManualFood({
       pizza: String(tpvSystemFood.pizza || 0),
       burger: String(tpvSystemFood.burger || 0),
       taco: String(tpvSystemFood.taco || 0),
     });
     setFoodSlotsInitialized(true);
-  }, [showDeliveryClosingSlots, foodSlotsInitialized, tpvSystemFood]);
+  }, [showDeliveryClosingSlots, foodSlotsInitialized, tpvSystemFood, draftHasFood]);
 
   useEffect(() => {
-    if (!showDeliveryClosingSlots || !foodSlotsInitialized || shiftOrdersLoading) return;
+    if (!showDeliveryClosingSlots || !foodSlotsInitialized || shiftOrdersLoading || draftHasFood) return;
     setManualFood((prev) => {
       const stillDefault = prev.pizza === '0' && prev.burger === '0' && prev.taco === '0';
       if (!stillDefault) return prev;
@@ -1484,7 +1592,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
         taco: String(tpvSystemFood.taco || 0),
       };
     });
-  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, tpvSystemFood]);
+  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, tpvSystemFood, draftHasFood]);
 
   const handleCashSlotChange = useCallback((value: string) => {
     const formatted = formatMoneyAsYouType(value, true);
@@ -1561,6 +1669,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
             <button onClick={onCancel} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"><X className="w-5 h-5 text-gray-500" /></button>
           </div>
+          {draftRestored ? (
+            <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+              Borrador recuperado — lo que guardaste antes sigue aquí.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4">
@@ -1801,7 +1914,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <AggregatorClosingEditor
                 autoRows={aggregatorRows}
                 foodByChannel={foodReport.byAggregator}
+                initialManualDraft={
+                  savedDraft?.appsManualDraft && Object.keys(savedDraft.appsManualDraft).length > 0
+                    ? savedDraft.appsManualDraft
+                    : null
+                }
                 onSnapshotChange={handleAppsSnapshotChange}
+                onManualDraftChange={handleAppsManualDraftChange}
                 title="Por integración"
                 startStep={2}
               />
@@ -2122,14 +2241,23 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           </div>
         ) : null}
 
-        <div className="flex-shrink-0 p-6 border-t border-zinc-200 dark:border-zinc-700 flex gap-3">
+        <div className="flex-shrink-0 p-4 sm:p-6 border-t border-zinc-200 dark:border-zinc-700 flex flex-col sm:flex-row gap-2 sm:gap-3">
           <button
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="px-5 py-3.5 border-2 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 rounded-xl font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+            className="px-4 py-3 border-2 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 rounded-xl font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
           >
             Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveForLater}
+            disabled={busy}
+            className="px-4 py-3 border-2 border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 rounded-xl font-bold hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-2"
+          >
+            <Save className="w-4 h-4" />
+            Guardar para luego
           </button>
           <button
             type="button"
@@ -3612,10 +3740,14 @@ export function TpvRegisterGate({
   });
 
   const activeStoreScope = useMemo(() => {
-    const pdvId = String(
+    const rawId = String(
       activeSession?.pointOfSaleId || tabletRestrictedPdvId || managerPdvPickId || '',
     ).trim();
-    const pdv = pointsOfSale.find((p) => p._id === pdvId);
+    const pdv =
+      pointsOfSale.find((p) => p._id === rawId)
+      || pointsOfSale.find((p) => String(p.workCenterId || '').trim() === rawId)
+      || null;
+    const pdvId = String(pdv?._id || rawId || '').trim();
     const workCenterId = String(
       pdv?.workCenterId || tabletBinding?.workCenterId || '',
     ).trim();
@@ -3721,11 +3853,13 @@ export function TpvRegisterGate({
   const refreshClockedInWorkers = useCallback(async (options?: { silent?: boolean }) => {
     if (!businessId) {
       setClockedInWorkers([]);
+      setClockedInWorkersLoading(false);
       return;
     }
     const { pdvId, workCenterId } = activeStoreScope;
     if (!pdvId) {
       setClockedInWorkers([]);
+      setClockedInWorkersLoading(false);
       return;
     }
     const ownerUserId = String(scopeBusiness?.owner_user_id || currentBusiness?.owner_user_id || '').trim();
@@ -3774,7 +3908,19 @@ export function TpvRegisterGate({
     } finally {
       if (!silent) setClockedInWorkersLoading(false);
     }
-  }, [businessId, scopeBusiness?.owner_user_id, currentBusiness?.owner_user_id, activeStoreScope, activeSession, user?.user_id, user?.id]);
+  }, [
+    businessId,
+    scopeBusiness?.owner_user_id,
+    currentBusiness?.owner_user_id,
+    activeStoreScope.pdvId,
+    activeStoreScope.workCenterId,
+    activeSession?._id,
+    activeSession?.openedAt,
+    activeSession?.workerId,
+    activeSession?.workerName,
+    user?.user_id,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession)) return;
@@ -3797,9 +3943,10 @@ export function TpvRegisterGate({
       setClockedInWorkersLoading(false);
       return;
     }
-    // Evita flash «Fichaje requerido» un frame antes de que arranque el fetch.
-    setClockedInWorkersLoading(true);
-    void refreshClockedInWorkers();
+    const hasWorkers = clockedInWorkersRef.current.length > 0;
+    // Solo forzar spinner de fichaje en la primera carga; refrescos silenciosos no parpadean.
+    if (!hasWorkers) setClockedInWorkersLoading(true);
+    void refreshClockedInWorkers({ silent: hasWorkers });
     const interval = setInterval(() => void refreshClockedInWorkers({ silent: true }), 60000);
     return () => clearInterval(interval);
   }, [activeStoreScope.pdvId, activeSession?._id, activeSession?.status, refreshClockedInWorkers]);
@@ -4111,8 +4258,13 @@ export function TpvRegisterGate({
   }, [loading]);
 
   // No mostrar Abrir caja hasta confirmar que no hay sesión open (o timeout corto).
+  // Si sticky sigue abierta (pick/PDV parpadeando), no forzar «Recuperando caja…».
   useEffect(() => {
     if (isTpvRegisterSessionOpen(activeSession)) {
+      setOpeningRecoverHold(false);
+      return;
+    }
+    if (isTpvRegisterSessionOpen(stickyOpenSessionRef.current)) {
       setOpeningRecoverHold(false);
       return;
     }
@@ -4352,6 +4504,7 @@ export function TpvRegisterGate({
     try {
       const updated = await updateTpvRegisterSessionRequest(dataUserId, closedPayload as TpvRegisterSession);
       stickyOpenSessionRef.current = null;
+      clearClosingFormDraft(String(updated._id || session._id || ''));
       setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: updated }));
       setShowClosing(false);
@@ -4834,7 +4987,11 @@ export function TpvRegisterGate({
     );
   }
 
-  if ((loading || openingRecoverHold) && !isTpvRegisterSessionOpen(activeSession)) {
+  if (
+    (loading || openingRecoverHold)
+    && !isTpvRegisterSessionOpen(activeSession)
+    && !isTpvRegisterSessionOpen(stickyOpenSessionRef.current)
+  ) {
     return wrapShell(
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
         <div className="text-center max-w-sm">

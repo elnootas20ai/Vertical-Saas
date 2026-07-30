@@ -27,6 +27,9 @@ test('incluye críticas y caja / impagos clave', () => {
   for (const id of [
     'delivery_cash_discrepancy',
     'delivery_cash_pending_close',
+    'delivery_register_closed_ok',
+    'delivery_register_closed_discrepancy',
+    'delivery_order_very_delayed',
     'payment_overdue',
     'delivery_unpaid_order',
     'client_payment_overdue',

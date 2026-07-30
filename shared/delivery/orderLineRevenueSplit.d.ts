@@ -3,7 +3,7 @@ export const SHARED_REPORT_CATEGORY_KEYS: ReadonlySet<string>;
 
 export type BrandRevenueSplitOptions = {
   monoBrandTakesAll?: boolean;
-  /** majority = lo compartido entero a la marca dominante del ticket */
+  /** majority = dominante; equal = a medias; by_units = legacy → equal */
   sharedSplitMode?: 'majority' | 'by_units' | 'equal';
 };
 
@@ -20,7 +20,7 @@ export function lineRevenueAmount(item: {
 }): number;
 export function lineQuantity(item: { quantity?: number }): number;
 
-export function normalizeSharedSplitMode(raw: unknown): 'majority';
+export function normalizeSharedSplitMode(raw: unknown): 'majority' | 'equal';
 
 export function pickMajorityBrandId(
   presentBrandIds: string[],

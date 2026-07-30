@@ -2369,10 +2369,12 @@ export interface OpsCenterData {
   };
   revenueByChannel: Record<string, number>;
   revenueByHour: { hour: string; revenue: number; orders: number }[];
-  /** Importe por línea entregada agrupado por marca (id → €). Respeta filtro PDV del día. */
+  /** Importe por línea cobrada/entregada agrupado por marca (id → €). Respeta filtro PDV del día. */
   revenueByBrand: Record<string, number>;
   /** Bebidas, complementos, etc. (sin marca en línea). */
   revenueByCategory: Record<string, number>;
+  /** Unidades de carta del día/sesión (no cancelados). */
+  foodFamilyCounts?: { pizza: number; burger: number; taco: number };
   /** id marca → nombre visible */
   brandLabels: Record<string, string>;
   pointsOfSale: PointOfSale[];

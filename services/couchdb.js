@@ -2316,7 +2316,7 @@ export async function findAccountByAppleId(req, appleId) {
 
   await ensureDatabase(req, ACCOUNTS_DB);
   const docs = await getAllDocuments(req, ACCOUNTS_DB);
-  return docs.find((doc) => doc.type === 'account' && doc.appleId === id) || null;
+  return docs.find((doc) => doc.type === 'account' && !doc.deletedAt && doc.appleId === id) || null;
 }
 
 export async function findAccountByUserId(req, userId) {
@@ -10100,14 +10100,18 @@ export function buildBrandBillingConfigDocument(businessId, data = {}, existing 
 
   const monoRaw =
     data.monoBrandTakesAll !== undefined ? data.monoBrandTakesAll : existing?.monoBrandTakesAll;
+  const modeRaw =
+    data.sharedSplitMode !== undefined ? data.sharedSplitMode : existing?.sharedSplitMode;
+  const modeStr = String(modeRaw || 'majority').trim();
+  const sharedSplitMode =
+    modeStr === 'equal' || modeStr === 'by_units' ? 'equal' : 'majority';
 
   const out = {
     _id: id,
     type: 'brand_billing_config',
     business_id: String(businessId || ''),
     sheets,
-    // Regla actual: lo compartido entero a la marca dominante (legacy → majority).
-    sharedSplitMode: 'majority',
+    sharedSplitMode,
     monoBrandTakesAll: monoRaw !== false,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
@@ -10118,13 +10122,16 @@ export function buildBrandBillingConfigDocument(businessId, data = {}, existing 
 
 export function sanitizeBrandBillingConfig(doc) {
   if (!doc) return null;
+  const modeStr = String(doc.sharedSplitMode || 'majority').trim();
+  const sharedSplitMode =
+    modeStr === 'equal' || modeStr === 'by_units' ? 'equal' : 'majority';
   return {
     _id: doc._id,
     _rev: doc._rev,
     type: 'brand_billing_config',
     business_id: doc.business_id || '',
     sheets: Array.isArray(doc.sheets) ? doc.sheets : [],
-    sharedSplitMode: 'majority',
+    sharedSplitMode,
     monoBrandTakesAll: doc.monoBrandTakesAll !== false,
     createdAt: doc.createdAt || '',
     updatedAt: doc.updatedAt || '',

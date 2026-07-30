@@ -136,7 +136,7 @@ authRouter.put(
 authRouter.get('/profile/:userId/activity', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getUserActivity);
 authRouter.get('/profile/:userId/onboarding', requireAuthAndEmailVerified, validateParams(userIdParamSchema), getOnboarding);
 authRouter.put('/profile/:userId/onboarding', requireAuthAndEmailVerified, validateParams(userIdParamSchema), saveOnboarding);
-authRouter.delete('/profile/:userId', requireAuthAndEmailVerified, validateParams(userIdParamSchema), deleteUser);
+authRouter.delete('/profile/:userId', requireAuthForProfileUpdate, validateParams(userIdParamSchema), deleteUser);
 
 // RGPD: Descargar mis datos personales
 authRouter.get('/export-my-data', requireAuthAndEmailVerified, exportMyData);

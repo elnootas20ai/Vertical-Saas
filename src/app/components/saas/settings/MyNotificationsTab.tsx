@@ -22,6 +22,7 @@ import {
   getNotificationPreferencesRequest,
   updateNotificationPreferencesRequest,
 } from '../../../lib/authApi';
+import { DevicePushStatusCard } from './DevicePushStatusCard';
 
 type ClockinPrefKey = keyof ClockinNotificationPreferences;
 type TeamPrefKey = keyof TeamNotificationPreferences;
@@ -245,6 +246,8 @@ export function MyNotificationsTab() {
           {error}
         </div>
       )}
+
+      <DevicePushStatusCard />
 
       <div className="rounded-2xl border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
         <div className="px-5 py-4 border-b-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex items-center gap-3">

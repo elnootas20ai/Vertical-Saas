@@ -13,6 +13,8 @@ interface ConfirmDestroyModalProps {
   confirmLabel?: string;
   destructiveLabel?: string;
   isDeleting?: boolean;
+  /** Si true, compara el texto ignorando mayúsculas (p. ej. ELIMINAR). */
+  caseInsensitive?: boolean;
 }
 
 export function ConfirmDestroyModal({
@@ -25,12 +27,15 @@ export function ConfirmDestroyModal({
   confirmLabel,
   destructiveLabel = 'Eliminar permanentemente',
   isDeleting = false,
+  caseInsensitive = false,
 }: ConfirmDestroyModalProps) {
   const { t } = useTranslation();
   const [inputValue, setInputValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const isMatch = inputValue.trim() === itemName.trim();
+  const isMatch = caseInsensitive
+    ? inputValue.trim().toUpperCase() === itemName.trim().toUpperCase()
+    : inputValue.trim() === itemName.trim();
 
   useEffect(() => {
     if (isOpen) {

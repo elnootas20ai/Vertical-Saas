@@ -481,23 +481,35 @@ function TpvRapidoCeoBoard() {
 
   const effectivePdvId = forceStorePicker ? null : (selectedPdvId || resolvedInitialPdvId);
 
+  const [pdvWaitTimedOut, setPdvWaitTimedOut] = useState(false);
+
+  // Mientras no haya PDV, seguir en “cargando” si aún puede llegar la lista
+  // (loading del scope, bootstrap CEO, o empresa aún resolviendo). Si no,
+  // un frame vacío muestra «sin tiendas» y al F5 ya están → confunde.
   const awaitingPdvResolution =
     !forceStorePicker
     && !effectivePdvId
     && activePdvs.length === 0
-    && (effectiveStoresLoading || !businessesFetchSettled || !businessId || !dataUserId);
+    && (
+      effectiveStoresLoading
+      || ceoBootstrapLoading
+      || shouldBootstrapCeoStores
+      || !businessesFetchSettled
+      || !businessId
+      || !dataUserId
+    );
 
   const noStoresConfigured =
     !forceStorePicker
     && !effectivePdvId
     && !effectiveStoresLoading
+    && !ceoBootstrapLoading
     && businessesFetchSettled
     && Boolean(businessId)
     && Boolean(dataUserId)
     && activePdvs.length === 0
-    && !shouldBootstrapCeoStores;
-
-  const [pdvWaitTimedOut, setPdvWaitTimedOut] = useState(false);
+    && !shouldBootstrapCeoStores
+    && pdvWaitTimedOut;
 
   useEffect(() => {
     if (!awaitingPdvResolution) {

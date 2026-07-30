@@ -642,7 +642,7 @@ export async function appleLogin(req, res) {
       account = await findAccountByEmail(req, appleAuth.email);
     }
 
-    if (!account) {
+    if (!account || account.deletedAt) {
       return res.status(404).json({
         ok: false,
         code: 'APPLE_ACCOUNT_NOT_FOUND',
@@ -2442,6 +2442,7 @@ export async function deleteUser(req, res) {
     const authUserId = String(req.authUser?.userId || req.authUser?.user_id || '').trim();
     const actorEmail = req.authUser?.email || '';
     const isSuperAdmin = isVertialSuperAdminEmail(actorEmail);
+    const isSelfDelete = Boolean(authUserId && userId && authUserId === userId);
 
     if (authUserId && userId && authUserId !== userId) {
       if (!isSuperAdmin) {
@@ -2454,7 +2455,7 @@ export async function deleteUser(req, res) {
     }
 
     const account = await findAccountByUserId(req, userId);
-    if (!account) {
+    if (!account || account.deletedAt) {
       return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
     }
 
@@ -2462,12 +2463,15 @@ export async function deleteUser(req, res) {
       return res.status(403).json({ ok: false, error: 'No se puede eliminar la cuenta de super-admin.' });
     }
 
-    // Limpiar negocios del owner y membership en otros negocios.
+    // Al auto-borrar (o super-admin): soft-delete negocios propios + tarjeta.
+    // Al borrar un miembro del equipo: solo se quita de members.
+    const shouldCleanupOwned = isSuperAdmin || isSelfDelete;
+
     try {
       const allBusinesses = await listAllBusinesses(req);
       for (const business of allBusinesses) {
         if (String(business.owner_user_id || '').trim() === account.user_id) {
-          if (isSuperAdmin) {
+          if (shouldCleanupOwned) {
             await softDeleteDocument(req, BUSINESSES_DB, business._id);
           }
           continue;
@@ -2486,7 +2490,7 @@ export async function deleteUser(req, res) {
       console.error('[AUTH] Error limpiando business al borrar usuario:', cleanupErr?.message);
     }
 
-    if (isSuperAdmin) {
+    if (shouldCleanupOwned) {
       try {
         const card = await findCardByUserId(req, account.user_id);
         if (card?._id) {
@@ -2497,7 +2501,21 @@ export async function deleteUser(req, res) {
       }
     }
 
-    await softDeleteDocument(req, ACCOUNTS_DB, account._id);
+    const now = new Date().toISOString();
+    await saveAccount(req, {
+      ...account,
+      deletedAt: now,
+      updatedAt: now,
+      status: 'deleted',
+      appleId: null,
+      sessions: [],
+      refreshTokenHash: null,
+      refreshTokenExpiry: null,
+      loginOtpHash: null,
+      loginOtpExpiry: null,
+      loginOtpSentAt: null,
+    });
+
     await writeChangelog(req, {
       entity: 'account',
       entityId: account._id,
@@ -2506,7 +2524,12 @@ export async function deleteUser(req, res) {
       actorUserId: req.body?.actorUserId || authUserId || userId,
       actorName: req.body?.actorName || account.fullName,
       changes: { before: { email: account.email, role: account.role, status: account.status } },
-      metadata: { email: account.email, ip: getClientIp(req), deletedBySuperAdmin: isSuperAdmin },
+      metadata: {
+        email: account.email,
+        ip: getClientIp(req),
+        deletedBySuperAdmin: isSuperAdmin,
+        selfDelete: isSelfDelete,
+      },
     });
     return res.json({ ok: true, id: account.user_id });
   } catch (error) {

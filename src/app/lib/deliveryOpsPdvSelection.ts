@@ -43,6 +43,41 @@ export function writeDeliveryOpsSelectedPdvId(
   }
 }
 
+/** Vista del Centro Operativo: una tienda o monitor en directo de todas. Solo Ops (no TPV/sidebar). */
+export type DeliveryOpsViewMode = 'single' | 'live_all';
+
+export const DELIVERY_OPS_LIVE_ALL_FILTER = '__live_all__';
+
+export function deliveryOpsViewModeStorageKey(businessId: string, dataUserId: string): string {
+  return `vertial.deliveryOps.viewMode.${String(businessId || 'noBiz')}.${String(dataUserId || '')}`;
+}
+
+export function readDeliveryOpsViewMode(
+  businessId: string,
+  dataUserId: string,
+): DeliveryOpsViewMode {
+  try {
+    const v = localStorage.getItem(deliveryOpsViewModeStorageKey(businessId, dataUserId));
+    return v === 'live_all' ? 'live_all' : 'single';
+  } catch {
+    return 'single';
+  }
+}
+
+export function writeDeliveryOpsViewMode(
+  businessId: string,
+  dataUserId: string,
+  mode: DeliveryOpsViewMode,
+): void {
+  try {
+    const key = deliveryOpsViewModeStorageKey(businessId, dataUserId);
+    if (mode === 'live_all') localStorage.setItem(key, 'live_all');
+    else localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Valor guardado: PDV `_id` o `wc:` + id del centro de trabajo (sales_point). */
 export function resolvePreferenceToPdvId(
   pointsOfSale: Array<{ _id: string; workCenterId?: string; active?: boolean }>,

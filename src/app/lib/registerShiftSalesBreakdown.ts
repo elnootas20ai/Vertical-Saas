@@ -66,6 +66,39 @@ function orderCashOrCard(raw: string | undefined | null): 'efectivo' | 'tarjeta'
   return null;
 }
 
+function roundMoney2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/**
+ * Importes efectivo/tarjeta del pedido para el desglose de cierre.
+ * Si hay `payments` (pago dividido), usa esos tramos; si no, el método único del pedido.
+ * No inventa reparto para bizum/online/mixto sin tramos.
+ */
+export function resolveOrderCashCardAmounts(
+  order: Pick<DeliveryOrder, 'paymentMethod' | 'payments'>,
+  orderTotal: number,
+): { efectivo: number; tarjeta: number } {
+  const payments = Array.isArray(order.payments) ? order.payments : [];
+  if (payments.length > 0) {
+    let efectivo = 0;
+    let tarjeta = 0;
+    for (const part of payments) {
+      const kind = orderCashOrCard(part.method);
+      const amount = roundMoney2(part.amount);
+      if (amount <= 0) continue;
+      if (kind === 'efectivo') efectivo += amount;
+      else if (kind === 'tarjeta') tarjeta += amount;
+    }
+    return { efectivo: roundMoney2(efectivo), tarjeta: roundMoney2(tarjeta) };
+  }
+  const kind = orderCashOrCard(order.paymentMethod);
+  const total = roundMoney2(Math.max(0, orderTotal));
+  if (kind === 'efectivo') return { efectivo: total, tarjeta: 0 };
+  if (kind === 'tarjeta') return { efectivo: 0, tarjeta: total };
+  return { efectivo: 0, tarjeta: 0 };
+}
+
 function lineRevenue(item: DeliveryOrderItem): number {
   const fromTotal = Number(item.total);
   if (Number.isFinite(fromTotal) && fromTotal > 0) return fromTotal;
@@ -134,7 +167,6 @@ export function buildShiftSalesBreakdown(orders: DeliveryOrder[]): ShiftSalesBre
     const orderItemLines: ShiftOrderItemLine[] = [];
     let orderUnits = 0;
     let itemsSubtotal = 0;
-    const payKind = orderCashOrCard(order.paymentMethod);
 
     for (const item of items) {
       const qty = Number(item.quantity || 0);
@@ -168,9 +200,20 @@ export function buildShiftSalesBreakdown(orders: DeliveryOrder[]): ShiftSalesBre
       lineItems.map((l) => l.rawRevenue),
       resolvedOrderTotal,
     );
+    const shares = resolveOrderCashCardAmounts(order, resolvedOrderTotal);
+    const cashByLine =
+      shares.efectivo > 0
+        ? distributeOrderLineTotals(adjustedTotals, shares.efectivo)
+        : adjustedTotals.map(() => 0);
+    const cardByLine =
+      shares.tarjeta > 0
+        ? distributeOrderLineTotals(adjustedTotals, shares.tarjeta)
+        : adjustedTotals.map(() => 0);
 
     lineItems.forEach((line, idx) => {
       const revenue = adjustedTotals[idx] ?? line.rawRevenue;
+      const lineEfectivo = cashByLine[idx] ?? 0;
+      const lineTarjeta = cardByLine[idx] ?? 0;
       totalUnits += line.qty;
       orderUnits += line.qty;
 
@@ -203,13 +246,10 @@ export function buildShiftSalesBreakdown(orders: DeliveryOrder[]): ShiftSalesBre
       }
       group.quantity += line.qty;
       group.revenue += revenue;
-      if (payKind === 'efectivo') {
-        group.revenueEfectivo += revenue;
-        totalEfectivo += revenue;
-      } else if (payKind === 'tarjeta') {
-        group.revenueTarjeta += revenue;
-        totalTarjeta += revenue;
-      }
+      group.revenueEfectivo += lineEfectivo;
+      group.revenueTarjeta += lineTarjeta;
+      totalEfectivo += lineEfectivo;
+      totalTarjeta += lineTarjeta;
 
       orderItemLines.push({
         name: line.name,

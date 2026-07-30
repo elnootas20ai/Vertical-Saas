@@ -69,6 +69,13 @@ describe('allocateSharedUnitsByPresence', () => {
       bb: 2,
     });
   });
+
+  it('equal: 2 compartidos → 1 a cada marca', () => {
+    expect(allocateSharedUnitsByPresence({ moda: 2, bb: 1 }, 2, 'equal')).toEqual({
+      moda: 3,
+      bb: 2,
+    });
+  });
 });
 
 describe('suggestBillingSheetsFromBrands / unlock', () => {

@@ -35,7 +35,10 @@ interface AggregatorClosingEditorProps {
   foodByChannel: Record<string, FoodFamilyCounts>;
   title?: string;
   startStep?: number;
+  /** Borrador restaurado (cierre «Guardar para luego»). */
+  initialManualDraft?: ManualLinesByChannel | null;
   onSnapshotChange?: (snapshot: AggregatorClosingSnapshot) => void;
+  onManualDraftChange?: (draft: ManualLinesByChannel) => void;
 }
 
 const FOOD_LINES = DELIVERY_FOOD_UNIT_ORDER.map((key) => ({
@@ -110,13 +113,20 @@ export function AggregatorClosingEditor({
   foodByChannel,
   title = 'Integraciones',
   startStep = 2,
+  initialManualDraft = null,
   onSnapshotChange,
+  onManualDraftChange,
 }: AggregatorClosingEditorProps) {
   const seededRef = useRef(false);
   const touchedRef = useRef<Set<string>>(new Set());
-  const [draft, setDraft] = useState<ManualLinesByChannel>(() =>
-    buildSeedLines(autoRows, foodByChannel),
-  );
+  const [draft, setDraft] = useState<ManualLinesByChannel>(() => {
+    const seed = buildSeedLines(autoRows, foodByChannel);
+    if (initialManualDraft && typeof initialManualDraft === 'object') {
+      for (const ch of Object.keys(initialManualDraft)) touchedRef.current.add(ch);
+      return { ...seed, ...initialManualDraft };
+    }
+    return seed;
+  });
 
   useEffect(() => {
     setDraft((prev) => {
@@ -222,6 +232,10 @@ export function AggregatorClosingEditor({
   useEffect(() => {
     onSnapshotChange?.(snapshot);
   }, [snapshot, onSnapshotChange]);
+
+  useEffect(() => {
+    onManualDraftChange?.(draft);
+  }, [draft, onManualDraftChange]);
 
   const patchLine = (
     channel: string,
@@ -337,7 +351,9 @@ export function AggregatorClosingEditor({
                           <input
                             type="text"
                             inputMode="decimal"
+                            lang="es-ES"
                             autoComplete="off"
+                            enterKeyHint="done"
                             placeholder="0,00"
                             value={draftLine.cash}
                             onChange={(e) =>
@@ -353,7 +369,9 @@ export function AggregatorClosingEditor({
                           <input
                             type="text"
                             inputMode="decimal"
+                            lang="es-ES"
                             autoComplete="off"
+                            enterKeyHint="done"
                             placeholder="0,00"
                             value={draftLine.card}
                             onChange={(e) =>

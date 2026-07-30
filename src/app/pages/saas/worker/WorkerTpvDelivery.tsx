@@ -54,6 +54,7 @@ import { OrderItemDetailCard } from '../../../components/delivery/OrderItemDetai
 import { DecimalNumpadField } from '../../../components/saas/DecimalNumpadField';
 import { parseDecimalPadValue } from '../../../lib/decimalNumpadInput';
 import { TpvSplitPaymentModal } from '../../../components/saas/tpv/TpvSplitPaymentModal';
+import { TpvSplitByItemsModal } from '../../../components/saas/tpv/TpvSplitByItemsModal';
 import {
   formatSplitPartsSummary,
   type TpvSplitPaymentPart,
@@ -678,7 +679,7 @@ function DeliverPaymentModal({
   useModalClose(!loading, onClose);
   const chargeTotal = resolveDeliveryOrderChargeTotal(order);
   const [cashStep, setCashStep] = useState(false);
-  const [splitOpen, setSplitOpen] = useState(false);
+  const [splitStep, setSplitStep] = useState<'choice' | 'amounts' | 'items' | null>(null);
   const [cashGiven, setCashGiven] = useState('');
   const cashGivenAmount = parseDecimalPadValue(cashGiven);
   const changeAmount =
@@ -727,16 +728,97 @@ function DeliverPaymentModal({
     );
   };
 
-  if (splitOpen && askPayment) {
+  if (splitStep === 'amounts' && askPayment) {
     return (
       <TpvSplitPaymentModal
         total={chargeTotal}
-        title="Pago dividido"
+        title="Pago por importes"
         subtitle={`#${order.orderNumber}`}
         loading={loading}
-        onClose={() => setSplitOpen(false)}
+        onClose={() => setSplitStep('choice')}
         onConfirm={(parts) => onConfirmSplit(parts)}
       />
+    );
+  }
+
+  if (splitStep === 'items' && askPayment) {
+    return (
+      <TpvSplitByItemsModal
+        items={order.items || []}
+        total={chargeTotal}
+        title="Pago por artículos"
+        subtitle={`#${order.orderNumber}`}
+        loading={loading}
+        onClose={onClose}
+        onBack={() => setSplitStep('choice')}
+        onConfirm={(parts) => onConfirmSplit(parts)}
+      />
+    );
+  }
+
+  if (splitStep === 'choice' && askPayment) {
+    return shell(
+      <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-sm p-5">
+        <button
+          type="button"
+          onClick={() => setSplitStep(null)}
+          disabled={loading}
+          className="absolute top-3 right-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+        >
+          <X className="w-5 h-5 text-gray-500" />
+        </button>
+        <div className="text-center mb-4 pr-6">
+          <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-violet-100 dark:bg-violet-950/40 flex items-center justify-center">
+            <Split className="w-6 h-6 text-violet-700 dark:text-violet-300" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Pago dividido</h3>
+          <p className="text-sm text-gray-500 mt-1 font-mono">#{order.orderNumber}</p>
+          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2 tabular-nums">
+            {formatCurrency(chargeTotal)}
+          </p>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">
+            ¿Cómo quieres dividir el cobro?
+          </p>
+        </div>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setSplitStep('items')}
+            disabled={loading || !(order.items || []).length}
+            className="w-full flex items-start gap-3 text-left py-3.5 px-3 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors disabled:opacity-50"
+          >
+            <ShoppingBag className="w-6 h-6 text-violet-700 dark:text-violet-300 shrink-0 mt-0.5" />
+            <span>
+              <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">Por artículos</span>
+              <span className="block text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
+                Cada producto en efectivo o tarjeta
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSplitStep('amounts')}
+            disabled={loading}
+            className="w-full flex items-start gap-3 text-left py-3.5 px-3 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-white dark:bg-gray-900 hover:bg-violet-50 dark:hover:bg-violet-950/20 transition-colors disabled:opacity-50"
+          >
+            <Wallet className="w-6 h-6 text-violet-700 dark:text-violet-300 shrink-0 mt-0.5" />
+            <span>
+              <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">Por importes</span>
+              <span className="block text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
+                Parte el total en tanto y tanto (€)
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSplitStep(null)}
+            disabled={loading}
+            className="w-full py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-300 disabled:opacity-50"
+          >
+            Atrás
+          </button>
+        </div>
+      </div>,
     );
   }
 
@@ -910,7 +992,7 @@ function DeliverPaymentModal({
               </button>
               <button
                 type="button"
-                onClick={() => setSplitOpen(true)}
+                onClick={() => setSplitStep('choice')}
                 disabled={loading}
                 className="col-span-2 flex flex-col items-center gap-2 py-3.5 px-2 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors disabled:opacity-50"
               >
@@ -962,12 +1044,13 @@ function OrderDetail({
   nowMs: number;
 }) {
   useModalClose(true, onClose);
-  const { currentBusiness, businesses } = useBusiness();
+  const { currentBusiness } = useBusiness();
   const compact = Boolean(readTpvTabletBinding());
   const cfg = STATUS_CONFIG[order.status];
   const nextLabel = tabletNextLabel(order);
-  const displayLabel = order.deliveryType === 'recogida'
-    ? (order.status === 'entregado' ? 'Entregado' : 'Recogida')
+  // Estado = fase del tablero (Montaje/Reparto/…). Tipo de pedido = badge aparte (Recogida/Envío).
+  const displayLabel = order.status === 'entregado'
+    ? 'Entregado'
     : isTpvRepartoBoardOrder(order)
       ? 'Reparto'
       : (LANE_STATUS_LABEL[order.status] || cfg.label);

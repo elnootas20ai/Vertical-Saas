@@ -222,12 +222,15 @@ export function WorkerSecurity() {
           </div>
         </div>
 
-        {/* Privacy */}
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+        {/* Privacy + account deletion (App Store 5.1.1(v)) */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-red-200 dark:border-red-900/50 p-6">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1 flex items-center gap-2">
             <Shield className="w-4 h-4 text-amber-500" />
-            {t('worker.security.privacy')}
+            Privacidad y eliminar cuenta / Privacy & delete account
           </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Descarga tus datos o elimina tu cuenta de Vertial de forma permanente.
+          </p>
           <div className="space-y-3">
             <button
               onClick={() => void handleDownloadMyData()}

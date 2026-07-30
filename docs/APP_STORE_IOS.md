@@ -53,9 +53,11 @@ Tras `npm run cap:sync`, `packageClassList` debe incluir Push, Apple Sign In, Ap
 - Backend: `POST /api/auth/apple-login`
 
 ### Guideline 5.1.1(v) — Eliminar cuenta
-- Ajustes → Seguridad → **Eliminar cuenta** (propietarios)
-- Trabajadores → Seguridad → eliminar cuenta (compacto)
-- Backend: `DELETE /api/auth/profile/:userId` (auto-borrado)
+- **Propietarios:** Ajustes → **Mi perfil** → pestaña **Seguridad / Delete account** → **Eliminar cuenta**
+  - URL directa: `/saas/settings/seguridad` (también `/saas/settings/security` y `/saas/settings/delete-account`)
+- **Trabajadores:** menú **Seguridad y Privacidad** → **Eliminar cuenta / Delete account**
+- Flujo: botón → escribe `ELIMINAR` en el modal → confirmar → logout
+- Backend: `DELETE /api/auth/profile/:userId` (auto-borrado; soft-delete cuenta + negocios propios; bloquea login email/Apple)
 
 ### Guideline 3.1.1 — App para clientes Vertial
 - **App iOS = acceso para clientes de Vertial** (login + operativa)
@@ -138,7 +140,8 @@ Asegura que la cuenta empresa tenga **suscripción activa** (script `scripts/see
 > Sign in with Apple uses official artwork from Apple Design Resources. Sign in with Google is not available on iOS. Sign in with Apple + email/password are the iOS methods.
 >
 > Demo — Company: [email] / [password]. Path: Entry → Empresa → Sign in.
-> Account deletion: Settings → Security → Delete account.
+>
+> Account deletion (Guideline 5.1.1(v)): After sign-in → sidebar Ajustes (Settings) → section Mi perfil → tab «Seguridad / Delete account» → scroll or tap «Ir a Eliminar cuenta» → button «Eliminar mi cuenta permanentemente» → type ELIMINAR → confirm. Direct path: Settings → Security → Delete account (`/saas/settings/seguridad`). Deletion completes in-app (no email or phone call). After deletion the user is signed out and cannot sign in again with that account.
 
 ### Checklist App Store Connect (metadatos 2.3)
 

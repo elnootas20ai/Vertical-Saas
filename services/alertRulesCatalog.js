@@ -41,7 +41,8 @@ export const ALERT_RULE_DEPARTMENTS = [
 
 export const ALL_ALERT_RULE_DEFINITIONS = [
   // ─── Delivery / caja / operación restaurante ─────────────────────────────
-  r('delivery_delayed_order', 'delivery', 'delivery', 'Pedido retrasado', 'Pedido que supera el tiempo máximo en su estado actual', { ...pushInApp, urgency: 'high' }),
+  r('delivery_delayed_order', 'delivery', 'delivery', 'Pedido retrasado (por fase)', 'Pedido que supera el tiempo máximo en su estado actual', { ...pushInApp, urgency: 'high' }),
+  r('delivery_order_very_delayed', 'delivery', 'delivery', 'Pedido muy retrasado', 'Pedido activo que supera el tiempo total desde que se creó (por defecto 1 h)', { ...pushEmail, urgency: 'high' }),
   r('delivery_kitchen_saturated', 'delivery', 'delivery', 'Cocina saturada', 'Demasiados pedidos en cocina respecto a la capacidad', { ...pushInApp, urgency: 'high', enabled: false }),
   r('delivery_queue_overflow', 'delivery', 'delivery', 'Cola de cocina desbordada', 'Pedidos en cola y cocina por encima de la capacidad', { ...pushInApp, urgency: 'high', enabled: false }),
   r('delivery_product_out_of_stock', 'delivery', 'delivery', 'Producto agotado en carta', 'Producto activo sin stock disponible', { urgency: 'high' }),
@@ -52,6 +53,8 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('delivery_cash_pending_close', 'delivery', 'pdvs', 'Caja sin cerrar', 'Caja abierta después de la hora límite o demasiadas horas', { ...pushEmail, urgency: 'high' }),
   r('delivery_register_not_opened', 'delivery', 'pdvs', 'Caja sin abrir', 'Terminal activo sin sesión de caja abierta hoy', { ...pushInApp, urgency: 'high' }),
   r('delivery_cash_discrepancy', 'delivery', 'pdvs', 'Descuadre de caja', 'Diferencia al cerrar caja respecto al esperado', { ...pushEmail, urgency: 'critical' }),
+  r('delivery_register_closed_ok', 'delivery', 'pdvs', 'Caja cerrada correctamente', 'Cierre de caja TPV sin descuadre', { ...pushEmail, urgency: 'medium' }),
+  r('delivery_register_closed_discrepancy', 'delivery', 'pdvs', 'Caja cerrada con descuadre', 'Cierre de caja TPV con diferencia de efectivo', { ...pushEmail, urgency: 'critical' }),
   r('delivery_channel_silent', 'delivery', 'delivery', 'Canal sin actividad', 'Canal de pedidos (web, app, agregador) sin pedidos en X minutos', { urgency: 'medium' }),
   r('delivery_low_margin', 'delivery', 'delivery', 'Margen bajo en delivery', 'Margen estimado del día por debajo del umbral', { urgency: 'medium' }),
   r('delivery_failed_delivery', 'delivery', 'delivery', 'Entrega fallida', 'Pedido que falló o se canceló tras salir a reparto', { ...pushInApp, urgency: 'high' }),
@@ -243,13 +246,16 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
 
 /** Paquete delivery al crear negocio: avisos al gerente/owner (caja, incidencias, equipo). */
 export const DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS = [
-  'delivery_cash_pending_close',
-  'delivery_register_not_opened',
   'delivery_cash_discrepancy',
+  'delivery_register_not_opened',
+  'delivery_cash_pending_close',
+  'delivery_register_closed_ok',
+  'delivery_register_closed_discrepancy',
   'register_high_return',
   'delivery_unpaid_order',
   'delivery_failed_delivery',
   'delivery_delayed_order',
+  'delivery_order_very_delayed',
   'delivery_no_address',
   'delivery_product_out_of_stock',
   'delivery_order_cancelled',

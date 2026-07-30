@@ -15,6 +15,7 @@ const PLAN_TIER_RANK = { basic: 0, normal: 1, pro: 2 };
 export const CEO_MOBILE_PUSH_RULE_IDS = new Set([
   // ── Críticas ──
   'delivery_cash_discrepancy',
+  'delivery_register_closed_discrepancy',
   'payment_overdue',
   'negative_cash_flow',
   'tax_deadline_overdue',
@@ -22,9 +23,13 @@ export const CEO_MOBILE_PUSH_RULE_IDS = new Set([
   // ── Caja / TPV ──
   'delivery_cash_pending_close',
   'delivery_register_not_opened',
+  'delivery_register_closed_ok',
   'register_high_return',
   'delivery_driver_mismatch',
   'butcher_register_pending',
+
+  // ── Operación delivery ──
+  'delivery_order_very_delayed',
 
   // ── Impagos / cobros / pedidos anulados ──
   'delivery_unpaid_order',

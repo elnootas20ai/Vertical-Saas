@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useMe
 import { useSSE } from '../hooks/useSSE';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useNativePushNotifications } from '../hooks/useNativePushNotifications';
+import { PushPermissionGate } from '../components/saas/PushPermissionGate';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuth } from './AuthContext';
 import { useBusinessOptional } from './BusinessContext';
@@ -2558,7 +2559,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     getStats,
   };
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={value}>
+      {children}
+      <PushPermissionGate userId={authUser?.user_id ?? null} />
+    </AppContext.Provider>
+  );
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────

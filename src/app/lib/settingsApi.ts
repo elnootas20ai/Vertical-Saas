@@ -285,6 +285,8 @@ export interface DeliveryDelayThresholds {
   kitchen: number;
   assembly: number;
   delivery: number;
+  /** Minutos desde creación del pedido (activo) → aviso CEO. Default 60. */
+  orderTotal: number;
 }
 
 /** Umbrales operativos delivery (cuándo dispara cada alerta). */
@@ -316,6 +318,7 @@ export const DEFAULT_DELIVERY_OPERATIONAL: DeliveryOperationalConfig = {
     kitchen: 18,
     assembly: 8,
     delivery: 35,
+    orderTotal: 60,
   },
   kitchenCapacity: 10,
   kitchenWarningPercent: 70,
