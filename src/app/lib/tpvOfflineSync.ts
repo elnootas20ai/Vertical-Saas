@@ -7,14 +7,12 @@ import {
   type TpvRegisterSession,
   type TpvRegisterTransaction,
 } from './deliveryApi';
-import { createButcherSaleRequest } from './butcherApi';
 import {
   isBrowserOnline,
   listTpvOfflineQueue,
   removeTpvOfflineItem,
   type TpvOfflineQueueItem,
 } from './tpvTabletOffline';
-import { isDiningOfflineType, syncDiningOfflineItem } from './restaurantTpvOfflineSync';
 
 export type TpvOfflineSyncResult = {
   synced: number;
@@ -75,19 +73,6 @@ async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
     if (!userId || !sessionId || !session || !tx) return false;
     await updateTpvRegisterSessionRequest(userId, session);
     return true;
-  }
-
-  if (item.type === 'butcher_sale') {
-    const userId = String(p.userId || '').trim();
-    const sale = p.sale as Record<string, unknown> | undefined;
-    if (!userId || !sale || !Array.isArray(sale.items) || sale.items.length === 0) return false;
-    const res = await createButcherSaleRequest(userId, sale);
-    if (!res?.ok) return false;
-    return true;
-  }
-
-  if (isDiningOfflineType(item.type)) {
-    return syncDiningOfflineItem(item);
   }
 
   // clock_in / clock_out: sincronización futura vía API de fichajes
