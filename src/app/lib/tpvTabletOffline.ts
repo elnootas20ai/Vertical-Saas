@@ -6,7 +6,12 @@ export type TpvOfflineQueueItemType =
   | 'sale'
   | 'order_create'
   | 'order_update'
-  | 'register_tx';
+  | 'order_cancel'
+  | 'register_tx'
+  | 'butcher_sale'
+  | 'dining_comanda_add'
+  | 'dining_comanda_send'
+  | 'dining_pay';
 
 export type TpvOfflineQueueItem = {
   id: string;

@@ -1866,10 +1866,6 @@ export function WorkerTpvDelivery({
 
   const handleDeleteOrder = useCallback(async (reason: string) => {
     if (!userId || !deleteOrder) return;
-    if (!isBrowserOnline()) {
-      toast.error('Sin conexión — no se puede eliminar el pedido ahora');
-      return;
-    }
     const target = deleteOrder;
     if (!beginAdvancing(target._id)) return;
 
@@ -1892,12 +1888,27 @@ export function WorkerTpvDelivery({
       ],
     };
 
-    // Cierra modal y mueve el pedido al instante (el servidor sigue en segundo plano).
+    const queueCancel = () => {
+      enqueueTpvOfflineItem('order_cancel', {
+        userId,
+        orderId: target._id,
+        cancelReason: trimmed,
+      });
+    };
+
+    // Cierra modal y mueve el pedido al instante (online u offline).
     setOrders((prev) => prev.map((o) => (o._id === target._id ? optimistic : o)));
     setShowDelivered(true);
     setDeleteOrder(null);
     if (selectedOrder?._id === target._id) setSelectedOrder(null);
     if (deliveryCompleteOrder?._id === target._id) setDeliveryCompleteOrder(null);
+
+    if (!isBrowserOnline()) {
+      queueCancel();
+      toast.info(`Sin conexión — eliminación en cola (#${target.orderNumber})`);
+      endAdvancing(target._id);
+      return;
+    }
 
     try {
       const { order: updated, cajaRegistration } = await cancelDeliveryOrderRequest(
@@ -1912,8 +1923,18 @@ export function WorkerTpvDelivery({
         toast.success(`Pedido #${target.orderNumber} eliminado`);
       }
     } catch (err) {
-      setOrders((prev) => prev.map((o) => (o._id === target._id ? target : o)));
-      toast.error(err instanceof Error ? err.message : 'Error al eliminar el pedido');
+      const msg = err instanceof Error ? err.message : String(err || '');
+      const networkish =
+        !isBrowserOnline()
+        || /fetch|network|failed|timeout|offline|ECONN|502|503|504|Load failed|Failed to fetch/i.test(msg);
+      if (networkish) {
+        // Backend caído / sin red: deja el UI y sincroniza al volver.
+        queueCancel();
+        toast.info(`Sin servidor — eliminación en cola (#${target.orderNumber})`);
+      } else {
+        setOrders((prev) => prev.map((o) => (o._id === target._id ? target : o)));
+        toast.error(msg || 'Error al eliminar el pedido');
+      }
     } finally {
       endAdvancing(target._id);
     }

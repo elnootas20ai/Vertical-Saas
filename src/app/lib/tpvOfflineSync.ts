@@ -1,4 +1,5 @@
 import {
+  cancelDeliveryOrderRequest,
   createDeliveryOrderRequest,
   updateDeliveryOrderRequest,
   updateTpvRegisterSessionRequest,
@@ -6,12 +7,14 @@ import {
   type TpvRegisterSession,
   type TpvRegisterTransaction,
 } from './deliveryApi';
+import { createButcherSaleRequest } from './butcherApi';
 import {
   isBrowserOnline,
   listTpvOfflineQueue,
   removeTpvOfflineItem,
   type TpvOfflineQueueItem,
 } from './tpvTabletOffline';
+import { isDiningOfflineType, syncDiningOfflineItem } from './restaurantTpvOfflineSync';
 
 export type TpvOfflineSyncResult = {
   synced: number;
@@ -40,6 +43,22 @@ async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
     return true;
   }
 
+  if (item.type === 'order_cancel') {
+    const userId = String(p.userId || '').trim();
+    const orderId = String(p.orderId || '').trim();
+    const cancelReason = String(p.cancelReason || '').trim();
+    if (!userId || !orderId || cancelReason.length < 4) return false;
+    try {
+      await cancelDeliveryOrderRequest(userId, orderId, cancelReason);
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err || '');
+      // Idempotente: si ya se canceló online, la cola no debe quedarse pillada.
+      if (/ya est[aá] cancelado|already cancelled|404|no encontrado/i.test(msg)) return true;
+      throw err;
+    }
+  }
+
   if (item.type === 'register_tx') {
     const userId = String(p.userId || '').trim();
     const session = p.session as TpvRegisterSession | undefined;
@@ -56,6 +75,19 @@ async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
     if (!userId || !sessionId || !session || !tx) return false;
     await updateTpvRegisterSessionRequest(userId, session);
     return true;
+  }
+
+  if (item.type === 'butcher_sale') {
+    const userId = String(p.userId || '').trim();
+    const sale = p.sale as Record<string, unknown> | undefined;
+    if (!userId || !sale || !Array.isArray(sale.items) || sale.items.length === 0) return false;
+    const res = await createButcherSaleRequest(userId, sale);
+    if (!res?.ok) return false;
+    return true;
+  }
+
+  if (isDiningOfflineType(item.type)) {
+    return syncDiningOfflineItem(item);
   }
 
   // clock_in / clock_out: sincronización futura vía API de fichajes
