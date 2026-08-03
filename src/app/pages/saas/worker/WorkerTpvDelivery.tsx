@@ -1690,6 +1690,16 @@ export function WorkerTpvDelivery({
         return;
       }
 
+      // UI al instante (montaje→reparto no espera al servidor); si falla, se revierte.
+      setOrders((prev) => prev.map((o) => (o._id === payload._id ? payload : o)));
+      setDeliveryCompleteOrder(null);
+      if (next === 'entregado') {
+        setShowDelivered(true);
+        setSelectedOrder(null);
+      } else if (selectedOrder?._id === payload._id) {
+        setSelectedOrder(payload);
+      }
+
       const submitUpdate = async (body: DeliveryOrder): Promise<DeliveryOrder> => {
         try {
           return await updateDeliveryOrderRequest(userId, body);
@@ -1715,20 +1725,22 @@ export function WorkerTpvDelivery({
       };
 
       const updated = await submitUpdate(payload);
-      setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
-      setDeliveryCompleteOrder(null);
-      if (next === 'entregado') setShowDelivered(true);
+      setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
+      if (selectedOrder?._id === updated._id && next !== 'entregado') {
+        setSelectedOrder(updated);
+      }
       if (next === 'entregado') {
-        setSelectedOrder(null);
         toast.success(
           `Pedido #${order.orderNumber} entregado · ${PAYMENT_LABELS[resolvedPayment!]}`,
         );
       } else {
-        if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
         const label = LANE_STATUS_LABEL[next] || STATUS_CONFIG[next].label;
         toast.success(`Pedido #${order.orderNumber} → ${label}`);
       }
     } catch (err) {
+      // Revertir UI optimista si el servidor rechazó el avance.
+      setOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
+      if (selectedOrder?._id === order._id) setSelectedOrder(order);
       toast.error(err instanceof Error ? err.message : 'Error al avanzar pedido');
     } finally {
       endAdvancing(order._id);
