@@ -4,7 +4,10 @@ import {
   lineQuantity,
   lineRevenueAmount,
 } from '../../../shared/delivery/orderLineRevenueSplit.js';
-import { filterOrdersForRegisterSession } from './registerShiftSalesBreakdown';
+import {
+  filterOrdersForRegisterSession,
+  resolveOrderCashCardAmounts,
+} from './registerShiftSalesBreakdown';
 import {
   splitRulesFromBillingConfig,
   type BrandBillingConfig,
@@ -28,6 +31,10 @@ export type ShiftBrandRevenueRow = {
   brandId: string;
   name: string;
   revenue: number;
+  /** € cobrados en efectivo atribuidos a esta marca */
+  revenueEfectivo: number;
+  /** € cobrados con tarjeta atribuidos a esta marca */
+  revenueTarjeta: number;
   /** € de líneas con esa marca */
   ownRevenue: number;
   /** € compartidos (bebidas…) asignados a esta marca */
@@ -67,6 +74,8 @@ export function buildShiftBrandRevenue(
   const splitRules = splitRulesFromBillingConfig(rules || null);
   const shiftOrders = filterOrdersForRegisterSession(session, orders);
   const byBrand: Record<string, number> = {};
+  const cashByBrand: Record<string, number> = {};
+  const cardByBrand: Record<string, number> = {};
   const ownByBrand: Record<string, number> = {};
   const sharedByBrand: Record<string, number> = {};
   const orderCountByBrand: Record<string, number> = {};
@@ -76,6 +85,10 @@ export function buildShiftBrandRevenue(
   for (const order of shiftOrders) {
     const orderRev = orderRevenue(order);
     total += orderRev;
+    const pay = resolveOrderCashCardAmounts(order, orderRev);
+    const payDenom = Math.max(0, pay.efectivo) + Math.max(0, pay.tarjeta);
+    const cashRatio = payDenom > 0 ? Math.max(0, pay.efectivo) / payDenom : 0;
+    const cardRatio = payDenom > 0 ? Math.max(0, pay.tarjeta) / payDenom : 0;
 
     const items = Array.isArray(order.items) ? order.items : [];
     const ownOnly: Record<string, number> = {};
@@ -101,6 +114,8 @@ export function buildShiftBrandRevenue(
       const v = (Number(amt) || 0) * scale;
       if (v <= 0) continue;
       byBrand[bid] = (byBrand[bid] || 0) + v;
+      cashByBrand[bid] = (cashByBrand[bid] || 0) + v * cashRatio;
+      cardByBrand[bid] = (cardByBrand[bid] || 0) + v * cardRatio;
       const ownRaw = (ownOnly[bid] || 0) * scale;
       const own = Math.min(ownRaw, v);
       const shared = Math.max(0, v - own);
@@ -124,10 +139,14 @@ export function buildShiftBrandRevenue(
       const sharedAssigned = Math.round((sharedByBrand[brandId] || 0) * 100) / 100;
       const orderCount = orderCountByBrand[brandId] || 0;
       const rev = Math.round(revenue * 100) / 100;
+      const revenueEfectivo = Math.round((cashByBrand[brandId] || 0) * 100) / 100;
+      const revenueTarjeta = Math.round((cardByBrand[brandId] || 0) * 100) / 100;
       return {
         brandId,
         name: String(brandLabels[brandId] || '').trim() || brandId,
         revenue: rev,
+        revenueEfectivo,
+        revenueTarjeta,
         ownRevenue,
         sharedAssigned,
         orderCount,

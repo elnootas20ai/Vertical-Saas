@@ -156,10 +156,6 @@ function OrderChannelBadge({ channel, compact = false }: { channel?: string | nu
 
 type FulfillmentFilter = 'all' | 'recogida' | 'domicilio';
 
-function isCompletedBoardOrder(order: DeliveryOrder): boolean {
-  return isDeliveredBoardOrder(order);
-}
-
 /** Pedido cobrado en TPV (Cobrar y enviar): tiene canal y método de pago. */
 function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryPaymentMethod {
   const pm = String(raw || '').trim().toLowerCase();
@@ -168,17 +164,21 @@ function resolveDeliveryPaymentMethod(raw: string | undefined | null): DeliveryP
   return 'efectivo';
 }
 
-/** Pedir cobro si aún no está cobrado (montaje→reparto, montaje→entregar recogida, etc.). */
+/** Pedir cobro si aún no está cobrado. */
 function shouldAskPaymentOnDelivery(order: DeliveryOrder): boolean {
   return !orderAlreadyCobrado(order);
 }
 
-/** Al entregar (recogida/domicilio) o al pasar a reparto (domicilio): pedir cobro si aún no está cobrado. */
+/**
+ * Cuándo pedir efectivo/tarjeta/dividido al avanzar:
+ * - Recogida tienda: al finalizar (montaje → entregado).
+ * - Domicilio: solo al entregar (reparto → entregado), NO al pasar montaje → reparto.
+ */
 function shouldAskPaymentOnAdvance(
   order: DeliveryOrder,
   next: DeliveryOrderStatus,
 ): boolean {
-  if (next !== 'entregado' && next !== 'en_reparto') return false;
+  if (next !== 'entregado') return false;
   return shouldAskPaymentOnDelivery(order);
 }
 
@@ -561,7 +561,7 @@ function OrderCard({
             onClick={() => onAdvance(order)}
             disabled={advancing}
             title={nextLabel}
-            className={`shrink-0 self-center flex flex-col items-center justify-center rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
+            className={`shrink-0 self-center flex flex-col items-center justify-center rounded-lg bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
               compact
                 ? 'min-w-[3.25rem] min-h-[2.75rem] px-1.5 py-1 gap-0.5 text-[10px]'
                 : 'min-w-[3.5rem] min-h-[44px] px-2 py-2 gap-0.5 rounded-lg text-[10px]'
@@ -867,7 +867,7 @@ function DeliverPaymentModal({
                     onClick={() => setCashGiven(amount.toFixed(2))}
                     className={`min-h-[36px] px-2.5 rounded-lg text-xs font-semibold border touch-manipulation ${
                       selected
-                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        ? 'bg-[var(--v-blue,#2563eb)] text-white border-[var(--v-blue,#2563eb)]'
                         : 'bg-white dark:bg-gray-800 border-emerald-300 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200'
                     }`}
                   >
@@ -918,7 +918,7 @@ function DeliverPaymentModal({
                 onConfirm('efectivo', cash);
               }}
               disabled={loading || (changeAmount !== null && changeAmount < 0)}
-              className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white text-sm font-bold disabled:opacity-50 inline-flex items-center justify-center gap-2"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               Confirmar
@@ -1005,7 +1005,7 @@ function DeliverPaymentModal({
               type="button"
               onClick={() => onConfirm(resolveDeliveryPaymentMethod(order.paymentMethod))}
               disabled={loading}
-              className="col-span-2 flex items-center justify-center gap-2 py-4 px-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors disabled:opacity-50"
+              className="col-span-2 flex items-center justify-center gap-2 py-4 px-4 rounded-2xl border-2 border-emerald-200 dark:border-emerald-800 bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-sm transition-colors disabled:opacity-50"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -1057,8 +1057,9 @@ function OrderDetail({
   const typeBadge = DELIVERY_TYPE_BADGE[order.deliveryType] || DELIVERY_TYPE_BADGE.domicilio;
   const StatusIcon = cfg.Icon;
   const TypeIcon = typeBadge.Icon;
+  // Aunque diga Pagado: poder corregir efectivo ↔ tarjeta en cualquier fase.
   const canCorrectPayment =
-    Boolean(onCorrectPayment) && isCompletedBoardOrder(order) && orderAlreadyCobrado(order);
+    Boolean(onCorrectPayment) && orderAlreadyCobrado(order) && !isCancelledDeliveryOrder(order);
   const currentPayment = resolveDeliveryPaymentMethod(order.paymentMethod);
   const phaseTimer = getTpvPhaseTimer(order, nowMs);
   const isPaid = orderAlreadyCobrado(order);
@@ -1261,7 +1262,7 @@ function OrderDetail({
               type="button"
               onClick={() => onAdvance(order)}
               disabled={advancing || markingPaid}
-              className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50 touch-manipulation ${
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold disabled:opacity-50 touch-manipulation ${
                 compact ? 'px-2 py-2 text-sm' : 'px-3 py-3 rounded-xl text-base shadow-md gap-2'
               }`}
             >
@@ -1579,7 +1580,7 @@ export function WorkerTpvDelivery({
 
     let resolvedPayment = paymentMethod;
     if (!resolvedPayment && shouldAskPaymentOnAdvance(order, next)) {
-      setPaymentPromptPurpose(next === 'en_reparto' ? 'reparto' : 'entregar');
+      setPaymentPromptPurpose('entregar');
       setSelectedOrder(null);
       setDeliveryCompleteOrder(order);
       return;
@@ -1610,12 +1611,8 @@ export function WorkerTpvDelivery({
           extras.departedAt = now;
         }
       }
-      // Cobro al pasar a reparto (domicilio) o al entregar (recogida / fin de domicilio).
-      if (
-        (next === 'en_reparto' || next === 'entregado')
-        && resolvedPayment
-        && !orderAlreadyCobrado(order)
-      ) {
+      // Cobro solo al entregar (recogida en tienda o fin de domicilio). Nunca al mandar a reparto.
+      if (next === 'entregado' && resolvedPayment && !orderAlreadyCobrado(order)) {
         extras.paymentMethod = resolvedPayment;
         extras.paymentCollected = true;
         extras.paymentCollectedAt = now;
@@ -1648,8 +1645,8 @@ export function WorkerTpvDelivery({
                 ? `Recogida en tienda · ${resolvedPayment ? PAYMENT_LABELS[resolvedPayment] : 'entregado'}`
                 : next === 'entregado' && resolvedPayment
                   ? `Entregado · ${PAYMENT_LABELS[resolvedPayment]}`
-                  : next === 'en_reparto' && resolvedPayment && !orderAlreadyCobrado(order)
-                    ? `A reparto · cobrado ${PAYMENT_LABELS[resolvedPayment]}`
+                  : next === 'en_reparto'
+                    ? 'Enviado a reparto'
                     : undefined,
           },
         ],
@@ -1729,11 +1726,7 @@ export function WorkerTpvDelivery({
       } else {
         if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
         const label = LANE_STATUS_LABEL[next] || STATUS_CONFIG[next].label;
-        const paidNote =
-          next === 'en_reparto' && extras.paymentCollected && resolvedPayment
-            ? ` · ${PAYMENT_LABELS[resolvedPayment]}`
-            : '';
-        toast.success(`Pedido #${order.orderNumber} → ${label}${paidNote}`);
+        toast.success(`Pedido #${order.orderNumber} → ${label}`);
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al avanzar pedido');
@@ -2125,7 +2118,7 @@ export function WorkerTpvDelivery({
                 type="button"
                 onClick={() => setView('new-order')}
                 title="Nuevo pedido"
-                className="flex items-center justify-center gap-1 min-h-[40px] shrink-0 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm shadow-emerald-900/20 transition-colors touch-manipulation"
+                className="flex items-center justify-center gap-1 min-h-[40px] shrink-0 px-3 rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-xs shadow-sm shadow-blue-900/20 transition-colors touch-manipulation"
               >
                 <Plus className="w-4 h-4" strokeWidth={2.5} />
                 Nuevo
@@ -2232,7 +2225,7 @@ export function WorkerTpvDelivery({
               <button
                 type="button"
                 onClick={() => setView('new-order')}
-                className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm sm:text-base shadow-lg shadow-emerald-900/25"
+                className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-sm sm:text-base shadow-lg shadow-blue-900/25"
               >
                 <Plus className="w-5 h-5" strokeWidth={2.5} />
                 Nuevo pedido

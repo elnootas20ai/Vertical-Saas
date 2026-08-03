@@ -92,6 +92,7 @@ describe('buildShiftBrandRevenue', () => {
         _id: 'a',
         totalAmount: 12,
         paidAmount: 12,
+        paymentMethod: 'efectivo',
         items: [
           { brandIds: ['modo'], quantity: 1, total: 10 },
           { category: 'Bebidas', quantity: 1, total: 2 },
@@ -102,6 +103,52 @@ describe('buildShiftBrandRevenue', () => {
     expect(unbranded).toBe(0);
     expect(rows[0].name).toBe('Modomio');
     expect(rows[0].revenue).toBe(12);
+    expect(rows[0].revenueEfectivo).toBe(12);
+    expect(rows[0].revenueTarjeta).toBe(0);
+  });
+
+  it('separa efectivo y tarjeta por marca activa (p. ej. Modomio + otra)', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+    };
+    const orders = [
+      paidOrder({
+        _id: 'cash-modo',
+        totalAmount: 20,
+        paidAmount: 20,
+        paymentMethod: 'efectivo',
+        items: [{ brandIds: ['modo'], quantity: 1, total: 20 }],
+      }),
+      paidOrder({
+        _id: 'card-bb',
+        totalAmount: 15,
+        paidAmount: 15,
+        paymentMethod: 'tarjeta',
+        items: [{ brandIds: ['bb'], quantity: 1, total: 15 }],
+      }),
+      paidOrder({
+        _id: 'card-modo',
+        totalAmount: 10,
+        paidAmount: 10,
+        paymentMethod: 'tarjeta',
+        items: [{ brandIds: ['modo'], quantity: 1, total: 10 }],
+      }),
+    ];
+    const { rows } = buildShiftBrandRevenue(session, orders, {
+      modo: 'Modomio',
+      bb: 'Burger Brother',
+    });
+    const modo = rows.find((r) => r.brandId === 'modo');
+    const bb = rows.find((r) => r.brandId === 'bb');
+    expect(modo?.revenue).toBe(30);
+    expect(modo?.revenueEfectivo).toBe(20);
+    expect(modo?.revenueTarjeta).toBe(10);
+    expect(bb?.revenue).toBe(15);
+    expect(bb?.revenueEfectivo).toBe(0);
+    expect(bb?.revenueTarjeta).toBe(15);
   });
 });
 
