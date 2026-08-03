@@ -14,8 +14,16 @@ describe('orderItemCustomizationDetail — sin duplicar SIN', () => {
         { name: 'cebolla', quantity: 'sin' },
       ],
     });
-    expect(lines.filter((l) => /sin\s+cebolla/i.test(l))).toHaveLength(1);
+    expect(lines.filter((l) => /SIN\s+cebolla/i.test(l))).toHaveLength(1);
+    expect(lines).toContain('SIN cebolla');
     expect(lines.some((l) => l.includes('+') || l.includes('búfala'))).toBe(true);
+  });
+
+  it('acepta extras viejos (- sin) y nuevos (SIN)', () => {
+    const lines = orderItemCustomizationDetail({
+      extras: ['SIN tomate', '- sin cebolla', '- pepinillo'],
+    });
+    expect(lines).toEqual(['SIN tomate', 'SIN cebolla', 'SIN pepinillo']);
   });
 
   it('parts.removed sale una sola vez', () => {

@@ -2005,7 +2005,7 @@ export function buildOrderExtras(customization: CartLineCustomization): string[]
     }
     for (const ing of ref.removedIngredients ?? []) {
       const name = String(ing || '').trim();
-      if (name) out.push(`- sin ${name}`);
+      if (name) out.push(`SIN ${name}`);
     }
     const notes = String(ref.notes || '').trim();
     if (notes) out.push(`· ${notes}`);
@@ -2017,7 +2017,7 @@ export function buildOrderExtras(customization: CartLineCustomization): string[]
     out.push(`+ ${s.name}`);
   }
   for (const ing of customization.removedIngredients) {
-    out.push(`- sin ${ing}`);
+    out.push(`SIN ${ing}`);
   }
   return out;
 }

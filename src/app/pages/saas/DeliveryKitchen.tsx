@@ -22,6 +22,7 @@ import {
   pickDefaultActivePdvId,
   DELIVERY_ACTIVE_STORE_CHANGED,
 } from '../../lib/deliveryOpsPdvSelection';
+import { orderItemCustomizationParts } from '../../lib/deliveryTicketHelpers';
 import {
   ChefHat,
   Package,
@@ -52,7 +53,6 @@ import {
   List,
   Wifi,
   WifiOff,
-  Bell,
 } from 'lucide-react';
 
 // ─── Status config adapted to new Spanish statuses ───────────────────────────
@@ -238,11 +238,20 @@ function KitchenOrderCard({
                       <span className="px-1 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold rounded">AGOTADO</span>
                     )}
                   </div>
-                  {item.extras && item.extras.length > 0 && (
-                    <p className="text-xs text-indigo-600 dark:text-indigo-400 ml-6">
-                      + {item.extras.join(', ')}
-                    </p>
-                  )}
+                  {(() => {
+                    const parts = orderItemCustomizationParts(item);
+                    const bits = [
+                      ...parts.composition.map((n) => `▸ ${n}`),
+                      ...parts.added.map((n) => `+ ${n}`),
+                      ...parts.removed.map((n) => `SIN ${n}`),
+                    ];
+                    if (bits.length === 0) return null;
+                    return (
+                      <p className="text-xs text-indigo-600 dark:text-indigo-400 ml-6 font-semibold">
+                        {bits.join(' · ')}
+                      </p>
+                    );
+                  })()}
                   {item.notes && (
                     <p className="text-xs text-amber-600 dark:text-amber-400 ml-6 italic">{item.notes}</p>
                   )}
@@ -562,18 +571,40 @@ function OrderDetailModal({
                           <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold rounded">AGOTADO</span>
                         )}
                       </div>
-                      {item.extras && item.extras.length > 0 && (
-                        <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">+ {item.extras.join(', ')}</p>
-                      )}
+                      {(() => {
+                        const parts = orderItemCustomizationParts(item);
+                        const bits = [
+                          ...parts.composition.map((n) => `▸ ${n}`),
+                          ...parts.added.map((n) => `+ ${n}`),
+                          ...parts.removed.map((n) => `SIN ${n}`),
+                        ];
+                        if (bits.length === 0) return null;
+                        return (
+                          <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5 font-semibold">
+                            {bits.join(' · ')}
+                          </p>
+                        );
+                      })()}
                       {item.ingredients && item.ingredients.length > 0 && (
                         <div className="mt-1">
                           <p className="text-[10px] font-bold uppercase text-gray-400">Ingredientes</p>
                           <div className="flex flex-wrap gap-1 mt-0.5">
-                            {item.ingredients.map((ing) => (
-                              <span key={ing.name} className="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-[10px] text-gray-600 dark:text-gray-400">
-                                {ing.name}{ing.quantity ? ` (${ing.quantity})` : ''}
-                              </span>
-                            ))}
+                            {item.ingredients.map((ing) => {
+                              const qty = String(ing.quantity || '').toLowerCase();
+                              const isRemoved = qty === 'sin';
+                              return (
+                                <span
+                                  key={ing.name}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                    isRemoved
+                                      ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300'
+                                      : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                                  }`}
+                                >
+                                  {isRemoved ? `SIN ${ing.name}` : `${ing.name}${ing.quantity ? ` (${ing.quantity})` : ''}`}
+                                </span>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
@@ -925,21 +956,6 @@ export function DeliveryKitchen() {
     };
   }, [orders, colQueue, colKitchen, colReady, colIncidents]);
 
-  // Alerts
-  const alerts = useMemo(() => {
-    const list: { type: 'warning' | 'danger'; text: string }[] = [];
-    if (stats.queue >= 10) list.push({ type: 'danger', text: `Cola alta: ${stats.queue} pedidos pendientes` });
-    else if (stats.queue >= 5) list.push({ type: 'warning', text: `Cola creciendo: ${stats.queue} pedidos pendientes` });
-    const overtime = colKitchen.filter((o) => elapsedMinutes(o.kitchenStartedAt || o.createdAt) > 20);
-    for (const o of overtime.slice(0, 3)) {
-      list.push({ type: 'danger', text: `#${o.orderNumber} fuera de tiempo (${formatElapsed(elapsedMinutes(o.kitchenStartedAt || o.createdAt))})` });
-    }
-    if (colIncidents.length > 0) {
-      list.push({ type: 'danger', text: `${colIncidents.length} pedido(s) con incidencia` });
-    }
-    return list;
-  }, [stats, colKitchen, colIncidents]);
-
   // Mobile tab content
   const mobileOrders = useMemo(() => {
     if (mobileTab === 'cola') return colQueue;
@@ -950,21 +966,6 @@ export function DeliveryKitchen() {
   return (
     <Layout title="Cocina / KDS" noPadding>
       <div className="flex flex-col h-[calc(100vh-64px)] min-h-0">
-        {/* ── Alert bar ──────────────────────────────────────────────────── */}
-        {alerts.length > 0 && (
-          <div className="shrink-0 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2">
-            <div className="flex items-center gap-3 overflow-x-auto">
-              <Bell className="w-4 h-4 text-red-500 shrink-0 animate-pulse" />
-              {alerts.map((a, i) => (
-                <span key={i} className={`text-xs font-semibold whitespace-nowrap ${a.type === 'danger' ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400'}`}>
-                  {a.text}
-                  {i < alerts.length - 1 && <span className="mx-2 text-red-300">|</span>}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* ── KPI bar ────────────────────────────────────────────────────── */}
         <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
           <div className="grid grid-cols-5 gap-2 mb-3">

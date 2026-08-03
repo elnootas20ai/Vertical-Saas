@@ -13,7 +13,7 @@ export function OrderItemDetailCard({ item, formatPrice, variant = 'default' }: 
   const lineTotal = Number(item.unitPrice || 0) * Number(item.quantity || 0);
   const chips = [
     ...added.map((name) => ({ key: `+${name}`, label: `+ ${name}`, tone: 'add' as const })),
-    ...removed.map((name) => ({ key: `-${name}`, label: `sin ${name}`, tone: 'rem' as const })),
+    ...removed.map((name) => ({ key: `-${name}`, label: `SIN ${name}`, tone: 'rem' as const })),
     ...(note ? [{ key: 'note', label: note, tone: 'note' as const }] : []),
   ];
 

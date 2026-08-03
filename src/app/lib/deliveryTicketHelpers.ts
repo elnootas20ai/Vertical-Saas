@@ -6,7 +6,31 @@ import type {
 } from './deliveryTicketTypes';
 import type { DeliveryOrderItem } from './deliveryApi';
 
-/** Líneas de personalización guardadas en el ítem (+ extras, - sin ingrediente). */
+/** Etiqueta cocina/ticket al quitar un ingrediente (nunca “menos”). */
+export function formatRemovedIngredientLabel(name: string): string {
+  const n = String(name || '').trim();
+  if (!n) return '';
+  // Evitar "SIN SIN cebolla" si ya venía con prefijo.
+  const bare = n.replace(/^(?:-\s*)?(?:sin\s+)/i, '').trim() || n;
+  return `SIN ${bare}`;
+}
+
+/** Parsea líneas guardadas: "SIN X", "- sin X", "- X". */
+function parseRemovedIngredientLine(text: string): string | null {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return null;
+  const sinUpper = trimmed.match(/^SIN\s+(.+)$/i);
+  if (sinUpper) return String(sinUpper[1] || '').trim() || null;
+  const sinDash = trimmed.match(/^-\s*sin\s+(.+)$/i);
+  if (sinDash) return String(sinDash[1] || '').trim() || null;
+  if (trimmed.startsWith('-') && !trimmed.startsWith('+')) {
+    const name = trimmed.slice(1).trim().replace(/^sin\s+/i, '').trim();
+    return name || null;
+  }
+  return null;
+}
+
+/** Líneas de personalización guardadas en el ítem (+ extras, SIN ingrediente). */
 export function orderItemCustomizationDetail(
   item: Pick<DeliveryOrderItem, 'extras' | 'ingredients'>,
 ): string[] {
@@ -21,7 +45,7 @@ export function orderItemCustomizationDetail(
       const key = name.toLowerCase();
       if (removedKeys.has(key)) continue;
       removedKeys.add(key);
-      lines.push(`- sin ${name}`);
+      lines.push(formatRemovedIngredientLabel(name));
     }
   }
 
@@ -29,15 +53,13 @@ export function orderItemCustomizationDetail(
     for (const e of item.extras) {
       const text = String(e || '').trim();
       if (!text) continue;
-      const sinMatch = text.match(/^-\s*sin\s+(.+)$/i);
-      if (sinMatch) {
-        const name = String(sinMatch[1] || '').trim();
-        if (!name) continue;
-        const key = name.toLowerCase();
+      const removedName = parseRemovedIngredientLine(text);
+      if (removedName) {
+        const key = removedName.toLowerCase();
         // Ya está en ingredients (quantity:sin) o repetido en extras
         if (removedKeys.has(key)) continue;
         removedKeys.add(key);
-        lines.push(`- sin ${name}`);
+        lines.push(formatRemovedIngredientLabel(removedName));
         continue;
       }
       lines.push(text);
@@ -98,18 +120,14 @@ export function orderItemCustomizationParts(
       if (!name || addedKeys.has(key)) continue;
       addedKeys.add(key);
       added.push(name);
-    } else if (/^-\s*sin\s/i.test(trimmed)) {
-      const name = trimmed.replace(/^-\s*sin\s*/i, '').trim();
-      const key = name.toLowerCase();
-      if (!name || removedKeys.has(key)) continue;
+      continue;
+    }
+    const removedName = parseRemovedIngredientLine(trimmed);
+    if (removedName) {
+      const key = removedName.toLowerCase();
+      if (removedKeys.has(key)) continue;
       removedKeys.add(key);
-      removed.push(name);
-    } else if (trimmed.startsWith('-')) {
-      const name = trimmed.slice(1).trim();
-      const key = name.toLowerCase();
-      if (!name || removedKeys.has(key)) continue;
-      removedKeys.add(key);
-      removed.push(name);
+      removed.push(removedName);
     }
   }
   return {
@@ -128,7 +146,7 @@ export function orderItemKitchenNotes(
   const lines = [
     ...composition.map((n) => `> ${n}`),
     ...added.map((n) => `+ ${n}`),
-    ...removed.map((n) => `- sin ${n}`),
+    ...removed.map((n) => formatRemovedIngredientLabel(n)),
     note,
   ].filter(Boolean);
   return lines.join(' · ');
