@@ -119,6 +119,7 @@ import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { useTpvOrderFlowActive } from '../../context/TpvChromeContext';
 import { TpvCashOpsModal } from './TpvCashOpsModal';
+import { TpvCashMovementVoidModal } from './TpvCashMovementVoidModal';
 import type { TpvPrinterScope } from './TpvPrinterSetupPanel';
 import { isVertialNativeApp } from '../../lib/vertialPrint/isNativeApp';
 import { readNativePrinterDiagnosticsSync, readPrinterVerifiedHost } from '../../lib/vertialPrint/nativePrinterDiagnostics';
@@ -2078,7 +2079,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
                 {(() => {
                   const cashOps = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
-                  if (cashOps.length === 0) {
+                  const voided = (session.voidedCashMovements || []).slice().sort(
+                    (a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime(),
+                  );
+                  if (cashOps.length === 0 && voided.length === 0) {
                     return (
                       <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-400">
                         Sin movimientos de caja (entradas / salidas / devoluciones) en este turno.
@@ -2086,34 +2090,73 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     );
                   }
                   return (
-                    <div>
-                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                        Movimientos de caja ({cashOps.length})
-                      </h4>
-                      <div className="space-y-1 max-h-40 overflow-y-auto">
-                        {[...cashOps].reverse().map((tx) => (
-                          <div
-                            key={tx.id}
-                            className="flex items-center justify-between gap-2 text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <span className="text-gray-400 mr-1.5">
-                                {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                              </span>
-                              <span className="font-semibold text-gray-700 dark:text-gray-300">
-                                {TPV_CASH_TX_LABELS[tx.type] || tx.type}
-                              </span>
-                              {tx.description ? (
-                                <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
-                              ) : null}
-                            </div>
-                            <span className="shrink-0 font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-                              {tx.type === 'cash_in' ? '+' : '−'}
-                              {tx.amount.toFixed(2)}€
-                            </span>
+                    <div className="space-y-3">
+                      {cashOps.length > 0 ? (
+                        <div>
+                          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
+                            Movimientos de caja ({cashOps.length})
+                          </h4>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {[...cashOps].reverse().map((tx) => (
+                              <div
+                                key={tx.id}
+                                className="flex items-center justify-between gap-2 text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <span className="text-gray-400 mr-1.5">
+                                    {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                                  </span>
+                                  <span className="font-semibold text-gray-700 dark:text-gray-300">
+                                    {TPV_CASH_TX_LABELS[tx.type] || tx.type}
+                                  </span>
+                                  {tx.description ? (
+                                    <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
+                                  ) : null}
+                                </div>
+                                <span className="shrink-0 font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+                                  {tx.type === 'cash_in' ? '+' : '−'}
+                                  {tx.amount.toFixed(2)}€
+                                </span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ) : null}
+                      {voided.length > 0 ? (
+                        <div>
+                          <h4 className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-2">
+                            Salidas / movimientos eliminados ({voided.length})
+                          </h4>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {voided.map((v) => (
+                              <div
+                                key={v.id}
+                                className="text-xs p-2 rounded-lg border border-rose-200 bg-rose-50/80 dark:border-rose-900 dark:bg-rose-950/30"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-stone-800 dark:text-stone-100">
+                                      {TPV_CASH_TX_LABELS[v.type] || v.type} anulada
+                                      {v.originalDescription ? ` · ${v.originalDescription}` : ''}
+                                    </p>
+                                    <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 break-words">
+                                      Motivo eliminación: {v.voidReason}
+                                    </p>
+                                    <p className="text-[10px] text-stone-500 mt-0.5">
+                                      {new Date(v.voidedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                                      {v.voidedBy ? ` · ${v.voidedBy}` : ''}
+                                    </p>
+                                  </div>
+                                  <span className="shrink-0 font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+                                    {v.type === 'cash_in' ? '+' : '−'}
+                                    {Number(v.amount || 0).toFixed(2)}€
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })()}
@@ -3439,6 +3482,8 @@ export function TpvRegisterGate({
   const [restaurantCloseWarnings, setRestaurantCloseWarnings] = useState<string[]>([]);
   const [showCashCount, setShowCashCount] = useState(false);
   const [showCashOps, setShowCashOps] = useState(false);
+  const [voidCashTx, setVoidCashTx] = useState<TpvRegisterTransaction | null>(null);
+  const [voidCashBusy, setVoidCashBusy] = useState(false);
   const [showClockIn, setShowClockIn] = useState(false);
   const [showIncident, setShowIncident] = useState(false);
   const [showPrinterSetup, setShowPrinterSetup] = useState(false);
@@ -4619,7 +4664,12 @@ export function TpvRegisterGate({
     await txQueueRef.current;
   }, [applySessionTransactions]);
 
-  const removeCashMovement = useCallback(async (txId: string) => {
+  const removeCashMovement = useCallback(async (txId: string, voidReason: string) => {
+    const reason = String(voidReason || '').trim();
+    if (reason.length < 2) {
+      toast.error('Indica el motivo de la eliminación');
+      return;
+    }
     const run = async () => {
       const uid = dataUserIdRef.current;
       const sessionId = activeSessionIdRef.current;
@@ -4636,18 +4686,34 @@ export function TpvRegisterGate({
         }
         const updatedTxs = (current.transactions || []).filter((t) => t.id !== id);
         const patch = applySessionTransactions(current, updatedTxs);
+        const voidedEntry = {
+          id: `void-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          originalTransactionId: target.id,
+          type: target.type as 'cash_in' | 'cash_out' | 'return',
+          amount: Math.round(Number(target.amount || 0) * 100) / 100,
+          originalDescription: String(target.description || '').trim(),
+          voidReason: reason,
+          voidedAt: new Date().toISOString(),
+          voidedBy: String(target.registeredBy || current.workerName || 'Tablet').trim() || 'Tablet',
+          originalDate: String(target.date || ''),
+        };
         const nextSession: TpvRegisterSession = {
           ...current,
           ...patch,
           summary: buildTpvRegisterSummary({ ...current, ...patch }),
+          voidedCashMovements: [...(current.voidedCashMovements || []), voidedEntry],
           removedTransactionIds: [id],
         };
 
         if (!isBrowserOnline()) {
           enqueueTpvOfflineItem('register_tx', { userId: uid, session: nextSession, removedTransactionId: id });
-          setSessions((prev) => prev.map((s) => (s._id === sessionId ? { ...nextSession, removedTransactionIds: undefined } : s)));
+          setSessions((prev) =>
+            prev.map((s) => (s._id === sessionId ? { ...nextSession, removedTransactionIds: undefined } : s)),
+          );
           const label = TPV_CASH_TX_LABELS[target.type] || 'Movimiento';
-          toast.info(`${label} eliminado en cola local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`);
+          toast.info(
+            `${label} eliminado en cola local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`,
+          );
           return;
         }
 
@@ -5239,7 +5305,15 @@ export function TpvRegisterGate({
           <RegisterCashOpsStrip
             session={activeSession}
             compact={compactRegisterChrome}
-            onRemove={(txId) => { void removeCashMovement(txId); }}
+            onRemove={(txId) => {
+              const tx = (activeSession.transactions || []).find((t) => t.id === txId);
+              if (!tx || !isTpvCashMovementTx(tx.type)) {
+                toast.error('Solo se pueden eliminar entradas, salidas o devoluciones');
+                return;
+              }
+              setVoidCashTx(tx);
+            }}
+            removingId={voidCashBusy && voidCashTx ? voidCashTx.id : null}
           />
         )}
         <div className="flex-1 min-h-0 min-w-0 w-full flex flex-col overflow-hidden relative">
@@ -5293,6 +5367,27 @@ export function TpvRegisterGate({
             registeredBy={activeSession.workerName}
             onClose={() => setShowCashOps(false)}
             onConfirm={async (tx) => { await addTransaction(tx); }}
+          />
+        </TpvGatePortal>
+      )}
+      {voidCashTx && (
+        <TpvGatePortal>
+          <TpvCashMovementVoidModal
+            tx={voidCashTx}
+            loading={voidCashBusy}
+            onClose={() => {
+              if (voidCashBusy) return;
+              setVoidCashTx(null);
+            }}
+            onConfirm={async (reason) => {
+              setVoidCashBusy(true);
+              try {
+                await removeCashMovement(voidCashTx.id, reason);
+                setVoidCashTx(null);
+              } finally {
+                setVoidCashBusy(false);
+              }
+            }}
           />
         </TpvGatePortal>
       )}

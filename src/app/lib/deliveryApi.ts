@@ -1923,6 +1923,19 @@ export interface TpvRegisterTransaction {
   workerName?: string;
 }
 
+/** Salida/entrada/devolución eliminada durante el turno (auditoría en cierre). */
+export interface TpvVoidedCashMovement {
+  id: string;
+  originalTransactionId: string;
+  type: 'cash_in' | 'cash_out' | 'return';
+  amount: number;
+  originalDescription: string;
+  voidReason: string;
+  voidedAt: string;
+  voidedBy?: string;
+  originalDate: string;
+}
+
 export interface TpvCashCount {
   id: string;
   date: string;
@@ -2027,6 +2040,9 @@ export interface TpvRegisterSession {
   };
 
   incidents: TpvIncident[];
+
+  /** Movimientos de caja anulados (motivo obligatorio; salen en el cierre). */
+  voidedCashMovements?: TpvVoidedCashMovement[];
 
   salesByChannel?: Record<string, number>;
 

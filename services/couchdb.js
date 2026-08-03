@@ -7312,6 +7312,9 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
     closingValidationNotes: String(data.closingValidationNotes ?? existing?.closingValidationNotes ?? ''),
 
     incidents: Array.isArray(data.incidents) ? data.incidents : (existing?.incidents || []),
+    voidedCashMovements: Array.isArray(data.voidedCashMovements)
+      ? data.voidedCashMovements
+      : (existing?.voidedCashMovements || []),
     salesByChannel: data.salesByChannel || existing?.salesByChannel || {},
     aggregatorClosingTotals:
       data.aggregatorClosingTotals
@@ -7381,6 +7384,7 @@ export function sanitizeTpvRegisterSession(doc) {
     closingValidationNotes: doc.closingValidationNotes || '',
 
     incidents: Array.isArray(doc.incidents) ? doc.incidents : [],
+    voidedCashMovements: Array.isArray(doc.voidedCashMovements) ? doc.voidedCashMovements : [],
     salesByChannel: doc.salesByChannel || {},
     aggregatorClosingTotals: doc.aggregatorClosingTotals || undefined,
     aggregatorClosingCash: doc.aggregatorClosingCash || undefined,

@@ -305,7 +305,11 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
             .filter((t) => t.type === 'cash_out' || t.type === 'expense')
             .slice()
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-          if (cashOuts.length === 0) return null;
+          const voidedOuts = (session.voidedCashMovements || [])
+            .filter((v) => v.type === 'cash_out')
+            .slice()
+            .sort((a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime());
+          if (cashOuts.length === 0 && voidedOuts.length === 0) return null;
           return (
             <div className="mt-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/60 p-2.5 space-y-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
@@ -327,6 +331,32 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
                   </span>
                 </div>
               ))}
+              {voidedOuts.length > 0 ? (
+                <>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400 pt-1">
+                    Salidas eliminadas (motivo)
+                  </p>
+                  {voidedOuts.map((v) => (
+                    <div key={v.id} className="flex items-start justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <p className="font-medium text-zinc-900 dark:text-zinc-100 break-words">
+                          {v.originalDescription?.trim() || 'Salida'} · anulada
+                        </p>
+                        <p className="text-[10px] text-rose-700 dark:text-rose-300 break-words">
+                          Motivo eliminación: {v.voidReason}
+                        </p>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                          {new Date(v.voidedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                          {v.voidedBy ? ` · ${v.voidedBy}` : ''}
+                        </p>
+                      </div>
+                      <span className="font-semibold tabular-nums text-rose-700 dark:text-rose-300 shrink-0 line-through">
+                        −{fmtMoney(v.amount)}€
+                      </span>
+                    </div>
+                  ))}
+                </>
+              ) : null}
             </div>
           );
         })()}

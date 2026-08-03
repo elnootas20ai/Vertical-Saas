@@ -4,10 +4,14 @@ import { useModalClose } from '../../hooks/useModalClose';
 import type { TpvRegisterTransaction } from '../../lib/deliveryApi';
 import { DecimalNumpadField } from './DecimalNumpadField';
 import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
+import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
 
 const TPV_MODAL_Z = 'z-[100]';
 
 type CashOpType = 'cash_in' | 'cash_out' | 'return';
+
+/** Atajos opcionales; el importe es libre (numpad / teclado). */
+const QUICK_AMOUNTS = [10, 20, 50, 100, 200] as const;
 
 const OP_CONFIG: Record<CashOpType, { label: string; icon: typeof ArrowUpCircle; color: string }> = {
   cash_in: {
@@ -27,6 +31,10 @@ const OP_CONFIG: Record<CashOpType, { label: string; icon: typeof ArrowUpCircle;
   },
 };
 
+function roundCashAmount(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export function TpvCashOpsModal({
   onConfirm,
   onClose,
@@ -45,7 +53,8 @@ export function TpvCashOpsModal({
   const [submitting, setSubmitting] = useState(false);
 
   const parsed = parseDecimalPadValue(amount);
-  const valid = Number.isFinite(parsed) && parsed > 0 && description.trim().length >= 2;
+  const cashAmount = Number.isFinite(parsed) ? roundCashAmount(parsed) : Number.NaN;
+  const valid = Number.isFinite(cashAmount) && cashAmount > 0 && description.trim().length >= 2;
 
   const handleSubmit = async () => {
     if (!valid || submitting) return;
@@ -54,7 +63,7 @@ export function TpvCashOpsModal({
       await onConfirm({
         type: opType,
         paymentMethod: 'efectivo',
-        amount: parsed,
+        amount: cashAmount,
         description: description.trim(),
         registeredBy: registeredBy || 'Tablet',
       });
@@ -107,6 +116,27 @@ export function TpvCashOpsModal({
         </div>
 
         <label className="block text-xs font-semibold text-gray-500 mb-1">Importe (€)</label>
+        <p className="text-[11px] text-stone-400 mb-1.5">Cualquier cantidad — o atajo:</p>
+        <div className="flex flex-wrap gap-2 mb-2">
+          {QUICK_AMOUNTS.map((n) => {
+            const selected = cashAmount === n;
+            return (
+              <button
+                key={n}
+                type="button"
+                disabled={busy}
+                onClick={() => setAmount(String(n))}
+                className={`min-h-11 min-w-[3.25rem] px-3 rounded-xl text-sm font-bold tabular-nums border transition-colors ${
+                  selected
+                    ? 'border-blue-600 bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40 dark:border-blue-500'
+                    : 'border-stone-200 bg-white text-stone-700 hover:border-blue-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200'
+                }`}
+              >
+                {n}€
+              </button>
+            );
+          })}
+        </div>
         <DecimalNumpadField
           value={amount}
           onChange={setAmount}
@@ -136,10 +166,11 @@ export function TpvCashOpsModal({
           type="button"
           onClick={() => void handleSubmit()}
           disabled={!valid || busy}
-          className="w-full py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+          className={`w-full ${VERTIAL_BTN_PRIMARY}`}
         >
           {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
           Registrar movimiento
+          {valid ? ` · ${cashAmount.toFixed(2)}€` : ''}
         </button>
       </div>
     </div>
