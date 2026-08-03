@@ -5252,7 +5252,11 @@ function ClientResultCard({ client, onSelect }: { client: Client; onSelect: () =
   };
 
   return (
-    <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 transition-colors">
+    <button
+      type="button"
+      onClick={onSelect}
+      className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-gray-900 dark:hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 active:bg-gray-100 dark:active:bg-gray-800 transition-colors text-left cursor-pointer touch-manipulation"
+    >
       <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-sm font-bold text-gray-600 dark:text-gray-300 shrink-0">
         {getInitials(client.name)}
       </div>
@@ -5276,12 +5280,9 @@ function ClientResultCard({ client, onSelect }: { client: Client; onSelect: () =
           )}
         </div>
       </div>
-      <button
-        onClick={onSelect}
-        className="shrink-0 px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 text-xs font-medium hover:bg-gray-800 dark:hover:bg-gray-300 transition-colors"
-      >
+      <span className="shrink-0 px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-gray-200 text-white dark:text-gray-900 text-xs font-medium pointer-events-none">
         Seleccionar
-      </button>
-    </div>
+      </span>
+    </button>
   );
 }
