@@ -141,6 +141,7 @@ import { notifyManagersOrderCancelled, appendTpvIncidentForOrderCancel } from '.
 import { notifyTpvRegisterClosed } from '../services/tpvRegisterCloseNotifications.js';
 import { getApprovedVacationBlockingWork } from '../services/vacationClockinGate.js';
 import logger from '../services/logger.js';
+import { tryAutoIssueForDeliveryOrder } from '../services/verifactuIssueService.js';
 import {
   deliveryOrderMatchesClient,
   isCancelledDeliveryOrder,
@@ -626,7 +627,26 @@ export async function createDeliveryOrder(req, res) {
       ? buildDeliveryOrderDocument(userId, { ...doc, ticketNumber }, doc)
       : doc;
     const saved = await putDocument(req, db, docWithTicket._id, docWithTicket);
-    const savedDoc = { ...docWithTicket, _rev: saved.rev };
+    let savedDoc = { ...docWithTicket, _rev: saved.rev };
+
+    // Verifactu: emitir registro local al cobrar TPV (si está activado).
+    try {
+      const vf = await tryAutoIssueForDeliveryOrder(req, savedDoc, account.user_id || userId);
+      if (vf?.record) {
+        const withVf = buildDeliveryOrderDocument(userId, {
+          ...savedDoc,
+          verifactuRecordId: vf.record.id,
+          verifactuFullNumber: vf.record.fullNumber,
+          verifactuQrUrl: vf.record.qrUrl,
+          verifactuHuella: vf.record.huella,
+        }, savedDoc);
+        const vfSaved = await putDocument(req, db, withVf._id, withVf);
+        savedDoc = { ...withVf, _rev: vfSaved.rev };
+      }
+    } catch (vfErr) {
+      logger.warn({ err: vfErr, orderId: savedDoc._id }, 'Verifactu auto (TPV) omitido');
+    }
+
     await maybeDeductRecipeStockForDeliveredOrder(req, userId, savedDoc, null);
     await maybeSyncDeliveryOrderFinance(req, userId, savedDoc);
     let cajaRegistration = await maybeRegisterTpvSaleOnTpvChannelOrderCreate(
@@ -791,8 +811,18 @@ export async function cancelDeliveryOrder(req, res) {
     const trimmedReason = String(cancelReason).trim();
     const db = getDeliveryDbName();
 
-    // Cancelación por error: quitar la venta de la caja abierta (no es devolución al cliente).
-    const netSaleInCaja = await resolveOpenSessionNetSaleForOrder(req, userId, existing, actorAccount);
+    // Una sola lectura de sesiones para neto + quitar venta (evita 2× _all_docs del delivery DB).
+    const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, existing, actorAccount);
+    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    const openSession = orderPdvId
+      ? findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId)
+      : null;
+    let netSaleInCaja = 0;
+    if (openSession) {
+      const sales = sumTpvRegisterSaleAmountForOrder(openSession.transactions, existing._id);
+      const returns = sumTpvRegisterReturnAmountForOrder(openSession.transactions, existing._id);
+      netSaleInCaja = Math.round((sales - returns) * 100) / 100;
+    }
 
     const doc = buildDeliveryOrderDocument(userId, {
       ...existing,
@@ -814,27 +844,18 @@ export async function cancelDeliveryOrder(req, res) {
       ],
     }, existing);
 
-    // Reponer stock si hubo descuento (cobrado o entregado).
-    try {
-      await restoreDeliveryOrderStockFromMovements(req, userId, {
-        orderId: doc._id,
-        orderType: 'delivery_order',
-        performedBy: 'system',
-      });
-    } catch (err) {
-      logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error revirtiendo stock al eliminar pedido');
-    }
-
     const saved = await putDocument(req, db, doc._id, doc);
+    const orderRev = { ...doc, _rev: saved.rev };
 
     let cajaRegistration = { status: 'nothing_to_register' };
     if (netSaleInCaja > 0.001) {
-      cajaRegistration = await removeTpvOrderSalesFromOpenSession(req, userId, { ...doc, _rev: saved.rev }, {
+      cajaRegistration = await removeTpvOrderSalesFromOpenSession(req, userId, orderRev, {
         callerAccount: actorAccount,
+        preloadedSessions: allSessions,
       });
       // Si no se pudo borrar la venta (conflicto), compensar quitando el importe sin llamarlo devolución.
       if (cajaRegistration?.status !== 'registered' && cajaRegistration?.status !== 'already_registered') {
-        cajaRegistration = await autoRegisterTpvReturnForOrder(req, userId, { ...doc, _rev: saved.rev }, {
+        cajaRegistration = await autoRegisterTpvReturnForOrder(req, userId, orderRev, {
           amount: netSaleInCaja,
           paymentMethod: existing.paymentMethod || 'efectivo',
           registeredBy: actorName,
@@ -842,62 +863,90 @@ export async function cancelDeliveryOrder(req, res) {
           callerAccount: actorAccount,
         });
       }
-      await maybeSyncDeliveryOrderFinance(req, userId, { ...doc, _rev: saved.rev });
     }
 
-    await logAccountActivity(req, {
-      actorUserId: actorUserId, actorName, targetUserId: userId,
-      type: 'delivery_order', action: `Eliminó pedido ${doc.orderNumber}: ${trimmedReason}`,
-      entityId: doc._id, entityLabel: doc.orderNumber,
-      metadata: {
-        cancelReason: trimmedReason,
-        cancelledBy: actorName,
-        previousStatus: existing.status,
-        cajaReturnAmount: netSaleInCaja > 0.001 ? netSaleInCaja : 0,
-      },
-    });
-    const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
-    broadcastDeliveryOrderSse(account, userId, 'cancelled', { ...doc, _rev: saved.rev }, {
+    const sanitized = sanitizeDeliveryOrder(orderRev);
+    broadcastDeliveryOrderSse(account, userId, 'cancelled', orderRev, {
       oldStatus: existing.status,
       reason: trimmedReason,
     });
-    triggerReactiveAlert(userId, 'order_status_changed', { orderId: doc._id, newStatus: 'cancelled', previousStatus: existing.status }).catch(() => null);
 
-    // Incidencia en caja abierta (si hay) + alerta al admin / Centro de alertas.
-    await appendTpvIncidentForOrderCancel(req, {
-      userId,
-      order: sanitized,
-      cancelReason: trimmedReason,
-      actorName,
-      callerAccount: actorAccount,
-      amount: netSaleInCaja,
-      resolveOrderPdvIdForCaja,
-    }).catch((err) => {
-      logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error registrando incidencia TPV');
-    });
-
-    const notifyResult = await notifyManagersOrderCancelled(req, {
-      order: { ...sanitized, cancelledAt: now },
-      cancelReason: trimmedReason,
-      actorUserId,
-      actorName,
-      businessUserId: userId,
-      previousStatus: existing.status,
-      cajaReturnAmount: netSaleInCaja > 0.001 ? netSaleInCaja : 0,
-    }).catch((err) => {
-      logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error notificando gerentes por cancelación');
-      return { notified: 0, alertId: null };
-    });
-
-    return res.json({
+    // Responder YA: stock / finanzas / alertas no deben bloquear la tablet.
+    res.json({
       ok: true,
       order: sanitized,
       cajaRegistration,
-      alertNotified: Boolean(notifyResult?.notified),
-      alertId: notifyResult?.alertId || null,
+      alertNotified: false,
+      alertId: null,
+    });
+
+    setImmediate(() => {
+      void (async () => {
+        try {
+          await restoreDeliveryOrderStockFromMovements(req, userId, {
+            orderId: doc._id,
+            orderType: 'delivery_order',
+            performedBy: 'system',
+          });
+        } catch (err) {
+          logger.warn({ tag: 'DELIVERY_STOCK', err: err?.message, orderId: doc._id }, 'Error revirtiendo stock al eliminar pedido');
+        }
+        if (netSaleInCaja > 0.001) {
+          try {
+            await maybeSyncDeliveryOrderFinance(req, userId, orderRev);
+          } catch (err) {
+            logger.warn({ tag: 'DELIVERY_FINANCE', err: err?.message, orderId: doc._id }, 'Error sync finanzas al eliminar');
+          }
+        }
+        try {
+          await logAccountActivity(req, {
+            actorUserId: actorUserId, actorName, targetUserId: userId,
+            type: 'delivery_order', action: `Eliminó pedido ${doc.orderNumber}: ${trimmedReason}`,
+            entityId: doc._id, entityLabel: doc.orderNumber,
+            metadata: {
+              cancelReason: trimmedReason,
+              cancelledBy: actorName,
+              previousStatus: existing.status,
+              cajaReturnAmount: netSaleInCaja > 0.001 ? netSaleInCaja : 0,
+            },
+          });
+        } catch (err) {
+          logger.warn({ tag: 'DELIVERY_ORDER', err: err?.message, orderId: doc._id }, 'Error log actividad cancelación');
+        }
+        triggerReactiveAlert(userId, 'order_status_changed', {
+          orderId: doc._id,
+          newStatus: 'cancelled',
+          previousStatus: existing.status,
+        }).catch(() => null);
+        await appendTpvIncidentForOrderCancel(req, {
+          userId,
+          order: sanitized,
+          cancelReason: trimmedReason,
+          actorName,
+          callerAccount: actorAccount,
+          amount: netSaleInCaja,
+          resolveOrderPdvIdForCaja,
+        }).catch((err) => {
+          logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error registrando incidencia TPV');
+        });
+        await notifyManagersOrderCancelled(req, {
+          order: { ...sanitized, cancelledAt: now },
+          cancelReason: trimmedReason,
+          actorUserId,
+          actorName,
+          businessUserId: userId,
+          previousStatus: existing.status,
+          cajaReturnAmount: netSaleInCaja > 0.001 ? netSaleInCaja : 0,
+        }).catch((err) => {
+          logger.warn({ tag: 'DELIVERY_ORDER_NOTIFY', orderId: doc._id, err: err?.message }, 'Error notificando gerentes por cancelación');
+        });
+      })();
     });
   } catch (error) {
-    return res.status(500).json({ ok: false, error: error.message || 'Error al cancelar pedido' });
+    if (!res.headersSent) {
+      return res.status(500).json({ ok: false, error: error.message || 'Error al cancelar pedido' });
+    }
+    logger.error({ tag: 'DELIVERY_ORDER', err: error?.message }, 'Error tras responder cancelación');
   }
 }
 
@@ -1215,8 +1264,9 @@ async function autoRegisterTpvReturnForOrder(req, userId, orderDoc, {
 /**
  * Cancelación: elimina las ventas del pedido en la caja abierta del PDV (como si no hubieran existido).
  * No crea movimiento de devolución.
+ * `preloadedSessions`: evita un _all_docs extra en el primer intento (mismo request).
  */
-async function removeTpvOrderSalesFromOpenSession(req, userId, orderDoc, { callerAccount } = {}) {
+async function removeTpvOrderSalesFromOpenSession(req, userId, orderDoc, { callerAccount, preloadedSessions } = {}) {
   const orderPdvId = await resolveOrderPdvIdForCaja(req, userId, orderDoc, callerAccount);
   if (!orderPdvId) {
     return { status: 'no_pdv', message: 'No se pudo identificar el punto de venta del pedido para ajustar caja.' };
@@ -1228,7 +1278,9 @@ async function removeTpvOrderSalesFromOpenSession(req, userId, orderDoc, { calle
   const maxAttempts = 5;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    const allSessions = (attempt === 0 && Array.isArray(preloadedSessions))
+      ? preloadedSessions
+      : await listTpvRegisterSessionsByUser(req, userId);
     const openSession = findOpenTpvRegisterSessionForPointOfSale(allSessions, orderPdvId);
     if (!openSession) {
       return {
@@ -1721,6 +1773,11 @@ export async function createCatalogItem(req, res) {
       entityLabel: doc.name,
       metadata: { category: doc.category },
     });
+    if (String(doc.vertical || '') === 'butcherShop') {
+      import('../services/butcherCatalogBridge.js')
+        .then((m) => m.syncCoreCatalogToButcher(req, userId, { ...doc, _rev: saved.rev }))
+        .catch(() => {});
+    }
     return res.status(201).json({ ok: true, item: sanitizeCatalogItem({ ...doc, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al crear artículo' });
@@ -2270,6 +2327,11 @@ export async function updateCatalogItem(req, res) {
     const saved = await putDocument(req, db, doc._id, doc);
     const stockChanged = Number(existing.stockQuantity || 0) !== Number(doc.stockQuantity || 0);
     if (stockChanged) triggerReactiveAlert(userId, 'stock_updated', { itemId: doc._id }).catch(() => null);
+    if (String(doc.vertical || existing.vertical || '') === 'butcherShop') {
+      import('../services/butcherCatalogBridge.js')
+        .then((m) => m.syncCoreCatalogToButcher(req, userId, { ...doc, _rev: saved.rev }))
+        .catch(() => {});
+    }
     return res.json({ ok: true, item: sanitizeCatalogItem({ ...doc, _rev: saved.rev }) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al actualizar artículo' });

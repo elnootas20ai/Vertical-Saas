@@ -316,15 +316,26 @@ export function DeliveryOrders() {
 
   const handleCancel = async (reason: string) => {
     if (!userId || !cancelOrder) return;
+    const target = cancelOrder;
+    const trimmed = String(reason || '').trim();
+    const now = new Date().toISOString();
+    const optimistic = {
+      ...target,
+      status: 'cancelled' as const,
+      cancelReason: trimmed,
+      cancelledAt: now,
+    };
+    setOrders((prev) => prev.map((o) => (o._id === target._id ? { ...o, ...optimistic } : o)));
+    setCancelOrder(null);
+    if (selectedOrder?._id === target._id) setSelectedOrder({ ...selectedOrder, ...optimistic });
     setActionLoading(true);
     try {
       const { order: updated, cajaRegistration } = await cancelDeliveryOrderRequest(
         userId,
-        cancelOrder._id,
-        reason,
+        target._id,
+        trimmed,
       );
-      setOrders((prev) => prev.map((o) => o._id === updated._id ? updated : o));
-      setCancelOrder(null);
+      setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
       if (selectedOrder?._id === updated._id) setSelectedOrder(updated);
       if (cajaRegistration?.status === 'registered') {
         toast.success('Pedido eliminado · restado de caja');
@@ -332,6 +343,8 @@ export function DeliveryOrders() {
         toast.success('Pedido eliminado');
       }
     } catch (err) {
+      setOrders((prev) => prev.map((o) => (o._id === target._id ? target : o)));
+      if (selectedOrder?._id === target._id) setSelectedOrder(target);
       toast.error(err instanceof Error ? err.message : 'Error al eliminar el pedido');
     } finally {
       setActionLoading(false);

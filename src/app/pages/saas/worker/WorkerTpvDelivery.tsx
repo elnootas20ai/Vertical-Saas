@@ -1866,29 +1866,66 @@ export function WorkerTpvDelivery({
 
   const handleDeleteOrder = useCallback(async (reason: string) => {
     if (!userId || !deleteOrder) return;
-    if (!beginAdvancing(deleteOrder._id)) return;
+    if (!isBrowserOnline()) {
+      toast.error('Sin conexión — no se puede eliminar el pedido ahora');
+      return;
+    }
+    const target = deleteOrder;
+    if (!beginAdvancing(target._id)) return;
+
+    const trimmed = String(reason || '').trim();
+    const now = new Date().toISOString();
+    const optimistic: DeliveryOrder = {
+      ...target,
+      status: 'cancelled',
+      cancelReason: trimmed,
+      cancelledAt: now,
+      cancelledBy: user?.fullName || 'Tablet',
+      stageHistory: [
+        ...(target.stageHistory || []),
+        {
+          status: 'cancelled',
+          date: now,
+          user: user?.fullName || 'Tablet',
+          notes: trimmed,
+        },
+      ],
+    };
+
+    // Cierra modal y mueve el pedido al instante (el servidor sigue en segundo plano).
+    setOrders((prev) => prev.map((o) => (o._id === target._id ? optimistic : o)));
+    setShowDelivered(true);
+    setDeleteOrder(null);
+    if (selectedOrder?._id === target._id) setSelectedOrder(null);
+    if (deliveryCompleteOrder?._id === target._id) setDeliveryCompleteOrder(null);
+
     try {
       const { order: updated, cajaRegistration } = await cancelDeliveryOrderRequest(
         userId,
-        deleteOrder._id,
-        reason,
+        target._id,
+        trimmed,
       );
-      setOrders(prev => prev.map(o => o._id === updated._id ? updated : o));
-      setShowDelivered(true);
-      setDeleteOrder(null);
-      if (selectedOrder?._id === updated._id) setSelectedOrder(null);
-      if (deliveryCompleteOrder?._id === updated._id) setDeliveryCompleteOrder(null);
+      setOrders((prev) => prev.map((o) => (o._id === updated._id ? updated : o)));
       if (cajaRegistration?.status === 'registered') {
-        toast.success(`Pedido #${deleteOrder.orderNumber} eliminado · restado de caja`);
+        toast.success(`Pedido #${target.orderNumber} eliminado · restado de caja`);
       } else {
-        toast.success(`Pedido #${deleteOrder.orderNumber} eliminado`);
+        toast.success(`Pedido #${target.orderNumber} eliminado`);
       }
     } catch (err) {
+      setOrders((prev) => prev.map((o) => (o._id === target._id ? target : o)));
       toast.error(err instanceof Error ? err.message : 'Error al eliminar el pedido');
     } finally {
-      endAdvancing(deleteOrder._id);
+      endAdvancing(target._id);
     }
-  }, [userId, deleteOrder, selectedOrder, deliveryCompleteOrder, beginAdvancing, endAdvancing]);
+  }, [
+    userId,
+    deleteOrder,
+    selectedOrder,
+    deliveryCompleteOrder,
+    beginAdvancing,
+    endAdvancing,
+    user?.fullName,
+  ]);
 
   const handleCorrectPayment = useCallback(
     async (order: DeliveryOrder, method: DeliveryPaymentMethod) => {
