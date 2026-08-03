@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Loader2, Minus, Package, Plus, Search, Sparkles } from 'lucide-react';
+import { Loader2, Minus, Package, Plus, Search, Sparkles, X } from 'lucide-react';
+import type { Brand } from '../../../lib/brandsApi';
 import type { CatalogItem } from '../../../lib/deliveryApi';
 import type { TpvCatalogSection } from '../../../lib/tpvCatalogNavigation';
 import {
@@ -68,6 +69,8 @@ type TpvProductPickerProps = {
   onSelectedSectionChange: (sectionId: string) => void;
   loading: boolean;
   catalog: CatalogItem[];
+  /** Marcas del negocio: para ocultar organizadores compartidos entre marcas. */
+  brands?: Brand[];
   clientProductScores: Record<string, number>;
   resetSignal?: number;
   selectedCategory: string | null;
@@ -86,9 +89,8 @@ type TpvProductPickerProps = {
   hideCatalogAdminLink?: boolean;
   /** TPV tablet: layout denso, catálogo + carrito en fila y más espacio útil. */
   compact?: boolean;
-  /** Persiste el orden de marcas/categorías por usuario y negocio. */
-  userId?: string;
-  businessId?: string;
+  /** Layout de pestañas (bar: marca + familias). */
+  catalogLayout?: 'default' | 'brand_families';
 };
 
 const ProductTile = memo(function ProductTile({
@@ -262,6 +264,7 @@ export function TpvProductPicker({
   onSelectedSectionChange,
   loading,
   catalog,
+  brands = [],
   clientProductScores,
   resetSignal = 0,
   selectedCategory,
@@ -280,6 +283,7 @@ export function TpvProductPicker({
   compact = false,
   userId,
   businessId,
+  catalogLayout = 'default',
 }: TpvProductPickerProps) {
   const [productSearch, setProductSearch] = useState('');
   const [sectionOrder, setSectionOrder] = useState<string[]>([]);
@@ -319,8 +323,10 @@ export function TpvProductPicker({
         selectedScope,
         selectedCategory,
         clientProductScores,
+        brands,
+        catalogLayout,
       ),
-    [searchIndex, catalog, productSearch, selectedScope, selectedCategory, clientProductScores],
+    [searchIndex, catalog, productSearch, selectedScope, selectedCategory, clientProductScores, brands, catalogLayout],
   );
 
   const isSearchMode = productSearch.trim().length > 0;
@@ -397,11 +403,12 @@ export function TpvProductPicker({
       <div className="flex-1 flex flex-col min-h-0 min-w-0 w-full rounded-lg border border-gray-200/80 dark:border-gray-800 bg-white dark:bg-gray-900 overflow-hidden">
         <div className={`shrink-0 border-b border-gray-100 dark:border-gray-800 ${compact ? 'px-2 pt-1.5 pb-1.5' : 'px-2.5 pt-2.5 pb-2'}`}>
           <div className="relative">
-            <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 ${compact ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
+            <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none ${compact ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
             <input
               id="tpv-product-search"
               name="vertial-product-search"
-              type="search"
+              type="text"
+              inputMode="search"
               value={productSearch}
               onChange={(e) => {
                 const v = e.target.value;
@@ -414,10 +421,21 @@ export function TpvProductPicker({
               spellCheck={false}
               data-1p-ignore
               data-lpignore="true"
-              className={`w-full pl-8 pr-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 ${
-                compact ? 'h-10 text-sm' : 'h-10 text-sm pl-8 pr-2.5 rounded-lg'
-              }`}
+              className={`w-full pl-8 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/80 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 ${
+                productSearch.trim() ? 'pr-10' : 'pr-2.5'
+              } ${compact ? 'h-10 text-sm' : 'h-10 text-sm'}`}
             />
+            {productSearch.trim() ? (
+              <button
+                type="button"
+                title="Borrar búsqueda"
+                aria-label="Borrar búsqueda"
+                onClick={() => setProductSearch('')}
+                className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center justify-center min-h-9 min-w-9 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-200/70 dark:hover:text-stone-200 dark:hover:bg-stone-700 touch-manipulation"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            ) : null}
           </div>
         </div>
 
