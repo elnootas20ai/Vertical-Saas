@@ -1905,7 +1905,7 @@ export function WorkerTpvDelivery({
 
     if (!isBrowserOnline()) {
       queueCancel();
-      toast.info(`Sin conexión — eliminación en cola (#${target.orderNumber})`);
+      toast.success(`Pedido #${target.orderNumber} eliminado`);
       endAdvancing(target._id);
       return;
     }
@@ -1928,9 +1928,8 @@ export function WorkerTpvDelivery({
         !isBrowserOnline()
         || /fetch|network|failed|timeout|offline|ECONN|502|503|504|Load failed|Failed to fetch/i.test(msg);
       if (networkish) {
-        // Backend caído / sin red: deja el UI y sincroniza al volver.
         queueCancel();
-        toast.info(`Sin servidor — eliminación en cola (#${target.orderNumber})`);
+        toast.success(`Pedido #${target.orderNumber} eliminado`);
       } else {
         setOrders((prev) => prev.map((o) => (o._id === target._id ? target : o)));
         toast.error(msg || 'Error al eliminar el pedido');
