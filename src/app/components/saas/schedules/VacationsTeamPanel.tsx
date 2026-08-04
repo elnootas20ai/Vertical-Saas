@@ -423,6 +423,7 @@ function VacationPolicyCard({
     onlyWeekdays: Boolean(settings.onlyWeekdays),
     minNoticeDays: Number(settings.minNoticeDays ?? 7),
     minTenureMonthsForVacation: Number(settings.minTenureMonthsForVacation ?? 2),
+    minTenureDaysForVacation: Number(settings.minTenureDaysForVacation ?? 0),
     accrualMode: settings.accrualMode === 'annual_fixed' ? 'annual_fixed' : 'monthly',
     daysPerMonth: Number(settings.daysPerMonth ?? 2.5),
     defaultDaysPerYear: Number(settings.defaultDaysPerYear ?? 30),
@@ -437,6 +438,7 @@ function VacationPolicyCard({
       onlyWeekdays: Boolean(settings.onlyWeekdays),
       minNoticeDays: Number(settings.minNoticeDays ?? 7),
       minTenureMonthsForVacation: Number(settings.minTenureMonthsForVacation ?? 2),
+      minTenureDaysForVacation: Number(settings.minTenureDaysForVacation ?? 0),
       accrualMode: settings.accrualMode === 'annual_fixed' ? 'annual_fixed' : 'monthly',
       daysPerMonth: Number(settings.daysPerMonth ?? 2.5),
       defaultDaysPerYear: Number(settings.defaultDaysPerYear ?? 30),
@@ -495,8 +497,35 @@ function VacationPolicyCard({
             className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
           />
         </label>
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block sm:col-span-2 lg:col-span-3">
+          <span className="block">Cuándo se pueden pedir vacaciones (política empresa)</span>
+          <span className="mt-0.5 block font-normal text-[11px] text-gray-500">
+            Vertial usa la fecha de alta del contrato. Si el trabajador solo lleva 2–3–4 días, puedes bloquearlo con «días mínimos».
+            Si pones días y meses, tiene que cumplir las dos.
+          </span>
+        </label>
         <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
-          Alta mínima para pedir vacaciones
+          Días mínimos desde el alta
+          <select
+            value={String(draft.minTenureDaysForVacation)}
+            onChange={(e) =>
+              setDraft((p) => ({
+                ...p,
+                minTenureDaysForVacation: Math.max(0, Number(e.target.value) || 0),
+              }))
+            }
+            className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
+          >
+            <option value="0">Sin mínimo por días</option>
+            <option value="7">7 días (≈ 1 semana)</option>
+            <option value="14">14 días (≈ 2 semanas)</option>
+            <option value="30">30 días (≈ 1 mes)</option>
+            <option value="60">60 días (≈ 2 meses)</option>
+            <option value="90">90 días (≈ 3 meses)</option>
+          </select>
+        </label>
+        <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
+          Meses mínimos desde el alta
           <select
             value={String(draft.minTenureMonthsForVacation)}
             onChange={(e) =>
@@ -507,10 +536,12 @@ function VacationPolicyCard({
             }
             className="mt-1 w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-900"
           >
-            <option value="0">Sin mínimo</option>
-            <option value="2">2 meses desde el alta</option>
-            <option value="3">3 meses desde el alta</option>
-            <option value="4">4 meses desde el alta</option>
+            <option value="0">Sin mínimo por meses</option>
+            <option value="1">1 mes</option>
+            <option value="2">2 meses</option>
+            <option value="3">3 meses</option>
+            <option value="4">4 meses</option>
+            <option value="6">6 meses</option>
           </select>
         </label>
         <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 block">
@@ -639,6 +670,7 @@ function VacationPolicyCard({
               onlyWeekdays: draft.onlyWeekdays,
               minNoticeDays: draft.minNoticeDays,
               minTenureMonthsForVacation: draft.minTenureMonthsForVacation,
+              minTenureDaysForVacation: draft.minTenureDaysForVacation,
               accrualMode: draft.accrualMode as 'monthly' | 'annual_fixed',
               daysPerMonth: draft.daysPerMonth,
               defaultDaysPerYear: draft.defaultDaysPerYear,

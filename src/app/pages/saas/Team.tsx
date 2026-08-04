@@ -26,7 +26,6 @@ import {
   DollarSign,
   Edit2,
   FileText,
-  GraduationCap,
   Heart,
   ImagePlus,
   Key,
@@ -78,7 +77,6 @@ import type {
   AgentSkin,
   AuthUser,
   EmploymentInfo,
-  EmploymentSkill,
   PersonalData,
   RoleDefinition,
   TeamInvitation,
@@ -99,10 +97,12 @@ import {
   buildCustomRolePermissionMatrix,
   formatRoleAccessSummary,
   getInvitePermissionsForUser,
+  getVertialAccessPermissionModules,
   loadCustomRoles,
   mergeRoleCatalog,
   upsertCustomRole,
 } from '../../lib/roleCatalog';
+import { assignPrimaryWorkSite, clearPrimaryWorkSite } from '../../lib/workerStoreAssignment';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { getFunctionRolesForBusiness, getInviteRoleDisplayLabel } from '../../lib/inviteFunctionRoles';
 import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
@@ -861,32 +861,37 @@ const ROLE_TOKEN: Record<
   },
 };
 
-const PERMISSION_MODULES = [
-  { key: 'workshop', label: 'Taller', icon: <Wrench className="w-3.5 h-3.5" /> },
-  { key: 'vehicles', label: 'Vehículos', icon: <Car className="w-3.5 h-3.5" /> },
-  { key: 'clients', label: 'Clientes', icon: <Users className="w-3.5 h-3.5" /> },
-  { key: 'sales', label: 'Ventas', icon: <TrendingUp className="w-3.5 h-3.5" /> },
-  { key: 'documents', label: 'Documentos', icon: <FileText className="w-3.5 h-3.5" /> },
-  { key: 'finance', label: 'Finanzas', icon: <DollarSign className="w-3.5 h-3.5" /> },
-  { key: 'ancove', label: 'ANCOVE', icon: <Building2 className="w-3.5 h-3.5" /> },
-  { key: 'team', label: 'Equipo', icon: <UsersRound className="w-3.5 h-3.5" /> },
-  { key: 'delivery', label: 'Delivery / Pedidos', icon: <Package className="w-3.5 h-3.5" /> },
-  { key: 'sala', label: 'Sala / Mesas', icon: <Package className="w-3.5 h-3.5" /> },
-  { key: 'cash_register', label: 'Caja / TPV', icon: <Banknote className="w-3.5 h-3.5" /> },
-  { key: 'reports', label: 'Informes', icon: <FileText className="w-3.5 h-3.5" /> },
-] as const;
+const PERMISSION_MODULE_ICONS: Record<string, React.ReactNode> = {
+  workshop: <Wrench className="w-3.5 h-3.5" />,
+  vehicles: <Car className="w-3.5 h-3.5" />,
+  clients: <Users className="w-3.5 h-3.5" />,
+  sales: <TrendingUp className="w-3.5 h-3.5" />,
+  reservations: <Calendar className="w-3.5 h-3.5" />,
+  documents: <FileText className="w-3.5 h-3.5" />,
+  finance: <DollarSign className="w-3.5 h-3.5" />,
+  ancove: <Building2 className="w-3.5 h-3.5" />,
+  team: <UsersRound className="w-3.5 h-3.5" />,
+  fleet: <Car className="w-3.5 h-3.5" />,
+  delivery: <Package className="w-3.5 h-3.5" />,
+  sala: <Package className="w-3.5 h-3.5" />,
+  cash_register: <Banknote className="w-3.5 h-3.5" />,
+  cleaning_materials: <Package className="w-3.5 h-3.5" />,
+  acquisitions: <Package className="w-3.5 h-3.5" />,
+  butcher_purchases: <Package className="w-3.5 h-3.5" />,
+  butcher_waste: <Package className="w-3.5 h-3.5" />,
+  reports: <FileText className="w-3.5 h-3.5" />,
+  scrapyard: <Wrench className="w-3.5 h-3.5" />,
+  scrapyard_docs: <FileText className="w-3.5 h-3.5" />,
+};
 
-function resolvePermissionModuleLabel(
-  module: (typeof PERMISSION_MODULES)[number],
-  businessType?: string | null,
-): string {
-  if (module.key === 'delivery') {
+function resolvePermissionModuleLabel(key: string, fallbackLabel: string, businessType?: string | null): string {
+  if (key === 'delivery') {
     return getRetailOpsUiCopy(businessType).permissionDeliveryModule;
   }
-  if (module.key === 'sala') {
+  if (key === 'sala') {
     return isRestaurantBusinessType(businessType) ? 'Sala / Mesas' : 'Sala';
   }
-  return module.label;
+  return fallbackLabel;
 }
 
 function getRoleToken(role?: string, skinId?: string) {
@@ -947,13 +952,21 @@ function buildRolePermissions(role = 'Usuario', roleDefinitions: RoleDefinition[
   return getInvitePermissionsForUser(role, roleDefinitions);
 }
 
-function normalizePermissions(permissions?: AccountPermissionMatrix, role?: string) {
-  const base = buildRolePermissions(role);
+function normalizePermissions(
+  permissions?: AccountPermissionMatrix,
+  role?: string,
+  businessType?: string | null,
+) {
+  const modules = getVertialAccessPermissionModules(businessType);
+  const base: AccountPermissionMatrix = {
+    ...buildRolePermissions(role),
+    ...(permissions || {}),
+  };
   if (!permissions) {
     return base;
   }
 
-  for (const module of PERMISSION_MODULES) {
+  for (const module of modules) {
     const current = permissions[module.key];
     base[module.key] = {
       view: Boolean(current?.view),
@@ -1038,11 +1051,16 @@ function getActivityMeta(type?: string) {
   return { icon: <LogIn className="w-3.5 h-3.5" />, bg: 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400' };
 }
 
-function getPermissionSummary(permissions?: AccountPermissionMatrix, role?: string) {
-  const matrix = normalizePermissions(permissions, role);
-  const totalView = PERMISSION_MODULES.filter((module) => matrix[module.key]?.view).length;
-  const totalEdit = PERMISSION_MODULES.filter((module) => matrix[module.key]?.edit).length;
-  return { totalView, totalEdit };
+function getPermissionSummary(
+  permissions?: AccountPermissionMatrix,
+  role?: string,
+  businessType?: string | null,
+) {
+  const modules = getVertialAccessPermissionModules(businessType);
+  const matrix = normalizePermissions(permissions, role, businessType);
+  const totalView = modules.filter((module) => matrix[module.key]?.view).length;
+  const totalEdit = modules.filter((module) => matrix[module.key]?.edit).length;
+  return { totalView, totalEdit, total: modules.length };
 }
 
 function PageNotification({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
@@ -1324,8 +1342,9 @@ function MemberDrawer({
 
   const activeSkin = getSkinById(selectedSkinId);
   const token = getRoleToken(memberState.role, memberState.skinId);
-  const permissions = normalizePermissions(memberState.permissions, memberState.role);
-  const permissionSummary = getPermissionSummary(memberState.permissions, memberState.role);
+  const permissions = normalizePermissions(memberState.permissions, memberState.role, businessType);
+  const permissionSummary = getPermissionSummary(memberState.permissions, memberState.role, businessType);
+  const accessModules = getVertialAccessPermissionModules(businessType);
   const isCurrentUser = currentUserId === memberState.user_id;
 
   const persistMember = async (payload: Partial<AuthUser>) => {
@@ -1345,7 +1364,7 @@ function MemberDrawer({
   };
 
   const handlePermissionToggle = async (moduleKey: string, field: 'view' | 'edit') => {
-    const nextPermissions = normalizePermissions(memberState.permissions, memberState.role);
+    const nextPermissions = normalizePermissions(memberState.permissions, memberState.role, businessType);
     const currentValue = nextPermissions[moduleKey]?.[field] || false;
 
     nextPermissions[moduleKey] = {
@@ -1406,6 +1425,27 @@ function MemberDrawer({
     }
 
     const inviteStatus = form.status === 'pending' ? 'pending' : 'accepted';
+    const siteId = String(form.employment.salesPointId || '').trim();
+    const siteWc = workCenters.find((w) => String(w._id || w.id || '').trim() === siteId);
+    const employmentSynced = siteId
+      ? assignPrimaryWorkSite(
+          {
+            ...form.employment,
+            bankAccount: normalizeIbanInput(form.employment.bankAccount),
+            bankName: normalizeBankName(form.employment.bankName),
+            emergencyContact: normalizeEmergencyContact(form.employment.emergencyContact),
+            emergencyPhone: normalizeEmergencyPhone(form.employment.emergencyPhone),
+          },
+          { id: siteId, name: siteWc?.name || siteId },
+        )
+      : clearPrimaryWorkSite({
+          ...form.employment,
+          bankAccount: normalizeIbanInput(form.employment.bankAccount),
+          bankName: normalizeBankName(form.employment.bankName),
+          emergencyContact: normalizeEmergencyContact(form.employment.emergencyContact),
+          emergencyPhone: normalizeEmergencyPhone(form.employment.emergencyPhone),
+        });
+
     const nextUser = await persistMember({
       fullName: form.fullName.trim(),
       email: form.email.trim(),
@@ -1414,13 +1454,7 @@ function MemberDrawer({
       role: form.role,
       status: form.status,
       inviteStatus,
-      employment: {
-        ...form.employment,
-        bankAccount: normalizeIbanInput(form.employment.bankAccount),
-        bankName: normalizeBankName(form.employment.bankName),
-        emergencyContact: normalizeEmergencyContact(form.employment.emergencyContact),
-        emergencyPhone: normalizeEmergencyPhone(form.employment.emergencyPhone),
-      },
+      employment: employmentSynced,
       personalData: buildDefaultPersonalData(form.personalData),
     });
 
@@ -1981,82 +2015,6 @@ function MemberDrawer({
                   </div>
                 </div>
               </div>
-
-              {/* Skills */}
-              <div>
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Competencias y habilidades</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const id = `skill-${Date.now()}`;
-                      setForm((prev) => ({
-                        ...prev,
-                        employment: {
-                          ...prev.employment,
-                          skills: [...prev.employment.skills, { id, name: '', level: 3 }],
-                        },
-                      }));
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Añadir skill
-                  </button>
-                </div>
-                {form.employment.skills.length === 0 ? (
-                  <div className="rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700 p-6 text-center">
-                    <GraduationCap className="w-8 h-8 mx-auto text-gray-300 dark:text-gray-600 mb-2" />
-                    <p className="text-sm text-gray-400 dark:text-gray-500">Sin competencias definidas</p>
-                    <p className="text-xs text-gray-300 dark:text-gray-600 mt-1">Añade habilidades técnicas, idiomas, certificaciones...</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {form.employment.skills.map((skill, idx) => (
-                      <div key={skill.id} className="flex items-center gap-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 p-3">
-                        <div className="flex-1 min-w-0">
-                          <input
-                            className={`${inputClassName} !py-1.5 text-sm`}
-                            value={skill.name}
-                            onChange={(e) => {
-                              const next = [...form.employment.skills];
-                              next[idx] = { ...next[idx], name: e.target.value };
-                              setForm((prev) => ({ ...prev, employment: { ...prev.employment, skills: next } }));
-                            }}
-                            placeholder="Nombre de la competencia..."
-                          />
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {Array.from({ length: 5 }).map((_, i) => (
-                            <button
-                              key={i}
-                              type="button"
-                              onClick={() => {
-                                const next = [...form.employment.skills];
-                                next[idx] = { ...next[idx], level: i + 1 };
-                                setForm((prev) => ({ ...prev, employment: { ...prev.employment, skills: next } }));
-                              }}
-                              className="p-0.5"
-                            >
-                              <Star className={`w-4 h-4 transition-colors ${i < skill.level ? 'text-amber-400 fill-amber-400' : 'text-gray-200 dark:text-gray-600'}`} />
-                            </button>
-                          ))}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const next = form.employment.skills.filter((_, si) => si !== idx);
-                            setForm((prev) => ({ ...prev, employment: { ...prev.employment, skills: next } }));
-                          }}
-                          className="rounded-lg p-1.5 text-gray-300 dark:text-gray-600 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
@@ -2445,42 +2403,6 @@ function MemberDrawer({
                 </div>
               </section>
 
-              {/* Skills read-only */}
-              <section className="border-b border-gray-100 dark:border-gray-700/50 px-6 py-4">
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Competencias</h3>
-                  <button
-                    type="button"
-                    onClick={() => { setEditing(true); setDrawerTab('info'); }}
-                    className="rounded-lg p-1.5 text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                    title="Editar competencias"
-                  >
-                    <Edit2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                {(memberState.employment?.skills && memberState.employment.skills.length > 0) ? (
-                  <div className="space-y-3">
-                    {memberState.employment.skills.map((skill: EmploymentSkill) => (
-                      <div key={skill.id}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{skill.name}</span>
-                          <div className="flex gap-0.5">
-                            {Array.from({ length: 5 }).map((_, i) => (
-                              <Star key={i} className={`w-3.5 h-3.5 ${i < skill.level ? 'text-amber-400 fill-amber-400' : 'text-gray-200 dark:text-gray-700'}`} />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                          <div className="h-full bg-amber-400 rounded-full transition-all" style={{ width: `${(skill.level / 5) * 100}%` }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-400 dark:text-gray-500">Sin competencias definidas</p>
-                )}
-              </section>
-
               {/* Apariencia read-only */}
               <section className="border-b border-gray-100 dark:border-gray-700/50 px-6 py-4">
                 <div className="mb-3 flex items-center justify-between">
@@ -2556,13 +2478,13 @@ function MemberDrawer({
                 <span className="text-center">Ver</span>
                 <span className="text-center">Editar</span>
               </div>
-              {PERMISSION_MODULES.map((module, index) => {
-                const current = permissions[module.key];
+              {accessModules.map((module, index) => {
+                const current = permissions[module.key] || { view: false, edit: false };
                 return (
-                  <div key={module.key} className={`grid grid-cols-[1fr_56px_56px] items-center px-3 py-2.5 ${index < PERMISSION_MODULES.length - 1 ? 'border-t border-gray-100 dark:border-gray-700/50' : ''}`}>
+                  <div key={module.key} className={`grid grid-cols-[1fr_56px_56px] items-center px-3 py-2.5 ${index < accessModules.length - 1 ? 'border-t border-gray-100 dark:border-gray-700/50' : ''}`}>
                     <div className="flex items-center gap-2">
-                      <span className="text-gray-400 dark:text-gray-500">{module.icon}</span>
-                      <span className={`text-xs font-medium ${current.view ? 'text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'}`}>{resolvePermissionModuleLabel(module, businessType)}</span>
+                      <span className="text-gray-400 dark:text-gray-500">{PERMISSION_MODULE_ICONS[module.key] || <Shield className="w-3.5 h-3.5" />}</span>
+                      <span className={`text-xs font-medium ${current.view ? 'text-gray-800 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'}`}>{resolvePermissionModuleLabel(module.key, module.label, businessType)}</span>
                     </div>
                     <div className="flex justify-center">
                       <PermissionIconButton active={current.view} disabled={permissionSavingKey === `${module.key}:view`} onClick={() => void handlePermissionToggle(module.key, 'view')} />
@@ -3107,7 +3029,7 @@ export function Team() {
           case 'status': return member.status || '';
           case 'role': return member.role || '';
           case 'permissions': {
-            const s = getPermissionSummary(member.permissions, member.role);
+            const s = getPermissionSummary(member.permissions, member.role, currentBusiness?.businessType);
             return s.totalView + s.totalEdit;
           }
           case 'activity': return member.recentActivity?.[0]?.action || '';
@@ -3614,7 +3536,7 @@ export function Team() {
                         ? Array.from({ length: 4 }).map((_, i) => <TeamRowSkeleton key={i} />)
                         : displayMembers.map((member) => {
                         const token = getRoleToken(member.role);
-                        const summary = getPermissionSummary(member.permissions, member.role);
+                        const summary = getPermissionSummary(member.permissions, member.role, currentBusiness?.businessType);
                         return (
                           <tr key={member.user_id} onClick={() => navigate(`/saas/team/${member.user_id}`)} className={`group cursor-pointer border-l-4 transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 ${token.accentBorder}`}>
                             <td className="px-5 py-4">

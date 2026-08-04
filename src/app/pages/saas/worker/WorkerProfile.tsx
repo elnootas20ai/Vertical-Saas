@@ -36,11 +36,12 @@ import {
 } from '../../../lib/employmentBankUtils';
 import { formatDateEs } from '../../../lib/formatDateEs';
 import { toast } from 'sonner';
+import { VERTIAL_BTN_PRIMARY } from '../../../lib/vertialUiTokens';
+import { WORKER_CARD, WORKER_INPUT, WORKER_PAGE, WORKER_SECTION_TITLE } from '../../../lib/workerUi';
 
-const inputClass =
-  'w-full px-3 py-2.5 rounded-lg border text-sm transition-all bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none';
+const inputClass = WORKER_INPUT;
 const inputDisabledClass =
-  'w-full px-3 py-2.5 rounded-lg border text-sm bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed';
+  'w-full min-h-11 cursor-not-allowed rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2.5 text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-900/50 dark:text-stone-400';
 
 export function WorkerProfile() {
   const { t } = useTranslation();
@@ -128,66 +129,66 @@ export function WorkerProfile() {
 
   return (
     <Layout title={t('worker.profile.title')} subtitle={t('worker.profile.subtitle')}>
-      <div className="space-y-6">
+      <div className={WORKER_PAGE}>
         {completion && !completion.workerCompleted && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20 flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
+          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/20">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
             <div>
               <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Ficha incompleta</p>
-              <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                Rellena tus datos y pulsa Guardar para que tu empresa pueda darte de alta.
+              <p className="mt-0.5 text-xs text-amber-700 dark:text-amber-300">
+                Rellena tus datos y pulsa Guardar.
               </p>
             </div>
           </div>
         )}
 
         {completion?.workerCompleted && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-900/20 flex items-center gap-2">
+          <div className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/20">
             <CheckCircle2 className="h-5 w-5 text-emerald-600" />
             <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
               {completion.fullyCompleted
-                ? 'Ficha de trabajador completa'
-                : 'Tu parte está completa. RRHH puede completar el alta laboral.'}
+                ? 'Ficha completa'
+                : 'Tu parte está lista. RRHH puede completar el alta.'}
             </p>
           </div>
         )}
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <div className="flex flex-col sm:flex-row items-center gap-6">
+        <div className={`${WORKER_CARD} p-4 sm:p-5`}>
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-5">
             <div className="relative group">
-              <div className="w-24 h-24 bg-gray-200 dark:bg-gray-700 rounded-2xl flex items-center justify-center overflow-hidden">
+              <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-2xl bg-stone-100 dark:bg-stone-800 sm:h-24 sm:w-24">
                 {user?.avatar ? (
-                  <img src={user.avatar} alt={user.fullName} className="w-24 h-24 object-cover" />
+                  <img src={user.avatar} alt={user.fullName} className="h-full w-full object-cover" />
                 ) : (
-                  <span className="text-2xl font-bold text-gray-500 dark:text-gray-400">{initials}</span>
+                  <span className="text-2xl font-bold text-stone-400">{initials}</span>
                 )}
               </div>
-              <button type="button" className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                <Camera className="w-6 h-6 text-white" />
+              <button type="button" className="absolute inset-0 flex items-center justify-center rounded-2xl bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                <Camera className="h-6 w-6 text-white" />
               </button>
             </div>
-            <div className="text-center sm:text-left flex-1">
-              <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+            <div className="min-w-0 flex-1 text-center sm:text-left">
+              <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100 sm:text-xl">
                 {formData.firstName} {formData.lastName}
               </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">{user?.email}</p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs text-gray-400 dark:text-gray-500">{user?.role || t('worker.profile.employee')}</span>
-                {employment?.department && (
+              <p className="truncate text-sm text-stone-500">{user?.email}</p>
+              <div className="mt-1 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                <span className="text-xs text-stone-400">{user?.role || t('worker.profile.employee')}</span>
+                {employment?.department ? (
                   <>
-                    <span className="text-xs text-gray-300 dark:text-gray-600">·</span>
-                    <span className="text-xs text-gray-400 dark:text-gray-500">{employment.department}</span>
+                    <span className="text-xs text-stone-300">·</span>
+                    <span className="text-xs text-stone-400">{employment.department}</span>
                   </>
-                )}
+                ) : null}
               </div>
             </div>
             <button
               type="button"
               onClick={() => void handleSave()}
               disabled={isSaving}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              className={`${VERTIAL_BTN_PRIMARY} w-full sm:w-auto`}
             >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               {isSaving ? t('common.saving', 'Guardando…') : t('common.save')}
             </button>
           </div>
@@ -196,39 +197,39 @@ export function WorkerProfile() {
         {employment && (employment.position || employment.contractType || employment.schedule) && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {employment.position && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
-                <Briefcase className="w-4 h-4 text-blue-500 mb-2" />
-                <p className="text-xs text-gray-400 dark:text-gray-500">{t('worker.profile.positionLabel')}</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{employment.position}</p>
+              <div className={`${WORKER_CARD} p-3.5`}>
+                <Briefcase className="mb-2 h-4 w-4 text-[var(--v-blue,#2563eb)]" />
+                <p className="text-xs text-stone-400">{t('worker.profile.positionLabel')}</p>
+                <p className="mt-0.5 text-sm font-semibold text-stone-900 dark:text-stone-100">{employment.position}</p>
               </div>
             )}
             {employment.schedule && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
-                <Clock className="w-4 h-4 text-emerald-500 mb-2" />
-                <p className="text-xs text-gray-400 dark:text-gray-500">{t('worker.profile.scheduleLabel')}</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{employment.schedule}</p>
+              <div className={`${WORKER_CARD} p-3.5`}>
+                <Clock className="mb-2 h-4 w-4 text-emerald-500" />
+                <p className="text-xs text-stone-400">{t('worker.profile.scheduleLabel')}</p>
+                <p className="mt-0.5 text-sm font-semibold text-stone-900 dark:text-stone-100">{employment.schedule}</p>
               </div>
             )}
             {employment.contractType && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
-                <Building2 className="w-4 h-4 text-purple-500 mb-2" />
-                <p className="text-xs text-gray-400 dark:text-gray-500">{t('worker.profile.contractLabel')}</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5 capitalize">{employment.contractType}</p>
+              <div className={`${WORKER_CARD} p-3.5`}>
+                <Building2 className="mb-2 h-4 w-4 text-stone-500" />
+                <p className="text-xs text-stone-400">{t('worker.profile.contractLabel')}</p>
+                <p className="mt-0.5 text-sm font-semibold capitalize text-stone-900 dark:text-stone-100">{employment.contractType}</p>
               </div>
             )}
             {employment.startDate && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
-                <Calendar className="w-4 h-4 text-amber-500 mb-2" />
-                <p className="text-xs text-gray-400 dark:text-gray-500">{t('worker.profile.startDateLabel')}</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{formatDateEs(employment.startDate)}</p>
+              <div className={`${WORKER_CARD} p-3.5`}>
+                <Calendar className="mb-2 h-4 w-4 text-amber-500" />
+                <p className="text-xs text-stone-400">{t('worker.profile.startDateLabel')}</p>
+                <p className="mt-0.5 text-sm font-semibold text-stone-900 dark:text-stone-100">{formatDateEs(employment.startDate)}</p>
               </div>
             )}
           </div>
         )}
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-            <User className="w-4 h-4 text-blue-500" />
+        <div className={`${WORKER_CARD} p-4 sm:p-5`}>
+          <h3 className={`${WORKER_SECTION_TITLE} mb-4 flex items-center gap-2`}>
+            <User className="h-4 w-4 text-[var(--v-blue,#2563eb)]" />
             {t('worker.profile.personalData')}
           </h3>
 
@@ -243,7 +244,7 @@ export function WorkerProfile() {
               { key: 'socialSecurityNumber', label: 'Nº Seguridad Social', icon: <User className="w-4 h-4" /> },
             ].map((field) => (
               <div key={field.key}>
-                <label className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+                <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-stone-500">
                   {field.icon}
                   {field.label}
                 </label>
@@ -257,8 +258,8 @@ export function WorkerProfile() {
               </div>
             ))}
             <div>
-              <label className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                <Calendar className="w-4 h-4" />
+              <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-stone-500">
+                <Calendar className="h-4 w-4" />
                 {t('worker.profile.birthDate')}
               </label>
               <BirthDateEsField
@@ -270,20 +271,20 @@ export function WorkerProfile() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-emerald-500" />
+        <div className={`${WORKER_CARD} p-4 sm:p-5`}>
+          <h3 className={`${WORKER_SECTION_TITLE} mb-4 flex items-center gap-2`}>
+            <MapPin className="h-4 w-4 text-emerald-500" />
             {t('worker.profile.address')}
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {[
               { key: 'address', label: t('worker.profile.streetAddress'), full: true },
               { key: 'city', label: t('worker.profile.city') },
               { key: 'postalCode', label: t('worker.profile.postalCode') },
             ].map((field) => (
               <div key={field.key} className={field.full ? 'sm:col-span-2' : ''}>
-                <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{field.label}</label>
+                <label className="mb-1.5 block text-xs font-medium text-stone-500">{field.label}</label>
                 <input
                   type="text"
                   value={(formData as Record<string, string>)[field.key]}
@@ -295,15 +296,15 @@ export function WorkerProfile() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-            <Heart className="w-4 h-4 text-red-500" />
+        <div className={`${WORKER_CARD} p-4 sm:p-5`}>
+          <h3 className={`${WORKER_SECTION_TITLE} mb-4 flex items-center gap-2`}>
+            <Heart className="h-4 w-4 text-rose-500" />
             {t('worker.profile.emergencyContact')}
           </h3>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.profile.emergencyName')}</label>
+              <label className="mb-1.5 block text-xs font-medium text-stone-500">{t('worker.profile.emergencyName')}</label>
               <input
                 type="text"
                 value={formData.emergencyContact}
@@ -313,7 +314,7 @@ export function WorkerProfile() {
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.profile.emergencyPhone')}</label>
+              <label className="mb-1.5 block text-xs font-medium text-stone-500">{t('worker.profile.emergencyPhone')}</label>
               <input
                 type="tel"
                 value={formData.emergencyPhone}
@@ -325,25 +326,25 @@ export function WorkerProfile() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-            <CreditCard className="w-4 h-4 text-indigo-500" />
+        <div className={`${WORKER_CARD} p-4 sm:p-5`}>
+          <h3 className={`${WORKER_SECTION_TITLE} mb-4 flex items-center gap-2`}>
+            <CreditCard className="h-4 w-4 text-[var(--v-blue,#2563eb)]" />
             {t('worker.profile.bankInfo')}
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">IBAN</label>
+              <label className="mb-1.5 block text-xs font-medium text-stone-500">IBAN</label>
               <input
                 type="text"
                 value={formData.bankAccount}
                 onChange={(e) => handleChange('bankAccount', formatIbanInput(e.target.value))}
                 maxLength={IBAN_DISPLAY_MAX_LENGTH}
                 placeholder="ES00 0000 0000 0000 0000 0000"
-                className={`px-3 py-2.5 rounded-lg border transition-all ${IBAN_INPUT_CLASS} bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none`}
+                className={`${WORKER_INPUT} ${IBAN_INPUT_CLASS}`}
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5 block">{t('worker.profile.bankName')}</label>
+              <label className="mb-1.5 block text-xs font-medium text-stone-500">{t('worker.profile.bankName')}</label>
               <input
                 type="text"
                 value={formData.bankName}
@@ -361,9 +362,9 @@ export function WorkerProfile() {
             type="button"
             onClick={() => void handleSave()}
             disabled={isSaving}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            className={`${VERTIAL_BTN_PRIMARY} w-full sm:w-auto`}
           >
-            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {isSaving ? t('common.saving', 'Guardando…') : t('common.save')}
           </button>
         </div>

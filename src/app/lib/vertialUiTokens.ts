@@ -26,6 +26,10 @@ export const VERTIAL_FOCUS_RING =
 export const VERTIAL_SURFACE =
   'rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950';
 
+/** Superficie stone (trabajador / ops móviles) */
+export const VERTIAL_SURFACE_STONE =
+  'rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-900';
+
 /** Cobros: mismo color siempre (efectivo / tarjeta) en todo el SaaS */
 export const VERTIAL_CASH_TEXT =
   'text-emerald-700 dark:text-emerald-300';

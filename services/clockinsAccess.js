@@ -128,7 +128,8 @@ export async function resolveVisibleMemberIds(expressReq, business, orgchart, re
     return collectExtendedBusinessTeamIds(expressReq, business);
   }
 
-  if (!member) return [];
+  // Trabajador sin fila en members (invitado / sync pendiente): siempre ve SUS fichajes.
+  if (!member) return [requester];
 
   const subordinateIds = getSubordinateIds(business, orgchart, requester);
   if (subordinateIds && subordinateIds.length > 0) {
@@ -166,15 +167,22 @@ export function isMemberAssignedToSalesPoint(
   const role = String(memberRole || '').trim();
   const ref = String(assignmentRef || '').trim();
   if (isManagerRole(role) && !ref) return true;
-  if (!ref) return false;
+  // Sin tienda en Equipo: PDV es etiqueta (fichar igual).
+  if (!ref) return true;
 
   const wc = String(workCenterId || '').trim();
-  return (
+  if (
     ref === pdv
     || ref === wc
     || ref === `wc:${wc}`
     || ref === `wc:${pdv}`
-  );
+    || salesPointRefsSameStore(ref, pdv, wc)
+  ) {
+    return true;
+  }
+  // Invitación guarda workCenterId como salesPointId; el cliente puede mandar el PDV del mismo local.
+  if (wc && (ref === wc || ref === `wc:${wc}`)) return true;
+  return false;
 }
 
 export function memberEmploymentSalesPointRef(member, account) {

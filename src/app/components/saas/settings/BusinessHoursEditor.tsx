@@ -436,48 +436,43 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
 
   if (wizard) {
     return (
-      <div className="w-full min-w-0 space-y-3">
-        <StoreHoursBanner storeLabel={storeLabel} />
+      <div className="flex w-full min-w-0 flex-col gap-2">
         {hoursIssue ? (
           <div
-            className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100"
+            className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100"
             role="alert"
           >
             {hoursIssue}
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-stone-50/80 px-3 py-2 dark:border-stone-700 dark:bg-stone-900/40">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           {storeLabel ? (
-            <>
-              <Store className="h-4 w-4 shrink-0 text-stone-500" />
-              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-stone-900 dark:text-stone-100">
-                {storeLabel}
-              </span>
-            </>
+            <span className="min-w-0 truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
+              {storeLabel}
+            </span>
           ) : null}
-          <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-stone-700 dark:bg-stone-800 dark:text-stone-200">
-            {openDayCount} días abiertos
+          <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+            {openDayCount} abiertos
           </span>
+          <div className="ml-auto flex gap-1">
+            {PRESETS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                title={p.hint}
+                onClick={() => applyPreset(p.id)}
+                className="rounded-md border border-stone-200 bg-white px-2 py-1 text-[10px] font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
+              >
+                {p.label.split(' ')[0]}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
-          {PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => applyPreset(p.id)}
-              className="rounded-lg border border-gray-200 bg-white px-2 py-2 text-left transition-colors hover:border-gray-400 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500"
-            >
-              <span className="block text-xs font-semibold leading-tight text-gray-900 dark:text-gray-100">{p.label}</span>
-              <span className="mt-0.5 block text-[10px] leading-tight text-gray-500 dark:text-gray-400">{p.hint}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+        <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-800">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Días abiertos (L–D)</p>
+            <p className="text-[11px] font-semibold text-gray-700 dark:text-gray-300">Días (L–D)</p>
             <div className="flex gap-1">
               {ALL_DAYS.map((day) => {
                 const open = config.schedule[day].open;
@@ -487,7 +482,7 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
                     type="button"
                     title={`${WEEKDAY_LABELS[day]} — ${open ? 'Abierto' : 'Cerrado'}`}
                     onClick={() => toggleDayOpen(day)}
-                    className={`flex h-8 w-8 items-center justify-center rounded-md text-xs font-bold transition-colors ${
+                    className={`flex h-7 w-7 items-center justify-center rounded-md text-[11px] font-bold transition-colors ${
                       open
                         ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
                         : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
@@ -500,7 +495,7 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
             </div>
           </div>
 
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             <ScheduleBlock
               dense
               title="Lunes a viernes"
@@ -531,58 +526,51 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
             />
           </div>
 
-          <div className="mt-3 flex flex-col gap-2 border-t border-gray-100 pt-3 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">Misma hora en todos los abiertos</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-col gap-1.5 border-t border-gray-100 pt-2 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[11px] font-semibold text-gray-800 dark:text-gray-200">Misma hora en abiertos</p>
+            <div className="flex flex-wrap items-center gap-1.5">
               <TimeRangeRow from={quickFrom} to={quickTo} onFrom={setQuickFrom} onTo={setQuickTo} />
               <button
                 type="button"
                 onClick={applyQuickToOpenDays}
-                className={`${VERTIAL_BTN_PRIMARY} !min-h-9 !px-3 !py-1.5 !text-xs`}
+                className={`${VERTIAL_BTN_PRIMARY} !min-h-8 !px-2.5 !py-1 !text-[11px]`}
               >
-                <Copy className="h-3.5 w-3.5" />
+                <Copy className="h-3 w-3" />
                 Aplicar
               </button>
             </div>
           </div>
-
-          {showMixedHint ? (
-            <p className="mt-2 text-[11px] leading-snug text-amber-900 dark:text-amber-100">
-              Algún día va distinto —{' '}
-              <button type="button" className="font-semibold underline" onClick={() => setShowDayDetail(true)}>
-                ajustar por día
-              </button>
-              .
-            </p>
-          ) : null}
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => setShowTimezone((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-800"
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-800"
           >
-            <Globe className="h-3.5 w-3.5 shrink-0" />
-            Zona: <span className="font-semibold text-gray-800 dark:text-gray-200">{config.timezone}</span>
+            <Globe className="h-3 w-3 shrink-0" />
+            {config.timezone}
           </button>
           <button
             type="button"
             onClick={() => setShowDayDetail((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-800"
+            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-800"
           >
-            <Clock className="h-3.5 w-3.5 shrink-0" />
+            <Clock className="h-3 w-3 shrink-0" />
             {showDayDetail ? 'Ocultar por día' : 'Ajustar por día'}
           </button>
+          {showMixedHint ? (
+            <span className="text-[10px] text-amber-800 dark:text-amber-200">
+              Algún día distinto — ajusta por día
+            </span>
+          ) : null}
         </div>
 
         {showTimezone ? (
           <select
             value={config.timezone}
             onChange={(e) => onChange({ ...config, timezone: e.target.value })}
-            className="h-9 w-full max-w-xs rounded-lg border border-gray-300 bg-white px-2 text-xs outline-none focus:border-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            className="h-8 w-full max-w-xs shrink-0 rounded-lg border border-gray-300 bg-white px-2 text-[11px] outline-none focus:border-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
           >
             {TIMEZONE_OPTIONS.map((tz) => (
               <option key={tz} value={tz}>
@@ -593,7 +581,7 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
         ) : null}
 
         {showDayDetail ? (
-          <div className="max-h-40 overflow-y-auto rounded-xl border border-gray-200 bg-white px-3 py-1 dark:border-gray-700 dark:bg-gray-800">
+          <div className="max-h-36 min-h-0 overflow-y-auto rounded-xl border border-gray-200 bg-white px-2 dark:border-gray-700 dark:bg-gray-800">
             {ALL_DAYS.map((day) => {
               const d = config.schedule[day];
               return (

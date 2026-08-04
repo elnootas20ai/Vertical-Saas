@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FileText,
@@ -14,6 +14,8 @@ import {
   Upload,
   Loader2,
   X,
+  HeartPulse,
+  IdCard,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Layout } from '../../../components/saas/Layout';
@@ -23,22 +25,30 @@ import { WORKER_SELF_UPLOAD_TYPES } from '../../../lib/gestoriaLaborMetrics';
 import { createNotificationRequest } from '../../../lib/notificationApi';
 import {
   createPayrollDocumentRequest,
+  formatPayrollPeriodLabel,
   listPayrollDocumentsRequest,
   PAYROLL_DOC_TYPE_LABELS,
+  buildPayrollDocumentDisplayName,
+  resolvePayrollDocumentCategory,
   type PayrollDocument,
   type PayrollDocumentType,
 } from '../../../lib/payrollApi';
+import { PAYROLL_DOC_FOLDERS } from '../../../lib/payrollDocFolders';
+import { filterPayrollDocuments } from '../../../lib/payrollFilters';
+import { PayrollDocumentPreviewModal } from '../../../components/saas/PayrollDocumentPreviewModal';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../lib/vertialUiTokens';
+import { WORKER_PAGE } from '../../../lib/workerUi';
 
-type DocCategory = 'all' | 'identity' | 'nomina' | 'contrato' | 'certificado' | 'baja' | 'otro';
+type DocCategory = 'all' | 'identity' | 'nomina' | 'contrato' | 'certificado' | 'justificante' | 'baja' | 'otro';
 
 const CATEGORY_CONFIG: Record<DocCategory, { label: string; icon: React.ReactNode }> = {
   all: { label: 'Todos', icon: <FolderOpen className="w-4 h-4" /> },
   identity: { label: 'Identidad', icon: <ShieldCheck className="w-4 h-4" /> },
+  justificante: { label: 'Justificantes', icon: <FileText className="w-4 h-4" /> },
+  baja: { label: 'Baja / IT', icon: <HeartPulse className="w-4 h-4" /> },
   nomina: { label: 'Nóminas', icon: <Receipt className="w-4 h-4" /> },
   contrato: { label: 'Contratos', icon: <ScrollText className="w-4 h-4" /> },
   certificado: { label: 'Certificados', icon: <ShieldCheck className="w-4 h-4" /> },
-  baja: { label: 'Baja / IT', icon: <FileText className="w-4 h-4" /> },
   otro: { label: 'Otros', icon: <File className="w-4 h-4" /> },
 };
 
@@ -65,12 +75,9 @@ function formatBytes(bytes: number): string {
 
 function matchesCategory(doc: PayrollDocument, cat: DocCategory): boolean {
   if (cat === 'all') return true;
-  if (cat === 'identity') return IDENTITY_TYPES.has(doc.documentType);
-  if (cat === 'otro') {
-    return !IDENTITY_TYPES.has(doc.documentType)
-      && !['nomina', 'contrato', 'certificado', 'baja'].includes(doc.documentType);
-  }
-  return doc.documentType === cat;
+  const folder = PAYROLL_DOC_FOLDERS.find((f) => f.id === cat);
+  if (folder) return folder.match(doc.documentType);
+  return false;
 }
 
 async function notifyManagersWorkerDoc(
@@ -87,7 +94,7 @@ async function notifyManagersWorkerDoc(
         message: `${doc.worker_name} ha subido «${doc.name}».`,
         entityId: doc.id || doc._id,
         entityType: 'payroll',
-        route: '/saas/gestoria',
+        route: '/saas/payroll?tab=documentacion',
         metadata: { workerId: doc.worker_id, documentType: doc.documentType },
       }).catch(() => undefined),
     ),
@@ -101,6 +108,7 @@ export function WorkerDocs() {
   const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const [activeCategory, setActiveCategory] = useState<DocCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterPeriod, setFilterPeriod] = useState('');
   const [documents, setDocuments] = useState<PayrollDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
@@ -108,6 +116,7 @@ export function WorkerDocs() {
   const [name, setName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<PayrollDocument | null>(null);
 
   const loadDocuments = useCallback(async () => {
     if (!user?.user_id) return;
@@ -129,24 +138,44 @@ export function WorkerDocs() {
     void loadDocuments();
   }, [loadDocuments]);
 
-  const filteredDocs = documents
-    .filter((doc) => matchesCategory(doc, activeCategory))
-    .filter(
-      (doc) =>
-        doc.name.toLowerCase().includes(searchQuery.toLowerCase())
-        || (doc.fileName || '').toLowerCase().includes(searchQuery.toLowerCase()),
-    );
+  const availablePeriods = useMemo(() => {
+    const set = new Set<string>();
+    for (const d of documents) {
+      if (d.period && /^\d{4}-\d{2}$/.test(d.period)) set.add(d.period);
+      const created = String(d.createdAt || '').slice(0, 7);
+      if (/^\d{4}-\d{2}$/.test(created)) set.add(created);
+    }
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [documents]);
 
-  const categoryCounts = (Object.keys(CATEGORY_CONFIG) as DocCategory[]).reduce(
-    (acc, key) => {
-      acc[key] = documents.filter((d) => matchesCategory(d, key)).length;
-      return acc;
-    },
-    {} as Record<DocCategory, number>,
-  );
+  const filteredDocs = useMemo(() => {
+    const bySearchAndMonth = filterPayrollDocuments({
+      documents,
+      search: searchQuery,
+      period: filterPeriod,
+    });
+    return bySearchAndMonth.filter((doc) => matchesCategory(doc, activeCategory));
+  }, [documents, searchQuery, filterPeriod, activeCategory]);
+
+  const categoryCounts = useMemo(() => {
+    const scoped = filterPayrollDocuments({
+      documents,
+      search: searchQuery,
+      period: filterPeriod,
+    });
+    return (Object.keys(CATEGORY_CONFIG) as DocCategory[]).reduce(
+      (acc, key) => {
+        acc[key] = scoped.filter((d) => matchesCategory(d, key)).length;
+        return acc;
+      },
+      {} as Record<DocCategory, number>,
+    );
+  }, [documents, searchQuery, filterPeriod]);
+
+  const hasActiveFilters = Boolean(searchQuery.trim() || filterPeriod || activeCategory !== 'all');
 
   const getDocIcon = (docType: PayrollDocumentType) => {
-    if (IDENTITY_TYPES.has(docType)) return <ShieldCheck className="w-5 h-5 text-purple-500" />;
+    if (IDENTITY_TYPES.has(docType)) return <ShieldCheck className="w-5 h-5 text-teal-500" />;
     switch (docType) {
       case 'nomina':
         return <Receipt className="w-5 h-5 text-emerald-500" />;
@@ -154,12 +183,26 @@ export function WorkerDocs() {
         return <ScrollText className="w-5 h-5 text-blue-500" />;
       case 'certificado':
         return <ShieldCheck className="w-5 h-5 text-purple-500" />;
+      case 'justificante':
+        return <FileText className="w-5 h-5 text-sky-500" />;
       case 'baja':
-        return <FileText className="w-5 h-5 text-amber-500" />;
+        return <HeartPulse className="w-5 h-5 text-amber-500" />;
       default:
         return <File className="w-5 h-5 text-gray-400" />;
     }
   };
+
+  function openUpload(type: PayrollDocumentType) {
+    setDocumentType(type);
+    setName(
+      buildPayrollDocumentDisplayName({
+        documentType: type,
+        workerName: user?.fullName || user?.email,
+      }),
+    );
+    setFile(null);
+    setShowUpload(true);
+  }
 
   function handleDownload(doc: PayrollDocument) {
     if (!doc.fileData) return;
@@ -170,17 +213,11 @@ export function WorkerDocs() {
   }
 
   function handlePreview(doc: PayrollDocument) {
-    if (!doc.fileData) return;
-    const win = window.open('', '_blank');
-    if (!win) return;
-    if (doc.mimeType?.startsWith('image/')) {
-      win.document.write(`<img src="${doc.fileData}" style="max-width:100%;height:auto" />`);
-    } else if (doc.mimeType === 'application/pdf') {
-      win.location.href = doc.fileData;
-    } else {
-      handleDownload(doc);
-      win.close();
+    if (!doc.fileData) {
+      toast.error('Este documento no tiene archivo para previsualizar');
+      return;
     }
+    setPreviewDoc(doc);
   }
 
   async function handleUpload(e: React.FormEvent) {
@@ -206,14 +243,19 @@ export function WorkerDocs() {
         worker_id: user.user_id,
         worker_name: user.fullName || user.email || '',
         documentType,
-        name: name.trim(),
+        name: buildPayrollDocumentDisplayName({
+          documentType,
+          workerName: user.fullName || user.email,
+          fileName: file.name,
+          customName: name.trim(),
+        }),
         fileData,
         mimeType: file.type,
         fileName: file.name,
         size: file.size,
         uploadedBy: user.user_id,
         uploadedByName: user.fullName,
-        documentCategory: IDENTITY_TYPES.has(documentType) ? 'identity' : 'other',
+        documentCategory: resolvePayrollDocumentCategory(documentType),
       });
       setDocuments((prev) => [doc, ...prev]);
       const managerIds = [
@@ -237,14 +279,71 @@ export function WorkerDocs() {
 
   return (
     <Layout title={t('worker.docs.title')} subtitle={t('worker.docs.subtitle')}>
-      <div className="space-y-5">
+      <div className={WORKER_PAGE}>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => openUpload('dni_nie')}
+            className="flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-4 text-left hover:border-blue-300 hover:bg-blue-50/40 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-blue-700 dark:hover:bg-blue-950/20 transition-colors"
+          >
+            <div className="w-11 h-11 rounded-xl bg-teal-50 dark:bg-teal-950/40 flex items-center justify-center shrink-0">
+              <IdCard className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Subir identidad</p>
+              <p className="text-xs text-stone-500 mt-0.5">
+                DNI/NIE, pasaporte o permiso
+              </p>
+              <p className="text-[11px] font-semibold text-blue-600 dark:text-blue-400 mt-2">
+                {categoryCounts.identity} archivo{categoryCounts.identity === 1 ? '' : 's'}
+              </p>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => openUpload('justificante')}
+            className="flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-4 text-left hover:border-sky-300 hover:bg-sky-50/40 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-sky-700 dark:hover:bg-sky-950/20 transition-colors"
+          >
+            <div className="w-11 h-11 rounded-xl bg-sky-50 dark:bg-sky-950/40 flex items-center justify-center shrink-0">
+              <FileText className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Subir justificante</p>
+              <p className="text-xs text-stone-500 mt-0.5">
+                Ausencia, cita médica, permiso…
+              </p>
+              <p className="text-[11px] font-semibold text-sky-700 dark:text-sky-400 mt-2">
+                {categoryCounts.justificante} archivo{categoryCounts.justificante === 1 ? '' : 's'}
+              </p>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => openUpload('baja')}
+            className="flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-4 text-left hover:border-amber-300 hover:bg-amber-50/40 dark:border-stone-700 dark:bg-stone-900 dark:hover:border-amber-700 dark:hover:bg-amber-950/20 transition-colors"
+          >
+            <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-950/40 flex items-center justify-center shrink-0">
+              <HeartPulse className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Subir baja / IT</p>
+              <p className="text-xs text-stone-500 mt-0.5">
+                Parte médico de baja o alta
+              </p>
+              <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 mt-2">
+                {categoryCounts.baja} archivo{categoryCounts.baja === 1 ? '' : 's'}
+              </p>
+            </div>
+          </button>
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-stone-600 dark:text-stone-400">
-            Sube tu DNI/NIE (foto anverso/reverso). Las nóminas las publica la empresa o gestoría.
+            Nóminas y contratos los publica la empresa. Tú subes identidad, justificante y baja.
           </p>
-          <button type="button" onClick={() => setShowUpload(true)} className={VERTIAL_BTN_PRIMARY}>
+          <button type="button" onClick={() => openUpload('dni_nie')} className={VERTIAL_BTN_PRIMARY}>
             <Upload className="h-4 w-4" />
-            Subir mi documento
+            Subir documento
           </button>
         </div>
 
@@ -275,15 +374,60 @@ export function WorkerDocs() {
           )}
         </div>
 
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('worker.docs.searchPlaceholder')}
-            className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          />
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="search"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar por nombre, tipo o nómina…"
+              className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+          <div className="relative sm:w-44">
+            <Calendar className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="month"
+              value={filterPeriod}
+              onChange={(e) => setFilterPeriod(e.target.value)}
+              className="w-full pl-10 pr-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              title="Filtrar por mes"
+            />
+          </div>
+          {availablePeriods.length > 0 ? (
+            <select
+              value={filterPeriod}
+              onChange={(e) => setFilterPeriod(e.target.value)}
+              className="sm:w-44 px-3 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="">Todos los meses</option>
+              {availablePeriods.map((p) => (
+                <option key={p} value={p}>{formatPayrollPeriodLabel(p)}</option>
+              ))}
+            </select>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-stone-500 tabular-nums">
+            {filteredDocs.length} documento{filteredDocs.length === 1 ? '' : 's'}
+            {documents.length !== filteredDocs.length ? ` de ${documents.length}` : ''}
+            {filterPeriod ? ` · ${formatPayrollPeriodLabel(filterPeriod)}` : ''}
+          </p>
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setFilterPeriod('');
+                setActiveCategory('all');
+              }}
+              className="text-xs font-semibold text-blue-600 dark:text-blue-400"
+            >
+              Limpiar filtros
+            </button>
+          ) : null}
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700">
@@ -300,7 +444,7 @@ export function WorkerDocs() {
               </p>
               {documents.length === 0 ? (
                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                  Empieza subiendo tu DNI/NIE. Las nóminas aparecerán cuando las publique la empresa.
+                  Empieza subiendo tu DNI/NIE o un parte de baja.
                 </p>
               ) : null}
             </div>
@@ -318,7 +462,9 @@ export function WorkerDocs() {
                   <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                     <span className="text-xs text-gray-400 flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {formatDate(doc.createdAt)}
+                      {doc.period
+                        ? formatPayrollPeriodLabel(doc.period)
+                        : formatDate(doc.createdAt)}
                     </span>
                     {doc.size ? <span className="text-xs text-gray-400">{formatBytes(doc.size)}</span> : null}
                     <span className="text-[10px] font-bold px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded">
@@ -376,7 +522,17 @@ export function WorkerDocs() {
                 Tipo
                 <select
                   value={documentType}
-                  onChange={(e) => setDocumentType(e.target.value as PayrollDocumentType)}
+                  onChange={(e) => {
+                    const next = e.target.value as PayrollDocumentType;
+                    setDocumentType(next);
+                    setName(
+                      buildPayrollDocumentDisplayName({
+                        documentType: next,
+                        workerName: user?.fullName || user?.email,
+                        fileName: file?.name,
+                      }),
+                    );
+                  }}
                   className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-800"
                 >
                   {WORKER_SELF_UPLOAD_TYPES.map((type) => (
@@ -391,7 +547,7 @@ export function WorkerDocs() {
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Ej. DNI anverso"
+                  placeholder={`Ej. ${PAYROLL_DOC_TYPE_LABELS[documentType]}`}
                   className="mt-1 w-full rounded-xl border border-stone-200 px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-800"
                 />
               </label>
@@ -404,7 +560,15 @@ export function WorkerDocs() {
                   onChange={(e) => {
                     const f = e.target.files?.[0] || null;
                     setFile(f);
-                    if (f && !name) setName(f.name.replace(/\.[^.]+$/, ''));
+                    if (f) {
+                      setName(
+                        buildPayrollDocumentDisplayName({
+                          documentType,
+                          workerName: user?.fullName || user?.email,
+                          fileName: f.name,
+                        }),
+                      );
+                    }
                   }}
                 />
               </label>
@@ -420,6 +584,10 @@ export function WorkerDocs() {
             </form>
           </div>
         </div>
+      ) : null}
+
+      {previewDoc ? (
+        <PayrollDocumentPreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />
       ) : null}
     </Layout>
   );

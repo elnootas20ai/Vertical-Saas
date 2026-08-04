@@ -65,7 +65,8 @@ export function resolvePdvIdFromStoreRef(
 ): { pdvId: string | null; pdvName: string | null; workCenterId: string | null } {
   const r = String(ref || '').trim();
   if (!r) return { pdvId: null, pdvName: null, workCenterId: null };
-  const byId = pointsOfSale.find((p) => p._id === r);
+  const bare = r.startsWith('wc:') ? r.slice(3) : r;
+  const byId = pointsOfSale.find((p) => p._id === r || p._id === bare);
   if (byId) {
     return {
       pdvId: byId._id,
@@ -73,21 +74,31 @@ export function resolvePdvIdFromStoreRef(
       workCenterId: String(byId.workCenterId || '').trim() || null,
     };
   }
-  const byWc = pointsOfSale.find((p) => String(p.workCenterId || '').trim() === r);
+  const byWc = pointsOfSale.find((p) => {
+    const wc = String(p.workCenterId || '').trim();
+    return wc === r || wc === bare;
+  });
   if (byWc) {
     return {
       pdvId: byWc._id,
       pdvName: byWc.name || null,
-      workCenterId: r,
+      workCenterId: String(byWc.workCenterId || '').trim() || bare,
     };
   }
-  return { pdvId: null, pdvName: null, workCenterId: r };
+  return { pdvId: null, pdvName: null, workCenterId: bare };
 }
 
 export function isInvitedWorkerUser(user: AuthUser | null | undefined): boolean {
   if (!user) return false;
   if (user.accountType === 'user') return true;
   return Boolean(String((user as { invitedBy?: string }).invitedBy || '').trim());
+}
+
+function workCenterMatchesRef(wc: WorkCenter, ref: string): boolean {
+  const bare = ref.startsWith('wc:') ? ref.slice(3) : ref;
+  const id = String(wc._id || '').trim();
+  const alt = String(wc.id || '').trim();
+  return id === ref || alt === ref || id === bare || alt === bare;
 }
 
 /** Trabajador invitado: solo su tienda/PDV asignado en Equipo (`employment.salesPointId`). */
@@ -111,21 +122,25 @@ export function filterStoresForWorkerAssignment(
   if (resolved.pdvId) {
     const pdv = pointsOfSale.find((p) => p._id === resolved.pdvId) || null;
     const linkedWcId = wcId || String(pdv?.workCenterId || '').trim();
+    const matchedWc = linkedWcId
+      ? workCenters.filter((wc) => workCenterMatchesRef(wc, linkedWcId))
+      : workCenters.filter((wc) => workCenterMatchesRef(wc, ref));
     return {
       pointsOfSale: pdv ? [pdv] : [],
-      workCenters: linkedWcId
-        ? workCenters.filter((wc) => wc._id === linkedWcId)
-        : workCenters,
+      workCenters: matchedWc,
       assignedPdvId: resolved.pdvId,
     };
   }
 
   if (wcId) {
-    const wcPdvs = pointsOfSale.filter((p) => String(p.workCenterId || '').trim() === wcId);
+    const wcPdvs = pointsOfSale.filter((p) => {
+      const linked = String(p.workCenterId || '').trim();
+      return linked === wcId || linked === ref;
+    });
     const primary = wcPdvs[0] || null;
     return {
       pointsOfSale: wcPdvs,
-      workCenters: workCenters.filter((wc) => wc._id === wcId),
+      workCenters: workCenters.filter((wc) => workCenterMatchesRef(wc, wcId)),
       assignedPdvId: primary?._id || null,
     };
   }

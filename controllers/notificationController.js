@@ -95,10 +95,13 @@ export async function createNotification(req, res) {
     broadcastToUser(userId, 'notification', sanitized);
 
     // Enviar Web Push (app cerrada o en segundo plano)
+    const pushRoute =
+      sanitized.route
+      || (String(account.role || '') === 'Usuario' ? '/saas/worker/notifications' : '/saas/dashboard');
     sendPushToUser(req, userId, {
       title: sanitized.title,
       body: sanitized.message,
-      data: { route: sanitized.route || '/saas/dashboard', notificationId: sanitized.id },
+      data: { route: pushRoute, notificationId: sanitized.id },
     }).catch((err) => console.warn('[Push] Error enviando push al crear notificación:', err?.message));
 
     return res.status(201).json({

@@ -1424,7 +1424,7 @@ export async function updateProfile(req, res) {
     const savedAccount = await saveAccount(req, updatedAccount);
     const persistedAccount = (await findAccountByUserId(req, savedAccount.user_id)) || savedAccount;
 
-    if (savedAccount.linkedBusinessId && (fullName !== undefined || email !== undefined || role !== undefined || permissions !== undefined)) {
+    if (savedAccount.linkedBusinessId && (fullName !== undefined || email !== undefined || role !== undefined || permissions !== undefined || employment !== undefined)) {
       try {
         const business = await findBusinessById(req, savedAccount.linkedBusinessId);
         if (business && Array.isArray(business.members)) {
@@ -1438,6 +1438,9 @@ export async function updateProfile(req, res) {
               permissions: permissions !== undefined
                 ? normalizePermissionMatrix(savedAccount.permissions, savedAccount.role || m.role)
                 : m.permissions,
+              employment: employment !== undefined
+                ? (savedAccount.employment || m.employment)
+                : m.employment,
             };
           });
           await saveBusiness(req, { ...business, members, updatedAt: new Date().toISOString() });
@@ -2292,6 +2295,15 @@ export async function acceptInvitation(req, res) {
         role: invitation.role || 'Usuario',
         permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
         joinedAt: now,
+        employment: invitation.employment
+          ? {
+              salesPointId: String(invitation.employment.salesPointId || '').trim() || undefined,
+              position: invitation.employment.position || invitation.role || undefined,
+              contractType: invitation.employment.contractType || undefined,
+              workday: invitation.employment.workday || undefined,
+              startDate: invitation.employment.startDate || undefined,
+            }
+          : undefined,
       };
       await saveBusiness(req, {
         ...business,
@@ -2301,11 +2313,18 @@ export async function acceptInvitation(req, res) {
     } else if (!isOwner && isAlreadyMember) {
       const nextMembers = members.map((member) => {
         if (member.user_id !== account.user_id) return member;
+        const inviteEmp = invitation.employment || {};
+        const salesPointId = String(inviteEmp.salesPointId || member.employment?.salesPointId || '').trim();
         return {
           ...member,
           fullName: resolvedFullName || member.fullName,
           role: invitation.role || member.role || 'Usuario',
           permissions: normalizePermissionMatrix(invitation.permissions, invitation.role || 'Usuario'),
+          employment: {
+            ...(member.employment || {}),
+            ...inviteEmp,
+            ...(salesPointId ? { salesPointId } : {}),
+          },
         };
       });
       await saveBusiness(req, {
@@ -2365,6 +2384,33 @@ export async function acceptInvitation(req, res) {
       posPinHash: invitation.posPinHash || account.posPinHash || '',
       updatedAt: now,
     });
+
+    // Sync tienda de la contratación → members (fichaje + historial CEO).
+    const acceptSalesPointId = String(mergedEmployment?.salesPointId || '').trim();
+    if (acceptSalesPointId) {
+      try {
+        const freshBiz = await findBusinessById(req, business.business_id);
+        if (freshBiz && Array.isArray(freshBiz.members)) {
+          await saveBusiness(req, {
+            ...freshBiz,
+            members: freshBiz.members.map((m) => {
+              if (m.user_id !== account.user_id) return m;
+              return {
+                ...m,
+                employment: {
+                  ...(m.employment || {}),
+                  ...mergedEmployment,
+                  salesPointId: acceptSalesPointId,
+                },
+              };
+            }),
+            updatedAt: now,
+          });
+        }
+      } catch (syncErr) {
+        console.error('[AUTH] Error sync employment members (acceptInvitation):', syncErr?.message);
+      }
+    }
 
     const savedInvitation = await saveTeamInvitation(req, {
       ...invitation,
@@ -3519,12 +3565,40 @@ export async function acceptInvite(req, res) {
                   role: inviteRole,
                   permissions: invitePermissions,
                   joinedAt: now,
+                  employment: inviteEmployment
+                    ? {
+                        salesPointId: String(inviteEmployment.salesPointId || '').trim() || undefined,
+                        position: inviteEmployment.position || inviteRole || undefined,
+                        contractType: inviteEmployment.contractType || undefined,
+                        workday: inviteEmployment.workday || undefined,
+                        startDate: inviteEmployment.startDate || undefined,
+                      }
+                    : undefined,
                 },
               ],
               updatedAt: now,
             });
           } else {
-            savedBusiness = business;
+            const salesPointId = String(inviteEmployment?.salesPointId || '').trim();
+            if (salesPointId) {
+              savedBusiness = await saveBusiness(req, {
+                ...business,
+                members: members.map((m) => {
+                  if (m.user_id !== account.user_id) return m;
+                  return {
+                    ...m,
+                    employment: {
+                      ...(m.employment || {}),
+                      ...(inviteEmployment || {}),
+                      salesPointId,
+                    },
+                  };
+                }),
+                updatedAt: now,
+              });
+            } else {
+              savedBusiness = business;
+            }
           }
         }
       } catch (memberErr) {
@@ -3616,6 +3690,55 @@ export async function acceptInvite(req, res) {
     });
 
     const savedAccount = await saveAccount(req, updatedAccountDoc);
+
+    // Asegura employment.salesPointId (tienda de la contratación) también en business.members.
+    const finalSalesPointId = String(
+      savedAccount.employment?.salesPointId
+      || inviteEmployment?.salesPointId
+      || '',
+    ).trim();
+    if (inviteBusinessId && finalSalesPointId) {
+      try {
+        const biz = await findBusinessById(req, inviteBusinessId);
+        if (biz && Array.isArray(biz.members)) {
+          const nextMembers = biz.members.map((m) => {
+            if (m.user_id !== savedAccount.user_id) return m;
+            return {
+              ...m,
+              employment: {
+                ...(m.employment || {}),
+                ...(savedAccount.employment || inviteEmployment || {}),
+                salesPointId: finalSalesPointId,
+              },
+            };
+          });
+          const isOnRoster = nextMembers.some((m) => m.user_id === savedAccount.user_id);
+          await saveBusiness(req, {
+            ...biz,
+            members: isOnRoster
+              ? nextMembers
+              : [
+                  ...nextMembers,
+                  {
+                    user_id: savedAccount.user_id,
+                    fullName: savedAccount.fullName,
+                    email: savedAccount.email,
+                    role: inviteRole,
+                    permissions: invitePermissions,
+                    joinedAt: now,
+                    employment: {
+                      ...(savedAccount.employment || {}),
+                      salesPointId: finalSalesPointId,
+                    },
+                  },
+                ],
+            updatedAt: now,
+          });
+        }
+      } catch (syncEmpErr) {
+        console.error('[AUTH] Error sync employment → members:', syncEmpErr?.message);
+      }
+    }
 
     let accountForTokens = savedAccount;
     if ((teamInvite?.scheduleTemplateId || account.onboardingData?.scheduleTemplateId) && inviteBusinessId) {

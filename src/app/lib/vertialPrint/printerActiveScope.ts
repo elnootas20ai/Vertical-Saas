@@ -44,9 +44,28 @@ export function resolveEffectivePrinterConfig(options?: {
   localFallback?: VertialPrinterConfig;
 }): VertialPrinterConfig {
   const scope = options ?? {};
-  const pdv = scope.pdv ?? activeScope.pdv ?? null;
-  const terminalId = String(scope.terminalId ?? activeScope.terminalId ?? '').trim();
-  const pdvId = String(scope.pdvId || pdv?._id || activeScope.pdvId || '').trim();
+  const explicitPdvId = String(scope.pdvId || '').trim();
+  let pdv = scope.pdv !== undefined ? scope.pdv : (activeScope.pdv ?? null);
+
+  // Si piden un PDV concreto, no usar el documento de otra tienda del scope activo.
+  // Antes: { pdvId: tienda-2 } seguía leyendo printerConfig de la tienda-1 activa
+  // y la 2ª impresora solo salía en la prueba del panel.
+  if (explicitPdvId && pdv && String(pdv._id || '').trim() !== explicitPdvId) {
+    pdv = null;
+  }
+
+  const activePdvId = String(activeScope.pdvId || activeScope.pdv?._id || '').trim();
+  const pdvId = explicitPdvId || String(pdv?._id || activePdvId || '').trim();
+
+  let terminalId = String(scope.terminalId ?? '').trim();
+  if (!terminalId) {
+    // Heredar terminal del scope solo si es la misma tienda (o no hay PDV explícito distinto).
+    const sameStoreAsActive = !explicitPdvId || !activePdvId || explicitPdvId === activePdvId;
+    if (sameStoreAsActive && scope.terminalId === undefined) {
+      terminalId = String(activeScope.terminalId || '').trim();
+    }
+  }
+
   const localFallback = scope.localFallback ?? loadLegacyPrinterConfig();
   const localCfg = normalizeVertialPrinterConfig(localFallback);
 
@@ -80,11 +99,43 @@ export function resolveEffectivePrinterConfig(options?: {
   }
 
   // Sin config de tienda: IP de este dispositivo (tablet) como respaldo.
-  if (isVertialPrinterConfigConfigured(localCfg)) {
+  // Si piden otra tienda distinta a la activa, no prestar la IP del dispositivo
+  // (pedidos de la 2ª tienda no deben salir en la impresora de la 1ª).
+  const canUseDeviceFallback =
+    !explicitPdvId || !activePdvId || explicitPdvId === activePdvId;
+  if (canUseDeviceFallback && isVertialPrinterConfigConfigured(localCfg)) {
     return localCfg;
   }
 
   return normalizeVertialPrinterConfig(localFallback || DEFAULT_PRINTER_CONFIG);
+}
+
+/**
+ * Impresora para un pedido real: prioriza la tienda del pedido (salesPointId).
+ * El ticket de prueba del panel ya resolvía con esa tienda; los pedidos no,
+ * y la 2ª impresora quedaba muda aunque la prueba sí saliera.
+ */
+export function resolvePrinterConfigForOrderPdv(
+  orderPdvId?: string | null,
+): VertialPrinterConfig {
+  const id = String(orderPdvId || '').trim();
+  if (!id) {
+    return resolveEffectivePrinterConfig();
+  }
+
+  const activePdvId = String(activeScope.pdvId || activeScope.pdv?._id || '').trim();
+  const samePdv = !activePdvId || activePdvId === id;
+  const byOrder = resolveEffectivePrinterConfig({
+    pdvId: id,
+    pdv: samePdv ? (activeScope.pdv ?? null) : null,
+    terminalId: samePdv ? (activeScope.terminalId ?? null) : null,
+  });
+
+  if (isVertialPrinterConfigConfigured(byOrder)) {
+    return byOrder;
+  }
+
+  return resolveEffectivePrinterConfig();
 }
 
 /** Config efectiva: terminal → tienda → caché → dispositivo. */

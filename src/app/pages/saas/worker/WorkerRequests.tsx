@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Loader2,
   PauseCircle,
@@ -30,24 +31,26 @@ import {
   getSettings,
   listVacations,
   validateVacationRequestPolicy,
-  vacationEligibleFromDate,
+  resolveVacationTenureGate,
   findOverlappingLeaveRequests,
   LEAVE_TYPE_LABELS,
   type VacationRequest,
   type VacationSettings,
 } from '../../../lib/vacationsApi';
 import { getMemberScheduleWeeklyHours } from '../../../lib/schedulesApi';
-import { formatDateEs, formatDateRangeEs } from '../../../lib/formatDateEs';
+import { formatDateEs, formatDateRangeEs, formatDateTimeEs } from '../../../lib/formatDateEs';
 import { formatNumberEs, formatQtyEs } from '../../../lib/formatNumberEs';
 import { toast } from 'sonner';
+import { WORKER_CARD, WORKER_PAGE } from '../../../lib/workerUi';
+import { VERTIAL_BTN_PRIMARY } from '../../../lib/vertialUiTokens';
 
 const STATUS_STYLE: Record<VacationRequest['status'], string> = {
   pending:
-    'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800',
+    'bg-orange-50 text-orange-800 border-orange-200 dark:bg-orange-950/30 dark:text-orange-300 dark:border-orange-800',
   approved:
     'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800',
   rejected:
-    'bg-red-50 text-red-800 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800',
+    'bg-rose-50/80 text-rose-700 border-rose-200 dark:bg-rose-950/25 dark:text-rose-300 dark:border-rose-900',
   cancelled:
     'bg-stone-100 text-stone-600 border-stone-200 dark:bg-stone-800 dark:text-stone-300 dark:border-stone-700',
 };
@@ -102,6 +105,7 @@ export function WorkerRequests() {
   const [filter, setFilter] = useState<'all' | VacationRequest['status']>('all');
   const [mobileTab, setMobileTab] = useState<MobileTab>('new');
   const [justSentId, setJustSentId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
   const listTopRef = useRef<HTMLElement | null>(null);
 
@@ -129,18 +133,14 @@ export function WorkerRequests() {
   }, [settings?.minNoticeDays]);
 
   const vacationTenureBlock = useMemo(() => {
-    const months = Number(settings?.minTenureMonthsForVacation ?? 2);
-    if (months <= 0) return null;
-    const emp = String(user?.employment?.startDate || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(emp)) {
-      return 'No se pueden pedir vacaciones: falta la fecha de alta en tu ficha.';
-    }
-    const eligibleFrom = vacationEligibleFromDate(emp, months);
-    if (eligibleFrom && todayIsoLocal() < eligibleFrom) {
-      return `Vacaciones disponibles tras ${months} mes(es) de alta (desde el ${formatDateEs(eligibleFrom)}).`;
-    }
-    return null;
-  }, [settings?.minTenureMonthsForVacation, user?.employment?.startDate]);
+    const gate = resolveVacationTenureGate(settings, user?.employment?.startDate);
+    return gate.ok ? null : gate.message;
+  }, [
+    settings?.minTenureMonthsForVacation,
+    settings?.minTenureDaysForVacation,
+    settings,
+    user?.employment?.startDate,
+  ]);
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!businessId || !memberId) {
@@ -451,16 +451,16 @@ export function WorkerRequests() {
   }
 
   const formSection = (
-    <section className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 sm:p-5">
+    <section className={`${WORKER_CARD} p-4 sm:p-5`}>
       <div className="mb-4 flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40 dark:text-blue-400">
           <Send className="h-5 w-5" />
         </div>
         <div className="min-w-0">
-          <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Pedir a RRHH</h2>
-          <p className="text-xs text-gray-500">
+          <h2 className="text-base font-bold text-stone-900 dark:text-stone-100">Pedir a RRHH</h2>
+          <p className="text-xs text-stone-500">
             Completa y envía.{' '}
-            <Link to="/saas/worker/calendar" className="font-semibold text-blue-600 hover:underline">
+            <Link to="/saas/worker/calendar" className="font-semibold text-[var(--v-blue,#2563eb)] hover:underline">
               Ver calendario
             </Link>
           </p>
@@ -605,7 +605,7 @@ export function WorkerRequests() {
         <button
           type="submit"
           disabled={submitting || vacationCannotRequest}
-          className="flex w-full min-h-12 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          className={`${VERTIAL_BTN_PRIMARY} w-full`}
         >
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           {submitting ? 'Enviando…' : 'Enviar a RRHH'}
@@ -668,61 +668,142 @@ export function WorkerRequests() {
             const Icon = STATUS_ICON[req.status] || Clock;
             const typeDef = getHrRequestType(req.leaveType);
             const highlight = justSentId === req._id;
+            const decided = req.status === 'approved' || req.status === 'rejected' || req.status === 'cancelled';
+            const open = expandedId === req._id;
+            const reviewNote = String(req.reviewNote || '').trim();
+            const ownNotes = String(req.notes || '').trim();
+
             return (
               <li
                 key={req._id}
-                className={`rounded-2xl border bg-white px-4 py-3.5 dark:bg-gray-800 sm:rounded-none sm:border-0 sm:border-b sm:border-gray-100 sm:last:border-b-0 dark:sm:border-gray-700/60 ${
+                className={`rounded-2xl border bg-white dark:bg-gray-800 sm:rounded-none sm:border-0 sm:border-b sm:border-gray-100 sm:last:border-b-0 dark:sm:border-gray-700/60 ${
                   highlight
                     ? 'border-emerald-300 ring-2 ring-emerald-200 dark:border-emerald-700 dark:ring-emerald-900'
                     : 'border-gray-200 dark:border-gray-700'
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                        {typeDef.label}
-                      </p>
-                      {req.needsHrReview ? (
-                        <span className="rounded-md bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
-                          En valoración RRHH
-                        </span>
-                      ) : null}
-                      {req.urgency === 'urgent' ? (
-                        <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
-                          Urgente
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-0.5 text-xs text-gray-500">
-                      {formatDateRangeEs(req.startDate, req.endDate)} · {formatQtyEs(req.totalDays)} d
-                    </p>
-                    {req.conflictSummary ? (
-                      <p className="mt-1 text-xs text-orange-700 dark:text-orange-300">{req.conflictSummary}</p>
-                    ) : null}
-                    {req.notes ? (
-                      <p className="mt-1.5 text-xs text-gray-600 dark:text-gray-400">{req.notes}</p>
-                    ) : null}
-                    {req.reviewNote ? (
-                      <p className="mt-1 text-xs text-gray-500">Nota RRHH: {req.reviewNote}</p>
-                    ) : null}
-                  </div>
-                  <span
-                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold ${STATUS_STYLE[req.status]}`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {statusLabels[req.status] || req.status}
-                  </span>
-                </div>
-                {req.status === 'pending' ? (
+                {decided ? (
                   <button
                     type="button"
-                    onClick={() => void handleCancel(req)}
-                    disabled={cancellingId === req._id}
-                    className="mt-3 w-full min-h-11 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-rose-950/30 sm:mt-2 sm:w-auto sm:min-h-0 sm:border-0 sm:bg-transparent sm:px-0 sm:text-xs sm:underline-offset-2 sm:hover:bg-transparent sm:hover:underline"
+                    onClick={() => setExpandedId(open ? null : req._id)}
+                    className="flex w-full items-start justify-between gap-3 px-4 py-3.5 text-left"
+                    aria-expanded={open}
                   >
-                    {cancellingId === req._id ? 'Cancelando…' : 'Cancelar solicitud'}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {typeDef.label}
+                        </p>
+                        {req.urgency === 'urgent' ? (
+                          <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+                            Urgente
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {formatDateRangeEs(req.startDate, req.endDate)} · {formatQtyEs(req.totalDays)} d
+                      </p>
+                      <p className="mt-1 text-[11px] font-medium text-blue-600 dark:text-blue-400">
+                        {open ? 'Ocultar detalle' : 'Ver detalle y motivos'}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold ${STATUS_STYLE[req.status]}`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {statusLabels[req.status] || req.status}
+                      </span>
+                      <ChevronDown
+                        className={`h-4 w-4 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}
+                      />
+                    </div>
                   </button>
+                ) : (
+                  <div className="flex items-start justify-between gap-3 px-4 py-3.5">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                          {typeDef.label}
+                        </p>
+                        {req.needsHrReview ? (
+                          <span className="rounded-md bg-orange-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
+                            En valoración RRHH
+                          </span>
+                        ) : null}
+                        {req.urgency === 'urgent' ? (
+                          <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 dark:bg-rose-900/40 dark:text-rose-300">
+                            Urgente
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {formatDateRangeEs(req.startDate, req.endDate)} · {formatQtyEs(req.totalDays)} d
+                      </p>
+                      {req.conflictSummary
+                        && req.needsHrReview
+                        && !/Nadie más del equipo/i.test(req.conflictSummary) ? (
+                        <p className="mt-1 text-xs text-orange-700 dark:text-orange-300">{req.conflictSummary}</p>
+                      ) : null}
+                      {ownNotes ? (
+                        <p className="mt-1.5 text-xs text-gray-600 dark:text-gray-400">{ownNotes}</p>
+                      ) : null}
+                    </div>
+                    <span
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold ${STATUS_STYLE[req.status]}`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      {statusLabels[req.status] || req.status}
+                    </span>
+                  </div>
+                )}
+
+                {decided && open ? (
+                  <div className="space-y-2 border-t border-gray-100 px-4 pb-3.5 pt-3 dark:border-gray-700/60">
+                    {(req.reviewedAt || req.reviewedByName) ? (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {[
+                          req.reviewedByName ? `Por ${req.reviewedByName}` : null,
+                          req.reviewedAt ? formatDateTimeEs(req.reviewedAt) : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    ) : null}
+                    <div className="rounded-xl bg-stone-50 px-3 py-2.5 dark:bg-stone-900/60">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                        {req.status === 'approved'
+                          ? 'Motivo / nota de aprobación'
+                          : req.status === 'rejected'
+                            ? 'Motivo del rechazo'
+                            : 'Motivo de la cancelación'}
+                      </p>
+                      <p className="mt-1 text-sm text-gray-800 dark:text-gray-200">
+                        {reviewNote || 'Sin motivo indicado'}
+                      </p>
+                    </div>
+                    {ownNotes ? (
+                      <div className="rounded-xl border border-gray-100 px-3 py-2.5 dark:border-gray-700">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">
+                          Tu nota al pedir
+                        </p>
+                        <p className="mt-1 text-sm text-gray-700 dark:text-gray-300">{ownNotes}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {req.status === 'pending' ? (
+                  <div className="px-4 pb-3.5 sm:px-4 sm:pb-3">
+                    <button
+                      type="button"
+                      onClick={() => void handleCancel(req)}
+                      disabled={cancellingId === req._id}
+                      className="w-full min-h-11 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 dark:border-gray-600 dark:hover:bg-rose-950/30 sm:mt-0 sm:w-auto sm:min-h-0 sm:border-0 sm:bg-transparent sm:px-0 sm:text-xs sm:underline-offset-2 sm:hover:bg-transparent sm:hover:underline"
+                    >
+                      {cancellingId === req._id ? 'Cancelando…' : 'Cancelar solicitud'}
+                    </button>
+                  </div>
                 ) : null}
               </li>
             );
@@ -733,26 +814,26 @@ export function WorkerRequests() {
   );
 
   return (
-    <Layout title={t('nav.workerRequests', 'Solicitudes')} subtitle="Envía a RRHH vacaciones, permisos o bajas">
-      <div className="mx-auto max-w-2xl space-y-4 pb-4 sm:space-y-5">
+    <Layout title={t('nav.workerRequests', 'Solicitudes')} subtitle="Vacaciones, permisos y bajas">
+      <div className={WORKER_PAGE}>
         <div className={`grid gap-2 ${canShowVacationBalance ? 'grid-cols-3' : 'grid-cols-2'}`}>
-          <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-800">
-            <p className="text-[11px] font-medium text-gray-500">Pendientes</p>
-            <p className="text-xl font-bold tabular-nums text-amber-600">{formatNumberEs(pendingCount, { maxFraction: 0 })}</p>
+          <div className={`${WORKER_CARD} px-3 py-3`}>
+            <p className="text-[11px] font-medium text-stone-500">Pendientes</p>
+            <p className="text-xl font-bold tabular-nums text-orange-600">{formatNumberEs(pendingCount, { maxFraction: 0 })}</p>
           </div>
           {canShowVacationBalance && balanceLabel ? (
-            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-800">
-              <p className="text-[11px] font-medium text-gray-500">Puedes pedir</p>
-              <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-white">
+            <div className={`${WORKER_CARD} px-3 py-3`}>
+              <p className="text-[11px] font-medium text-stone-500">Puedes pedir</p>
+              <p className="text-xl font-bold tabular-nums text-stone-900 dark:text-stone-50">
                 {balanceLabel.value}
-                <span className="ml-0.5 text-sm font-semibold text-gray-400">d</span>
+                <span className="ml-0.5 text-sm font-semibold text-stone-400">d</span>
               </p>
-              <p className="mt-0.5 text-[10px] leading-tight text-gray-400">{balanceLabel.hint}</p>
+              <p className="mt-0.5 text-[10px] leading-tight text-stone-400">{balanceLabel.hint}</p>
             </div>
           ) : null}
-          <div className="rounded-2xl border border-gray-200 bg-white px-3 py-3 dark:border-gray-700 dark:bg-gray-800">
-            <p className="text-[11px] font-medium text-gray-500">Enviadas</p>
-            <p className="text-xl font-bold tabular-nums text-gray-900 dark:text-white">{formatNumberEs(requests.length, { maxFraction: 0 })}</p>
+          <div className={`${WORKER_CARD} px-3 py-3`}>
+            <p className="text-[11px] font-medium text-stone-500">Enviadas</p>
+            <p className="text-xl font-bold tabular-nums text-stone-900 dark:text-stone-50">{formatNumberEs(requests.length, { maxFraction: 0 })}</p>
           </div>
         </div>
 

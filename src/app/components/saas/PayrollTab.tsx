@@ -21,6 +21,7 @@ import {
   payrollUploadSuccessMessage,
   listPayrollDocumentsRequest,
   PAYROLL_DOC_TYPE_LABELS,
+  buildPayrollDocumentDisplayName,
   type PayrollDocument,
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
@@ -47,7 +48,17 @@ const DOC_TYPE_COLORS: Record<PayrollDocumentType, string> = {
   nomina: 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700',
   contrato: 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700',
   certificado: 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-700',
+  justificante: 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-700',
   baja: 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700',
+  dni_nie: 'bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-700',
+  pasaporte: 'bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-700',
+  permiso_trabajo: 'bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-700',
+  reconocimiento_medico: 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-700',
+  prl: 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-700',
+  carnet_conducir: 'bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-700',
+  certificado_penales: 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-700',
+  seguro: 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-700',
+  titulo: 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-700',
   otro: 'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-600',
 };
 
@@ -75,12 +86,20 @@ function UploadModal({ members, currentUser, businessId, onClose, onUploaded }: 
 
   const activeMembers = members.filter((m) => m.status !== 'inactive');
 
+  function suggestName(type: PayrollDocumentType, nextPeriod: string, workerName?: string, fileName?: string) {
+    const worker = workerName || members.find((m) => m.user_id === workerId)?.fullName;
+    return buildPayrollDocumentDisplayName({
+      documentType: type,
+      workerName: worker,
+      period: type === 'nomina' ? nextPeriod : undefined,
+      fileName,
+    });
+  }
+
   function handleFileChange(selected: File | null) {
     if (!selected) return;
     setFile(selected);
-    if (!name) {
-      setName(selected.name.replace(/\.[^.]+$/, ''));
-    }
+    setName(suggestName(documentType, period, undefined, selected.name));
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -114,8 +133,14 @@ function UploadModal({ members, currentUser, businessId, onClose, onUploaded }: 
         worker_id: workerId,
         worker_name: worker?.fullName || workerId,
         documentType,
-        name: name.trim(),
-        period: period.trim() || undefined,
+        name: buildPayrollDocumentDisplayName({
+          documentType,
+          workerName: worker?.fullName,
+          period: documentType === 'nomina' ? period : undefined,
+          fileName: file.name,
+          customName: name.trim(),
+        }),
+        period: documentType === 'nomina' ? (period.trim() || undefined) : undefined,
         fileData,
         mimeType: file.type,
         fileName: file.name,
@@ -172,7 +197,11 @@ function UploadModal({ members, currentUser, businessId, onClose, onUploaded }: 
               </label>
               <select
                 value={documentType}
-                onChange={(e) => setDocumentType(e.target.value as PayrollDocumentType)}
+                onChange={(e) => {
+                  const next = e.target.value as PayrollDocumentType;
+                  setDocumentType(next);
+                  setName(suggestName(next, period, undefined, file?.name));
+                }}
                 className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
               >
                 {(Object.entries(PAYROLL_DOC_TYPE_LABELS) as [PayrollDocumentType, string][]).map(([k, v]) => (
@@ -180,17 +209,28 @@ function UploadModal({ members, currentUser, businessId, onClose, onUploaded }: 
                 ))}
               </select>
             </div>
+            {documentType === 'nomina' ? (
             <div>
               <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">
-                Período (ej. 2025-01)
+                Período (nómina)
               </label>
               <input
                 type="month"
                 value={period}
-                onChange={(e) => setPeriod(e.target.value)}
+                onChange={(e) => {
+                  setPeriod(e.target.value);
+                  setName(suggestName(documentType, e.target.value, undefined, file?.name));
+                }}
                 className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
               />
             </div>
+            ) : (
+              <div className="flex items-end">
+                <p className="text-xs text-gray-500 dark:text-gray-400 pb-2">
+                  Se guarda como <strong>{PAYROLL_DOC_TYPE_LABELS[documentType]}</strong>.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Name */}
@@ -202,7 +242,7 @@ function UploadModal({ members, currentUser, businessId, onClose, onUploaded }: 
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. Nómina enero 2025"
+              placeholder={`Ej. ${PAYROLL_DOC_TYPE_LABELS[documentType]} · trabajador`}
               className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
             />
           </div>
@@ -462,7 +502,7 @@ export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
             className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-gray-100 px-4 py-2 text-sm font-semibold text-white dark:text-gray-900 hover:bg-black dark:hover:bg-white transition-colors"
           >
             <Files className="w-4 h-4" />
-            Subir ZIP nóminas
+            Subir nóminas
           </button>
         )}
       </div>

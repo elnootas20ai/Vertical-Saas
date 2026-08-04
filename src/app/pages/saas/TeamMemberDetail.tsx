@@ -54,12 +54,11 @@ import { useBusiness } from '../../context/BusinessContext';
 import type {
   AuthUser,
   AccountPermissionMatrix,
-  AccountPermissionValue,
   EmploymentInfo,
   RoleDefinition,
   WorkerAssignment,
 } from '../../lib/authApi';
-import { listClockins, formatMinutes } from '../../lib/clockinsApi';
+import { listClockins, formatMinutes, mapsUrlForGeo, clockinPrimaryGeo } from '../../lib/clockinsApi';
 import type { ClockinRecord } from '../../lib/clockinsApi';
 import {
   getSchedule,
@@ -99,9 +98,22 @@ import {
   payrollUploadSuccessMessage,
   getDocumentExpiryStatus,
   PAYROLL_DOC_TYPE_LABELS,
+  buildPayrollDocumentDisplayName,
   type PayrollDocument,
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
+import { PayrollDocumentPreviewModal } from '../../components/saas/PayrollDocumentPreviewModal';
+import { getVertialAccessPermissionModules } from '../../lib/roleCatalog';
+import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { getHrLocationCopy } from '../../lib/retailLocationCopy';
+import {
+  assignPrimaryWorkSite,
+  clearPrimaryWorkSite,
+  hasExplicitSiteAssignment,
+  listActiveSiteAssignments,
+} from '../../lib/workerStoreAssignment';
+import { useWorkCenters } from '../../hooks/useWorkCenters';
 import { toast } from 'sonner';
 
 const HR_MANAGER_ROLES = new Set([
@@ -118,23 +130,6 @@ const inputClassName =
 
 type DetailTab = 'info' | 'labor-cost' | 'schedule' | 'clockins' | 'vacations' | 'assignments' | 'permissions' | 'documents' | 'message';
 
-const PERMISSION_MODULES: { key: string; label: string; icon: React.ReactNode }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: <Eye className="w-4 h-4" /> },
-  { key: 'team', label: 'Equipo', icon: <User className="w-4 h-4" /> },
-  { key: 'clients', label: 'Clientes', icon: <User className="w-4 h-4" /> },
-  { key: 'vehicles', label: 'Vehículos', icon: <Briefcase className="w-4 h-4" /> },
-  { key: 'operations', label: 'Operaciones', icon: <FileText className="w-4 h-4" /> },
-  { key: 'sales', label: 'Ventas', icon: <Receipt className="w-4 h-4" /> },
-  { key: 'finance', label: 'Finanzas', icon: <Receipt className="w-4 h-4" /> },
-  { key: 'documents', label: 'Documentos', icon: <FileText className="w-4 h-4" /> },
-  { key: 'calendar', label: 'Calendario', icon: <Calendar className="w-4 h-4" /> },
-  { key: 'settings', label: 'Configuración', icon: <Shield className="w-4 h-4" /> },
-  { key: 'reports', label: 'Informes', icon: <FileText className="w-4 h-4" /> },
-  { key: 'clockins', label: 'Fichajes', icon: <Clock className="w-4 h-4" /> },
-  { key: 'vacations', label: 'Vacaciones', icon: <Umbrella className="w-4 h-4" /> },
-  { key: 'schedules', label: 'Horarios', icon: <CalendarDays className="w-4 h-4" /> },
-];
-
 type DocCategory = 'all' | 'payslips' | 'contracts' | 'personal_docs' | 'expenses' | 'other';
 
 const DOC_CATEGORIES: { id: DocCategory; label: string; icon: React.ReactNode }[] = [
@@ -148,13 +143,25 @@ const DOC_CATEGORIES: { id: DocCategory; label: string; icon: React.ReactNode }[
 
 function normalizePermissions(
   permissions: AccountPermissionMatrix | undefined,
-  _role: string,
+  businessType?: string | null,
 ): AccountPermissionMatrix {
-  const result: AccountPermissionMatrix = {};
-  for (const mod of PERMISSION_MODULES) {
-    result[mod.key] = permissions?.[mod.key] || { view: false, edit: false };
+  const modules = getVertialAccessPermissionModules(businessType);
+  const result: AccountPermissionMatrix = { ...(permissions || {}) };
+  for (const mod of modules) {
+    const current = permissions?.[mod.key];
+    result[mod.key] = {
+      view: Boolean(current?.view),
+      edit: Boolean(current?.edit),
+    };
+    if (result[mod.key].edit) result[mod.key].view = true;
   }
   return result;
+}
+
+function permissionModuleLabel(key: string, fallback: string, businessType?: string | null): string {
+  if (key === 'delivery') return getRetailOpsUiCopy(businessType).permissionDeliveryModule;
+  if (key === 'sala') return isRestaurantBusinessType(businessType) ? 'Sala / Mesas' : 'Sala';
+  return fallback;
 }
 
 function buildEmploymentInfo(emp?: EmploymentInfo): EmploymentInfo {
@@ -299,7 +306,12 @@ function PayrollUploadModal({
   onUploaded,
 }: PayrollUploadModalProps) {
   const [documentType, setDocumentType] = useState<PayrollDocumentType>(initialType);
-  const [name, setName] = useState('');
+  const [name, setName] = useState(() =>
+    buildPayrollDocumentDisplayName({
+      documentType: initialType,
+      workerName: member.fullName,
+    }),
+  );
   const [period, setPeriod] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -311,7 +323,14 @@ function PayrollUploadModal({
   function handleFileChange(selected: File | null) {
     if (!selected) return;
     setFile(selected);
-    if (!name) setName(selected.name.replace(/\.[^.]+$/, ''));
+    setName(
+      buildPayrollDocumentDisplayName({
+        documentType,
+        workerName: member.fullName,
+        period: documentType === 'nomina' ? period : undefined,
+        fileName: selected.name,
+      }),
+    );
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -341,8 +360,14 @@ function PayrollUploadModal({
         worker_id: member.user_id,
         worker_name: member.fullName,
         documentType,
-        name: name.trim(),
-        period: period.trim() || undefined,
+        name: buildPayrollDocumentDisplayName({
+          documentType,
+          workerName: member.fullName,
+          period: documentType === 'nomina' ? period : undefined,
+          fileName: file.name,
+          customName: name.trim(),
+        }),
+        period: documentType === 'nomina' ? (period.trim() || undefined) : undefined,
         expiryDate: expiryDate || undefined,
         fileData,
         mimeType: file.type,
@@ -372,7 +397,9 @@ function PayrollUploadModal({
       <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 px-6 py-4">
           <div>
-            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">Subir documento</h2>
+            <h2 className="text-base font-bold text-gray-900 dark:text-gray-100">
+              Subir {PAYROLL_DOC_TYPE_LABELS[documentType] || 'documento'}
+            </h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Para {member.fullName}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
@@ -381,29 +408,55 @@ function PayrollUploadModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Tipo de documento</label>
-              <select
-                value={documentType}
-                onChange={(e) => setDocumentType(e.target.value as PayrollDocumentType)}
-                className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
-              >
-                {(Object.entries(PAYROLL_DOC_TYPE_LABELS) as [PayrollDocumentType, string][]).map(([k, v]) => (
-                  <option key={k} value={k}>{v}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Período</label>
-              <input
-                type="month"
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-                className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
-              />
+          <div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              ¿Qué parte quieres subir?
+            </p>
+            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400 mb-2">
+              Elige el tipo y después adjunta el archivo.
+            </p>
+            <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto">
+              {(Object.entries(PAYROLL_DOC_TYPE_LABELS) as [PayrollDocumentType, string][]).map(([k, v]) => {
+                const selected = documentType === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => {
+                      setDocumentType(k);
+                      setName(
+                        buildPayrollDocumentDisplayName({
+                          documentType: k,
+                          workerName: member.fullName,
+                          period: k === 'nomina' ? period : undefined,
+                          fileName: file?.name,
+                        }),
+                      );
+                    }}
+                    className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      selected
+                        ? 'border-blue-500 bg-blue-600 text-white'
+                        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200'
+                    }`}
+                  >
+                    {v}
+                  </button>
+                );
+              })}
             </div>
           </div>
+
+          {documentType === 'nomina' ? (
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Período (nómina)</label>
+            <input
+              type="month"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
+            />
+          </div>
+          ) : null}
 
           <div>
             <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">Fecha de caducidad</label>
@@ -424,11 +477,15 @@ function PayrollUploadModal({
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. Nómina enero 2025"
+              placeholder={`Ej. ${PAYROLL_DOC_TYPE_LABELS[documentType]}`}
               className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
             />
           </div>
 
+          <div>
+            <p className="mb-1.5 text-xs font-semibold text-gray-600 dark:text-gray-400">
+              Ahora el PDF de {PAYROLL_DOC_TYPE_LABELS[documentType].toLowerCase()}
+            </p>
           <div
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
@@ -462,6 +519,7 @@ function PayrollUploadModal({
                 <p className="text-xs text-gray-400 dark:text-gray-500">PDF, Word, Excel, imagen — máx. 10 MB</p>
               </div>
             )}
+          </div>
           </div>
 
           {error && (
@@ -513,6 +571,8 @@ export function TeamMemberDetail() {
   const { user, listUsers, listRoles, updateUser } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
+  const hrCopy = getHrLocationCopy(currentBusiness?.businessType);
+  const { activeWorkCenters, loading: workCentersLoading } = useWorkCenters();
   const lang = (i18n.language?.slice(0, 2) || 'es') as string;
 
   const [member, setMember] = useState<AuthUser | null>(null);
@@ -556,6 +616,8 @@ export function TeamMemberDetail() {
   // Permissions
   const [permissions, setPermissions] = useState<AccountPermissionMatrix>({});
   const [permissionSaving, setPermissionSaving] = useState('');
+  const [assignmentSaving, setAssignmentSaving] = useState(false);
+  const [assignSiteId, setAssignSiteId] = useState('');
 
   // Documents
   const [docCategory, setDocCategory] = useState<DocCategory>('all');
@@ -565,6 +627,7 @@ export function TeamMemberDetail() {
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [showPayrollUpload, setShowPayrollUpload] = useState(false);
   const [payrollUploadType, setPayrollUploadType] = useState<PayrollDocumentType>('nomina');
+  const [payrollPreviewDoc, setPayrollPreviewDoc] = useState<PayrollDocument | null>(null);
   const openPayrollUpload = (type: PayrollDocumentType = 'nomina') => {
     setPayrollUploadType(type);
     setShowPayrollUpload(true);
@@ -586,7 +649,8 @@ export function TeamMemberDetail() {
         setMember(found || null);
         setRoles(roleList);
         if (found) {
-          setPermissions(normalizePermissions(found.permissions, found.role));
+          setPermissions(normalizePermissions(found.permissions, currentBusiness?.businessType));
+          setAssignSiteId(String(found.employment?.salesPointId || '').trim());
         }
       })
       .finally(() => setLoading(false));
@@ -595,6 +659,7 @@ export function TeamMemberDetail() {
   useEffect(() => {
     if (!member) return;
     setHrForm(buildEmploymentInfo(member.employment));
+    setAssignSiteId(String(member.employment?.salesPointId || '').trim());
     setEditingHr(false);
   }, [member]);
 
@@ -859,11 +924,66 @@ export function TeamMemberDetail() {
     }
   }, [activeTab, loadExpenses, loadPayrollDocs]);
 
+  // ─── Site assignment (fichaje / TPV) ───────────────────────────────────────
+
+  const handleAssignWorkSite = async () => {
+    if (!member || !canManageHr) return;
+    const siteId = String(assignSiteId || '').trim();
+    if (!siteId) {
+      toast.error('Elige un sitio para asignar');
+      return;
+    }
+    const wc = activeWorkCenters.find(
+      (w) => String(w._id || w.id || '').trim() === siteId,
+    );
+    setAssignmentSaving(true);
+    try {
+      const employment = assignPrimaryWorkSite(member.employment, {
+        id: siteId,
+        name: wc?.name || siteId,
+      });
+      const result = await updateUser(member.user_id, { employment });
+      if (!result.success || !result.user) {
+        toast.error(result.error || 'No se pudo asignar el sitio');
+        return;
+      }
+      setMember(result.user);
+      toast.success('Sitio asignado. El trabajador ya puede fichar ahí.');
+    } catch {
+      toast.error('Error al asignar sitio');
+    } finally {
+      setAssignmentSaving(false);
+    }
+  };
+
+  const handleClearWorkSite = async () => {
+    if (!member || !canManageHr) return;
+    setAssignmentSaving(true);
+    try {
+      const employment = clearPrimaryWorkSite(member.employment);
+      const result = await updateUser(member.user_id, { employment });
+      if (!result.success || !result.user) {
+        toast.error(result.error || 'No se pudo quitar la asignación');
+        return;
+      }
+      setMember(result.user);
+      setAssignSiteId('');
+      toast.success('Asignación quitada. El fichaje sigue siendo posible sin sitio.');
+    } catch {
+      toast.error('Error al quitar asignación');
+    } finally {
+      setAssignmentSaving(false);
+    }
+  };
+
   // ─── Permissions handler ──────────────────────────────────────────────────
 
   const handlePermissionToggle = async (moduleKey: string, field: 'view' | 'edit') => {
     if (!member) return;
-    const next = { ...permissions };
+    const next = normalizePermissions(
+      { ...(member.permissions || {}), ...permissions },
+      currentBusiness?.businessType,
+    );
     const current = next[moduleKey]?.[field] || false;
     next[moduleKey] = {
       view: next[moduleKey]?.view || false,
@@ -879,6 +999,7 @@ export function TeamMemberDetail() {
       const result = await updateUser(member.user_id, { permissions: next });
       if (result.success && result.user) {
         setMember(result.user);
+        setPermissions(normalizePermissions(result.user.permissions, currentBusiness?.businessType));
         toast.success('Permisos actualizados');
       }
     } catch {
@@ -1060,7 +1181,14 @@ export function TeamMemberDetail() {
               <MapPin className="w-3.5 h-3.5 text-rose-500" />
               <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">Asignaciones</span>
             </div>
-            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{(emp.assignments || []).filter(a => a.status === 'active').length || '—'}</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              {hasExplicitSiteAssignment(emp) || listActiveSiteAssignments(emp.assignments).length > 0
+                ? Math.max(
+                    listActiveSiteAssignments(emp.assignments).length,
+                    hasExplicitSiteAssignment(emp) ? 1 : 0,
+                  )
+                : '—'}
+            </p>
           </div>
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 cursor-pointer hover:border-cyan-300 dark:hover:border-cyan-700 transition-colors" onClick={() => setActiveTab('schedule')}>
             <div className="flex items-center gap-2 mb-1">
@@ -1617,53 +1745,144 @@ export function TeamMemberDetail() {
         ═══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'assignments' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-rose-500" />
-                Asignaciones del trabajador
-              </h3>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-rose-500" />
+                  Asignaciones del trabajador
+                </h3>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 max-w-xl">
+                  Envía a este trabajador a un sitio para fichar y TPV. No es obligatorio: sin sitio también puede fichar.
+                </p>
+              </div>
             </div>
 
-            {/* Active assignments */}
+            {canManageHr ? (
+              <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 space-y-4">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                    {hrCopy.memberStoreLabel}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{hrCopy.memberStoreHint}</p>
+                </div>
+                {workCentersLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Cargando sitios…
+                  </div>
+                ) : activeWorkCenters.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                    {hrCopy.inviteNoWorkCenters}
+                  </div>
+                ) : (
+                  <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                    <label className="flex-1 block text-xs font-semibold text-gray-600 dark:text-gray-400">
+                      Sitio
+                      <select
+                        value={assignSiteId}
+                        onChange={(e) => setAssignSiteId(e.target.value)}
+                        className={`${inputClassName} mt-1.5`}
+                      >
+                        <option value="">{hrCopy.memberStoreEmpty}</option>
+                        {activeWorkCenters.map((wc) => {
+                          const id = String(wc._id || wc.id || '').trim();
+                          return (
+                            <option key={id} value={id}>
+                              {wc.name}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={assignmentSaving || !assignSiteId}
+                        onClick={() => void handleAssignWorkSite()}
+                        className="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {assignmentSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
+                        Asignar sitio
+                      </button>
+                      {hasExplicitSiteAssignment(emp) ? (
+                        <button
+                          type="button"
+                          disabled={assignmentSaving}
+                          onClick={() => void handleClearWorkSite()}
+                          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 dark:border-gray-600 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 disabled:opacity-50"
+                        >
+                          Quitar
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
             {(() => {
-              const activeAssignments = (emp.assignments || []).filter(a => a.status === 'active');
-              const endedAssignments = (emp.assignments || []).filter(a => a.status === 'ended');
+              const activeAssignments = listActiveSiteAssignments(emp.assignments);
+              const endedAssignments = (emp.assignments || []).filter((a) => a.status === 'ended');
+              const salesOnly =
+                hasExplicitSiteAssignment(emp)
+                && activeAssignments.length === 0
+                && String(emp.salesPointId || '').trim();
+              const salesName =
+                activeWorkCenters.find(
+                  (w) => String(w._id || w.id || '').trim() === String(emp.salesPointId || '').trim(),
+                )?.name || String(emp.salesPointId || '');
+
               return (
                 <>
-                  {activeAssignments.length === 0 ? (
-                    <div className="rounded-2xl border border-amber-200 dark:border-amber-800 border-dashed bg-amber-50/50 dark:bg-amber-950/20 p-8 text-center">
-                      <MapPin className="w-10 h-10 mx-auto mb-3 text-amber-300 dark:text-amber-700" />
-                      <p className="font-medium text-amber-800 dark:text-amber-200">Sin asignación activa</p>
-                      <p className="text-sm text-amber-600 dark:text-amber-400 mt-1">Este trabajador no tiene ninguna asignación de sede, centro o proyecto.</p>
+                  {activeAssignments.length === 0 && !salesOnly ? (
+                    <div className="rounded-2xl border border-stone-200 dark:border-stone-700 border-dashed bg-stone-50/80 dark:bg-stone-900/40 p-8 text-center">
+                      <MapPin className="w-10 h-10 mx-auto mb-3 text-stone-300 dark:text-stone-600" />
+                      <p className="font-medium text-stone-800 dark:text-stone-200">Sin sitio asignado</p>
+                      <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                        Opcional. Cuando lo actives, el trabajador lo verá en su app para fichar.
+                      </p>
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {activeAssignments.map(a => (
-                        <div key={a.id} className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                              a.type === 'branch' ? 'bg-blue-50 dark:bg-blue-900/30' :
-                              a.type === 'work_center' ? 'bg-emerald-50 dark:bg-emerald-900/30' :
-                              a.type === 'project' ? 'bg-purple-50 dark:bg-purple-900/30' :
-                              'bg-amber-50 dark:bg-amber-900/30'
-                            }`}>
-                              {a.type === 'branch' ? <Building2 className="w-5 h-5 text-blue-500" /> :
-                               a.type === 'work_center' ? <MapPin className="w-5 h-5 text-emerald-500" /> :
-                               a.type === 'project' ? <Briefcase className="w-5 h-5 text-purple-500" /> :
-                               <User className="w-5 h-5 text-amber-500" />}
+                      {salesOnly ? (
+                        <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 flex items-center justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 dark:bg-emerald-900/30">
+                              <MapPin className="w-5 h-5 text-emerald-500" />
                             </div>
-                            <div>
-                              <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{a.entityName}</p>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-[11px] text-gray-400 dark:text-gray-500 capitalize">{a.type === 'branch' ? 'Sede' : a.type === 'work_center' ? 'Centro de trabajo' : a.type === 'project' ? 'Proyecto' : 'Cliente'}</span>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{salesName}</p>
+                              <p className="text-[11px] text-gray-400">Sitio de fichaje / TPV · Principal</p>
+                            </div>
+                          </div>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                            <CheckCircle2 className="w-3 h-3" /> Activa
+                          </span>
+                        </div>
+                      ) : null}
+                      {activeAssignments.map((a) => (
+                        <div key={a.id} className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 flex items-center justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                              a.type === 'branch' ? 'bg-blue-50 dark:bg-blue-900/30' : 'bg-emerald-50 dark:bg-emerald-900/30'
+                            }`}>
+                              {a.type === 'branch'
+                                ? <Building2 className="w-5 h-5 text-blue-500" />
+                                : <MapPin className="w-5 h-5 text-emerald-500" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{a.entityName}</p>
+                              <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                                <span className="text-[11px] text-gray-400 dark:text-gray-500">
+                                  {a.type === 'branch' ? 'Sede' : 'Centro de trabajo'} · Fichaje / TPV
+                                </span>
                                 <span className="text-[11px] text-gray-400">·</span>
                                 <span className="text-[11px] text-gray-400">Desde {formatDateEs(a.startDate)}</span>
-                                {a.isPrimary && (
-                                  <>
-                                    <span className="text-[11px] text-gray-400">·</span>
-                                    <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">Principal</span>
-                                  </>
-                                )}
+                                {a.isPrimary ? (
+                                  <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-blue-300">
+                                    Principal
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
                           </div>
@@ -1676,23 +1895,25 @@ export function TeamMemberDetail() {
                   )}
 
                   {endedAssignments.length > 0 && (
-                    <div className="mt-6">
-                      <h4 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase mb-3">Historial de asignaciones</h4>
+                    <div className="mt-2">
+                      <h4 className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase mb-3">Historial</h4>
                       <div className="space-y-2">
-                        {endedAssignments.map(a => (
+                        {endedAssignments.map((a) => (
                           <div key={a.id} className="rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 p-3 flex items-center justify-between opacity-70">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
                               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-700">
-                                {a.type === 'branch' ? <Building2 className="w-4 h-4 text-gray-400" /> :
-                                 a.type === 'work_center' ? <MapPin className="w-4 h-4 text-gray-400" /> :
-                                 <Briefcase className="w-4 h-4 text-gray-400" />}
+                                <MapPin className="w-4 h-4 text-gray-400" />
                               </div>
-                              <div>
-                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{a.entityName}</p>
-                                <span className="text-[11px] text-gray-400">{formatDateEs(a.startDate)} → {a.endDate ? formatDateEs(a.endDate) : '—'}</span>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-600 dark:text-gray-400 truncate">{a.entityName}</p>
+                                <span className="text-[11px] text-gray-400">
+                                  {formatDateEs(a.startDate)} → {a.endDate ? formatDateEs(a.endDate) : '—'}
+                                </span>
                               </div>
                             </div>
-                            <span className="rounded-full bg-gray-100 dark:bg-gray-700 px-2.5 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400">Finalizada</span>
+                            <span className="rounded-full bg-gray-100 dark:bg-gray-700 px-2.5 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                              Finalizada
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -2008,6 +2229,7 @@ export function TeamMemberDetail() {
                       <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Salida</th>
                       <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Horas</th>
                       <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Descanso</th>
+                      <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Ubicación</th>
                       <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Estado</th>
                     </tr>
                   </thead>
@@ -2015,6 +2237,8 @@ export function TeamMemberDetail() {
                     {clockins.map((record) => {
                       const clockInEntry = record.entries.find((e) => e.type === 'clock_in');
                       const clockOutEntry = record.entries.find((e) => e.type === 'clock_out');
+                      const geo = clockinPrimaryGeo(record);
+                      const mapsHref = mapsUrlForGeo(geo);
                       return (
                         <tr key={record._id} className="border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
                           <td className="py-3 px-4 font-medium text-gray-900 dark:text-gray-100">
@@ -2028,6 +2252,20 @@ export function TeamMemberDetail() {
                           </td>
                           <td className="py-3 px-4 font-semibold text-gray-900 dark:text-gray-100">{formatMinutes(record.totalMinutes)}</td>
                           <td className="py-3 px-4 text-gray-500 dark:text-gray-400">{record.breakMinutes > 0 ? formatMinutes(record.breakMinutes) : '—'}</td>
+                          <td className="py-3 px-4">
+                            {mapsHref ? (
+                              <a
+                                href={mapsHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:underline"
+                              >
+                                <MapPin className="w-3.5 h-3.5" /> Ver mapa
+                              </a>
+                            ) : (
+                              <span className="text-xs text-gray-400">Sin GPS</span>
+                            )}
+                          </td>
                           <td className="py-3 px-4">
                             <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
                               record.status === 'completed'
@@ -2177,7 +2415,7 @@ export function TeamMemberDetail() {
                 Permisos del trabajador
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Asigna permisos para ver y editar cada módulo del sistema.
+                Módulos reales de Vertial (clientes, finanzas, caja, delivery…). Ver y editar por módulo.
               </p>
             </div>
 
@@ -2190,7 +2428,7 @@ export function TeamMemberDetail() {
                 </tr>
               </thead>
               <tbody>
-                {PERMISSION_MODULES.map((mod) => {
+                {getVertialAccessPermissionModules(currentBusiness?.businessType).map((mod) => {
                   const perm = permissions[mod.key] || { view: false, edit: false };
                   const isSavingView = permissionSaving === `${mod.key}:view`;
                   const isSavingEdit = permissionSaving === `${mod.key}:edit`;
@@ -2198,8 +2436,10 @@ export function TeamMemberDetail() {
                     <tr key={mod.key} className="border-b border-gray-50 dark:border-gray-800">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
-                          {mod.icon}
-                          <span className="font-medium text-gray-900 dark:text-gray-100">{mod.label}</span>
+                          <Shield className="w-4 h-4 text-gray-400" />
+                          <span className="font-medium text-gray-900 dark:text-gray-100">
+                            {permissionModuleLabel(mod.key, mod.label, currentBusiness?.businessType)}
+                          </span>
                         </div>
                       </td>
                       <td className="py-3 px-4 text-center">
@@ -2287,7 +2527,7 @@ export function TeamMemberDetail() {
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                     <Receipt className="w-4 h-4 text-emerald-500" />
-                    Nóminas y documentos laborales
+                    Nóminas
                   </h4>
                   {(HR_MANAGER_ROLES.has(String(user?.role || ''))
                     || Boolean(currentBusiness?.owner_user_id && user?.user_id === currentBusiness.owner_user_id)) && (
@@ -2297,7 +2537,7 @@ export function TeamMemberDetail() {
                       className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
                     >
                       <Upload className="w-3.5 h-3.5" />
-                      Subir documento
+                      Subir nómina
                     </button>
                   )}
                 </div>
@@ -2306,13 +2546,13 @@ export function TeamMemberDetail() {
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
                   </div>
-                ) : payrollDocs.length === 0 ? (
+                ) : payrollDocs.filter((d) => d.documentType === 'nomina').length === 0 ? (
                   <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                     <Receipt className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
-                    <p className="text-sm">No hay nóminas ni documentos laborales todavía.</p>
+                    <p className="text-sm">No hay nóminas todavía.</p>
                     {(user?.role === 'Admin' || user?.role === 'Superadmin') && (
                       <button
-                        onClick={() => setShowPayrollUpload(true)}
+                        onClick={() => openPayrollUpload('nomina')}
                         className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
                       >
                         <Upload className="w-3.5 h-3.5" />
@@ -2323,6 +2563,7 @@ export function TeamMemberDetail() {
                 ) : (
                   <div className="space-y-2">
                     {payrollDocs
+                      .filter((d) => d.documentType === 'nomina')
                       .filter((d) => {
                         if (!docSearch.trim()) return true;
                         const q = docSearch.toLowerCase();
@@ -2371,6 +2612,16 @@ export function TeamMemberDetail() {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          {doc.fileData && (
+                            <button
+                              type="button"
+                              onClick={() => setPayrollPreviewDoc(doc)}
+                              title="Ver documento"
+                              className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          )}
                           {doc.fileData && (
                             <button
                               type="button"
@@ -2424,22 +2675,58 @@ export function TeamMemberDetail() {
             {/* Contratos section */}
             {(docCategory === 'all' || docCategory === 'contracts') && (
               <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5">
-                <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
-                  <ScrollText className="w-4 h-4 text-blue-500" />
-                  Contratos
-                </h4>
-                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                  <ScrollText className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
-                  <p className="text-sm">Contratos de trabajo, anexos y prórrogas.</p>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                    <ScrollText className="w-4 h-4 text-blue-500" />
+                    Contratos
+                  </h4>
                   <button
                     type="button"
                     onClick={() => openPayrollUpload('contrato')}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/30 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/30 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
                   >
                     <Upload className="w-3.5 h-3.5" />
                     Subir contrato
                   </button>
                 </div>
+                {payrollDocs.filter((d) => d.documentType === 'contrato').length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <ScrollText className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
+                    <p className="text-sm">No hay contratos subidos todavía.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {payrollDocs
+                      .filter((d) => d.documentType === 'contrato')
+                      .map((doc) => (
+                        <div key={doc._id} className="flex items-center justify-between rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{doc.name}</p>
+                            <p className="text-xs text-gray-500">
+                              Contrato · {new Date(doc.createdAt).toLocaleDateString('es-ES')}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {doc.fileData ? (
+                              <button
+                                type="button"
+                                onClick={() => setPayrollPreviewDoc(doc)}
+                                className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
+                                title="Ver contrato"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                            ) : null}
+                            {doc.fileData ? (
+                              <a href={doc.fileData} download={doc.fileName || doc.name} className="text-xs font-semibold text-blue-600">
+                                Descargar
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -2475,9 +2762,19 @@ export function TeamMemberDetail() {
                             <p className="text-xs text-gray-500">{PAYROLL_DOC_TYPE_LABELS[doc.documentType]}</p>
                           </div>
                           {doc.fileData ? (
-                            <a href={doc.fileData} download={doc.fileName || doc.name} className="text-xs font-semibold text-blue-600">
-                              Descargar
-                            </a>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setPayrollPreviewDoc(doc)}
+                                className="rounded-lg p-1.5 text-gray-400 hover:bg-blue-50 hover:text-blue-600"
+                                title="Ver documento"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <a href={doc.fileData} download={doc.fileName || doc.name} className="text-xs font-semibold text-blue-600">
+                                Descargar
+                              </a>
+                            </div>
                           ) : null}
                         </div>
                       ))}
@@ -2606,6 +2903,12 @@ export function TeamMemberDetail() {
           }}
         />
       )}
+      {payrollPreviewDoc ? (
+        <PayrollDocumentPreviewModal
+          doc={payrollPreviewDoc}
+          onClose={() => setPayrollPreviewDoc(null)}
+        />
+      ) : null}
     </Layout>
   );
 }

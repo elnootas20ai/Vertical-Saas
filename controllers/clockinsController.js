@@ -916,18 +916,23 @@ async function resolveMemberStoreAssignment(req, business, memberUserId) {
   };
 }
 
-async function assertMemberCanClockAtStore(req, res, business, memberUserId, pdvId, workCenterId) {
-  const sp = String(pdvId || '').trim();
-  if (!sp) return true;
-  const { ref, role } = await resolveMemberStoreAssignment(req, business, memberUserId);
-  if (!isMemberAssignedToSalesPoint(business, memberUserId, sp, workCenterId, ref, role)) {
-    res.status(403).json({
-      ok: false,
-      error: 'Este trabajador no está asignado a esta tienda',
-    });
-    return false;
-  }
+/** Tienda = etiqueta informativa. Nunca bloquea fichaje (entrada/salida/TPV). */
+async function assertMemberCanClockAtStore(_req, _res, _business, _memberUserId, _pdvId, _workCenterId) {
   return true;
+}
+
+/** Miembro del negocio o cuenta con linkedBusinessId (invitado aún no en members). */
+async function assertClockinTargetOnTeam(req, business, targetMemberId) {
+  if (isBusinessTeamMember(business, targetMemberId)) return true;
+  try {
+    const account = await findAccountByUserId(req, targetMemberId);
+    const linked = String(account?.linkedBusinessId || '').replace(/^business:/, '').trim();
+    const bid = String(business?.business_id || business?.id || '').replace(/^business:/, '').trim();
+    if (linked && bid && linked === bid) return true;
+  } catch {
+    /* cuenta no encontrada */
+  }
+  return false;
 }
 
 function scheduleTimeToMinutes(value) {
@@ -990,9 +995,9 @@ export async function checkInMember(req, res) {
     const {
       memberId,
       memberName,
-      sales_point_id: salesPointId,
-      sales_point_name: salesPointName,
-      work_center_id: workCenterId,
+      sales_point_id: salesPointIdBody,
+      sales_point_name: salesPointNameBody,
+      work_center_id: workCenterIdBody,
       device_type: deviceType,
       geo,
       store_team_clockin: storeTeamClockin,
@@ -1000,14 +1005,31 @@ export async function checkInMember(req, res) {
 
     const targetMemberId = normalizeClockinUserId(memberId);
     if (!targetMemberId) return badRequest(res, 'Falta memberId');
-    if (!isBusinessTeamMember(business, targetMemberId)) {
+    if (!(await assertClockinTargetOnTeam(req, business, targetMemberId))) {
       return res.status(404).json({
         ok: false,
         error: 'Este trabajador no pertenece al equipo de esta empresa',
       });
     }
 
-    const sp = String(salesPointId || '').trim();
+    // Tienda de la contratación (account.employment.salesPointId = workCenter de la invitación).
+    const assignment = await resolveMemberStoreAssignment(req, business, targetMemberId);
+    const employmentStoreRef = String(assignment.ref || '').trim().replace(/^wc:/, '');
+
+    let salesPointId = String(salesPointIdBody || '').trim() || employmentStoreRef;
+    let salesPointName = String(salesPointNameBody || '').trim();
+    let workCenterId = String(workCenterIdBody || '').trim() || employmentStoreRef;
+
+    if (salesPointId && !salesPointName) {
+      try {
+        const wcDoc = await findWorkCenterById(req, workCenterId || salesPointId);
+        salesPointName = String(wcDoc?.name || '').trim();
+      } catch {
+        /* nombre opcional */
+      }
+    }
+
+    const sp = salesPointId;
     const isStoreTeamClockin = storeTeamClockin === true || storeTeamClockin === 'true';
 
     if (!canManageStoreClockin(business, requesterId, targetMemberId, {
@@ -1017,7 +1039,7 @@ export async function checkInMember(req, res) {
       return res.status(403).json({ ok: false, error: 'No puedes fichar por otro trabajador' });
     }
 
-    const wc = String(workCenterId || '').trim();
+    const wc = workCenterId;
     if (!(await assertMemberCanClockAtStore(req, res, business, targetMemberId, sp, wc))) {
       return;
     }
@@ -1063,10 +1085,8 @@ export async function checkInMember(req, res) {
           };
           await putDocument(req, clockinsDb, openClockin._id, doc);
         } else if (sp && existingSp && !salesPointRefsSameStore(existingSp, sp, wc)) {
-          return res.status(409).json({
-            ok: false,
-            error: 'Ya tienes un fichaje activo hoy en otra tienda',
-          });
+          // Turno ya abierto: reanudar siempre (no 409 por tienda distinta).
+          return res.json({ ok: true, clockin: doc, alreadyActive: true });
         } else if (sp && existingSp && sp !== existingSp && salesPointRefsSameStore(existingSp, sp, wc)) {
           doc = {
             ...openClockin,
@@ -1125,6 +1145,7 @@ export async function checkInMember(req, res) {
       geo: geo || undefined,
       sales_point_id: salesPointId ? String(salesPointId).trim() : undefined,
       sales_point_name: salesPointName ? String(salesPointName).trim() : undefined,
+      work_center_id: workCenterId ? String(workCenterId).trim() : undefined,
       ...(scheduled_start ? { scheduled_start } : {}),
       ...(scheduled_end ? { scheduled_end } : {}),
       createdAt: now,
@@ -1215,9 +1236,7 @@ export async function appendClockinEntry(req, res) {
       return res.status(403).json({ ok: false, error: 'No puedes modificar este fichaje' });
     }
 
-    if (sp && !(await assertMemberCanClockAtStore(req, res, business, doc.member_id, sp, ''))) {
-      return;
-    }
+    // Salida / descanso: no revalidar asignación de tienda (deja cerrar el turno).
 
     // No reanudar jornada ni seguir operando si está de vacaciones/baja aprobada
     if (entryType === 'break_end' || entryType === 'break_start') {

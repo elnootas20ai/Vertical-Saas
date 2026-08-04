@@ -4,7 +4,12 @@ import {
   cacheServerPdvPrinterConfigs,
   saveLegacyPrinterConfig,
 } from '../src/app/lib/vertialPrint/printerConfig';
-import { resolveEffectivePrinterConfig } from '../src/app/lib/vertialPrint/printerActiveScope';
+import {
+  clearActivePrinterScope,
+  resolveEffectivePrinterConfig,
+  resolvePrinterConfigForOrderPdv,
+  setActivePrinterScope,
+} from '../src/app/lib/vertialPrint/printerActiveScope';
 import type { PointOfSale } from '../src/app/lib/deliveryApi';
 
 function stubLocalStorage() {
@@ -84,6 +89,7 @@ describe('resolveEffectivePrinterConfig', () => {
 
 describe('cacheServerPdvPrinterConfigs + resolución por pdvId', () => {
   afterEach(() => {
+    clearActivePrinterScope();
     vi.unstubAllGlobals();
   });
 
@@ -96,6 +102,48 @@ describe('cacheServerPdvPrinterConfigs + resolución por pdvId', () => {
     expect(cfg.connectionType).toBe('network');
     expect(cfg.networkHost).toBe('192.168.1.77');
     expect(cfg.networkPort).toBe(9100);
+  });
+
+  it('con scope en tienda-1, pdvId de tienda-2 usa la caché de la 2 (no la IP activa)', () => {
+    stubLocalStorage();
+    cacheServerPdvPrinterConfigs([
+      { _id: 'pdv-1', printerConfig: { connectionType: 'network', networkHost: '192.168.0.10', networkPort: 9100 } },
+      { _id: 'pdv-2', printerConfig: { connectionType: 'network', networkHost: '192.168.0.20', networkPort: 9100 } },
+    ]);
+    setActivePrinterScope({
+      pdvId: 'pdv-1',
+      pdv: basePdv({
+        _id: 'pdv-1',
+        printerConfig: {
+          ...DEFAULT_PRINTER_CONFIG,
+          connectionType: 'network',
+          networkHost: '192.168.0.10',
+        },
+      }),
+    });
+    const cfg = resolveEffectivePrinterConfig({ pdvId: 'pdv-2' });
+    expect(cfg.networkHost).toBe('192.168.0.20');
+  });
+
+  it('pedido de la 2ª tienda imprime en su impresora aunque el scope sea la 1ª', () => {
+    stubLocalStorage();
+    cacheServerPdvPrinterConfigs([
+      { _id: 'pdv-1', printerConfig: { connectionType: 'network', networkHost: '192.168.0.10', networkPort: 9100 } },
+      { _id: 'pdv-2', printerConfig: { connectionType: 'network', networkHost: '192.168.0.20', networkPort: 9100 } },
+    ]);
+    setActivePrinterScope({
+      pdvId: 'pdv-1',
+      pdv: basePdv({
+        _id: 'pdv-1',
+        printerConfig: {
+          ...DEFAULT_PRINTER_CONFIG,
+          connectionType: 'network',
+          networkHost: '192.168.0.10',
+        },
+      }),
+    });
+    expect(resolvePrinterConfigForOrderPdv('pdv-2').networkHost).toBe('192.168.0.20');
+    expect(resolvePrinterConfigForOrderPdv('pdv-1').networkHost).toBe('192.168.0.10');
   });
 
   it('no cachea configuraciones que no son de red (no sirven para imprimir desde el móvil)', () => {

@@ -72,18 +72,17 @@ export function WorkerStoreScheduleCard({
           ? 'Sin turno hoy'
           : null;
 
+  // Horario del local (info). No alarmar: el turno del trabajador lo marca el CEO.
   const storeHeadline =
     storeResolving
       ? 'Cargando horario de tienda…'
-      : storeToday.status === 'open'
-        ? `Tienda: ${storeToday.headline}`
+      : storeToday.from && storeToday.to
+        ? `Horario tienda: ${storeToday.from} – ${storeToday.to}`
         : storeToday.status === 'closed'
-          ? 'Tienda cerrada hoy'
-          : storeToday.status === 'outside_hours'
-            ? `Tienda fuera de horario (${storeToday.from} – ${storeToday.to})`
-            : hasAssignment
-              ? 'Horario de tienda no definido'
-              : null;
+          ? 'Tienda: cerrada hoy'
+          : storeToday.status === 'open' && storeToday.headline
+            ? `Tienda: ${storeToday.headline}`
+            : null;
 
   if (!workCenter && !hasAssignment && !hasPersonalSchedule) {
     return (
@@ -115,15 +114,7 @@ export function WorkerStoreScheduleCard({
                 </p>
               ) : null}
               {storeHeadline ? (
-                <p
-                  className={`text-xs ${
-                    storeToday.status === 'open'
-                      ? 'text-gray-600 dark:text-gray-400'
-                      : storeToday.status === 'no_schedule'
-                        ? 'text-gray-500 dark:text-gray-400'
-                        : 'text-rose-600 dark:text-rose-400'
-                  }`}
-                >
+                <p className="text-xs text-gray-600 dark:text-gray-400">
                   {storeHeadline}
                 </p>
               ) : null}
@@ -195,41 +186,36 @@ export function WorkerStoreScheduleCard({
         )}
       </div>
 
-      {/* Horario de tienda */}
+      {/* Horario de tienda (solo si hay datos reales o estado cerrado/fuera) */}
+      {storeResolving || storeToday.status !== 'no_schedule' ? (
       <div className="px-5 py-3 bg-orange-50/60 dark:bg-orange-950/20 border-b border-orange-100 dark:border-orange-900/40">
         <p className="text-xs uppercase tracking-wide text-orange-700 dark:text-orange-300 font-semibold mb-1">
           Horario de la tienda
         </p>
         {storeResolving ? (
           <p className="text-sm text-gray-500">Cargando…</p>
-        ) : storeToday.status === 'open' ? (
+        ) : storeToday.from && storeToday.to ? (
           <>
-            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{storeToday.headline}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Abierta ahora</p>
-          </>
-        ) : storeToday.status === 'outside_hours' ? (
-          <>
-            <p className="text-lg font-bold text-rose-600 dark:text-rose-400">Fuera de horario</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              {storeToday.from} – {storeToday.to}
+            </p>
             <p className="text-xs text-gray-500 mt-0.5">
-              Horario del día: {storeToday.from} – {storeToday.to}. Puedes fichar igual (trabajo fuera / local cerrado).
+              Horario de apertura del local (tu turno lo marca el gerente).
             </p>
           </>
         ) : storeToday.status === 'closed' ? (
           <>
-            <p className="text-lg font-bold text-rose-600 dark:text-rose-400">Cerrada hoy</p>
-            <p className="text-xs text-gray-500 mt-0.5">Hoy la tienda está cerrada. Puedes fichar igual si te corresponde.</p>
+            <p className="text-lg font-bold text-gray-700 dark:text-gray-200">Cerrada hoy</p>
+            <p className="text-xs text-gray-500 mt-0.5">Según el calendario del local.</p>
           </>
-        ) : (
+        ) : storeToday.status === 'open' && storeToday.headline ? (
           <>
-            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
-              No definido en el local
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              El fichaje usa tu turno y la tienda asignada.
-            </p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{storeToday.headline}</p>
+            <p className="text-xs text-gray-500 mt-0.5">Horario del local</p>
           </>
-        )}
+        ) : null}
       </div>
+      ) : null}
 
       {/* Semana: prioriza patrón personal */}
       {personalWeek.length > 0 ? (

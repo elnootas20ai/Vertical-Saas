@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   X, Bell, CheckCircle, Clock, RefreshCw, ArrowRight,
-  CalendarDays, AlertTriangle, Settings2, type LucideIcon,
+  CalendarDays, AlertTriangle, Settings2, FileText, type LucideIcon,
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useApp, type AppNotification } from '../../context/AppContext';
@@ -63,19 +63,32 @@ function isRrhhPersonal(n: AppNotification): boolean {
 }
 
 function alertKind(n: AppNotification): { label: string; Icon: LucideIcon; tone: 'positive' | 'neutral' | 'negative' } {
+  const title = String(n.title || '');
+  const entity = String(n.entityType || '').toLowerCase();
+  const docType = String(n.metadata?.documentType || '').toLowerCase();
+
   if (isPositiveAlert(n)) {
     return { label: 'Positiva', Icon: CheckCircle, tone: 'positive' };
   }
-  if (/urgente/i.test(n.title || '') || n.level === 'alert') {
-    return { label: 'Negativa', Icon: AlertTriangle, tone: 'negative' };
+  if (entity === 'payroll' || docType || /nómina|nomina|contrato|documento|certificado/i.test(title)) {
+    if (docType === 'contrato' || /^nuevo contrato/i.test(title)) {
+      return { label: 'Contrato', Icon: FileText, tone: 'neutral' };
+    }
+    if (docType === 'nomina' || /nómina|nomina/i.test(title)) {
+      return { label: 'Nómina', Icon: FileText, tone: 'neutral' };
+    }
+    return { label: 'Documento', Icon: FileText, tone: 'neutral' };
   }
-  if (isRrhhPersonal(n) && /fich/i.test(n.title || '')) {
+  if (/urgente/i.test(title) || n.level === 'alert') {
+    return { label: 'Urgente', Icon: AlertTriangle, tone: 'negative' };
+  }
+  if (isRrhhPersonal(n) && /fich/i.test(title)) {
     return { label: 'Fichaje', Icon: Clock, tone: 'neutral' };
   }
   if (isRrhhPersonal(n)) {
     return { label: 'Equipo', Icon: CalendarDays, tone: 'neutral' };
   }
-  return { label: 'Alerta', Icon: Bell, tone: 'neutral' };
+  return { label: 'Aviso', Icon: Bell, tone: 'neutral' };
 }
 
 function resolvePersonalRoute(n: { route?: string; entityType?: string; entityId?: string }): string {
@@ -152,7 +165,7 @@ function WorkerInbox({ isOpen, onClose }: Props) {
   useModalClose(isOpen, onClose);
 
   const unread = notifications.filter((n) => !n.read);
-  const list = unread.length > 0 ? unread : notifications.slice(0, 30);
+  const list = unread.length > 0 ? unread : notifications.slice(0, 40);
 
   const openOne = async (n: AppNotification) => {
     await markNotificationAsRead(n.id, true);
@@ -160,31 +173,53 @@ function WorkerInbox({ isOpen, onClose }: Props) {
     if (route) {
       navigate(route);
       onClose();
+      return;
     }
+    navigate('/saas/worker/notifications');
+    onClose();
   };
 
   if (!isOpen) return null;
 
   return (
     <DrawerChrome
-      title="Alertas"
-      subtitle={unread.length > 0 ? `${unread.length} sin leer` : 'Todo al día'}
+      title="Tus alertas"
+      subtitle={
+        unread.length > 0
+          ? `${unread.length} sin leer · nóminas, contratos y avisos`
+          : 'Todo al día'
+      }
       onClose={onClose}
       footer={
-        unread.length > 0 ? (
+        <div className="space-y-2">
+          {unread.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => void markAllNotificationsAsRead()}
+              className={`w-full min-h-11 ${VERTIAL_BTN_PRIMARY}`}
+            >
+              <CheckCircle className="h-4 w-4" />
+              Marcar todo leído
+            </button>
+          ) : null}
           <button
             type="button"
-            onClick={() => void markAllNotificationsAsRead()}
-            className={`w-full ${VERTIAL_BTN_PRIMARY}`}
+            onClick={() => {
+              navigate('/saas/worker/notifications');
+              onClose();
+            }}
+            className={`w-full min-h-11 ${VERTIAL_BTN_SECONDARY}`}
           >
-            <CheckCircle className="h-4 w-4" />
-            Marcar todo leído
+            Ver historial
           </button>
-        ) : null
+        </div>
       }
     >
       {list.length === 0 ? (
-        <EmptyState title="Sin avisos" hint="Cuando haya algo de turno o equipo, saldrá aquí." />
+        <EmptyState
+          title="Sin avisos"
+          hint="Cuando suban una nómina, un contrato u otro documento, te avisamos aquí."
+        />
       ) : (
         <ul className="divide-y divide-stone-100 dark:divide-stone-900">
           {list.map((n) => {
@@ -195,17 +230,17 @@ function WorkerInbox({ isOpen, onClose }: Props) {
                 ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
                 : kind.tone === 'negative'
                   ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
-                  : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300';
+                  : 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300';
             return (
               <li key={n.id}>
                 <button
                   type="button"
                   onClick={() => void openOne(n)}
-                  className={`w-full flex gap-3 px-4 py-3.5 text-left hover:bg-stone-50 dark:hover:bg-stone-900/60 ${
-                    n.read ? 'opacity-60' : ''
+                  className={`flex w-full min-h-[64px] gap-3 px-4 py-3.5 text-left active:bg-stone-50 dark:active:bg-stone-900/60 ${
+                    n.read ? 'opacity-60' : 'bg-blue-50/40 dark:bg-blue-950/20'
                   }`}
                 >
-                  <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconWrap}`}>
+                  <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${iconWrap}`}>
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -216,12 +251,21 @@ function WorkerInbox({ isOpen, onClose }: Props) {
                       {!n.read ? (
                         <span className="h-1.5 w-1.5 rounded-full bg-[var(--v-blue,#2563eb)]" />
                       ) : null}
+                      <span className="ml-auto text-[10px] tabular-nums text-stone-400">
+                        {formatDateTimeEs(n.createdAt)}
+                      </span>
                     </span>
-                    <span className="mt-0.5 block text-sm font-semibold text-stone-900 dark:text-stone-50 line-clamp-1">
+                    <span className="mt-0.5 block text-[15px] font-semibold text-stone-900 dark:text-stone-50 line-clamp-2">
                       {n.title}
                     </span>
                     {n.message ? (
                       <span className="mt-0.5 block text-xs text-stone-500 line-clamp-2">{n.message}</span>
+                    ) : null}
+                    {resolvePersonalRoute(n) ? (
+                      <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--v-blue,#2563eb)]">
+                        Abrir
+                        <ArrowRight className="h-3 w-3" />
+                      </span>
                     ) : null}
                   </span>
                 </button>

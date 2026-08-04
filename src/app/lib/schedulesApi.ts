@@ -451,6 +451,36 @@ export async function saveShiftTemplate(
   return { ...doc, _rev: result.rev };
 }
 
+/**
+ * Resiembra plantillas RRHH desde el horario de tienda.
+ * No toca turnos personales ya guardados en schedules.
+ */
+export async function applyOpeningHoursToShiftTemplates(
+  businessId: string,
+  openingHours: BusinessHoursConfig | null | undefined,
+  opts?: { storeLabel?: string },
+): Promise<{ updated: number; created: number }> {
+  const bid = String(businessId || '').trim();
+  if (!bid) return { updated: 0, created: 0 };
+  const weekly = defaultWeekly(openingHours);
+  const templates = await listShiftTemplates(bid);
+  if (templates.length === 0) {
+    const label = String(opts?.storeLabel || 'tienda').trim() || 'tienda';
+    await saveShiftTemplate(
+      bid,
+      `Horario ${label}`,
+      TEMPLATE_COLORS[0] || '#2563eb',
+      weekly,
+      null,
+    );
+    return { updated: 0, created: 1 };
+  }
+  for (const t of templates) {
+    await saveShiftTemplate(bid, t.name, t.color, weekly, t);
+  }
+  return { updated: templates.length, created: 0 };
+}
+
 export async function deleteShiftTemplate(template: ShiftTemplate): Promise<void> {
   if (!template._rev) return;
   await req(

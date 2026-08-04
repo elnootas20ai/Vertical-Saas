@@ -13,6 +13,7 @@ import {
   type BrandBillingConfig,
   type BrandBillingSplitRules,
 } from './brandBillingConfig';
+import { displayBrandName } from './brandLabels';
 
 function orderRevenue(order: DeliveryOrder): number {
   const total = Number((order as { totalAmount?: number }).totalAmount ?? order.total);
@@ -143,7 +144,7 @@ export function buildShiftBrandRevenue(
       const revenueTarjeta = Math.round((cardByBrand[brandId] || 0) * 100) / 100;
       return {
         brandId,
-        name: String(brandLabels[brandId] || '').trim() || brandId,
+        name: displayBrandName(brandId, brandLabels),
         revenue: rev,
         revenueEfectivo,
         revenueTarjeta,
@@ -236,7 +237,7 @@ export function getOrderBrandShares(
     const sharedAssigned = Math.round(Math.max(0, amount - ownRevenue) * 100) / 100;
     shares.push({
       brandId: bid,
-      name: String(brandLabels[bid] || '').trim() || bid,
+      name: displayBrandName(bid, brandLabels),
       amount,
       ownRevenue,
       sharedAssigned,

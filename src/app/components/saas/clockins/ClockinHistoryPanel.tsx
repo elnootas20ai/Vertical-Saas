@@ -21,6 +21,7 @@ import {
   fetchActiveNow,
   formatMinutes,
   getDisplayTime,
+  mapsUrlForGeo,
 } from '../../../lib/clockinsApi';
 import { listUsersRequest, type AuthUser } from '../../../lib/authApi';
 import {
@@ -57,6 +58,8 @@ interface ClockinHistoryPanelProps {
   refreshKey?: number;
   /** Sesiones recién cerradas (optimistic merge mientras llega el API). */
   seedRecords?: ClockinRecord[];
+  /** Panel denso encajado (p. ej. Fichaje worker): altura fija + scroll. */
+  compact?: boolean;
 }
 
 function upsertClockinRecords(base: ClockinRecord[], seeds: ClockinRecord[]): ClockinRecord[] {
@@ -112,6 +115,7 @@ function RecordRow({
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
             {ciTime} → {coTime}
             {entry.breakMinutes > 0 ? ` · descanso ${entry.breakMinutes} min` : ''}
+            {entry.sales_point_name ? ` · ${entry.sales_point_name}` : ''}
           </p>
         </div>
         <div className="text-right shrink-0">
@@ -128,9 +132,15 @@ function RecordRow({
                 {new Date(getDisplayTime(e, entry)).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
               </span>
               {e.geo ? (
-                <span className="inline-flex items-center gap-0.5 text-emerald-600">
-                  <MapPin className="w-3 h-3" /> GPS
-                </span>
+                <a
+                  href={mapsUrlForGeo(e.geo) || '#'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 text-emerald-600 hover:underline"
+                  onClick={(ev) => ev.stopPropagation()}
+                >
+                  <MapPin className="w-3 h-3" /> Ver ubicación
+                </a>
               ) : null}
             </div>
           ))}
@@ -232,6 +242,7 @@ export function ClockinHistoryPanel({
   onViewMember,
   refreshKey = 0,
   seedRecords,
+  compact = false,
 }: ClockinHistoryPanelProps) {
   const [mainTab, setMainTab] = useState<MainTab>(managerView ? 'team' : 'mine');
   const [rangeTab, setRangeTab] = useState<RangeTab>('week');
@@ -418,110 +429,118 @@ export function ClockinHistoryPanel({
 
   const monthLabel = monthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
 
+  const shellClass = compact
+    ? 'flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900'
+    : 'overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800';
+
   return (
-    <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 space-y-3">
+    <div className={shellClass}>
+      <div className={`shrink-0 border-b border-stone-200 dark:border-stone-700 ${compact ? 'space-y-2 p-3' : 'space-y-3 p-4 border-gray-200 dark:border-gray-700'}`}>
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-base font-bold text-gray-900 dark:text-gray-100">Historial de fichajes</h3>
+          <h3 className={`font-bold text-stone-900 dark:text-stone-100 ${compact ? 'text-sm' : 'text-base text-gray-900 dark:text-gray-100'}`}>
+            Historial de fichajes
+          </h3>
           <button
             type="button"
             onClick={() => void load()}
-            className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+            className="text-xs font-medium text-[var(--v-blue,#2563eb)] hover:underline"
           >
             Actualizar
           </button>
         </div>
-        <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-900 rounded-xl">
-          <button
-            type="button"
-            onClick={() => setMainTab('mine')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-semibold rounded-lg transition-colors ${
-              mainTab === 'mine'
-                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            Mis fichajes
-          </button>
-          <button
-            type="button"
-            onClick={() => setMainTab('team')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-sm font-semibold rounded-lg transition-colors ${
-              mainTab === 'team'
-                ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-          >
-            <Users className="w-4 h-4" />
-            {managerView ? 'Equipo' : 'Equipo hoy'}
-          </button>
-        </div>
+        {!compact ? (
+          <div className="flex gap-1 rounded-xl bg-gray-100 p-1 dark:bg-gray-900">
+            <button
+              type="button"
+              onClick={() => setMainTab('mine')}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-colors ${
+                mainTab === 'mine'
+                  ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white'
+                  : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              <User className="h-4 w-4" />
+              Mis fichajes
+            </button>
+            <button
+              type="button"
+              onClick={() => setMainTab('team')}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-semibold transition-colors ${
+                mainTab === 'team'
+                  ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white'
+                  : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              {managerView ? 'Equipo' : 'Equipo hoy'}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {loading ? (
-        <div className="py-16 flex justify-center">
-          <Loader2 className="w-7 h-7 animate-spin text-blue-500" />
+        <div className={`flex justify-center ${compact ? 'py-10' : 'py-16'}`}>
+          <Loader2 className="h-7 w-7 animate-spin text-[var(--v-blue,#2563eb)]" />
         </div>
-      ) : mainTab === 'mine' ? (
+      ) : compact || mainTab === 'mine' ? (
         <>
-          <div className="px-4 pt-3 flex flex-wrap gap-2">
+          <div className={`flex shrink-0 flex-wrap gap-2 ${compact ? 'px-3 pt-2.5' : 'px-4 pt-3'}`}>
             {(['week', 'month', 'all'] as RangeTab[]).map((id) => (
               <button
                 key={id}
                 type="button"
                 onClick={() => setRangeTab(id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
                   rangeTab === id
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                    : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
                 }`}
               >
                 {id === 'week' ? 'Esta semana' : id === 'month' ? 'Este mes' : 'Todo'}
               </button>
             ))}
             {rangeTab === 'month' ? (
-              <div className="flex items-center gap-1 ml-auto">
-                <button type="button" onClick={() => setMonthOffset((o) => o + 1)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
-                  <ChevronLeft className="w-4 h-4" />
+              <div className="ml-auto flex items-center gap-1">
+                <button type="button" onClick={() => setMonthOffset((o) => o + 1)} className="rounded p-1 hover:bg-stone-100 dark:hover:bg-stone-800">
+                  <ChevronLeft className="h-4 w-4" />
                 </button>
-                <span className="text-xs font-medium capitalize min-w-[100px] text-center">{monthLabel}</span>
+                <span className="min-w-[100px] text-center text-xs font-medium capitalize">{monthLabel}</span>
                 <button
                   type="button"
                   disabled={monthOffset === 0}
                   onClick={() => setMonthOffset((o) => Math.max(0, o - 1))}
-                  className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30"
+                  className="rounded p-1 hover:bg-stone-100 disabled:opacity-30 dark:hover:bg-stone-800"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
             ) : null}
           </div>
 
-          <div className="grid grid-cols-3 gap-2 p-4 border-b border-gray-100 dark:border-gray-700">
-            <div className="rounded-xl bg-gray-50 dark:bg-gray-900/50 p-3 text-center">
-              <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{mineStats.days}</p>
-              <p className="text-[10px] uppercase tracking-wide text-gray-500">Días</p>
+          <div className={`grid shrink-0 grid-cols-3 gap-2 border-b border-stone-100 dark:border-stone-800 ${compact ? 'p-3' : 'p-4'}`}>
+            <div className={`rounded-xl bg-stone-50 text-center dark:bg-stone-950/50 ${compact ? 'p-2' : 'p-3'}`}>
+              <p className={`font-bold text-stone-900 dark:text-stone-100 ${compact ? 'text-base' : 'text-lg'}`}>{mineStats.days}</p>
+              <p className="text-[10px] uppercase tracking-wide text-stone-500">Días</p>
             </div>
-            <div className="rounded-xl bg-blue-50 dark:bg-blue-950/30 p-3 text-center">
-              <p className="text-lg font-bold text-blue-700 dark:text-blue-300">{formatHoursShort(mineStats.worked)}</p>
-              <p className="text-[10px] uppercase tracking-wide text-gray-500">Trabajado</p>
+            <div className={`rounded-xl bg-blue-50 text-center dark:bg-blue-950/30 ${compact ? 'p-2' : 'p-3'}`}>
+              <p className={`font-bold text-blue-700 dark:text-blue-300 ${compact ? 'text-base' : 'text-lg'}`}>{formatHoursShort(mineStats.worked)}</p>
+              <p className="text-[10px] uppercase tracking-wide text-stone-500">Trabajado</p>
             </div>
-            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/30 p-3 text-center">
-              <p className="text-lg font-bold text-amber-700 dark:text-amber-300">{formatHoursShort(mineStats.breaks)}</p>
-              <p className="text-[10px] uppercase tracking-wide text-gray-500">Descanso</p>
+            <div className={`rounded-xl bg-amber-50 text-center dark:bg-amber-950/30 ${compact ? 'p-2' : 'p-3'}`}>
+              <p className={`font-bold text-amber-700 dark:text-amber-300 ${compact ? 'text-base' : 'text-lg'}`}>{formatHoursShort(mineStats.breaks)}</p>
+              <p className="text-[10px] uppercase tracking-wide text-stone-500">Descanso</p>
             </div>
           </div>
 
           {loadError ? (
-            <p className="mx-4 mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+            <p className="mx-3 mt-2 shrink-0 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
               {loadError}
             </p>
           ) : null}
 
-          <div>
+          <div className={compact ? 'min-h-0 flex-1 overflow-y-auto' : undefined}>
             {filteredMine.length === 0 ? (
-              <p className="py-12 text-center text-sm text-gray-400">
+              <p className={`text-center text-sm text-stone-400 ${compact ? 'px-3 py-8' : 'py-12'}`}>
                 {loadError
                   ? 'No se pudo cargar el historial'
                   : 'Aún no hay fichajes cerrados en este periodo. Al pulsar Salida, aparecerá aquí.'}

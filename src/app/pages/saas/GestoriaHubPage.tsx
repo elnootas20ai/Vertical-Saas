@@ -29,6 +29,7 @@ import {
   getDocumentExpiryStatus,
   listPayrollDocumentsRequest,
   PAYROLL_DOC_TYPE_LABELS,
+  buildPayrollDocumentDisplayName,
   payrollUploadSuccessMessage,
   type PayrollDocument,
   type PayrollDocumentType,
@@ -116,8 +117,14 @@ function GestoriaUploadModal({
         worker_id: workerId,
         worker_name: selected?.fullName || '',
         documentType,
-        name: name.trim(),
-        period: period.trim() || undefined,
+        name: buildPayrollDocumentDisplayName({
+          documentType,
+          workerName: selected?.fullName,
+          period: documentType === 'nomina' ? period : undefined,
+          fileName: file.name,
+          customName: name.trim(),
+        }),
+        period: documentType === 'nomina' ? (period.trim() || undefined) : undefined,
         fileData,
         mimeType: file.type,
         fileName: file.name,
@@ -165,7 +172,18 @@ function GestoriaUploadModal({
               Tipo
               <select
                 value={documentType}
-                onChange={(e) => setDocumentType(e.target.value as PayrollDocumentType)}
+                onChange={(e) => {
+                  const next = e.target.value as PayrollDocumentType;
+                  setDocumentType(next);
+                  setName(
+                    buildPayrollDocumentDisplayName({
+                      documentType: next,
+                      workerName: selected?.fullName,
+                      period: next === 'nomina' ? period : undefined,
+                      fileName: file?.name,
+                    }),
+                  );
+                }}
                 className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-800"
               >
                 {(Object.entries(PAYROLL_DOC_TYPE_LABELS) as [PayrollDocumentType, string][]).map(([k, v]) => (
@@ -175,6 +193,7 @@ function GestoriaUploadModal({
                 ))}
               </select>
             </label>
+            {documentType === 'nomina' ? (
             <label className="block text-xs font-semibold text-stone-600">
               Período
               <input
@@ -184,13 +203,18 @@ function GestoriaUploadModal({
                 className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-800"
               />
             </label>
+            ) : (
+              <p className="self-end pb-2 text-xs text-stone-500">
+                Se guarda como {PAYROLL_DOC_TYPE_LABELS[documentType]}.
+              </p>
+            )}
           </div>
           <label className="block text-xs font-semibold text-stone-600">
             Nombre *
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Ej. Nómina julio 2026"
+              placeholder={`Ej. ${PAYROLL_DOC_TYPE_LABELS[documentType]} · trabajador`}
               className="mt-1 w-full rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-sm dark:border-stone-700 dark:bg-stone-800"
             />
           </label>
@@ -202,7 +226,16 @@ function GestoriaUploadModal({
               onChange={(e) => {
                 const f = e.target.files?.[0] || null;
                 setFile(f);
-                if (f && !name) setName(f.name.replace(/\.[^.]+$/, ''));
+                if (f) {
+                  setName(
+                    buildPayrollDocumentDisplayName({
+                      documentType,
+                      workerName: selected?.fullName,
+                      period: documentType === 'nomina' ? period : undefined,
+                      fileName: f.name,
+                    }),
+                  );
+                }
               }}
               className="mt-1 block w-full text-sm"
             />

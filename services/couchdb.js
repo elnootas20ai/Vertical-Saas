@@ -1391,11 +1391,16 @@ export function buildDefaultEmploymentInfo(overrides = {}) {
 }
 
 export function buildDefaultPermissionMatrix(role = 'Usuario') {
+  // Alineado con buildRolePermissionsMatrix (roleCatalog) y TEAM_MANAGER_ROLES:
+  // Gestor RRHH necesita team + documents (nóminas / contratos).
   const allEnabled =
     role === 'Admin'
     || role === 'Gerente'
     || role === 'Administrador'
-    || role === 'Encargado';
+    || role === 'Encargado'
+    || role === 'Gestor'
+    || role === 'GerenteGrupo'
+    || role === 'Superadmin';
   const base = TEAM_PERMISSION_KEYS.reduce((acc, key) => {
     acc[key] = { view: allEnabled, edit: allEnabled };
     return acc;

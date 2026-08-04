@@ -15,6 +15,8 @@ import {
   Truck,
   Umbrella,
   Zap,
+  Clock,
+  UserRound,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuthOptional } from '../../context/AuthContext';
@@ -53,7 +55,7 @@ const WORKER_HOME_ITEM: BottomNavItem = {
 const WORKER_CLOCK_ITEM: BottomNavItem = {
   id: 'worker-clock',
   path: '/saas/worker/clock',
-  icon: Zap,
+  icon: Clock,
   label: 'Fichaje',
 };
 
@@ -70,6 +72,15 @@ const ALERTS_ITEM: BottomNavItem = {
   path: '/saas/alerts',
   icon: Bell,
   label: 'Alertas',
+};
+
+/** Trabajador: avisos personales (nómina, contrato…), no Centro de Alertas CEO. */
+const WORKER_ALERTS_ITEM: BottomNavItem = {
+  id: 'worker-alertas',
+  path: '/saas/worker/notifications',
+  icon: Bell,
+  label: 'Alertas',
+  matchPaths: ['/saas/worker/notifications'],
 };
 
 /** Dueño / admin: pestañas operativas del día según vertical. */
@@ -160,6 +171,7 @@ function workerNavItemsForVertical(
   return [
     WORKER_HOME_ITEM,
     WORKER_CLOCK_ITEM,
+    WORKER_ALERTS_ITEM,
     {
       id: 'worker-requests',
       path: '/saas/worker/requests',
@@ -169,7 +181,7 @@ function workerNavItemsForVertical(
     {
       id: 'worker-profile',
       path: '/saas/worker/profile',
-      icon: Users,
+      icon: UserRound,
       label: 'Perfil',
     },
   ];
@@ -189,6 +201,9 @@ function navItemsForVertical(
 function isNavItemActive(pathname: string, item: BottomNavItem): boolean {
   if (item.id === 'alertas') {
     return pathname.startsWith('/saas/alerts');
+  }
+  if (item.id === 'worker-alertas') {
+    return pathname.startsWith('/saas/worker/notifications');
   }
 
   const candidates = [item.path, ...(item.matchPaths ?? [])];
@@ -232,7 +247,8 @@ export function BottomNav() {
       <div className="flex items-stretch">
         {navItems.map(({ id, path, icon: Icon, label, matchPaths }) => {
           const isActive = isNavItemActive(location.pathname, { id, path, icon: Icon, label, matchPaths });
-          const showBadge = id === 'alertas' && badgeCount > 0;
+          const showBadge =
+            (id === 'alertas' || id === 'worker-alertas') && badgeCount > 0;
 
           return (
             <button

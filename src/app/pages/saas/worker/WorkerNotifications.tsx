@@ -1,34 +1,30 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import {
   Bell,
   BellOff,
   Loader2,
   CheckCheck,
-  ExternalLink,
-  Info,
+  ArrowRight,
+  FileText,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { useApp } from '../../../context/AppContext';
 import { useAuthOptional } from '../../../context/AuthContext';
+import { formatDateTimeEs } from '../../../lib/formatDateEs';
+import { WORKER_PAGE } from '../../../lib/workerUi';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../lib/vertialUiTokens';
 
-function formatWhen(iso: string) {
-  try {
-    const date = new Date(iso);
-    return date.toLocaleString('es-ES', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return '';
-  }
+function docKindLabel(n: { title?: string; entityType?: string; metadata?: Record<string, unknown> }) {
+  const title = String(n.title || '');
+  const docType = String(n.metadata?.documentType || '').toLowerCase();
+  if (docType === 'contrato' || /^nuevo contrato/i.test(title)) return 'Contrato';
+  if (docType === 'nomina' || /nómina|nomina/i.test(title)) return 'Nómina';
+  if (n.entityType === 'payroll' || /documento|certificado|justificante/i.test(title)) return 'Documento';
+  return 'Aviso';
 }
 
 export function WorkerNotifications() {
-  const { t } = useTranslation();
   const user = useAuthOptional()?.user ?? null;
   const userId = user?.user_id || user?.id || '';
   const { notifications, markNotificationAsRead, markAllNotificationsAsRead } = useApp();
@@ -38,7 +34,6 @@ export function WorkerNotifications() {
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
-    // La lista vive en AppContext (misma que la campanita).
     const tmr = window.setTimeout(() => setBooting(false), 200);
     return () => window.clearTimeout(tmr);
   }, [userId]);
@@ -53,7 +48,6 @@ export function WorkerNotifications() {
 
   const handleMarkRead = async (id: string) => {
     await markNotificationAsRead(id, true);
-    setTab('todas');
   };
 
   const handleMarkAllRead = async () => {
@@ -68,72 +62,61 @@ export function WorkerNotifications() {
   };
 
   return (
-    <Layout title={t('worker.notifications.title')} subtitle={t('worker.notifications.subtitle')}>
-      <div className="space-y-6">
-        <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-5 py-4 flex items-start gap-3">
-          <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
-          <p className="text-sm text-blue-800 dark:text-blue-200">
-            Al abrir o limpiar un aviso, pasa a «Todas» y deja de contar en la campanita. No vuelve a salir el número.
-          </p>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-            <div className="flex items-center gap-3">
-              {unreadCount > 0 ? (
-                <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
-                  <Bell className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                </div>
-              ) : (
-                <div className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-xl flex items-center justify-center">
-                  <BellOff className="w-5 h-5 text-gray-400" />
-                </div>
-              )}
-              <div>
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+    <Layout title="Tus alertas" subtitle="Nóminas, contratos y avisos de la empresa">
+      <div className={`${WORKER_PAGE} sm:space-y-4`}>
+        <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950">
+          <div className="flex items-center justify-between gap-3 border-b border-stone-100 px-4 py-3.5 dark:border-stone-800">
+            <div className="flex min-w-0 items-center gap-3">
+              <div
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
+                  unreadCount > 0
+                    ? 'bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40'
+                    : 'bg-stone-100 text-stone-400 dark:bg-stone-800'
+                }`}
+              >
+                {unreadCount > 0 ? <Bell className="h-5 w-5" /> : <BellOff className="h-5 w-5" />}
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-bold text-stone-900 dark:text-white">
                   {unreadCount > 0 ? `${unreadCount} sin leer` : 'Todo al día'}
                 </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {notifications.length} avisos en total
+                <p className="text-xs text-stone-500">
+                  {notifications.length} aviso{notifications.length !== 1 ? 's' : ''} en total
                 </p>
               </div>
             </div>
-            {unreadCount > 0 && (
+            {unreadCount > 0 ? (
               <button
                 type="button"
                 onClick={() => void handleMarkAllRead()}
                 disabled={markingAll}
-                className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50"
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-11 !px-3 !text-xs`}
               >
-                {markingAll ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <CheckCheck className="w-4 h-4" />
-                )}
-                Limpiar campanita
+                {markingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />}
+                Limpiar
               </button>
-            )}
+            ) : null}
           </div>
 
-          <div className="flex gap-2 px-5 py-3 border-b border-gray-100 dark:border-gray-700">
+          <div className="flex gap-2 border-b border-stone-100 px-4 py-2.5 dark:border-stone-800">
             <button
               type="button"
               onClick={() => setTab('alertas')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+              className={`min-h-10 rounded-xl px-3 text-xs font-bold ${
                 tab === 'alertas'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                  : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
               }`}
             >
-              Alertas ({unreadCount})
+              Sin leer ({unreadCount})
             </button>
             <button
               type="button"
               onClick={() => setTab('todas')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+              className={`min-h-10 rounded-xl px-3 text-xs font-bold ${
                 tab === 'todas'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                  : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
               }`}
             >
               Todas
@@ -142,76 +125,100 @@ export function WorkerNotifications() {
 
           {booting ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+              <Loader2 className="h-8 w-8 animate-spin text-[var(--v-blue,#2563eb)]" />
             </div>
           ) : visible.length === 0 ? (
-            <div className="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
-              {tab === 'alertas'
-                ? 'Sin alertas nuevas. Mira «Todas» para el historial.'
-                : 'No tienes notificaciones todavía.'}
+            <div className="px-5 py-14 text-center">
+              <FileText className="mx-auto mb-2 h-8 w-8 text-stone-300" />
+              <p className="text-sm font-semibold text-stone-700 dark:text-stone-200">
+                {tab === 'alertas' ? 'Nada pendiente' : 'Aún no hay avisos'}
+              </p>
+              <p className="mt-1 text-xs text-stone-500">
+                Cuando publiquen una nómina o un contrato, te llega aquí y a la campanita.
+              </p>
             </div>
           ) : (
-            <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {visible.slice(0, 50).map((notification) => {
-                const content = (
+            <ul className="divide-y divide-stone-100 dark:divide-stone-800">
+              {visible.slice(0, 60).map((notification) => {
+                const kind = docKindLabel(notification);
+                const body = (
                   <>
-                    <div className="flex items-start justify-between gap-3">
-                      <p
-                        className={`text-sm font-medium ${
-                          notification.read
-                            ? 'text-gray-600 dark:text-gray-400'
-                            : 'text-gray-900 dark:text-white'
-                        }`}
-                      >
-                        {notification.title}
-                      </p>
-                      <span className="text-xs text-gray-400 shrink-0">
-                        {formatWhen(notification.createdAt)}
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
+                        {kind}
+                      </span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-stone-400">
+                        {formatDateTimeEs(notification.createdAt)}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      {notification.message}
+                    <p
+                      className={`mt-0.5 text-[15px] font-semibold ${
+                        notification.read
+                          ? 'text-stone-600 dark:text-stone-400'
+                          : 'text-stone-900 dark:text-white'
+                      }`}
+                    >
+                      {notification.title}
                     </p>
+                    {notification.message ? (
+                      <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                        {notification.message}
+                      </p>
+                    ) : null}
                   </>
                 );
 
-                const className = `block px-5 py-4 transition-colors ${
+                const className = `block min-h-[72px] px-4 py-3.5 transition-colors active:bg-stone-50 dark:active:bg-stone-900/50 ${
                   notification.read
-                    ? 'bg-white dark:bg-gray-800'
-                    : 'bg-blue-50/50 dark:bg-blue-900/10 hover:bg-blue-50 dark:hover:bg-blue-900/20'
+                    ? 'bg-white dark:bg-stone-950'
+                    : 'bg-blue-50/50 dark:bg-blue-950/15'
                 }`;
 
                 if (notification.route) {
                   return (
-                    <Link
-                      key={notification.id}
-                      to={notification.route}
-                      onClick={() => void handleMarkRead(notification.id)}
-                      className={className}
-                    >
-                      {content}
-                      <span className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 mt-2">
-                        Ver detalle
-                        <ExternalLink className="w-3 h-3" />
-                      </span>
-                    </Link>
+                    <li key={notification.id}>
+                      <Link
+                        to={notification.route}
+                        onClick={() => void handleMarkRead(notification.id)}
+                        className={className}
+                      >
+                        {body}
+                        <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-[var(--v-blue,#2563eb)]">
+                          Abrir
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </span>
+                      </Link>
+                    </li>
                   );
                 }
 
                 return (
-                  <button
-                    key={notification.id}
-                    type="button"
-                    onClick={() => void handleMarkRead(notification.id)}
-                    className={`w-full text-left ${className}`}
-                  >
-                    {content}
-                  </button>
+                  <li key={notification.id}>
+                    <button
+                      type="button"
+                      onClick={() => void handleMarkRead(notification.id)}
+                      className={`w-full text-left ${className}`}
+                    >
+                      {body}
+                    </button>
+                  </li>
                 );
               })}
-            </div>
+            </ul>
           )}
         </div>
+
+        {unreadCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => void handleMarkAllRead()}
+            disabled={markingAll}
+            className={`w-full md:hidden ${VERTIAL_BTN_PRIMARY}`}
+          >
+            {markingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCheck className="h-4 w-4" />}
+            Marcar todo leído
+          </button>
+        ) : null}
       </div>
     </Layout>
   );

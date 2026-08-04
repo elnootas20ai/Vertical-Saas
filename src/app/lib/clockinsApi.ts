@@ -49,6 +49,28 @@ export interface GeoLocation {
   accuracy?: number;
 }
 
+/** Enlace Maps para que el gerente vea dónde fichó el trabajador. */
+export function mapsUrlForGeo(geo: Pick<GeoLocation, 'latitude' | 'longitude'> | null | undefined): string | null {
+  if (!geo) return null;
+  if (!Number.isFinite(geo.latitude) || !Number.isFinite(geo.longitude)) return null;
+  return `https://maps.google.com/?q=${geo.latitude},${geo.longitude}`;
+}
+
+/** Primera ubicación útil de un fichaje (entrada o doc). */
+export function clockinPrimaryGeo(record: {
+  geo?: GeoLocation;
+  entries?: Array<{ type?: string; geo?: GeoLocation }>;
+}): GeoLocation | null {
+  const fromIn = record.entries?.find((e) => e.type === 'clock_in' && e.geo)?.geo;
+  if (fromIn && Number.isFinite(fromIn.latitude) && Number.isFinite(fromIn.longitude)) return fromIn;
+  const any = record.entries?.find((e) => e.geo)?.geo;
+  if (any && Number.isFinite(any.latitude) && Number.isFinite(any.longitude)) return any;
+  if (record.geo && Number.isFinite(record.geo.latitude) && Number.isFinite(record.geo.longitude)) {
+    return record.geo;
+  }
+  return null;
+}
+
 export interface ClockEntry {
   type: 'clock_in' | 'break_start' | 'break_end' | 'clock_out';
   time: string;

@@ -737,7 +737,11 @@ function ExpandedMemberDetail({
   onViewFullHistory: () => void;
 }) {
   const device = (r as { device_type?: string }).device_type;
-  const geo = (r as { geo?: { latitude: number; longitude: number } }).geo;
+  const entryGeos = r.entries
+    .map((entry, i) => ({ entry, i, geo: entry.geo }))
+    .filter((row) => row.geo && Number.isFinite(row.geo.latitude) && Number.isFinite(row.geo.longitude));
+  const docGeo = (r as { geo?: { latitude: number; longitude: number } }).geo;
+  const primaryGeo = entryGeos[0]?.geo || docGeo;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -751,6 +755,9 @@ function ExpandedMemberDetail({
           <div className="space-y-1.5">
             {r.entries.map((entry, i) => {
               const diff = getTimeDiffMinutes(entry, r);
+              const mapsHref = entry.geo
+                ? `https://maps.google.com/?q=${entry.geo.latitude},${entry.geo.longitude}`
+                : null;
               return (
                 <div
                   key={i}
@@ -760,12 +767,22 @@ function ExpandedMemberDetail({
                   <span className="text-xs font-medium text-gray-500 w-28 shrink-0">{ENTRY_LABELS[entry.type] || entry.type}</span>
                   <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{fmtTime(entry.time)}</span>
                   <TimeDiffBadge diff={diff} />
+                  {mapsHref ? (
+                    <a
+                      href={mapsHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-emerald-600 hover:underline"
+                    >
+                      <MapPin className="w-3.5 h-3.5" /> Ubicación
+                    </a>
+                  ) : null}
                 </div>
               );
             })}
           </div>
         )}
-        {(device || geo || r.notes) && (
+        {(device || primaryGeo || r.notes) && (
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-500">
             {device === 'mobile' && (
               <span className="inline-flex items-center gap-1">
@@ -777,14 +794,14 @@ function ExpandedMemberDetail({
                 <Monitor className="w-3.5 h-3.5" /> PC
               </span>
             )}
-            {geo && (
+            {primaryGeo && (
               <a
-                href={`https://maps.google.com/?q=${geo.latitude},${geo.longitude}`}
+                href={`https://maps.google.com/?q=${primaryGeo.latitude},${primaryGeo.longitude}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-emerald-600 hover:underline"
+                className="inline-flex items-center gap-1 text-emerald-600 hover:underline font-medium"
               >
-                <MapPin className="w-3.5 h-3.5" /> Ver ubicación
+                <MapPin className="w-3.5 h-3.5" /> Ver ubicación en mapa
               </a>
             )}
             {r.notes && <span className="italic">Nota: {r.notes}</span>}

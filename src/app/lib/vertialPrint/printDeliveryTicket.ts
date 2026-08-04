@@ -2,13 +2,15 @@ import { toast } from 'sonner';
 import type { DeliveryTicketPrintOptions } from '../deliveryTicketTypes';
 import { buildTicketDocument } from './ticketDocument';
 import { encodeTicketEscpos } from './escposEncode';
-import { resolveEffectivePrinterConfig } from './printerActiveScope';
+import {
+  resolveEffectivePrinterConfig,
+  resolvePrinterConfigForOrderPdv,
+} from './printerActiveScope';
 import { fetchBridgeHealth, fetchBridgePingPrinter, sendEscposToBridge } from './printBridgeClient';
 import { printDeliveryTicketBrowser, printTestTicketBrowser } from './printBrowser';
 import { isVertialNativeApp } from './isNativeApp';
 import { sendNativeEscpos } from './nativePrintClient';
 import {
-  isNativeWifiPrinterReady,
   NATIVE_WIFI_PRINTER_SETUP_MESSAGE,
   shouldBlockBrowserPrintOnNative,
 } from './nativePrintRouting';
@@ -34,17 +36,12 @@ function withUnifiedTicketPaperWidth(config: VertialPrinterConfig): VertialPrint
 }
 
 /**
- * Config efectiva para imprimir un pedido: primero el scope activo (sesión TPV /
- * dispositivo) y, si en la app nativa no hay impresora WiFi lista, la impresora
- * guardada del PDV del pedido (sincronizada desde el servidor al cargar tiendas).
+ * Config efectiva para imprimir un pedido: la impresora de la tienda del pedido
+ * (salesPointId), no la de otra tienda que tenga el scope activo.
+ * Así la 2ª impresora (prueba OK en el panel) también recibe comandas/tickets.
  */
 function resolvePrinterConfigForOrder(options: DeliveryTicketPrintOptions) {
-  const config = resolveEffectivePrinterConfig();
-  if (!isVertialNativeApp() || isNativeWifiPrinterReady(config)) return config;
-  const orderPdvId = String(options.order?.salesPointId || '').trim();
-  if (!orderPdvId) return config;
-  const byOrderPdv = resolveEffectivePrinterConfig({ pdvId: orderPdvId });
-  return isNativeWifiPrinterReady(byOrderPdv) ? byOrderPdv : config;
+  return resolvePrinterConfigForOrderPdv(options.order?.salesPointId);
 }
 
 export async function printDeliveryTicket(

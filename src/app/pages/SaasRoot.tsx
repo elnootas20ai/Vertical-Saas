@@ -122,12 +122,14 @@ function SaasContent() {
 
   }, [isAuthenticated, isInitializing, navigate]);
 
-  // Código TPV activo → solo tienda/TPV (trabajadores).
-  // Cuenta empresa/admin: no atrapar con un binding viejo de tablet (login SaaS normal).
+  // Código TPV activo → solo tienda/TPV.
+  // Cuenta empresa/admin: no atrapar con binding viejo fuera del flujo tablet;
+  // si está en TPV/login código, no borrar (dueño abriendo caja con código).
   useEffect(() => {
     if (isInitializing || !isAuthenticated || !user) return;
     if (!tpvTabletLocked) return;
     if (!isWorkerAccount(user)) {
+      if (isTpvTabletAllowedPath(location.pathname)) return;
       clearTpvTabletBinding();
       return;
     }

@@ -20,8 +20,13 @@ import {
   pickActiveClockinRecord,
 } from '../lib/clockinHistoryUtils';
 
-/** Tope duro al GPS de fichaje (el API del navegador a veces ignora su timeout). */
-const GEO_HARD_TIMEOUT_MS = 4_500;
+/** Tope duro al GPS de fichaje (incluye diálogo de permiso). */
+const GEO_HARD_TIMEOUT_MS = 8_000;
+
+function isValidGeo(geo: GeoLocation | null | undefined): geo is GeoLocation {
+  if (!geo) return false;
+  return Number.isFinite(geo.latitude) && Number.isFinite(geo.longitude);
+}
 
 /**
  * Segundos trabajados en vivo para el contador de UI.
@@ -95,11 +100,12 @@ export function useWorkerClockIn(
   businessId: string,
   memberId: string,
   memberName: string,
-  storeContext?: { sales_point_id?: string; sales_point_name?: string },
+  storeContext?: { sales_point_id?: string; sales_point_name?: string; work_center_id?: string },
   options?: { onSessionCompleted?: (rec: ClockinRecord) => void },
 ) {
   const isMobile = isMobileDevice();
-  const { location: geoLocation, status: geoStatus, requestLocationForClock } = useGeolocation();
+  const { location: geoLocation, status: geoStatus, requestLocationForClock } =
+    useGeolocation();
   const autoClockOutTriggered = useRef(false);
   const displayAnchorRef = useRef<DisplayAnchor | null>(null);
   const [todaySessionCount, setTodaySessionCount] = useState(0);
@@ -140,15 +146,35 @@ export function useWorkerClockIn(
     };
   }, []);
 
-  const getGeoForAction = useCallback(async (): Promise<GeoLocation | undefined> => {
-    const loc = await Promise.race([
-      requestLocationForClock(),
-      new Promise<null>((resolve) => {
-        window.setTimeout(() => resolve(null), GEO_HARD_TIMEOUT_MS);
-      }),
-    ]);
-    return loc || undefined;
-  }, [requestLocationForClock]);
+  /**
+   * GPS al fichar (opcional de momento).
+   * Pide ubicación si se puede; si falla, no bloquea entrada ni salida.
+   * Más adelante se podrá activar como obligatoria por configuración.
+   */
+  const getGeoForAction = useCallback(
+    async (_required: boolean): Promise<GeoLocation | undefined> => {
+      // Salida / descanso: no re-pedir permiso.
+      if (!_required) {
+        return isValidGeo(geoLocation) ? geoLocation : undefined;
+      }
+
+      const withHardTimeout = (p: Promise<GeoLocation | null>) =>
+        Promise.race([
+          p,
+          new Promise<null>((resolve) => {
+            window.setTimeout(() => resolve(null), GEO_HARD_TIMEOUT_MS);
+          }),
+        ]);
+
+      let loc = await withHardTimeout(requestLocationForClock());
+      if (!isValidGeo(loc) && isValidGeo(geoLocation)) {
+        loc = geoLocation;
+      }
+      // Opcional: no bloquear si no hay GPS.
+      return isValidGeo(loc) ? loc : undefined;
+    },
+    [requestLocationForClock, geoLocation],
+  );
 
   const fireClockinNotification = useCallback(
     (eventType: ClockinEventType, rec: ClockinRecord | null, hasGeo: boolean) => {
@@ -280,7 +306,7 @@ export function useWorkerClockIn(
     setError('');
     setInfo('');
     try {
-      const geo = await getGeoForAction();
+      const geo = await getGeoForAction(false);
       const rec = await clockOut(record, geo);
       displayAnchorRef.current = null;
       setRecord(null);
@@ -354,13 +380,29 @@ export function useWorkerClockIn(
     setError('');
     setInfo('');
     try {
-      const geo = await getGeoForAction();
-      const rec = await clockIn(businessId, memberId, memberName, {
+      const geo = await getGeoForAction(false);
+      const baseOpts = {
         geo,
-        device_type: isMobile ? 'mobile' : 'desktop',
+        device_type: (isMobile ? 'mobile' : 'desktop') as 'mobile' | 'desktop',
         sales_point_id: storeContext?.sales_point_id,
         sales_point_name: storeContext?.sales_point_name,
-      });
+        work_center_id: storeContext?.work_center_id,
+      };
+      let rec: ClockinRecord;
+      try {
+        rec = await clockIn(businessId, memberId, memberName, baseOpts);
+      } catch (firstErr: unknown) {
+        const msg = firstErr instanceof Error ? firstErr.message : '';
+        // Si el backend viejo aún bloquea por tienda, reintentar sin PDV.
+        if (/tienda/i.test(msg) && (baseOpts.sales_point_id || baseOpts.work_center_id)) {
+          rec = await clockIn(businessId, memberId, memberName, {
+            geo: baseOpts.geo,
+            device_type: baseOpts.device_type,
+          });
+        } else {
+          throw firstErr;
+        }
+      }
       const alreadyActive = Boolean((rec as ClockinRecord & { alreadyActive?: boolean }).alreadyActive);
       if (alreadyActive) {
         setInfo('Ya tenías un fichaje activo. Se ha reanudado ese turno (no se crea uno nuevo).');
@@ -399,6 +441,7 @@ export function useWorkerClockIn(
     isMobile,
     storeContext?.sales_point_id,
     storeContext?.sales_point_name,
+    storeContext?.work_center_id,
     reanchorDisplay,
   ]);
 
@@ -408,7 +451,7 @@ export function useWorkerClockIn(
     setError('');
     setInfo('');
     try {
-      const geo = await getGeoForAction();
+      const geo = await getGeoForAction(false);
       const wasOnBreak = isOnBreak;
       const rec = wasOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
       reanchorDisplay(rec);

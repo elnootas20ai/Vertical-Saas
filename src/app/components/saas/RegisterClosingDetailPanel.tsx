@@ -29,6 +29,7 @@ import {
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
+import { buildBrandLabelsMap } from '../../lib/brandLabels';
 import { DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
 
 const METHOD_CHIP =
@@ -130,12 +131,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
     ])
       .then(([brands, billingConfig]) => {
         if (cancelled) return;
-        const labels: Record<string, string> = {};
-        for (const b of brands) {
-          const id = String(b._id || b.id || '').trim();
-          if (id) labels[id] = b.name;
-        }
-        setBrandLabels(labels);
+        setBrandLabels(buildBrandLabelsMap(brands));
         setBillingRules(splitRulesFromBillingConfig(billingConfig));
       })
       .catch(() => {

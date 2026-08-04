@@ -7,20 +7,15 @@ import {
   FileText,
   MessageSquare,
   ChevronRight,
-  Play,
-  Square,
-  Coffee,
   TrendingUp,
   CheckCircle2,
   AlertCircle,
   Timer,
-  Loader2,
   ChefHat,
   Wrench,
   SprayCan,
   ShoppingCart,
   ArrowRight,
-  MapPin,
   Recycle,
   Music,
   Scissors,
@@ -36,15 +31,14 @@ import {
   Hotel,
   CarTaxiFront,
   Droplets,
-  Pill,
   Beef,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
-import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
-import { useWorkerClockIn, formatClockTimer } from '../../../hooks/useWorkerClockIn';
+import { WorkerClockInCard } from '../../../components/saas/worker/WorkerClockInCard';
+import { WorkerAssignmentsCard } from '../../../components/saas/worker/WorkerAssignmentsCard';
 import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 
 interface QuickAction {
@@ -89,47 +83,8 @@ export function WorkerHome() {
   const tpvConfig = vertical ? TPV_VERTICAL_CONFIG[vertical] : undefined;
 
   const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
-  const memberId = user?.user_id || '';
+  const memberId = String(user?.user_id || user?.id || '').trim();
   const memberName = user?.fullName || '';
-  const {
-    canClockInEntry,
-    storeClosedForClockIn,
-    storeHoursToday,
-    hasAssignment,
-    assignedPdvId,
-    storeLabel,
-    loading: storeLoading,
-  } = useWorkerAssignedStore();
-
-  const storeContext = assignedPdvId
-    ? { sales_point_id: assignedPdvId, sales_point_name: storeLabel || undefined }
-    : undefined;
-
-  const {
-    record,
-    loading,
-    acting,
-    error,
-    info,
-    isClockedIn,
-    isOnBreak,
-    elapsedSeconds,
-    todaySessionCount,
-    maxSessionsPerDay,
-    maxSessionsReached,
-    canStartNewSession,
-    geoLocation,
-    geoStatus,
-    handleClockIn,
-    handleClockOut,
-    handleBreakToggle,
-  } = useWorkerClockIn(businessId, memberId, memberName, storeContext);
-
-  const clockInTime = (() => {
-    if (!record || !isClockedIn) return null;
-    const entry = record.entries.find((e) => e.type === 'clock_in');
-    return entry ? new Date(entry.time) : null;
-  })();
 
   const now = new Date();
   const greeting = now.getHours() < 12
@@ -161,133 +116,18 @@ export function WorkerHome() {
   return (
     <Layout title={t('worker.home.title')} subtitle={greeting + ', ' + (user?.firstName || t('worker.home.worker'))}>
       <div className="space-y-6">
-        {/* Clock In/Out Hero Card */}
-        {error && (
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-sm text-red-700 dark:text-red-300">
-            {error}
+        {businessId && memberId ? (
+          <div className="max-w-[380px]">
+            <WorkerClockInCard
+              businessId={businessId}
+              memberId={memberId}
+              memberName={memberName}
+              size="md"
+            />
           </div>
-        )}
-        {info && (
-          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-sm text-blue-800 dark:text-blue-200">
-            {info}
-          </div>
-        )}
+        ) : null}
 
-        <div className={`relative overflow-hidden rounded-2xl p-6 text-white transition-all duration-500 ${
-          loading
-            ? 'bg-gradient-to-br from-gray-700 to-gray-900 dark:from-gray-600 dark:to-gray-800'
-            : isClockedIn
-              ? isOnBreak
-                ? 'bg-gradient-to-br from-amber-500 to-orange-600'
-                : 'bg-gradient-to-br from-emerald-500 to-emerald-700'
-              : todaySessionCount > 0
-                ? 'bg-gradient-to-br from-blue-600 to-indigo-700'
-                : 'bg-gradient-to-br from-gray-700 to-gray-900 dark:from-gray-600 dark:to-gray-800'
-        }`}>
-          <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -translate-y-32 translate-x-32" />
-          <div className="absolute bottom-0 left-0 w-48 h-48 bg-white/5 rounded-full translate-y-24 -translate-x-24" />
-
-          <div className="relative flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <p className="text-white/70 text-sm font-medium mb-1">
-                {loading
-                  ? t('worker.home.loadingClock', 'Cargando fichaje...')
-                  : isClockedIn
-                    ? isOnBreak
-                      ? t('worker.clock.onBreak', 'En descanso')
-                      : t('worker.home.workingNow')
-                    : maxSessionsReached
-                      ? `Máximo ${maxSessionsPerDay} fichajes hoy`
-                      : todaySessionCount > 0
-                        ? `Turno cerrado · ${todaySessionCount}/${maxSessionsPerDay}`
-                        : t('worker.home.notClockedIn')}
-              </p>
-              <div className="flex items-baseline gap-3">
-                <span className="text-4xl font-bold tracking-tight font-mono">
-                  {loading ? '--:--:--' : formatClockTimer(elapsedSeconds)}
-                </span>
-              </div>
-              {clockInTime && (
-                <p className="text-white/60 text-sm mt-1">
-                  {t('worker.home.since')} {clockInTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              )}
-              <p className={`text-xs mt-1 flex items-center gap-1 ${
-                geoStatus === 'granted' || geoLocation
-                  ? 'text-emerald-200/60'
-                  : geoStatus === 'denied' ? 'text-red-200/60' : 'text-white/40'
-              }`}>
-                <MapPin className="w-3 h-3" />
-                {geoStatus === 'granted' || geoLocation
-                  ? t('worker.clock.geoActive', 'Ubicación activada')
-                  : geoStatus === 'denied'
-                    ? t('worker.clock.geoDenied', 'Ubicación denegada')
-                    : t('worker.clock.geoRequired', 'Se solicitará ubicación al fichar')}
-              </p>
-            </div>
-
-            {!loading && (
-              <div className="flex flex-col items-stretch sm:items-end gap-2">
-                {!isClockedIn && (
-                  <>
-                    <button
-                      onClick={() => void handleClockIn()}
-                      disabled={acting || storeLoading || !canClockInEntry || !canStartNewSession}
-                      className="flex items-center gap-3 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 bg-white text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {acting || storeLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-                      {todaySessionCount > 0 ? 'Fichar otra vez' : t('worker.home.clockIn')}
-                    </button>
-                    {!storeLoading && !canClockInEntry ? (
-                      <p className="text-white/70 text-xs max-w-[220px] sm:text-right">
-                        {!hasAssignment
-                          ? 'Sin tienda o local asignado.'
-                          : 'No se puede fichar en este momento.'}
-                      </p>
-                    ) : null}
-                    {!storeLoading && canClockInEntry && maxSessionsReached ? (
-                      <p className="text-white/80 text-xs max-w-[220px] sm:text-right">
-                        Máximo {maxSessionsPerDay} fichajes al día.
-                      </p>
-                    ) : null}
-                    {!storeLoading && canClockInEntry && storeClosedForClockIn && canStartNewSession ? (
-                      <p className="text-white/80 text-xs max-w-[220px] sm:text-right">
-                        {storeHoursToday.status === 'outside_hours'
-                          ? `Fuera de horario (${storeHoursToday.from} – ${storeHoursToday.to}). Puedes fichar.`
-                          : 'Tienda cerrada hoy. Puedes fichar igual.'}
-                      </p>
-                    ) : null}
-                  </>
-                )}
-
-                {isClockedIn && (
-                  <>
-                    <button
-                      onClick={() => void handleBreakToggle()}
-                      disabled={acting}
-                      className={`flex items-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 disabled:opacity-50 ${
-                        isOnBreak
-                          ? 'bg-white text-amber-600 hover:bg-amber-50'
-                          : 'bg-white/20 text-white hover:bg-white/30 backdrop-blur-sm'
-                      }`}
-                    >
-                      {acting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coffee className="w-5 h-5" />}
-                      {isOnBreak ? t('worker.clock.endBreak', 'Fin descanso') : t('worker.clock.startBreak', 'Descanso')}
-                    </button>
-                    <button
-                      onClick={() => void handleClockOut()}
-                      disabled={acting}
-                      className="flex items-center gap-3 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
-                    >
-                      {acting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Square className="w-5 h-5" />}
-                      {t('worker.home.clockOut')}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+        <WorkerAssignmentsCard />
 
         {/* TPV Module CTA */}
         {tpvConfig && (

@@ -60,4 +60,8 @@ describe('clockinsAccess store TPV', () => {
       false,
     );
   });
+
+  it('self-fichaje: worker can mutate own clockin even without store', () => {
+    assert.equal(canMutateClockinForMember(business, 'worker-2', 'worker-2'), true);
+  });
 });

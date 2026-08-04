@@ -7,9 +7,11 @@ import {
   type PayrollManifestHint,
 } from './payrollBulkMatch';
 import {
+  buildPayrollDocumentDisplayName,
   createPayrollDocumentRequest,
   finalizePayrollDocumentUpload,
   formatPayrollPeriodLabel,
+  PAYROLL_DOC_TYPE_LABELS,
   type PayrollDocument,
   type PayrollDocumentType,
 } from './payrollApi';
@@ -103,12 +105,12 @@ export function buildDefaultPayrollDocumentName(
   fileName: string,
   documentType: PayrollDocumentType,
 ): string {
-  const periodLabel = period ? formatPayrollPeriodLabel(period) : '';
-  if (documentType === 'nomina' && periodLabel) {
-    return `Nómina ${periodLabel} · ${workerName}`;
-  }
-  const base = fileName.replace(/\.[^.]+$/, '');
-  return base.trim() || `Documento · ${workerName}`;
+  return buildPayrollDocumentDisplayName({
+    documentType,
+    workerName,
+    period,
+    fileName,
+  });
 }
 
 export function isAcceptedPayrollUploadFile(file: File): boolean {
@@ -266,7 +268,10 @@ export function payrollBulkSummaryMessage(outcome: PayrollBulkUploadOutcome): st
   const total = outcome.success.length + outcome.failed.length;
   if (total === 0) return 'No hay documentos listos para publicar';
   if (outcome.failed.length === 0) {
-    return `${outcome.success.length} de ${total} publicadas. Los trabajadores ya las ven en Documentos.`;
+    const type = outcome.success[0]?.documentType;
+    const label = type ? (PAYROLL_DOC_TYPE_LABELS[type] || 'Documento') : 'Documento';
+    const plural = outcome.success.length === 1 ? label.toLowerCase() : `${label.toLowerCase()}s`;
+    return `${outcome.success.length} ${plural} publicad${outcome.success.length === 1 ? 'o' : 'os'}. Los trabajadores ya los ven en Documentos.`;
   }
-  return `${outcome.success.length} de ${total} publicadas · ${outcome.failed.length} con error`;
+  return `${outcome.success.length} de ${total} publicados · ${outcome.failed.length} con error`;
 }

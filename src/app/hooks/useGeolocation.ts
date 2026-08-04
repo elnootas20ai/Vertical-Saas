@@ -13,9 +13,9 @@ export interface UseGeolocationResult {
 }
 
 const GEO_TIMEOUT = 15_000;
-/** Fichaje: no bloquear la UI más de unos segundos esperando GPS. */
-const GEO_CLOCK_TIMEOUT = 4_000;
-const GEO_MAX_AGE = 60_000;
+/** Fichaje: tiempo razonable para GPS + diálogo de permiso. */
+const GEO_CLOCK_TIMEOUT = 12_000;
+const GEO_MAX_AGE = 30_000;
 
 type GeoRequestOptions = {
   timeoutMs?: number;
@@ -96,12 +96,12 @@ export function useGeolocation(): UseGeolocationResult {
     });
   }, []);
 
-  /** Ubicación rápida al fichar: sin alta precisión y con timeout corto. */
+  /** Ubicación al fichar: pide permiso y GPS (alta precisión). */
   const requestLocationForClock = useCallback((): Promise<GeoLocation | null> => {
     return new Promise((resolve) => {
       readPosition(resolve, setLocation, setStatus, setError, {
         timeoutMs: GEO_CLOCK_TIMEOUT,
-        highAccuracy: false,
+        highAccuracy: true,
       });
     });
   }, []);

@@ -93,7 +93,7 @@ export function NotificationLivePopup({ onOpenInbox }: Props) {
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top,0px)+4.25rem)] z-[70] flex justify-center px-3"
+      className="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top,0px)+3.75rem)] z-[70] flex justify-center px-3 sm:top-[calc(env(safe-area-inset-top,0px)+4.25rem)]"
       role="status"
       aria-live="polite"
     >
@@ -108,13 +108,16 @@ export function NotificationLivePopup({ onOpenInbox }: Props) {
             if (route) navigate(route);
             else onOpenInbox?.();
           }}
-          className="flex w-full items-start gap-3 px-4 py-3 pr-10 text-left hover:bg-stone-50 dark:hover:bg-stone-800/80 rounded-2xl transition-colors"
+          className="flex w-full min-h-[64px] items-start gap-3 rounded-2xl px-4 py-3.5 pr-11 text-left active:bg-stone-50 dark:active:bg-stone-800/80"
         >
-          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--v-blue,#2563eb)] text-white">
+          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--v-blue,#2563eb)] text-white">
             <Bell className="h-4 w-4" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm font-bold text-stone-900 dark:text-white line-clamp-2">
+            <span className="block text-[11px] font-bold uppercase tracking-wide text-[var(--v-blue,#2563eb)]">
+              Nuevo aviso
+            </span>
+            <span className="mt-0.5 block text-[15px] font-bold text-stone-900 dark:text-white line-clamp-2">
               {banner.title}
             </span>
             {banner.message ? (
@@ -122,6 +125,9 @@ export function NotificationLivePopup({ onOpenInbox }: Props) {
                 {banner.message}
               </span>
             ) : null}
+            <span className="mt-1.5 block text-[11px] font-semibold text-[var(--v-blue,#2563eb)]">
+              Toca para abrir
+            </span>
           </span>
         </button>
         <button
@@ -130,7 +136,7 @@ export function NotificationLivePopup({ onOpenInbox }: Props) {
             if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
             setBanner(null);
           }}
-          className="absolute right-2 top-2 p-1.5 rounded-lg text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+          className="absolute right-1.5 top-1.5 min-h-10 min-w-10 rounded-xl p-2 text-stone-400 active:bg-stone-100 dark:active:bg-stone-800"
           aria-label="Cerrar"
         >
           <X className="h-4 w-4" />

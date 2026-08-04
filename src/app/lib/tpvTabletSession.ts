@@ -220,6 +220,11 @@ export function isTpvTabletBindingAllowedForAuth(params: {
   );
   if (!match) return false;
 
+  // Quien activó el código en este dispositivo: OK aunque el API de empresas
+  // no traiga `members` (trabajadores / payloads reducidos). Sin esto el TPV
+  // echaba al login tras entrar con el código.
+  if (boundAuth === selfId) return true;
+
   const ownerId = String(match.owner_user_id || '').trim();
   if (dataUserId !== selfId && dataUserId !== ownerId) return false;
 

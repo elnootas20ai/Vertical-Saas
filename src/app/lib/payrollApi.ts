@@ -58,6 +58,7 @@ export type PayrollDocumentType =
   | 'nomina'
   | 'contrato'
   | 'certificado'
+  | 'justificante'
   | 'baja'
   | 'dni_nie'
   | 'pasaporte'
@@ -106,6 +107,7 @@ export const PAYROLL_DOC_TYPE_LABELS: Record<PayrollDocumentType, string> = {
   nomina: 'Nómina',
   contrato: 'Contrato',
   certificado: 'Certificado',
+  justificante: 'Justificante',
   baja: 'Baja / IT',
   dni_nie: 'DNI / NIE',
   pasaporte: 'Pasaporte',
@@ -129,6 +131,58 @@ export const DOC_CATEGORY_LABELS: Record<string, string> = {
   other: 'Otros',
 };
 
+/** Carpeta lógica del documento según su tipo (nómina ≠ contrato ≠ identidad…). */
+export function resolvePayrollDocumentCategory(
+  documentType: PayrollDocumentType,
+): NonNullable<PayrollDocument['documentCategory']> {
+  switch (documentType) {
+    case 'nomina':
+      return 'other'; // se lista como nómina por documentType; category es secundaria
+    case 'contrato':
+      return 'contract';
+    case 'dni_nie':
+    case 'pasaporte':
+    case 'permiso_trabajo':
+    case 'carnet_conducir':
+      return 'identity';
+    case 'certificado':
+    case 'certificado_penales':
+    case 'titulo':
+    case 'prl':
+      return 'certificate';
+    case 'reconocimiento_medico':
+    case 'baja':
+      return 'medical';
+    case 'seguro':
+      return 'insurance';
+    case 'justificante':
+    case 'otro':
+    default:
+      return 'other';
+  }
+}
+
+/** Nombre legible al subir: respeta el tipo elegido (Contrato · Ana, Nómina mar 2026 · Ana…). */
+export function buildPayrollDocumentDisplayName(options: {
+  documentType: PayrollDocumentType;
+  workerName?: string;
+  period?: string;
+  fileName?: string;
+  customName?: string;
+}): string {
+  const custom = String(options.customName || '').trim();
+  if (custom) return custom;
+  const typeLabel = PAYROLL_DOC_TYPE_LABELS[options.documentType] || 'Documento';
+  const worker = String(options.workerName || '').trim();
+  const periodLabel = options.period ? formatPayrollPeriodLabel(options.period) : '';
+  if (options.documentType === 'nomina' && periodLabel) {
+    return worker ? `${typeLabel} ${periodLabel} · ${worker}` : `${typeLabel} ${periodLabel}`;
+  }
+  if (worker) return `${typeLabel} · ${worker}`;
+  const fromFile = String(options.fileName || '').replace(/\.[^.]+$/, '').trim();
+  return fromFile || typeLabel;
+}
+
 export function formatPayrollPeriodLabel(period?: string): string {
   if (!period) return '';
   const [year, month] = period.split('-');
@@ -139,16 +193,36 @@ export function formatPayrollPeriodLabel(period?: string): string {
   return `${monthNames[idx]} ${year}`;
 }
 
+/** Título corto y claro (mismo estilo que «Nueva nómina disponible»). */
+function workerPayrollNotificationTitle(documentType: PayrollDocumentType): string {
+  switch (documentType) {
+    case 'nomina':
+      return 'Nueva nómina disponible';
+    case 'contrato':
+      return 'Nuevo contrato';
+    case 'certificado':
+      return 'Nuevo certificado';
+    case 'justificante':
+      return 'Nuevo justificante';
+    case 'baja':
+      return 'Documento de baja';
+    case 'dni_nie':
+    case 'pasaporte':
+    case 'permiso_trabajo':
+      return 'Nuevo documento de identidad';
+    default:
+      return `Nuevo documento: ${PAYROLL_DOC_TYPE_LABELS[documentType] || 'Documento'}`;
+  }
+}
+
 /** Tras subir un documento, avisa al trabajador (app + push). No bloquea si falla. */
 export async function notifyWorkerPayrollDocumentUploaded(doc: PayrollDocument): Promise<void> {
   if (!doc.worker_id) return;
-  const typeLabel = PAYROLL_DOC_TYPE_LABELS[doc.documentType] || 'Documento';
   const periodSuffix = doc.period ? ` · ${formatPayrollPeriodLabel(doc.period)}` : '';
-  const isPayslip = doc.documentType === 'nomina';
   await createNotificationRequest(doc.worker_id, {
     level: 'info',
     category: 'team',
-    title: isPayslip ? 'Nueva nómina disponible' : `Nuevo documento: ${typeLabel}`,
+    title: workerPayrollNotificationTitle(doc.documentType),
     message: `${doc.name}${periodSuffix} ya está en Documentos.`,
     entityId: doc.id || doc._id,
     entityType: 'payroll',
@@ -249,11 +323,16 @@ export async function createPayrollDocumentRequest(
   await ensurePayrollDatabase();
   const id = `payroll-${uuidv4()}`;
   const now = new Date().toISOString();
+  const documentType = data.documentType;
   const document: PayrollDocument = {
     _id: id,
     type: 'payroll',
     id,
     ...data,
+    documentType,
+    documentCategory: data.documentCategory || resolvePayrollDocumentCategory(documentType),
+    // El mes solo aplica a nómina; un contrato/DNI no debe heredar periodo de la UI.
+    period: documentType === 'nomina' ? (data.period || undefined) : undefined,
     createdAt: now,
     updatedAt: now,
   };

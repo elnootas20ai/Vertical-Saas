@@ -1596,16 +1596,25 @@ Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el d
 // S-05: Bases de datos CouchDB accesibles según rol
 const COUCH_ADMIN_ROLES = new Set(['Admin', 'Gerente']);
 const COUCH_ALLOWED_DBS = new Set(['vehicles', 'notifications', 'cards', 'accounts', 'invoice', 'schedules', 'vacations', 'payroll', 'staff-expenses']);
+/** Lectura para trabajadores: tienda de la contratación (fichaje / horario). Escritura sigue Admin/Gerente. */
+const COUCH_WORKER_READ_DBS = new Set(['sales-points']);
+
+function couchDbSuffixAllowed(dbName, allowedSet) {
+  if (allowedSet.has(dbName)) return true;
+  for (const allowed of allowedSet) {
+    if (dbName.endsWith(`-${allowed}`)) return true;
+  }
+  return false;
+}
 
 function requireCouchDbAccess(req, res, next) {
   const dbName = String(req.params.dbName || '').toLowerCase().trim();
   if (!dbName) return next();
   const role = req.authUser?.role;
   if (COUCH_ADMIN_ROLES.has(role)) return next();
-  if (COUCH_ALLOWED_DBS.has(dbName)) return next();
-  for (const allowed of COUCH_ALLOWED_DBS) {
-    if (dbName.endsWith(`-${allowed}`)) return next();
-  }
+  if (couchDbSuffixAllowed(dbName, COUCH_ALLOWED_DBS)) return next();
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method === 'GET' && couchDbSuffixAllowed(dbName, COUCH_WORKER_READ_DBS)) return next();
   return res.status(403).json({ ok: false, error: 'Acceso a esta base de datos no está permitido' });
 }
 

@@ -69,6 +69,7 @@ import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import { QuietTip } from './QuietTip';
 import { buildShiftBrandRevenue, getOrderBrandShares } from '../../lib/registerShiftBrandBilling';
 import { listBrandsRequest } from '../../lib/brandApi';
+import { buildBrandLabelsMap } from '../../lib/brandLabels';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import {
   splitRulesFromBillingConfig,
@@ -1645,12 +1646,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     ])
       .then(([brands, billingConfig]) => {
         if (cancelled) return;
-        const labels: Record<string, string> = {};
-        for (const b of brands) {
-          const id = String(b._id || b.id || '').trim();
-          if (id) labels[id] = b.name;
-        }
-        setBrandLabels(labels);
+        setBrandLabels(buildBrandLabelsMap(brands));
         setBillingRules(splitRulesFromBillingConfig(billingConfig));
       })
       .catch(() => {
@@ -3877,8 +3873,10 @@ export function TpvRegisterGate({
 
   const printerModalScope = useMemo((): TpvPrinterScope | undefined => {
     if (!dataUserId) return undefined;
+    // Si el manager elige otra tienda en el panel de impresora, esa manda
+    // (si no, con caja abierta en la 1ª nunca podías guardar/probar la 2ª).
     const preferredId = String(
-      activeSession?.pointOfSaleId || tabletRestrictedPdvId || managerPdvPickId || '',
+      managerPdvPickId || activeSession?.pointOfSaleId || tabletRestrictedPdvId || '',
     ).trim();
     const pdv =
       printerStores.find((p) => p._id === preferredId)

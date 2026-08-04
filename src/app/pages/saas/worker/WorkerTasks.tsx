@@ -8,7 +8,6 @@ import {
   Clock,
   AlertTriangle,
   Search,
-  Calendar,
   MoreVertical,
   Trash2,
   Play,
@@ -44,12 +43,23 @@ import { getInviteRoleDisplayLabel } from '../../../lib/inviteFunctionRoles';
 import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
 import { WorkerStoreScheduleCard } from '../../../components/saas/worker/WorkerStoreScheduleCard';
 import { WorkerClockInCard } from '../../../components/saas/worker/WorkerClockInCard';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../lib/vertialUiTokens';
+import {
+  WORKER_CARD,
+  WORKER_FILTER_PILL,
+  WORKER_FILTER_PILL_OFF,
+  WORKER_FILTER_PILL_ON,
+  WORKER_FILTER_ROW,
+  WORKER_INPUT,
+  WORKER_MUTED,
+  WORKER_PAGE,
+} from '../../../lib/workerUi';
 
 const PRIORITY_CONFIG: Record<TaskPriority, { label: string; color: string; icon: React.ReactNode }> = {
-  low: { label: 'Baja', color: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300', icon: <Circle className="w-3 h-3" /> },
-  medium: { label: 'Media', color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400', icon: <Clock className="w-3 h-3" /> },
-  high: { label: 'Alta', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: <AlertTriangle className="w-3 h-3" /> },
-  urgent: { label: 'Urgente', color: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400', icon: <AlertTriangle className="w-3 h-3" /> },
+  low: { label: 'Baja', color: 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300', icon: <Circle className="w-3 h-3" /> },
+  medium: { label: 'Media', color: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300', icon: <Clock className="w-3 h-3" /> },
+  high: { label: 'Alta', color: 'bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-300', icon: <AlertTriangle className="w-3 h-3" /> },
+  urgent: { label: 'Urgente', color: 'bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300', icon: <AlertTriangle className="w-3 h-3" /> },
 };
 
 export function WorkerTasks() {
@@ -272,8 +282,8 @@ export function WorkerTasks() {
 
   return (
     <Layout title={t('worker.tasks.title')} subtitle={t('worker.tasks.subtitle')}>
-      <div className="space-y-5">
-        <div className="space-y-4">
+      <div className={WORKER_PAGE}>
+        <div className="space-y-3">
           {showStoreBlock ? (
             <WorkerStoreScheduleCard
               workCenter={workCenter}
@@ -293,114 +303,97 @@ export function WorkerTasks() {
             businessId={businessId}
             memberId={memberId}
             memberName={memberName}
-            compact
+            size="md"
           />
         </div>
 
         {roleBundle ? (
-          <div className="rounded-2xl border border-blue-200 bg-blue-50/80 px-4 py-3 dark:border-blue-900 dark:bg-blue-950/30">
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
-              Tu función · {getInviteRoleDisplayLabel(roleId, businessType) || roleBundle.roleLabel}
+          <div className={`${WORKER_CARD} border-blue-200 bg-blue-50/60 px-4 py-3 dark:border-blue-900 dark:bg-blue-950/30`}>
+            <p className="text-xs font-semibold text-[var(--v-blue,#2563eb)] dark:text-blue-300">
+              {getInviteRoleDisplayLabel(roleId, businessType) || roleBundle.roleLabel}
             </p>
-            <p className="mt-1 text-sm text-blue-900 dark:text-blue-100">{roleBundle.summary}</p>
-            <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-200/70">
-              Las tareas de abajo son tu checklist del puesto. Márcalas conforme las hagas.
-            </p>
+            <p className="mt-0.5 text-sm text-stone-800 dark:text-stone-100">{roleBundle.summary}</p>
+            <p className={`mt-1 ${WORKER_MUTED}`}>Marca las tareas conforme las completes.</p>
           </div>
         ) : null}
 
-        {/* Total Time Today */}
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-white">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-blue-100 text-sm font-medium">{t('worker.tasks.totalTimeToday', 'Tiempo total trabajado')}</p>
-              <p className="text-3xl font-bold font-mono mt-1">{formatTaskTimer(totalWorkedToday)}</p>
-            </div>
-            <Timer className="w-10 h-10 text-blue-200" />
+        <div className={`${WORKER_CARD} flex items-center justify-between gap-3 px-4 py-3`}>
+          <div className="min-w-0">
+            <p className={WORKER_MUTED}>{t('worker.tasks.totalTimeToday', 'Tiempo en tareas hoy')}</p>
+            <p className="font-mono text-2xl font-bold tabular-nums text-stone-900 dark:text-stone-50">
+              {formatTaskTimer(totalWorkedToday)}
+            </p>
           </div>
-          {hasRunningTimer && (
-            <div className="mt-3 flex items-center gap-2 text-sm text-blue-100">
-              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              {t('worker.tasks.timerActive', 'Timer activo')}
-              {(() => {
-                const running = tasks.find((t) => t.timerRunning);
-                if (!running) return null;
-                const remaining = getRemainingAutoStop(running);
-                const rm = Math.floor(remaining / 60);
-                return (
-                  <span className="ml-auto text-xs bg-white/15 px-2 py-0.5 rounded-full">
-                    {t('worker.tasks.autoStop', 'Auto-pausa en')} {Math.floor(rm / 60)}h {rm % 60}m
-                  </span>
-                );
-              })()}
-            </div>
+          {hasRunningTimer ? (
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+              En curso
+            </span>
+          ) : (
+            <Timer className="h-6 w-6 shrink-0 text-stone-300 dark:text-stone-600" />
           )}
         </div>
 
-        {/* Stats Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className={WORKER_FILTER_ROW}>
           {([
-            ['all', t('worker.tasks.all', 'Todas'), 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200'],
-            ['pending', t('worker.tasks.pending', 'Pendientes'), 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300'],
-            ['in_progress', t('worker.tasks.inProgress', 'En progreso'), 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'],
-            ['completed', t('worker.tasks.completed', 'Completadas'), 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300'],
-          ] as const).map(([key, label, colors]) => (
+            ['all', t('worker.tasks.all', 'Todas')],
+            ['pending', t('worker.tasks.pending', 'Pendientes')],
+            ['in_progress', t('worker.tasks.inProgress', 'En curso')],
+            ['completed', t('worker.tasks.completed', 'Hechas')],
+          ] as const).map(([key, label]) => (
             <button
               key={key}
+              type="button"
               onClick={() => setFilter(key)}
-              className={`p-3 rounded-xl border transition-all text-left ${
-                filter === key
-                  ? 'border-blue-300 dark:border-blue-700 ring-2 ring-blue-200 dark:ring-blue-800'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-gray-300'
-              } ${colors}`}
+              className={`${WORKER_FILTER_PILL} ${
+                filter === key ? WORKER_FILTER_PILL_ON : WORKER_FILTER_PILL_OFF
+              }`}
             >
-              <p className="text-2xl font-bold">{counts[key]}</p>
-              <p className="text-xs font-medium opacity-70">{label}</p>
+              {label}
+              <span className="tabular-nums opacity-70">{counts[key]}</span>
             </button>
           ))}
         </div>
 
-        {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('worker.tasks.searchPlaceholder', 'Buscar tareas...')}
-              className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+              placeholder={t('worker.tasks.searchPlaceholder', 'Buscar…')}
+              className={`${WORKER_INPUT} pl-10`}
             />
           </div>
-          <button
-            onClick={() => setShowNewTask(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            {t('worker.tasks.newTask', 'Nueva tarea')}
+          <button type="button" onClick={() => setShowNewTask(true)} className={`${VERTIAL_BTN_PRIMARY} w-full sm:w-auto`}>
+            <Plus className="h-4 w-4" />
+            {t('worker.tasks.newTask', 'Nueva')}
           </button>
         </div>
 
-        {/* New Task Form */}
-        {showNewTask && (
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-blue-200 dark:border-blue-800 p-4 space-y-3">
+        {showNewTask ? (
+          <div className={`${WORKER_CARD} space-y-3 border-blue-200 p-4 dark:border-blue-800`}>
             <input
               type="text"
               value={newTaskTitle}
               onChange={(e) => setNewTaskTitle(e.target.value)}
               placeholder={t('worker.tasks.newTaskPlaceholder', '¿Qué necesitas hacer?')}
-              className="w-full px-4 py-2.5 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className={WORKER_INPUT}
               autoFocus
               onKeyDown={(e) => e.key === 'Enter' && handleAddTask()}
             />
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-500">{t('worker.tasks.priority', 'Prioridad')}:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={WORKER_MUTED}>{t('worker.tasks.priority', 'Prioridad')}</span>
               {(['low', 'medium', 'high', 'urgent'] as TaskPriority[]).map((p) => (
                 <button
                   key={p}
+                  type="button"
                   onClick={() => setNewTaskPriority(p)}
-                  className={`text-xs px-2 py-1 rounded-lg transition-all ${
-                    newTaskPriority === p ? PRIORITY_CONFIG[p].color + ' ring-2 ring-offset-1' : 'bg-gray-100 dark:bg-gray-700 text-gray-500'
+                  className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-all ${
+                    newTaskPriority === p
+                      ? `${PRIORITY_CONFIG[p].color} ring-2 ring-blue-400/40`
+                      : 'bg-stone-100 text-stone-500 dark:bg-stone-800'
                   }`}
                 >
                   {t(`worker.tasks.priority_${p}`, PRIORITY_CONFIG[p].label)}
@@ -408,33 +401,32 @@ export function WorkerTasks() {
               ))}
             </div>
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setShowNewTask(false)}
-                className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-              >
+              <button type="button" onClick={() => setShowNewTask(false)} className={VERTIAL_BTN_SECONDARY}>
                 {t('common.cancel', 'Cancelar')}
               </button>
               <button
+                type="button"
                 onClick={handleAddTask}
                 disabled={saving === 'new'}
-                className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors disabled:opacity-50"
+                className={VERTIAL_BTN_PRIMARY}
               >
-                {saving === 'new' ? <Loader2 className="w-4 h-4 animate-spin" /> : t('common.add', 'Añadir')}
+                {saving === 'new' ? <Loader2 className="h-4 w-4 animate-spin" /> : t('common.add', 'Añadir')}
               </button>
             </div>
           </div>
-        )}
+        ) : null}
 
-        {/* Task List */}
         <div className="space-y-2">
           {filteredTasks.length === 0 ? (
-            <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
-              <AlertCircle className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-              <p className="text-gray-500 dark:text-gray-400 font-medium">{t('worker.tasks.noTasks', 'Sin tareas')}</p>
-              <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">
+            <div className={`${WORKER_CARD} px-4 py-10 text-center`}>
+              <AlertCircle className="mx-auto mb-2 h-8 w-8 text-stone-300 dark:text-stone-600" />
+              <p className="text-sm font-medium text-stone-600 dark:text-stone-300">
+                {t('worker.tasks.noTasks', 'Sin tareas')}
+              </p>
+              <p className={`mt-1 ${WORKER_MUTED}`}>
                 {roleBundle
-                  ? 'Recarga la página o vuelve a iniciar sesión.'
-                  : t('worker.tasks.noTasksHint', 'Crea una nueva tarea para empezar')}
+                  ? 'Recarga o vuelve a iniciar sesión.'
+                  : t('worker.tasks.noTasksHint', 'Crea una tarea para empezar')}
               </p>
             </div>
           ) : (
@@ -445,125 +437,129 @@ export function WorkerTasks() {
               return (
                 <div
                   key={task._id}
-                  className={`group flex items-start gap-3 p-4 bg-white dark:bg-gray-800 rounded-xl border transition-all ${
+                  className={`${WORKER_CARD} flex items-start gap-3 p-3.5 ${
                     task.timerRunning
-                      ? 'border-green-300 dark:border-green-700 ring-1 ring-green-200 dark:ring-green-800'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
-                  } hover:shadow-sm`}
+                      ? 'border-emerald-300 ring-1 ring-emerald-200 dark:border-emerald-700 dark:ring-emerald-900'
+                      : ''
+                  }`}
                 >
-                  {/* Complete toggle */}
                   <button
+                    type="button"
                     onClick={() => handleToggleComplete(task)}
                     disabled={isSaving}
-                    className={`mt-0.5 shrink-0 transition-colors ${
-                      task.status === 'completed' ? 'text-emerald-500' : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400'
+                    className={`mt-0.5 shrink-0 touch-manipulation ${
+                      task.status === 'completed'
+                        ? 'text-emerald-500'
+                        : 'text-stone-300 hover:text-emerald-400 dark:text-stone-600'
                     }`}
+                    aria-label={task.status === 'completed' ? 'Reabrir' : 'Completar'}
                   >
                     {task.status === 'completed' ? (
-                      <CheckCircle2 className="w-5 h-5" />
+                      <CheckCircle2 className="h-6 w-6" />
                     ) : (
-                      <Circle className="w-5 h-5" />
+                      <Circle className="h-6 w-6" />
                     )}
                   </button>
 
-                  {/* Task content */}
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                  <div className="min-w-0 flex-1">
+                    <p
+                      className={`text-[15px] font-medium leading-snug ${
+                        task.status === 'completed'
+                          ? 'text-stone-400 line-through'
+                          : 'text-stone-900 dark:text-stone-100'
+                      }`}
+                    >
                       {task.title}
                     </p>
                     {task.description ? (
-                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+                      <p className="mt-0.5 line-clamp-2 text-xs text-stone-500 dark:text-stone-400">
                         {task.description}
                       </p>
                     ) : null}
 
-                    {/* Timer display */}
-                    <div className="flex flex-wrap items-center gap-2 mt-2">
-                      <span className={`inline-flex items-center gap-1.5 text-xs font-mono px-2.5 py-1 rounded-lg ${
-                        task.timerRunning
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                          : liveSeconds > 0
-                            ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
-                            : 'bg-gray-50 text-gray-400 dark:bg-gray-800 dark:text-gray-500'
-                      }`}>
-                        <Timer className="w-3 h-3" />
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 font-mono text-[11px] ${
+                          task.timerRunning
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                            : liveSeconds > 0
+                              ? 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
+                              : 'bg-stone-50 text-stone-400 dark:bg-stone-900 dark:text-stone-500'
+                        }`}
+                      >
+                        <Timer className="h-3 w-3" />
                         {formatTaskTimer(liveSeconds)}
-                        {task.timerRunning && <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />}
                       </span>
-
-                      <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${PRIORITY_CONFIG[task.priority].color}`}>
-                        {PRIORITY_CONFIG[task.priority].icon}
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${PRIORITY_CONFIG[task.priority].color}`}
+                      >
                         {t(`worker.tasks.priority_${task.priority}`, PRIORITY_CONFIG[task.priority].label)}
                       </span>
-
                       {task.category === 'role_onboarding' || task.templateKey ? (
-                        <span className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
-                          Del puesto
+                        <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                          Puesto
                         </span>
                       ) : null}
-
-                      <span className="text-[10px] text-gray-400 flex items-center gap-1">
-                        <Calendar className="w-3 h-3" />
-                        {task.dueDate}
-                      </span>
                     </div>
 
-                    {/* Auto-stop warning */}
-                    {task.timerRunning && (() => {
-                      const remaining = getRemainingAutoStop(task);
-                      const mins = Math.floor(remaining / 60);
-                      if (mins < 30) {
-                        return (
-                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            {t('worker.tasks.autoStopWarning', 'Se detendrá automáticamente en')} {mins}m
-                          </p>
-                        );
-                      }
-                      return null;
-                    })()}
+                    {task.timerRunning
+                      ? (() => {
+                          const remaining = getRemainingAutoStop(task);
+                          const mins = Math.floor(remaining / 60);
+                          if (mins >= 30) return null;
+                          return (
+                            <p className="mt-1 flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-400">
+                              <AlertTriangle className="h-3 w-3" />
+                              Auto-pausa en {mins} min
+                            </p>
+                          );
+                        })()
+                      : null}
                   </div>
 
-                  {/* Timer control */}
-                  {task.status !== 'completed' && (
+                  {task.status !== 'completed' ? (
                     <button
-                      onClick={() => task.timerRunning ? handleStopTimer(task) : handleStartTimer(task)}
+                      type="button"
+                      onClick={() => (task.timerRunning ? handleStopTimer(task) : handleStartTimer(task))}
                       disabled={isSaving}
-                      className={`shrink-0 p-2 rounded-lg transition-all ${
+                      className={`flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-xl transition-colors disabled:opacity-50 ${
                         task.timerRunning
-                          ? 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
-                          : 'bg-green-100 text-green-600 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50'
-                      } disabled:opacity-50`}
+                          ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-300'
+                          : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                      }`}
+                      aria-label={task.timerRunning ? 'Parar' : 'Iniciar'}
                     >
                       {isSaving ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Loader2 className="h-4 w-4 animate-spin" />
                       ) : task.timerRunning ? (
-                        <Square className="w-4 h-4" />
+                        <Square className="h-4 w-4" />
                       ) : (
-                        <Play className="w-4 h-4" />
+                        <Play className="h-4 w-4" />
                       )}
                     </button>
-                  )}
+                  ) : null}
 
-                  {/* Menu */}
-                  <div className="relative">
+                  <div className="relative shrink-0">
                     <button
+                      type="button"
                       onClick={() => setOpenMenuId(openMenuId === task._id ? null : task._id)}
-                      className="p-1 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all"
+                      className="flex h-11 w-9 touch-manipulation items-center justify-center rounded-xl text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800"
+                      aria-label="Más"
                     >
-                      <MoreVertical className="w-4 h-4 text-gray-400" />
+                      <MoreVertical className="h-4 w-4" />
                     </button>
-                    {openMenuId === task._id && (
-                      <div className="absolute right-0 top-full mt-1 w-36 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg z-10 py-1">
+                    {openMenuId === task._id ? (
+                      <div className="absolute right-0 top-full z-10 mt-1 w-36 rounded-xl border border-stone-200 bg-white py-1 shadow-lg dark:border-stone-700 dark:bg-stone-900">
                         <button
+                          type="button"
                           onClick={() => handleDelete(task)}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                          className="flex w-full items-center gap-2 px-3 py-2.5 text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="h-3.5 w-3.5" />
                           {t('common.delete', 'Eliminar')}
                         </button>
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               );

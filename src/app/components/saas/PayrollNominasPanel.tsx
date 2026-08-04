@@ -6,6 +6,8 @@ import {
   Calendar,
   CheckCircle2,
   Clock,
+  Download,
+  Eye,
   Loader2,
   Receipt,
   Search,
@@ -16,6 +18,7 @@ import type { AuthUser } from '../../lib/authApi';
 import {
   formatPayrollPeriodLabel,
   type PayrollDocument,
+  type PayrollDocumentType,
 } from '../../lib/payrollApi';
 import { computeLaborCostBreakdown } from '../../lib/laborCost';
 import { formatMoneyEs } from '../../lib/formatNumberEs';
@@ -28,6 +31,7 @@ import {
   VERTIAL_BTN_SECONDARY,
   VERTIAL_SURFACE,
 } from '../../lib/vertialUiTokens';
+import { PayrollWorkerDocsFolders } from './PayrollWorkerDocsFolders';
 
 type MonthPayStatus = 'paid' | 'pending' | 'future' | 'before_hire';
 
@@ -71,13 +75,43 @@ function periodKeysFrom(start: Date, end: Date): string[] {
 function parseHireDate(iso?: string): Date | null {
   if (!iso) return null;
   const raw = String(iso).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const [y, m, d] = raw.split('-').map(Number);
+  if (!raw) return null;
+
+  // YYYY-MM-DD (o fecha ISO con hora)
+  const isoDay = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoDay) {
+    const y = Number(isoDay[1]);
+    const m = Number(isoDay[2]);
+    const d = Number(isoDay[3]);
     const dt = new Date(y, m - 1, d);
     return Number.isNaN(dt.getTime()) ? null : dt;
   }
+
+  // DD/MM/YYYY o DD-MM-YYYY (formato España en fichas)
+  const esDay = raw.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/);
+  if (esDay) {
+    const d = Number(esDay[1]);
+    const m = Number(esDay[2]);
+    const y = Number(esDay[3]);
+    const dt = new Date(y, m - 1, d);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+
   const dt = new Date(raw);
   return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+/** Alta laboral: fecha de contrato, o si falta, cuándo se creó la cuenta. */
+function resolveEmploymentStart(member: AuthUser): Date | null {
+  return (
+    parseHireDate(member.employment?.startDate)
+    || parseHireDate(member.createdAt)
+    || null
+  );
+}
+
+function periodKeyFromDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 function initials(name?: string): string {
@@ -121,32 +155,41 @@ export function buildWorkerPayrollProfiles(
         }
       }
 
-      const hire = parseHireDate(member.employment?.startDate);
-      const rangeStart =
-        hire && hire > yearStart
-          ? new Date(hire.getFullYear(), hire.getMonth(), 1)
-          : yearStart;
-      const monthKeys = periodKeysFrom(rangeStart, now);
+      const hire = resolveEmploymentStart(member);
+      // Sin alta conocida: solo el mes actual (no inventar pendientes de ene–jul).
+      const rangeStart = hire
+        ? new Date(hire.getFullYear(), hire.getMonth(), 1)
+        : new Date(now.getFullYear(), now.getMonth(), 1);
+      // Calendario del año en curso: no mostrar meses de años anteriores.
+      const effectiveStart = rangeStart < yearStart ? yearStart : rangeStart;
+      const monthKeys = periodKeysFrom(effectiveStart, now);
+      const hireKey = hire ? periodKeyFromDate(hire) : null;
 
-      const months = monthKeys.map((period) => {
-        const doc = byPeriod.get(period) || null;
-        let status: MonthPayStatus = 'pending';
-        if (doc) status = 'paid';
-        else if (period > currentPeriod) status = 'future';
-        else if (hire) {
-          const hireKey = `${hire.getFullYear()}-${String(hire.getMonth() + 1).padStart(2, '0')}`;
-          if (period < hireKey) status = 'before_hire';
-        }
-        return {
-          period,
-          label: formatPayrollPeriodLabel(period),
-          status,
-          doc,
-        };
-      });
+      const months = monthKeys
+        .map((period) => {
+          const doc = byPeriod.get(period) || null;
+          let status: MonthPayStatus = 'pending';
+          if (doc) {
+            status = 'paid';
+          } else if (period > currentPeriod) {
+            status = 'future';
+          } else if (hireKey && period < hireKey) {
+            // Meses anteriores al alta: no son deuda de nómina.
+            status = 'before_hire';
+          }
+          return {
+            period,
+            label: formatPayrollPeriodLabel(period),
+            status,
+            doc,
+          };
+        })
+        // No listar meses anteriores al alta (evita «Pendiente» fantasma).
+        .filter((m) => m.status !== 'before_hire');
 
       const currentMonthPaid = byPeriod.has(currentPeriod);
       const paidMonthsCount = months.filter((m) => m.status === 'paid').length;
+      // Solo meses laborales reales sin documento (nunca «antes del alta»).
       const pendingMonths = months.filter((m) => m.status === 'pending').length;
       const paidYtd = hasSalary ? paidMonthsCount * (netMonthly || 0) : 0;
       const pendingNow = hasSalary
@@ -192,6 +235,8 @@ type Props = {
   onSelectWorker: (workerId: string) => void;
   onOpenDocuments: (workerId?: string) => void;
   onUploadPayslips: () => void;
+  onUploadDocument?: (workerId: string, documentType: PayrollDocumentType) => void;
+  onPreviewDocument?: (doc: PayrollDocument) => void;
 };
 
 export function PayrollNominasPanel({
@@ -202,6 +247,8 @@ export function PayrollNominasPanel({
   onSelectWorker,
   onOpenDocuments,
   onUploadPayslips,
+  onUploadDocument,
+  onPreviewDocument,
 }: Props) {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
@@ -357,6 +404,7 @@ export function PayrollNominasPanel({
           ) : (
             <WorkerPayrollDetail
               profile={selected}
+              documents={documents}
               onOpenTeam={() =>
                 navigate(`/saas/team/${selected.member.user_id}`)
               }
@@ -364,6 +412,13 @@ export function PayrollNominasPanel({
                 onOpenDocuments(selected.member.user_id)
               }
               onUploadPayslips={onUploadPayslips}
+              onUploadDocument={
+                onUploadDocument
+                  ? (documentType) =>
+                      onUploadDocument(selected.member.user_id, documentType)
+                  : undefined
+              }
+              onPreviewDocument={onPreviewDocument}
             />
           )}
         </div>
@@ -430,14 +485,20 @@ function StatusPill({ profile }: { profile: WorkerPayrollProfile }) {
 
 function WorkerPayrollDetail({
   profile,
+  documents,
   onOpenTeam,
   onOpenDocuments,
   onUploadPayslips,
+  onUploadDocument,
+  onPreviewDocument,
 }: {
   profile: WorkerPayrollProfile;
+  documents: PayrollDocument[];
   onOpenTeam: () => void;
   onOpenDocuments: () => void;
   onUploadPayslips: () => void;
+  onUploadDocument?: (documentType: PayrollDocumentType) => void;
+  onPreviewDocument?: (doc: PayrollDocument) => void;
 }) {
   const m = profile.member;
   const emp = m.employment;
@@ -479,10 +540,18 @@ function WorkerPayrollDetail({
             Ver ficha
           </button>
           <button type="button" onClick={onOpenDocuments} className={VERTIAL_BTN_SECONDARY}>
-            Documentos
+            Ver todos
           </button>
         </div>
       </div>
+
+      <PayrollWorkerDocsFolders
+        worker={m}
+        documents={documents}
+        canUpload={Boolean(onUploadDocument)}
+        onUploadClick={onUploadDocument}
+        onPreview={onPreviewDocument}
+      />
 
       {!profile.hasSalary ? (
         <div className={`rounded-xl border p-4 flex gap-3 ${VERTIAL_ACCENT_BORDER} ${VERTIAL_ACCENT_BG}`}>
@@ -563,9 +632,21 @@ function WorkerPayrollDetail({
                     : 'border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-900/40'
               }`}
             >
-              <p className="text-xs font-semibold text-stone-800 dark:text-stone-200">
-                {month.label}
-              </p>
+              <div className="flex items-start justify-between gap-1">
+                <p className="text-xs font-semibold text-stone-800 dark:text-stone-200">
+                  {month.label}
+                </p>
+                {month.doc?.fileData && onPreviewDocument ? (
+                  <button
+                    type="button"
+                    onClick={() => onPreviewDocument(month.doc!)}
+                    className="rounded-md p-1 text-stone-400 hover:bg-white/80 hover:text-blue-600 dark:hover:bg-stone-800 dark:hover:text-blue-400"
+                    title="Ver nómina"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                  </button>
+                ) : null}
+              </div>
               <p className="text-[11px] mt-1 font-medium">
                 {month.status === 'paid' && (
                   <span className="text-emerald-700 dark:text-emerald-300">Documentada</span>
@@ -622,13 +703,26 @@ function WorkerPayrollDetail({
                   </div>
                 </div>
                 {doc.fileData ? (
-                  <a
-                    href={doc.fileData}
-                    download={doc.fileName || doc.name}
-                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline shrink-0"
-                  >
-                    Descargar
-                  </a>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {onPreviewDocument ? (
+                      <button
+                        type="button"
+                        onClick={() => onPreviewDocument(doc)}
+                        className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-blue-600 dark:hover:bg-stone-800 dark:hover:text-blue-400"
+                        title="Ver nómina"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    ) : null}
+                    <a
+                      href={doc.fileData}
+                      download={doc.fileName || doc.name}
+                      className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-100 hover:text-blue-600 dark:hover:bg-stone-800 dark:hover:text-blue-400"
+                      title="Descargar"
+                    >
+                      <Download className="w-4 h-4" />
+                    </a>
+                  </div>
                 ) : null}
               </li>
             ))}

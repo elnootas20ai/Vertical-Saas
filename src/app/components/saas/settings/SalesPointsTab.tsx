@@ -67,10 +67,7 @@ import {
 } from '../../../lib/businessHoursUtils';
 import { getBusinessHours, type BusinessHoursConfig } from '../../../lib/settingsApi';
 import {
-  defaultWeekly,
-  listShiftTemplates,
-  saveShiftTemplate,
-  TEMPLATE_COLORS,
+  applyOpeningHoursToShiftTemplates,
 } from '../../../lib/schedulesApi';
 import { BusinessHoursEditor } from './BusinessHoursEditor';
 import {
@@ -671,6 +668,16 @@ function WorkCenterModal({
             })()
           : editItem?.openingHours,
       });
+      // RRHH: alinear plantillas con el horario de tienda (no toca turnos personales).
+      if (includeOpeningHours && schedulesBusinessId) {
+        try {
+          await applyOpeningHoursToShiftTemplates(schedulesBusinessId, openingHours, {
+            storeLabel: form.name,
+          });
+        } catch {
+          /* best-effort: el centro ya está guardado */
+        }
+      }
       onClose();
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
@@ -808,8 +815,9 @@ function WorkCenterModal({
       steps={shellSteps}
       activeStepId={step}
       onStepChange={(id) => setStep(id as WizardStepId)}
-      maxHeight={simplifyPdvCreate ? 'min(92dvh,780px)' : 'min(90dvh,920px)'}
-      size={simplifyPdvCreate ? 'medium' : 'default'}
+      maxHeight={step === 'horarios' ? 'min(90dvh,720px)' : simplifyPdvCreate ? 'min(92dvh,780px)' : 'min(90dvh,920px)'}
+      size={simplifyPdvCreate || step === 'horarios' ? 'medium' : 'default'}
+      bodyOverflow={step === 'horarios' ? 'hidden' : 'auto'}
       preview={step === 'horarios' ? undefined : storePreview}
       footer={
         <SettingsWizardFooter
@@ -1578,26 +1586,25 @@ function WorkCenterModal({
           )}
 
           {step === 'horarios' && includeOpeningHours && (
-            <div className="space-y-3 pb-2">
-              <p className="text-xs text-gray-600 dark:text-gray-400">
-                Obligatoria la configuración de <span className="font-semibold">cada día</span> (L–D).
-                Este horario es la <span className="font-semibold">base del local</span> (plantillas y estado abierto/cerrado).
-                El contrato del trabajador puede ser más largo; <span className="font-semibold">no limita el fichaje</span>.
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+              <p className="shrink-0 text-[11px] leading-snug text-gray-600 dark:text-gray-400">
+                Configura cada día (L–D). Base del local; no limita el fichaje.
               </p>
               {fieldErrors.horarios ? (
-                <p className="text-xs text-red-600 dark:text-red-400 font-medium">{fieldErrors.horarios}</p>
+                <p className="shrink-0 text-xs font-medium text-red-600 dark:text-red-400">{fieldErrors.horarios}</p>
               ) : null}
-              <BusinessHoursEditor
-                config={openingHours}
-                onChange={(next) => {
-                  setOpeningHours(next);
-                  setHoursConfirmed(false);
-                  clearFieldError('horarios');
-                }}
-                storeLabel={storeHoursLabel}
-                wizard={simplifyPdvCreate}
-                compact={!simplifyPdvCreate}
-              />
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <BusinessHoursEditor
+                  config={openingHours}
+                  onChange={(next) => {
+                    setOpeningHours(next);
+                    setHoursConfirmed(false);
+                    clearFieldError('horarios');
+                  }}
+                  storeLabel={storeHoursLabel}
+                  wizard
+                />
+              </div>
               {schedulesBusinessId ? (
                 <button
                   type="button"
@@ -1615,30 +1622,16 @@ function WorkCenterModal({
                       if (!ok) return;
                       setApplyingTemplates(true);
                       try {
-                        const weekly = defaultWeekly(openingHours);
-                        const templates = await listShiftTemplates(schedulesBusinessId);
-                        if (templates.length === 0) {
-                          const label = String(form.name || 'tienda').trim() || 'tienda';
-                          await saveShiftTemplate(
-                            schedulesBusinessId,
-                            `Horario ${label}`,
-                            TEMPLATE_COLORS[0] || '#2563eb',
-                            weekly,
-                            null,
-                          );
+                        const result = await applyOpeningHoursToShiftTemplates(
+                          schedulesBusinessId,
+                          openingHours,
+                          { storeLabel: form.name },
+                        );
+                        if (result.created > 0) {
                           toast.success('Plantilla creada desde el horario de tienda');
                         } else {
-                          for (const t of templates) {
-                            await saveShiftTemplate(
-                              schedulesBusinessId,
-                              t.name,
-                              t.color,
-                              weekly,
-                              t,
-                            );
-                          }
                           toast.success(
-                            `${templates.length} plantilla${templates.length === 1 ? '' : 's'} actualizada${templates.length === 1 ? '' : 's'}`,
+                            `${result.updated} plantilla${result.updated === 1 ? '' : 's'} actualizada${result.updated === 1 ? '' : 's'}`,
                           );
                         }
                       } catch (err) {
@@ -1650,13 +1643,13 @@ function WorkCenterModal({
                       }
                     })();
                   }}
-                  className="w-full rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-950/60"
+                  className="w-full shrink-0 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-600 dark:bg-stone-900/40 dark:text-stone-200 dark:hover:bg-stone-800"
                 >
-                  {applyingTemplates ? 'Aplicando…' : 'Aplicar horario de tienda a plantillas RRHH'}
+                  {applyingTemplates ? 'Aplicando…' : 'Aplicar a plantillas RRHH'}
                 </button>
               ) : null}
               {!editItem ? (
-                <label className="flex items-start gap-2.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-3 dark:border-gray-700 dark:bg-gray-900/40 cursor-pointer">
+                <label className="flex shrink-0 items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40 cursor-pointer">
                   <input
                     type="checkbox"
                     className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
@@ -1666,9 +1659,8 @@ function WorkCenterModal({
                       if (e.target.checked) clearFieldError('horarios');
                     }}
                   />
-                  <span className="text-xs text-gray-700 dark:text-gray-300">
-                    He revisado el horario de <span className="font-semibold">cada día</span> (lunes a domingo)
-                    y está correcto para este local.
+                  <span className="text-[11px] leading-snug text-gray-700 dark:text-gray-300">
+                    He revisado el horario de cada día (L–D) y está correcto.
                   </span>
                 </label>
               ) : null}

@@ -131,6 +131,7 @@ import {
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
+import { canManageTeam } from '../../lib/teamManagerAccess';
 import { sortByBusinessUsage } from '../../lib/businessUsageOrder';
 import {
   workerNeedsBusinessLink,
@@ -708,8 +709,8 @@ function SidebarInner({
   })();
 
   const isWorker = isWorkerAccount(user);
-  /** Trabajador = solo backoffice worker (sin selector de empresas ni menú gerente). */
-  const treatAsWorkerNav = isWorker;
+  /** Trabajador operativo = menú worker. Gestor/Encargado invitados gestionan equipo → menú empresa (nóminas, contratos). */
+  const treatAsWorkerNav = isWorker && !canManageTeam(user, businesses);
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved } = useAlertCenterSummary(
     !treatAsWorkerNav ? alertCenterBusinessId : undefined,

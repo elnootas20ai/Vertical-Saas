@@ -15,6 +15,7 @@ export {
   loadPrinterConfig,
   savePrinterConfig,
   resolveEffectivePrinterConfig,
+  resolvePrinterConfigForOrderPdv,
   setActivePrinterScope,
   clearActivePrinterScope,
   getActivePrinterScope,

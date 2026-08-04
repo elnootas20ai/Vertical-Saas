@@ -13,7 +13,7 @@ import {
   resolveWorkerWorkCenter,
 } from '../lib/workerStoreHours';
 import { hasOpeningHoursPayload } from '../lib/businessHoursUtils';
-import { resolveEffectiveSalesPointRef } from '../lib/workerStoreAssignment';
+import { resolveEffectiveSalesPointRef, hasExplicitSiteAssignment } from '../lib/workerStoreAssignment';
 import {
   getSchedule,
   getScheduleForDate,
@@ -80,6 +80,8 @@ export function useWorkerAssignedStore() {
   const [memberSchedule, setMemberSchedule] = useState<ScheduleTemplate | null>(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [profileRefreshing, setProfileRefreshing] = useState(true);
+  /** Fuerza re-lectura del centro (horario) tras cambios en Ajustes / foco de pestaña. */
+  const [storeDocRefresh, setStoreDocRefresh] = useState(0);
 
   const businessId = String(
     currentBusiness?.business_id || user?.linkedBusinessId || '',
@@ -129,18 +131,20 @@ export function useWorkerAssignedStore() {
       resolveEffectiveSalesPointRef({
         employmentSalesPointId: user?.employment?.salesPointId,
         scheduleWorkCenterId: memberSchedule?.work_center_id,
+        assignments: user?.employment?.assignments,
         workCenters: pool,
         pointsOfSale: allPointsOfSale,
       }),
     [
       user?.employment?.salesPointId,
+      user?.employment?.assignments,
       memberSchedule?.work_center_id,
       pool,
       allPointsOfSale,
     ],
   );
 
-  const explicitAssignment = Boolean(String(user?.employment?.salesPointId || '').trim());
+  const explicitAssignment = hasExplicitSiteAssignment(user?.employment);
 
   const resolvedFromPool = useMemo(() => {
     if (!salesPointRef) return null;
@@ -154,20 +158,18 @@ export function useWorkerAssignedStore() {
       setFetchingAssigned(false);
       return;
     }
-    // Si el pool tiene el centro pero sin horario (caché stale), pedir el doc fresco.
-    if (resolvedFromPool && hasOpeningHoursPayload(resolvedFromPool.openingHours)) {
-      setFetchedWorkCenter(null);
-      setFetchingAssigned(false);
-      return;
-    }
     const fetchId = String(
       resolvedFromPool?._id || resolvedFromPool?.id || salesPointRef,
     ).trim();
     let cancelled = false;
     setFetchingAssigned(true);
+    // Siempre pedir el doc fresco: el pool puede traer caché sin horario o desactualizado.
     void getWorkCenterById(fetchId)
       .then((wc) => {
         if (!cancelled) setFetchedWorkCenter(wc);
+      })
+      .catch(() => {
+        if (!cancelled) setFetchedWorkCenter(null);
       })
       .finally(() => {
         if (!cancelled) setFetchingAssigned(false);
@@ -175,7 +177,20 @@ export function useWorkerAssignedStore() {
     return () => {
       cancelled = true;
     };
-  }, [salesPointRef, resolvedFromPool]);
+  }, [salesPointRef, resolvedFromPool, storeDocRefresh]);
+
+  useEffect(() => {
+    const bump = () => setStoreDocRefresh((n) => n + 1);
+    window.addEventListener('work-centers:changed', bump);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') bump();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.removeEventListener('work-centers:changed', bump);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
 
   return useMemo(() => {
     const employmentRef = String(user?.employment?.salesPointId || '').trim();
@@ -218,7 +233,8 @@ export function useWorkerAssignedStore() {
       resolvedWorkCenter = pool[0];
     }
 
-    const hasAssignment = Boolean(salesPointRef);
+    const hasAssignment = hasExplicitSiteAssignment(user?.employment)
+      || Boolean(String(memberSchedule?.work_center_id || '').trim());
     const storeLabel =
       scoped.pointsOfSale[0]?.name
       || resolvedWorkCenter?.name
@@ -227,11 +243,23 @@ export function useWorkerAssignedStore() {
 
     const workCenter =
       resolvedWorkCenter
-      || (hasAssignment ? stubAssignedWorkCenter(salesPointRef, storeLabel) : null);
+      || (hasAssignment && salesPointRef ? stubAssignedWorkCenter(salesPointRef, storeLabel) : null);
 
+    // Tienda de la contratación (employment) o PDV resuelto — NUNCA omitir si hay empleo.
+    const employmentStoreId = String(user?.employment?.salesPointId || '').trim().replace(/^wc:/, '');
+    const scheduleStoreId = String(memberSchedule?.work_center_id || '').trim().replace(/^wc:/, '');
     const assignedPdvId =
       scoped.pointsOfSale[0]?._id
+      || scoped.assignedPdvId
+      || employmentStoreId
       || (salesPointRef && !salesPointRef.startsWith('wc:') ? salesPointRef : '')
+      || scheduleStoreId
+      || '';
+    const assignedWorkCenterId =
+      String(resolvedWorkCenter?._id || resolvedWorkCenter?.id || '').trim()
+      || employmentStoreId
+      || scheduleStoreId
+      || (salesPointRef ? salesPointRef.replace(/^wc:/, '') : '')
       || '';
 
     // Horario de tienda = info del local (no candado de fichaje).
@@ -247,10 +275,10 @@ export function useWorkerAssignedStore() {
     const personalDayOff = Boolean(memberSchedule) && !personalShiftToday;
 
     /**
-     * Fichar con tienda asignada (employment, horario o única tienda del negocio).
-     * El horario de apertura no bloquea (contrato/trabajo fuera de franja permitido).
+     * Auto-fichaje del trabajador: no exige tienda (RRHH / sin PDV / aún sin asignar).
+     * La tienda es etiqueta opcional; el horario de local no bloquea.
      */
-    const canClockInEntry = !loading && hasAssignment;
+    const canClockInEntry = !loading;
 
     return {
       isDelivery,
@@ -261,6 +289,8 @@ export function useWorkerAssignedStore() {
       resolvedWorkCenter,
       storeLabel,
       assignedPdvId,
+      /** Centro de trabajo de la contratación (mismo id que salesPointId en invitación). */
+      assignedWorkCenterId,
       hasAssignment,
       /** true solo si viene de Equipo (employment.salesPointId), no de inferencia. */
       explicitAssignment,
@@ -274,7 +304,11 @@ export function useWorkerAssignedStore() {
       hasPersonalSchedule,
       personalDayOff,
       scheduleLoading,
-      showStoreBlock: isDelivery || pool.length > 0 || hasAssignment || !listsLoading,
+      /** Info útil: tienda asignada, turno personal u horario real del local. */
+      showStoreBlock:
+        hasAssignment
+        || hasPersonalSchedule
+        || Boolean(resolvedWorkCenter && hasOpeningHoursPayload(resolvedWorkCenter.openingHours)),
     };
   }, [
     isDelivery,

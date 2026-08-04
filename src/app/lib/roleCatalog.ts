@@ -21,6 +21,60 @@ export const ROLE_PERMISSION_OPTIONS = [
   { key: 'butcher_waste', label: 'Merma carnicería', description: 'Registrar y revisar mermas / caducados' },
 ] as const;
 
+/**
+ * Módulos de «Permisos de acceso» en ficha de trabajador.
+ * Alineados con TEAM_PERMISSION_KEYS (couchdb) + sala (FE).
+ * No incluir claves inventadas (dashboard, clockins, etc.): no están conectadas.
+ */
+export const VERTIAL_ACCESS_PERMISSION_MODULES = [
+  { key: 'vehicles', label: 'Vehículos' },
+  { key: 'clients', label: 'Clientes' },
+  { key: 'sales', label: 'Ventas' },
+  { key: 'reservations', label: 'Reservas' },
+  { key: 'documents', label: 'Documentos' },
+  { key: 'finance', label: 'Finanzas' },
+  { key: 'ancove', label: 'ANCOVE' },
+  { key: 'team', label: 'Equipo' },
+  { key: 'fleet', label: 'Flota / Reparto' },
+  { key: 'delivery', label: 'Delivery / Pedidos' },
+  { key: 'sala', label: 'Sala / Mesas' },
+  { key: 'cash_register', label: 'Caja / TPV' },
+  { key: 'cleaning_materials', label: 'Materiales limpieza' },
+  { key: 'acquisitions', label: 'Compras' },
+  { key: 'butcher_purchases', label: 'Compras carnicería' },
+  { key: 'butcher_waste', label: 'Merma carnicería' },
+  { key: 'reports', label: 'Informes' },
+  { key: 'scrapyard', label: 'Desguace' },
+  { key: 'scrapyard_docs', label: 'Docs desguace' },
+  { key: 'workshop', label: 'Taller' },
+] as const;
+
+export type VertialAccessPermissionKey = (typeof VERTIAL_ACCESS_PERMISSION_MODULES)[number]['key'];
+
+/** Lista de módulos de acceso según vertical (clientes/finanzas siempre disponibles). */
+export function getVertialAccessPermissionModules(businessType?: string | null) {
+  const type = String(businessType || '');
+  const isButcher = type === 'butcherShop';
+  const isScrap = type === 'scrapyard';
+  const isCleaning = type === 'cleaning';
+  const isAuto = type === 'carDealership' || type === 'workshop' || type === 'spareParts';
+  const isRestaurant = isRestaurantBusinessType(businessType);
+
+  return VERTIAL_ACCESS_PERMISSION_MODULES.filter((module) => {
+    if (module.key === 'butcher_purchases' || module.key === 'butcher_waste') return isButcher;
+    if (module.key === 'scrapyard' || module.key === 'scrapyard_docs') return isScrap;
+    if (module.key === 'cleaning_materials') return isCleaning;
+    if (module.key === 'ancove' || module.key === 'vehicles' || module.key === 'workshop') {
+      return isAuto || !type;
+    }
+    if (module.key === 'sala' || module.key === 'reservations') {
+      return isRestaurant || !type;
+    }
+    // clients, finance, sales, documents, team, delivery, cash_register, reports, fleet, acquisitions…
+    return true;
+  });
+}
+
 export const SCRAPYARD_PERMISSION_OPTIONS = [
   { key: 'scrapyard.entry.full', label: 'Entrada completa', description: 'Registrar, revisar y validar entradas' },
   { key: 'scrapyard.entry.basic', label: 'Entrada basica', description: 'Registrar entrada basica y fotos' },
@@ -201,9 +255,11 @@ export function formatRoleAccessSummary(
   if (
     roleId === 'Admin'
     || roleId === 'Gerente'
+    || roleId === 'GerenteGrupo'
     || roleId === 'Administrador'
     || roleId === 'Encargado'
     || roleId === 'Gestor'
+    || roleId === 'Superadmin'
   ) {
     return 'Acceso completo al negocio';
   }
@@ -244,9 +300,11 @@ export function buildRolePermissionsMatrix(role = 'Usuario', roleDefinitions: Ro
   const allEnabled =
     role === 'Admin'
     || role === 'Gerente'
+    || role === 'GerenteGrupo'
     || role === 'Administrador'
     || role === 'Encargado'
-    || role === 'Gestor';
+    || role === 'Gestor'
+    || role === 'Superadmin';
 
   const base = Object.fromEntries(
     ROLE_PERMISSION_OPTIONS.map((option) => [option.key, { view: allEnabled, edit: allEnabled }]),

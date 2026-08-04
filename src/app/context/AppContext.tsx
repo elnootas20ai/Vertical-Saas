@@ -2564,19 +2564,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(authUser?.user_id),
   });
 
-  // Push nativo/web: solo CEO/empresa. Trabajadores (código) no registran token.
-  const ceoPushUserId = authUser && !isWorkerAccount(authUser) ? (authUser.user_id ?? null) : null;
+  // Push nativo/web: CEO y trabajador (nómina, contrato, avisos personales).
+  const pushUserId = authUser?.user_id ?? null;
   usePushNotifications({
-    userId: ceoPushUserId,
-    token: ceoPushUserId ? sseToken : null,
+    userId: pushUserId,
+    token: pushUserId ? sseToken : null,
   });
   useNativePushNotifications({
-    userId: ceoPushUserId,
-    token: ceoPushUserId ? sseToken : null,
+    userId: pushUserId,
+    token: pushUserId ? sseToken : null,
   });
-
-  // Gate de permiso del sistema: también solo CEO
-  // (PushPermissionGate se monta abajo y filtra trabajadores)
 
   const refreshClients = async () => {
     if (!authUser?.user_id) return;
@@ -2635,7 +2632,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={value}>
       {children}
-      <PushPermissionGate userId={ceoPushUserId} />
+      <PushPermissionGate userId={pushUserId} />
     </AppContext.Provider>
   );
 }

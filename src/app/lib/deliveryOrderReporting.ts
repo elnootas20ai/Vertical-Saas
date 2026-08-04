@@ -1,3 +1,5 @@
+import { displayBrandName } from './brandLabels';
+
 export {
   normalizeReportCategory,
   reportCategoryLabel,
@@ -15,7 +17,5 @@ export function brandDisplayName(
   brandId: string,
   labels: Record<string, string> | null | undefined,
 ): string {
-  const id = String(brandId || '').trim();
-  if (!id) return '';
-  return String(labels?.[id] || '').trim() || id;
+  return displayBrandName(brandId, labels);
 }

@@ -145,10 +145,16 @@ export interface VacationSettings {
   /** Días mínimos de antelación respecto a hoy. */
   minNoticeDays?: number;
   /**
-   * Meses mínimos de alta en la empresa antes de poder pedir vacaciones.
+   * Meses mínimos de alta (fecha de contrato) antes de poder pedir vacaciones.
    * 0 = sin mínimo. Valores típicos: 2, 3 o 4.
    */
   minTenureMonthsForVacation?: number;
+  /**
+   * Días naturales mínimos desde el alta (contrato) antes de poder pedir vacaciones.
+   * Bloquea si el trabajador solo lleva 2–3–4 días. 0 = sin mínimo por días.
+   * Se combina con `minTenureMonthsForVacation` (hay que cumplir ambos si ambos > 0).
+   */
+  minTenureDaysForVacation?: number;
   /**
    * false (predeterminado): solo se pueden pedir días ya generados.
    * true: permite pedir por encima del saldo (RRHH decide al aprobar).
@@ -210,6 +216,10 @@ export function normalizeVacationSettings(settings: VacationSettings): VacationS
       0,
       Math.min(24, Math.floor(Number(settings.minTenureMonthsForVacation ?? 2))),
     ),
+    minTenureDaysForVacation: Math.max(
+      0,
+      Math.min(365, Math.floor(Number(settings.minTenureDaysForVacation ?? 0))),
+    ),
     allowRequestUnaccrued: settings.allowRequestUnaccrued === true,
     leaveTypePolicies,
     allowances: settings.allowances && typeof settings.allowances === 'object' ? settings.allowances : {},
@@ -230,6 +240,110 @@ export function vacationEligibleFromDate(
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/** Fecha (YYYY-MM-DD) tras `days` naturales desde el alta (incluido el día de alta = día 1). */
+export function vacationEligibleFromDays(
+  employmentStartDate: string | null | undefined,
+  days: number,
+): string | null {
+  const start = String(employmentStartDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || days <= 0) return null;
+  const d = new Date(`${start}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  // Día 1 = alta; pedible a partir del día N → sumar (N - 1).
+  d.setDate(d.getDate() + Math.max(0, days - 1));
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Días naturales de alta cumplidos hasta `asOf` (alta = 1). */
+export function countTenureDaysSinceHire(
+  employmentStartDate: string | null | undefined,
+  asOf: Date = new Date(),
+): number | null {
+  const start = String(employmentStartDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return null;
+  const a = new Date(`${start}T12:00:00`);
+  if (Number.isNaN(a.getTime())) return null;
+  const b = new Date(asOf);
+  b.setHours(12, 0, 0, 0);
+  if (b < a) return 0;
+  return Math.floor((b.getTime() - a.getTime()) / 86_400_000) + 1;
+}
+
+export type VacationTenureGate = {
+  ok: boolean;
+  /** Fecha a partir de la cual ya puede pedir (la más restrictiva). */
+  eligibleFrom: string | null;
+  /** Mensaje corto para UI del trabajador. */
+  message: string | null;
+  daysWorked: number | null;
+  minDays: number;
+  minMonths: number;
+};
+
+/**
+ * Política de antigüedad: meses y/o días desde el alta del contrato.
+ * Si ambos > 0, hay que cumplir los dos (la fecha efectiva es la más tardía).
+ */
+export function resolveVacationTenureGate(
+  settings: VacationSettings | null | undefined,
+  employmentStartDate?: string | null,
+  asOf: Date = new Date(),
+): VacationTenureGate {
+  const normalized = settings ? normalizeVacationSettings(settings) : null;
+  const minMonths = Number(normalized?.minTenureMonthsForVacation || 0);
+  const minDays = Number(normalized?.minTenureDaysForVacation || 0);
+  const emp = String(employmentStartDate || '').slice(0, 10);
+  const daysWorked = countTenureDaysSinceHire(emp, asOf);
+
+  if (minMonths <= 0 && minDays <= 0) {
+    return { ok: true, eligibleFrom: null, message: null, daysWorked, minDays: 0, minMonths: 0 };
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(emp)) {
+    return {
+      ok: false,
+      eligibleFrom: null,
+      message: 'No se pueden pedir vacaciones: falta la fecha de alta en tu ficha de equipo.',
+      daysWorked: null,
+      minDays,
+      minMonths,
+    };
+  }
+
+  const fromMonths = minMonths > 0 ? vacationEligibleFromDate(emp, minMonths) : null;
+  const fromDays = minDays > 0 ? vacationEligibleFromDays(emp, minDays) : null;
+  const candidates = [fromMonths, fromDays].filter(Boolean) as string[];
+  const eligibleFrom = candidates.length ? candidates.sort().slice(-1)[0] : null;
+
+  const y = asOf.getFullYear();
+  const m = String(asOf.getMonth() + 1).padStart(2, '0');
+  const d = String(asOf.getDate()).padStart(2, '0');
+  const todayIso = `${y}-${m}-${d}`;
+
+  if (eligibleFrom && todayIso < eligibleFrom) {
+    const parts: string[] = [];
+    if (minDays > 0) parts.push(`${minDays} día(s) desde el alta`);
+    if (minMonths > 0) parts.push(`${minMonths} mes(es) de alta`);
+    const workedHint =
+      daysWorked != null && daysWorked > 0
+        ? ` Llevas ${daysWorked} día(s) trabajado(s) desde el contrato.`
+        : '';
+    return {
+      ok: false,
+      eligibleFrom,
+      message: `Vacaciones a partir del ${formatDateEs(eligibleFrom)} (política: ${parts.join(' y ')}).${workedHint}`,
+      daysWorked,
+      minDays,
+      minMonths,
+    };
+  }
+
+  return { ok: true, eligibleFrom, message: null, daysWorked, minDays, minMonths };
 }
 
 export function validateVacationRequestPolicy(
@@ -296,24 +410,10 @@ export function validateVacationRequestPolicy(
     }
   }
 
-  const minTenure = Number(normalized?.minTenureMonthsForVacation || 0);
-  if (isVacation && minTenure > 0) {
-    const empStart = String(options?.employmentStartDate || '').slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(empStart)) {
-      return {
-        ok: false,
-        error: 'No se pueden pedir vacaciones: falta la fecha de alta en tu ficha de equipo.',
-      };
-    }
-    const eligibleFrom = vacationEligibleFromDate(empStart, minTenure);
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
-    const todayIso = today.toISOString().slice(0, 10);
-    if (eligibleFrom && todayIso < eligibleFrom) {
-      return {
-        ok: false,
-        error: `Las vacaciones se pueden pedir tras ${minTenure} mes(es) de alta (a partir del ${formatDateEs(eligibleFrom)}).`,
-      };
+  if (isVacation) {
+    const gate = resolveVacationTenureGate(normalized, options?.employmentStartDate);
+    if (!gate.ok) {
+      return { ok: false, error: gate.message || 'Aún no puedes pedir vacaciones según la política de la empresa.' };
     }
   }
 
@@ -516,8 +616,6 @@ export async function createVacationRequest(
         })
         .join('; ')}${teamOverlaps.length > 5 ? ` (+${teamOverlaps.length - 5})` : ''}`,
     );
-  } else {
-    summaryParts.push('Nadie más del equipo tiene ausencia activa en esas fechas');
   }
   const conflictSummary = summaryParts.filter(Boolean).join(' · ') || undefined;
 
@@ -805,6 +903,7 @@ function buildDefaultVacationSettings(businessId: string): VacationSettings {
     onlyWeekdays: false,
     minNoticeDays: 7,
     minTenureMonthsForVacation: 2,
+    minTenureDaysForVacation: 0,
     allowRequestUnaccrued: false,
     leaveTypePolicies: mergeLeaveTypePolicies(null),
     createdAt: now,
@@ -911,23 +1010,13 @@ export type VacationBalanceOptions = {
   scheduleWeeklyHours?: number | null;
 };
 
-/** ¿Ya puede pedir vacaciones según meses de alta de la empresa? */
+/** ¿Ya puede pedir vacaciones según política de antigüedad (días y/o meses desde el alta)? */
 export function isVacationTenureEligible(
   settings: VacationSettings | null | undefined,
   employmentStartDate?: string | null,
   asOf: Date = new Date(),
 ): boolean {
-  const normalized = settings ? normalizeVacationSettings(settings) : null;
-  const months = Number(normalized?.minTenureMonthsForVacation || 0);
-  if (months <= 0) return true;
-  const emp = String(employmentStartDate || '').slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(emp)) return false;
-  const eligibleFrom = vacationEligibleFromDate(emp, months);
-  if (!eligibleFrom) return false;
-  const y = asOf.getFullYear();
-  const m = String(asOf.getMonth() + 1).padStart(2, '0');
-  const d = String(asOf.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}` >= eligibleFrom;
+  return resolveVacationTenureGate(settings, employmentStartDate, asOf).ok;
 }
 
 function contractFromBalanceOptions(
@@ -977,8 +1066,8 @@ export function getMemberVacationBalance(
       contract: contractFromBalanceOptions(options),
     },
   );
-  // Hasta cumplir meses de alta: pedibles = 0 (también con cupo manual).
-  // Si RRHH quiere permitir antes: minTenureMonthsForVacation = 0 o allowRequestUnaccrued.
+  // Hasta cumplir antigüedad (días/meses de alta): pedibles = 0.
+  // Si RRHH quiere permitir antes: minTenure* = 0 o allowRequestUnaccrued.
   const asOfDate =
     typeof options?.asOf === 'string'
       ? new Date(`${String(options.asOf).slice(0, 10)}T12:00:00`)

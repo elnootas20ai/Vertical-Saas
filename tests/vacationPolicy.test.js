@@ -4,7 +4,10 @@ import {
   countNaturalDays,
   countBusinessDays,
   countVacationRequestDays,
+  countTenureDaysSinceHire,
+  resolveVacationTenureGate,
   validateVacationRequestPolicy,
+  vacationEligibleFromDays,
 } from '../src/app/lib/vacationsApi.ts';
 
 describe('vacationPolicy (MVP calendario)', () => {
@@ -30,6 +33,7 @@ describe('vacationPolicy (MVP calendario)', () => {
     maxConsecutiveDays: 14,
     minNoticeDays: 0,
     minTenureMonthsForVacation: 0,
+    minTenureDaysForVacation: 0,
     onlyWeekdays: false,
     ...extra,
   });
@@ -125,6 +129,53 @@ describe('vacationPolicy (MVP calendario)', () => {
       { employmentStartDate: oldHire.toISOString().slice(0, 10) },
     );
     expect(ok).toEqual({ ok: true });
+  });
+
+  it('bloquea si solo lleva pocos días desde el alta (política por días)', () => {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+    const far = new Date(today);
+    far.setDate(far.getDate() + 14);
+    const start = far.toISOString().slice(0, 10);
+
+    const hire3 = new Date(today);
+    hire3.setDate(hire3.getDate() - 2); // día 3 de alta
+    const hireIso = hire3.toISOString().slice(0, 10);
+    expect(countTenureDaysSinceHire(hireIso, today)).toBe(3);
+    expect(vacationEligibleFromDays(hireIso, 30)).toBeTruthy();
+
+    const bad = validateVacationRequestPolicy(
+      start,
+      start,
+      vacSettings({ maxConsecutiveDays: 0, minTenureDaysForVacation: 30 }),
+      'vacation',
+      { employmentStartDate: hireIso },
+    );
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toMatch(/día/);
+
+    const hire40 = new Date(today);
+    hire40.setDate(hire40.getDate() - 39);
+    const ok = validateVacationRequestPolicy(
+      start,
+      start,
+      vacSettings({ maxConsecutiveDays: 0, minTenureDaysForVacation: 30 }),
+      'vacation',
+      { employmentStartDate: hire40.toISOString().slice(0, 10) },
+    );
+    expect(ok).toEqual({ ok: true });
+  });
+
+  it('resolveVacationTenureGate combina días y meses (la fecha más tarde)', () => {
+    const asOf = new Date('2026-08-04T12:00:00');
+    const gate = resolveVacationTenureGate(
+      vacSettings({ minTenureDaysForVacation: 14, minTenureMonthsForVacation: 2 }),
+      '2026-08-01',
+      asOf,
+    );
+    expect(gate.ok).toBe(false);
+    expect(gate.daysWorked).toBe(4);
+    expect(gate.eligibleFrom).toBe('2026-10-01'); // 2 meses gana sobre 14 días
   });
 
   it('bloquea fines de semana si onlyWeekdays', () => {

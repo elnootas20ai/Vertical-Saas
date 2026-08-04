@@ -256,7 +256,9 @@ export function buildTicketDocument({
     dateLabel: date,
     issuer: resolveTicketIssuer(business),
     taxId: business.taxId || '',
-    addressLine: [business.address, business.city].filter(Boolean).join(', '),
+    // No imprimir dirección del emisor (suele ser domicilio de dueño/trabajador).
+    // La dirección del CLIENTE (domicilio) va en customerAddress.
+    addressLine: '',
     phone: business.phone || '',
     salesPointName: salesPointName || order.salesPointName || '',
     orderNumber: order.orderNumber || '',

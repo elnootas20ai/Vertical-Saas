@@ -63,7 +63,12 @@ export function resolveWorkerWorkCenter(
 ): WorkCenter | null {
   const ref = String(salesPointRef || '').trim();
   if (!ref) return null;
-  const matches = workCenters.filter((wc) => wc._id === ref || wc.id === ref);
+  const bare = ref.startsWith('wc:') ? ref.slice(3) : ref;
+  const matches = workCenters.filter((wc) => {
+    const id = String(wc._id || '').trim();
+    const alt = String(wc.id || '').trim();
+    return id === ref || alt === ref || id === bare || alt === bare;
+  });
   if (matches.length === 0) return null;
   return matches.reduce((best, wc) => preferRicherWorkCenter(best, wc));
 }
@@ -97,8 +102,8 @@ export function formatStoreHoursToday(
 ): StoreHoursToday {
   if (!hasOpeningHoursPayload(workCenter?.openingHours)) {
     return {
-      label: 'Horario de tienda no definido',
-      headline: 'Horario de tienda no definido',
+      label: 'Sin horario de apertura',
+      headline: 'Sin horario de apertura',
       open: false,
       openForClockIn: true,
       storeOpenNow: false,

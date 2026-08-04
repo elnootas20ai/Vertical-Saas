@@ -1,7 +1,6 @@
 /**
  * Permiso de notificaciones nativo (iOS/Android) / navegador:
- * pide el diálogo del sistema UNA sola vez por cuenta CEO/empresa.
- * Trabajadores (código) no lo piden de momento.
+ * pide el diálogo del sistema UNA sola vez por cuenta (CEO o trabajador).
  */
 import { useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -12,9 +11,6 @@ import {
   readPushConsent,
   writePushConsent,
 } from '../../lib/pushPermissionConsent';
-import { useAuth } from '../../context/AuthContext';
-import { isWorkerAccount } from '../../lib/authApi';
-
 const ASK_DELAY_MS = 1600;
 
 async function systemReceiveStatus(): Promise<'granted' | 'denied' | 'prompt' | 'unsupported'> {
@@ -56,12 +52,9 @@ function triggerPushRegister(): void {
 
 export function PushPermissionGate({ userId }: { userId: string | null }) {
   const ranForUserRef = useRef<string | null>(null);
-  const { user } = useAuth();
-  const isWorker = isWorkerAccount(user);
 
   useEffect(() => {
-    // Solo CEO / cuenta empresa. Trabajadores (código) → sin pedirlo de momento.
-    if (!userId || isWorker) return;
+    if (!userId) return;
     if (ranForUserRef.current === userId) return;
 
     let cancelled = false;
@@ -127,7 +120,7 @@ export function PushPermissionGate({ userId }: { userId: string | null }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [userId, isWorker]);
+  }, [userId]);
 
   return null;
 }

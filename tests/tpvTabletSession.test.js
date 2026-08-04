@@ -5,6 +5,7 @@ import {
   TPV_TABLET_RESTAURANT_PATH,
   exitTpvTabletSessionPath,
   isTpvTabletAllowedPath,
+  isTpvTabletBindingAllowedForAuth,
   isTpvTabletWorkerPath,
   leaveTpvTabletSession,
   resolveTpvTabletWorkerPath,
@@ -35,6 +36,35 @@ describe('tpvTabletSession — rutas tablet', () => {
 
   afterEach(() => {
     clearTpvTabletBinding();
+  });
+
+  it('trabajador que activó el código entra aunque businesses no traiga members', () => {
+    const binding = {
+      terminalCode: 'CANYRP',
+      pdvId: 'pdv-1',
+      workCenterId: 'wc-1',
+      businessId: 'biz-1',
+      dataUserId: 'owner-1',
+      authUserId: 'worker-1',
+      tpvVertical: 'delivery',
+      boundAt: new Date().toISOString(),
+    };
+    expect(
+      isTpvTabletBindingAllowedForAuth({
+        binding,
+        authUser: { user_id: 'worker-1' },
+        businesses: [{ business_id: 'biz-1', owner_user_id: 'owner-1', members: [] }],
+        businessesSettled: true,
+      }),
+    ).toBe(true);
+    expect(
+      isTpvTabletBindingAllowedForAuth({
+        binding,
+        authUser: { user_id: 'otro-worker' },
+        businesses: [{ business_id: 'biz-1', owner_user_id: 'owner-1', members: [] }],
+        businessesSettled: true,
+      }),
+    ).toBe(false);
   });
 
   it('isTpvTabletWorkerPath reconoce delivery, restaurant y prefijo worker/tpv', () => {
