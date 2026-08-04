@@ -121,7 +121,7 @@ function fromStoredPromotion(p: StoredPromotion): Promotion {
     discountValue: Number(p.discountValue || 0),
     code: p.code || undefined,
     startDate: p.startDate || defaultStartDate(),
-    endDate: p.endDate || defaultEndDate(),
+    endDate: p.endDate || '',
     maxUses: p.maxUses ?? null,
     currentUses: Number(p.currentUses || 0),
     targetAudience: 'all',
@@ -173,16 +173,25 @@ function formatCurrency(v: number) {
 }
 
 function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
+  if (!String(iso || '').trim()) return 'Permanente';
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return 'Permanente';
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function formatDateInput(iso: string) {
+  if (!iso) return '';
   return iso.slice(0, 10);
 }
 
 function daysUntil(iso: string) {
+  if (!String(iso || '').trim()) return Number.POSITIVE_INFINITY;
   const diff = new Date(iso).getTime() - Date.now();
   return Math.ceil(diff / 86400000);
+}
+
+function isPermanentPromo(p: { endDate?: string | null }) {
+  return !String(p.endDate || '').trim();
 }
 
 function defaultStartDate() {
@@ -479,6 +488,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
     code: '',
     startDate: defaultStartDate(),
     endDate: defaultEndDate(),
+    permanent: false,
     maxUses: '' as string,
     targetAudience: 'all' as Promotion['targetAudience'],
     weekdays: [] as PromoWeekday[],
@@ -490,7 +500,8 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   function resetForm() {
     setForm({
       name: '', description: '', type: 'percentage', discountValue: 10, code: '',
-      startDate: defaultStartDate(), endDate: defaultEndDate(), maxUses: '', targetAudience: 'all',
+      startDate: defaultStartDate(), endDate: defaultEndDate(), permanent: false,
+      maxUses: '', targetAudience: 'all',
       weekdays: [], productNamesText: '', fixedUnitPrice: 11, applyAuto: true,
     });
     setEditingId(null);
@@ -538,8 +549,16 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       showToast('El nombre de la promoción es obligatorio', 'error');
       return;
     }
-    if (!form.startDate || !form.endDate) {
-      showToast('Las fechas de inicio y fin son obligatorias', 'error');
+    if (!form.startDate) {
+      showToast('La fecha de inicio es obligatoria', 'error');
+      return;
+    }
+    if (!form.permanent && !form.endDate) {
+      showToast('Indica fecha fin, o marca «Permanente»', 'error');
+      return;
+    }
+    if (form.permanent && !String(form.code || '').trim()) {
+      showToast('Un código permanente necesita un código (ej. VERANO10)', 'error');
       return;
     }
     const productNames = parseProductNames(form.productNamesText);
@@ -566,7 +585,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
         discountValue: form.type === 'fixed_unit_price' ? Number(form.fixedUnitPrice) : form.discountValue,
         code: form.code || undefined,
         startDate: new Date(form.startDate).toISOString(),
-        endDate: new Date(form.endDate + 'T23:59:59').toISOString(),
+        endDate: form.permanent ? '' : new Date(form.endDate + 'T23:59:59').toISOString(),
         maxUses: form.maxUses ? parseInt(form.maxUses) : null,
         currentUses: 0,
         targetAudience: form.targetAudience,
@@ -594,6 +613,18 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       showToast('El nombre es obligatorio', 'error');
       return;
     }
+    if (!form.startDate) {
+      showToast('La fecha de inicio es obligatoria', 'error');
+      return;
+    }
+    if (!form.permanent && !form.endDate) {
+      showToast('Indica fecha fin, o marca «Permanente»', 'error');
+      return;
+    }
+    if (form.permanent && !String(form.code || '').trim()) {
+      showToast('Un código permanente necesita un código (ej. VERANO10)', 'error');
+      return;
+    }
     const productNames = parseProductNames(form.productNamesText);
     if (form.type === 'fixed_unit_price') {
       if (!(form.fixedUnitPrice > 0)) {
@@ -618,7 +649,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                 discountValue: form.type === 'fixed_unit_price' ? Number(form.fixedUnitPrice) : form.discountValue,
                 code: form.code || undefined,
                 startDate: new Date(form.startDate).toISOString(),
-                endDate: new Date(form.endDate + 'T23:59:59').toISOString(),
+                endDate: form.permanent ? '' : new Date(form.endDate + 'T23:59:59').toISOString(),
                 maxUses: form.maxUses ? parseInt(form.maxUses) : null,
                 targetAudience: form.targetAudience,
                 weekdays: form.weekdays.length > 0 ? [...form.weekdays] : undefined,
@@ -641,14 +672,16 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   }, [editingId, form, promotions]);
 
   function handleEdit(promo: Promotion) {
+    const permanent = isPermanentPromo(promo);
     setForm({
       name: promo.name,
       description: promo.description,
       type: promo.type,
       discountValue: promo.discountValue,
       code: promo.code || '',
-      startDate: formatDateInput(promo.startDate),
-      endDate: formatDateInput(promo.endDate),
+      startDate: formatDateInput(promo.startDate) || defaultStartDate(),
+      endDate: permanent ? defaultEndDate() : (formatDateInput(promo.endDate) || defaultEndDate()),
+      permanent,
       maxUses: promo.maxUses ? String(promo.maxUses) : '',
       targetAudience: promo.targetAudience,
       weekdays: promo.weekdays || [],
@@ -711,6 +744,31 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
         {/* ═══════════════════════════════════════════ LIST VIEW */}
         {activeView === 'list' && (
           <>
+            <div className="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3.5 dark:border-stone-700 dark:bg-stone-900/50">
+              <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+                Cómo se usan en el TPV
+              </p>
+              <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-stone-600 dark:text-stone-400">
+                <li>
+                  <span className="font-semibold text-stone-800 dark:text-stone-200">Código:</span>{' '}
+                  crea aquí una promo <span className="font-medium">Activa</span> con un código
+                  (ej. VERANO10). En el TPV → Promoción → Código aparece en una lista para
+                  elegirlo (sin teclear). Las sin fecha fin salen primero. También puedes
+                  «Otro (escribir)» si hace falta.
+                </li>
+                <li>
+                  <span className="font-semibold text-stone-800 dark:text-stone-200">Cliente:</span>{' '}
+                  el desplegable «Cliente» del TPV no usa esta pantalla. Se crea en{' '}
+                  <span className="font-medium">Clientes → ficha → pestaña Promociones</span>.
+                </li>
+                <li>
+                  <span className="font-semibold text-stone-800 dark:text-stone-200">Sin código:</span>{' '}
+                  si marcas «Aplicar sola en el TPV», el descuento puede entrar automático (según
+                  reglas). Si quieres usarla a mano, pon siempre un código.
+                </li>
+              </ul>
+            </div>
+
             {/* Filters + New button */}
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative flex-1 min-w-48">
@@ -835,14 +893,27 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                             </td>
                             <td className="px-4 py-3"><StatusBadge status={promo.status} /></td>
                             <td className="px-4 py-3">
-                              <p className="text-xs text-slate-600 dark:text-slate-400">{formatDate(promo.startDate)} – {formatDate(promo.endDate)}</p>
-                              {promo.status === 'active' && remaining > 0 && (
-                                <p className={`text-xs ${remaining <= 7 ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}>
-                                  {remaining} días restantes
-                                </p>
-                              )}
-                              {promo.status === 'active' && remaining <= 0 && (
-                                <p className="text-xs text-red-500">Vencida</p>
+                              {isPermanentPromo(promo) ? (
+                                <>
+                                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                                    Desde {formatDate(promo.startDate)}
+                                  </p>
+                                  <span className="inline-flex mt-0.5 items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                                    Permanente
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-xs text-slate-600 dark:text-slate-400">{formatDate(promo.startDate)} – {formatDate(promo.endDate)}</p>
+                                  {promo.status === 'active' && Number.isFinite(remaining) && remaining > 0 && (
+                                    <p className={`text-xs ${remaining <= 7 ? 'text-amber-500' : 'text-slate-400 dark:text-slate-500'}`}>
+                                      {remaining} días restantes
+                                    </p>
+                                  )}
+                                  {promo.status === 'active' && Number.isFinite(remaining) && remaining <= 0 && (
+                                    <p className="text-xs text-red-500">Vencida</p>
+                                  )}
+                                </>
                               )}
                             </td>
                             <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -1066,21 +1137,28 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                       </div>
                     </div>
                     <div className="md:col-span-2">
-                      <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
+                      <label className="inline-flex items-start gap-2 text-sm text-slate-700 dark:text-slate-200 cursor-pointer">
                         <input
                           type="checkbox"
                           checked={form.applyAuto}
                           onChange={(e) => setForm((f) => ({ ...f, applyAuto: e.target.checked }))}
-                          className="rounded border-slate-300"
+                          className="mt-0.5 rounded border-slate-300"
                         />
-                        Aplicar sola en el TPV (sin código)
+                        <span>
+                          Aplicar sola en el TPV (sin teclear código)
+                          <span className="mt-0.5 block text-[11px] font-normal text-stone-500">
+                            Si quieres que el cajero la active a mano, deja un código y no marques esto.
+                          </span>
+                        </span>
                       </label>
                     </div>
                   </>
                 )}
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Código promocional</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    Código promocional{form.permanent ? ' *' : ''}
+                  </label>
                   <div className="flex gap-2">
                     <input
                       value={form.code}
@@ -1096,6 +1174,12 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                       Generar
                     </button>
                   </div>
+                  <p className="mt-1.5 text-[11px] leading-relaxed text-stone-500 dark:text-stone-400">
+                    En el TPV (Promoción → Código) saldrá en la lista para elegirlo.
+                    Déjala Activa. Marca «Permanente» en el paso 4 si no debe caducar
+                    (sigue haciendo falta el código). Para el desplegable «Cliente» del TPV,
+                    créala en la ficha del cliente.
+                  </p>
                 </div>
 
                 <div>
@@ -1145,6 +1229,28 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                 <span className="w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs flex items-center justify-center font-bold">4</span>
                 Periodo de validez
               </h2>
+              <label className="mb-4 flex items-start gap-3 rounded-xl border border-slate-200 dark:border-gray-700 bg-stone-50/80 dark:bg-gray-900/40 px-3 py-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.permanent}
+                  onChange={(e) => {
+                    const permanent = e.target.checked;
+                    setForm((f) => ({
+                      ...f,
+                      permanent,
+                      endDate: permanent ? '' : (f.endDate || defaultEndDate()),
+                    }));
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500/40"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-slate-800 dark:text-slate-100">Permanente</span>
+                  <span className="block text-[11px] leading-relaxed text-stone-500 dark:text-stone-400 mt-0.5">
+                    Sin fecha de caducidad. El código sigue existiendo y se puede usar en el TPV
+                    hasta que desactives o pauses la promoción.
+                  </span>
+                </span>
+              </label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Fecha inicio *</label>
@@ -1156,13 +1262,19 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">Fecha fin *</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    Fecha fin {form.permanent ? '' : '*'}
+                  </label>
                   <input
                     type="date"
-                    value={form.endDate}
-                    onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
-                    className="w-full text-sm border border-slate-200 dark:border-gray-700 dark:bg-gray-900 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400"
+                    value={form.permanent ? '' : form.endDate}
+                    disabled={form.permanent}
+                    onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value, permanent: false }))}
+                    className="w-full text-sm border border-slate-200 dark:border-gray-700 dark:bg-gray-900 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-400 disabled:opacity-50 disabled:cursor-not-allowed"
                   />
+                  {form.permanent && (
+                    <p className="mt-1 text-[11px] text-emerald-700 dark:text-emerald-400">Sin caducidad</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1269,7 +1381,15 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">Fin</p>
-                    <p className="font-medium text-slate-900 dark:text-slate-100">{formatDate(selectedPromo.endDate)}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-100">
+                      {isPermanentPromo(selectedPromo) ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                          Permanente
+                        </span>
+                      ) : (
+                        formatDate(selectedPromo.endDate)
+                      )}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">Público</p>
@@ -1323,8 +1443,10 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                   <div className="space-y-4">
                     <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-slate-200 dark:border-gray-700">
                       <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Asignar al cliente (TPV)</h4>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                        El gerente asigna un código activo a un cliente y en TPV rápido se aplicará automáticamente al seleccionarlo.
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 leading-relaxed">
+                        Deja este código listo cuando elijan ese cliente en el TPV (modo Código
+                        preactivado). No es el desplegable «Cliente»: ese se gestiona en
+                        Clientes → ficha → Promociones.
                       </p>
                       <div className="flex flex-col sm:flex-row gap-2">
                         <select
@@ -1476,7 +1598,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
   }
 
   return (
-    <Layout title="Promociones" subtitle="Gestiona campañas, descuentos y códigos promocionales" noPadding>
+    <Layout title="Promociones" subtitle="Códigos y descuentos de la empresa para el TPV" noPadding>
       {pageBody}
     </Layout>
   );

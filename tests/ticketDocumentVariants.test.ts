@@ -88,8 +88,9 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('Envio a domicilio');
     expect(text).toContain('Tel: 666123456');
     expect(text).toContain('Pizza Margarita');
-    expect(text).toContain('Extra queso');
-    expect(text).toContain('DE MAS');
+    expect(text).toContain('1x Pizza Margarita');
+    expect(text).toContain('EXTRA DE queso');
+    expect(text).not.toContain('DE MAS');
     expect(text).toContain('DE MENOS');
     expect(text).toContain('cebolla');
     expect(text).toContain('Bien hecha');

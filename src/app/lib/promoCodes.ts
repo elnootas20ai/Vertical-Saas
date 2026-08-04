@@ -198,6 +198,44 @@ export function findActivePromotionByCode(codeRaw: string): AppliedPromo | null 
   };
 }
 
+/**
+ * Promos de empresa con código, activas ahora, para elegir en TPV (sin teclear).
+ * Primero las “permanentes” (sin fecha fin); luego las que tienen caducidad.
+ */
+export function listSelectableCompanyPromoCodes(opts?: {
+  salesPointId?: string | null;
+  relatedSalesPointIds?: Array<string | null | undefined>;
+  now?: Date;
+}): AppliedPromo[] {
+  const now = opts?.now || new Date();
+  const salesPointId = opts?.salesPointId;
+  const related = opts?.relatedSalesPointIds || [];
+  const promos = readStoredPromotions().filter((p) => {
+    const code = String(p.code || '').trim();
+    if (!code) return false;
+    if (!isPromotionActiveNow(p, now)) return false;
+    // Solo auto sin código útil: si applyMode es auto y no hay código, ya filtrado.
+    // Con código, se puede elegir a mano aunque también sea auto.
+    if (!promoAppliesToSalesPoint(p, salesPointId, related)) return false;
+    return true;
+  });
+
+  const toApplied = (p: StoredPromotion): AppliedPromo => ({
+    id: p.id,
+    name: p.name,
+    type: p.type,
+    code: String(p.code || '').trim(),
+    discountValue: Number(p.discountValue || 0),
+  });
+
+  const permanent = promos.filter((p) => !String(p.endDate || '').trim());
+  const dated = promos.filter((p) => String(p.endDate || '').trim());
+  const sortByName = (a: StoredPromotion, b: StoredPromotion) =>
+    String(a.name || '').localeCompare(String(b.name || ''), 'es');
+
+  return [...permanent.sort(sortByName), ...dated.sort(sortByName)].map(toApplied);
+}
+
 export function computePromoDiscount(total: number, promo: AppliedPromo | null): { discount: number; finalTotal: number } {
   const base = Number.isFinite(total) ? Math.max(0, total) : 0;
   if (!promo) return { discount: 0, finalTotal: base };

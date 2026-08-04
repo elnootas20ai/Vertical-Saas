@@ -4,6 +4,7 @@ import {
   distributeOrderLineTotals,
   filterOrdersForRegisterSession,
   orderLineDiscountRatio,
+  resolveOrderCashCardAmounts,
 } from '../src/app/lib/registerShiftSalesBreakdown.ts';
 import { reconcileRegisterTotals } from '../src/app/lib/tpvCajaMath.js';
 
@@ -138,6 +139,24 @@ describe('registerShiftSalesBreakdown', () => {
 
   it('distributeOrderLineTotals cuadra céntimos', () => {
     expect(distributeOrderLineTotals([10, 10, 10], 29.99)).toEqual([10, 10, 9.99]);
+  });
+
+  it('resolveOrderCashCardAmounts: payments vacíos caen al método tarjeta', () => {
+    expect(
+      resolveOrderCashCardAmounts({ paymentMethod: 'tarjeta', payments: [] }, 40),
+    ).toEqual({ efectivo: 0, tarjeta: 40 });
+  });
+
+  it('resolveOrderCashCardAmounts: solo bizum no inventa tarjeta', () => {
+    expect(
+      resolveOrderCashCardAmounts(
+        {
+          paymentMethod: 'tarjeta',
+          payments: [{ id: 'x', method: 'bizum', amount: 40 }],
+        },
+        40,
+      ),
+    ).toEqual({ efectivo: 0, tarjeta: 0 });
   });
 
   it('reparte mixto con payments en efectivo y tarjeta sin perder el total', () => {

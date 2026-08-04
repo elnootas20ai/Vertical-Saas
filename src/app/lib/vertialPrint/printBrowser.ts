@@ -37,12 +37,17 @@ table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 .item{padding:8px 0;border-bottom:1px dotted #ccc}
 .item:last-child{border-bottom:none}
 .big{font-size:16px;font-weight:bold}
-.kitchen-item{font-size:18px;font-weight:900}
+.kitchen-item{font-size:22px;font-weight:900}
 .comp{font-size:17px;font-weight:900;letter-spacing:0.02em}
 .kitchen-comp{font-size:18px;font-weight:900;letter-spacing:0.03em}
 .order-note{background:#fef3c7;border:1px solid #f59e0b;padding:6px 8px;margin-top:8px;font-weight:bold;color:#92400e}
 @media print{body{margin:0}}
 `;
+
+function kitchenExtraLabel(name: string): string {
+  const cleaned = String(name || '').replace(/^extra\s+/i, '').trim() || String(name || '').trim();
+  return `EXTRA DE ${cleaned}`;
+}
 
 function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = false): string {
   const bits: string[] = [];
@@ -59,7 +64,7 @@ function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = fa
     for (const name of line.added) {
       bits.push(
         kitchen
-          ? `<div class="add">+ DE MAS ${escapeHtml(name)}</div>`
+          ? `<div class="add">+ ${escapeHtml(kitchenExtraLabel(name))}</div>`
           : `<div class="add">+ ${escapeHtml(name)}</div>`,
       );
     }

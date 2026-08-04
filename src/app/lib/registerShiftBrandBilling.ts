@@ -14,6 +14,48 @@ import {
   type BrandBillingSplitRules,
 } from './brandBillingConfig';
 import { displayBrandName } from './brandLabels';
+import { isAggregatorChannel } from './deliveryIntegrationsUi';
+import { normalizeTpvPaymentMethod } from './tpvCajaMath';
+
+function roundMoney2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/**
+ * Cobros efectivo/tarjeta de la caja por pedido (misma fuente que la card de arriba).
+ * Preferible al paymentMethod del pedido cuando hay txs de venta enlazadas.
+ */
+function cashCardByOrderFromSession(
+  transactions: TpvRegisterSession['transactions'] | undefined,
+): Map<string, { efectivo: number; tarjeta: number }> {
+  const map = new Map<string, { efectivo: number; tarjeta: number }>();
+  for (const tx of transactions || []) {
+    if (!tx || tx.type !== 'sale') continue;
+    const orderId = String(tx.linkedDeliveryOrderId || tx.orderId || '').trim();
+    if (!orderId) continue;
+    const amount = roundMoney2(tx.amount);
+    if (amount <= 0) continue;
+    const method = normalizeTpvPaymentMethod(tx.paymentMethod);
+    const prev = map.get(orderId) || { efectivo: 0, tarjeta: 0 };
+    if (method === 'efectivo') prev.efectivo = roundMoney2(prev.efectivo + amount);
+    else if (method === 'tarjeta') prev.tarjeta = roundMoney2(prev.tarjeta + amount);
+    map.set(orderId, prev);
+  }
+  return map;
+}
+
+function resolveOrderPayForBrandSplit(
+  order: DeliveryOrder,
+  orderRev: number,
+  fromSession: Map<string, { efectivo: number; tarjeta: number }>,
+): { efectivo: number; tarjeta: number } {
+  const orderId = String(order._id || order.id || '').trim();
+  const sessionPay = orderId ? fromSession.get(orderId) : undefined;
+  if (sessionPay && sessionPay.efectivo + sessionPay.tarjeta > 0) {
+    return sessionPay;
+  }
+  return resolveOrderCashCardAmounts(order, orderRev);
+}
 
 function orderRevenue(order: DeliveryOrder): number {
   const total = Number((order as { totalAmount?: number }).totalAmount ?? order.total);
@@ -63,17 +105,41 @@ function buildWhy(own: number, shared: number, orderCount: number): string {
 }
 
 /**
- * € del turno por marca (mismos pedidos que el cierre), con reglas Facturación
- * y desglose propios / compartidos.
+ * € del turno por marca en TPV/tienda (caja del local).
+ * Excluye Glovo/Uber/Just Eat/Flipdish: eso es otra caja (integradores).
+ * Efectivo/tarjeta: prioriza ventas de la sesión de caja (como la card de arriba).
  */
 export function buildShiftBrandRevenue(
-  session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt' | 'status' | 'pointOfSaleId'>,
+  session: Pick<
+    TpvRegisterSession,
+    'openedAt' | 'closedAt' | 'status' | 'pointOfSaleId' | 'transactions'
+  >,
   orders: DeliveryOrder[],
   brandLabels: Record<string, string> = {},
   rules?: BrandBillingSplitRules | Pick<BrandBillingConfig, 'sharedSplitMode' | 'monoBrandTakesAll'> | null,
 ): { rows: ShiftBrandRevenueRow[]; unbranded: number; total: number } {
   const splitRules = splitRulesFromBillingConfig(rules || null);
-  const shiftOrders = filterOrdersForRegisterSession(session, orders);
+  // Solo pedidos de tienda/TPV — nunca mezclar apps en la caja del local.
+  const shiftOrders = filterOrdersForRegisterSession(session, orders).filter(
+    (o) => !isAggregatorChannel(String(o.channel || '')),
+  );
+  const payFromSession = cashCardByOrderFromSession(session.transactions);
+  // Ratio global de la caja tienda (ignora canales agregador si hubiera txs).
+  let sessionCashTotal = 0;
+  let sessionCardTotal = 0;
+  for (const tx of session.transactions || []) {
+    if (!tx || tx.type !== 'sale') continue;
+    if (isAggregatorChannel(String(tx.channel || ''))) continue;
+    const amount = roundMoney2(tx.amount);
+    if (amount <= 0) continue;
+    const method = normalizeTpvPaymentMethod(tx.paymentMethod);
+    if (method === 'efectivo') sessionCashTotal = roundMoney2(sessionCashTotal + amount);
+    else if (method === 'tarjeta') sessionCardTotal = roundMoney2(sessionCardTotal + amount);
+  }
+  const sessionPayDenom = sessionCashTotal + sessionCardTotal;
+  const globalCashRatio = sessionPayDenom > 0 ? sessionCashTotal / sessionPayDenom : 0;
+  const globalCardRatio = sessionPayDenom > 0 ? sessionCardTotal / sessionPayDenom : 0;
+
   const byBrand: Record<string, number> = {};
   const cashByBrand: Record<string, number> = {};
   const cardByBrand: Record<string, number> = {};
@@ -86,10 +152,15 @@ export function buildShiftBrandRevenue(
   for (const order of shiftOrders) {
     const orderRev = orderRevenue(order);
     total += orderRev;
-    const pay = resolveOrderCashCardAmounts(order, orderRev);
+    const pay = resolveOrderPayForBrandSplit(order, orderRev, payFromSession);
     const payDenom = Math.max(0, pay.efectivo) + Math.max(0, pay.tarjeta);
-    const cashRatio = payDenom > 0 ? Math.max(0, pay.efectivo) / payDenom : 0;
-    const cardRatio = payDenom > 0 ? Math.max(0, pay.tarjeta) / payDenom : 0;
+    // Pedido sin ef/tj resuelto (mixto vacío, etc.): reparte con el mix real de caja.
+    const cashRatio = payDenom > 0
+      ? Math.max(0, pay.efectivo) / payDenom
+      : globalCashRatio;
+    const cardRatio = payDenom > 0
+      ? Math.max(0, pay.tarjeta) / payDenom
+      : globalCardRatio;
 
     const items = Array.isArray(order.items) ? order.items : [];
     const ownOnly: Record<string, number> = {};
@@ -159,6 +230,110 @@ export function buildShiftBrandRevenue(
     .sort((a, b) => b.revenue - a.revenue);
 
   return { rows, unbranded, total };
+}
+
+export type ShiftAppsBrandTotalRow = {
+  brandId: string;
+  name: string;
+  /** € apps (Glovo/Uber/JE/Flipdish) atribuidos a la marca */
+  revenue: number;
+  orderCount: number;
+  sharePercent: number;
+};
+
+/**
+ * Total apps del turno por marca (caja de integradores — NO cajón de tienda).
+ * Solo Glovo / Uber Eats / Just Eat / Flipdish. No suma al arqueo de efectivo.
+ */
+export function buildShiftAppsBrandTotals(
+  session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt' | 'status' | 'pointOfSaleId'>,
+  orders: DeliveryOrder[],
+  brandLabels: Record<string, string> = {},
+  rules?: BrandBillingSplitRules | Pick<BrandBillingConfig, 'sharedSplitMode' | 'monoBrandTakesAll'> | null,
+): { rows: ShiftAppsBrandTotalRow[]; unbranded: number; total: number } {
+  const splitRules = splitRulesFromBillingConfig(rules || null);
+  const appsOrders = filterOrdersForRegisterSession(session, orders).filter((o) =>
+    isAggregatorChannel(String(o.channel || '')),
+  );
+  const byBrand: Record<string, number> = {};
+  const orderCountByBrand: Record<string, number> = {};
+  let unbranded = 0;
+  let total = 0;
+
+  for (const order of appsOrders) {
+    const orderRev = orderRevenue(order);
+    if (orderRev <= 0) continue;
+    total += orderRev;
+    const attributed = attributeOrderRevenueByBrand(order, splitRules);
+    const attributedSum =
+      Object.values(attributed.byBrand).reduce((s, n) => s + (Number(n) || 0), 0)
+      + (Number(attributed.unbranded) || 0);
+    const scale = attributedSum > 0 ? orderRev / attributedSum : 1;
+    let hit = false;
+    for (const [bid, amt] of Object.entries(attributed.byBrand)) {
+      const v = (Number(amt) || 0) * scale;
+      if (v <= 0) continue;
+      byBrand[bid] = (byBrand[bid] || 0) + v;
+      orderCountByBrand[bid] = (orderCountByBrand[bid] || 0) + 1;
+      hit = true;
+    }
+    unbranded += (Number(attributed.unbranded) || 0) * scale;
+    if (!hit && Object.keys(attributed.byBrand).length === 0) {
+      // ya sumado en unbranded
+    }
+  }
+
+  total = roundMoney2(total);
+  unbranded = roundMoney2(unbranded);
+
+  const rows: ShiftAppsBrandTotalRow[] = Object.entries(byBrand)
+    .map(([brandId, revenue]) => {
+      const rev = roundMoney2(revenue);
+      return {
+        brandId,
+        name: displayBrandName(brandId, brandLabels),
+        revenue: rev,
+        orderCount: orderCountByBrand[brandId] || 0,
+        sharePercent: total > 0 ? Math.round((revenue / total) * 1000) / 10 : 0,
+      };
+    })
+    .filter((r) => r.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue || a.name.localeCompare(b.name, 'es'));
+
+  return { rows, unbranded, total };
+}
+
+/**
+ * Escala el reparto por marca al Total apps del cierre (si el usuario ajustó a mano).
+ */
+export function scaleAppsBrandTotalsToAppTotal(
+  rows: ShiftAppsBrandTotalRow[],
+  unbranded: number,
+  appTotal: number,
+): { rows: ShiftAppsBrandTotalRow[]; unbranded: number } {
+  const target = roundMoney2(Math.max(0, appTotal));
+  const source = roundMoney2(
+    rows.reduce((s, r) => s + (Number(r.revenue) || 0), 0) + Math.max(0, unbranded),
+  );
+  if (target <= 0 || source <= 0) {
+    return { rows: rows.map((r) => ({ ...r, revenue: 0, sharePercent: 0 })), unbranded: 0 };
+  }
+  if (Math.abs(target - source) < 0.02) {
+    return { rows, unbranded: roundMoney2(unbranded) };
+  }
+  const scale = target / source;
+  const scaled = rows.map((r) => {
+    const revenue = roundMoney2(r.revenue * scale);
+    return {
+      ...r,
+      revenue,
+      sharePercent: target > 0 ? Math.round((revenue / target) * 1000) / 10 : 0,
+    };
+  });
+  return {
+    rows: scaled.filter((r) => r.revenue > 0),
+    unbranded: roundMoney2(unbranded * scale),
+  };
 }
 
 export type OrderBrandShare = {

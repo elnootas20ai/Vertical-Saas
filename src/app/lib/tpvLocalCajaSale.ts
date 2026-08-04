@@ -70,12 +70,14 @@ export async function ensureLocalCajaSaleForOrder(
     paymentMethod?: string | null;
     amount?: number;
     registeredBy?: string;
+    /** Pago dividido: permite varias ventas del mismo pedido (efectivo + tarjeta). */
+    allowMultiple?: boolean;
   },
 ): Promise<boolean> {
   if (!register?.session || !register.addTransaction) return false;
   const orderId = String(order._id || '').trim();
   if (!orderId) return false;
-  if (sessionHasSaleForOrder(register.session, orderId)) return true;
+  if (!opts?.allowMultiple && sessionHasSaleForOrder(register.session, orderId)) return true;
   const amount =
     opts?.amount != null && Number.isFinite(opts.amount)
       ? Number(opts.amount)

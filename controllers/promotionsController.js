@@ -108,7 +108,7 @@ function buildPromotionDocument(userId, data, existing = null) {
     discountValue: Number(data.discountValue ?? existing?.discountValue ?? 0),
     code: data.code !== undefined ? String(data.code || '').trim() : (existing?.code || ''),
     startDate: data.startDate || existing?.startDate || '',
-    endDate: data.endDate || existing?.endDate || '',
+    endDate: data.endDate !== undefined ? String(data.endDate || '') : (existing?.endDate || ''),
     maxUses: data.maxUses !== undefined ? data.maxUses : (existing?.maxUses ?? null),
     currentUses: Number(data.currentUses ?? existing?.currentUses ?? 0),
     targetAudience: data.targetAudience || existing?.targetAudience || 'all',

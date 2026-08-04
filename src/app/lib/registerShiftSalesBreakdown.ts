@@ -71,29 +71,38 @@ function roundMoney2(n: number): number {
 }
 
 /**
- * Importes efectivo/tarjeta del pedido para el desglose de cierre.
- * Si hay `payments` (pago dividido), usa esos tramos; si no, el método único del pedido.
- * No inventa reparto para bizum/online/mixto sin tramos.
+ * Importes efectivo/tarjeta del pedido para el desglose de cierre / marcas.
+ * 1) Tramos `payments` (pago dividido) si aportan efectivo/tarjeta.
+ * 2) Si los tramos no sirven (vacíos / solo bizum), cae al método único del pedido.
+ * No inventa 50/50 para mixto sin tramos.
  */
 export function resolveOrderCashCardAmounts(
   order: Pick<DeliveryOrder, 'paymentMethod' | 'payments'>,
   orderTotal: number,
 ): { efectivo: number; tarjeta: number } {
+  const total = roundMoney2(Math.max(0, orderTotal));
   const payments = Array.isArray(order.payments) ? order.payments : [];
   if (payments.length > 0) {
     let efectivo = 0;
     let tarjeta = 0;
+    let otherPaid = 0;
     for (const part of payments) {
       const kind = orderCashOrCard(part.method);
       const amount = roundMoney2(part.amount);
       if (amount <= 0) continue;
       if (kind === 'efectivo') efectivo += amount;
       else if (kind === 'tarjeta') tarjeta += amount;
+      else otherPaid += amount;
     }
-    return { efectivo: roundMoney2(efectivo), tarjeta: roundMoney2(tarjeta) };
+    efectivo = roundMoney2(efectivo);
+    tarjeta = roundMoney2(tarjeta);
+    // Tramos ef/tj → usarlos.
+    if (efectivo + tarjeta > 0) return { efectivo, tarjeta };
+    // Hay cobros no ef/tj (bizum/online…): no inventar tarjeta.
+    if (otherPaid > 0) return { efectivo: 0, tarjeta: 0 };
+    // payments[] vacío de importes → caer al método del pedido.
   }
   const kind = orderCashOrCard(order.paymentMethod);
-  const total = roundMoney2(Math.max(0, orderTotal));
   if (kind === 'efectivo') return { efectivo: total, tarjeta: 0 };
   if (kind === 'tarjeta') return { efectivo: 0, tarjeta: total };
   return { efectivo: 0, tarjeta: 0 };

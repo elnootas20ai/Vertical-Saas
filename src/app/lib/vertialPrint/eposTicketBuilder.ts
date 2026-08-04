@@ -101,22 +101,28 @@ function pushLineDetail(
   if (item.note) line(builder, `  NOTA: ${item.note}`, width);
 }
 
-/** Comanda cocina: solo `xN Nombre` negrita+alto; resto normal. */
+/** Comanda cocina: `xN Nombre` más grande; extras como EXTRA DE. */
+function kitchenExtraLabel(name: string): string {
+  const cleaned = String(name || '').replace(/^extra\s+/i, '').trim() || String(name || '').trim();
+  return `EXTRA DE ${cleaned}`;
+}
+
 function pushKitchenLineDetail(
   builder: EposBuilder,
   item: TicketDocument['lines'][number],
   paperWidthMm: 58 | 80,
 ): void {
   const cols = colsForSize(paperWidthMm, false);
-  setTextSize(builder, 1, 2);
-  boldLine(builder, `${item.qty}x ${item.name}`, cols);
+  const titleCols = colsForSize(paperWidthMm, true);
+  setTextSize(builder, 2, 2);
+  boldLine(builder, `${item.qty}x ${item.name}`, titleCols);
   setTextSize(builder, 1, 1);
   for (const name of item.composition || []) {
     line(builder, `  > ${name}`, cols);
   }
   for (const name of item.added || []) {
     if (builder.addTextStyle) builder.addTextStyle(false, false, true);
-    line(builder, `  + DE MAS ${name}`, cols);
+    line(builder, `  + ${kitchenExtraLabel(name)}`, cols);
     if (builder.addTextStyle) builder.addTextStyle(false, false, false);
   }
   for (const name of item.removed || []) {

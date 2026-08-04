@@ -32,6 +32,7 @@ import {
   computePromoDiscount,
   computeFixedUnitPriceDiscount,
   listAutoFixedUnitPricePromotions,
+  listSelectableCompanyPromoCodes,
   readStoredPromotions,
   writeStoredPromotions,
   type AppliedPromo,
@@ -1091,6 +1092,7 @@ export function TpvRapidoOrderFlow({
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
   const [promoMode, setPromoMode] = useState<'none' | 'code' | 'client'>('none');
+  const [promoCodeManual, setPromoCodeManual] = useState(false);
   const [clientPromos, setClientPromos] = useState<ClientPromotion[]>([]);
   const [selectedClientPromoId, setSelectedClientPromoId] = useState<string>('');
   const [companyPromos, setCompanyPromos] = useState<StoredPromotion[]>(() =>
@@ -1630,6 +1632,15 @@ export function TpvRapidoOrderFlow({
     [cart],
   );
 
+  const selectableCompanyCodes = useMemo(() => {
+    const salesPointId = String(register?.session?.pointOfSaleId || '').trim();
+    return listSelectableCompanyPromoCodes({
+      salesPointId,
+      relatedSalesPointIds: [salesPointId],
+    });
+    // companyPromos refresca al sync remoto
+  }, [companyPromos, register?.session?.pointOfSaleId]);
+
   const applyPromoCode = useCallback(() => {
     const code = promoCodeInput.trim();
     if (!code) {
@@ -1644,12 +1655,39 @@ export function TpvRapidoOrderFlow({
     setAppliedPromo(found);
     setPromoCodeInput(found.code);
     setPromoMode('code');
+    setPromoCodeManual(false);
     toast.success(`Código aplicado: ${found.code}`);
   }, [promoCodeInput]);
+
+  const applyPromoFromList = useCallback((code: string) => {
+    const raw = String(code || '').trim();
+    if (!raw) {
+      setAppliedPromo(null);
+      setPromoCodeInput('');
+      return;
+    }
+    if (raw === '__manual__') {
+      setPromoCodeManual(true);
+      setAppliedPromo(null);
+      setPromoCodeInput('');
+      return;
+    }
+    const found = findActivePromotionByCode(raw);
+    if (!found) {
+      toast.error('Código no válido o no está activo');
+      return;
+    }
+    setPromoCodeManual(false);
+    setAppliedPromo(found);
+    setPromoCodeInput(found.code);
+    setPromoMode('code');
+    toast.success(`Código aplicado: ${found.code}`);
+  }, []);
 
   const clearPromoCode = useCallback(() => {
     setAppliedPromo(null);
     setPromoCodeInput('');
+    setPromoCodeManual(false);
     if (promoMode === 'code') setPromoMode('none');
   }, [promoMode]);
 
@@ -2564,7 +2602,18 @@ export function TpvRapidoOrderFlow({
           ...(cashReceived != null && cashChange != null && !collectOnDelivery
             ? { amountReceived: cashReceived, changeGiven: cashChange }
             : {}),
-          ...(parts?.length ? { payments: [] } : {}),
+          // Guardar tramos ya en el pedido (evita marcas/tarjeta a 0 si falla el cobro partido).
+          ...(parts?.length
+            ? {
+                payments: parts.map((p, idx) => ({
+                  id: String(p.id || `pay-${idx}`),
+                  method: normalizeTpvPaymentMethod(p.method),
+                  amount: Number(p.amount) || 0,
+                  ...(p.amountReceived != null ? { amountReceived: Number(p.amountReceived) } : {}),
+                  ...(p.changeGiven != null ? { changeGiven: Number(p.changeGiven) } : {}),
+                })),
+              }
+            : {}),
           deliveryAddressId: selectedAddressId || '',
           priority: 'normal',
           // Mismo nº en ticket y servidor → imprimir en paralelo al crear.
@@ -2590,11 +2639,24 @@ export function TpvRapidoOrderFlow({
           } as DeliveryOrder;
           enqueueTpvOfflineItem('order_create', { userId, orderData });
           if (!collectOnDelivery) {
-            await ensureLocalCajaSaleForOrder(registerFromGate, offlineOrder, {
-              paymentMethod: orderData.paymentMethod,
-              amount: payableTotal,
-              registeredBy: takerName || 'TPV',
-            });
+            if (parts?.length && method === 'mixto') {
+              for (const part of parts) {
+                const partAmount = Number(part.amount) || 0;
+                if (partAmount <= 0) continue;
+                await ensureLocalCajaSaleForOrder(registerFromGate, offlineOrder, {
+                  paymentMethod: normalizeTpvPaymentMethod(part.method),
+                  amount: partAmount,
+                  registeredBy: takerName || 'TPV',
+                  allowMultiple: true,
+                });
+              }
+            } else {
+              await ensureLocalCajaSaleForOrder(registerFromGate, offlineOrder, {
+                paymentMethod: orderData.paymentMethod,
+                amount: payableTotal,
+                registeredBy: takerName || 'TPV',
+              });
+            }
           }
           setCreatedOrder(offlineOrder);
           return;
@@ -2604,24 +2666,23 @@ export function TpvRapidoOrderFlow({
         // Si se imprime antes, en tablet el bridge nativo puede dejar la UI en «Enviando…».
         let { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
 
-        // Airbag: si el servidor no metió caja, la sesión local sí cuenta el cobro.
-        if (!collectOnDelivery) {
+        // Cobro dividido: registrar tramos en pedido + caja (también en tablet).
+        // No meter un cobro "mixto" único en caja (se contaría mal como efectivo).
+        if (
+          parts?.length
+          && method === 'mixto'
+          && deliveryType !== 'domicilio'
+          && !collectOnDelivery
+        ) {
+          created = await registerSplitPaymentsRequest(userId, created._id, parts);
+          cajaStatus = null;
+        } else if (!collectOnDelivery) {
+          // Airbag: si el servidor no metió caja, la sesión local sí cuenta el cobro.
           await ensureLocalCajaSaleForOrder(registerFromGate, created, {
             paymentMethod: created.paymentMethod,
             amount: Number(created.paidAmount || payableTotal),
             registeredBy: takerName || 'TPV',
           });
-        }
-
-        // Recogida: cobro dividido tras crear (caja por tramo).
-        if (
-          parts?.length
-          && method === 'mixto'
-          && deliveryType !== 'domicilio'
-          && !tabletMode
-        ) {
-          created = await registerSplitPaymentsRequest(userId, created._id, parts);
-          cajaStatus = null;
         }
 
         notifyDeliveryOpsLive({
@@ -5111,7 +5172,15 @@ export function TpvRapidoOrderFlow({
                               key={mode}
                               type="button"
                               disabled={mode === 'client' && clientPromos.length === 0}
-                              onClick={() => setPromoMode(mode)}
+                              onClick={() => {
+                                setPromoMode(mode);
+                                if (mode === 'code') setPromoCodeManual(false);
+                                if (mode !== 'code') {
+                                  setAppliedPromo(null);
+                                  setPromoCodeInput('');
+                                  setPromoCodeManual(false);
+                                }
+                              }}
                               className={`px-2 h-7 rounded-full text-[10px] font-bold border transition-colors disabled:opacity-50 ${
                                 promoMode === mode
                                   ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 border-gray-900 dark:border-gray-100'
@@ -5136,25 +5205,44 @@ export function TpvRapidoOrderFlow({
                                 </option>
                               ))}
                             </select>
-                          ) : (
+                          ) : promoMode === 'code' ? (
                             <>
-                              <input
-                                value={promoCodeInput}
-                                onChange={(e) => setPromoCodeInput(e.target.value)}
-                                className={`${INPUT_CLASS} uppercase h-9 py-1.5 text-xs min-w-0 flex-1`}
-                                placeholder="PROMO"
-                                disabled={promoMode !== 'code'}
-                              />
+                              {!promoCodeManual && selectableCompanyCodes.length > 0 ? (
+                                <select
+                                  value={appliedPromo?.code || ''}
+                                  onChange={(e) => applyPromoFromList(e.target.value)}
+                                  className={`${INPUT_CLASS} h-9 py-1.5 text-xs min-w-0 flex-1`}
+                                >
+                                  <option value="">Elegir código…</option>
+                                  {selectableCompanyCodes.map((p) => (
+                                    <option key={p.id} value={p.code}>
+                                      {p.code}
+                                      {p.name ? ` · ${p.name}` : ''}
+                                    </option>
+                                  ))}
+                                  <option value="__manual__">Otro (escribir)…</option>
+                                </select>
+                              ) : (
+                                <input
+                                  value={promoCodeInput}
+                                  onChange={(e) => setPromoCodeInput(e.target.value)}
+                                  className={`${INPUT_CLASS} uppercase h-9 py-1.5 text-xs min-w-0 flex-1`}
+                                  placeholder="PROMO"
+                                  autoFocus={promoCodeManual}
+                                />
+                              )}
                               {appliedPromo ? (
                                 <button type="button" onClick={clearPromoCode} className="px-2 h-9 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-semibold shrink-0">
                                   Quitar
                                 </button>
-                              ) : (
-                                <button type="button" onClick={applyPromoCode} disabled={promoMode !== 'code'} className="px-2 h-9 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-semibold shrink-0 disabled:opacity-50">
+                              ) : promoCodeManual || selectableCompanyCodes.length === 0 ? (
+                                <button type="button" onClick={applyPromoCode} className="px-2 h-9 rounded-lg bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-xs font-semibold shrink-0">
                                   OK
                                 </button>
-                              )}
+                              ) : null}
                             </>
+                          ) : (
+                            <p className="text-[10px] text-gray-400 py-2">Sin promoción</p>
                           )}
                         </div>
                         <div className="flex items-center justify-between text-xs">

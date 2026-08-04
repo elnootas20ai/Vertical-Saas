@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeCompanyBillingBreakdown } from '../src/app/lib/portfolioMetrics.ts';
 import {
+  buildShiftAppsBrandTotals,
   buildShiftBrandRevenue,
   getOrderBrandShares,
 } from '../src/app/lib/registerShiftBrandBilling.ts';
@@ -149,6 +150,123 @@ describe('buildShiftBrandRevenue', () => {
     expect(bb?.revenue).toBe(15);
     expect(bb?.revenueEfectivo).toBe(0);
     expect(bb?.revenueTarjeta).toBe(15);
+  });
+
+  it('marcas TPV no mezclan pedidos Glovo (otra caja)', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+      transactions: [
+        {
+          id: 't-tpv',
+          type: 'sale',
+          paymentMethod: 'tarjeta',
+          amount: 40,
+          channel: 'tpv',
+          linkedDeliveryOrderId: 'tpv1',
+          orderId: 'tpv1',
+          date: '2026-07-15T12:00:00.000Z',
+        },
+      ],
+    };
+    const orders = [
+      paidOrder({
+        _id: 'tpv1',
+        channel: 'tpv',
+        totalAmount: 40,
+        paidAmount: 40,
+        paymentMethod: 'tarjeta',
+        items: [{ brandIds: ['modo'], quantity: 1, total: 40 }],
+      }),
+      paidOrder({
+        _id: 'g1',
+        channel: 'glovo',
+        totalAmount: 100,
+        paidAmount: 100,
+        items: [{ brandIds: ['modo'], quantity: 1, total: 100 }],
+      }),
+    ];
+    const store = buildShiftBrandRevenue(session, orders, { modo: 'Modomio' });
+    expect(store.total).toBe(40);
+    expect(store.rows[0]?.revenueTarjeta).toBe(40);
+    const apps = buildShiftAppsBrandTotals(session, orders, { modo: 'Modomio' });
+    expect(apps.total).toBe(100);
+    expect(apps.rows[0]?.revenue).toBe(100);
+  });
+
+  it('total apps por marca (Glovo/Uber) con reglas Facturación', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+    };
+    const orders = [
+      paidOrder({
+        _id: 'g1',
+        channel: 'glovo',
+        totalAmount: 30,
+        paidAmount: 30,
+        items: [{ brandIds: ['modo'], quantity: 1, total: 30 }],
+      }),
+      paidOrder({
+        _id: 'u1',
+        channel: 'ubereats',
+        totalAmount: 20,
+        paidAmount: 20,
+        items: [{ brandIds: ['bb'], quantity: 1, total: 20 }],
+      }),
+      paidOrder({
+        _id: 'tpv1',
+        channel: 'tpv',
+        totalAmount: 99,
+        paidAmount: 99,
+        items: [{ brandIds: ['modo'], quantity: 1, total: 99 }],
+      }),
+    ];
+    const { rows, total } = buildShiftAppsBrandTotals(session, orders, {
+      modo: 'Modomio',
+      bb: 'Blackburger',
+    });
+    expect(total).toBe(50);
+    expect(rows.find((r) => r.brandId === 'modo')?.revenue).toBe(30);
+    expect(rows.find((r) => r.brandId === 'bb')?.name).toBe('Blackburger');
+    expect(rows.find((r) => r.brandId === 'bb')?.revenue).toBe(20);
+  });
+
+  it('tarjeta desde txs de caja aunque el pedido diga mixto sin payments', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+      transactions: [
+        {
+          id: 't1',
+          type: 'sale',
+          paymentMethod: 'tarjeta',
+          amount: 25,
+          linkedDeliveryOrderId: 'broken-mix',
+          orderId: 'broken-mix',
+          date: '2026-07-15T12:00:00.000Z',
+        },
+      ],
+    };
+    const orders = [
+      paidOrder({
+        _id: 'broken-mix',
+        totalAmount: 25,
+        paidAmount: 25,
+        paymentMethod: 'mixto',
+        payments: [],
+        items: [{ brandIds: ['modo'], quantity: 1, total: 25 }],
+      }),
+    ];
+    const { rows } = buildShiftBrandRevenue(session, orders, { modo: 'Modomio' });
+    expect(rows[0]?.revenueTarjeta).toBe(25);
+    expect(rows[0]?.revenueEfectivo).toBe(0);
   });
 });
 

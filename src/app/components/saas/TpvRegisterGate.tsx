@@ -67,7 +67,11 @@ import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import { QuietTip } from './QuietTip';
-import { buildShiftBrandRevenue, getOrderBrandShares } from '../../lib/registerShiftBrandBilling';
+import {
+  buildShiftAppsBrandTotals,
+  buildShiftBrandRevenue,
+  getOrderBrandShares,
+} from '../../lib/registerShiftBrandBilling';
 import { listBrandsRequest } from '../../lib/brandApi';
 import { buildBrandLabelsMap } from '../../lib/brandLabels';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
@@ -1665,6 +1669,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     [session, shiftOrders, brandLabels, billingRules],
   );
 
+  const appsBrandBilling = useMemo(
+    () => buildShiftAppsBrandTotals(session, shiftOrders, brandLabels, billingRules),
+    [session, shiftOrders, brandLabels, billingRules],
+  );
+
   return (
     <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4`}>
       <div className="bg-white dark:bg-stone-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
@@ -1894,6 +1903,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 onManualDraftChange={handleAppsManualDraftChange}
                 title="Apps de delivery"
                 startStep={2}
+                appsBrandRows={appsBrandBilling.rows}
+                appsBrandUnbranded={appsBrandBilling.unbranded}
               />
             </div>
           )}

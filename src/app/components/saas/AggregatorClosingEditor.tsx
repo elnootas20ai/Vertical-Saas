@@ -23,6 +23,8 @@ import {
   VERTIAL_CARD_TEXT,
 } from '../../lib/vertialUiTokens';
 import { QuietTip } from './QuietTip';
+import type { ShiftAppsBrandTotalRow } from '../../lib/registerShiftBrandBilling';
+import { scaleAppsBrandTotalsToAppTotal } from '../../lib/registerShiftBrandBilling';
 
 /** Borrador por app: unidades + total hecho en integrador + no pagados tienda. */
 export type ChannelClosingDraft = {
@@ -68,6 +70,9 @@ interface AggregatorClosingEditorProps {
   initialManualDraft?: ManualLinesByChannel | Record<string, unknown> | null;
   onSnapshotChange?: (snapshot: AggregatorClosingSnapshot) => void;
   onManualDraftChange?: (draft: ManualLinesByChannel) => void;
+  /** Totales apps por marca (Facturación), p. ej. Modomio / Blackburger. */
+  appsBrandRows?: ShiftAppsBrandTotalRow[];
+  appsBrandUnbranded?: number;
 }
 
 const FOOD_LINES = DELIVERY_FOOD_UNIT_ORDER.map((key) => ({
@@ -215,6 +220,8 @@ export function AggregatorClosingEditor({
   initialManualDraft = null,
   onSnapshotChange,
   onManualDraftChange,
+  appsBrandRows = [],
+  appsBrandUnbranded = 0,
 }: AggregatorClosingEditorProps) {
   const seededRef = useRef(false);
   const touchedRef = useRef<Set<string>>(new Set());
@@ -332,6 +339,15 @@ export function AggregatorClosingEditor({
     onManualDraftChange?.(draft);
   }, [draft, onManualDraftChange]);
 
+  const brandAppsDisplay = useMemo(() => {
+    if (!appsBrandRows.length && appsBrandUnbranded <= 0) return null;
+    return scaleAppsBrandTotalsToAppTotal(
+      appsBrandRows,
+      appsBrandUnbranded,
+      snapshot.appTotal,
+    );
+  }, [appsBrandRows, appsBrandUnbranded, snapshot.appTotal]);
+
   const patchQty = (channel: string, family: FoodFamilyKey, value: string) => {
     touchedRef.current.add(channel);
     setDraft((prev) => {
@@ -375,14 +391,53 @@ export function AggregatorClosingEditor({
         <div className="flex items-center gap-1.5 text-xs font-semibold text-stone-600 dark:text-stone-300">
           <Plug className="w-3.5 h-3.5 opacity-70" /> {title}
         </div>
-        <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-100">
-          Total {snapshot.appTotal.toFixed(2)}€
-          <span className="mx-1.5 font-semibold text-stone-400">·</span>
-          <span className={VERTIAL_CASH_TEXT}>Efectivo {snapshot.cashTotal.toFixed(2)}€</span>
-          <span className="mx-1.5 font-semibold text-stone-400">·</span>
-          <span className={VERTIAL_CARD_TEXT}>Tarjeta {snapshot.cardTotal.toFixed(2)}€</span>
-        </p>
+        <div className="text-right">
+          <QuietTip tip="Total hecho en apps (plataformas). No es el cajón de tienda. El efectivo de abajo solo es «no pagado» cobrado en local.">
+            <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-100">
+              Total apps {snapshot.appTotal.toFixed(2)}€
+            </p>
+          </QuietTip>
+          <p className="text-[11px] font-semibold tabular-nums mt-0.5">
+            <QuietTip tip="No pagado en efectivo en tienda → sí suma al arqueo del cajón.">
+              <span className={VERTIAL_CASH_TEXT}>No pag. ef. {snapshot.cashTotal.toFixed(2)}€</span>
+            </QuietTip>
+            <span className="mx-1 font-semibold text-stone-400">·</span>
+            <QuietTip tip="No pagado con tarjeta en tienda. No suma al cajón de efectivo.">
+              <span className={VERTIAL_CARD_TEXT}>No pag. tj. {snapshot.cardTotal.toFixed(2)}€</span>
+            </QuietTip>
+          </p>
+        </div>
       </div>
+
+      {brandAppsDisplay && (brandAppsDisplay.rows.length > 0 || brandAppsDisplay.unbranded > 0) ? (
+        <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-stone-50/80 dark:bg-stone-900/40 space-y-1">
+          <QuietTip tip="Reparto del Total apps (Glovo/Uber/JE/Flipdish) por marca. Es otra caja: no suma al cajón de la tienda. Solo el «No pagado efectivo» entra en el arqueo.">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500 dark:text-stone-400">
+              Total apps por marca · no va al cajón
+            </p>
+          </QuietTip>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {brandAppsDisplay.rows.map((row) => (
+              <p
+                key={row.brandId}
+                className="text-xs font-semibold text-stone-800 dark:text-stone-100 tabular-nums"
+              >
+                <span className="text-stone-500 dark:text-stone-400 font-medium">Total app {row.name}</span>
+                {' '}
+                <span className="font-black">{row.revenue.toFixed(2)}€</span>
+                {row.sharePercent > 0 ? (
+                  <span className="ml-1 text-[10px] font-semibold text-stone-400">{row.sharePercent}%</span>
+                ) : null}
+              </p>
+            ))}
+            {brandAppsDisplay.unbranded > 0 ? (
+              <p className="text-xs font-semibold text-stone-500 tabular-nums">
+                Sin marca {brandAppsDisplay.unbranded.toFixed(2)}€
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="p-2.5 space-y-2">
         <div className="hidden lg:grid grid-cols-[6.5rem_repeat(3,minmax(0,4rem))_minmax(0,1.1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 px-1 text-[11px] font-semibold text-stone-500">

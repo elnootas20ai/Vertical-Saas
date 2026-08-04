@@ -158,11 +158,10 @@ export function ShiftBrandBillingSummary({
         ) : null}
       </div>
 
-      {!compact ? (
-        <p className="mt-2 text-[10px] leading-snug text-stone-400 dark:text-stone-500">
-          Efectivo/tarjeta siguen el cobro del pedido. Compartidos van a la marca dominante.
-        </p>
-      ) : null}
+      <p className={`leading-snug text-stone-400 dark:text-stone-500 ${compact ? 'mt-1.5 text-[10px]' : 'mt-2 text-[10px]'}`}>
+        Solo TPV/tienda (cajón). Apps Glovo/Uber van aparte en Integradores.
+        {!compact ? ' Efectivo/tarjeta siguen el cobro. Compartidos → marca dominante.' : ''}
+      </p>
     </div>
   );
 }

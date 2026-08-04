@@ -138,17 +138,23 @@ function setPrintColor(red: boolean): Uint8Array {
 
 /**
  * Línea de producto en comanda cocina:
- * solo `xN Nombre` va negrita + doble alto. Composición / extras / notas en normal.
+ * `xN Nombre` negrita + doble ancho/alto (un poco más grande).
+ * Composición / extras / notas en normal.
  */
+function kitchenExtraLabel(name: string): string {
+  const cleaned = String(name || '').replace(/^extra\s+/i, '').trim() || String(name || '').trim();
+  return `EXTRA DE ${cleaned}`;
+}
+
 function pushKitchenLineDetail(
   chunks: Uint8Array[],
   line: TicketDocument['lines'][number],
   paperWidthMm: 58 | 80,
 ) {
-  const tallCols = colsForSize(paperWidthMm, SIZE_TALL);
-  chunks.push(setSize(SIZE_TALL));
+  const titleCols = colsForSize(paperWidthMm, SIZE_TITLE);
+  chunks.push(setSize(SIZE_TITLE));
   chunks.push(setBold(true));
-  chunks.push(textLine(`${line.qty}x ${line.name}`, tallCols));
+  chunks.push(textLine(`${line.qty}x ${line.name}`, titleCols));
   chunks.push(setBold(false));
   chunks.push(setSize(SIZE_NORMAL));
 
@@ -157,7 +163,7 @@ function pushKitchenLineDetail(
   }
   for (const name of line.added || []) {
     chunks.push(setPrintColor(true));
-    chunks.push(textLine(`  + DE MAS ${name}`, widthFor(paperWidthMm)));
+    chunks.push(textLine(`  + ${kitchenExtraLabel(name)}`, widthFor(paperWidthMm)));
     chunks.push(setPrintColor(false));
   }
   for (const name of line.removed || []) {
