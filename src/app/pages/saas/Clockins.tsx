@@ -97,6 +97,7 @@ import {
 import { listVacations, type VacationRequest } from '../../lib/vacationsApi';
 import { ClockinsManagerTeamView } from '../../components/saas/clockins/ClockinsManagerTeamView';
 import { ClockinHistoryPanel } from '../../components/saas/clockins/ClockinHistoryPanel';
+import { todayDateStr } from '../../lib/clockinHistoryUtils';
 import { resolveClockinMemberName } from '../../lib/clockinsDisplay';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import { isManagerRole } from '../../lib/managerRoles';
@@ -140,7 +141,8 @@ export function Clockins() {
   const [error, setError] = useState('');
   const [myRecord, setMyRecord] = useState<ClockinRecord | null>(null);
   const [teamRecords, setTeamRecords] = useState<EnrichedClockinRecord[]>([]);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(() => todayDateStr());
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const [notesText, setNotesText] = useState('');
   const [showNotes, setShowNotes] = useState(false);
   const [tick, setTick] = useState(0);
@@ -461,7 +463,7 @@ export function Clockins() {
     try {
       const geo = await getGeo();
       setMyRecord(await clockIn(businessId, user.user_id, user.fullName || user.email, { geo, device_type: 'desktop' }));
-      loadActiveNow();
+      await Promise.all([loadActiveNow(), loadTeamRecords()]);
     } catch (e: any) { setError(e.message); } finally { setActionLoading(false); }
   };
 
@@ -470,8 +472,11 @@ export function Clockins() {
     setActionLoading(true); setError('');
     try {
       const geo = await getGeo();
-      setMyRecord(await clockOut(myRecord, geo));
-      loadActiveNow();
+      await clockOut(myRecord, geo);
+      // Liberar UI: permitir otra entrada el mismo día (tope 3 en API).
+      setMyRecord(null);
+      await Promise.all([loadActiveNow(), loadTeamRecords()]);
+      setHistoryRefresh((n) => n + 1);
     } catch (e: any) { setError(e.message); } finally { setActionLoading(false); }
   };
 
@@ -481,6 +486,7 @@ export function Clockins() {
     try {
       const geo = await getGeo();
       setMyRecord(myRecord.status === 'break' ? await endBreak(myRecord, geo) : await startBreak(myRecord, geo));
+      await loadActiveNow();
     } catch (e: any) { setError(e.message); } finally { setActionLoading(false); }
   };
 
@@ -503,9 +509,12 @@ export function Clockins() {
   };
 
   const shiftDate = (days: number) => {
-    const d = new Date(selectedDate);
+    const [y, m, day] = selectedDate.split('-').map(Number);
+    const d = new Date(y, (m || 1) - 1, day || 1);
     d.setDate(d.getDate() + days);
-    setSelectedDate(d.toISOString().slice(0, 10));
+    setSelectedDate(
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+    );
   };
 
   const fmtTime = (iso: string) =>
@@ -518,7 +527,7 @@ export function Clockins() {
     return Math.max(0, Math.round((Date.now() - new Date(ci.time).getTime()) / 60000) - myRecord.breakMinutes);
   })();
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = todayDateStr();
 
   useEffect(() => {
     if (!businessId || !isAdmin) {
@@ -809,6 +818,7 @@ export function Clockins() {
               businessId={businessId}
               memberId={user?.user_id || ''}
               managerView
+              refreshKey={historyRefresh}
               onViewMember={(id) => navigate(`/saas/team/${id}?tab=clockins`)}
             />
           </div>

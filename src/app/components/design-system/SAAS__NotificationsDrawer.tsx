@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  X, Bell, CheckCircle, AlertCircle, Info, Clock,
-  ArrowRight, RefreshCw, Bike, DollarSign, Users, Activity,
-  Eye, Settings2, Building2, Layers, Sparkles, Shield,
+  X, Bell, CheckCircle, Clock, RefreshCw, ArrowRight,
+  CalendarDays, AlertTriangle, Settings2, type LucideIcon,
 } from 'lucide-react';
 import { useNavigate } from 'react-router';
-import { useApp } from '../../context/AppContext';
+import { useApp, type AppNotification } from '../../context/AppContext';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
@@ -13,536 +12,564 @@ import { isWorkerAccount } from '../../lib/authApi';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
-import { useAlertDepartments } from '../../hooks/useAlertDepartments';
-import {
-  AlertProShell,
-  AlertProKpiStrip,
-  AlertProDeptTabs,
-  AlertProRow,
-  AlertProEmpty,
-  AlertProIconButton,
-} from '../saas/alertCenterProUi';
 import {
   fetchAlerts,
-  bulkUpdateAlertStatus,
   updateAlertStatus,
-  triggerAlertEngineCheck,
+  resolveAllUnresolvedAlerts,
   type AlertRecord,
 } from '../../lib/alertCenterApi';
 import {
   fetchDocumentAlertsAsRecords,
   mergeAlertLists,
-  shouldIncludeDocumentAlerts,
   isSyntheticDocumentAlert,
   dismissDocumentAlert,
   dismissDocumentAlerts,
 } from '../../lib/documentAlertsApi';
 import { mapAlertsForBusinessVertical } from '../../lib/alertActions';
 import { toast } from 'sonner';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
+import { formatDateTimeEs } from '../../lib/formatDateEs';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const DEPT_ICONS: Record<string, typeof Bell> = {
-  all: Bell,
-  pdvs: Building2,
-  delivery: Bike,
-  finanzas: DollarSign,
-  rrhh: Users,
-  catalogProviders: Layers,
-  documentacion: Shield,
-  operaciones: Activity,
-  limpieza: Sparkles,
-  construccion: Building2,
-  verticales: Layers,
-  sistema: Shield,
-};
+type InboxTab = 'equipo' | 'negocio';
 
-function LegacyNotificationsDrawer({ isOpen, onClose }: Props) {
-  const navigate = useNavigate();
-  const { notifications, markNotificationAsRead, markAllNotificationsAsRead } = useApp();
-  useModalClose(isOpen, onClose);
-  const unreadCount = notifications.filter((n) => !n.read).length;
+function isRrhhPersonal(n: AppNotification): boolean {
+  const title = String(n.title || '');
+  const entity = String(n.entityType || '').toLowerCase();
+  const cat = String(n.category || '').toLowerCase();
+  return (
+    entity === 'vacation' ||
+    cat === 'clockin' ||
+    /^nueva solicitud/i.test(title) ||
+    /^solicitud /i.test(title) ||
+    /^conflicto de solicitudes/i.test(title) ||
+    /fich/i.test(title) ||
+    /vacaci/i.test(title)
+  );
+}
 
-  const getIcon = (level: 'success' | 'warning' | 'info' | 'alert') => {
-    switch (level) {
-      case 'success': return <CheckCircle className="w-5 h-5 text-green-600" />;
-      case 'warning': return <AlertCircle className="w-5 h-5 text-amber-600" />;
-      case 'info': return <Info className="w-5 h-5 text-blue-600" />;
-      case 'alert': return <AlertCircle className="w-5 h-5 text-red-600" />;
-    }
+function personalKind(n: AppNotification): { label: string; Icon: LucideIcon } {
+  if (/urgente/i.test(n.title || '') || n.level === 'alert') {
+    return { label: 'Urgente', Icon: AlertTriangle };
+  }
+  if (isRrhhPersonal(n) && /fich/i.test(n.title || '')) {
+    return { label: 'Fichaje', Icon: Clock };
+  }
+  if (isRrhhPersonal(n)) {
+    return { label: 'Equipo', Icon: CalendarDays };
+  }
+  return { label: 'Aviso', Icon: Bell };
+}
+
+function resolvePersonalRoute(n: { route?: string; entityType?: string; entityId?: string }): string {
+  if (n.route?.startsWith('/saas/')) return n.route;
+  if (!n.entityType || !n.entityId) return '';
+  const id = encodeURIComponent(n.entityId);
+  const routeMap: Record<string, string> = {
+    sale: `/saas/sales/${id}`,
+    vehicle: `/saas/vehicles/${id}`,
+    lead: `/saas/clients?tab=leads&leadId=${id}`,
+    client: `/saas/clients/${id}`,
   };
+  return routeMap[n.entityType] || '';
+}
 
-  const resolveRoute = (n: { route?: string; entityType?: string; entityId?: string }): string => {
-    if (n.route?.startsWith('/saas/')) return n.route;
-    if (!n.entityType || !n.entityId) return '';
-    const id = encodeURIComponent(n.entityId);
-    const routeMap: Record<string, string> = {
-      sale: `/saas/sales/${id}`,
-      vehicle: `/saas/vehicles/${id}`,
-      lead: `/saas/clients?tab=leads&leadId=${id}`,
-      client: `/saas/clients/${id}`,
-    };
-    return routeMap[n.entityType] || '';
-  };
-
-  if (!isOpen) return null;
-
+function DrawerChrome({
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+}: {
+  title: string;
+  subtitle: string;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[55]" onClick={onClose} />
+      <div className="fixed inset-0 bg-black/40 z-[55]" onClick={onClose} />
       <div
-        className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md bg-white dark:bg-gray-800 shadow-2xl z-[60] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        className="fixed right-0 top-0 bottom-0 w-full sm:max-w-md bg-white dark:bg-stone-950 shadow-2xl z-[60] flex flex-col pt-[env(safe-area-inset-top,0px)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="border-b border-gray-200 dark:border-gray-700 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Bell className="w-5 h-5 text-gray-700 dark:text-gray-300" />
-            <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Notificaciones</h2>
-              {unreadCount > 0 && <p className="text-xs text-gray-600 dark:text-gray-400">{unreadCount} sin leer</p>}
-            </div>
+        <div className="shrink-0 border-b border-stone-200 dark:border-stone-800 px-4 py-3.5 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-bold text-stone-900 dark:text-stone-50">{title}</h2>
+            <p className="text-xs text-stone-500 mt-0.5">{subtitle}</p>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"><X className="w-5 h-5" /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800"
+            aria-label="Cerrar"
+          >
+            <X className="w-5 h-5 text-stone-500" />
+          </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          {notifications.length > 0 ? (
-            <div className="space-y-3">
-              {notifications.map((n) => (
-                <div
-                  key={n.id}
-                  className={`p-4 border-2 rounded-xl cursor-pointer ${n.read ? 'opacity-70' : ''}`}
-                  onClick={async () => {
-                    await markNotificationAsRead(n.id, true);
-                    const route = resolveRoute(n);
-                    if (route) { navigate(route); onClose(); }
-                  }}
-                >
-                  <div className="flex gap-3">
-                    {getIcon(n.level)}
-                    <div>
-                      <h3 className="font-semibold text-sm">{n.title}</h3>
-                      <p className="text-sm text-gray-600">{n.message}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full py-12 text-center">
-              <Bell className="w-16 h-16 text-gray-300 mb-4" />
-              <p className="text-gray-600">Sin notificaciones</p>
-            </div>
-          )}
-        </div>
-        {notifications.length > 0 && (
-          <div className="border-t px-6 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <button onClick={() => void markAllNotificationsAsRead()} className="w-full text-sm font-medium text-blue-600">
-              Marcar todas como leídas
-            </button>
+        <div className="flex-1 min-h-0 overflow-y-auto">{children}</div>
+        {footer ? (
+          <div className="shrink-0 border-t border-stone-200 dark:border-stone-800 p-3 space-y-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            {footer}
           </div>
-        )}
+        ) : null}
       </div>
     </>
   );
 }
 
-function AlertCenterDrawer({
+function EmptyState({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <Bell className="mb-3 h-10 w-10 text-stone-300" />
+      <p className="text-sm font-semibold text-stone-800 dark:text-stone-100">{title}</p>
+      <p className="mt-1 text-xs text-stone-500 max-w-[16rem]">{hint}</p>
+    </div>
+  );
+}
+
+function WorkerInbox({ isOpen, onClose }: Props) {
+  const navigate = useNavigate();
+  const { notifications, markNotificationAsRead, markAllNotificationsAsRead } = useApp();
+  useModalClose(isOpen, onClose);
+
+  const unread = notifications.filter((n) => !n.read);
+  const list = unread.length > 0 ? unread : notifications.slice(0, 30);
+
+  const openOne = async (n: AppNotification) => {
+    await markNotificationAsRead(n.id, true);
+    const route = resolvePersonalRoute(n);
+    if (route) {
+      navigate(route);
+      onClose();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <DrawerChrome
+      title="Avisos"
+      subtitle={unread.length > 0 ? `${unread.length} sin leer` : 'Todo al día'}
+      onClose={onClose}
+      footer={
+        unread.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => void markAllNotificationsAsRead()}
+            className={`w-full ${VERTIAL_BTN_PRIMARY}`}
+          >
+            <CheckCircle className="h-4 w-4" />
+            Marcar todo leído
+          </button>
+        ) : null
+      }
+    >
+      {list.length === 0 ? (
+        <EmptyState title="Sin avisos" hint="Cuando haya algo de turno o equipo, saldrá aquí." />
+      ) : (
+        <ul className="divide-y divide-stone-100 dark:divide-stone-900">
+          {list.map((n) => {
+            const kind = personalKind(n);
+            const Icon = kind.Icon;
+            return (
+              <li key={n.id}>
+                <button
+                  type="button"
+                  onClick={() => void openOne(n)}
+                  className={`w-full flex gap-3 px-4 py-3.5 text-left hover:bg-stone-50 dark:hover:bg-stone-900/60 ${
+                    n.read ? 'opacity-60' : ''
+                  }`}
+                >
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
+                        {kind.label}
+                      </span>
+                      {!n.read ? (
+                        <span className="h-1.5 w-1.5 rounded-full bg-[var(--v-blue,#2563eb)]" />
+                      ) : null}
+                    </span>
+                    <span className="mt-0.5 block text-sm font-semibold text-stone-900 dark:text-stone-50 line-clamp-1">
+                      {n.title}
+                    </span>
+                    {n.message ? (
+                      <span className="mt-0.5 block text-xs text-stone-500 line-clamp-2">{n.message}</span>
+                    ) : null}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </DrawerChrome>
+  );
+}
+
+function ManagerInbox({
   isOpen,
   onClose,
   user,
 }: Props & { user: NonNullable<AuthContextType['user']> }) {
   const navigate = useNavigate();
+  const { notifications, markNotificationAsRead, markAllNotificationsAsRead } = useApp();
   const currentBusiness = useBusinessOptional()?.currentBusiness;
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = useAlertCenterBusinessId();
-  const { departments, departmentSourceFilter, vertical } = useAlertDepartments();
   const { summary, reload: reloadSummary } = useAlertCenterSummary(businessId, {
-    pollMs: isOpen ? 30_000 : 60_000,
+    pollMs: isOpen ? 45_000 : 120_000,
   });
-
   const businessType = currentBusiness?.businessType;
 
+  const [tab, setTab] = useState<InboxTab>('equipo');
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [activeDept, setActiveDept] = useState('all');
-  const busyAlertIds = useRef(new Set<string>());
-  const loadInflightRef = useRef<{ deptId: string; promise: Promise<void> } | null>(null);
-  const loadSeqRef = useRef(0);
+  const [busy, setBusy] = useState(false);
+  const busyIds = useRef(new Set<string>());
+  const autoTabRef = useRef(false);
   useModalClose(isOpen, onClose);
 
-  const loadAlerts = useCallback(async (deptId = activeDept, options?: { silent?: boolean }) => {
+  const teamList = notifications.filter((n) => isRrhhPersonal(n) || !n.read).slice(0, 40);
+  const teamUnread = notifications.filter((n) => !n.read).length;
+  const negocioCount = summary?.unresolved ?? 0;
+
+  const loadNegocio = useCallback(async () => {
     if (!businessId) return;
-
-    // Solo reutiliza la petición en curso si es del mismo departamento;
-    // al cambiar de pestaña se lanza una nueva y el seq descarta la obsoleta.
-    if (loadInflightRef.current?.deptId === deptId) {
-      return loadInflightRef.current.promise;
-    }
-
-    const silent = options?.silent === true;
-    const seq = ++loadSeqRef.current;
-    if (!silent) setLoading(true);
-
-    const run = async () => {
-      try {
-        const sourceFilter = departmentSourceFilter(deptId);
-        const includeDocs = shouldIncludeDocumentAlerts(sourceFilter);
-        const res = await fetchAlerts(businessId, {
-          status: 'new,seen',
-          order: 'desc',
-          page: 1,
-          limit: 20,
-          ...(sourceFilter ? { source: sourceFilter } : {}),
-        });
-        if (seq !== loadSeqRef.current) return;
-
-        const serverAlerts = mapAlertsForBusinessVertical(res.alerts || [], businessType);
-        setAlerts(serverAlerts);
-
-        if (includeDocs && dataUserId) {
-          const docAlerts = await fetchDocumentAlertsAsRecords(dataUserId, businessId);
-          if (seq !== loadSeqRef.current) return;
-          setAlerts(mergeAlertLists(serverAlerts, docAlerts, 20));
-        }
-      } catch {
-        if (seq === loadSeqRef.current) {
-          toast.error('No se pudieron cargar las alertas');
-        }
-      } finally {
-        if (seq === loadSeqRef.current && !silent) setLoading(false);
-      }
-    };
-
-    const promise = run().finally(() => {
-      if (loadInflightRef.current?.promise === promise) {
-        loadInflightRef.current = null;
-      }
-    });
-    loadInflightRef.current = { deptId, promise };
-    return promise;
-  }, [businessId, activeDept, dataUserId, departmentSourceFilter, businessType]);
-
-  const syncAndReload = useCallback(async () => {
-    if (!businessId || syncing) return;
-    setSyncing(true);
+    setLoading(true);
     try {
-      const accountUserId = user?.user_id || user?.id || '';
-      if (accountUserId) {
-        await triggerAlertEngineCheck(accountUserId).catch(() => null);
+      const res = await fetchAlerts(businessId, {
+        status: 'new,seen',
+        order: 'desc',
+        page: 1,
+        limit: 25,
+      });
+      let list = mapAlertsForBusinessVertical(res.alerts || [], businessType);
+      if (dataUserId) {
+        const docs = await fetchDocumentAlertsAsRecords(dataUserId, businessId).catch(() => []);
+        list = mergeAlertLists(list, docs, 25);
       }
-      await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: true })]);
+      setAlerts(list.filter((a) => a.status !== 'resolved'));
+    } catch {
+      toast.error('No se pudieron cargar las alertas');
     } finally {
-      setSyncing(false);
+      setLoading(false);
     }
-  }, [businessId, user?.user_id, user?.id, reloadSummary, loadAlerts, activeDept, syncing]);
-
-  useEffect(() => {
-    if (!isOpen || !businessId) return;
-    void loadAlerts(activeDept, { silent: alerts.length > 0 });
-  }, [isOpen, businessId, activeDept, loadAlerts]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [businessId, businessType, dataUserId]);
 
   useEffect(() => {
     if (!isOpen) {
-      loadSeqRef.current += 1;
-      setLoading(false);
+      autoTabRef.current = false;
+      return;
     }
-  }, [isOpen]);
+    if (autoTabRef.current) return;
+    if (teamUnread > 0) {
+      setTab('equipo');
+      autoTabRef.current = true;
+      return;
+    }
+    if (negocioCount > 0) {
+      setTab('negocio');
+      autoTabRef.current = true;
+    }
+  }, [isOpen, teamUnread, negocioCount]);
 
-  const handleNavigate = useCallback(
-    (route: string) => {
-      if (route.startsWith('/')) {
-        navigate(route);
-      } else {
-        navigate(`/saas/${route.replace(/^\//, '')}`);
-      }
+  useEffect(() => {
+    if (!isOpen || tab !== 'negocio') return;
+    void loadNegocio();
+  }, [isOpen, tab, loadNegocio]);
+
+  const openPersonal = async (n: AppNotification) => {
+    await markNotificationAsRead(n.id, true);
+    const route = resolvePersonalRoute(n);
+    if (route) {
+      navigate(route);
       onClose();
-    },
-    [navigate, onClose],
-  );
-
-  const applyLocalStatus = useCallback(
-    (alertId: string, status: 'seen' | 'resolved') => {
-      setAlerts((prev) =>
-        status === 'resolved'
-          ? prev.filter((a) => a.id !== alertId)
-          : prev.map((a) => (a.id === alertId ? { ...a, status } : a)),
-      );
-    },
-    [],
-  );
-
-  const handleMarkSeen = useCallback(
-    async (alertId: string) => {
-      if (busyAlertIds.current.has(alertId)) return;
-      busyAlertIds.current.add(alertId);
-      try {
-        if (isSyntheticDocumentAlert(alertId)) {
-          if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
-          applyLocalStatus(alertId, 'seen');
-          await reloadSummary();
-          return;
-        }
-        await updateAlertStatus(businessId, alertId, 'seen');
-        applyLocalStatus(alertId, 'seen');
-        await reloadSummary();
-      } catch {
-        toast.error('No se pudo marcar como vista');
-      } finally {
-        busyAlertIds.current.delete(alertId);
-      }
-    },
-    [businessId, dataUserId, applyLocalStatus, reloadSummary],
-  );
-
-  const handleResolve = useCallback(
-    async (alertId: string) => {
-      if (busyAlertIds.current.has(alertId)) return;
-      busyAlertIds.current.add(alertId);
-      try {
-        if (isSyntheticDocumentAlert(alertId)) {
-          if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
-          applyLocalStatus(alertId, 'resolved');
-          toast.success('Alerta archivada');
-          await reloadSummary();
-          return;
-        }
-        await updateAlertStatus(businessId, alertId, 'resolved');
-        applyLocalStatus(alertId, 'resolved');
-        toast.success('Alerta resuelta');
-        await reloadSummary();
-      } catch {
-        toast.error('No se pudo resolver la alerta');
-      } finally {
-        busyAlertIds.current.delete(alertId);
-      }
-    },
-    [businessId, dataUserId, applyLocalStatus, reloadSummary],
-  );
-
-  const markAllSeen = async () => {
-    if (bulkBusy) return;
-    const newIds = alerts.filter((a) => a.status === 'new' && !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
-    const syntheticIds = alerts.filter((a) => a.status === 'new' && isSyntheticDocumentAlert(a.id)).map((a) => a.id);
-    if (newIds.length === 0 && syntheticIds.length === 0) return;
-    setBulkBusy(true);
-    try {
-      if (syntheticIds.length && dataUserId) {
-        dismissDocumentAlerts(dataUserId, businessId, syntheticIds);
-        setAlerts((prev) => prev.map((a) => (syntheticIds.includes(a.id) ? { ...a, status: 'seen' as const } : a)));
-      }
-      if (newIds.length) {
-        await bulkUpdateAlertStatus(businessId, newIds, 'seen');
-      }
-      await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: true })]);
-    } catch {
-      toast.error('No se pudieron marcar como vistas');
-    } finally {
-      setBulkBusy(false);
     }
   };
 
-  const resolveAllVisible = useCallback(async () => {
-    if (!businessId || bulkBusy) return;
-    const pending = alerts.filter((a) => a.status !== 'resolved');
-    if (pending.length === 0) return;
+  const openAlert = async (alert: AlertRecord) => {
+    if (!busyIds.current.has(alert.id) && alert.status === 'new') {
+      busyIds.current.add(alert.id);
+      try {
+        if (isSyntheticDocumentAlert(alert.id)) {
+          if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alert.id);
+        } else {
+          await updateAlertStatus(businessId, alert.id, 'seen');
+        }
+        setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, status: 'seen' } : a)));
+        await reloadSummary();
+      } catch {
+        /* best-effort */
+      } finally {
+        busyIds.current.delete(alert.id);
+      }
+    }
+    if (alert.route?.startsWith('/')) {
+      navigate(alert.route);
+      onClose();
+    }
+  };
 
-    const syntheticIds = pending.filter((a) => isSyntheticDocumentAlert(a.id)).map((a) => a.id);
-    const realIds = pending.filter((a) => !isSyntheticDocumentAlert(a.id)).map((a) => a.id);
-
-    setBulkBusy(true);
+  const resolveOne = async (alertId: string) => {
+    if (busyIds.current.has(alertId)) return;
+    busyIds.current.add(alertId);
     try {
-      if (syntheticIds.length && dataUserId) {
-        dismissDocumentAlerts(dataUserId, businessId, syntheticIds);
-      }
-
-      setAlerts([]);
-
-      let updated = 0;
-      let errors = 0;
-      if (realIds.length) {
-        const result = await bulkUpdateAlertStatus(businessId, realIds, 'resolved');
-        updated = result.updated ?? 0;
-        errors = result.errors ?? 0;
-      }
-
-      const totalOk = updated + syntheticIds.length;
-      if (errors > 0) {
-        toast.warning(`${totalOk} resueltas · ${errors} no se pudieron guardar`);
+      if (isSyntheticDocumentAlert(alertId)) {
+        if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
       } else {
-        toast.success(`${totalOk} alerta${totalOk !== 1 ? 's' : ''} resuelta${totalOk !== 1 ? 's' : ''}`);
+        await updateAlertStatus(businessId, alertId, 'resolved');
       }
-
-      await Promise.all([reloadSummary(), loadAlerts(activeDept, { silent: true })]);
+      setAlerts((prev) => prev.filter((a) => a.id !== alertId));
+      await reloadSummary();
     } catch {
-      toast.error('Error al resolver alertas');
-      await loadAlerts(activeDept, { silent: true });
+      toast.error('No se pudo cerrar');
     } finally {
-      setBulkBusy(false);
+      busyIds.current.delete(alertId);
     }
-  }, [alerts, bulkBusy, businessId, dataUserId, activeDept, reloadSummary, loadAlerts]);
-
-  const goFullCenter = () => {
-    navigate('/saas/alerts');
-    onClose();
   };
 
-  const goAjustes = () => {
-    navigate('/saas/alerts?tab=ajustes');
-    onClose();
+  const clearNegocio = async () => {
+    if (!businessId || busy) return;
+    setBusy(true);
+    try {
+      const synthetic = alerts.filter((a) => isSyntheticDocumentAlert(a.id)).map((a) => a.id);
+      if (synthetic.length && dataUserId) {
+        dismissDocumentAlerts(dataUserId, businessId, synthetic);
+      }
+      await resolveAllUnresolvedAlerts(businessId);
+      setAlerts([]);
+      await reloadSummary();
+      toast.success('Bandeja de negocio limpia');
+    } catch {
+      toast.error('No se pudo limpiar');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!isOpen) return null;
 
-  const highCount = summary?.byPriority?.high ?? 0;
-  const unresolved = summary?.unresolved ?? 0;
-  const newCount = summary?.byStatus?.new ?? 0;
-  const visiblePending = alerts.filter((a) => a.status !== 'resolved').length;
-  const listNote =
-    unresolved > visiblePending && visiblePending > 0
-      ? `Mostrando ${visiblePending} de ${unresolved} pendientes`
-      : null;
+  const subtitle =
+    tab === 'equipo'
+      ? teamUnread > 0
+        ? `${teamUnread} sin leer`
+        : 'Solicitudes y fichajes'
+      : negocioCount > 0
+        ? `${negocioCount} pendientes`
+        : 'Caja y operación';
+
+  const showTeamClear = tab === 'equipo' && teamUnread > 0;
+  const showBizClear = tab === 'negocio' && (alerts.length > 0 || negocioCount > 0);
+  const showBizOpen = tab === 'negocio';
+  const hasFooter = showTeamClear || showBizClear || showBizOpen;
 
   return (
-    <>
-      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[55]" onClick={onClose} />
-
-      <div
-        className="fixed inset-y-0 right-0 w-full sm:max-w-md bg-zinc-50 dark:bg-zinc-950 shadow-2xl z-[60] flex flex-col overflow-hidden animate-in slide-in-from-right duration-300 pt-[env(safe-area-inset-top,0px)]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <AlertProShell
-          compact
-          title="Centro de alertas"
-          subtitle="Stock · Finanzas · RRHH · Documentación"
-          badge={unresolved > 0 ? (
-            <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-bold text-red-700 ring-1 ring-red-200 dark:bg-red-950/50 dark:text-red-300 dark:ring-red-900/50">
-              {unresolved > 99 ? '99+' : unresolved} activas
-            </span>
-          ) : undefined}
-          actions={(
-            <>
-              <AlertProIconButton title="Ajustes de alertas" onClick={goAjustes}>
-                <Settings2 className="w-4 h-4" />
-              </AlertProIconButton>
-              <AlertProIconButton title="Actualizar" onClick={() => void syncAndReload()} disabled={syncing}>
-                <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
-              </AlertProIconButton>
-              <AlertProIconButton title="Cerrar" onClick={onClose}>
-                <X className="w-4 h-4" />
-              </AlertProIconButton>
-            </>
-          )}
-          kpis={(
-            <AlertProKpiStrip
-              compact
-              unresolved={unresolved}
-              high={highCount}
-              newCount={newCount}
-            />
-          )}
-        />
-
-        <AlertProDeptTabs
-          compact
-          summary={summary}
-          activeId={activeDept}
-          onChange={setActiveDept}
-          icons={DEPT_ICONS}
-          departments={departments}
-          vertical={vertical}
-        />
-
-        <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-zinc-50 dark:bg-zinc-950">
-          {listNote && (
-            <p className="px-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-              {listNote}
-            </p>
-          )}
-          {bulkBusy ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-zinc-500">
-              <RefreshCw className="h-5 w-5 animate-spin" />
-              Resolviendo alertas…
-            </div>
-          ) : loading && alerts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 py-16 text-sm text-zinc-500">
-              <RefreshCw className="h-6 w-6 animate-spin text-zinc-400" />
-              Cargando alertas…
-            </div>
-          ) : alerts.length === 0 ? (
-            <AlertProEmpty label={`Sin alertas en ${departments.find((d) => d.id === activeDept)?.label || 'esta área'}`} />
-          ) : (
-            alerts.map((alert) => (
-              <AlertProRow
-                key={alert.id}
-                alert={alert}
-                showActions
-                showArrow={false}
-                onNavigate={handleNavigate}
-                onMarkSeen={(id) => void handleMarkSeen(id)}
-                onResolve={(id) => void handleResolve(id)}
-              />
-            ))
-          )}
-        </div>
-
-        <div className="shrink-0 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {newCount > 0 && (
+    <DrawerChrome
+      title="Avisos"
+      subtitle={subtitle}
+      onClose={onClose}
+      footer={
+        hasFooter ? (
+          <>
+            {showTeamClear ? (
+              <button
+                type="button"
+                onClick={() => void markAllNotificationsAsRead()}
+                className={`w-full ${VERTIAL_BTN_PRIMARY}`}
+              >
+                <CheckCircle className="h-4 w-4" />
+                Marcar todo leído
+              </button>
+            ) : null}
+            {showBizClear ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void clearNegocio()}
+                className={`w-full ${VERTIAL_BTN_SECONDARY}`}
+              >
+                {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                Limpiar pendientes
+              </button>
+            ) : null}
+            {showBizOpen ? (
+              <button
+                type="button"
+                onClick={() => {
+                  navigate('/saas/alerts');
+                  onClose();
+                }}
+                className={`w-full ${VERTIAL_BTN_PRIMARY}`}
+              >
+                Abrir centro de alertas
+                <ArrowRight className="h-4 w-4" />
+              </button>
+            ) : null}
+            {showBizOpen ? (
+              <button
+                type="button"
+                onClick={() => {
+                  navigate('/saas/alerts?tab=settings');
+                  onClose();
+                }}
+                className="w-full inline-flex items-center justify-center gap-2 text-xs font-semibold text-stone-500 hover:text-stone-800 dark:hover:text-stone-200 py-1"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                Ajustes
+              </button>
+            ) : null}
+          </>
+        ) : undefined
+      }
+    >
+      <div className="sticky top-0 z-10 flex gap-1 border-b border-stone-200 bg-white px-3 py-2 dark:border-stone-800 dark:bg-stone-950">
+        {(
+          [
+            { id: 'equipo' as const, label: 'Equipo', count: teamUnread },
+            { id: 'negocio' as const, label: 'Negocio', count: negocioCount },
+          ] as const
+        ).map((t) => {
+          const active = tab === t.id;
+          return (
             <button
+              key={t.id}
               type="button"
-              disabled={bulkBusy || syncing}
-              onClick={() => void markAllSeen()}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 py-2.5 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition"
+              onClick={() => setTab(t.id)}
+              className={`flex-1 min-h-10 rounded-xl text-sm font-bold transition-colors ${
+                active
+                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                  : 'bg-stone-100 text-stone-600 hover:bg-stone-200 dark:bg-stone-900 dark:text-stone-300'
+              }`}
             >
-              <Eye className="w-4 h-4" />
-              Marcar todas como vistas
+              {t.label}
+              {t.count > 0 ? (
+                <span className={`ml-1.5 tabular-nums ${active ? 'opacity-90' : 'text-stone-400'}`}>
+                  {t.count > 99 ? '99+' : t.count}
+                </span>
+              ) : null}
             </button>
-          )}
-          {alerts.some((a) => a.status !== 'resolved') && (
-            <button
-              type="button"
-              disabled={bulkBusy || syncing}
-              onClick={() => void resolveAllVisible()}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 py-2.5 text-sm font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition disabled:opacity-50"
-            >
-              {bulkBusy ? (
-                <RefreshCw className="w-4 h-4 animate-spin" />
-              ) : (
-                <CheckCircle className="w-4 h-4" />
-              )}
-              {bulkBusy ? 'Resolviendo…' : 'Resolver todas visibles'}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={goAjustes}
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 py-3 text-sm font-semibold text-white shadow-md shadow-violet-500/20 transition hover:from-violet-500 hover:to-indigo-500"
-          >
-            <Settings2 className="w-4 h-4" />
-            Ajustes de alertas
-          </button>
-          <button
-            type="button"
-            onClick={goFullCenter}
-            className="w-full flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 py-2.5 text-sm font-semibold text-zinc-800 dark:text-zinc-200 transition hover:bg-zinc-50 dark:hover:bg-zinc-800"
-          >
-            Abrir centro completo
-            <ArrowRight className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => { navigate('/saas/alerts?tab=historial'); onClose(); }}
-            className="w-full text-center text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300 py-1"
-          >
-            Ver historial de alertas
-          </button>
-        </div>
+          );
+        })}
       </div>
-    </>
+
+      {tab === 'equipo' ? (
+        teamList.length === 0 ? (
+          <EmptyState
+            title="Nada del equipo"
+            hint="Solicitudes, vacaciones y fichajes aparecen aquí."
+          />
+        ) : (
+          <ul className="divide-y divide-stone-100 dark:divide-stone-900">
+            {teamList.map((n) => {
+              const kind = personalKind(n);
+              const Icon = kind.Icon;
+              return (
+                <li key={n.id}>
+                  <button
+                    type="button"
+                    onClick={() => void openPersonal(n)}
+                    className={`w-full flex gap-3 px-4 py-3.5 text-left hover:bg-stone-50 dark:hover:bg-stone-900/60 ${
+                      n.read ? 'opacity-55' : ''
+                    }`}
+                  >
+                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-stone-400">
+                          {kind.label}
+                        </span>
+                        {!n.read ? (
+                          <span className="h-1.5 w-1.5 rounded-full bg-[var(--v-blue,#2563eb)]" />
+                        ) : null}
+                      </span>
+                      <span className="mt-0.5 block text-sm font-semibold text-stone-900 dark:text-stone-50 line-clamp-1">
+                        {n.title}
+                      </span>
+                      {n.message ? (
+                        <span className="mt-0.5 block text-xs text-stone-500 line-clamp-2">{n.message}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )
+      ) : loading && alerts.length === 0 ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-sm text-stone-500">
+          <RefreshCw className="h-5 w-5 animate-spin" />
+          Cargando…
+        </div>
+      ) : alerts.length === 0 ? (
+        <EmptyState
+          title="Negocio al día"
+          hint="Descuadres de caja, pedidos críticos y avisos del local salen aquí."
+        />
+      ) : (
+        <ul className="divide-y divide-stone-100 dark:divide-stone-900">
+          {alerts.map((alert) => (
+            <li key={alert.id} className="flex items-stretch gap-1 px-2 py-1">
+              <button
+                type="button"
+                onClick={() => void openAlert(alert)}
+                className="min-w-0 flex-1 flex gap-3 px-2 py-2.5 text-left rounded-xl hover:bg-stone-50 dark:hover:bg-stone-900/60"
+              >
+                <span
+                  className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${
+                    alert.priority === 'high'
+                      ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300'
+                      : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
+                  }`}
+                >
+                  {alert.priority === 'high' ? (
+                    <AlertTriangle className="h-4 w-4" />
+                  ) : (
+                    <Bell className="h-4 w-4" />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    {alert.status === 'new' ? (
+                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--v-blue,#2563eb)]" />
+                    ) : null}
+                    <span className="text-sm font-semibold text-stone-900 dark:text-stone-50 line-clamp-1">
+                      {alert.title}
+                    </span>
+                  </span>
+                  {alert.message ? (
+                    <span className="mt-0.5 block text-xs text-stone-500 line-clamp-2">{alert.message}</span>
+                  ) : null}
+                  {alert.createdAt ? (
+                    <span className="mt-1 block text-[10px] text-stone-400">
+                      {formatDateTimeEs(alert.createdAt)}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+              <button
+                type="button"
+                title="Cerrar aviso"
+                onClick={() => void resolveOne(alert.id)}
+                className="shrink-0 self-center p-2.5 rounded-xl text-stone-400 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950/40"
+              >
+                <CheckCircle className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </DrawerChrome>
   );
 }
 
@@ -551,10 +578,10 @@ export function SAAS__NotificationsDrawer({ isOpen, onClose }: Props) {
   if (!auth?.user) return null;
 
   if (isWorkerAccount(auth.user)) {
-    return <LegacyNotificationsDrawer isOpen={isOpen} onClose={onClose} />;
+    return <WorkerInbox isOpen={isOpen} onClose={onClose} />;
   }
 
   if (!isOpen) return null;
 
-  return <AlertCenterDrawer isOpen={isOpen} onClose={onClose} user={auth.user} />;
+  return <ManagerInbox isOpen={isOpen} onClose={onClose} user={auth.user} />;
 }

@@ -10,6 +10,7 @@ import { couchRequest, getCouchConfig } from './couchdb.js';
 import crypto from 'node:crypto';
 import { shouldSendMobilePush } from './pushAlertPolicy.js';
 import { sendNativePushToUser, saveNativeToken, deleteNativeToken } from './nativePushService.js';
+import { couchJson } from './couchResponse.js';
 
 export { saveNativeToken, deleteNativeToken };
 
@@ -64,8 +65,11 @@ export async function saveSubscription(req, userId, subscription) {
 
   let rev;
   try {
-    const existing = await couchRequest(req, `/${PUSH_DB}/${encodeURIComponent(id)}`);
-    rev = existing._rev;
+    const existingRes = await couchRequest(req, `/${PUSH_DB}/${encodeURIComponent(id)}`);
+    if (existingRes.ok) {
+      const existing = await couchJson(existingRes);
+      rev = existing?._rev;
+    }
   } catch {
     // Documento nuevo
   }
@@ -79,11 +83,15 @@ export async function saveSubscription(req, userId, subscription) {
     createdAt: new Date().toISOString(),
   };
 
-  await couchRequest(req, `/${PUSH_DB}/${encodeURIComponent(id)}`, {
+  const putRes = await couchRequest(req, `/${PUSH_DB}/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body: JSON.stringify(doc),
     headers: { 'Content-Type': 'application/json' },
   });
+  if (!putRes.ok) {
+    const errBody = await putRes.text().catch(() => '');
+    throw new Error(`No se pudo guardar suscripción push (${putRes.status}): ${errBody.slice(0, 200)}`);
+  }
 }
 
 /**
@@ -96,7 +104,10 @@ export async function deleteSubscription(req, userId, endpoint) {
   const hash = hashEndpoint(endpoint);
   const id = `push:${userId}:${hash}`;
   try {
-    const existing = await couchRequest(req, `/${PUSH_DB}/${encodeURIComponent(id)}`);
+    const existingRes = await couchRequest(req, `/${PUSH_DB}/${encodeURIComponent(id)}`);
+    if (!existingRes.ok) return;
+    const existing = await couchJson(existingRes);
+    if (!existing?._rev) return;
     await couchRequest(req, `/${PUSH_DB}/${encodeURIComponent(id)}?rev=${existing._rev}`, {
       method: 'DELETE',
     });
@@ -114,7 +125,7 @@ export async function deleteSubscription(req, userId, endpoint) {
 async function getSubscriptionsForUser(req, userId) {
   await ensurePushDB(req);
   try {
-    const result = await couchRequest(req, `/${PUSH_DB}/_find`, {
+    const resultRes = await couchRequest(req, `/${PUSH_DB}/_find`, {
       method: 'POST',
       body: JSON.stringify({
         selector: { type: 'push_subscription', userId },
@@ -122,7 +133,9 @@ async function getSubscriptionsForUser(req, userId) {
       }),
       headers: { 'Content-Type': 'application/json' },
     });
-    return (result.docs || []).map((d) => d.subscription).filter(Boolean);
+    if (!resultRes.ok) return [];
+    const result = await couchJson(resultRes);
+    return (result?.docs || []).map((d) => d.subscription).filter(Boolean);
   } catch {
     return [];
   }
@@ -167,7 +180,7 @@ async function sendWebPushToUser(req, userId, payload) {
  *
  * @param {object|null} req
  * @param {string} userId
- * @param {{ title: string; body: string; data?: Record<string, unknown>; sound?: string; badge?: number }} payload
+ * @param {{ title: string; body: string; data?: Record<string, unknown>; sound?: string; badge?: number; collapseId?: string }} payload
  * @param {{ ruleId?: string; category?: string; channels?: string[] }} [options]
  */
 export async function sendPushToUser(req, userId, payload, options = {}) {
@@ -179,13 +192,23 @@ export async function sendPushToUser(req, userId, payload, options = {}) {
     if (!allowed) return;
   }
 
+  // APNs/FCM: data solo strings
+  const rawData = payload.data && typeof payload.data === 'object' ? payload.data : {};
+  const data = {};
+  for (const [k, v] of Object.entries(rawData)) {
+    if (v == null) continue;
+    data[k] = typeof v === 'string' ? v : String(v);
+  }
+
   const nativePayload = {
     ...payload,
+    data,
     sound: payload.sound || 'default',
+    collapseId: payload.collapseId || data.notificationId || undefined,
   };
 
   await Promise.all([
-    sendWebPushToUser(req, userId, payload),
+    sendWebPushToUser(req, userId, { ...payload, data }),
     sendNativePushToUser(req, userId, nativePayload),
   ]);
 }

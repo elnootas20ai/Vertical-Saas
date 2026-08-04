@@ -5,11 +5,13 @@ import { isWorkerAccount } from '../../lib/authApi';
 import {
   WORKER_OWNED_FIELD_DEFS,
   isWorkerProfileSubject,
+  resolveWorkerProfileCompletion,
 } from '../../lib/workerProfileCompletion';
 
 /**
  * Solo avisa al trabajador de lo que ÉL debe completar.
  * Fecha de alta / grupo de cotización / mutua → Gestor/RRHH (no se muestran aquí).
+ * Desaparece en cuanto los datos del trabajador están rellenos (recalculado en vivo).
  */
 export function WorkerProfileCompletionBanner() {
   const navigate = useNavigate();
@@ -19,11 +21,11 @@ export function WorkerProfileCompletionBanner() {
   if (!user || !isWorkerAccount(user) || !isWorkerProfileSubject(user)) return null;
   if (!String(user.linkedBusinessId || '').trim()) return null;
 
-  const completion = user.workerProfileCompletion;
-  if (!completion || completion.workerCompleted) return null;
+  const completion = resolveWorkerProfileCompletion(user);
+  if (completion.workerCompleted) return null;
 
   const workerLabels = WORKER_OWNED_FIELD_DEFS
-    .filter((f) => completion.workerMissing?.includes(f.id))
+    .filter((f) => completion.workerMissing.includes(f.id))
     .map((f) => f.label);
 
   if (workerLabels.length === 0) return null;

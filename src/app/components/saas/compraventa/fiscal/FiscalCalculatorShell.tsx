@@ -5,6 +5,7 @@ import {
   Calculator,
   Car,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   FileText,
   Globe,
@@ -215,6 +216,101 @@ function KpiCard({
   );
 }
 
+function HistoryList({
+  history,
+  savedId,
+  loadingHistory,
+  onLoad,
+  onDelete,
+}: {
+  history: FiscalConsultationRecord[];
+  savedId: string | null;
+  loadingHistory: boolean;
+  onLoad: (entry: FiscalConsultationRecord) => void;
+  onDelete: (entryId: string) => void;
+}) {
+  if (loadingHistory && history.length === 0) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-8 text-xs text-gray-400">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Cargando simulaciones…
+      </div>
+    );
+  }
+
+  if (history.length === 0) {
+    return (
+      <div className="mt-2 flex flex-col items-center gap-2 px-3 py-6 text-center">
+        <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-100 text-gray-400 dark:bg-gray-900">
+          <History className="h-5 w-5" />
+        </span>
+        <p className="text-xs text-gray-400">
+          Guarda una simulación para recuperarla en cualquier dispositivo.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <ul className="space-y-2">
+      {history.map((entry) => (
+        <li key={entry.id}>
+          <div
+            className={`rounded-2xl border p-3 transition-colors ${
+              savedId === entry.id
+                ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20'
+                : 'border-gray-200 bg-gray-50/50 hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900/50'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <button type="button" onClick={() => onLoad(entry)} className="min-w-0 flex-1 text-left">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
+                    {entry.summary.vehicleLabel}
+                  </p>
+                  {entry.summary.invoiceTotal != null ? (
+                    <span className="shrink-0 text-xs font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
+                      {formatEuro(entry.summary.invoiceTotal)}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 truncate text-xs text-gray-600 dark:text-gray-300">
+                  {entry.summary.regimeLabel}
+                </p>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span
+                    className={`rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide ${tagClasses(
+                      entry.summary.rebuEligible ? 'REBU' : 'R. General',
+                    )}`}
+                  >
+                    {entry.summary.rebuEligible ? 'REBU' : 'General'}
+                  </span>
+                  <span className="text-[10px] text-gray-400">
+                    {new Date(entry.updatedAt).toLocaleString('es-ES', {
+                      day: '2-digit',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => onDelete(entry.id)}
+                className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
+                aria-label="Eliminar"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }: Props) {
   const { user } = useAuth();
   const { vehicles } = useApp();
@@ -229,11 +325,13 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
   const [form, setForm] = useState<FiscalFormInput>(() => defaultFiscalForm(defaultCcaa));
   const [history, setHistory] = useState<FiscalConsultationRecord[]>([]);
   const [acquisitions, setAcquisitions] = useState<VehicleAcquisition[]>([]);
+  const [acquisitionsReady, setAcquisitionsReady] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [prefillKey, setPrefillKey] = useState('');
   const [initialApplied, setInitialApplied] = useState(false);
+  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
 
   const prefillOptions = useMemo(
     () => buildFiscalPrefillOptions(vehicles ?? [], acquisitions),
@@ -254,10 +352,15 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
   }, [userId, businessId]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      setAcquisitionsReady(true);
+      return;
+    }
+    setAcquisitionsReady(false);
     void listAcquisitionsRequest(userId)
       .then((res) => setAcquisitions(res.items || []))
-      .catch(() => {});
+      .catch(() => setAcquisitions([]))
+      .finally(() => setAcquisitionsReady(true));
   }, [userId]);
 
   useEffect(() => {
@@ -268,8 +371,9 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
     setForm((prev) => ({ ...prev, ccaa: prev.ccaa || defaultCcaa }));
   }, [defaultCcaa]);
 
+  // Esperar adquisiciones antes del prefill inicial (evita precio/vendedor incorrectos al deep-link).
   useEffect(() => {
-    if (initialApplied || !initialVehicleId || !vehicles?.length) return;
+    if (initialApplied || !initialVehicleId || !vehicles?.length || !acquisitionsReady) return;
     const vehicle = vehicles.find((v) => v.id === initialVehicleId);
     if (!vehicle) return;
     const acquisition = initialAcquisitionId
@@ -279,9 +383,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
       buildFiscalFormFromStock(vehicle, acquisition, defaultCcaa),
     );
     setForm(next);
-    setPrefillKey(
-      acquisition ? `${vehicle.id}:${acquisition.id}` : vehicle.id,
-    );
+    setPrefillKey(acquisition ? `${vehicle.id}:${acquisition.id}` : vehicle.id);
     setInitialApplied(true);
   }, [
     initialApplied,
@@ -289,6 +391,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
     initialAcquisitionId,
     vehicles,
     acquisitions,
+    acquisitionsReady,
     defaultCcaa,
   ]);
 
@@ -364,7 +467,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
       });
       setSavedId(item.id);
       await loadHistory();
-      toast.success('Consulta guardada en la nube');
+      toast.success('Simulación guardada en la nube');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'No se pudo guardar');
     } finally {
@@ -422,11 +525,16 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
               <Calculator className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">
-                Calculadora fiscal
-              </h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+                  Simulación fiscal
+                </h1>
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  Cálculo orientativo
+                </span>
+              </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                IVA · REBU · TPO por CCAA · histórico en la nube
+                Estimación de IVA · REBU · TPO por CCAA · no sustituye asesoramiento
               </p>
             </div>
           </div>
@@ -476,85 +584,54 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
           <div className="flex items-center gap-2 border-b border-gray-200/80 px-4 py-3 dark:border-gray-800">
             <History className="h-4 w-4 text-gray-400" />
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Consultas ({history.length})
+              Simulaciones ({history.length})
             </span>
             {loadingHistory ? <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" /> : null}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {history.length === 0 ? (
-              <div className="mt-6 flex flex-col items-center gap-2 px-3 text-center">
-                <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gray-100 text-gray-400 dark:bg-gray-900">
-                  <History className="h-5 w-5" />
-                </span>
-                <p className="text-xs text-gray-400">Las consultas guardadas se sincronizan por negocio.</p>
-              </div>
-            ) : (
-              <ul className="space-y-2">
-                {history.map((entry) => (
-                  <li key={entry.id}>
-                    <div
-                      className={`rounded-2xl border p-3 transition-colors ${
-                        savedId === entry.id
-                          ? 'border-emerald-300 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20'
-                          : 'border-gray-200 bg-gray-50/50 hover:border-gray-300 dark:border-gray-800 dark:bg-gray-900/50'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleLoadHistory(entry)}
-                          className="min-w-0 flex-1 text-left"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="truncate text-sm font-semibold text-gray-900 dark:text-gray-100">
-                              {entry.summary.vehicleLabel}
-                            </p>
-                            {entry.summary.invoiceTotal != null ? (
-                              <span className="shrink-0 text-xs font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
-                                {formatEuro(entry.summary.invoiceTotal)}
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="mt-1 truncate text-xs text-gray-600 dark:text-gray-300">
-                            {entry.summary.regimeLabel}
-                          </p>
-                          <div className="mt-1.5 flex items-center gap-1.5">
-                            <span
-                              className={`rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide ${tagClasses(
-                                entry.summary.rebuEligible ? 'REBU' : 'R. General',
-                              )}`}
-                            >
-                              {entry.summary.rebuEligible ? 'REBU' : 'General'}
-                            </span>
-                            <span className="text-[10px] text-gray-400">
-                              {new Date(entry.updatedAt).toLocaleString('es-ES', {
-                                day: '2-digit',
-                                month: 'short',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void handleDeleteHistory(entry.id)}
-                          className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40"
-                          aria-label="Eliminar"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <HistoryList
+              history={history}
+              savedId={savedId}
+              loadingHistory={loadingHistory}
+              onLoad={handleLoadHistory}
+              onDelete={(id) => void handleDeleteHistory(id)}
+            />
           </div>
         </aside>
 
         <div className="min-h-0 min-w-0 overflow-y-auto border-b border-gray-200/80 p-4 md:p-5 xl:border-b-0 xl:border-r dark:border-gray-800 print:hidden">
           <div className="mx-auto w-full max-w-2xl space-y-5 xl:max-w-none">
+            <section className="rounded-2xl border border-gray-200 bg-white xl:hidden dark:border-gray-800 print:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileHistoryOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                aria-expanded={mobileHistoryOpen}
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  <History className="h-4 w-4 text-gray-400" />
+                  Simulaciones guardadas ({history.length})
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 text-gray-400 transition-transform ${mobileHistoryOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {mobileHistoryOpen ? (
+                <div className="max-h-64 overflow-y-auto border-t border-gray-100 p-3 dark:border-gray-800">
+                  <HistoryList
+                    history={history}
+                    savedId={savedId}
+                    loadingHistory={loadingHistory}
+                    onLoad={(entry) => {
+                      handleLoadHistory(entry);
+                      setMobileHistoryOpen(false);
+                    }}
+                    onDelete={(id) => void handleDeleteHistory(id)}
+                  />
+                </div>
+              ) : null}
+            </section>
+
             <section className="rounded-2xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-800 dark:bg-gray-900/40">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
@@ -638,7 +715,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
             </section>
 
             <section className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900/30">
-              <StepHeader step={3} title="Datos del vehículo" hint="Fecha y km deciden nuevo/usado" />
+              <StepHeader step={3} title="Datos del vehículo" hint="Fecha y km deciden nuevo/usado a efectos de IVA" />
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div>
                   <label className="text-xs font-medium text-gray-500">Marca</label>
@@ -674,6 +751,9 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
                     value={form.firstRegistration}
                     onChange={(e) => patch({ firstRegistration: e.target.value })}
                   />
+                  <p className="mt-1 text-[11px] text-gray-400">
+                    Obligatoria para clasificar nuevo/usado. No se inventa desde la fecha de compra.
+                  </p>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-500">Kilómetros</label>
@@ -722,7 +802,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
 
             <section className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900/30">
               <div className="mb-3.5 flex items-center justify-between gap-2">
-                <StepHeader step={4} title="Venta (opcional)" className="" />
+                <StepHeader step={4} title="Simulación de venta" hint="Opcional · estima factura e IVA" className="" />
                 <label
                   className={`flex cursor-pointer select-none items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
                     form.includeSale
@@ -771,7 +851,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
                 </div>
               ) : (
                 <p className="rounded-xl border border-dashed border-gray-200 px-3.5 py-3 text-xs text-gray-400 dark:border-gray-700">
-                  Activa la simulación para ver el régimen de factura y el IVA del modelo 303.
+                  Activa la simulación para ver la previsión de factura y la estimación de IVA (modelo 303).
                 </p>
               )}
             </section>
@@ -785,7 +865,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
               </span>
-              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-500">Resultado en directo</h2>
+              <h2 className="text-xs font-bold uppercase tracking-wide text-gray-500">Estimación en directo</h2>
             </div>
             {result.purchase && result.vehicleLabel !== 'Sin identificar' ? (
               <span className="inline-flex max-w-[55%] items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
@@ -801,9 +881,9 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
                 <Wallet className="h-6 w-6" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Todo listo para calcular</p>
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">Listo para estimar</p>
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Introduce el precio de compra en el paso 3 y verás aquí el análisis fiscal al instante.
+                  Introduce el precio de compra en el paso 3 y verás aquí el cálculo orientativo al instante.
                 </p>
               </div>
             </div>
@@ -811,25 +891,33 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-2.5">
                 <KpiCard
-                  label="Coste real compra"
+                  label="Coste estimado compra"
                   value={formatEuro(result.purchase.realPurchaseCost)}
                   sub={result.purchase.vatDeductible > 0 ? 'IVA recuperable descontado' : undefined}
                   accent="emerald"
                 />
                 {result.sale ? (
-                  <KpiCard label="Factura de venta" value={formatEuro(result.sale.invoiceTotal)} sub={result.sale.regimeLabel} />
+                  <KpiCard
+                    label="Previsión factura venta"
+                    value={formatEuro(result.sale.invoiceTotal)}
+                    sub={result.sale.regimeLabel}
+                  />
                 ) : (
                   <KpiCard
-                    label="Régimen en venta"
+                    label="Régimen orientativo"
                     value={result.purchase.rebuEligible ? 'REBU' : 'General'}
                     sub={result.purchase.rebuEligible ? 'IVA solo del margen' : 'IVA 21% sobre base'}
                   />
                 )}
                 {result.sale ? (
-                  <KpiCard label="IVA modelo 303" value={formatEuro(result.sale.vatQuota303)} accent="amber" />
+                  <KpiCard
+                    label="Estimación IVA (303)"
+                    value={formatEuro(result.sale.vatQuota303)}
+                    accent="amber"
+                  />
                 ) : null}
                 {result.sale && result.sale.margin != null ? (
-                  <KpiCard label="Margen bruto" value={formatEuro(result.sale.margin)} />
+                  <KpiCard label="Margen bruto estimado" value={formatEuro(result.sale.margin)} />
                 ) : null}
               </div>
 
@@ -876,7 +964,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
                     </div>
                   ) : null}
                   <div className="flex justify-between gap-2 border-t border-gray-100 pt-2.5 dark:border-gray-800">
-                    <dt className="font-semibold text-gray-700 dark:text-gray-200">Coste real</dt>
+                    <dt className="font-semibold text-gray-700 dark:text-gray-200">Coste estimado</dt>
                     <dd className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
                       {formatEuro(result.purchase.realPurchaseCost)}
                     </dd>
@@ -942,7 +1030,7 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
                     ) : null}
                     <p className="mt-2.5 flex items-center gap-1.5 rounded-lg bg-white/60 px-2.5 py-1.5 text-xs font-medium text-emerald-800 dark:bg-black/20 dark:text-emerald-200">
                       <Receipt className="h-3.5 w-3.5 shrink-0" />
-                      Modelo 303: {result.sale.model303Hint}
+                      Estimación modelo 303: {result.sale.model303Hint}
                     </p>
                   </div>
 
@@ -982,9 +1070,10 @@ export function FiscalCalculatorShell({ initialVehicleId, initialAcquisitionId }
                 </div>
               )}
 
-              <p className="flex items-start gap-1.5 rounded-xl bg-gray-100/70 px-3 py-2 text-[11px] leading-relaxed text-gray-400 dark:bg-gray-900/60">
+              <p className="flex items-start gap-1.5 rounded-xl bg-gray-100/70 px-3 py-2 text-[11px] leading-relaxed text-gray-500 dark:bg-gray-900/60 dark:text-gray-400">
                 <Info className="mt-0.5 h-3 w-3 shrink-0" />
-                Herramienta orientativa (LIVA / TRLITP). TPO según tipo orientativo por CCAA; pueden aplicar tablas oficiales.
+                Simulación fiscal orientativa (LIVA / TRLITP). No es liquidación oficial ni asesoramiento tributario.
+                El TPO es un tipo orientativo por CCAA; pueden aplicar tablas y exenciones oficiales.
               </p>
             </div>
           )}

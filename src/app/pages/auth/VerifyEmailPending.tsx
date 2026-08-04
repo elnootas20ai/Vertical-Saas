@@ -319,8 +319,8 @@ export function VerifyEmailPending() {
             <div className="flex justify-center mb-8">
               <VertialLogo size="lg" />
             </div>
-            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/40">
-              <CheckCircle className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/40">
+              <CheckCircle className="h-8 w-8 text-blue-600 dark:text-blue-400" />
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 mb-2">
               Correo confirmado
@@ -345,8 +345,8 @@ export function VerifyEmailPending() {
             <div className="flex justify-center mb-8">
               <VertialLogo size="lg" />
             </div>
-            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/40">
-              <CheckCircle className="h-8 w-8 text-emerald-600 dark:text-emerald-400" />
+            <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/40">
+              <CheckCircle className="h-8 w-8 text-blue-600 dark:text-blue-400" />
             </div>
             <h1 className="text-2xl font-semibold tracking-tight text-gray-900 dark:text-gray-50 mb-2">
               Cuenta verificada
@@ -378,7 +378,7 @@ export function VerifyEmailPending() {
             {targetEmail ? (
               <div className="space-y-3">
                 {resendState === 'sent' && countdown > 0 && (
-                  <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+                  <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-200">
                     <CheckCircle className="w-4 h-4 shrink-0" />
                     <span>Nuevo enlace enviado a <strong>{targetEmail}</strong></span>
                   </div>

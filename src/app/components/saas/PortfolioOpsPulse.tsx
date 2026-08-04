@@ -1,4 +1,8 @@
-import { useMemo, useState, type ReactNode } from 'react';
+/**
+ * Resumen operativo por tienda (PDVs) + comparativa top 2 con marcas mismo día.
+ * Desktop: tablas. Tablet/móvil (`compact` o &lt; lg): cards densas y legibles.
+ */
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -16,25 +20,54 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import type { Brand } from '../../lib/brandApi';
+import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
+import {
+  brandsForBilling,
+  splitRulesFromBillingConfig,
+  type BrandBillingSplitRules,
+} from '../../lib/brandBillingConfig';
+import { isBrandActive } from '../../lib/brandUtils';
+import type { DeliveryOrder } from '../../lib/deliveryApi';
+import { formatDateEs } from '../../lib/formatDateEs';
+import { formatNumberEs } from '../../lib/formatNumberEs';
 import {
   aggregateStoreOpsPulses,
+  buildPdvBrandSameDayCompare,
+  emptyOpsExcelChannels,
   fmtEuro,
   monthOverMonthPct,
+  opsExcelChannelsTotal,
   rankStoreOpsPulses,
+  type OpsExcelChannels,
+  type PdvBrandSameDayCompare,
   type StoreOpsPulse,
 } from '../../lib/portfolioMetrics';
+import { localCalendarDayKey } from '../../lib/tpvCajaScope';
 
 type RangeMode = '7d' | 'month';
 
 type Props = {
-  /** Pulses de últimos 7 días (uno por PDV/tienda). */
   pulses7d: StoreOpsPulse[];
-  /** Pulses del mes en curso. */
   pulsesMonth: StoreOpsPulse[];
   refreshButton: ReactNode;
-  /** Dashboard de una sola empresa: no repetir el nombre de empresa bajo cada tienda. */
   singleBusiness?: boolean;
+  businessId?: string;
+  brands?: Brand[];
+  orders?: DeliveryOrder[];
+  /** Móvil / CeoMobileHome: sin tablas anchas ni gráfica grande. */
+  compact?: boolean;
 };
+
+const EXCEL_COLS: Array<{ key: keyof OpsExcelChannels; label: string }> = [
+  { key: 'efectivo', label: 'Efectivo' },
+  { key: 'tpv', label: 'TPV' },
+  { key: 'x', label: 'X' },
+  { key: 'app', label: 'App' },
+  { key: 'uber', label: 'Uber' },
+  { key: 'justEat', label: 'Just Eat' },
+  { key: 'glovo', label: 'Glovo' },
+];
 
 function DeltaBadge({ pct }: { pct: number | null }) {
   if (pct === null) {
@@ -69,11 +102,66 @@ function MixLine({
   kebab: number;
 }) {
   return (
-    <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300 tabular-nums">
-      {pizza}🍕 · {burger}🍔 · {taco}🌮
-      {kebab > 0 ? ` · ${kebab}🥙` : ''}
+    <span className="inline-block whitespace-nowrap text-[10px] font-semibold text-gray-600 dark:text-gray-300 tabular-nums">
+      {formatNumberEs(pizza, { maxFraction: 0 })}🍕 · {formatNumberEs(burger, { maxFraction: 0 })}🍔 ·{' '}
+      {formatNumberEs(taco, { maxFraction: 0 })}🌮
+      {kebab > 0 ? ` · ${formatNumberEs(kebab, { maxFraction: 0 })}🥙` : ''}
     </span>
   );
+}
+
+function dayRowStickyBg(isBest: boolean, isWorst: boolean): string {
+  if (isBest) return 'bg-emerald-50 dark:bg-emerald-950';
+  if (isWorst) return 'bg-rose-50 dark:bg-rose-950';
+  return 'bg-white dark:bg-gray-800';
+}
+
+function MoneyCell({ n }: { n: number }) {
+  if (!n) return <span className="text-gray-300 dark:text-gray-600">—</span>;
+  return <span className="tabular-nums">{fmtEuro(n)}</span>;
+}
+
+function ChannelMixStrip({ channels }: { channels: OpsExcelChannels }) {
+  const total = opsExcelChannelsTotal(channels) || 1;
+  const parts = EXCEL_COLS
+    .map((c) => ({ ...c, amount: Number(channels[c.key]) || 0 }))
+    .filter((c) => c.amount > 0);
+  if (parts.length === 0) return null;
+  return (
+    <div className="space-y-1.5">
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+        {parts.map((p) => (
+          <div
+            key={p.key}
+            className="h-full bg-[var(--v-blue,#2563eb)]/80 first:rounded-l-full last:rounded-r-full"
+            style={{
+              width: `${Math.max(2, (p.amount / total) * 100)}%`,
+              opacity: 0.55 + (p.amount / total) * 0.45,
+            }}
+            title={`${p.label}: ${fmtEuro(p.amount)}`}
+          />
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-x-2.5 gap-y-1">
+        {parts.map((p) => (
+          <span key={p.key} className="text-[10px] text-gray-600 dark:text-gray-300">
+            <span className="font-semibold">{p.label}</span>{' '}
+            <span className="tabular-nums">{fmtEuro(p.amount)}</span>
+            <span className="text-gray-400">
+              {' '}
+              · {formatNumberEs(Math.round((p.amount / total) * 100), { maxFraction: 0 })}%
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function shortDayLabel(dayKey: string): string {
+  const parts = formatDateEs(dayKey).split('/');
+  if (parts.length >= 2) return `${parts[0]}/${parts[1]}`;
+  return formatDateEs(dayKey);
 }
 
 export function PortfolioOpsPulse({
@@ -81,9 +169,32 @@ export function PortfolioOpsPulse({
   pulsesMonth,
   refreshButton,
   singleBusiness = false,
+  businessId,
+  brands = [],
+  orders = [],
+  compact = false,
 }: Props) {
   const [range, setRange] = useState<RangeMode>('7d');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [billingRules, setBillingRules] = useState<BrandBillingSplitRules | null>(null);
+
+  useEffect(() => {
+    if (!businessId) {
+      setBillingRules(null);
+      return;
+    }
+    let cancelled = false;
+    getBrandBillingConfigRequest(businessId)
+      .then((cfg) => {
+        if (!cancelled) setBillingRules(splitRulesFromBillingConfig(cfg));
+      })
+      .catch(() => {
+        if (!cancelled) setBillingRules(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
 
   const pulses = useMemo(
     () => rankStoreOpsPulses(range === '7d' ? pulses7d : pulsesMonth),
@@ -91,6 +202,34 @@ export function PortfolioOpsPulse({
   );
 
   const totals = useMemo(() => aggregateStoreOpsPulses(pulses), [pulses]);
+
+  const brandCompare = useMemo((): PdvBrandSameDayCompare | null => {
+    if (pulses.length < 2 || brands.length === 0 || orders.length === 0) return null;
+    const a = pulses[0];
+    const b = pulses[1];
+    const active = brandsForBilling(brands).filter((br) => isBrandActive(br));
+    if (active.length === 0) return null;
+    return buildPdvBrandSameDayCompare(orders, {
+      todayKey: localCalendarDayKey(),
+      monthsBack: 3,
+      storeA: {
+        storeName: a.storeName,
+        pdvId: a.pdvId,
+        workCenterId: a.storeId,
+      },
+      storeB: {
+        storeName: b.storeName,
+        pdvId: b.pdvId,
+        workCenterId: b.storeId,
+      },
+      brands: active.map((br) => ({
+        id: String(br._id || br.id || '').trim(),
+        name: String(br.name || 'Marca').trim(),
+        color: br.primaryColor || '#2563EB',
+      })),
+      rules: billingRules,
+    });
+  }, [pulses, brands, orders, billingRules]);
 
   const selected = useMemo(() => {
     if (pulses.length === 0) return null;
@@ -130,266 +269,461 @@ export function PortfolioOpsPulse({
   }, [selected, bestDayKey]);
 
   const rangeLabel = range === '7d' ? 'últimos 7 días' : 'mes en curso';
+  const rangeShort = range === '7d' ? '7 días' : 'Mes';
 
   if (pulses.length === 0) {
     return (
-      <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-indigo-500" />
+      <section className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:rounded-2xl sm:p-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="flex items-center gap-1.5 text-xs font-bold text-gray-900 dark:text-gray-100 sm:text-sm">
+            <BarChart3 className="h-3.5 w-3.5 text-[var(--v-blue,#2563eb)] sm:h-4 sm:w-4" />
             Resumen operativo
           </h3>
           {refreshButton}
         </div>
-        <p className="text-sm text-gray-500">
-          No hay tiendas con PDV en la selección. Cuando haya ventas por tienda, aquí verás €, comida y comparación entre PDVs.
+        <p className="text-[11px] text-gray-500 sm:text-sm">
+          Sin tiendas con PDV. Cuando haya ventas, verás €, comida y comparación.
         </p>
       </section>
     );
   }
 
+  const groupChannels = totals.channels || emptyOpsExcelChannels();
+
   return (
-    <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 sm:p-5 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-            <BarChart3 className="w-4 h-4 text-indigo-500" />
-            Resumen operativo
+    <section
+      className={`rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:rounded-2xl ${
+        compact ? 'space-y-3 p-2.5' : 'space-y-3 p-3 sm:space-y-4 sm:p-4 lg:p-5'
+      }`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-1.5 text-xs font-bold text-gray-900 dark:text-gray-100 sm:text-sm">
+            <BarChart3 className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
+            <span className="truncate">Resumen operativo</span>
           </h3>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            Por tienda · {rangeLabel} · datos reales de pedidos
-          </p>
+          {!compact ? (
+            <p className="mt-0.5 hidden text-[11px] text-gray-500 sm:block">
+              {singleBusiness
+                ? `Solo esta empresa · ${rangeLabel}`
+                : `Grupo · ${rangeLabel}`}
+            </p>
+          ) : null}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex p-0.5 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-900/50">
-            <button
-              type="button"
-              onClick={() => setRange('7d')}
-              className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${
-                range === '7d'
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-gray-600 dark:text-gray-400'
-              }`}
-            >
-              7 días
-            </button>
-            <button
-              type="button"
-              onClick={() => setRange('month')}
-              className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${
-                range === 'month'
-                  ? 'bg-indigo-600 text-white'
-                  : 'text-gray-600 dark:text-gray-400'
-              }`}
-            >
-              Mes
-            </button>
+        <div className="flex items-center gap-1.5">
+          <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-600 dark:bg-gray-900/50">
+            {(['7d', 'month'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRange(key)}
+                className={`rounded-md px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                  compact ? 'min-h-9 px-3' : 'sm:min-h-0'
+                } ${
+                  range === key
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                    : 'text-gray-600 dark:text-gray-400'
+                }`}
+              >
+                {key === '7d' ? '7 días' : 'Mes'}
+              </button>
+            ))}
           </div>
           {refreshButton}
         </div>
       </div>
 
-      {/* Cabecera grupo */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+      {/* KPIs */}
+      <div
+        className={`grid gap-1.5 ${
+          compact ? 'grid-cols-3' : 'grid-cols-3 sm:grid-cols-3 lg:grid-cols-6'
+        }`}
+      >
         <HeaderStat
-          label="Ventas periodo"
+          label="Ventas"
           value={fmtEuro(totals.revenuePeriod)}
           sub={<DeltaBadge pct={totals.revenueMomPct} />}
+          dense={compact}
         />
         <HeaderStat
           label="Hoy"
           value={fmtEuro(totals.revenueToday)}
-          sub="Todas las tiendas"
+          sub={compact ? undefined : 'Tiendas'}
+          dense={compact}
         />
         <HeaderStat
-          label="Pedidos"
-          value={String(totals.ordersPeriod)}
-          sub={`Ticket med. ${fmtEuro(totals.avgTicket)}`}
+          label="Ped."
+          value={formatNumberEs(totals.ordersPeriod, { maxFraction: 0 })}
+          sub={compact ? undefined : rangeShort}
+          dense={compact}
         />
-        <HeaderStat
-          label="Pizzas"
-          value={String(totals.pizza)}
-          sub="Periodo"
-        />
-        <HeaderStat
-          label="Burgers"
-          value={String(totals.burger)}
-          sub="Periodo"
-        />
-        <HeaderStat
-          label="Tacos"
-          value={String(totals.taco)}
-          sub={totals.kebab > 0 ? `Kebab ${totals.kebab}` : 'Periodo'}
-        />
+        {!compact ? (
+          <>
+            <HeaderStat
+              label="Pizzas"
+              value={formatNumberEs(totals.pizza, { maxFraction: 0 })}
+              sub={rangeShort}
+            />
+            <HeaderStat
+              label="Burgers"
+              value={formatNumberEs(totals.burger, { maxFraction: 0 })}
+              sub={rangeShort}
+            />
+            <HeaderStat
+              label="Tacos"
+              value={formatNumberEs(totals.taco, { maxFraction: 0 })}
+              sub={
+                totals.kebab > 0
+                  ? `Kebab ${formatNumberEs(totals.kebab, { maxFraction: 0 })}`
+                  : rangeShort
+              }
+            />
+          </>
+        ) : (
+          <div className="col-span-3 flex flex-wrap items-center gap-x-3 gap-y-0.5 px-0.5 pt-0.5">
+            <MixLine
+              pizza={totals.pizza}
+              burger={totals.burger}
+              taco={totals.taco}
+              kebab={totals.kebab}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Ranking PDVs */}
-      <div className="overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700">
-        <table className="w-full min-w-[720px] text-sm">
-          <thead>
-            <tr className="text-left text-[10px] font-bold uppercase tracking-wide text-gray-400 bg-gray-50 dark:bg-gray-900/40">
-              <th className="px-3 py-2">#</th>
-              <th className="px-3 py-2">Tienda</th>
-              <th className="px-3 py-2 text-right">€ periodo</th>
-              <th className="px-3 py-2 text-right">%</th>
-              <th className="px-3 py-2 text-right">Ped.</th>
-              <th className="px-3 py-2 text-right">Ticket</th>
-              <th className="px-3 py-2">Mix</th>
-              <th className="px-3 py-2 text-right">Hoy</th>
-              <th className="px-3 py-2 text-right">Δ periodo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pulses.map((p, idx) => {
-              const key = `${p.businessId}:${p.storeId}`;
-              const active = selected && `${selected.businessId}:${selected.storeId}` === key;
-              return (
-                <tr
-                  key={key}
-                  onClick={() => setSelectedKey(key)}
-                  className={`cursor-pointer border-t border-gray-100 dark:border-gray-700/80 transition-colors ${
-                    active
-                      ? 'bg-indigo-50/80 dark:bg-indigo-950/30'
-                      : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'
-                  }`}
-                >
-                  <td className="px-3 py-2.5 text-xs font-black text-gray-400">{idx + 1}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                      <div>
-                        <p className="font-bold text-gray-900 dark:text-gray-100 text-xs">{p.storeName}</p>
-                        {!singleBusiness && (
-                          <p className="text-[10px] text-gray-400">{p.businessName}</p>
-                        )}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-black tabular-nums text-xs">
-                    {fmtEuro(p.revenuePeriod)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-xs tabular-nums text-gray-600">
-                    {p.sharePercent}%
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-xs tabular-nums">{p.ordersPeriod}</td>
-                  <td className="px-3 py-2.5 text-right text-xs tabular-nums">{fmtEuro(p.avgTicket)}</td>
-                  <td className="px-3 py-2.5">
-                    <MixLine pizza={p.pizza} burger={p.burger} taco={p.taco} kebab={p.kebab} />
-                  </td>
-                  <td className="px-3 py-2.5 text-right text-xs font-semibold tabular-nums">
-                    {fmtEuro(p.revenueToday)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right">
-                    <DeltaBadge pct={p.revenueMomPct} />
+      {/* Canales: strip siempre; tabla solo desktop */}
+      <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-2.5 py-2 dark:border-gray-700 dark:bg-gray-900/30 sm:px-3 sm:py-2.5">
+        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Canales</p>
+          <p className="text-[11px] font-black tabular-nums text-gray-900 dark:text-gray-100">
+            {fmtEuro(opsExcelChannelsTotal(groupChannels))}
+          </p>
+        </div>
+        <ChannelMixStrip channels={groupChannels} />
+        {!compact ? (
+          <div className="mt-2.5 hidden overflow-x-auto overscroll-x-contain lg:block">
+            <table className="w-full min-w-[560px] text-[11px]">
+              <thead>
+                <tr className="text-[9px] uppercase tracking-wide text-gray-400">
+                  {EXCEL_COLS.map((c) => (
+                    <th key={c.key} className="pb-1 pr-2 text-right font-semibold">
+                      {c.label}
+                    </th>
+                  ))}
+                  <th className="pb-1 text-right font-semibold">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-gray-200 dark:border-gray-700">
+                  {EXCEL_COLS.map((c) => (
+                    <td key={c.key} className="py-1.5 pr-2 text-right font-semibold tabular-nums">
+                      <MoneyCell n={Number(groupChannels[c.key]) || 0} />
+                    </td>
+                  ))}
+                  <td className="py-1.5 text-right font-extrabold tabular-nums">
+                    {fmtEuro(opsExcelChannelsTotal(groupChannels))}
                   </td>
                 </tr>
-              );
-            })}
-            <tr className="border-t-2 border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-900/50 font-bold">
-              <td className="px-3 py-2.5 text-[10px] uppercase text-gray-500" colSpan={2}>
-                Total
-              </td>
-              <td className="px-3 py-2.5 text-right text-xs tabular-nums">{fmtEuro(totals.revenuePeriod)}</td>
-              <td className="px-3 py-2.5 text-right text-xs">100%</td>
-              <td className="px-3 py-2.5 text-right text-xs tabular-nums">{totals.ordersPeriod}</td>
-              <td className="px-3 py-2.5 text-right text-xs tabular-nums">{fmtEuro(totals.avgTicket)}</td>
-              <td className="px-3 py-2.5">
-                <MixLine
-                  pizza={totals.pizza}
-                  burger={totals.burger}
-                  taco={totals.taco}
-                  kebab={totals.kebab}
-                />
-              </td>
-              <td className="px-3 py-2.5 text-right text-xs tabular-nums">{fmtEuro(totals.revenueToday)}</td>
-              <td className="px-3 py-2.5 text-right">
-                <DeltaBadge pct={totals.revenueMomPct} />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </div>
 
-      {/* Detalle tienda seleccionada */}
-      {selected && (
-        <div className="grid lg:grid-cols-5 gap-4">
-          <div className="lg:col-span-2 rounded-xl border border-gray-100 dark:border-gray-700 p-3">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <p className="text-xs font-black text-gray-900 dark:text-gray-100">{selected.storeName}</p>
-                <p className="text-[10px] text-gray-400">
-                  {singleBusiness ? '€ / día' : `${selected.businessName} · € / día`}
-                </p>
-              </div>
-              <TrendingUp className="w-4 h-4 text-indigo-500" />
-            </div>
-            <div className="h-40">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                  <XAxis dataKey="label" tick={{ fontSize: 9 }} interval={0} />
-                  <YAxis tick={{ fontSize: 9 }} width={40} />
-                  <Tooltip
-                    formatter={(value: number) => [fmtEuro(value), 'Ventas']}
-                    contentStyle={{ fontSize: 11, borderRadius: 8 }}
-                  />
-                  <Bar dataKey="euros" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+      {/* Ranking: cards en móvil/tablet; tabla en lg */}
+      <div className="space-y-1.5 lg:hidden">
+        <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Tiendas</p>
+        {pulses.map((p, idx) => {
+          const key = `${p.businessId}:${p.storeId}`;
+          const active = selected && `${selected.businessId}:${selected.storeId}` === key;
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSelectedKey(key)}
+              className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
+                compact ? 'min-h-11' : ''
+              } ${
+                active
+                  ? 'border-[rgba(37,99,235,0.35)] bg-[rgba(37,99,235,0.06)] dark:border-blue-800 dark:bg-blue-950/30'
+                  : 'border-gray-100 bg-gray-50/70 dark:border-gray-800 dark:bg-gray-900/30'
+              }`}
+            >
+              <span className="min-w-0 flex items-center gap-1.5">
+                <span className="w-4 shrink-0 text-[10px] font-black text-gray-400">
+                  {idx + 1}
+                </span>
+                <MapPin className="h-3 w-3 shrink-0 text-[var(--v-blue,#2563eb)]" />
+                <span className="min-w-0">
+                  <span className="block truncate text-[11px] font-bold text-gray-900 dark:text-gray-100">
+                    {p.storeName}
+                  </span>
+                  <span className="block truncate text-[9px] text-gray-400">
+                    <MixLine pizza={p.pizza} burger={p.burger} taco={p.taco} kebab={p.kebab} />
+                  </span>
+                </span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className="block text-[11px] font-black tabular-nums text-gray-900 dark:text-gray-100">
+                  {fmtEuro(p.revenuePeriod)}
+                </span>
+                <span className="inline-flex items-center justify-end gap-1">
+                  <span className="text-[9px] text-gray-400">
+                    {formatNumberEs(p.sharePercent, { maxFraction: 0 })}%
+                  </span>
+                  <DeltaBadge pct={p.revenueMomPct} />
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-          <div className="lg:col-span-3 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
-            <div className="px-3 py-2 bg-gray-50 dark:bg-gray-900/40 border-b border-gray-100 dark:border-gray-700">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                Día a día · {selected.storeName}
-              </p>
-            </div>
-            <div className="divide-y divide-gray-100 dark:divide-gray-700 max-h-64 overflow-y-auto">
-              {selected.days.map((d) => {
-                const isBest = d.dayKey === bestDayKey;
-                const isWorst = d.dayKey === worstDayKey;
+      {!compact ? (
+        <div className="hidden overflow-x-auto rounded-xl border border-gray-100 overscroll-x-contain dark:border-gray-700 lg:block [-webkit-overflow-scrolling:touch]">
+          <table className="w-full min-w-[980px] text-sm">
+            <thead>
+              <tr className="bg-gray-50 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:bg-gray-900/40">
+                <th className="px-3 py-2">#</th>
+                <th className="px-3 py-2">Tienda</th>
+                {EXCEL_COLS.map((c) => (
+                  <th key={c.key} className="px-2 py-2 text-right">
+                    {c.label}
+                  </th>
+                ))}
+                <th className="px-2 py-2 text-right">Total</th>
+                <th className="px-2 py-2 text-right">%</th>
+                <th className="px-2 py-2 text-right">Ped.</th>
+                <th className="px-2 py-2">Mix</th>
+                <th className="px-2 py-2 text-right">Hoy</th>
+                <th className="px-2 py-2 text-right">Δ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pulses.map((p, idx) => {
+                const key = `${p.businessId}:${p.storeId}`;
+                const active = selected && `${selected.businessId}:${selected.storeId}` === key;
+                const ch = p.channels || emptyOpsExcelChannels();
                 return (
-                  <div
-                    key={d.dayKey}
-                    className={`flex flex-wrap items-center justify-between gap-2 px-3 py-2 ${
-                      isBest
-                        ? 'bg-emerald-50/60 dark:bg-emerald-950/20'
-                        : isWorst
-                          ? 'bg-rose-50/50 dark:bg-rose-950/20'
-                          : ''
+                  <tr
+                    key={key}
+                    onClick={() => setSelectedKey(key)}
+                    className={`cursor-pointer border-t border-gray-100 transition-colors dark:border-gray-700/80 ${
+                      active
+                        ? 'bg-[rgba(37,99,235,0.06)] dark:bg-blue-950/30'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'
                     }`}
                   >
-                    <div className="min-w-[100px]">
-                      <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
-                        {d.weekdayLabel}
-                        <span className="ml-1 text-[10px] font-semibold text-gray-400">{d.label}</span>
-                      </p>
-                      {(isBest || isWorst) && (
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-gray-500">
-                          {isBest ? 'Mejor día' : 'Día más flojo'}
-                        </p>
-                      )}
-                    </div>
-                    <MixLine pizza={d.pizza} burger={d.burger} taco={d.taco} kebab={d.kebab} />
-                    <div className="text-right">
-                      <p className="text-xs font-black tabular-nums">{fmtEuro(d.revenue)}</p>
-                      <p className="text-[10px] text-gray-400">
-                        {d.orders} ped. · <DeltaBadge pct={d.revenueDeltaPct} />
-                      </p>
-                    </div>
-                  </div>
+                    <td className="px-3 py-2.5 text-xs font-black text-gray-400">{idx + 1}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
+                        <div>
+                          <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                            {p.storeName}
+                          </p>
+                          {!singleBusiness && (
+                            <p className="text-[10px] text-gray-400">{p.businessName}</p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    {EXCEL_COLS.map((c) => (
+                      <td key={c.key} className="px-2 py-2.5 text-right text-xs">
+                        <MoneyCell n={Number(ch[c.key]) || 0} />
+                      </td>
+                    ))}
+                    <td className="px-2 py-2.5 text-right text-xs font-black tabular-nums">
+                      {fmtEuro(p.revenuePeriod)}
+                    </td>
+                    <td className="px-2 py-2.5 text-right text-xs tabular-nums text-gray-600">
+                      {formatNumberEs(p.sharePercent, { maxFraction: 1 })}%
+                    </td>
+                    <td className="px-2 py-2.5 text-right text-xs tabular-nums">
+                      {formatNumberEs(p.ordersPeriod, { maxFraction: 0 })}
+                    </td>
+                    <td className="px-2 py-2.5">
+                      <MixLine pizza={p.pizza} burger={p.burger} taco={p.taco} kebab={p.kebab} />
+                    </td>
+                    <td className="px-2 py-2.5 text-right text-xs font-semibold tabular-nums">
+                      {fmtEuro(p.revenueToday)}
+                    </td>
+                    <td className="px-2 py-2.5 text-right">
+                      <DeltaBadge pct={p.revenueMomPct} />
+                    </td>
+                  </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {/* Detalle tienda */}
+      {selected ? (
+        compact ? (
+          <StoreDayCompact
+            store={selected}
+            bestDayKey={bestDayKey}
+            worstDayKey={worstDayKey}
+          />
+        ) : (
+          <div className="grid gap-3 lg:grid-cols-5 lg:gap-4">
+            <div className="rounded-xl border border-gray-100 p-3 dark:border-gray-700 lg:col-span-2">
+              <div className="mb-2 flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-black text-gray-900 dark:text-gray-100">
+                    {selected.storeName}
+                  </p>
+                  <p className="text-[10px] text-gray-400">€ / día</p>
+                </div>
+                <TrendingUp className="h-4 w-4 text-[var(--v-blue,#2563eb)]" />
+              </div>
+              <div className="h-36 sm:h-40">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis dataKey="label" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
+                    <YAxis tick={{ fontSize: 9 }} width={40} />
+                    <Tooltip
+                      formatter={(value: number) => [fmtEuro(value), 'Ventas']}
+                      contentStyle={{ fontSize: 11, borderRadius: 8 }}
+                    />
+                    <Bar dataKey="euros" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-2">
+                <ChannelMixStrip channels={selected.channels || emptyOpsExcelChannels()} />
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-gray-100 dark:border-gray-700 lg:col-span-3">
+              <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
+                  Día a día · {selected.storeName}
+                </p>
+                <p className="shrink-0 text-[9px] text-gray-400 lg:hidden">Desliza →</p>
+              </div>
+              {/* Móvil/tablet: filas simples */}
+              <div className="divide-y divide-gray-100 dark:divide-gray-800 lg:hidden">
+                {selected.days.map((d) => {
+                  const isBest = d.dayKey === bestDayKey;
+                  const isWorst = d.dayKey === worstDayKey;
+                  return (
+                    <div
+                      key={d.dayKey}
+                      className={`flex items-center justify-between gap-2 px-2.5 py-1.5 ${
+                        isBest
+                          ? 'bg-emerald-50/50 dark:bg-emerald-950/20'
+                          : isWorst
+                            ? 'bg-rose-50/40 dark:bg-rose-950/20'
+                            : ''
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-[11px] font-semibold text-gray-900 dark:text-gray-100">
+                          {d.weekdayLabel}{' '}
+                          <span className="font-normal text-gray-400">{d.label}</span>
+                        </p>
+                        <MixLine pizza={d.pizza} burger={d.burger} taco={d.taco} kebab={d.kebab} />
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-[11px] font-black tabular-nums">{fmtEuro(d.revenue)}</p>
+                        <DeltaBadge pct={d.revenueDeltaPct} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* Desktop: tabla canales */}
+              <div className="hidden max-h-72 overflow-x-auto overflow-y-auto overscroll-x-contain lg:block [-webkit-overflow-scrolling:touch]">
+                <table className="w-full min-w-[780px] text-[11px]">
+                  <thead className="sticky top-0 z-20 bg-white dark:bg-gray-800">
+                    <tr className="text-[9px] uppercase tracking-wide text-gray-400">
+                      <th className="sticky left-0 z-30 bg-white px-2 py-1.5 text-left font-semibold dark:bg-gray-800">
+                        Día
+                      </th>
+                      {EXCEL_COLS.map((c) => (
+                        <th key={c.key} className="px-1.5 py-1.5 text-right font-semibold">
+                          {c.label}
+                        </th>
+                      ))}
+                      <th className="px-1.5 py-1.5 text-right font-semibold">Total</th>
+                      <th className="px-1.5 py-1.5 text-right font-semibold">Ped.</th>
+                      <th className="sticky right-12 z-30 min-w-[7rem] bg-white px-2 py-1.5 text-left font-semibold shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)] dark:bg-gray-800">
+                        Mix
+                      </th>
+                      <th className="sticky right-0 z-30 w-12 min-w-12 bg-white px-1.5 py-1.5 text-right font-semibold dark:bg-gray-800">
+                        Δ
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selected.days.map((d) => {
+                      const isBest = d.dayKey === bestDayKey;
+                      const isWorst = d.dayKey === worstDayKey;
+                      const ch = d.channels || emptyOpsExcelChannels();
+                      const stickyBg = dayRowStickyBg(isBest, isWorst);
+                      return (
+                        <tr
+                          key={d.dayKey}
+                          className={`border-t border-gray-100 dark:border-gray-700/80 ${
+                            isBest
+                              ? 'bg-emerald-50/60 dark:bg-emerald-950/20'
+                              : isWorst
+                                ? 'bg-rose-50/50 dark:bg-rose-950/20'
+                                : ''
+                          }`}
+                        >
+                          <td className={`sticky left-0 z-10 px-2 py-1.5 ${stickyBg}`}>
+                            <p className="font-bold text-gray-900 dark:text-gray-100">
+                              {d.weekdayLabel}
+                              <span className="ml-1 text-[10px] font-semibold text-gray-400">
+                                {d.label}
+                              </span>
+                            </p>
+                          </td>
+                          {EXCEL_COLS.map((c) => (
+                            <td key={c.key} className="px-1.5 py-1.5 text-right">
+                              <MoneyCell n={Number(ch[c.key]) || 0} />
+                            </td>
+                          ))}
+                          <td className="px-1.5 py-1.5 text-right font-black tabular-nums">
+                            {fmtEuro(d.revenue)}
+                          </td>
+                          <td className="px-1.5 py-1.5 text-right tabular-nums text-gray-500">
+                            {formatNumberEs(d.orders, { maxFraction: 0 })}
+                          </td>
+                          <td
+                            className={`sticky right-12 z-10 min-w-[7rem] whitespace-nowrap px-2 py-1.5 shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)] ${stickyBg}`}
+                          >
+                            <MixLine
+                              pizza={d.pizza}
+                              burger={d.burger}
+                              taco={d.taco}
+                              kebab={d.kebab}
+                            />
+                          </td>
+                          <td
+                            className={`sticky right-0 z-10 w-12 min-w-12 px-1.5 py-1.5 text-right ${stickyBg}`}
+                          >
+                            <DeltaBadge pct={d.revenueDeltaPct} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      ) : null}
 
-      {/* Comparativa rápida top 2 */}
-      {pulses.length >= 2 && (
-        <PdvVersus a={pulses[0]} b={pulses[1]} />
-      )}
+      {pulses.length >= 2 ? (
+        <PdvVersus a={pulses[0]} b={pulses[1]} brandCompare={brandCompare} compact={compact} />
+      ) : null}
     </section>
   );
 }
@@ -398,57 +732,398 @@ function HeaderStat({
   label,
   value,
   sub,
+  dense,
 }: {
   label: string;
   value: string;
-  sub: ReactNode;
+  sub?: ReactNode;
+  dense?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 px-3 py-2">
-      <p className="text-[9px] font-bold uppercase tracking-wide text-gray-500">{label}</p>
-      <p className="text-sm font-black tabular-nums text-gray-900 dark:text-gray-100 mt-0.5">{value}</p>
-      <div className="mt-0.5 text-[10px] text-gray-500">{sub}</div>
+    <div
+      className={`rounded-xl border border-gray-100 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/40 ${
+        dense ? 'px-2 py-1.5' : 'px-2.5 py-2 sm:px-3'
+      }`}
+    >
+      <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
+      <p
+        className={`font-black tabular-nums text-gray-900 dark:text-gray-100 ${
+          dense ? 'text-xs' : 'mt-0.5 text-sm'
+        }`}
+      >
+        {value}
+      </p>
+      {sub ? <div className="mt-0.5 text-[10px] text-gray-500">{sub}</div> : null}
     </div>
   );
 }
 
-function PdvVersus({ a, b }: { a: StoreOpsPulse; b: StoreOpsPulse }) {
+function StoreDayCompact({
+  store,
+  bestDayKey,
+  worstDayKey,
+}: {
+  store: StoreOpsPulse;
+  bestDayKey: string | null;
+  worstDayKey: string | null;
+}) {
+  const recent = store.days.slice(-7);
+  return (
+    <div className="rounded-xl border border-gray-100 px-2.5 py-2 dark:border-gray-700">
+      <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+        {store.storeName} · últimos días
+      </p>
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">
+        {recent.map((d) => {
+          const isBest = d.dayKey === bestDayKey;
+          const isWorst = d.dayKey === worstDayKey;
+          return (
+            <div
+              key={d.dayKey}
+              className={`flex items-center justify-between gap-2 py-1.5 ${
+                isBest
+                  ? 'bg-emerald-50/40 dark:bg-emerald-950/15'
+                  : isWorst
+                    ? 'bg-rose-50/30 dark:bg-rose-950/15'
+                    : ''
+              }`}
+            >
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100">
+                  {d.label}
+                  {isBest ? (
+                    <span className="ml-1 text-[9px] font-bold text-emerald-600">mejor</span>
+                  ) : null}
+                  {isWorst ? (
+                    <span className="ml-1 text-[9px] font-bold text-rose-600">flojo</span>
+                  ) : null}
+                </p>
+                <MixLine pizza={d.pizza} burger={d.burger} taco={d.taco} kebab={d.kebab} />
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[11px] font-black tabular-nums">{fmtEuro(d.revenue)}</p>
+                <DeltaBadge pct={d.revenueDeltaPct} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PdvVersus({
+  a,
+  b,
+  brandCompare,
+  compact = false,
+}: {
+  a: StoreOpsPulse;
+  b: StoreOpsPulse;
+  brandCompare?: PdvBrandSameDayCompare | null;
+  compact?: boolean;
+}) {
   const revDiff = Math.round((a.revenuePeriod - b.revenuePeriod) * 100) / 100;
   const pizzaDiff = a.pizza - b.pizza;
-  const ticketDiff = Math.round((a.avgTicket - b.avgTicket) * 100) / 100;
+  const glovoDiff = Math.round(((a.channels?.glovo || 0) - (b.channels?.glovo || 0)) * 100) / 100;
   const revPct = monthOverMonthPct(a.revenuePeriod, b.revenuePeriod);
+  const dayNum = brandCompare?.dayOfMonth
+    ? String(brandCompare.dayOfMonth).padStart(2, '0')
+    : null;
+
+  const [focusDay, setFocusDay] = useState<string | null>(null);
+  const dayKeys = brandCompare?.dayKeys || [];
+  const activeDay = focusDay && dayKeys.includes(focusDay) ? focusDay : dayKeys[dayKeys.length - 1] || null;
 
   return (
-    <div className="rounded-xl border border-indigo-100 dark:border-indigo-900/50 bg-indigo-50/40 dark:bg-indigo-950/20 px-3 py-3">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-300 mb-2">
+    <div
+      className={`rounded-xl border border-[rgba(37,99,235,0.2)] bg-[rgba(37,99,235,0.04)] dark:border-blue-900/50 dark:bg-blue-950/20 ${
+        compact ? 'px-2.5 py-2' : 'px-3 py-3'
+      }`}
+    >
+      <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--v-blue,#2563eb)]">
         Comparativa · {a.storeName} vs {b.storeName}
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-        <div>
-          <p className="text-gray-500 text-[10px]">Diferencia €</p>
-          <p className="font-black tabular-nums">
+
+      <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+        <div className="rounded-lg bg-white/70 px-2 py-1.5 dark:bg-gray-900/40">
+          <p className="text-[9px] text-gray-500">€</p>
+          <p className="font-black tabular-nums text-gray-900 dark:text-gray-100">
             {revDiff >= 0 ? '+' : ''}
             {fmtEuro(revDiff)}
-            {revPct !== null ? (
-              <span className="ml-1 font-semibold text-gray-500">({revPct > 0 ? '+' : ''}{revPct}%)</span>
-            ) : null}
           </p>
+          {revPct !== null ? (
+            <p className="text-[9px] text-gray-400">
+              {revPct > 0 ? '+' : ''}
+              {revPct}%
+            </p>
+          ) : null}
         </div>
-        <div>
-          <p className="text-gray-500 text-[10px]">Diferencia pizzas</p>
-          <p className="font-black tabular-nums">
+        <div className="rounded-lg bg-white/70 px-2 py-1.5 dark:bg-gray-900/40">
+          <p className="text-[9px] text-gray-500">Pizzas</p>
+          <p className="font-black tabular-nums text-gray-900 dark:text-gray-100">
             {pizzaDiff >= 0 ? '+' : ''}
-            {pizzaDiff}
+            {formatNumberEs(pizzaDiff, { maxFraction: 0 })}
           </p>
         </div>
-        <div>
-          <p className="text-gray-500 text-[10px]">Ticket medio</p>
-          <p className="font-black tabular-nums">
-            {ticketDiff >= 0 ? '+' : ''}
-            {fmtEuro(ticketDiff)}
+        <div className="rounded-lg bg-white/70 px-2 py-1.5 dark:bg-gray-900/40">
+          <p className="text-[9px] text-gray-500">Glovo</p>
+          <p className="font-black tabular-nums text-gray-900 dark:text-gray-100">
+            {glovoDiff >= 0 ? '+' : ''}
+            {fmtEuro(glovoDiff)}
           </p>
         </div>
       </div>
+
+      {brandCompare && brandCompare.brands.length > 0 ? (
+        <div className="mt-2.5 border-t border-[rgba(37,99,235,0.15)] pt-2 dark:border-blue-900/40">
+          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--v-blue,#2563eb)]">
+            Marcas · día {dayNum}
+            <span className="ml-1 font-medium normal-case tracking-normal text-gray-500">
+              · mismo día · meses atrás
+            </span>
+          </p>
+
+          {/* Chips de fecha (móvil/tablet) */}
+          <div className="mb-2 flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:hidden">
+            {dayKeys.map((dk) => {
+              const on = dk === activeDay;
+              return (
+                <button
+                  key={dk}
+                  type="button"
+                  onClick={() => setFocusDay(dk)}
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                    compact ? 'min-h-9' : ''
+                  } ${
+                    on
+                      ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                      : 'bg-white text-gray-600 dark:bg-gray-900 dark:text-gray-300'
+                  }`}
+                >
+                  {shortDayLabel(dk)}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Vista móvil/tablet: foco en un día */}
+          <div className="space-y-1.5 lg:hidden">
+            <p className="text-[9px] text-gray-500">
+              {activeDay ? formatDateEs(activeDay) : ''} ·{' '}
+              <span className="font-semibold text-gray-700 dark:text-gray-200">{a.storeName}</span>
+              {' · '}
+              <span className="font-semibold text-gray-700 dark:text-gray-200">{b.storeName}</span>
+            </p>
+            {brandCompare.brands.map((brand) => {
+              const point = brand.points.find((p) => p.dayKey === activeDay);
+              if (!point) return null;
+              const bothActive = point.aActive && point.bActive;
+              const diff = bothActive
+                ? Math.round((point.aUnits - point.bUnits) * 10) / 10
+                : null;
+              return (
+                <div
+                  key={brand.brandId}
+                  className="rounded-lg border border-white/80 bg-white/80 px-2.5 py-1.5 dark:border-gray-700 dark:bg-gray-900/50"
+                >
+                  <div className="mb-1 flex items-center gap-1.5">
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: brand.color }}
+                    />
+                    <span className="truncate text-[11px] font-bold text-gray-900 dark:text-gray-100">
+                      {brand.brandName}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 text-center text-[11px]">
+                    <div>
+                      <p className="truncate text-[9px] text-gray-400">{a.storeName}</p>
+                      <p className="font-black tabular-nums">
+                        {point.aActive
+                          ? formatNumberEs(point.aUnits, { maxFraction: 1 })
+                          : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="truncate text-[9px] text-gray-400">{b.storeName}</p>
+                      <p className="font-black tabular-nums">
+                        {point.bActive
+                          ? formatNumberEs(point.bUnits, { maxFraction: 1 })
+                          : '—'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-gray-400">Δ</p>
+                      <p
+                        className={`font-black tabular-nums ${
+                          diff == null || diff === 0
+                            ? 'text-gray-400'
+                            : diff > 0
+                              ? 'text-emerald-600'
+                              : 'text-rose-600'
+                        }`}
+                      >
+                        {diff == null
+                          ? '—'
+                          : `${diff > 0 ? '+' : ''}${formatNumberEs(diff, { maxFraction: 1 })}`}
+                      </p>
+                    </div>
+                  </div>
+                  {!bothActive ? (
+                    <p className="mt-1 text-[9px] text-gray-400">Sin histórico (alta posterior)</p>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {/* Historial compacto por marca (todos los meses) */}
+            <details className="rounded-lg border border-dashed border-gray-200 bg-white/50 px-2 py-1.5 dark:border-gray-700 dark:bg-gray-900/30">
+              <summary className="cursor-pointer text-[10px] font-bold text-gray-600 dark:text-gray-300">
+                Ver historial 3 meses
+              </summary>
+              <div className="mt-1.5 space-y-2">
+                {brandCompare.brands.map((brand) => (
+                  <div key={`hist-${brand.brandId}`}>
+                    <p className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold text-gray-800 dark:text-gray-100">
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: brand.color }}
+                      />
+                      {brand.brandName}
+                    </p>
+                    <div className="space-y-0.5">
+                      {brand.points.map((p) => {
+                        const both = p.aActive && p.bActive;
+                        const diff = both
+                          ? Math.round((p.aUnits - p.bUnits) * 10) / 10
+                          : null;
+                        return (
+                          <div
+                            key={p.dayKey}
+                            className="flex items-center justify-between gap-2 text-[10px] tabular-nums"
+                          >
+                            <span className="text-gray-500">{shortDayLabel(p.dayKey)}</span>
+                            <span className="font-semibold text-gray-800 dark:text-gray-100">
+                              {p.aActive
+                                ? formatNumberEs(p.aUnits, { maxFraction: 1 })
+                                : '—'}
+                              {' · '}
+                              {p.bActive
+                                ? formatNumberEs(p.bUnits, { maxFraction: 1 })
+                                : '—'}
+                              {diff != null ? (
+                                <span
+                                  className={`ml-1.5 ${
+                                    diff === 0
+                                      ? 'text-gray-400'
+                                      : diff > 0
+                                        ? 'text-emerald-600'
+                                        : 'text-rose-600'
+                                  }`}
+                                >
+                                  {diff > 0 ? '+' : ''}
+                                  {formatNumberEs(diff, { maxFraction: 1 })}
+                                </span>
+                              ) : (
+                                <span className="ml-1.5 text-gray-400">sin hist.</span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+
+          {/* Vista desktop: tabla */}
+          <div className="hidden overflow-x-auto overscroll-x-contain lg:block">
+            <table className="min-w-full text-[10px]">
+              <thead>
+                <tr className="text-left text-gray-500">
+                  <th className="sticky left-0 z-10 bg-[rgba(239,246,255,0.95)] py-1 pr-2 font-bold dark:bg-blue-950/95">
+                    Marca
+                  </th>
+                  {brandCompare.dayKeys.map((dk) => (
+                    <th key={dk} className="px-1.5 py-1 text-center font-bold whitespace-nowrap">
+                      {formatDateEs(dk)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {brandCompare.brands.map((brand) => (
+                  <tr
+                    key={brand.brandId}
+                    className="border-t border-[rgba(37,99,235,0.12)] dark:border-blue-900/30"
+                  >
+                    <td className="sticky left-0 z-10 bg-[rgba(239,246,255,0.95)] py-1.5 pr-2 dark:bg-blue-950/95">
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-gray-800 dark:text-gray-100">
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: brand.color }}
+                        />
+                        <span className="max-w-[7rem] truncate">{brand.brandName}</span>
+                      </span>
+                    </td>
+                    {brand.points.map((p) => {
+                      const both = p.aActive && p.bActive;
+                      const diff = both
+                        ? Math.round((p.aUnits - p.bUnits) * 10) / 10
+                        : null;
+                      return (
+                        <td key={p.dayKey} className="px-1.5 py-1.5 text-center tabular-nums">
+                          {!both && !p.aActive && !p.bActive ? (
+                            <span className="text-gray-300">—</span>
+                          ) : (
+                            <>
+                              <span className="font-bold text-gray-900 dark:text-gray-100">
+                                {p.aActive
+                                  ? formatNumberEs(p.aUnits, { maxFraction: 1 })
+                                  : '—'}
+                              </span>
+                              <span className="text-gray-400"> · </span>
+                              <span className="font-bold text-gray-900 dark:text-gray-100">
+                                {p.bActive
+                                  ? formatNumberEs(p.bUnits, { maxFraction: 1 })
+                                  : '—'}
+                              </span>
+                              {diff != null && (p.aUnits > 0 || p.bUnits > 0) ? (
+                                <span
+                                  className={`mt-0.5 block text-[9px] font-semibold ${
+                                    diff === 0
+                                      ? 'text-gray-400'
+                                      : diff > 0
+                                        ? 'text-emerald-600 dark:text-emerald-400'
+                                        : 'text-rose-600 dark:text-rose-400'
+                                  }`}
+                                >
+                                  {diff > 0 ? '+' : ''}
+                                  {formatNumberEs(diff, { maxFraction: 1 })}
+                                </span>
+                              ) : (
+                                <span className="mt-0.5 block text-[9px] text-gray-300">
+                                  {both ? '—' : 'sin hist.'}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1.5 text-[9px] text-gray-500">
+              Cada celda: uds {a.storeName} · {b.storeName} · abajo Δ
+            </p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

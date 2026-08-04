@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useSearchParams } from 'react-router-dom';
-import { Monitor, Store } from 'lucide-react';
+import { ArrowLeft, Monitor, Store } from 'lucide-react';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
+import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { writeDeliveryOpsSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
@@ -155,6 +156,11 @@ export function TpvTabletLogin() {
     setErrors({});
   };
 
+  const goBack = () => {
+    clearTpvTabletBinding();
+    navigate(AUTH_PATHS.entry, { replace: true });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-md">
@@ -163,6 +169,15 @@ export function TpvTabletLogin() {
         </div>
 
         <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 border border-white/10">
+          <button
+            type="button"
+            onClick={goBack}
+            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 transition-colors mb-4"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Volver
+          </button>
+
           <div className="flex items-center gap-3 mb-6">
             <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center">
               <Monitor className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
@@ -221,9 +236,6 @@ export function TpvTabletLogin() {
             </ACCESO__Button>
           </form>
         </div>
-
-        {/* Sin “Volver al acceso”: la tablet de tienda debe quedarse fuera del SaaS
-            (evitar saltar a cuenta Modomio / dashboard). */}
       </div>
     </div>
   );

@@ -19,7 +19,13 @@ import {
 import { tableStatusOnRelease } from './restaurantTableStatus';
 import { isOpenDiningOrder } from './restaurantTableDisplay';
 import type { CartLineCustomization } from './catalogCustomization';
-import { cartLineUnitPrice } from './catalogCustomization';
+import { cartLineUnitPrice, productBrandIdsFromItem } from './catalogCustomization';
+import { enqueueTpvOfflineItem, isBrowserOnline } from './tpvTabletOffline';
+import { optimisticAppendDraftComanda } from './restaurantTpvOfflineSync';
+import {
+  formatUnavailableCartNames,
+  unavailableCartLines,
+} from './restaurantCatalogAvailability';
 
 export type RestaurantCartLine = {
   lineId: string;
@@ -41,6 +47,7 @@ export function cartLinesToDiningItems(lines: RestaurantCartLine[]): DiningOrder
     status: 'pending' as const,
     cancelledReason: '',
     cancelledBy: '',
+    brandIds: productBrandIdsFromItem(ci.catalogItem),
   }));
 }
 
@@ -57,6 +64,9 @@ export function deliveryItemsToDiningItems(items: DeliveryOrderItem[]): DiningOr
     status: 'pending' as const,
     cancelledReason: '',
     cancelledBy: '',
+    brandIds: Array.isArray(i.brandIds)
+      ? i.brandIds.map((b) => String(b || '').trim()).filter(Boolean)
+      : [],
   }));
 }
 
@@ -118,8 +128,42 @@ export async function addCartToDiningAccount(params: {
   createdByName: string;
   notes?: string;
   sendToKitchen?: boolean;
-}): Promise<{ order: DiningOrder; comanda: DiningComanda }> {
+  /** Cuenta actual para merge optimista offline. */
+  currentOrder?: DiningOrder | null;
+}): Promise<{ order: DiningOrder; comanda: DiningComanda; queuedOffline?: boolean }> {
+  const blocked = unavailableCartLines(params.lines);
+  if (blocked.length > 0) {
+    throw new Error(`Agotado en carta: ${formatUnavailableCartNames(params.lines)}`);
+  }
+
   const items = cartLinesToDiningItems(params.lines);
+
+  if (!isBrowserOnline()) {
+    const clientMutationId = uuidv4();
+    enqueueTpvOfflineItem('dining_comanda_add', {
+      userId: params.userId,
+      orderId: params.orderId,
+      items,
+      createdBy: params.createdBy,
+      createdByName: params.createdByName,
+      notes: params.notes || '',
+      sendToKitchen: Boolean(params.sendToKitchen),
+      clientMutationId,
+    });
+    const base = params.currentOrder;
+    if (!base || base._id !== params.orderId) {
+      throw new Error('Sin conexión: no hay cuenta local para guardar. Reabre la mesa cuando haya red.');
+    }
+    const order = optimisticAppendDraftComanda(base, items, {
+      createdBy: params.createdBy,
+      createdByName: params.createdByName,
+      notes: params.notes || '',
+      clientMutationId,
+    });
+    const comanda = order.comandas[order.comandas.length - 1];
+    return { order, comanda, queuedOffline: true };
+  }
+
   const { order, comanda } = await addComandaRequest(params.userId, params.orderId, {
     items,
     createdBy: params.createdBy,
@@ -136,6 +180,17 @@ export async function addCartToDiningAccount(params: {
   return { order, comanda };
 }
 
+export function diningOrderHasPendingKitchen(order: DiningOrder): boolean {
+  return (order.comandas || []).some((c) =>
+    ['sent_to_kitchen', 'in_preparation'].includes(String(c.status || '')));
+}
+
+export type PayAndCloseDiningResult = {
+  order: DiningOrder;
+  fullyPaid: boolean;
+  cajaRegistration?: { status: string; message?: string } | null;
+};
+
 export async function payAndCloseDiningOrder(params: {
   userId: string;
   order: DiningOrder;
@@ -149,12 +204,78 @@ export async function payAndCloseDiningOrder(params: {
     paidByName: string;
     splitLabel?: string;
   };
-}): Promise<DiningOrder> {
-  const { order, fullyPaid } = await payDiningOrderRequest(params.userId, params.order._id, params.payment);
-  if (fullyPaid) {
-    return closeDiningOrderRequest(params.userId, order._id);
+  salesPointId?: string;
+  salesPointName?: string;
+  registerInCaja?: boolean;
+  /** Si hay comandas en cocina, fuerza el cierre al cobrar (evita pagado-huérfano). */
+  forceCloseIfKitchenPending?: boolean;
+}): Promise<PayAndCloseDiningResult & { queuedOffline?: boolean }> {
+  if (!isBrowserOnline()) {
+    const force =
+      Boolean(params.forceCloseIfKitchenPending) && diningOrderHasPendingKitchen(params.order);
+    enqueueTpvOfflineItem('dining_pay', {
+      userId: params.userId,
+      orderId: params.order._id,
+      payment: params.payment,
+      salesPointId: params.salesPointId || '',
+      salesPointName: params.salesPointName || '',
+      registerInCaja: params.registerInCaja !== false,
+      closeAfterPay: true,
+      forceClose: force,
+    });
+    const paidAmt = Number(params.payment.amount || 0);
+    const payments = [
+      ...(params.order.payments || []),
+      {
+        id: `offline-pay-${Date.now()}`,
+        method: params.payment.method,
+        amount: paidAmt,
+        amountReceived: Number(params.payment.amountReceived || paidAmt),
+        changeGiven: Number(params.payment.changeGiven || 0),
+        tip: Number(params.payment.tip || 0),
+        paidBy: params.payment.paidBy,
+        paidByName: params.payment.paidByName,
+        paidAt: new Date().toISOString(),
+        splitLabel: params.payment.splitLabel || '',
+      },
+    ];
+    const paidTotal = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const fullyPaid = paidTotal + 0.001 >= Number(params.order.total || 0);
+    return {
+      order: {
+        ...params.order,
+        payments,
+        status: fullyPaid ? 'paid' : params.order.status,
+        paidAt: fullyPaid ? new Date().toISOString() : params.order.paidAt,
+      },
+      fullyPaid,
+      cajaRegistration: { status: 'queued_offline', message: 'Cobro en cola: se registrará al recuperar red' },
+      queuedOffline: true,
+    };
   }
-  return order;
+
+  const { order, fullyPaid, cajaRegistration } = await payDiningOrderRequest(
+    params.userId,
+    params.order._id,
+    params.payment,
+    {
+      salesPointId: params.salesPointId,
+      salesPointName: params.salesPointName,
+      registerInCaja: params.registerInCaja,
+    },
+  );
+  if (fullyPaid) {
+    const force =
+      Boolean(params.forceCloseIfKitchenPending) && diningOrderHasPendingKitchen(params.order);
+    const closed = await closeDiningOrderRequest(
+      params.userId,
+      params.order._id,
+      force || undefined,
+      force ? 'Cobrado con cocina pendiente' : undefined,
+    );
+    return { order: closed, fullyPaid: true, cajaRegistration };
+  }
+  return { order, fullyPaid: false, cajaRegistration };
 }
 
 export function diningOrderPaidAmount(order: DiningOrder): number {
@@ -176,12 +297,23 @@ export type DiningAccountLineView = {
   key: string;
   comandaId: string;
   itemId: string;
+  productId: string;
   comandaNumber: number;
   name: string;
   quantity: number;
   unitPrice: number;
   lineTotal: number;
   notes: string;
+};
+
+export type DiningCajaPayLine = {
+  id: string;
+  catalogItemId?: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  notes?: string;
 };
 
 /** Líneas ya guardadas en la cuenta de mesa (comandas persistidas). */
@@ -197,6 +329,7 @@ export function flattenDiningAccountLines(order: DiningOrder): DiningAccountLine
         key: `${comanda.id}:${item.id}`,
         comandaId: comanda.id,
         itemId: item.id,
+        productId: String(item.productId || '').trim(),
         comandaNumber: Number(comanda.orderNumber || 0),
         name: String(item.name || 'Producto'),
         quantity,
@@ -207,6 +340,87 @@ export function flattenDiningAccountLines(order: DiningOrder): DiningAccountLine
     }
   }
   return out;
+}
+
+/**
+ * Escala líneas de cuenta al importe cobrado (pago parcial / split).
+ * Así cada parte lleva productos reales y la suma de cantidades ≈ cuenta.
+ */
+export function scaleDiningLinesToPayAmount(
+  lines: DiningAccountLineView[],
+  payAmount: number,
+  dueAmount: number,
+): DiningCajaPayLine[] {
+  const pay = Math.round(Math.max(0, Number(payAmount) || 0) * 100) / 100;
+  const due = Math.round(Math.max(0, Number(dueAmount) || 0) * 100) / 100;
+  if (lines.length === 0 || pay <= 0) return [];
+
+  const linesSum = Math.round(lines.reduce((s, l) => s + l.lineTotal, 0) * 100) / 100;
+  const base = due > 0.004 ? due : (linesSum > 0 ? linesSum : pay);
+  const fullRemaining = Math.abs(pay - base) < 0.02;
+
+  if (fullRemaining) {
+    return lines.map((line) => ({
+      id: line.itemId || line.key,
+      catalogItemId: line.productId || undefined,
+      name: line.name,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      total: Math.round(line.lineTotal * 100) / 100,
+      notes: line.notes || undefined,
+    }));
+  }
+
+  const ratio = pay / base;
+  const scaled = lines.map((line) => {
+    const total = Math.round(line.lineTotal * ratio * 100) / 100;
+    const quantity = Math.round(line.quantity * ratio * 1000) / 1000;
+    const unitPrice = quantity > 0
+      ? Math.round((total / quantity) * 100) / 100
+      : Math.round(line.unitPrice * ratio * 100) / 100;
+    return {
+      id: line.itemId || line.key,
+      catalogItemId: line.productId || undefined,
+      name: line.name,
+      quantity: quantity > 0 ? quantity : line.quantity,
+      unitPrice,
+      total,
+      notes: line.notes || undefined,
+    };
+  }).filter((l) => l.total > 0);
+
+  if (scaled.length === 0) return [];
+
+  const scaledSum = Math.round(scaled.reduce((s, l) => s + l.total, 0) * 100) / 100;
+  const remainder = Math.round((pay - scaledSum) * 100) / 100;
+  if (remainder !== 0) {
+    const maxIndex = scaled.reduce((best, l, i) => (l.total > scaled[best].total ? i : best), 0);
+    scaled[maxIndex] = {
+      ...scaled[maxIndex],
+      total: Math.round((scaled[maxIndex].total + remainder) * 100) / 100,
+    };
+  }
+  return scaled;
+}
+
+/** Ítems de caja para un cobro de mesa (completo o parcial/split). */
+export function buildDiningCajaPayItems(params: {
+  order: DiningOrder;
+  payAmount: number;
+  dueAmount: number;
+  fallbackName: string;
+}): DiningCajaPayLine[] {
+  const lines = flattenDiningAccountLines(params.order);
+  const scaled = scaleDiningLinesToPayAmount(lines, params.payAmount, params.dueAmount);
+  if (scaled.length > 0) return scaled;
+  const amount = Math.round(Math.max(0, Number(params.payAmount) || 0) * 100) / 100;
+  return [{
+    id: 'cuenta',
+    name: params.fallbackName || 'Cuenta mesa',
+    quantity: 1,
+    unitPrice: amount,
+    total: amount,
+  }];
 }
 
 /**
@@ -321,14 +535,20 @@ export async function applyDiningOrderDiscount(params: {
   discountPercent?: number;
   discount?: number;
   discountReason?: string;
+  loyaltyRedeem?: { points: number; clientId?: string; reason?: string };
 }): Promise<DiningOrder> {
   const discountPercent = Math.max(0, Math.min(100, Number(params.discountPercent || 0)));
   const discount = Math.max(0, Number(params.discount || 0));
-  return updateDiningOrderRequest(params.userId, params.orderId, {
-    discountPercent: discountPercent > 0 ? discountPercent : 0,
-    discount: discountPercent > 0 ? 0 : discount,
-    discountReason: String(params.discountReason || '').trim(),
-  });
+  return updateDiningOrderRequest(
+    params.userId,
+    params.orderId,
+    {
+      discountPercent: discountPercent > 0 ? discountPercent : 0,
+      discount: discountPercent > 0 ? 0 : discount,
+      discountReason: String(params.discountReason || '').trim(),
+    },
+    params.loyaltyRedeem ? { loyaltyRedeem: params.loyaltyRedeem } : undefined,
+  );
 }
 
 export async function moveDiningOrderToTable(params: {

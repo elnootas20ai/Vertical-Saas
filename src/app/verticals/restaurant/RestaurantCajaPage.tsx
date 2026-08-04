@@ -11,32 +11,34 @@ import {
 } from '../../lib/deliveryOpsPdvSelection';
 import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import {
+  filterRestaurantRegisterSessions,
   listRestaurantRegisterSessions,
-  listSalaOrdersForDay,
   type TpvRegisterSession,
-  type DiningOrder,
 } from '../../lib/restaurantCajaApi';
-import type { PointOfSale } from '../../lib/deliveryApi';
+import { pointOfSaleDisplayLabel, type PointOfSale } from '../../lib/deliveryApi';
 import {
   Banknote, CreditCard, Phone as PhoneIcon, Wifi, User,
-  Store, Clock, BarChart3, AlertTriangle, CheckCircle2,
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
-  ArrowLeft, UtensilsCrossed, Radio, Receipt,
-  Calendar, History,
+  Store, Clock, BarChart3,
+  ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 import { CajaTimelineBoard } from '../../components/saas/caja/CajaTimelineBoard';
-import { downloadAccumulatedCajaClosingsExcel } from '../../lib/cajaClosingsExcelExport';
-import { RestaurantLiveDashboardPanel } from '../../components/saas/restaurant/RestaurantLiveDashboardPanel';
-import { TpvIncidentsPanel } from '../../components/saas/restaurant/TpvIncidentsPanel';
+import {
+  downloadUrielCajaClosings,
+  type UrielCajaDownloadFormat,
+} from '../../lib/cajaUrielClosingsExcelExport';
+import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
+import { listBrandsRequest } from '../../lib/brandApi';
+import {
+  suggestBillingSheetsFromBrands,
+  syncBillingSheetsWithBrands,
+} from '../../lib/brandBillingConfig';
 import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
 import {
   buildTpvRegisterSummaryForDay,
   dedupeOpenRegisterSessions,
-  isLocalCalendarDay,
   localCalendarDayKey,
-  localDayBoundsForKey,
-  sessionActiveOnCalendarDay,
+  sessionBelongsToCajaDay,
   sortRegisterSessionsForDisplay,
 } from '../../lib/tpvCajaScope';
 
@@ -60,28 +62,6 @@ const TPV_TX_LABELS: Record<string, string> = {
 
 function todayIsoDate(): string {
   return localCalendarDayKey();
-}
-
-function addDaysIso(isoDate: string, delta: number): string {
-  const d = new Date(`${isoDate}T12:00:00`);
-  d.setDate(d.getDate() + delta);
-  return localCalendarDayKey(d);
-}
-
-function formatDayHeading(isoDate: string): string {
-  const today = todayIsoDate();
-  if (isoDate === today) return 'Hoy';
-  if (isoDate === addDaysIso(today, -1)) return 'Ayer';
-  return new Date(`${isoDate}T12:00:00`).toLocaleDateString('es-ES', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-  });
-}
-
-function last7Days(): string[] {
-  const today = todayIsoDate();
-  return Array.from({ length: 7 }, (_, i) => addDaysIso(today, -6 + i));
 }
 
 function sessionStatusLabel(session: TpvRegisterSession): { text: string; className: string } {
@@ -123,7 +103,7 @@ function groupSessionsByStore(
   const groups: StoreDayGroup[] = [];
   for (const [pdvId, rawSessions] of byPdv) {
     const pdv = pointsOfSale.find((p) => p._id === pdvId);
-    const storeName = pdv?.name || rawSessions[0]?.pointOfSaleName || 'Tienda';
+    const storeName = pdv?.name || rawSessions[0]?.pointOfSaleName || 'Local';
     const sessions = sortRegisterSessionsForDisplay(rawSessions);
     const openCount = sessions.filter((s) => s.status === 'open').length;
     const totalSales = sessions.reduce((sum, s) => sum + buildTpvRegisterSummaryForDay(s, selectedDate).totalSales, 0);
@@ -150,7 +130,7 @@ function turnBadgeClass(session: TpvRegisterSession): string {
 }
 
 function sessionOnDate(session: TpvRegisterSession, isoDate: string): boolean {
-  return sessionActiveOnCalendarDay(session, isoDate);
+  return sessionBelongsToCajaDay(session, isoDate);
 }
 
 function isAutoValidatedEmptyTurn(session: TpvRegisterSession): boolean {
@@ -200,7 +180,7 @@ function OpenRegisterHero({
                 <span className="w-2 h-2 rounded-full shrink-0 bg-emerald-500" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
-                    {session.pointOfSaleName || 'Tienda'}
+                    {session.pointOfSaleName || 'Local'}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5 truncate">
                     {session.workerName} · {session.terminalName} · desde {openedTime}
@@ -378,7 +358,7 @@ function RegisterCard({
     <div className="space-y-4">
       {ts.status === 'closed' ? (
         <>
-          <RegisterClosingDetailPanel session={ts} />
+          <RegisterClosingDetailPanel session={ts} variant="restaurant" />
           {onViewClosing && (
             <button
               type="button"
@@ -530,12 +510,12 @@ function ClosingViewModal({ session, onClose }: { session: TpvRegisterSession; o
         <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Cierre de caja</h2>
-            <p className="text-xs text-gray-500 mt-1">Resumen completo del turno</p>
+            <p className="text-xs text-gray-500 mt-1">Resumen del turno · sala / bar</p>
           </div>
           <button type="button" onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl text-gray-500">✕</button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto p-6">
-          <RegisterClosingDetailPanel session={session} />
+          <RegisterClosingDetailPanel session={session} variant="restaurant" />
         </div>
         <div className="flex-shrink-0 p-6 border-t border-gray-200 dark:border-gray-700">
           <button type="button" onClick={onClose} className="w-full py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold">
@@ -557,6 +537,10 @@ export function RestaurantCajaPage() {
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
+  const businessId = useMemo(
+    () => resolveBusinessScopeId(currentBusiness),
+    [currentBusiness],
+  );
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -566,13 +550,22 @@ export function RestaurantCajaPage() {
   const [filterPdv, setFilterPdv] = useState('');
   const [onlyOpenNow, setOnlyOpenNow] = useState(false);
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
-  const [showExtras, setShowExtras] = useState(false);
   const [viewingClosingSession, setViewingClosingSession] = useState<TpvRegisterSession | null>(null);
-  const [salaOrders, setSalaOrders] = useState<DiningOrder[]>([]);
-  const [loadingOrders, setLoadingOrders] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnceRef = useRef(false);
   const userCollapsedOpenRef = useRef(false);
+
+  const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
+    ? activeStoreScope.allPointsOfSale
+    : activeStoreScope.pointsOfSale;
+
+  const scopedSessions = useMemo(
+    () => filterRestaurantRegisterSessions(sessions, {
+      businessId,
+      pointOfSaleIds: pointsOfSale.map((p) => p._id),
+    }),
+    [sessions, businessId, pointsOfSale],
+  );
 
   const handleViewClosing = useCallback((session: TpvRegisterSession) => {
     setViewingClosingSession(session);
@@ -587,7 +580,7 @@ export function RestaurantCajaPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const sessData = await listRestaurantRegisterSessions(dataUserId);
+      const sessData = await listRestaurantRegisterSessions(dataUserId, { businessId });
       const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values());
       setSessions(unique);
       hasLoadedOnceRef.current = true;
@@ -597,7 +590,7 @@ export function RestaurantCajaPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dataUserId]);
+  }, [dataUserId, businessId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -610,7 +603,7 @@ export function RestaurantCajaPage() {
     if (sessions.length === 0 && !loading) {
       // datos cargados pero vacíos
     }
-    const session = sessions.find((s) => s._id === deepLinkSessionId);
+    const session = scopedSessions.find((s) => s._id === deepLinkSessionId);
     const clearDeepLink = () => {
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
@@ -630,7 +623,7 @@ export function RestaurantCajaPage() {
 
     if (validateParam) {
       if (session.status === 'open') {
-        toast.info('Esta caja sigue abierta. El cierre se realiza desde el TPV en tienda.');
+        toast.info('Esta caja sigue abierta. El cierre se realiza desde el TPV de sala.');
       } else {
         setViewingClosingSession(session);
       }
@@ -638,7 +631,7 @@ export function RestaurantCajaPage() {
       setViewingClosingSession(session);
     }
     clearDeepLink();
-  }, [loading, sessions, deepLinkSessionId, validateParam, setSearchParams]);
+  }, [loading, scopedSessions, deepLinkSessionId, validateParam, setSearchParams]);
 
   useEffect(() => {
     const id = window.setInterval(() => { void loadData({ silent: true }); }, 30000);
@@ -651,18 +644,19 @@ export function RestaurantCajaPage() {
     return () => window.removeEventListener('focus', onFocus);
   }, [loadData]);
 
-  const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
-    ? activeStoreScope.allPointsOfSale
-    : activeStoreScope.pointsOfSale;
-
-  // Arrancar filtrado por la tienda activa del scope (como Delivery).
+  // Arrancar filtrado por el local activo del scope (o el único PDV, p. ej. Bodegeta).
   const didInitPdvFilter = useRef(false);
   useEffect(() => {
     if (didInitPdvFilter.current) return;
+    if (pointsOfSale.length === 0) return;
     const active = String(activeStoreScope.activeSalesPointId || '').trim();
-    if (!active || pointsOfSale.length === 0) return;
-    if (pointsOfSale.some((p) => p._id === active)) {
+    if (active && pointsOfSale.some((p) => p._id === active)) {
       setFilterPdv(active);
+      didInitPdvFilter.current = true;
+      return;
+    }
+    if (pointsOfSale.length === 1) {
+      setFilterPdv(pointsOfSale[0]._id);
       didInitPdvFilter.current = true;
     }
   }, [activeStoreScope.activeSalesPointId, pointsOfSale]);
@@ -681,58 +675,14 @@ export function RestaurantCajaPage() {
     [currentBusiness, dataUserId, activeStoreScope],
   );
 
-  const todayStr = todayIsoDate();
-  const weekDays = useMemo(() => last7Days(), [todayStr]);
-
-  const daySessions = useMemo(() => {
-    let list = sessions.filter((s) => sessionOnDate(s, selectedDate));
-    if (onlyOpenNow) list = list.filter((s) => s.status === 'open');
-    if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
-    return list;
-  }, [sessions, selectedDate, onlyOpenNow, filterPdv]);
-
-  const loadSalaOrders = useCallback(async () => {
-    if (!dataUserId) return;
-    setLoadingOrders(true);
-    const bounds = localDayBoundsForKey(selectedDate);
-    try {
-      const data = await listSalaOrdersForDay(dataUserId, bounds.from, bounds.to);
-      setSalaOrders(data.filter((o) => ['paid', 'closed'].includes(o.status) || o.payments?.length > 0));
-    } catch {
-      setSalaOrders([]);
-    } finally {
-      setLoadingOrders(false);
-    }
-  }, [dataUserId, selectedDate]);
-
-  useEffect(() => {
-    if (!showExtras) return;
-    void loadSalaOrders();
-  }, [showExtras, loadSalaOrders]);
-
-  const openSessionsNow = useMemo(() => {
-    let list = sessions.filter((s) => s.status === 'open');
-    if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
-    return dedupeOpenRegisterSessions(list);
-  }, [sessions, filterPdv]);
-
   const openOnSelectedDay = useMemo(() => {
-    let list = sessions.filter((s) => sessionOnDate(s, selectedDate) && s.status === 'open');
+    let list = scopedSessions.filter((s) => sessionOnDate(s, selectedDate) && s.status === 'open');
     if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
     return dedupeOpenRegisterSessions(list);
-  }, [sessions, selectedDate, filterPdv]);
-
-  const openSessions = openSessionsNow;
-  const storeGroups = useMemo(() => {
-    const groups = groupSessionsByStore(daySessions, pointsOfSale, selectedDate, {
-      excludeOpen: openOnSelectedDay.length > 0 && !onlyOpenNow,
-    });
-    if (filterPdv) return groups.filter((g) => g.pdvId === filterPdv);
-    return groups;
-  }, [daySessions, pointsOfSale, filterPdv, selectedDate, openOnSelectedDay.length, onlyOpenNow]);
+  }, [scopedSessions, selectedDate, filterPdv]);
 
   const dayStats = useMemo(() => {
-    const allDay = sessions.filter((s) => sessionOnDate(s, selectedDate));
+    const allDay = scopedSessions.filter((s) => sessionOnDate(s, selectedDate));
     const scopedDay = filterPdv ? allDay.filter((s) => s.pointOfSaleId === filterPdv) : allDay;
     const storesWithActivity = new Set(scopedDay.map((s) => s.pointOfSaleId).filter(Boolean)).size;
     const openNow = dedupeOpenRegisterSessions(scopedDay.filter((s) => s.status === 'open')).length;
@@ -743,13 +693,7 @@ export function RestaurantCajaPage() {
       openNow,
       sales,
     };
-  }, [sessions, selectedDate, filterPdv]);
-
-  const salaOrdersInRange = useMemo(() => {
-    return (salaOrders || [])
-      .filter((o) => isLocalCalendarDay(String(o.createdAt || o.paidAt || ''), selectedDate))
-      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  }, [salaOrders, selectedDate]);
+  }, [scopedSessions, selectedDate, filterPdv]);
 
   useEffect(() => {
     userCollapsedOpenRef.current = false;
@@ -765,54 +709,68 @@ export function RestaurantCajaPage() {
     }
   }, [loading, openOnSelectedDay]);
 
-  const handleToggleSession = useCallback((id: string) => {
-    setExpandedSessionId((prev) => {
-      const next = prev === id ? null : id;
-      if (next === null && openOnSelectedDay.some((s) => s._id === id)) {
-        userCollapsedOpenRef.current = true;
-      } else if (next !== null) {
-        userCollapsedOpenRef.current = false;
-      }
-      if (next) {
-        requestAnimationFrame(() => {
-          document.querySelector(`[data-caja-turn="${next}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
-      }
-      return next;
-    });
-  }, [openOnSelectedDay]);
+  const excelClosedCount = scopedSessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
-  const handleOpenTpv = useCallback(() => {
-    const businessId = resolveBusinessScopeId(currentBusiness);
-    const pdvId = filterPdv || activeStoreScope.activeSalesPointId || '';
-    if (businessId && dataUserId && pdvId) {
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, pdvId);
-      activeStoreScope.setActiveSalesPoint(pdvId);
-      notifyDeliveryActiveStoreChanged();
-    }
-    navigate('/saas/sala');
-  }, [
-    currentBusiness,
-    filterPdv,
-    activeStoreScope.activeSalesPointId,
-    activeStoreScope.setActiveSalesPoint,
-    dataUserId,
-    navigate,
-  ]);
-
-  const excelClosedCount = sessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
-
-  const handleExcel = () => {
+  const handleDownload = async (format: UrielCajaDownloadFormat) => {
     try {
-      const { rows } = downloadAccumulatedCajaClosingsExcel(sessions);
-      if (rows === 0) {
-        toast.info('Aún no hay cierres de caja para exportar');
+      const pdvId = String(
+        filterPdv
+        || activeStoreScope.activeSalesPointId
+        || scopedSessions.find((s) => String(s.status || '') !== 'open')?.pointOfSaleId
+        || '',
+      ).trim();
+      if (!pdvId) {
+        toast.info('Elige un local para descargar el informe de ingresos');
         return;
       }
-      toast.success(`Excel generado con ${rows} cierre${rows === 1 ? '' : 's'} acumulado${rows === 1 ? '' : 's'}`);
+      const pdv = pointsOfSale.find((p) => p._id === pdvId);
+      const yearMonth = selectedDate.slice(0, 7);
+
+      let billingSheets = null as ReturnType<typeof suggestBillingSheetsFromBrands> | null;
+      if (businessId) {
+        try {
+          const [cfg, brands] = await Promise.all([
+            getBrandBillingConfigRequest(businessId),
+            listBrandsRequest(businessId),
+          ]);
+          if (cfg.sheets.length > 0) {
+            billingSheets = syncBillingSheetsWithBrands(cfg.sheets, brands);
+          } else {
+            const suggested = suggestBillingSheetsFromBrands(brands);
+            if (suggested.length > 0) billingSheets = suggested;
+          }
+        } catch (err) {
+          console.warn('Facturación marcas no disponible; descarga usa plantilla por defecto', err);
+        }
+      }
+
+      const { rows, fileName, sheetNames } = await downloadUrielCajaClosings(scopedSessions, {
+        pointOfSaleId: pdvId,
+        pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : pdvId,
+        yearMonth,
+        billingSheets,
+        format,
+      });
+      if (rows === 0) {
+        toast.info('Aún no hay cierres de caja en este mes para ese local');
+        return;
+      }
+      const sheetsLabel = sheetNames.length ? sheetNames.join(' + ') : 'ingresos';
+      if (format === 'google-sheets') {
+        toast.success(
+          `Descargado ${fileName}. Súbelo a Google Drive y ábrelo con Hojas de cálculo (${rows} día${rows === 1 ? '' : 's'}).`,
+          { duration: 7000 },
+        );
+        return;
+      }
+      if (format === 'csv') {
+        toast.success(`CSV ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
+        return;
+      }
+      toast.success(`Excel ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
     } catch (err) {
       console.error(err);
-      toast.error('No se pudo generar el Excel');
+      toast.error(err instanceof Error ? err.message : 'No se pudo generar la descarga');
     }
   };
 
@@ -830,7 +788,7 @@ export function RestaurantCajaPage() {
   return (
     <>
       <CajaTimelineBoard
-        sessions={sessions}
+        sessions={scopedSessions}
         selectedDate={selectedDate}
         onSelectedDateChange={(d) => { setSelectedDate(d); setExpandedSessionId(null); }}
         pointsOfSale={pointsOfSale}
@@ -840,30 +798,13 @@ export function RestaurantCajaPage() {
         onOnlyOpenNowChange={setOnlyOpenNow}
         dayStats={dayStats}
         excelClosedCount={excelClosedCount}
-        onExcelClick={handleExcel}
-        onBack={() => navigate('/saas/sala', { replace: true })}
+        onDownloadFormat={handleDownload}
+        onBack={() => navigate('/saas/restaurant-ops', { replace: true })}
         selectedSessionId={expandedSessionId}
         onSelectSession={setExpandedSessionId}
         onViewFullClosing={handleViewClosing}
         refreshing={refreshing}
-        headerExtra={(
-          <>
-            <button
-              type="button"
-              onClick={() => navigate('/saas/sala')}
-              className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500"
-            >
-              <UtensilsCrossed className="h-3.5 w-3.5" /> Sala
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenTpv}
-              className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500"
-            >
-              <Receipt className="h-3.5 w-3.5" /> TPV
-            </button>
-          </>
-        )}
+        locationNoun={{ singular: 'Local', plural: 'locales', filterAll: 'Todos los locales' }}
       />
       {viewingClosingSession && (
         <ClosingViewModal

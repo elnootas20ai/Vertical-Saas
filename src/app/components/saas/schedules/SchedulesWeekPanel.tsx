@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Copy, Pencil, Users, Zap } from 'lucide-react';
 import type { ScheduleTemplate, Weekday } from '../../../lib/schedulesApi';
 import { WEEKDAYS } from '../../../lib/schedulesApi';
-import type { VacationRequest } from '../../../lib/vacationsApi';
+import type { VacationRequest, LeaveType } from '../../../lib/vacationsApi';
+import { LEAVE_TYPE_SHORT_ES, LEAVE_TYPE_CHIP_CLASS } from '../../../lib/vacationsApi';
 import type { CompanyHoliday } from '../../../lib/companyHolidaysApi';
 import type { AvailabilityBlock } from '../../../lib/availabilityBlocksApi';
 import { getHolidayForDate } from '../../../lib/companyHolidaysApi';
-import { getMemberBlocksForDate, BLOCK_REASON_LABELS, BLOCK_REASON_COLORS } from '../../../lib/availabilityBlocksApi';
+import { getMemberBlocksForDate, BLOCK_REASON_COLORS } from '../../../lib/availabilityBlocksApi';
 import { ROLE_BADGE } from '../../../lib/schedulesDisplay';
 
 export interface WeekMember {
@@ -27,6 +28,7 @@ interface Props {
   weekOffset: number;
   dayLabels: Record<Weekday, string>;
   lang: string;
+  leaveLabels: Record<string, string>;
   canManage: boolean;
   saving: boolean;
   blockLabels: Record<string, string>;
@@ -37,6 +39,47 @@ interface Props {
   onBulkAssign?: () => void;
   onAutoAssign?: () => void;
   hasRules?: boolean;
+}
+
+function isoLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Prioriza aprobada sobre pendiente si hay solape. */
+function leaveOnDay(vacations: VacationRequest[], memberId: string, dateStr: string): VacationRequest | null {
+  const hits = vacations.filter(
+    (v) =>
+      v.member_id === memberId
+      && (v.status === 'approved' || v.status === 'pending')
+      && dateStr >= v.startDate
+      && dateStr <= v.endDate,
+  );
+  if (!hits.length) return null;
+  return hits.find((v) => v.status === 'approved') || hits[0];
+}
+
+function leaveChip(
+  leave: VacationRequest,
+  leaveLabels: Record<string, string>,
+): { className: string; label: string; title: string } {
+  const type = (leave.leaveType || 'other') as LeaveType;
+  const full = leaveLabels[type] || LEAVE_TYPE_SHORT_ES[type] || leave.leaveType || 'Ausencia';
+  const short = LEAVE_TYPE_SHORT_ES[type] || full.slice(0, 8);
+  if (leave.status === 'pending') {
+    return {
+      className: 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 ring-1 ring-amber-300/80 dark:ring-amber-700',
+      label: short,
+      title: `${full} · Pendiente de aprobar`,
+    };
+  }
+  return {
+    className: LEAVE_TYPE_CHIP_CLASS[type] || LEAVE_TYPE_CHIP_CLASS.other,
+    label: short,
+    title: full,
+  };
 }
 
 export function SchedulesWeekPanel({
@@ -51,6 +94,7 @@ export function SchedulesWeekPanel({
   weekOffset,
   dayLabels,
   lang,
+  leaveLabels,
   canManage,
   saving,
   blockLabels,
@@ -68,13 +112,40 @@ export function SchedulesWeekPanel({
     return date.getDate() === n.getDate() && date.getMonth() === n.getMonth() && date.getFullYear() === n.getFullYear();
   };
 
+  const weekEndIso = weekDates[6] ? isoLocal(weekDates[6]) : weekStart;
+
   const getSchedule = (id: string) => schedules.find((s) => s.member_id === id);
   const withSchedule = members.filter((m) => getSchedule(m.user_id)).length;
-  const onVacationThisWeek = new Set(
-    vacations
-      .filter((v) => v.status === 'approved' && v.startDate <= weekDates[6]?.toISOString().slice(0, 10) && v.endDate >= weekStart)
-      .map((v) => v.member_id),
-  );
+
+  const weekLeaves = useMemo(() => {
+    return vacations.filter(
+      (v) =>
+        (v.status === 'approved' || v.status === 'pending')
+        && v.startDate <= weekEndIso
+        && v.endDate >= weekStart
+        && members.some((m) => m.user_id === v.member_id),
+    );
+  }, [vacations, weekStart, weekEndIso, members]);
+
+  const awaySummary = useMemo(() => {
+    const byMember = new Map<string, { name: string; items: { type: string; status: string }[] }>();
+    for (const v of weekLeaves) {
+      const member = members.find((m) => m.user_id === v.member_id);
+      if (!member) continue;
+      const typeLabel = leaveLabels[v.leaveType] || v.leaveType;
+      const cur = byMember.get(v.member_id) || { name: member.fullName, items: [] };
+      cur.items.push({ type: typeLabel, status: v.status });
+      byMember.set(v.member_id, cur);
+    }
+    return Array.from(byMember.values());
+  }, [weekLeaves, members, leaveLabels]);
+
+  const approvedAwayCount = new Set(
+    weekLeaves.filter((v) => v.status === 'approved').map((v) => v.member_id),
+  ).size;
+  const pendingAwayCount = new Set(
+    weekLeaves.filter((v) => v.status === 'pending').map((v) => v.member_id),
+  ).size;
 
   return (
     <div className="space-y-4">
@@ -98,7 +169,9 @@ export function SchedulesWeekPanel({
               {formatDate(weekDates[0])} — {formatDate(weekDates[6])}
             </h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              {withSchedule}/{members.length} con horario · {onVacationThisWeek.size} de vacaciones esta semana
+              {withSchedule}/{members.length} con horario
+              {approvedAwayCount > 0 ? ` · ${approvedAwayCount} ausente${approvedAwayCount === 1 ? '' : 's'}` : ''}
+              {pendingAwayCount > 0 ? ` · ${pendingAwayCount} pendiente${pendingAwayCount === 1 ? '' : 's'}` : ''}
               {canManage ? ' · Clic en una fila para editar' : ''}
             </p>
           </div>
@@ -118,9 +191,35 @@ export function SchedulesWeekPanel({
           )}
         </div>
 
+        {awaySummary.length > 0 && (
+          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-700/60 bg-slate-50/80 dark:bg-slate-900/40">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-2">Quién falta esta semana</p>
+            <ul className="flex flex-wrap gap-2">
+              {awaySummary.map((row) => {
+                const parts = row.items.map((it) =>
+                  it.status === 'pending' ? `${it.type} (pend.)` : it.type,
+                );
+                return (
+                  <li
+                    key={row.name}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs text-gray-800 dark:text-gray-200"
+                  >
+                    <span className="font-semibold">{row.name}</span>
+                    <span className="text-gray-400">·</span>
+                    <span className="text-gray-600 dark:text-gray-400">{parts.join(', ')}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
         <div className="px-4 py-2 flex flex-wrap gap-3 text-[10px] text-gray-500 border-b border-gray-100 dark:border-gray-700/60">
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-400" /> Turno</span>
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-green-500" /> Vacaciones</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-sky-500" /> Asuntos propios</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-orange-500" /> Baja / otros</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded ring-1 ring-amber-400 bg-amber-100" /> Pendiente</span>
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-rose-400" /> Festivo</span>
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-violet-400" /> Bloqueo</span>
         </div>
@@ -131,7 +230,7 @@ export function SchedulesWeekPanel({
               <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40">
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-400 uppercase w-44">Miembro</th>
                 {WEEKDAYS.map((day, i) => {
-                  const dateStr = weekDates[i].toISOString().slice(0, 10);
+                  const dateStr = isoLocal(weekDates[i]);
                   const hol = getHolidayForDate(dateStr, holidays);
                   return (
                     <th
@@ -185,18 +284,20 @@ export function SchedulesWeekPanel({
                       </div>
                     </td>
                     {WEEKDAYS.map((day, i) => {
-                      const dateStr = weekDates[i].toISOString().slice(0, 10);
+                      const dateStr = isoLocal(weekDates[i]);
                       const shift = sched?.weekly?.[day];
-                      const vac = vacations.find(
-                        (v) => v.member_id === member.user_id && v.status === 'approved' && dateStr >= v.startDate && dateStr <= v.endDate,
-                      );
+                      const vac = leaveOnDay(vacations, member.user_id, dateStr);
                       const blk = getMemberBlocksForDate(blocks, member.user_id, dateStr)[0];
                       const hol = getHolidayForDate(dateStr, holidays);
                       if (vac) {
+                        const chip = leaveChip(vac, leaveLabels);
                         return (
                           <td key={day} className="px-2 py-3 text-center">
-                            <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-                              Vac.
+                            <span
+                              className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold max-w-[76px] truncate ${chip.className}`}
+                              title={chip.title}
+                            >
+                              {chip.label}
                             </span>
                           </td>
                         );

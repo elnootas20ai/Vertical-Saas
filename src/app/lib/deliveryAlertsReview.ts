@@ -1,29 +1,34 @@
 /**
- * Primera revisión de alertas Delivery: pack CEO activo por defecto;
- * el resto queda apagado pero pendiente de revisar/activar.
+ * Primera revisión de alertas Delivery: pack compacto (solo cableado).
+ * Mantener alineado con services/alertRulesCatalog.js
  */
 
 import type { AlertRule } from './settingsApi';
 
-/** Alineado con services/alertRulesCatalog.js — DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS */
+/**
+ * 1 fichaje · 2 docs empresa · 3 caja abrir/cerrar · 4 descuadre ·
+ * 5 pedido retrasado · 6 sin cobrar/cancelado.
+ * Sin producto agotado.
+ */
 export const DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS = [
-  'delivery_cash_pending_close',
+  'worker_no_clockin',
+  'document_missing_required',
+  'document_expired',
+  'document_expiring_soon',
   'delivery_register_not_opened',
+  'delivery_cash_pending_close',
   'delivery_cash_discrepancy',
-  'delivery_register_closed_ok',
   'delivery_register_closed_discrepancy',
-  'register_high_return',
-  'delivery_unpaid_order',
-  'delivery_failed_delivery',
   'delivery_delayed_order',
   'delivery_order_very_delayed',
-  'delivery_no_address',
-  'delivery_product_out_of_stock',
+  'delivery_unpaid_order',
   'delivery_order_cancelled',
-  'worker_no_clockin',
 ] as const;
 
+export const DELIVERY_COMPACT_VISIBLE_RULE_IDS = DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS;
+
 const CEO_SET = new Set<string>(DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS);
+const COMPACT_SET = new Set<string>(DELIVERY_COMPACT_VISIBLE_RULE_IDS);
 
 const LEGACY_IDS = new Set([
   'stale_delivery',
@@ -49,16 +54,15 @@ export function isDeliveryAlertsReviewPending(
   return !review?.completedAt;
 }
 
-/** Reglas de operación delivery/sala/caja (excluye legacy). */
+export function isDeliveryCompactAlertRuleId(ruleId: string): boolean {
+  return COMPACT_SET.has(String(ruleId || ''));
+}
+
+/** Solo el pack compacto visible/revisable en delivery. */
 export function isDeliveryReviewRule(rule: Pick<AlertRule, 'id' | 'category' | 'department'>): boolean {
   const id = String(rule.id || '');
   if (!id || LEGACY_IDS.has(id)) return false;
-  if (CEO_SET.has(id)) return true;
-  if (id.startsWith('delivery_') || id.startsWith('sala_')) return true;
-  if (id === 'register_high_return') return true;
-  if (rule.category === 'delivery' || rule.category === 'sala') return true;
-  if (rule.department === 'delivery' || rule.department === 'pdvs') return true;
-  return false;
+  return isDeliveryCompactAlertRuleId(id);
 }
 
 export function isCeoDefaultRuleId(ruleId: string): boolean {

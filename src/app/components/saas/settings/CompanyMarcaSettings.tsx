@@ -64,6 +64,7 @@ import {
   isDeliveryBusinessType,
   resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
+import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 import { useTenantEntitlements, countCommercialBrands } from '../../../hooks/useTenantEntitlements';
 import { writeBillingSelection } from '../../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
@@ -819,6 +820,9 @@ export function CompanyMarcaSettings() {
   const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const businessId = resolveBusinessScopeId(currentBusiness);
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
+  /** Mismo asistente de línea (qué vendes → categorías) para TPV retail. */
+  const showCommercialLineWizard = isDelivery || isRestaurant;
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const pdvGate = useDeliveryStorePdvGate();
   const pdvGateReloadedRef = useRef(false);
@@ -1401,7 +1405,7 @@ export function CompanyMarcaSettings() {
         onSave={persistBrand}
         editingBrand={editingBrand}
         retailStores={retailStores}
-        isDelivery={isDelivery}
+        isDelivery={showCommercialLineWizard}
         activationHighlight={modalActivationHighlight}
       />
 

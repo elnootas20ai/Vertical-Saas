@@ -296,6 +296,9 @@ function normalizeItemStatus(value) {
 }
 
 function sanitizeComandaItem(item) {
+  const brandIds = Array.isArray(item?.brandIds)
+    ? item.brandIds.map((b) => String(b || '').trim()).filter(Boolean)
+    : [];
   return {
     id: item.id || uuidv4(),
     productId: String(item.productId || ''),
@@ -308,6 +311,7 @@ function sanitizeComandaItem(item) {
     status: normalizeItemStatus(item.status),
     cancelledReason: String(item.cancelledReason || ''),
     cancelledBy: String(item.cancelledBy || ''),
+    brandIds,
   };
 }
 
@@ -404,6 +408,9 @@ export function buildDiningOrderDocument(userId, data = {}, existing = null) {
     discount: totals.discount,
     discountPercent,
     discountReason: String(data.discountReason ?? existing?.discountReason ?? ''),
+    loyaltyRedeem: data.loyaltyRedeem !== undefined
+      ? (data.loyaltyRedeem || null)
+      : (existing?.loyaltyRedeem || null),
     tax: totals.tax,
     total: totals.total,
 
@@ -423,6 +430,10 @@ export function buildDiningOrderDocument(userId, data = {}, existing = null) {
     clientName: String(data.clientName ?? existing?.clientName ?? ''),
     invoiceGenerated: Boolean(data.invoiceGenerated ?? existing?.invoiceGenerated ?? false),
     financialMovementId: String(data.financialMovementId ?? existing?.financialMovementId ?? ''),
+    verifactuRecordId: String(data.verifactuRecordId ?? existing?.verifactuRecordId ?? ''),
+    verifactuFullNumber: String(data.verifactuFullNumber ?? existing?.verifactuFullNumber ?? ''),
+    verifactuQrUrl: String(data.verifactuQrUrl ?? existing?.verifactuQrUrl ?? ''),
+    verifactuHuella: String(data.verifactuHuella ?? existing?.verifactuHuella ?? ''),
 
     notes: String(data.notes ?? existing?.notes ?? ''),
     createdAt: existing?.createdAt || now,
@@ -450,6 +461,7 @@ export function sanitizeDiningOrder(doc) {
     discount: doc.discount || 0,
     discountPercent: doc.discountPercent || 0,
     discountReason: doc.discountReason || '',
+    loyaltyRedeem: doc.loyaltyRedeem || null,
     tax: doc.tax || 0,
     total: doc.total || 0,
     status: normalizeOrderStatus(doc.status),
@@ -466,6 +478,10 @@ export function sanitizeDiningOrder(doc) {
     clientName: doc.clientName || '',
     invoiceGenerated: doc.invoiceGenerated || false,
     financialMovementId: doc.financialMovementId || '',
+    verifactuRecordId: doc.verifactuRecordId || '',
+    verifactuFullNumber: doc.verifactuFullNumber || '',
+    verifactuQrUrl: doc.verifactuQrUrl || '',
+    verifactuHuella: doc.verifactuHuella || '',
     notes: doc.notes || '',
     createdAt: doc.createdAt || '',
     updatedAt: doc.updatedAt || '',
@@ -485,6 +501,12 @@ export async function listDiningOrdersByUser(req, userId, filters = {}) {
   }
   if (filters.tableId) {
     orders = orders.filter((o) => o.tableId === filters.tableId);
+  }
+  if (filters.clientId) {
+    const cid = String(filters.clientId || '').trim();
+    if (cid) {
+      orders = orders.filter((o) => String(o.clientId || '').trim() === cid);
+    }
   }
   if (filters.dateFrom) {
     orders = orders.filter((o) => o.createdAt >= filters.dateFrom);

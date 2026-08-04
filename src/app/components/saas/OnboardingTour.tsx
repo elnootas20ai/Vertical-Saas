@@ -24,6 +24,15 @@ import {
   isGuidedActivationBusinessType,
 } from '../../lib/deliveryOpsTypes';
 
+/** Delivery/restaurant: no abrir el tour hasta saber el % del checklist (evita flash → “completado”). */
+function checklistReadyForTourGate(
+  usesGuided: boolean,
+  checklistTotalSteps: number,
+): boolean {
+  if (!usesGuided) return true;
+  return checklistTotalSteps > 0;
+}
+
 function resolveAccountUserId(user: { user_id?: string; id?: string } | null | undefined): string {
   return String(user?.user_id || user?.id || '').trim();
 }
@@ -128,6 +137,12 @@ export function OnboardingTour({ onComplete }: Props) {
       return;
     }
 
+    const usesGuided = isGuidedActivationBusinessType(businessType);
+    if (!checklistReadyForTourGate(usesGuided, checklistTotalSteps)) {
+      if (!showLockRef.current) setTourGate('loading');
+      return;
+    }
+
     if (checklistComplete) {
       if (accountUserId && businessId) {
         markOnboardingTourCompleted(accountUserId, businessId);
@@ -210,6 +225,7 @@ export function OnboardingTour({ onComplete }: Props) {
     currentBusiness,
     user,
     checklistComplete,
+    checklistTotalSteps,
     hasActivationFocus,
     steps,
   ]);

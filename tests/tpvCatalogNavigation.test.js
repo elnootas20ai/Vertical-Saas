@@ -190,6 +190,165 @@ describe('categoriesForTpvScope', () => {
       'blackburger',
     ]);
   });
+
+  it('bar/restaurante: sin pestaña Todos', () => {
+    const brands = [
+      {
+        _id: 'bode',
+        name: 'Bodegeta',
+        active: true,
+        catalogCategories: ['Tapas', 'Bebidas'],
+      },
+    ];
+    const catalog = [
+      {
+        _id: 'tapa-1',
+        itemType: 'product',
+        category: 'Tapas',
+        active: true,
+        brandIds: ['bode'],
+        unitPrice: 5,
+      },
+    ];
+    const sections = buildTpvCatalogSections(brands, catalog, { includeAllTab: false });
+    expect(sections.some((s) => s.scope.kind === 'all')).toBe(false);
+    expect(sections.map((s) => s.label)).toContain('Bodegeta');
+  });
+
+  it('bar: marca primero, luego Bebidas/Cafés/Postres; subfamilias abajo', () => {
+    const brands = [
+      { _id: 'bode', name: 'Bodegeta', active: true, catalogCategories: ['Tapas', 'Raciones'] },
+    ];
+    const catalog = [
+      { _id: 't1', itemType: 'product', category: 'Tapas', active: true, brandIds: ['bode'], unitPrice: 4 },
+      { _id: 'c1', itemType: 'product', category: 'Cervezas', active: true, brandIds: ['bode'], unitPrice: 2 },
+      { _id: 'r1', itemType: 'product', category: 'Refrescos', active: true, brandIds: ['bode'], unitPrice: 2 },
+      { _id: 'v1', itemType: 'product', category: 'Vinos', active: true, brandIds: ['bode'], unitPrice: 3 },
+      { _id: 'f1', itemType: 'product', category: 'Café', active: true, brandIds: ['bode'], unitPrice: 1.5 },
+      { _id: 'p1', itemType: 'product', category: 'Postres', active: true, brandIds: ['bode'], unitPrice: 4 },
+    ];
+    const sections = buildTpvCatalogSections(brands, catalog, {
+      includeAllTab: false,
+      layout: 'brand_families',
+    });
+    expect(sections.map((s) => s.label)).toEqual(['Bodegeta', 'Bebidas', 'Cafés', 'Postres']);
+
+    const drinkCats = categoriesForTpvScope(
+      { kind: 'shared', groupKey: 'bebidas' },
+      brands,
+      catalog,
+      'brand_families',
+    );
+    expect(drinkCats.sort()).toEqual(['Cervezas', 'Refrescos', 'Vinos']);
+
+    const brandCats = categoriesForTpvScope(
+      { kind: 'brand', brandId: 'bode' },
+      brands,
+      catalog,
+      'brand_families',
+    );
+    expect(brandCats).toEqual(['Tapas']);
+  });
+
+  it('si varias marcas usan el mismo organizador, sale de cada marca y va a pestaña compartida', () => {
+    const brands = [
+      {
+        _id: 'mod',
+        name: 'modomio',
+        active: true,
+        catalogCategories: ['Pizzas', 'Cervezas', 'Vinos'],
+      },
+      {
+        _id: 'bb',
+        name: 'blackburger',
+        active: true,
+        catalogCategories: ['Burgers', 'Cervezas', 'Vinos'],
+      },
+    ];
+    const catalog = [
+      {
+        _id: 'pizza-1',
+        itemType: 'product',
+        category: 'Pizzas',
+        active: true,
+        brandIds: ['mod'],
+        unitPrice: 10,
+      },
+      {
+        _id: 'burger-1',
+        itemType: 'product',
+        category: 'Burgers',
+        active: true,
+        brandIds: ['bb'],
+        unitPrice: 12,
+      },
+      {
+        _id: 'beer-1',
+        itemType: 'product',
+        category: 'Cervezas',
+        active: true,
+        brandIds: ['bb'],
+        unitPrice: 3,
+      },
+      {
+        _id: 'wine-1',
+        itemType: 'product',
+        category: 'Vinos',
+        active: true,
+        brandIds: ['mod'],
+        unitPrice: 8,
+      },
+    ];
+
+    const sections = buildTpvCatalogSections(brands, catalog);
+    expect(sections.map((s) => s.label)).toEqual([
+      'Todos',
+      'Cervezas',
+      'Vinos',
+      'blackburger',
+      'modomio',
+    ]);
+
+    const modCats = categoriesForTpvScope({ kind: 'brand', brandId: 'mod' }, brands, catalog);
+    expect(modCats).toEqual(['Pizzas']);
+
+    const bbCats = categoriesForTpvScope({ kind: 'brand', brandId: 'bb' }, brands, catalog);
+    expect(bbCats).toEqual(['Burgers']);
+
+    const index = buildTpvProductSearchIndex(catalog);
+    const modProducts = searchTpvProducts(
+      index,
+      catalog,
+      '',
+      { kind: 'brand', brandId: 'mod' },
+      null,
+      {},
+      brands,
+    );
+    expect(modProducts.map((i) => i._id)).toEqual(['pizza-1']);
+
+    const cervezas = searchTpvProducts(
+      index,
+      catalog,
+      '',
+      { kind: 'shared', groupKey: 'cervezas' },
+      null,
+      {},
+      brands,
+    );
+    expect(cervezas.map((i) => i._id)).toEqual(['beer-1']);
+
+    const vinos = searchTpvProducts(
+      index,
+      catalog,
+      '',
+      { kind: 'shared', groupKey: 'vinos' },
+      null,
+      {},
+      brands,
+    );
+    expect(vinos.map((i) => i._id)).toEqual(['wine-1']);
+  });
 });
 
 describe('búsqueda TPV sin acentos', () => {

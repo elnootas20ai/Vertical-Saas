@@ -29,13 +29,56 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload;
 }
 
-/** Sesiones de caja TPV (mismo backend operativo, sin pedidos delivery). */
-export async function listRestaurantRegisterSessions(userId: string): Promise<TpvRegisterSession[]> {
-  const id = normalizeUserId(userId);
-  const payload = await request<{ ok: boolean; sessions: TpvRegisterSession[] }>(
-    `/api/delivery/caja-bootstrap/${encodeURIComponent(id)}`,
+export type ListRestaurantRegisterSessionsOptions = {
+  /** Filtra turnos al negocio actual (p. ej. Bodegeta) y sus PDV. */
+  businessId?: string | null;
+  salesPointId?: string | null;
+};
+
+function sessionBusinessId(session: TpvRegisterSession): string {
+  const row = session as TpvRegisterSession & { businessId?: string };
+  return String(row.business_id || row.businessId || '').trim();
+}
+
+/** Filtra sesiones al negocio/PDV restaurant (evita turnos delivery de otras empresas). */
+export function filterRestaurantRegisterSessions(
+  sessions: TpvRegisterSession[],
+  options?: { businessId?: string | null; pointOfSaleIds?: Iterable<string> | null },
+): TpvRegisterSession[] {
+  const bid = String(options?.businessId || '').trim();
+  const pdvIds = new Set(
+    Array.from(options?.pointOfSaleIds || []).map((id) => String(id || '').trim()).filter(Boolean),
   );
-  return payload.sessions || [];
+  return (sessions || []).filter((session) => {
+    const sessionBid = sessionBusinessId(session);
+    if (bid && sessionBid && sessionBid !== bid) return false;
+    const pdvId = String(session.pointOfSaleId || '').trim();
+    if (!pdvId) return false;
+    // Con PDVs del local (Bodegeta, etc.): solo turnos de esos PDV.
+    if (pdvIds.size > 0) return pdvIds.has(pdvId);
+    // PDVs aún no cargados: mantener lo que vino del API (ya filtrado por businessId).
+    return true;
+  });
+}
+
+/** Sesiones de caja TPV del negocio restaurant (mismo motor de sesiones, scope por businessId). */
+export async function listRestaurantRegisterSessions(
+  userId: string,
+  options?: ListRestaurantRegisterSessionsOptions,
+): Promise<TpvRegisterSession[]> {
+  const id = normalizeUserId(userId);
+  const params = new URLSearchParams();
+  const businessId = String(options?.businessId || '').trim();
+  const salesPointId = String(options?.salesPointId || '').trim();
+  if (businessId) params.set('businessId', businessId);
+  if (salesPointId) params.set('salesPointId', salesPointId);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  const payload = await request<{ ok: boolean; sessions: TpvRegisterSession[] }>(
+    `/api/delivery/caja-bootstrap/${encodeURIComponent(id)}${qs}`,
+  );
+  const sessions = payload.sessions || [];
+  if (!businessId) return sessions;
+  return filterRestaurantRegisterSessions(sessions, { businessId });
 }
 
 export async function updateRestaurantRegisterSession(

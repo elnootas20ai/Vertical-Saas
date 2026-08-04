@@ -74,13 +74,15 @@ self.addEventListener('push', (event) => {
   }
 
   const title = payload.title || 'Vertial';
+  const data = (payload.data || {}) as Record<string, unknown>;
+  const notifId = typeof data.notificationId === 'string' ? data.notificationId : '';
   const options: NotificationOptions = {
     body: payload.body || '',
     icon: payload.icon || '/pwa-192x192.png',
     badge: payload.badge || '/pwa-192x192.png',
-    tag: 'vertial-notification',
-    renotify: true,
-    data: payload.data || {},
+    tag: notifId ? `vertial-${notifId}` : 'vertial-notification',
+    renotify: false,
+    data,
   };
 
   event.waitUntil(self.registration.showNotification(title, options));
@@ -97,6 +99,12 @@ self.addEventListener('notificationclick', (event) => {
       .then((clientList) => {
         for (const client of clientList) {
           if ('focus' in client) {
+            // Preferir postMessage + soft navigate; fallback navigate
+            try {
+              client.postMessage({ type: 'vertial:push-navigate', route });
+            } catch {
+              /* ignore */
+            }
             void client.navigate(route);
             return client.focus();
           }

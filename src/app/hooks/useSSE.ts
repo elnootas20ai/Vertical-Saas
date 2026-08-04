@@ -95,13 +95,17 @@ export function useSSE({ userId, token, businessId, handlers, enabled = true }: 
       reconnectDelay.current = RECONNECT_INITIAL_MS;
     });
 
-    for (const [eventName, handler] of Object.entries(handlersRef.current)) {
+    // Siempre leer handlersRef.current: si capturamos `handler` al conectar,
+    // el chat se queda con selectedChannelId=null y deja de anexar mensajes.
+    for (const eventName of Object.keys(handlersRef.current)) {
       es.addEventListener(eventName, (e: MessageEvent) => {
+        const current = handlersRef.current[eventName];
+        if (!current) return;
         try {
           const data = JSON.parse(e.data);
-          handler(data);
+          current(data);
         } catch {
-          handler(e.data);
+          current(e.data);
         }
       });
     }

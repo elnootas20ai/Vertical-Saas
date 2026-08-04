@@ -102,6 +102,7 @@ export function mapAcquisitionToCompra(
     id: item.id,
     vehicleLabel,
     status: mapAcquisitionStatus(item.status),
+    acquisitionStatus: item.status,
     purchaseDate: item.acquisitionDate || item.createdAt?.slice(0, 10) || '',
     purchasePrice: item.costCompra || 0,
     supplierName: item.sellerName || '',

@@ -2,12 +2,33 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { useAuth } from '../../context/AuthContext';
-import { createButcherSaleRequest, searchButcherClientsRequest, listButcherClientsRequest, type ButcherClient } from '../../lib/butcherApi';
+import { createButcherSaleRequest, voidButcherSaleRequest, searchButcherClientsRequest, listButcherClientsRequest, type ButcherClient } from '../../lib/butcherApi';
 import { DecimalNumpadField } from '../../components/saas/DecimalNumpadField';
+import { ScaleWeightWidget } from '../../components/saas/ScaleWeightWidget';
 import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
-import { isVertialNativeApp, printTicketDocument } from '../../lib/vertialPrint';
+import { useScale } from '../../hooks/useScale';
+import { printButcherProductLabel } from '../../lib/butcherLabelPrint';
+import { isVertialNativeApp, printTicketDocument, setActivePrinterScope } from '../../lib/vertialPrint';
 import { splitTicketVat, type TicketDocument } from '../../lib/vertialPrint/ticketDocument';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
+import { useBusiness } from '../../context/BusinessContext';
+import { TpvRegisterGate, useTpvRegisterIfOpen } from '../../components/saas/TpvRegisterGate';
+import { TpvChromeScope } from '../../context/TpvChromeContext';
+import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
+import {
+  ensureButcherTpvTarget,
+  listButcherPdvOptions,
+  selectButcherTpvPdv,
+} from '../../lib/butcherTpvScope';
+import {
+  butcherTpvLinesTotalWeightKg,
+  mapButcherTpvLinesToSaleItems,
+  mapTpvPaymentToButcher,
+} from '../../lib/butcherTpvSale';
+import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
+import { downloadButcherCajaZCsv } from '../../lib/butcherCajaZExport';
+import type { PointOfSale } from '../../lib/deliveryApi';
+import { useTranslation } from 'react-i18next';
 import {
   ArrowLeft,
   Beef,
@@ -141,6 +162,8 @@ interface TicketDoc extends VerticalEntity {
   workerId: string;
   workerName: string;
   timeIso: string;
+  saleId?: string | null;
+  voided?: boolean;
 }
 
 interface CompletedSale {
@@ -158,6 +181,8 @@ interface CompletedSale {
   workerId: string;
   workerName: string;
   time: Date;
+  canonicalSaleId?: string | null;
+  voided?: boolean;
 }
 
 interface ParkedTicket {
@@ -214,14 +239,20 @@ function convertToKg(cantidad: number, unidad: UnitMode): number {
 
 // ─── Component ───────────────────────────────────────────────────
 
-export function ButcherTpvPage() {
+/** Tablero TPV carnicería (asume caja abierta vía context o sin asiento). */
+export function ButcherTpvBoard() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const register = useTpvRegisterIfOpen();
   const userId = user?.user_id || user?.id || '';
   const catalogApi = useMemo(() => createVerticalApi<CatalogProduct>('butcher-ops', 'catalog'), []);
   const ticketsApi = useMemo(() => createVerticalApi<TicketDoc>('butcher-ops', 'tickets'), []);
   const workerName = user?.firstName ? `${user.firstName} ${user?.lastName || ''}`.trim() : 'Trabajador';
   const workerId = user?.user_id || user?.id || 'worker-default';
+  const businessName = currentBusiness?.name || 'Carnicería';
+  const businessId = currentBusiness?.business_id || '';
 
   // ─── State ─────────────────────────────────────────────────────
   const [catalog, setCatalog] = useState<CatalogProduct[]>([]);
@@ -232,8 +263,66 @@ export function ButcherTpvPage() {
   const [searchProduct, setSearchProduct] = useState('');
   const [unitMode, setUnitMode] = useState<UnitMode>('kg');
   const [quantityInput, setQuantityInput] = useState('1');
-  const [scaleConnected, setScaleConnected] = useState(false);
   const [scaleReading, setScaleReading] = useState<number | null>(null);
+
+  const [butcherPdvId, setButcherPdvId] = useState(() =>
+    typeof localStorage !== 'undefined' ? localStorage.getItem('butcher_tpv_pdv_id') || '' : '',
+  );
+  const [butcherTerminalId, setButcherTerminalId] = useState(() =>
+    typeof localStorage !== 'undefined' ? localStorage.getItem('butcher_tpv_terminal_id') || '' : '',
+  );
+  const [butcherPdvName, setButcherPdvName] = useState('');
+  const [pdvOptions, setPdvOptions] = useState<PointOfSale[]>([]);
+  const [voidingSale, setVoidingSale] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [target, options] = await Promise.all([
+          ensureButcherTpvTarget(userId),
+          listButcherPdvOptions(userId),
+        ]);
+        if (cancelled) return;
+        setButcherPdvId(target.pdv._id);
+        setButcherTerminalId(target.terminalId);
+        setButcherPdvName(target.pdv.name || target.pdv.code || '');
+        setPdvOptions(options.length ? options : [target.pdv]);
+        setActivePrinterScope({ pdvId: target.pdv._id, terminalId: target.terminalId, pdv: target.pdv });
+      } catch {
+        /* peso manual sigue disponible */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const handleSelectPdv = useCallback(async (pdvId: string) => {
+    if (!userId || !pdvId || pdvId === butcherPdvId) return;
+    try {
+      const { pdv, terminalId } = await selectButcherTpvPdv(userId, pdvId);
+      setButcherPdvId(pdv._id);
+      setButcherTerminalId(terminalId);
+      setButcherPdvName(pdv.name || pdv.code || '');
+      setActivePrinterScope({ pdvId: pdv._id, terminalId, pdv });
+      toast.success(`Mostrador: ${pdv.name || pdv.code}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo cambiar de mostrador');
+    }
+  }, [userId, butcherPdvId]);
+
+  const handleStableWeight = useCallback((reading: { weight: number; unit?: string }) => {
+    const kg = reading.unit === 'g' ? reading.weight / 1000 : reading.weight;
+    if (!(kg > 0)) return;
+    setQuantityInput(String(+kg.toFixed(3)));
+    setUnitMode('kg');
+    setScaleReading(+kg.toFixed(3));
+  }, []);
+  const scale = useScale(userId, butcherPdvId, butcherTerminalId, {
+    autoConnect: true,
+    onStableWeight: handleStableWeight,
+  });
+  const scaleConnected = scale.isConnected;
 
   const [clienteNombre, setClienteNombre] = useState<string | null>(null);
   const [clienteId, setClienteId] = useState<string | null>(null);
@@ -299,6 +388,8 @@ export function ButcherTpvPage() {
     workerId: doc.workerId,
     workerName: doc.workerName,
     time: new Date(doc.timeIso || doc.createdAt),
+    canonicalSaleId: doc.saleId || null,
+    voided: Boolean(doc.voided),
   }), []);
 
   const loadTickets = useCallback(async () => {
@@ -422,28 +513,52 @@ export function ButcherTpvPage() {
     }
   }, [parkedTickets, addAlert, alerts]);
 
-  // ─── Scale simulation ─────────────────────────────────────────
+  // ─── Báscula hardware (useScale) ──────────────────────────────
 
-  const toggleScale = () => {
-    setScaleConnected(prev => {
-      const next = !prev;
-      toast[next ? 'success' : 'info'](next ? 'Báscula conectada' : 'Báscula desconectada');
-      if (!next) setScaleReading(null);
-      return next;
-    });
+  const toggleScale = async () => {
+    try {
+      if (scale.isConnected) {
+        await scale.disconnect();
+        setScaleReading(null);
+        toast.info('Báscula desconectada');
+      } else {
+        const ok = await scale.connect();
+        toast[ok ? 'success' : 'error'](ok ? 'Báscula conectada' : (scale.error || 'No se pudo conectar la báscula'));
+      }
+    } catch {
+      toast.error('Error al conectar la báscula');
+      addAlert('weight', 'error', 'Lectura de báscula fallida: no conectada');
+    }
   };
 
-  const readScale = () => {
-    if (!scaleConnected) {
-      toast.error('Báscula no conectada');
+  const readScale = async () => {
+    if (!scale.isConnected && !scale.hasScale) {
+      toast.error('Báscula no configurada — usa peso manual');
       addAlert('weight', 'error', 'Lectura de báscula fallida: no conectada');
       return;
     }
-    const simulated = +(Math.random() * 3 + 0.1).toFixed(3);
-    setScaleReading(simulated);
-    setQuantityInput(String(simulated));
-    setUnitMode('kg');
-    toast.success(`Peso leído: ${simulated} kg`);
+    try {
+      if (!scale.isConnected) {
+        const ok = await scale.connect();
+        if (!ok) {
+          toast.error(scale.error || 'No se pudo conectar');
+          return;
+        }
+      }
+      const reading = await scale.readWeight();
+      const kg = reading.unit === 'g' ? reading.weight / 1000 : reading.weight;
+      if (!(kg > 0)) {
+        toast.error('Peso no válido');
+        return;
+      }
+      setScaleReading(+kg.toFixed(3));
+      setQuantityInput(String(+kg.toFixed(3)));
+      setUnitMode('kg');
+      toast.success(`Peso leído: ${kg.toFixed(3)} kg`);
+    } catch {
+      toast.error('Error leyendo báscula');
+      addAlert('weight', 'error', 'Lectura de báscula fallida');
+    }
   };
 
   // ─── Product actions ──────────────────────────────────────────
@@ -663,34 +778,98 @@ export function ButcherTpvPage() {
     const ent = paymentMethod === 'efectivo' ? parseDecimalPadValue(entregado) || ticketTotal : ticketTotal;
     const cambioVal = paymentMethod === 'efectivo' ? Math.max(0, ent - ticketTotal) : 0;
     const linesSnapshot = [...lines];
-    const catalogSnapshot = [...catalog];
     const timeIso = new Date().toISOString();
+    const saleItems = mapButcherTpvLinesToSaleItems(linesSnapshot);
+    const salePayload = {
+      ticketNumber: ticketNo,
+      clientId: clienteId || undefined,
+      clientName: clienteNombre || selectedClient?.name || '',
+      items: saleItems,
+      total: ticketTotal,
+      totalWeight: butcherTpvLinesTotalWeightKg(linesSnapshot),
+      paymentMethod: mapTpvPaymentToButcher(paymentMethod),
+      soldBy: workerName,
+      pointOfSaleId: butcherPdvId || undefined,
+      pointOfSaleName: butcherPdvName || undefined,
+      storeId: butcherPdvId || undefined,
+      tiendaId: butcherPdvId || undefined,
+      terminalId: butcherTerminalId || undefined,
+      businessId: businessId || undefined,
+      business_id: businessId || undefined,
+    };
 
     try {
-      const created = await ticketsApi.create(userId, {
-        ticketNo,
-        lines: linesSnapshot,
-        subtotal: ticketSubtotal,
-        descuentoTotal: ticketDiscount,
-        total: ticketTotal,
-        method: paymentMethod,
-        entregado: ent,
-        cambio: cambioVal,
-        clienteId,
-        clienteNombre,
-        workerId,
-        workerName,
-        timeIso,
-      });
-      for (const line of linesSnapshot) {
-        const p = catalogSnapshot.find(c => c._id === line.productoId);
-        if (p) {
-          await catalogApi.update(userId, p._id, { stock: p.stock });
+      let canonicalSaleId: string | null = null;
+      let queuedOffline = false;
+
+      try {
+        const saleRes = await createButcherSaleRequest(userId, salePayload as Partial<import('../../lib/butcherApi').ButcherSale>);
+        if (saleRes?.ok && (saleRes as { sale?: { _id?: string } }).sale?._id) {
+          canonicalSaleId = (saleRes as { sale: { _id: string } }).sale._id;
+        } else if (!isBrowserOnline()) {
+          enqueueTpvOfflineItem('butcher_sale', { userId, sale: salePayload });
+          queuedOffline = true;
+        } else {
+          throw new Error((saleRes as { error?: string })?.error || 'No se pudo registrar la venta canónica');
+        }
+      } catch (err) {
+        if (!isBrowserOnline()) {
+          enqueueTpvOfflineItem('butcher_sale', { userId, sale: salePayload });
+          queuedOffline = true;
+        } else {
+          throw err;
         }
       }
+
+      // Ticket ops = espejo UI (stock solo vía venta canónica / FEFO)
+      let created: TicketDoc;
+      try {
+        created = await ticketsApi.create(userId, {
+          ticketNo,
+          lines: linesSnapshot,
+          subtotal: ticketSubtotal,
+          descuentoTotal: ticketDiscount,
+          total: ticketTotal,
+          method: paymentMethod,
+          entregado: ent,
+          cambio: cambioVal,
+          clienteId,
+          clienteNombre,
+          workerId,
+          workerName,
+          timeIso,
+          saleId: canonicalSaleId,
+          voided: false,
+        });
+      } catch {
+        created = {
+          _id: canonicalSaleId || `local-${ticketNo}`,
+          type: 'bt_ticket',
+          user_id: userId,
+          createdAt: timeIso,
+          updatedAt: timeIso,
+          ticketNo,
+          lines: linesSnapshot,
+          subtotal: ticketSubtotal,
+          descuentoTotal: ticketDiscount,
+          total: ticketTotal,
+          method: paymentMethod,
+          entregado: ent,
+          cambio: cambioVal,
+          clienteId,
+          clienteNombre,
+          workerId,
+          workerName,
+          timeIso,
+          saleId: canonicalSaleId,
+          voided: false,
+        };
+      }
+
       await loadCatalog();
       await loadTickets();
       const sale = docToSale(created);
+      sale.canonicalSaleId = canonicalSaleId;
       setLastSale(sale);
       setLines([]);
       setShowPayment(false);
@@ -698,24 +877,81 @@ export function ButcherTpvPage() {
       setClienteNombre(null);
       setClienteId(null);
       setSelectedClient(null);
-      toast.success(`Venta registrada — ${ticketNo}`);
+      toast.success(
+        queuedOffline
+          ? `Venta en cola offline — ${ticketNo}`
+          : `Venta registrada — ${ticketNo}`,
+      );
       setShowTicketPreview(true);
-      const pmMap: Record<string, string> = { efectivo: 'cash', tarjeta: 'card', bizum: 'bizum' };
-      createButcherSaleRequest(userId, {
-        clientId: sale.clienteId || undefined,
-        clientName: sale.clienteNombre || '',
-        items: sale.lines.map((l: { nombre: string; cantidad: number; unit?: string; precioUnitario: number; subtotal: number }) => ({
-          productName: l.nombre, quantity: l.cantidad, unit: l.unit || 'kg',
-          pricePerUnit: l.precioUnitario, subtotal: l.subtotal,
-        })),
-        total: sale.total,
-        totalWeight: sale.lines.reduce((s: number, l: { unit?: string; cantidad: number }) => s + (l.unit === 'kg' ? Number(l.cantidad) : 0), 0),
-        paymentMethod: pmMap[sale.method] || 'cash',
-        soldBy: workerName,
-      } as Record<string, unknown>).catch(() => {});
+
+      if (register?.addTransaction) {
+        try {
+          await register.addTransaction({
+            type: 'sale',
+            paymentMethod,
+            amount: ticketTotal,
+            description: `Carnicería ${ticketNo}`,
+            orderId: canonicalSaleId || ticketNo,
+            orderNumber: ticketNo,
+            channel: 'butcher_tpv',
+            registeredBy: workerName,
+          });
+        } catch {
+          /* no bloquear cobro si falla el asiento de caja */
+        }
+      }
     } catch {
       toast.error('No se pudo registrar la venta en el servidor');
     }
+  };
+
+  const voidLastSale = async () => {
+    if (!lastSale || lastSale.voided || !userId) return;
+    const saleId = lastSale.canonicalSaleId;
+    if (!saleId) {
+      toast.error('Esta venta no tiene id canónico (¿offline?). Anúlala desde Ventas cuando se sincronice.');
+      return;
+    }
+    if (!window.confirm(`¿Anular ${lastSale.ticketNo} y devolver stock?`)) return;
+    setVoidingSale(true);
+    try {
+      const res = await voidButcherSaleRequest(userId, saleId);
+      if (!res?.ok) throw new Error(res?.error || 'Error al anular');
+      try {
+        await ticketsApi.update(userId, lastSale.id, { voided: true });
+      } catch { /* espejo opcional */ }
+      if (register?.addTransaction) {
+        await register.addTransaction({
+          type: 'return',
+          paymentMethod: lastSale.method,
+          amount: lastSale.total,
+          description: `Anulación ${lastSale.ticketNo}`,
+          orderId: saleId,
+          orderNumber: lastSale.ticketNo,
+          channel: 'butcher_tpv',
+          registeredBy: workerName,
+          refundReason: 'Anulación TPV carnicería',
+        }).catch(() => {});
+      }
+      setLastSale({ ...lastSale, voided: true });
+      await loadCatalog();
+      await loadTickets();
+      toast.success('Venta anulada — stock restaurado');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo anular');
+    } finally {
+      setVoidingSale(false);
+    }
+  };
+
+  const exportCajaZ = () => {
+    const session = register?.session;
+    if (!session) {
+      toast.error('Abre la caja para exportar el cierre Z');
+      return;
+    }
+    downloadButcherCajaZCsv(session, { businessName });
+    toast.success('CSV de cierre Z descargado');
   };
 
   // ─── Print ─────────────────────────────────────────────────────
@@ -891,7 +1127,7 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
             </div>
             <div className="min-w-0">
               <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">
-                TPV Carnicería
+                {t('butcherTpv.title', { defaultValue: 'TPV Carnicería' })}
               </h1>
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <span className="flex items-center gap-1">
@@ -902,9 +1138,30 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
                 <span>{new Date().toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}</span>
               </div>
             </div>
+            {pdvOptions.length > 0 && (
+              <select
+                value={butcherPdvId}
+                onChange={(e) => { void handleSelectPdv(e.target.value); }}
+                className="max-w-[140px] truncate rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200"
+                title={t('butcherTpv.selectPdv', { defaultValue: 'Mostrador / PDV' })}
+              >
+                {pdvOptions.map((p) => (
+                  <option key={p._id} value={p._id}>{p.name || p.code || p._id}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={exportCajaZ}
+              className="hidden sm:flex items-center gap-1 px-2 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              title={t('butcherTpv.exportZ', { defaultValue: 'Exportar cierre Z' })}
+            >
+              <CircleDollarSign className="w-3.5 h-3.5" />
+              Z
+            </button>
             {/* Stats pills */}
             <div className="hidden md:flex items-center gap-1.5">
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800">
@@ -920,7 +1177,7 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
             {/* Scale toggle */}
             <button
               type="button"
-              onClick={toggleScale}
+              onClick={() => { void toggleScale(); }}
               className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
                 scaleConnected
                   ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
@@ -1136,12 +1393,11 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
               {/* Read scale button */}
               <button
                 type="button"
-                onClick={readScale}
-                disabled={!scaleConnected}
+                onClick={() => { void readScale(); }}
                 className={`shrink-0 flex flex-col items-center justify-center gap-1 px-3 rounded-xl border-2 text-xs font-semibold transition-all ${
                   scaleConnected
                     ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50'
-                    : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
+                    : 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300'
                 }`}
                 title="Leer báscula (F4)"
               >
@@ -1149,6 +1405,42 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
                 <span className="text-[10px]">LEER</span>
               </button>
             </div>
+
+            <div className="mt-2">
+              <ScaleWeightWidget
+                scale={scale}
+                mode="compact"
+                showManualFallback
+                onWeightAccepted={(w, unit) => {
+                  const kg = unit === 'g' ? w / 1000 : w;
+                  if (!(kg > 0)) return;
+                  setQuantityInput(String(+kg.toFixed(3)));
+                  setUnitMode('kg');
+                  setScaleReading(+kg.toFixed(3));
+                }}
+              />
+            </div>
+
+            {lines.length > 0 && (
+              <button
+                type="button"
+                className="mt-2 w-full py-2 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 inline-flex items-center justify-center gap-1.5"
+                onClick={() => {
+                  const last = lines[lines.length - 1];
+                  const product = catalog.find((p) => p._id === last.productoId);
+                  void printButcherProductLabel({
+                    businessName: currentBusiness?.name || 'Carnicería',
+                    nombre: last.nombre,
+                    precioKg: last.precioUnitario,
+                    pesoKg: last.cantidadKg || last.cantidad,
+                    lote: product?.lote,
+                    caducidad: product?.fechaCaducidad,
+                  }).catch((e) => toast.error(e instanceof Error ? e.message : 'Error imprimiendo etiqueta'));
+                }}
+              >
+                <Tags className="w-3.5 h-3.5" /> Imprimir etiqueta (última línea)
+              </button>
+            )}
 
             {/* Quick weight buttons */}
             <div className="flex gap-1 mt-2 flex-wrap">
@@ -1675,35 +1967,98 @@ function butcherSaleToTicketDoc(sale: CompletedSale): TicketDocument {
             <div className="w-16 h-16 mx-auto bg-emerald-100 dark:bg-emerald-900/40 rounded-full flex items-center justify-center mb-3">
               <BadgeCheck className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Venta completada</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              {lastSale.voided
+                ? t('butcherTpv.voided', { defaultValue: 'Venta anulada' })
+                : t('butcherTpv.saleDone', { defaultValue: 'Venta completada' })}
+            </h2>
             <p className="text-sm text-gray-500 mt-1">{lastSale.ticketNo}</p>
-            <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">{formatCurrency(lastSale.total)}</p>
-            {lastSale.method === 'efectivo' && lastSale.cambio > 0 && (
+            <p className={`text-2xl font-black mt-2 ${lastSale.voided ? 'text-red-600' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              {formatCurrency(lastSale.total)}
+            </p>
+            {lastSale.method === 'efectivo' && lastSale.cambio > 0 && !lastSale.voided && (
               <p className="text-sm font-semibold text-gray-600 dark:text-gray-400 mt-1">
                 Cambio: {formatCurrency(lastSale.cambio)}
               </p>
             )}
 
-            <div className="flex gap-2 mt-5">
-              <button
-                type="button"
-                onClick={() => setShowTicketPreview(false)}
-                className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-600 dark:text-gray-400"
-              >
-                Cerrar
-              </button>
-              <button
-                type="button"
-                onClick={() => { void printTicket(lastSale); setShowTicketPreview(false); }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold"
-              >
-                <Printer className="w-4 h-4" />
-                Imprimir
-              </button>
+            <div className="flex flex-col gap-2 mt-5">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTicketPreview(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-600 dark:text-gray-400"
+                >
+                  {t('butcherTpv.close', { defaultValue: 'Cerrar' })}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void printTicket(lastSale); setShowTicketPreview(false); }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-bold"
+                >
+                  <Printer className="w-4 h-4" />
+                  {t('butcherTpv.print', { defaultValue: 'Imprimir' })}
+                </button>
+              </div>
+              {!lastSale.voided && (
+                <button
+                  type="button"
+                  disabled={voidingSale}
+                  onClick={() => { void voidLastSale(); }}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-red-200 dark:border-red-800 text-sm font-semibold text-red-600 dark:text-red-400 disabled:opacity-50"
+                >
+                  {voidingSale ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  {t('butcherTpv.void', { defaultValue: 'Anular venta' })}
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
     </div>
   );
+}
+
+/** Owner: chrome + turno de caja. Worker: ya viene envuelto en TpvRegisterGate. */
+function ButcherTpvOwnerShell() {
+  const { user } = useAuth();
+  const userId = user?.user_id || user?.id || '';
+  const [managerPdvId, setManagerPdvId] = useState(
+    () => (typeof localStorage !== 'undefined' ? localStorage.getItem('butcher_tpv_pdv_id') || '' : ''),
+  );
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { pdv, terminalId } = await ensureButcherTpvTarget(userId);
+        if (cancelled) return;
+        setManagerPdvId(pdv._id);
+        setActivePrinterScope({ pdvId: pdv._id, terminalId, pdv });
+      } catch {
+        /* el gate pedirá PDV si hace falta */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  return (
+    <TpvChromeScope>
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
+        <TpvOfflineBanner />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <TpvRegisterGate fillParent initialManagerPdvId={managerPdvId || undefined}>
+            <ButcherTpvBoard />
+          </TpvRegisterGate>
+        </div>
+      </div>
+    </TpvChromeScope>
+  );
+}
+
+export function ButcherTpvPage() {
+  const existingRegister = useTpvRegisterIfOpen();
+  if (existingRegister) return <ButcherTpvBoard />;
+  return <ButcherTpvOwnerShell />;
 }

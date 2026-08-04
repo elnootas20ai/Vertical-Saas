@@ -1,0 +1,48 @@
+---
+description: Línea visual única del SaaS Vertial (paleta logo, tipografía, acciones).
+alwaysApply: true
+---
+
+# Vertial SaaS — una sola línea de diseño
+
+## Decisión (desde ahora)
+
+Todo el SaaS (Gate, CEO, sidebar, topbar, verticales) camina hacia **una sola identidad visual**. No inventar paletas por módulo.
+
+Referencia viva: logo Vertial (`#22C55E` → `#14B8A6` → `#2563EB`, tinta `#0B1220`) + tipografía **Plus Jakarta Sans**.
+
+## Tokens / clases
+
+- CSS: `src/styles/vertial-saas.css` (prefijo `vsaas-*`)
+- Variables tema: `--primary` = azul avance `#2563EB`, `--destructive` = rojo sutil `#E11D48`, fondo `#F5F7FB`
+
+## Reglas de color
+
+| Uso | Color | Notas |
+|-----|--------|--------|
+| Marca / acento logo | Gradiente verde→teal→azul | Barras, chips, hero sutil |
+| Avanzar / Continuar / tabs activos / links | **Azul** `#2563EB` | Acción principal |
+| Urgente / limpiar / error operativo | **Rojo** `#E11D48` | Sutil, no neón |
+| OK / positivo | Verde logo `#22C55E` | Badges ok, margen + |
+| Aviso | Ámbar `#D97706` | Solo warning, no decoración |
+
+Prohibido en UI nueva: rainbow aleatorio (purple/violet/indigo/cyan por “variedad”), Inter/Roboto como fuente de marca, CTAs negros genéricos si el camino es avance.
+
+## Tipografía
+
+- UI SaaS: **Plus Jakarta Sans** (ya en `index.html` + `body` en `theme.css`)
+- Títulos: peso 700–800, tracking ligeramente negativo
+- Labels secundarios: muted slate, no gris muerto distinto en cada pantalla
+
+## Cómo evolucionar sin romper
+
+1. **Solo diseño**: clases/CSS/layout visual. No cambiar flujos, APIs ni impresora.
+2. Ir pantalla a pantalla. Primera referencia aplicada: **Compraventa → Centro Operativo** (`CompraventaHub.tsx`).
+3. Preferir clases `vsaas-*` o tokens CSS frente a `bg-purple-50` sueltos.
+4. Dark mode: mismos roles de color vía tokens `.dark` en `vertial-saas.css`.
+
+## Qué NO hacer
+
+- No mezclar “otro look” por vertical (delivery verde neón, restaurant terracotta, etc.).
+- No refactor masivo de todo el SaaS en un solo PR salvo petición explícita.
+- No tocar lógica de negocio “de paso” al rediseñar.

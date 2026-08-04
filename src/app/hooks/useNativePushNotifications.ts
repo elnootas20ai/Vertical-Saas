@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { getApiBase } from '../lib/apiBase';
 import { isVertialNativeApp } from '../lib/vertialPrint/isNativeApp';
 import { readPushConsent, writePushConsent } from '../lib/pushPermissionConsent';
+import { queuePushDeepLink } from '../lib/pushDeepLink';
 
 async function registerNativeToken(
   apiBase: string,
@@ -48,7 +49,7 @@ interface UseNativePushNotificationsOptions {
 
 /**
  * Push nativo iOS/Android — solo registra si el permiso ya está concedido.
- * El aviso profesional y requestPermissions viven en PushPermissionGate.
+ * El requestPermissions del sistema lo hace PushPermissionGate una vez.
  */
 export function useNativePushNotifications({ userId, token }: UseNativePushNotificationsOptions) {
   const deviceTokenRef = useRef<string | null>(null);
@@ -65,13 +66,32 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
     if (!isVertialNativeApp() || !userId || !token) return;
     if (platform !== 'ios' && platform !== 'android') return;
 
-    // Nunca pedir el popup del sistema aquí (solo 1 vez vía soft prompt).
+    // No pedir permiso aquí: lo hace PushPermissionGate (diálogo del sistema).
     const perm = await PushNotifications.checkPermissions();
     if (perm.receive !== 'granted') return;
 
     if (readPushConsent(userId).decision !== 'accepted') {
       writePushConsent(userId, 'accepted');
     }
+
+    // Android: canal high/public → sale en pantalla de bloqueo
+    if (platform === 'android') {
+      try {
+        await PushNotifications.createChannel({
+          id: 'vertial_alerts',
+          name: 'Alertas Vertial',
+          description: 'Avisos con el móvil bloqueado',
+          importance: 5,
+          visibility: 1,
+          sound: 'default',
+          vibration: true,
+          lights: true,
+        });
+      } catch {
+        /* canal ya existe o API no disponible */
+      }
+    }
+
     await PushNotifications.register();
   }, [userId, token, platform]);
 
@@ -106,10 +126,14 @@ export function useNativePushNotifications({ userId, token }: UseNativePushNotif
       const actionHandle = await PushNotifications.addListener(
         'pushNotificationActionPerformed',
         (action) => {
-          const route = action.notification?.data?.route;
-          if (typeof route === 'string' && route.startsWith('/')) {
-            window.location.href = route;
-          }
+          const data = (action.notification?.data || {}) as Record<string, unknown>;
+          const route =
+            data.route ||
+            data.url ||
+            (typeof data.FCM_MSG === 'object' && data.FCM_MSG
+              ? (data.FCM_MSG as { data?: { route?: string } }).data?.route
+              : undefined);
+          queuePushDeepLink(route);
         },
       );
 

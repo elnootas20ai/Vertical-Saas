@@ -5,6 +5,7 @@ import {
   listSalesByUser,
   findBusinessById,
   findAccountByUserId,
+  findWorkCenterById,
   ensureDatabase,
   getAllDocuments,
   getDocument,
@@ -929,6 +930,52 @@ async function assertMemberCanClockAtStore(req, res, business, memberUserId, pdv
   return true;
 }
 
+function scheduleTimeToMinutes(value) {
+  const raw = String(value || '').trim();
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(raw);
+  if (!m) return -1;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function isWithinOpenWindowMadrid(from, to, date = new Date()) {
+  const fromMin = scheduleTimeToMinutes(from);
+  const toMin = scheduleTimeToMinutes(to);
+  if (fromMin < 0 || toMin < 0 || fromMin === toMin) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Madrid',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value || 0);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+  const nowMin = hour * 60 + minute;
+  if (fromMin < toMin) return nowMin >= fromMin && nowMin < toMin;
+  return nowMin >= fromMin || nowMin < toMin;
+}
+
+function isWorkCenterOpenForClockIn(openingHours, date = new Date()) {
+  if (!openingHours?.schedule) return true;
+  const civil = calendarDayKeyMadrid(date);
+  const [y, m, d] = civil.split('-').map(Number);
+  const utcNoon = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const dayKey = WEEKDAYS_MAP[utcNoon.getUTCDay()] || 'monday';
+  const day = openingHours.schedule[dayKey];
+  if (!day?.open) return false;
+  const within = isWithinOpenWindowMadrid(day.from, day.to, date);
+  if (within === false || within === null) return false;
+  return true;
+}
+
+/**
+ * El horario de tienda es informativo (base del local / plantillas).
+ * No bloquea fichaje: el contrato puede superar la franja o trabajarse fuera.
+ * Se mantiene la función por compatibilidad; siempre permite continuar.
+ */
+async function assertStoreOpenForClockIn(_req, _res, _opts) {
+  return true;
+}
+
 export async function checkInMember(req, res) {
   try {
     const { businessId } = req.params;
@@ -974,6 +1021,7 @@ export async function checkInMember(req, res) {
     if (!(await assertMemberCanClockAtStore(req, res, business, targetMemberId, sp, wc))) {
       return;
     }
+    // Horario de tienda no bloquea fichaje (assertStoreOpenForClockIn = no-op).
 
     const vacationGate = await getApprovedVacationBlockingWork(req, businessId, targetMemberId);
     if (vacationGate.blocked) {
@@ -1032,8 +1080,35 @@ export async function checkInMember(req, res) {
       }
     }
 
+    // Tope anti-spam: máx. 3 sesiones (entrada→salida) por día (jornada partida / vuelta).
+    const MAX_SESSIONS_PER_DAY = 3;
+    const todaySessions = existingRecords.filter((r) => {
+      if (normalizeClockinUserId(r.member_id) !== targetMemberId) return false;
+      return clockinLocalDayKey(r) === date;
+    });
+    if (todaySessions.length >= MAX_SESSIONS_PER_DAY) {
+      return res.status(409).json({
+        ok: false,
+        error: `Máximo ${MAX_SESSIONS_PER_DAY} fichajes al día. Ya has usado los ${MAX_SESSIONS_PER_DAY}.`,
+        code: 'MAX_SESSIONS',
+        maxSessions: MAX_SESSIONS_PER_DAY,
+        usedSessions: todaySessions.length,
+      });
+    }
+
     const id = `clockin:${businessId}:${targetMemberId}:${date}:${Date.now()}`;
     const entry = { type: 'clock_in', time: now, geo: geo || undefined };
+    // Turno del día (informativo + auto-salida a fin + 10 min). La hora de fichaje es la real.
+    let scheduled_start;
+    let scheduled_end;
+    try {
+      const scheduleDocs = await loadSchedulesForDateRange(req, businessId, date, date);
+      const shift = resolveMemberShiftForDate(scheduleDocs, targetMemberId, date);
+      if (shift?.start) scheduled_start = shift.start;
+      if (shift?.end) scheduled_end = shift.end;
+    } catch {
+      /* opcional */
+    }
     const doc = {
       _id: id,
       type: 'clockin',
@@ -1050,6 +1125,8 @@ export async function checkInMember(req, res) {
       geo: geo || undefined,
       sales_point_id: salesPointId ? String(salesPointId).trim() : undefined,
       sales_point_name: salesPointName ? String(salesPointName).trim() : undefined,
+      ...(scheduled_start ? { scheduled_start } : {}),
+      ...(scheduled_end ? { scheduled_end } : {}),
       createdAt: now,
       updatedAt: now,
     };

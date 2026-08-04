@@ -6,9 +6,12 @@ import {
   listScales, createScale, updateScale, pingScale,
   listInventoryCounts, createInventoryCount, getDiscrepancies,
   getButcherAlertsSummary,
+  runButcherDespiece,
 } from '../controllers/butcherController.js';
 
 const butcherRouter = Router();
+
+butcherRouter.post('/:userId/despiece', runButcherDespiece);
 
 butcherRouter.get('/products/:userId', listProducts);
 butcherRouter.post('/products/:userId', createProduct);

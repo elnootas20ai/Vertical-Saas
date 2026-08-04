@@ -3506,7 +3506,7 @@ async function checkLongOccupiedTables(ctx, salaDocs, config) {
       alerts.push(await emit({
         ...ctx, dedupKey: `salaoccupied-${table._id}`,
         level: critical ? 'alert' : 'warning', priority: critical ? 'high' : 'medium',
-        category: 'sala_long_occupied_table', source: 'delivery',
+        category: 'sala_long_occupied_table', source: 'restaurant',
         title: 'Mesa abierta demasiado tiempo',
         message: `Mesa #${table.number} lleva ${Math.floor(mins / 60)}h ${Math.floor(mins % 60)}min abierta sin cobrar`,
         entityId: table._id, entityType: 'dining_table', route: '/saas/sala',
@@ -3522,18 +3522,33 @@ async function checkServedPendingClose(ctx, salaDocs, config) {
   if (!threshold) return [];
   const now = new Date();
   const alerts = [];
-  const orders = salaDocs.filter((d) => d.type === 'dining_order' && !d.deletedAt && d.status === 'served' && d.servedAt);
+  const orders = salaDocs.filter((d) => {
+    if (!d || d.type !== 'dining_order' || d.deletedAt) return false;
+    const st = String(d.status || '');
+    // Servida o en cobro pendiente sin cerrar.
+    if (st === 'served' && d.servedAt) return true;
+    if (st === 'pending_payment') return true;
+    return false;
+  });
   for (const order of orders) {
-    const mins = (now.getTime() - new Date(order.servedAt).getTime()) / 60_000;
+    const anchor = order.servedAt
+      || order.updatedAt
+      || order.paidAt
+      || order.createdAt;
+    if (!anchor) continue;
+    const mins = (now.getTime() - new Date(anchor).getTime()) / 60_000;
     if (mins >= threshold) {
+      const pendingPay = String(order.status || '') === 'pending_payment';
       alerts.push(await emit({
         ...ctx, dedupKey: `salapending-${order._id}`,
         level: 'warning', priority: 'medium',
-        category: 'sala_served_pending_close', source: 'delivery',
-        title: 'Mesa servida sin cobrar',
-        message: `Mesa #${order.tableNumber} servida hace ${Math.floor(mins)}min — pendiente de cobro`,
-        entityId: order._id, entityType: 'dining_order', route: '/saas/sala',
-        metadata: { tableNumber: order.tableNumber, minutes: Math.floor(mins) },
+        category: 'sala_served_pending_close', source: 'restaurant',
+        title: pendingPay ? 'Mesa pendiente de cobro' : 'Mesa servida sin cobrar',
+        message: pendingPay
+          ? `Mesa #${order.tableNumber} lleva ${Math.floor(mins)}min por cobrar`
+          : `Mesa #${order.tableNumber} servida hace ${Math.floor(mins)}min — pendiente de cobro`,
+        entityId: order._id, entityType: 'dining_order', route: '/saas/caja/tpv',
+        metadata: { tableNumber: order.tableNumber, minutes: Math.floor(mins), status: order.status },
       }));
     }
   }
@@ -3556,7 +3571,7 @@ async function checkSlowKitchenComandas(ctx, salaDocs, config) {
         alerts.push(await emit({
           ...ctx, dedupKey: `slowcomanda-${order._id}-${comanda.id || comanda.orderNumber || ''}`,
           level: critical ? 'alert' : 'warning', priority: critical ? 'high' : 'medium',
-          category: 'sala_slow_kitchen_comanda', source: 'delivery',
+          category: 'sala_slow_kitchen_comanda', source: 'restaurant',
           title: 'Comanda lenta en cocina',
           message: `Comanda #${comanda.orderNumber} de Mesa #${order.tableNumber} lleva ${Math.floor(mins)}min en cocina`,
           entityId: order._id, entityType: 'dining_order', route: '/saas/cocina',
@@ -3581,7 +3596,7 @@ async function checkSalaIncidents(ctx, salaDocs, config) {
       alerts.push(await emit({
         ...ctx, dedupKey: `salaincident-${order._id}`,
         level: 'warning', priority: 'medium',
-        category: 'sala_incident', source: 'delivery',
+        category: 'sala_incident', source: 'restaurant',
         title: 'Incidencia en sala',
         message: `Incidencia en Mesa #${order.tableNumber}: ${cancelledItems.length} ítem(s) cancelado(s)`,
         entityId: order._id, entityType: 'dining_order', route: '/saas/sala',

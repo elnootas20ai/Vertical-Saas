@@ -33,7 +33,23 @@ export function WorkerClock() {
   const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
-  const { showStoreBlock, workCenter, storeLabel, assignedPdvId, canClockInEntry, loading: storeLoading } = useWorkerAssignedStore();
+  const {
+    showStoreBlock,
+    workCenter,
+    storeLabel,
+    assignedPdvId,
+    hasAssignment,
+    canClockInEntry,
+    storeClosedForClockIn,
+    storeHoursToday,
+    personalShiftToday,
+    hasPersonalSchedule,
+    personalDayOff,
+    memberSchedule,
+    scheduleLoading,
+    storeResolving,
+    loading: storeLoading,
+  } = useWorkerAssignedStore();
 
   const storeContext = useMemo(
     () =>
@@ -43,47 +59,56 @@ export function WorkerClock() {
     [assignedPdvId, storeLabel],
   );
 
+  const [history, setHistory] = useState<ClockinRecord[]>([]);
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+
+  const pushCompletedToHistory = useCallback((rec: ClockinRecord) => {
+    if (rec.status !== 'completed') return;
+    setHistory((prev) => {
+      const rest = prev.filter((r) => r._id !== rec._id);
+      return [rec, ...rest].slice(0, 50);
+    });
+    setHistoryRefresh((n) => n + 1);
+  }, []);
+
   const {
     record,
     loading,
     acting,
     error,
+    info,
     isClockedIn,
     isOnBreak,
     elapsedSeconds,
     breakSeconds,
     remainingMinutes,
+    autoOutUsesShiftEnd,
+    todaySessionCount,
+    maxSessionsPerDay,
+    maxSessionsReached,
+    canStartNewSession,
     geoLocation,
     geoStatus,
     handleClockIn,
-    handleClockOut: baseClockOut,
+    handleClockOut,
     handleBreakToggle,
-  } = useWorkerClockIn(businessId, memberId, memberName, storeContext);
-
-  const [history, setHistory] = useState<ClockinRecord[]>([]);
-  const [historyRefresh, setHistoryRefresh] = useState(0);
+  } = useWorkerClockIn(businessId, memberId, memberName, storeContext, {
+    onSessionCompleted: pushCompletedToHistory,
+  });
 
   const loadHistory = useCallback(async () => {
     if (!businessId || !memberId) return;
     try {
-      const all = await listClockins(businessId, { memberId });
+      const all = await listClockins(businessId, { memberId, recordsOnly: true });
       setHistory(all.filter((r) => r.status === 'completed'));
     } catch {
-      /* historial opcional */
+      /* historial opcional: el panel también carga por su cuenta */
     }
   }, [businessId, memberId]);
 
   useEffect(() => {
     void loadHistory();
-  }, [loadHistory, historyRefresh]);
-
-  const handleClockOut = useCallback(async () => {
-    const rec = await baseClockOut();
-    if (rec) {
-      setHistory((prev) => [rec, ...prev].slice(0, 50));
-      setHistoryRefresh((n) => n + 1);
-    }
-  }, [baseClockOut]);
+  }, [loadHistory]);
 
   const weekRecords = useMemo(() => {
     const now = new Date();
@@ -124,9 +149,25 @@ export function WorkerClock() {
             {error}
           </div>
         )}
+        {info && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-sm text-blue-800 dark:text-blue-200">
+            {info}
+          </div>
+        )}
 
         {showStoreBlock ? (
-          <WorkerStoreScheduleCard workCenter={workCenter} storeLabel={storeLabel} />
+          <WorkerStoreScheduleCard
+            workCenter={workCenter}
+            storeLabel={storeLabel}
+            hasAssignment={hasAssignment}
+            storeHoursToday={storeHoursToday}
+            personalShiftToday={personalShiftToday}
+            hasPersonalSchedule={hasPersonalSchedule}
+            personalDayOff={personalDayOff}
+            memberSchedule={memberSchedule}
+            scheduleLoading={scheduleLoading}
+            storeResolving={storeResolving}
+          />
         ) : null}
 
         {/* Main Clock Card */}
@@ -166,10 +207,12 @@ export function WorkerClock() {
               </p>
             )}
 
-            {isClockedIn && !isOnBreak && remainingMinutes < 30 && (
+            {isClockedIn && !isOnBreak && remainingMinutes <= 15 && Number.isFinite(remainingMinutes) && (
               <p className="text-amber-200 text-xs mt-1 flex items-center justify-center gap-1">
                 <AlertTriangle className="w-3 h-3" />
-                Auto-salida en {Math.floor(remainingMinutes / 60)}h {remainingMinutes % 60}m
+                {autoOutUsesShiftEnd
+                  ? `Salida automática en ${remainingMinutes} min (fin de turno + 10 min)`
+                  : `Salida automática en ${Math.floor(remainingMinutes / 60)}h ${remainingMinutes % 60}m`}
               </p>
             )}
 
@@ -178,15 +221,36 @@ export function WorkerClock() {
                 <>
                   <button
                     onClick={() => void handleClockIn()}
-                    disabled={acting || storeLoading || !canClockInEntry || (record?.status === 'completed')}
+                    disabled={acting || storeLoading || !canClockInEntry || !canStartNewSession}
                     className="flex items-center gap-3 px-8 py-4 bg-white text-emerald-600 rounded-2xl font-bold text-lg shadow-xl hover:shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
                   >
                     {acting || storeLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6" />}
-                    {t('worker.clock.clockIn', 'Fichar entrada')}
+                    {todaySessionCount > 0
+                      ? t('worker.clock.clockInAgain', 'Fichar entrada otra vez')
+                      : t('worker.clock.clockIn', 'Fichar entrada')}
                   </button>
-                  {!storeLoading && !canClockInEntry && record?.status !== 'completed' ? (
+                  {storeLoading ? (
+                    <p className="text-white/70 text-xs max-w-xs">Cargando tu tienda…</p>
+                  ) : !canClockInEntry ? (
                     <p className="text-white/70 text-xs max-w-xs">
-                      Sin tienda o local asignado. Pide a tu gerente que te asigne uno en Equipo para poder fichar.
+                      Sin tienda o local asignado. No se puede fichar.
+                    </p>
+                  ) : null}
+                  {!storeLoading && canClockInEntry && maxSessionsReached ? (
+                    <p className="text-white/80 text-xs max-w-xs">
+                      Máximo {maxSessionsPerDay} fichajes hoy. Ya has usado los {maxSessionsPerDay}.
+                    </p>
+                  ) : null}
+                  {!storeLoading && canClockInEntry && canStartNewSession && todaySessionCount > 0 ? (
+                    <p className="text-white/70 text-xs max-w-xs">
+                      Turnos hoy: {todaySessionCount}/{maxSessionsPerDay}. Puedes abrir otro si te llaman.
+                    </p>
+                  ) : null}
+                  {!storeLoading && canClockInEntry && storeClosedForClockIn && canStartNewSession ? (
+                    <p className="text-white/80 text-xs max-w-xs">
+                      {storeHoursToday.status === 'outside_hours'
+                        ? `Tienda fuera de horario (${storeHoursToday.from} – ${storeHoursToday.to}). Puedes fichar igual.`
+                        : 'Tienda cerrada hoy. Puedes fichar igual si trabajas fuera o con el local cerrado.'}
                     </p>
                   ) : null}
                 </>
@@ -205,7 +269,9 @@ export function WorkerClock() {
                     {isOnBreak ? t('worker.clock.endBreak', 'Fin descanso') : t('worker.clock.startBreak', 'Descanso')}
                   </button>
                   <button
-                    onClick={() => void handleClockOut()}
+                    onClick={() => {
+                      void handleClockOut();
+                    }}
                     disabled={acting}
                     className="flex items-center gap-2 px-5 py-3 bg-white text-red-600 rounded-xl font-semibold shadow-lg hover:bg-red-50 hover:scale-105 active:scale-95 transition-all disabled:opacity-50"
                   >
@@ -215,12 +281,6 @@ export function WorkerClock() {
                 </>
               )}
             </div>
-
-            {record?.status === 'completed' && (
-              <p className="text-white/40 text-xs mt-3">
-                {t('worker.clock.completedToday', 'Ya fichaste hoy. El fichaje ha sido completado.')}
-              </p>
-            )}
 
             <div className={`flex items-center justify-center gap-1.5 mt-3 text-xs ${
               geoStatus === 'granted' || geoLocation
@@ -247,7 +307,9 @@ export function WorkerClock() {
 
             {isClockedIn && !isOnBreak && (
               <p className="text-white/30 text-[10px] mt-3">
-                {t('worker.clock.autoStopInfo', 'Se fichará salida automáticamente tras 4h continuas sin descanso')}
+                {autoOutUsesShiftEnd
+                  ? 'Si no pulsas salida, se cierra solo 10 min después del fin de tu turno. La hora real queda registrada.'
+                  : 'Sin turno asignado: salida automática tras 4 h seguidas trabajando (sin descanso).'}
               </p>
             )}
           </div>
@@ -272,9 +334,10 @@ export function WorkerClock() {
         </div>
 
         <ClockinHistoryPanel
-          key={historyRefresh}
           businessId={businessId}
           memberId={memberId}
+          refreshKey={historyRefresh}
+          seedRecords={history}
         />
       </div>
     </Layout>

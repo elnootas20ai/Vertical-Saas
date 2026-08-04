@@ -3,7 +3,7 @@ import {
   type ClockinRecord,
   type ClockinEventType,
   type GeoLocation,
-  getTodayClockin,
+  listTodayClockinSessions,
   clockIn,
   clockOut,
   startBreak,
@@ -11,34 +11,36 @@ import {
   notifyClockinEvent,
 } from '../lib/clockinsApi';
 import { useGeolocation, isMobileDevice } from './useGeolocation';
+import {
+  getAutoClockOutRemainingMs,
+  shouldAutoClockOut,
+} from '../lib/clockinAutoOut';
+import {
+  MAX_CLOCKIN_SESSIONS_PER_DAY,
+  pickActiveClockinRecord,
+} from '../lib/clockinHistoryUtils';
 
-const MAX_CONTINUOUS_MS = 4 * 60 * 60 * 1000;
+/** Tope duro al GPS de fichaje (el API del navegador a veces ignora su timeout). */
+const GEO_HARD_TIMEOUT_MS = 4_500;
 
-function parseSchedMs(dateStr: string, timeHHMM: string): number {
-  const [h, m] = timeHHMM.split(':').map(Number);
-  return new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`).getTime();
-}
-
-export function computeClockinLiveSeconds(record: ClockinRecord | null): { worked: number; breakSec: number } {
+/**
+ * Segundos trabajados en vivo para el contador de UI.
+ * No aplica plantilla de horario (eso es solo para nómina/totales): si se mezcla
+ * scheduled_start con husos, el reloj puede saltar minutos al fichar.
+ */
+export function computeClockinLiveSeconds(
+  record: ClockinRecord | null,
+  nowMs: number = Date.now(),
+): { worked: number; breakSec: number } {
   if (!record) return { worked: 0, breakSec: 0 };
   const entries = record.entries;
   const clockInEntry = entries.find((e) => e.type === 'clock_in');
   if (!clockInEntry) return { worked: 0, breakSec: 0 };
 
+  const startMs = new Date(clockInEntry.time).getTime();
+  if (!Number.isFinite(startMs)) return { worked: 0, breakSec: 0 };
   const clockOutEntry = entries.find((e) => e.type === 'clock_out');
-  const now = Date.now();
-
-  let startMs = new Date(clockInEntry.time).getTime();
-  let endMs = clockOutEntry ? new Date(clockOutEntry.time).getTime() : now;
-
-  if (record.date && record.scheduled_start) {
-    const schedStartMs = parseSchedMs(record.date, record.scheduled_start);
-    if (startMs < schedStartMs) startMs = schedStartMs;
-  }
-  if (record.date && record.scheduled_end) {
-    const schedEndMs = parseSchedMs(record.date, record.scheduled_end);
-    if (endMs > schedEndMs) endMs = schedEndMs;
-  }
+  const endMs = clockOutEntry ? new Date(clockOutEntry.time).getTime() : nowMs;
 
   const totalMs = Math.max(0, endMs - startMs);
 
@@ -55,7 +57,7 @@ export function computeClockinLiveSeconds(record: ClockinRecord | null): { worke
   }
   if (breakStart !== null) {
     const bStart = Math.max(breakStart, startMs);
-    const bEnd = Math.min(clockOutEntry ? new Date(clockOutEntry.time).getTime() : now, endMs);
+    const bEnd = Math.min(clockOutEntry ? new Date(clockOutEntry.time).getTime() : nowMs, endMs);
     if (bEnd > bStart) breakMs += bEnd - bStart;
   }
 
@@ -63,7 +65,7 @@ export function computeClockinLiveSeconds(record: ClockinRecord | null): { worke
   return { worked: Math.floor(workedMs / 1000), breakSec: Math.floor(breakMs / 1000) };
 }
 
-export function getClockinContinuousMs(record: ClockinRecord | null): number {
+export function getClockinContinuousMs(record: ClockinRecord | null, nowMs: number = Date.now()): number {
   if (!record || record.status === 'completed') return 0;
   const entries = record.entries;
   let lastResume: number | null = null;
@@ -72,7 +74,7 @@ export function getClockinContinuousMs(record: ClockinRecord | null): number {
     if (e.type === 'break_start' || e.type === 'clock_out') lastResume = null;
   }
   if (lastResume === null) return 0;
-  return Date.now() - lastResume;
+  return Math.max(0, nowMs - lastResume);
 }
 
 export function formatClockTimer(seconds: number) {
@@ -82,24 +84,69 @@ export function formatClockTimer(seconds: number) {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+type DisplayAnchor = {
+  clientMs: number;
+  worked: number;
+  breakSec: number;
+  onBreak: boolean;
+};
+
 export function useWorkerClockIn(
   businessId: string,
   memberId: string,
   memberName: string,
   storeContext?: { sales_point_id?: string; sales_point_name?: string },
+  options?: { onSessionCompleted?: (rec: ClockinRecord) => void },
 ) {
   const isMobile = isMobileDevice();
   const { location: geoLocation, status: geoStatus, requestLocationForClock } = useGeolocation();
   const autoClockOutTriggered = useRef(false);
+  const displayAnchorRef = useRef<DisplayAnchor | null>(null);
+  const [todaySessionCount, setTodaySessionCount] = useState(0);
+  const onSessionCompletedRef = useRef(options?.onSessionCompleted);
+  onSessionCompletedRef.current = options?.onSessionCompleted;
 
   const [record, setRecord] = useState<ClockinRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
   const [, setTick] = useState(0);
 
+  /**
+   * Ancla el contador al reloj del dispositivo para que no “salte” minutos
+   * por desfase con el servidor. En entrada nueva empieza en 00:00:00.
+   */
+  const reanchorDisplay = useCallback((rec: ClockinRecord | null, opts?: { freshClockIn?: boolean }) => {
+    if (!rec || (rec.status !== 'active' && rec.status !== 'break')) {
+      displayAnchorRef.current = null;
+      return;
+    }
+    if (opts?.freshClockIn) {
+      displayAnchorRef.current = {
+        clientMs: Date.now(),
+        worked: 0,
+        breakSec: 0,
+        onBreak: false,
+      };
+      return;
+    }
+    const live = computeClockinLiveSeconds(rec, Date.now());
+    displayAnchorRef.current = {
+      clientMs: Date.now(),
+      worked: live.worked,
+      breakSec: live.breakSec,
+      onBreak: rec.status === 'break',
+    };
+  }, []);
+
   const getGeoForAction = useCallback(async (): Promise<GeoLocation | undefined> => {
-    const loc = await requestLocationForClock();
+    const loc = await Promise.race([
+      requestLocationForClock(),
+      new Promise<null>((resolve) => {
+        window.setTimeout(() => resolve(null), GEO_HARD_TIMEOUT_MS);
+      }),
+    ]);
     return loc || undefined;
   }, [requestLocationForClock]);
 
@@ -146,27 +193,45 @@ export function useWorkerClockIn(
     if (!businessId || !memberId) {
       setLoading(false);
       setRecord(null);
+      setTodaySessionCount(0);
+      displayAnchorRef.current = null;
       return null;
     }
     setLoading(true);
     setError('');
     try {
-      const today = await getTodayClockin(businessId, memberId);
+      const sessions = await listTodayClockinSessions(businessId, memberId);
+      setTodaySessionCount(sessions.length);
+      const today = pickActiveClockinRecord(sessions);
       if (today && today.status !== 'completed') {
-        const contMs = getClockinContinuousMs(today);
-        if (contMs >= MAX_CONTINUOUS_MS) {
+        if (shouldAutoClockOut(today)) {
           try {
             const stopped = await clockOut(today);
-            setRecord(stopped);
+            reanchorDisplay(stopped);
+            // Sesión cerrada: liberar UI para poder abrir otra (si queda cupo).
+            displayAnchorRef.current = null;
+            setRecord(null);
+            setTodaySessionCount((n) => Math.max(n, sessions.length));
+            setInfo(
+              today.scheduled_end
+                ? 'Se cerró solo el fichaje (10 min después del fin de tu turno).'
+                : 'Se cerró solo el fichaje por seguridad (tiempo máximo continuo).',
+            );
+            void listTodayClockinSessions(businessId, memberId).then((s) => {
+              setTodaySessionCount(s.length);
+            });
             return stopped;
           } catch {
+            reanchorDisplay(today);
             setRecord(today);
             return today;
           }
         }
+        reanchorDisplay(today);
         setRecord(today);
         return today;
       }
+      displayAnchorRef.current = null;
       setRecord(null);
       return null;
     } catch (e: unknown) {
@@ -175,7 +240,7 @@ export function useWorkerClockIn(
     } finally {
       setLoading(false);
     }
-  }, [businessId, memberId]);
+  }, [businessId, memberId, reanchorDisplay]);
 
   useEffect(() => {
     void reloadToday();
@@ -183,8 +248,25 @@ export function useWorkerClockIn(
 
   const isClockedIn = record?.status === 'active' || record?.status === 'break';
   const isOnBreak = record?.status === 'break';
-  const { worked: elapsedSeconds, breakSec: breakSeconds } = computeClockinLiveSeconds(record);
+
+  const readDisplaySeconds = useCallback((): { worked: number; breakSec: number } => {
+    const anchor = displayAnchorRef.current;
+    if (!anchor || !isClockedIn) {
+      return computeClockinLiveSeconds(record);
+    }
+    const delta = Math.max(0, Math.floor((Date.now() - anchor.clientMs) / 1000));
+    if (anchor.onBreak || isOnBreak) {
+      return { worked: anchor.worked, breakSec: anchor.breakSec + delta };
+    }
+    return { worked: anchor.worked + delta, breakSec: anchor.breakSec };
+  }, [isClockedIn, isOnBreak, record]);
+
+  const { worked: elapsedSeconds, breakSec: breakSeconds } = readDisplaySeconds();
   const continuousMs = getClockinContinuousMs(record);
+  const remainingAutoOutMs = getAutoClockOutRemainingMs(record);
+  const remainingMinutes = Number.isFinite(remainingAutoOutMs)
+    ? Math.floor(remainingAutoOutMs / 60000)
+    : 0;
 
   useEffect(() => {
     if (!isClockedIn) return;
@@ -196,11 +278,36 @@ export function useWorkerClockIn(
     if (acting || !record) return null;
     setActing(true);
     setError('');
+    setInfo('');
     try {
       const geo = await getGeoForAction();
       const rec = await clockOut(record, geo);
-      setRecord(rec);
+      displayAnchorRef.current = null;
+      setRecord(null);
+      let used = todaySessionCount;
+      if (businessId && memberId) {
+        try {
+          const sessions = await listTodayClockinSessions(businessId, memberId);
+          used = sessions.length;
+          setTodaySessionCount(used);
+        } catch {
+          used = Math.min(MAX_CLOCKIN_SESSIONS_PER_DAY, Math.max(1, todaySessionCount));
+          setTodaySessionCount(used);
+        }
+      }
       fireClockinNotification('clock_out', rec, Boolean(geo));
+      try {
+        onSessionCompletedRef.current?.(rec);
+      } catch {
+        /* UI history refresh best-effort */
+      }
+      if (used < MAX_CLOCKIN_SESSIONS_PER_DAY) {
+        setInfo(
+          `Salida fichada. Puedes volver a entrar hoy (${used}/${MAX_CLOCKIN_SESSIONS_PER_DAY} turnos).`,
+        );
+      } else {
+        setInfo(`Salida fichada. Has alcanzado el máximo de ${MAX_CLOCKIN_SESSIONS_PER_DAY} fichajes hoy.`);
+      }
       return rec;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al fichar salida');
@@ -208,21 +315,44 @@ export function useWorkerClockIn(
     } finally {
       setActing(false);
     }
-  }, [acting, record, getGeoForAction, fireClockinNotification]);
+  }, [
+    acting,
+    record,
+    getGeoForAction,
+    fireClockinNotification,
+    businessId,
+    memberId,
+    todaySessionCount,
+  ]);
 
   useEffect(() => {
     if (!isClockedIn || !record || acting) return;
     if (record.status === 'break') return;
-    if (continuousMs < MAX_CONTINUOUS_MS) return;
+    if (!shouldAutoClockOut(record)) return;
     if (autoClockOutTriggered.current) return;
     autoClockOutTriggered.current = true;
-    void handleClockOut();
-  }, [continuousMs, isClockedIn, record, acting, handleClockOut]);
+    void handleClockOut().then((rec) => {
+      if (rec) {
+        setInfo(
+          record.scheduled_end
+            ? 'Se cerró solo el fichaje (10 min después del fin de tu turno).'
+            : 'Se cerró solo el fichaje por seguridad (tiempo máximo continuo).',
+        );
+      }
+    });
+  }, [remainingAutoOutMs, isClockedIn, record, acting, handleClockOut]);
 
   const handleClockIn = useCallback(async () => {
     if (acting || !businessId || !memberId) return null;
+    if (todaySessionCount >= MAX_CLOCKIN_SESSIONS_PER_DAY) {
+      setError(
+        `Máximo ${MAX_CLOCKIN_SESSIONS_PER_DAY} fichajes al día. Ya has usado los ${MAX_CLOCKIN_SESSIONS_PER_DAY}.`,
+      );
+      return null;
+    }
     setActing(true);
     setError('');
+    setInfo('');
     try {
       const geo = await getGeoForAction();
       const rec = await clockIn(businessId, memberId, memberName, {
@@ -231,8 +361,26 @@ export function useWorkerClockIn(
         sales_point_id: storeContext?.sales_point_id,
         sales_point_name: storeContext?.sales_point_name,
       });
+      const alreadyActive = Boolean((rec as ClockinRecord & { alreadyActive?: boolean }).alreadyActive);
+      if (alreadyActive) {
+        setInfo('Ya tenías un fichaje activo. Se ha reanudado ese turno (no se crea uno nuevo).');
+        // Reanudar: anclar al cliente para no heredar desfase servidor (±minutos).
+        const live = computeClockinLiveSeconds(rec, Date.now());
+        displayAnchorRef.current = {
+          clientMs: Date.now(),
+          worked: live.worked,
+          breakSec: live.breakSec,
+          onBreak: rec.status === 'break',
+        };
+      } else {
+        // Entrada nueva: el contador SIEMPRE arranca en 00:00:00 en este dispositivo.
+        reanchorDisplay(rec, { freshClockIn: true });
+        fireClockinNotification('clock_in', rec, Boolean(geo));
+        setTodaySessionCount((n) => Math.min(MAX_CLOCKIN_SESSIONS_PER_DAY, n + 1));
+      }
+      autoClockOutTriggered.current = false;
       setRecord(rec);
-      fireClockinNotification('clock_in', rec, Boolean(geo));
+      setTick((v) => v + 1);
       return rec;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al fichar entrada');
@@ -240,16 +388,30 @@ export function useWorkerClockIn(
     } finally {
       setActing(false);
     }
-  }, [acting, businessId, memberId, memberName, getGeoForAction, fireClockinNotification, isMobile, storeContext?.sales_point_id, storeContext?.sales_point_name]);
+  }, [
+    acting,
+    businessId,
+    memberId,
+    memberName,
+    todaySessionCount,
+    getGeoForAction,
+    fireClockinNotification,
+    isMobile,
+    storeContext?.sales_point_id,
+    storeContext?.sales_point_name,
+    reanchorDisplay,
+  ]);
 
   const handleBreakToggle = useCallback(async () => {
     if (acting || !record) return null;
     setActing(true);
     setError('');
+    setInfo('');
     try {
       const geo = await getGeoForAction();
       const wasOnBreak = isOnBreak;
       const rec = wasOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
+      reanchorDisplay(rec);
       setRecord(rec);
       fireClockinNotification(wasOnBreak ? 'break_end' : 'break_start', rec, Boolean(geo));
       return rec;
@@ -259,22 +421,30 @@ export function useWorkerClockIn(
     } finally {
       setActing(false);
     }
-  }, [acting, record, isOnBreak, getGeoForAction, fireClockinNotification]);
+  }, [acting, record, isOnBreak, getGeoForAction, fireClockinNotification, reanchorDisplay]);
 
-  const remainingAutoStop = Math.max(0, MAX_CONTINUOUS_MS - continuousMs);
-  const remainingMinutes = Math.floor(remainingAutoStop / 60000);
+  const maxSessionsReached = todaySessionCount >= MAX_CLOCKIN_SESSIONS_PER_DAY;
+  /** Puede abrir un turno nuevo (no hay activo y no se ha llegado al tope del día). */
+  const canStartNewSession = !isClockedIn && !maxSessionsReached;
 
   return {
     record,
     loading,
     acting,
     error,
+    info,
     isClockedIn,
     isOnBreak,
     elapsedSeconds,
     breakSeconds,
     continuousMs,
     remainingMinutes,
+    /** true si el auto-cierre usa fin de turno + 10 min (no el tope de 4 h). */
+    autoOutUsesShiftEnd: Boolean(record?.scheduled_end),
+    todaySessionCount,
+    maxSessionsPerDay: MAX_CLOCKIN_SESSIONS_PER_DAY,
+    maxSessionsReached,
+    canStartNewSession,
     geoLocation,
     geoStatus,
     reloadToday,

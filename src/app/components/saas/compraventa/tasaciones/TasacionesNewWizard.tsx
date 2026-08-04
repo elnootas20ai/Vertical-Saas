@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import { useAuth } from '../../../../context/AuthContext';
 import { useBusiness } from '../../../../context/BusinessContext';
 import { parseLocaleNumber } from '../../../../lib/numberFormat';
-import { createTradeInRequest } from '../../../../lib/tradeInApi';
+import { createTradeInRequest, updateTradeInRequest } from '../../../../lib/tradeInApi';
 import { tasacionToTradeInPayload } from '../../../../lib/compraventaMappers';
 import type { TasacionListItem } from './tasacionesListData';
 import {
@@ -62,13 +62,34 @@ function emptyForm(): TasacionWizardFormState {
   };
 }
 
+function formFromTasacion(item: TasacionListItem): TasacionWizardFormState {
+  return {
+    ownerName: item.ownerName || '',
+    ownerPhone: item.ownerPhone || '',
+    ownerEmail: item.ownerEmail || '',
+    brand: item.make || '',
+    model: item.model || '',
+    year: item.year ? String(item.year) : String(new Date().getFullYear()),
+    mileage: item.mileage != null ? String(item.mileage) : '',
+    licensePlate: item.licensePlate || '',
+    vin: item.vin || '',
+    color: item.color || '',
+    fuelType: item.fuel || '',
+    transmission: item.transmission || '',
+    requestedPrice: item.requestedPrice != null ? String(item.requestedPrice) : '',
+    recommendedPrice: item.recommendedPrice != null ? String(item.recommendedPrice) : '',
+    observations: item.observations || '',
+  };
+}
+
 type Props = {
   open: boolean;
   onClose: () => void;
   onCreated: (tasacionId: string) => void;
+  editing?: TasacionListItem | null;
 };
 
-export function TasacionesNewWizard({ open, onClose, onCreated }: Props) {
+export function TasacionesNewWizard({ open, onClose, onCreated, editing = null }: Props) {
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const userId = user?.user_id || user?.userId || user?._id || '';
@@ -84,9 +105,9 @@ export function TasacionesNewWizard({ open, onClose, onCreated }: Props) {
   useEffect(() => {
     if (!open) return;
     setStep('propietario');
-    setForm(emptyForm());
+    setForm(editing ? formFromTasacion(editing) : emptyForm());
     setSaving(false);
-  }, [open]);
+  }, [open, editing]);
 
   const patch = useCallback((partial: Partial<TasacionWizardFormState>) => {
     setForm((prev) => ({ ...prev, ...partial }));
@@ -168,6 +189,19 @@ export function TasacionesNewWizard({ open, onClose, onCreated }: Props) {
       };
 
       const payload = tasacionToTradeInPayload(draft);
+
+      if (editing?.id) {
+        const response = await updateTradeInRequest(userId, editing.id, {
+          ...payload,
+          color: payload.color || '',
+        });
+        const id = response.tradeIn?.id || editing.id;
+        toast.success('Tasación actualizada');
+        onCreated(id);
+        onClose();
+        return;
+      }
+
       const response = await createTradeInRequest(
         userId,
         {
@@ -185,17 +219,19 @@ export function TasacionesNewWizard({ open, onClose, onCreated }: Props) {
       onCreated(id);
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'No se pudo crear la tasación');
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar la tasación');
     } finally {
       setSaving(false);
     }
   };
 
+  const isEditing = Boolean(editing?.id);
+
   return (
     <SettingsWizardShell
       isOpen={open}
       onClose={onClose}
-      title="Nueva tasación"
+      title={isEditing ? 'Editar tasación' : 'Nueva tasación'}
       subtitle={`Paso ${stepIndex + 1} de ${STEPS.length} · ${STEPS[stepIndex].title}`}
       icon={<Scale className="h-5 w-5 text-emerald-600" strokeWidth={2} />}
       steps={wizardSteps}
@@ -210,7 +246,7 @@ export function TasacionesNewWizard({ open, onClose, onCreated }: Props) {
           onSave={handleSave}
           isLastStep={isLastStep}
           saving={saving}
-          saveLabel="Registrar tasación"
+          saveLabel={isEditing ? 'Guardar cambios' : 'Registrar tasación'}
           disableNext={saving}
           disableSave={saving}
         />

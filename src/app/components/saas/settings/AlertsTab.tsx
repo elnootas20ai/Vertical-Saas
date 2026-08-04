@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bell,
   BellOff,
@@ -37,7 +37,7 @@ import {
   ruleDepartment,
 } from '../../../lib/settingsApi';
 import { useAlertDepartments } from '../../../hooks/useAlertDepartments';
-import { isRuleVisibleForVertical } from '../../../lib/alertDepartments';
+import { isAlertRuleListedForVertical } from '../../../lib/alertDepartments';
 
 interface Props {
   businessId: string;
@@ -74,6 +74,7 @@ const CATEGORY_META: Record<string, { label: string; color: string }> = {
   documentos: { label: 'Documentos',  color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300' },
   sistema:    { label: 'Sistema',     color: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300' },
   delivery:   { label: 'Delivery / Caja', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300' },
+  restaurant_ops: { label: 'Sala / Caja', color: 'bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-200' },
   equipo:     { label: 'Equipo',      color: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300' },
   conciliacion: { label: 'Conciliación', color: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300' },
   ocr:        { label: 'OCR',         color: 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300' },
@@ -93,6 +94,16 @@ const AVAILABLE_ROLES = ['Admin', 'Comercial', 'Taller', 'Recepción', 'Finanzas
 
 export function AlertsTab({ businessId }: Props) {
   const { departments: alertDepartments, vertical } = useAlertDepartments();
+  const categoryMeta = useMemo(() => {
+    if (String(vertical || '').trim() !== 'restaurant') return CATEGORY_META;
+    return {
+      ...CATEGORY_META,
+      delivery: {
+        label: 'Sala / Caja',
+        color: 'bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-200',
+      },
+    };
+  }, [vertical]);
   const [config, setConfig] = useState<AlertsConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -242,7 +253,7 @@ export function AlertsTab({ businessId }: Props) {
     );
   }
 
-  const businessRules = config.rules.filter((r) => isRuleVisibleForVertical(ruleDepartment(r), vertical));
+  const businessRules = config.rules.filter((r) => isAlertRuleListedForVertical(r, vertical));
   const categories = [...new Set(businessRules.map((r) => r.category))];
   const filteredRules = businessRules.filter((r) => {
     if (filterDepartment !== 'all' && ruleDepartment(r) !== filterDepartment) return false;
@@ -491,7 +502,7 @@ export function AlertsTab({ businessId }: Props) {
               >
                 <option value="all">Todas las categorías</option>
                 {categories.map((cat) => (
-                  <option key={cat} value={cat}>{CATEGORY_META[cat]?.label || cat}</option>
+                  <option key={cat} value={cat}>{categoryMeta[cat]?.label || cat}</option>
                 ))}
               </select>
             </div>
@@ -499,7 +510,7 @@ export function AlertsTab({ businessId }: Props) {
             {/* Grouped rules */}
             <div className="space-y-6">
               {Object.entries(groupedRules).map(([category, rules]) => {
-                const catMeta = CATEGORY_META[category] || { label: category, color: 'bg-gray-100 text-gray-800' };
+                const catMeta = categoryMeta[category] || { label: category, color: 'bg-gray-100 text-gray-800' };
                 const catEnabledCount = rules.filter((r) => r.enabled).length;
                 const allEnabled = rules.every((r) => r.enabled);
 

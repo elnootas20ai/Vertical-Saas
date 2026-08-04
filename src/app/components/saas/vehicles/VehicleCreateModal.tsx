@@ -10,6 +10,11 @@ import {
   type DuplicateInfo,
 } from '../../../lib/vehicleApi';
 import { pickVehicleChanges } from './vehicleFormUtils';
+import {
+  VERTIAL_BTN_PRIMARY,
+  VERTIAL_BTN_SECONDARY,
+  VERTIAL_FOCUS_RING,
+} from '../../../lib/vertialUiTokens';
 
 type VehicleCreateModalProps = {
   open: boolean;
@@ -71,7 +76,7 @@ const TRANSMISSION_TYPES = [
 ];
 
 const inputClass =
-  'w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition-colors focus:border-amber-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100';
+  `w-full rounded-xl border-2 border-stone-200 bg-white px-3 py-2.5 text-sm text-stone-900 outline-none transition-colors dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 ${VERTIAL_FOCUS_RING}`;
 
 function Field({
   label,
@@ -541,19 +546,19 @@ export function VehicleCreateModal({ open, onClose, onCreated, onSaved, editVehi
           </div>
           </div>
 
-          <div className="flex shrink-0 gap-3 border-t border-gray-200 bg-white/95 px-6 py-4 backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/95">
+          <div className="flex shrink-0 gap-3 border-t border-stone-200 bg-white/95 px-6 py-4 backdrop-blur-sm dark:border-stone-800 dark:bg-stone-900/95">
             <button
               type="button"
               onClick={onClose}
               disabled={saving}
-              className="flex-1 rounded-xl border-2 border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:border-gray-300 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300"
+              className={`flex-1 ${VERTIAL_BTN_SECONDARY}`}
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gray-900 px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-gray-100 dark:text-gray-900"
+              className={`flex flex-1 ${VERTIAL_BTN_PRIMARY}`}
             >
               {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
               {saving ? 'Guardando…' : isEdit ? 'Guardar cambios' : 'Guardar'}

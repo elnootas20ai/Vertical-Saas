@@ -22,14 +22,32 @@ test('mergeAlertRules delivery: paquete CEO activo y legacy desactivado', () => 
   assert.equal(byId.delivery_kitchen_saturated?.enabled, false);
   assert.equal(byId.delivery_queue_overflow?.enabled, false);
   assert.equal(byId.delivery_order_cancelled?.enabled, true);
+  assert.equal(byId.worker_no_clockin?.enabled, true);
+  assert.equal(byId.document_missing_required?.enabled, true);
+  assert.equal(byId.delivery_product_out_of_stock?.enabled, false);
+  assert.equal(byId.delivery_register_closed_ok?.enabled, false);
 });
 
-test('mergeAlertRules sin vertical: no fuerza paquete CEO', () => {
+test('mergeAlertRules sin vertical: silencio por defecto (modo gerente)', () => {
   const rules = mergeAlertRules([], {});
   const delayed = rules.find((r) => r.id === 'delivery_delayed_order');
-  assert.equal(delayed?.enabled, true);
+  assert.equal(delayed?.enabled, false);
+  const cash = rules.find((r) => r.id === 'delivery_cash_discrepancy');
+  assert.equal(cash?.enabled, true);
   const stale = rules.find((r) => r.id === 'stale_delivery');
   assert.equal(stale?.enabled, false);
+  const stock = rules.find((r) => r.id === 'out_of_stock');
+  assert.equal(stock?.enabled, false);
+});
+
+test('applyManagerFocusRuleDefaults apaga ruido y deja pack delivery', async () => {
+  const { applyManagerFocusRuleDefaults } = await import('../services/alertRulesCatalog.js');
+  const noisy = mergeAlertRules([], {});
+  // Simula config antigua con casi todo ON
+  const allOn = noisy.map((r) => ({ ...r, enabled: true }));
+  const focused = applyManagerFocusRuleDefaults(allOn, { vertical: 'delivery' });
+  const on = focused.filter((r) => r.enabled).map((r) => r.id).sort();
+  assert.deepEqual(on.sort(), [...DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS].sort());
 });
 
 test('usesDeliveryAlertMotor detecta vertical delivery', () => {

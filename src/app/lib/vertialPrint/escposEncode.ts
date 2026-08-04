@@ -278,8 +278,26 @@ export function encodeTicketEscpos(
   ];
   pushTopMargin(chunks);
 
-  // Comanda cocina: solo lo operativo (pedido, tipo, productos, notas). Sin datos fiscales ni cliente.
+  // Comanda cocina: nombre + calle arriba del todo; luego pedido/tipo/tel, productos, notas.
+  // Sin importes ni datos fiscales. Misma plantilla para todas las tiendas del negocio.
   if (doc.variant === 'kitchen') {
+    chunks.push(command([ESC, 0x61, 0]));
+    if (doc.customerName) {
+      chunks.push(setSize(SIZE_TITLE));
+      chunks.push(setBold(true));
+      chunks.push(textLine(doc.customerName, colsForSize(paperWidthMm, SIZE_TITLE)));
+      chunks.push(setBold(false));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    if (doc.customerAddress) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(setBold(true));
+      chunks.push(textLine(doc.customerAddress, tallCols));
+      chunks.push(setBold(false));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    chunks.push(textLine(sepLine(width), width));
+
     pushCenteredTitle(chunks, doc.title, paperWidthMm);
     chunks.push(command([ESC, 0x61, 1]));
     chunks.push(textLine(`${doc.ticketNo} - ${doc.dateLabel}`, width));
@@ -293,9 +311,17 @@ export function encodeTicketEscpos(
     chunks.push(setBold(false));
     chunks.push(setSize(SIZE_NORMAL));
     if (doc.deliveryTypeLabel) {
+      // Un poco más marcado que Pedido/Tel: doble ancho+alto + negrita (domicilio / recogida).
+      chunks.push(setSize(SIZE_TITLE));
+      chunks.push(setBold(true));
+      chunks.push(textLine(doc.deliveryTypeLabel, colsForSize(paperWidthMm, SIZE_TITLE)));
+      chunks.push(setBold(false));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
+    if (doc.customerPhone) {
       chunks.push(setSize(SIZE_TALL));
       chunks.push(setBold(true));
-      chunks.push(textLine(doc.deliveryTypeLabel, tallCols));
+      chunks.push(textLine(`Tel: ${doc.customerPhone}`, tallCols));
       chunks.push(setBold(false));
       chunks.push(setSize(SIZE_NORMAL));
     }
@@ -516,4 +542,57 @@ export function encodeTestTicketEscpos(
     footer: 'Si ves esto, la impresora funciona',
     isRefund: false,
   }, paperWidthMm, feedOptions);
+}
+
+/** Etiqueta de mostrador carnicería (sin IVA ni layout de ticket de venta). */
+export function encodeButcherLabelEscpos(
+  data: {
+    businessName?: string;
+    nombre: string;
+    precioKg: number;
+    pesoKg?: number;
+    lote?: string | null;
+    caducidad?: string | null;
+    origen?: string | null;
+    alergenos?: string | null;
+  },
+  paperWidthMm: 58 | 80 = 58,
+): Uint8Array {
+  const width = colsForSize(paperWidthMm, SIZE_NORMAL);
+  const titleW = colsForSize(paperWidthMm, SIZE_TITLE);
+  const moneyFmt = (n: number) => `${Number(n || 0).toFixed(2)} EUR`;
+  const cad = String(data.caducidad || '').slice(0, 10);
+  let cadLabel = '';
+  if (cad) {
+    const [y, m, d] = cad.split('-');
+    cadLabel = y && m && d ? `${d}/${m}/${y}` : cad;
+  }
+  const peso = Number(data.pesoKg || 0);
+  const chunks: Uint8Array[] = [
+    command([ESC, 0x40]),
+    command([ESC, 0x61, 0x01]),
+    setSize(SIZE_NORMAL),
+    textLine(data.businessName || 'Carniceria', width),
+    setSize(SIZE_TITLE),
+    ...wrapEscposLines(data.nombre || 'Producto', titleW).map((l) => textLine(l, titleW)),
+    setSize(SIZE_TALL),
+    textLine(`${moneyFmt(data.precioKg)}/kg`, colsForSize(paperWidthMm, SIZE_TALL)),
+  ];
+  if (peso > 0) {
+    chunks.push(setSize(SIZE_NORMAL));
+    chunks.push(textLine(`Peso ${peso.toFixed(3)} kg`, width));
+    chunks.push(setSize(SIZE_TALL));
+    chunks.push(textLine(moneyFmt(peso * data.precioKg), colsForSize(paperWidthMm, SIZE_TALL)));
+  }
+  chunks.push(setSize(SIZE_NORMAL));
+  chunks.push(command([ESC, 0x61, 0x00]));
+  if (data.lote) chunks.push(textLine(`Lote: ${data.lote}`, width));
+  if (cadLabel) chunks.push(textLine(`Cad: ${cadLabel}`, width));
+  if (data.origen) chunks.push(textLine(`Origen: ${data.origen}`, width));
+  if (data.alergenos) chunks.push(textLine(`Alergenos: ${data.alergenos}`, width));
+  chunks.push(textLine('----------------', width));
+  chunks.push(textLine('Producto fresco', width));
+  chunks.push(command([LF, LF]));
+  chunks.push(command([GS, 0x56, 0x00]));
+  return concat(chunks);
 }

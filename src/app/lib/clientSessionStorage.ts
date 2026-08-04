@@ -25,6 +25,10 @@ const KEEP_PREFIXES_ON_ACCOUNT_SWITCH = [
   'vertial_printer_config_',
   'vertial_printer_verified',
   'vertial_lan_manual_confirmed',
+  // Tour / alta ya vistos: van por userId+empresa; no reaparecer al re-login.
+  'vertial_onboarding_completed:',
+  'vertial_onboarding_tour_ack:',
+  'vertial_activation_dismissed:',
 ];
 
 function shouldKeepLocalStorageKey(key: string, keepExact: Set<string>): boolean {
@@ -126,7 +130,11 @@ export function pruneLargeVertialCaches(): void {
   }
 }
 
-/** Libera espacio si localStorage está lleno (p. ej. cachés de notificaciones). */
+/**
+ * Limpia cachés de tiendas/empresas al arrancar.
+ * NO borra `vertial-notifications:*`: son el respaldo offline del inbox del trabajador;
+ * solo se purgan si localStorage está lleno (`pruneLargeVertialCaches`).
+ */
 export function pruneVertialStorageIfNeeded(): void {
   if (typeof window === 'undefined') return;
   pruneServerBackedLocalCaches();
@@ -136,8 +144,7 @@ export function pruneVertialStorageIfNeeded(): void {
       const key = localStorage.key(i);
       if (!key) continue;
       if (
-        key.startsWith('vertial-notifications:')
-        || key.startsWith('vertial_businesses_cache:')
+        key.startsWith('vertial_businesses_cache:')
         || key.startsWith('vertial_delivery_stores_cache:')
       ) {
         lsRemove.push(key);

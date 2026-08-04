@@ -136,6 +136,8 @@ export interface EmploymentInfo {
   terminationType?: 'voluntary' | 'dismissal' | 'end_of_contract' | 'mutual_agreement';
   contractType: string;
   workday: string;
+  /** Horas semanales de contrato (p. ej. 40 completa, 20 media). Vacaciones se prorratean con esto. */
+  hoursPerWeek?: number;
   salary: string;
   bankAccount: string;
   bankName: string;
@@ -701,11 +703,7 @@ async function request<T>(
       await new Promise((r) => setTimeout(r, 400 * (_networkAttempt + 1)));
       return request<T>(path, init, _retried, _networkAttempt + 1);
     }
-    const hint =
-      API_BASE
-        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
-        : `No se pudo conectar con ${url}. Si usas Vite en dev, arranca el backend o revisa el proxy; en prod, VITE_API_URL / mismo origen.`;
-    throw new Error(err instanceof Error ? `${hint} (${err.message})` : hint);
+    throw new Error('No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.');
   }
 
   const rawText = await response.text();
@@ -751,7 +749,7 @@ async function request<T>(
     throw new Error(
       bodyBit
         ? `${statusBit}: ${bodyBit}`
-        : `${statusBit}. La API no devolvió un mensaje de error (¿proxy o ruta /api incorrecta?).`,
+        : 'No se pudo completar la solicitud. Inténtalo de nuevo.',
     );
   }
 
@@ -790,11 +788,7 @@ async function publicAuthRequest<T>(path: string, init?: RequestInit): Promise<A
       ...init,
     });
   } catch (err) {
-    const hint =
-      API_BASE
-        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
-        : `No se pudo conectar con ${url}. Si usas Vite en dev, arranca el backend o revisa el proxy; en prod, VITE_API_URL / mismo origen.`;
-    throw new Error(err instanceof Error ? `${hint} (${err.message})` : hint);
+    throw new Error('No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.');
   }
 
   const rawText = await response.text();
@@ -826,6 +820,10 @@ export async function loginRequest(email: string, password: string) {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
+  // Paso OTP admin: contraseña OK pero aún no hay sesión
+  if ((result as { requiresLoginCode?: boolean }).requiresLoginCode) {
+    return result;
+  }
   if (result.accessToken) {
     setAuthTokens({
       accessToken: result.accessToken,
@@ -881,17 +879,12 @@ export async function googleLoginRequest(credential: string): Promise<GoogleLogi
     if (name === 'TimeoutError' || name === 'AbortError') {
       return {
         ok: false,
-        error:
-          'La API tardó demasiado en responder (Google). Suele indicar backend caído, 502 en Nginx o red; revisa /health y los logs del servidor.',
+        error: 'El acceso con Google está tardando demasiado. Inténtalo de nuevo o usa email y contraseña.',
       };
     }
-    const hint =
-      API_BASE
-        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
-        : `No se pudo conectar con ${url}. Revisa VITE_API_URL / mismo origen y el proxy.`;
     return {
       ok: false,
-      error: err instanceof Error ? `${hint} (${err.message})` : hint,
+      error: 'No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.',
     };
   }
 
@@ -903,7 +896,7 @@ export async function googleLoginRequest(credential: string): Promise<GoogleLogi
     } catch {
       payload = {
         ok: false,
-        error: rawText.replace(/\s+/g, ' ').trim().slice(0, 240) || 'Respuesta no JSON del servidor (¿502 HTML de Nginx?)',
+        error: rawText.replace(/\s+/g, ' ').trim().slice(0, 240) || 'No se pudo completar el acceso. Inténtalo de nuevo.',
       };
     }
   }
@@ -975,15 +968,12 @@ export async function appleLoginRequest(
     if (name === 'TimeoutError' || name === 'AbortError') {
       return {
         ok: false,
-        error: 'La API tardó demasiado en responder (Apple). Revisa conexión y que el backend esté en marcha.',
+        error: 'El acceso con Apple está tardando demasiado. Inténtalo de nuevo o usa email y contraseña.',
       };
     }
-    const hint = API_BASE
-      ? `No se pudo conectar con ${url}. Revisa red y que el backend esté en marcha.`
-      : `No se pudo conectar con ${url}. Revisa VITE_API_URL / mismo origen y el proxy.`;
     return {
       ok: false,
-      error: err instanceof Error ? `${hint} (${err.message})` : hint,
+      error: 'No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.',
     };
   }
 
@@ -1254,9 +1244,17 @@ export interface TeamNotificationPreferences {
   onWorkerProfileCompleted: boolean;
 }
 
+export interface PushConsentPreferences {
+  decision: 'unset' | 'accepted' | 'declined';
+  decidedAt?: string | null;
+  /** Solo servidor: permitir bajar de accepted → declined */
+  force?: boolean;
+}
+
 export interface NotificationPreferences {
   clockin: ClockinNotificationPreferences;
   team: TeamNotificationPreferences;
+  pushConsent?: PushConsentPreferences;
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
@@ -1272,6 +1270,10 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   team: {
     onIdentityCompleted: true,
     onWorkerProfileCompleted: true,
+  },
+  pushConsent: {
+    decision: 'unset',
+    decidedAt: null,
   },
 };
 
@@ -1451,10 +1453,7 @@ export async function fetchCurrentUserRequest(): Promise<ApiEnvelope<AuthUser>> 
         headers: buildHeaders(),
       });
     } catch (err) {
-      const hint = API_BASE
-        ? `No se pudo conectar con ${url}. Revisa red, CORS y que el backend esté en marcha.`
-        : `No se pudo conectar con ${url}. Si usas Vite en dev, arranca el backend o revisa el proxy; en prod, VITE_API_URL / mismo origen.`;
-      throw new Error(err instanceof Error ? `${hint} (${err.message})` : hint);
+      throw new Error('No se pudo conectar con el servidor. Comprueba tu conexión e inténtalo de nuevo.');
     }
     const rawText = await response.text();
     const payload = parseEnvelope(rawText);

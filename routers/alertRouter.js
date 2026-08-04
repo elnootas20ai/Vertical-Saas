@@ -12,6 +12,7 @@ import {
   getAlertSummary,
   updateAlertStatus,
   bulkUpdateAlertStatus,
+  resolveAllUnresolvedAlerts,
   assignAlert,
   deleteAlert,
 } from '../controllers/alertCenterController.js';
@@ -24,6 +25,7 @@ alertRouter.get('/:businessId/history', listAlertHistory);
 alertRouter.get('/:businessId/summary', getAlertSummary);
 alertRouter.get('/:businessId/:alertId/timeline', getAlertTimeline);
 alertRouter.put('/:businessId/bulk-status', bulkUpdateAlertStatus);
+alertRouter.post('/:businessId/resolve-all', resolveAllUnresolvedAlerts);
 alertRouter.put('/:businessId/:alertId/status', updateAlertStatus);
 alertRouter.put('/:businessId/:alertId/assign', assignAlert);
 alertRouter.delete('/:businessId/:alertId', deleteAlert);

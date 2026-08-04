@@ -4,7 +4,7 @@ import {
   filterOrdersForRegisterSession,
 } from './registerShiftSalesBreakdown';
 import type { TpvRegisterSession } from './deliveryApi';
-import { localCalendarDayKey } from './tpvCajaScope';
+import { localCalendarDayKey, sessionWorkDayKey } from './tpvCajaScope';
 
 export type FoodFamilyKey = 'pizza' | 'burger' | 'taco';
 
@@ -194,6 +194,43 @@ function countItem(item: DeliveryOrderItem): FoodFamilyCounts {
 
 const AGGREGATOR_CHANNELS = new Set(AGGREGATOR_PLATFORMS.map((p) => p.channel));
 
+/** Suma pizzas / burgers / tacos de una lista de pedidos (sin filtrar por día). */
+export function foodFamilyCountsFromOrders(orders: DeliveryOrder[]): FoodFamilyCounts {
+  return buildShiftFoodFamilyReport(orders).total;
+}
+
+/**
+ * Solo líneas con brandIds que incluyen la marca (reparto 1/N si multi-marca).
+ * Líneas sin marca no entran (van al total empresa, no a una marca concreta).
+ */
+export function foodFamilyCountsFromOrdersForBrand(
+  orders: DeliveryOrder[],
+  brandId: string,
+): FoodFamilyCounts {
+  const bid = String(brandId || '').trim();
+  if (!bid) return emptyFoodFamilyCounts();
+  const total = emptyFoodFamilyCounts();
+  for (const order of orders || []) {
+    const items = Array.isArray(order.items) ? order.items : [];
+    for (const item of items) {
+      const ids = Array.isArray(item.brandIds)
+        ? item.brandIds.map((b) => String(b || '').trim()).filter(Boolean)
+        : [];
+      if (!ids.includes(bid)) continue;
+      const line = countItem(item);
+      const share = ids.length > 0 ? 1 / ids.length : 1;
+      total.pizza += line.pizza * share;
+      total.burger += line.burger * share;
+      total.taco += line.taco * share;
+    }
+  }
+  return {
+    pizza: Math.round(total.pizza * 10) / 10,
+    burger: Math.round(total.burger * 10) / 10,
+    taco: Math.round(total.taco * 10) / 10,
+  };
+}
+
 /** Recuento pizzas / burgers / tacos del turno (y por canal / integrador). */
 export function buildShiftFoodFamilyReport(orders: DeliveryOrder[]): ShiftFoodFamilyReport {
   const total = emptyFoodFamilyCounts();
@@ -263,21 +300,6 @@ export function foodFamilyCountsFromSession(
     burger: Math.max(0, Math.floor(Number(raw.burger) || 0)),
     taco: Math.max(0, Math.floor(Number(raw.taco) || 0)),
   };
-}
-
-/** Día de trabajo del cierre = día local de apertura (como Excel Uriel; turnos de madrugada). */
-function sessionWorkDayKey(session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt'>): string {
-  const opened = String(session.openedAt || '').trim();
-  if (opened) {
-    const d = new Date(opened);
-    if (!Number.isNaN(d.getTime())) return localCalendarDayKey(d);
-  }
-  const closed = String(session.closedAt || '').trim();
-  if (closed) {
-    const d = new Date(closed);
-    if (!Number.isNaN(d.getTime())) return localCalendarDayKey(d);
-  }
-  return '';
 }
 
 /** Suma conteos guardados en cierres del día; si no hay, null. */

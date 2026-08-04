@@ -28,7 +28,15 @@ export function WorkerClockInCard({
   showHistoryLink = true,
 }: WorkerClockInCardProps) {
   const { t } = useTranslation();
-  const { storeLabel, assignedPdvId, canClockInEntry, loading: storeLoading } = useWorkerAssignedStore();
+  const {
+    storeLabel,
+    assignedPdvId,
+    canClockInEntry,
+    storeClosedForClockIn,
+    storeHoursToday,
+    hasAssignment,
+    loading: storeLoading,
+  } = useWorkerAssignedStore();
   const storeContext =
     assignedPdvId
       ? { sales_point_id: assignedPdvId, sales_point_name: storeLabel || undefined }
@@ -38,11 +46,17 @@ export function WorkerClockInCard({
     loading,
     acting,
     error,
+    info,
     isClockedIn,
     isOnBreak,
     elapsedSeconds,
     breakSeconds,
     remainingMinutes,
+    autoOutUsesShiftEnd,
+    todaySessionCount,
+    maxSessionsPerDay,
+    maxSessionsReached,
+    canStartNewSession,
     geoLocation,
     geoStatus,
     handleClockIn,
@@ -71,10 +85,25 @@ export function WorkerClockInCard({
           {error}
         </div>
       ) : null}
+      {info ? (
+        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-3 py-2 text-sm text-blue-800 dark:text-blue-200">
+          {info}
+        </div>
+      ) : null}
 
       {!canClockInEntry && !isClockedIn ? (
         <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
-          Sin tienda o local asignado. Pide a tu gerente que te asigne uno en Equipo para poder fichar.
+          {!hasAssignment
+            ? 'Sin tienda o local asignado. No se puede fichar.'
+            : 'No se puede fichar en este momento.'}
+        </div>
+      ) : null}
+
+      {canClockInEntry && storeClosedForClockIn && !isClockedIn ? (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+          {storeHoursToday.status === 'outside_hours'
+            ? `Tienda fuera de horario (${storeHoursToday.from} – ${storeHoursToday.to}). Puedes fichar igual.`
+            : 'Tienda cerrada hoy. Puedes fichar igual si trabajas fuera o con el local cerrado.'}
         </div>
       ) : null}
 
@@ -101,11 +130,13 @@ export function WorkerClockInCard({
             <button
               type="button"
               onClick={() => void handleClockIn()}
-              disabled={acting || !canClockInEntry || record?.status === 'completed'}
+              disabled={acting || !canClockInEntry || !canStartNewSession}
               className="inline-flex items-center gap-2 px-5 py-3 bg-white text-emerald-600 rounded-xl font-semibold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {acting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-              {t('worker.clock.clockIn', 'Fichar entrada')}
+              {todaySessionCount > 0
+                ? t('worker.clock.clockInAgain', 'Fichar entrada otra vez')
+                : t('worker.clock.clockIn', 'Fichar entrada')}
             </button>
           ) : (
             <>
@@ -131,12 +162,23 @@ export function WorkerClockInCard({
           )}
         </div>
 
-        {record?.status === 'completed' ? (
-          <p className="text-white/50 text-xs mt-3">{t('worker.clock.completedToday', 'Ya fichaste hoy.')}</p>
+        {!isClockedIn && maxSessionsReached ? (
+          <p className="text-white/50 text-xs mt-3">
+            Máximo {maxSessionsPerDay} fichajes hoy ({todaySessionCount}/{maxSessionsPerDay}).
+          </p>
+        ) : null}
+        {!isClockedIn && canStartNewSession && todaySessionCount > 0 ? (
+          <p className="text-white/50 text-xs mt-3">
+            Turnos hoy: {todaySessionCount}/{maxSessionsPerDay}
+          </p>
         ) : null}
 
-        {isClockedIn && !isOnBreak && remainingMinutes < 30 ? (
-          <p className="text-amber-100 text-xs mt-2">Auto-salida en {remainingMinutes} min</p>
+        {isClockedIn && !isOnBreak && remainingMinutes <= 15 && Number.isFinite(remainingMinutes) ? (
+          <p className="text-amber-100 text-xs mt-2">
+            {autoOutUsesShiftEnd
+              ? `Salida automática en ${remainingMinutes} min`
+              : `Auto-salida en ${remainingMinutes} min`}
+          </p>
         ) : null}
 
         <div className={`flex items-center justify-center gap-1.5 mt-3 text-xs ${

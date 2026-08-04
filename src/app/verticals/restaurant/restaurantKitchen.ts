@@ -15,6 +15,7 @@ export interface KitchenTicket {
   createdByName: string;
   items: {
     id: string;
+    productId: string;
     name: string;
     quantity: number;
     notes: string;
@@ -57,6 +58,7 @@ function comandaToTicket(order: DiningOrder, comanda: DiningComanda): KitchenTic
       .filter((item) => item.status !== 'cancelled')
       .map((item) => ({
         id: item.id,
+        productId: String(item.productId || '').trim(),
         name: item.name,
         quantity: Number(item.quantity) || 1,
         notes: item.notes || '',

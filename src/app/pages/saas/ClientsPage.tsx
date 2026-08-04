@@ -4,6 +4,7 @@ import { useLocation, useSearchParams } from 'react-router-dom';
 import { Layout } from '../../components/saas/Layout';
 import { useApp } from '../../context/AppContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { salesListPathForBusiness } from '../../lib/compraventaPaths';
 import { usePagination } from '../../hooks/usePagination';
 import { usePaginatedClients } from '../../hooks/usePaginatedClients';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
@@ -1576,12 +1577,15 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
+  /** CRM operativo con gasto / último pedido (delivery o bar-restaurante). */
+  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness;
   const isBusinessScopedClients = usesBusinessScopedClients(currentBusiness?.businessType);
   const scopedClientsBusinessId = isBusinessScopedClients && businessScopeId ? businessScopeId : undefined;
   const listPlan = useClientsListPlanAccess();
   const clientColDefsForUi = useMemo(
-    () => (isDeliveryBusiness ? DELIVERY_CLIENT_COL_DEFS : CLIENT_COL_DEFS),
-    [isDeliveryBusiness],
+    () => (isOpsCrmBusiness ? DELIVERY_CLIENT_COL_DEFS : CLIENT_COL_DEFS),
+    [isOpsCrmBusiness],
   );
   const viewClientDetail = useCallback((clientId: string) => {
     const path = `/saas/crm/clientes/${clientId}`;
@@ -1595,6 +1599,18 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const goToDeliveryTpvForClient = useCallback((clientId: string) => {
     navigate(`/saas/vertical/delivery/tpv?clientId=${encodeURIComponent(clientId)}`);
   }, [navigate]);
+
+  const goToRestaurantTpvForClient = useCallback((clientId: string) => {
+    navigate(`/saas/caja/tpv?clientId=${encodeURIComponent(clientId)}`);
+  }, [navigate]);
+
+  const goToOpsTpvForClient = useCallback((clientId: string) => {
+    if (isDeliveryBusiness) {
+      goToDeliveryTpvForClient(clientId);
+      return;
+    }
+    goToRestaurantTpvForClient(clientId);
+  }, [isDeliveryBusiness, goToDeliveryTpvForClient, goToRestaurantTpvForClient]);
 
   const [activeTab,               setActiveTab]               = useState<ClientTabId>('clients');
   const [activePill,              setActivePill]              = useState<LeadPill>('all');
@@ -1667,7 +1683,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       clientsDataUserId,
       undefined,
       scopedClientsBusinessId,
-      { liveStats: isDeliveryBusiness },
+      { liveStats: isOpsCrmBusiness },
     )
       .then((all) => {
         if (!cancelled) setSegmentAllClients(all);
@@ -1676,7 +1692,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         if (!cancelled) setLoadingSegmentClients(false);
       });
     return () => { cancelled = true; };
-  }, [useSegmentMode, clientsDataUserId, segmentConditions.length, isDeliveryBusiness, businessScopeId]);
+  }, [useSegmentMode, clientsDataUserId, segmentConditions.length, isOpsCrmBusiness, businessScopeId]);
 
   const [invoiceClientOptions, setInvoiceClientOptions] = useState<Client[]>([]);
 
@@ -1707,7 +1723,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     branchId: filterBranch,
     workCenterId: filterWorkCenter,
     pageSize: 20,
-    liveStats: isDeliveryBusiness,
+    liveStats: isOpsCrmBusiness,
   });
 
   useEffect(() => {
@@ -1732,7 +1748,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [activeTab, clientsDataUserId, isDeliveryBusiness, businessScopeId]);
+  }, [activeTab, clientsDataUserId, isOpsCrmBusiness, businessScopeId]);
 
   const withBusinessScope = useCallback(
     <T extends Record<string, unknown>>(payload: T): T => {
@@ -2016,13 +2032,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         clientsDataUserId,
         undefined,
         scopedClientsBusinessId,
-        { liveStats: isDeliveryBusiness },
+        { liveStats: isOpsCrmBusiness },
       );
       downloadClientsExport(
         all.map((c) => mapClientToExportRow(c)),
         {
-          includeResponsible: !isDeliveryBusiness,
-          includeDeliveryStats: isDeliveryBusiness,
+          includeResponsible: !isOpsCrmBusiness,
+          includeDeliveryStats: isOpsCrmBusiness,
         },
       );
       toast.success(`Exportados ${all.length} clientes`, { id: toastId });
@@ -2035,7 +2051,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     businessScopeId,
     clientsDataUserId,
     exportingClients,
-    isDeliveryBusiness,
+    isOpsCrmBusiness,
   ]);
 
   const { paginated: paginatedClientsLocal, pagination: clientsPaginationLocal } = usePagination(
@@ -2758,11 +2774,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const clearCFilters  = () => { setCFilterName([]); setCFilterStatus([]); setCFilterCity([]); setCSort({ key: 'name', dir: 'asc' }); setFilterBranch('all'); setFilterWorkCenter('all'); };
 
   const { visibleColumns: visibleLeadCols, visibleIds: visibleLeadColIds, columnOrder: leadColOrder, toggleColumn: toggleLeadCol, reorderColumns: reorderLeadCols, resetToDefault: resetLeadCols } = useColumnPreferences('leads', LEAD_COL_DEFS);
-  const clientColPrefsKey = isDeliveryBusiness ? 'clients-delivery-v2' : 'clients';
+  const clientColPrefsKey = isOpsCrmBusiness
+    ? (isDeliveryBusiness ? 'clients-delivery-v2' : 'clients-restaurant-v1')
+    : 'clients';
   const { visibleColumns: visibleClientCols, visibleIds: visibleClientColIds, columnOrder: clientColOrder, toggleColumn: toggleClientCol, reorderColumns: reorderClientCols, resetToDefault: resetClientCols } = useColumnPreferences(clientColPrefsKey, clientColDefsForUi);
 
   const effectiveVisibleClientCols = useMemo(() => {
-    if (!isDeliveryBusiness) return visibleClientCols;
+    if (!isOpsCrmBusiness) return visibleClientCols;
     return visibleClientCols.filter((colId) => {
       if (colId === 'gasto') return listPlan.canViewSpent;
       if (colId === 'ultimo') return listPlan.canViewLastOrder;
@@ -2771,14 +2789,14 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       if (colId === 'pedidos') return listPlan.canViewOrderCount;
       return true;
     });
-  }, [isDeliveryBusiness, visibleClientCols, listPlan]);
+  }, [isOpsCrmBusiness, visibleClientCols, listPlan]);
 
   const lockedDeliveryColIds = useMemo(() => {
-    if (!isDeliveryBusiness) return [] as ClientColId[];
+    if (!isOpsCrmBusiness) return [] as ClientColId[];
     return clientColDefsForUi
       .map((c) => c.id)
       .filter((id) => !effectiveVisibleClientCols.includes(id));
-  }, [isDeliveryBusiness, clientColDefsForUi, effectiveVisibleClientCols]);
+  }, [isOpsCrmBusiness, clientColDefsForUi, effectiveVisibleClientCols]);
 
 
   const PILLS: { id: LeadPill; label: string }[] = [
@@ -3313,7 +3331,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                       />
                     ) : null}
                     <div className="min-w-0">
-                    {isDeliveryBusiness ? (
+                    {isOpsCrmBusiness ? (
                       <DeliveryClientNameCell
                         name={client.name}
                         dni={client.dni}
@@ -3336,7 +3354,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 min-w-0"><Mail className="w-3.5 h-3.5 flex-shrink-0" /><span className="truncate">{client.email}</span></div>
                   {client.city && <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><MapPin className="w-3.5 h-3.5" />{client.city}</div>}
                 </div>
-                {isDeliveryBusiness ? (
+                {isOpsCrmBusiness ? (
                   <DeliveryClientCardExtras
                     stats={deliveryStats}
                     tags={client.tags || []}
@@ -3347,27 +3365,28 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                     showTier={listPlan.canViewSpent}
                   />
                 ) : null}
-                {!isDeliveryBusiness && (client.vehiclesPurchased?.length ?? 0) > 0 && (
+                {!isOpsCrmBusiness && (client.vehiclesPurchased?.length ?? 0) > 0 && (
                   <div className="flex items-center gap-1.5 p-2 bg-gray-50 dark:bg-gray-800 rounded-xl mb-2">
                     <Car className="w-3 h-3 text-gray-400 dark:text-gray-500" />
                     <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{client.vehiclesPurchased!.join(' · ')}</p>
                   </div>
                 )}
                   <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800 mt-2">
-                  {!isDeliveryBusiness && (
+                  {!isOpsCrmBusiness && (
                     <div className="flex items-center gap-1.5"><UserPlus className="w-3 h-3 text-gray-400 dark:text-gray-500" /><span className="text-xs text-gray-400 dark:text-gray-500">{client.responsible}</span></div>
                   )}
-                  {isDeliveryBusiness && <div />}
+                  {isOpsCrmBusiness && <div />}
                   <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                    {isDeliveryBusiness && !clientSelectMode ? (
+                    {isOpsCrmBusiness && !clientSelectMode ? (
                       <DeliveryClientRowActions
                         onView={() => viewClientDetail(client.id)}
-                        onNewOrder={() => goToDeliveryTpvForClient(client.id)}
-                        onDelete={() => void handleDeleteDeliveryClient(client)}
+                        onNewOrder={() => goToOpsTpvForClient(client.id)}
+                        onDelete={isDeliveryBusiness ? () => void handleDeleteDeliveryClient(client) : undefined}
                         deleting={deletingClientId === client.id}
                         alwaysVisible
+                        newOrderTitle={isRestaurantBusiness ? 'Abrir TPV sala' : 'Nuevo pedido'}
                       />
-                    ) : !isDeliveryBusiness ? (
+                    ) : !isOpsCrmBusiness ? (
                       <>
                         <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
                         <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
@@ -3406,7 +3425,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
             <span className="text-sm text-gray-500 dark:text-gray-400">
               <span className="font-semibold text-gray-900 dark:text-gray-100">{clientsListTotal}</span> cliente{clientsListTotal !== 1 ? 's' : ''}
-              {isDeliveryBusiness && (
+              {isOpsCrmBusiness && (
                 <span className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
                   listPlan.isBasicPlan
                     ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
@@ -3419,7 +3438,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               )}
             </span>
             <div className="flex items-center gap-2">
-              {isDeliveryBusiness && lockedDeliveryColIds.length > 0 && (
+              {isOpsCrmBusiness && lockedDeliveryColIds.length > 0 && (
                 <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500" title="Columnas bloqueadas en tu plan">
                   <Lock className="h-3 w-3" />
                   {lockedDeliveryColIds.length} columna{lockedDeliveryColIds.length !== 1 ? 's' : ''} bloqueada{lockedDeliveryColIds.length !== 1 ? 's' : ''}
@@ -3561,7 +3580,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                     ) : null}
                     {effectiveVisibleClientCols.includes('nombre') && (
                       <td className="px-5 py-3.5">
-                        {isDeliveryBusiness ? (
+                        {isOpsCrmBusiness ? (
                           <DeliveryClientNameCell
                             name={client.name}
                             dni={client.dni}
@@ -3616,21 +3635,22 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                     {effectiveVisibleClientCols.includes('ciudad') && <td className="px-5 py-3.5"><span className="text-sm text-gray-600 dark:text-gray-400">{client.city || '—'}</span></td>}
                     {effectiveVisibleClientCols.includes('responsable') && <td className="px-5 py-3.5"><span className="text-xs text-gray-500 dark:text-gray-400">{client.responsible}</span></td>}
                     {effectiveVisibleClientCols.includes('docs') && <td className="px-5 py-3.5 text-right"><span className="text-sm font-bold text-gray-700 dark:text-gray-300">{client.documentsCount || 0}</span></td>}
-                    {isDeliveryBusiness && lockedDeliveryColIds.map((colId) => (
+                    {isOpsCrmBusiness && lockedDeliveryColIds.map((colId) => (
                       <td key={`locked-${colId}`} className="px-3 py-3.5 bg-gray-50/50 dark:bg-gray-900/30">
                         <span className="text-xs text-gray-300 dark:text-gray-600">—</span>
                       </td>
                     ))}
                     <td className="px-4 py-3.5">
                       <div onClick={e => e.stopPropagation()}>
-                        {isDeliveryBusiness && !clientSelectMode ? (
+                        {isOpsCrmBusiness && !clientSelectMode ? (
                           <DeliveryClientRowActions
                             onView={() => viewClientDetail(client.id)}
-                            onNewOrder={() => goToDeliveryTpvForClient(client.id)}
-                            onDelete={() => void handleDeleteDeliveryClient(client)}
+                            onNewOrder={() => goToOpsTpvForClient(client.id)}
+                            onDelete={isDeliveryBusiness ? () => void handleDeleteDeliveryClient(client) : undefined}
                             deleting={deletingClientId === client.id}
+                            newOrderTitle={isRestaurantBusiness ? 'Abrir TPV sala' : 'Nuevo pedido'}
                           />
-                        ) : !isDeliveryBusiness ? (
+                        ) : !isOpsCrmBusiness ? (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button onClick={() => handleCreateContract(client)} className="p-1.5 hover:bg-blue-50 rounded-lg" title="Contrato"><FileText className="w-4 h-4 text-blue-500" /></button>
                             <button onClick={() => navigate(`/saas/vertical/limpieza/clientes?search=${encodeURIComponent(client.name)}`)} className="p-1.5 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 rounded-lg" title="Ver en limpieza"><Droplets className="w-4 h-4 text-cyan-500" /></button>
@@ -3913,7 +3933,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
             </div>
           )}
 
-          <button onClick={() => navigate('/saas/sales')}
+          <button onClick={() => navigate(salesListPathForBusiness(currentBusiness?.businessType))}
             className="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl text-sm text-gray-400 dark:text-gray-500 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-600 transition-colors">
             <ExternalLink className="w-4 h-4" /> Ver módulo completo de Ventas y Facturación
           </button>
@@ -4261,7 +4281,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   const layoutSubtitleByTab: Record<ClientTabId, string> = {
     leads: 'Gestión de leads',
-    clients: 'Gestión de clientes',
+    clients: isRestaurantBusiness
+      ? 'Clientes del local · reservas y fidelización'
+      : 'Gestión de clientes',
     billing: 'Gestión de facturación',
     alerts: 'Alertas y recordatorios comerciales',
   };

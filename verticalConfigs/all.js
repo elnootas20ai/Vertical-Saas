@@ -218,8 +218,10 @@ export const butcherOpsConfig = {
     traceability: { type: 'bt_lote',        idPrefix: 'btl', fields: ['codigoLote','proveedorId','proveedorNombre','tipoAnimal','origen','matadero','nGuiaSanitaria','fechaEntrada','fechaCaducidad','fechaSacrificio','kgRecibidos','kgDisponibles','costePorKg','tiendaAlmacenId','tiendaAlmacenNombre','temperatura','estado','motivoBloqueo','fechaBloqueo','observaciones','ventasAsociadas','creadoPor','fechaCreacion'], required: ['codigoLote'] },
     inventory:    { type: 'bt_stock_entry', idPrefix: 'bti', fields: ['producto','lote','zona','cantidad','unidad','fechaEntrada','fechaCaducidad','temperatura'], required: ['producto'] },
     products:     { type: 'bt_product',     idPrefix: 'btp', fields: ['ref','nombre','categoria','precioKg','stock','stockMinimo','conservacion','origen'], required: ['nombre'] },
-    catalog:      { type: 'bt_catalog',     idPrefix: 'btc', fields: ['nombre','categoria','precioKg','precioUnidad','stock','stockMinimo','unidadVenta','bloqueado','motivoBloqueo','fechaCaducidad','lote','precioActualizado'], required: ['nombre'] },
+    // Fuente de verdad TPV + Productos (incluye campos de ficha + venta)
+    catalog:      { type: 'bt_catalog',     idPrefix: 'btc', fields: ['ref','nombre','categoria','precioKg','precioUnidad','stock','stockMinimo','unidadVenta','bloqueado','motivoBloqueo','fechaCaducidad','lote','precioActualizado','conservacion','origen','catalogItemId','costePorKg'], required: ['nombre'] },
     tickets:      { type: 'bt_ticket',      idPrefix: 'btt', fields: ['ticketNo','lines','subtotal','descuentoTotal','total','method','entregado','cambio','clienteId','clienteNombre','workerId','workerName','time'], required: [] },
+    cuttingRecipes: { type: 'bt_cutting_recipe', idPrefix: 'btr', fields: ['nombre','origenProductId','origenNombre','cortes','mermaEsperadaPct'], required: ['nombre'] },
   },
 };
 

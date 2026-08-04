@@ -8,7 +8,10 @@ import {
   type PointOfSale,
 } from '../../lib/deliveryApi';
 import {
+  alignRetailWorkCentersToActiveBusiness,
   filterPointsOfSaleForWorkCenters,
+  knownBusinessIdsFromList,
+  rescueRetailForBusinessWithoutStores,
   resolveDeliveryDataUserId,
   type DeliveryStoresState,
 } from '../../lib/deliverySetup';
@@ -23,11 +26,12 @@ export type LoadRestaurantStoresOptions = {
   includeInactivePdvs?: boolean;
   skipPdvMerge?: boolean;
   tpvBootstrap?: boolean;
+  knownBusinessIds?: string[];
 };
 
 /**
  * Carga tiendas/PDV solo de esta empresa restaurante.
- * No reutiliza loadDeliveryStores (huérfanas, rescate, legacy multiempresa).
+ * Recupera locales etiquetados a UUID muertos (empresa recreada) sin mezclar delivery.
  */
 export async function loadRestaurantStores(
   authUser: AuthLike,
@@ -48,23 +52,44 @@ export async function loadRestaurantStores(
     listPointsOfSaleRequest(dataUserId, { includeInactive: includeInactivePdvs }).catch(() => []),
   ]);
 
-  const retail = filterRestaurantRetailWorkCenters(allWorkCenters, business, businesses);
+  const businessId = String(business.business_id || '').replace(/^business:/, '').trim();
+  const pdvScope = { businessId };
+  const dedupedRaw = dedupePointsOfSale(rawPdvs, dedupeOpts);
+
+  let scopedWorkCenters = alignRetailWorkCentersToActiveBusiness(
+    allWorkCenters,
+    business,
+    dedupedRaw,
+  );
+  const knownIds =
+    options?.knownBusinessIds ?? knownBusinessIdsFromList(businesses);
+  if (businessId && knownIds.length > 0) {
+    scopedWorkCenters = rescueRetailForBusinessWithoutStores(
+      scopedWorkCenters,
+      businessId,
+      knownIds,
+    );
+  }
+
+  const retail = filterRestaurantRetailWorkCenters(
+    scopedWorkCenters,
+    business,
+    businesses,
+  );
 
   const skipPdvMerge = options?.skipPdvMerge ?? true;
   let pointsOfSale = skipPdvMerge
-    ? dedupePointsOfSale(rawPdvs, dedupeOpts)
-    : await mergePointsOfSaleWithRetailWorkCenters(
-        dataUserId,
-        dedupePointsOfSale(rawPdvs, dedupeOpts),
-        {
-          business,
-          workCenters: retail,
-          includeInactive: includeInactivePdvs,
-        },
-      );
+    ? dedupedRaw
+    : await mergePointsOfSaleWithRetailWorkCenters(dataUserId, dedupedRaw, {
+        business,
+        workCenters: retail,
+        includeInactive: includeInactivePdvs,
+      });
 
+  // Con businessId: si solo hay centros sala_room (excluidos del retail),
+  // no vaciar PDVs etiquetados de la empresa (evita «Crear primer local» en TPV).
   pointsOfSale = dedupePointsOfSale(
-    filterPointsOfSaleForWorkCenters(pointsOfSale, retail),
+    filterPointsOfSaleForWorkCenters(pointsOfSale, retail, pdvScope),
     dedupeOpts,
   );
 
@@ -80,7 +105,7 @@ export async function loadRestaurantStores(
         if (idx >= 0) pointsOfSale[idx] = ensured;
         else pointsOfSale.push(ensured);
         pointsOfSale = dedupePointsOfSale(
-          filterPointsOfSaleForWorkCenters(pointsOfSale, retail),
+          filterPointsOfSaleForWorkCenters(pointsOfSale, retail, pdvScope),
           dedupeOpts,
         );
       } catch {
@@ -92,7 +117,7 @@ export async function loadRestaurantStores(
   if (options?.tpvBootstrap) {
     pointsOfSale = await ensureTabletCodesForPointsOfSale(dataUserId, pointsOfSale);
     pointsOfSale = dedupePointsOfSale(
-      filterPointsOfSaleForWorkCenters(pointsOfSale, retail),
+      filterPointsOfSaleForWorkCenters(pointsOfSale, retail, pdvScope),
       dedupeOpts,
     );
   }
@@ -112,5 +137,6 @@ export function scopeRestaurantPointsOfSale(
   businesses: Business[],
 ): PointOfSale[] {
   const retail = filterRestaurantRetailWorkCenters(workCenters, business, businesses);
-  return filterPointsOfSaleForWorkCenters(pointsOfSale, retail);
+  const businessId = String(business.business_id || '').replace(/^business:/, '').trim();
+  return filterPointsOfSaleForWorkCenters(pointsOfSale, retail, { businessId });
 }

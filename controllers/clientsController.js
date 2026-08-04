@@ -41,6 +41,11 @@ import {
   scopeDeliveryOrdersToBusinessId,
   scopeDeliveryOrdersToClientBusiness,
 } from '../services/deliveryClientSync.js';
+import {
+  enrichClientRowWithLiveDiningStats,
+  loadDiningOrdersForClientCrm,
+  mergeClientLiveStats,
+} from '../services/restaurantClientSync.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -150,7 +155,18 @@ export async function listClients(req, res) {
       const deliveryOrders = businessId
         ? await scopeDeliveryOrdersToBusinessId(req, ownerUserId, businessId, allOrders)
         : allOrders;
-      clients = clients.map((row) => enrichClientRowWithLiveDeliveryStats(row, deliveryOrders));
+      let diningOrders = [];
+      try {
+        diningOrders = await loadDiningOrdersForClientCrm(req, ownerUserId, businessId);
+      } catch {
+        diningOrders = [];
+      }
+      clients = clients.map((row) => {
+        const withDelivery = enrichClientRowWithLiveDeliveryStats(row, deliveryOrders);
+        if (!diningOrders.length) return withDelivery;
+        const withDining = enrichClientRowWithLiveDiningStats(row, diningOrders);
+        return mergeClientLiveStats(row, withDelivery, withDining);
+      });
     }
     return res.json({ ok: true, clients, meta });
   } catch (error) {
@@ -168,7 +184,7 @@ export async function createClient(req, res) {
     if (!client.name?.trim()) return badRequest(res, 'El nombre del cliente es obligatorio');
 
     const tags = Array.isArray(client.tags) ? client.tags.map((t) => String(t || '').trim()).filter(Boolean) : [];
-    // Atención rápida TPV sin teléfono → ficha CRM «cliente perdido» (sin exigir móvil).
+    // Legacy: fichas antiguas «cliente perdido». Atención rápida nueva ya no crea CRM sin teléfono.
     const allowEmptyPhone =
       tags.includes('cliente-perdido') || client.allowEmptyPhone === true || client.stats?.lostFromQuickAttention === true;
 

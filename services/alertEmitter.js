@@ -34,7 +34,7 @@ import {
 } from './alertConstants.js';
 import { resolveAlertPlanTier } from './alertPlanTiers.js';
 import { resolvePlanTier } from './subscriptionAddons.js';
-import { MANAGER_RECIPIENT_ROLES, ALL_ALERT_RULE_DEFINITIONS } from './alertRulesCatalog.js';
+import { ALL_ALERT_RULE_DEFINITIONS } from './alertRulesCatalog.js';
 import { isCeoUrgentMobilePushRule } from './pushAlertPolicy.js';
 
 export const fakeReq = { headers: {} };
@@ -101,16 +101,6 @@ async function getBusinessAlertConfig(businessId) {
   }
 }
 
-function memberMatchesRecipientRoles(memberRole, configuredRoles) {
-  const role = String(memberRole || '').trim();
-  if (!role) return false;
-  const configured = new Set((configuredRoles || []).map((r) => String(r || '').trim()));
-  if (configured.has(role)) return true;
-  const wantsManagers = ['Admin', 'Gerente', 'manager', 'gerente', 'owner'].some((r) => configured.has(r));
-  if (wantsManagers && MANAGER_RECIPIENT_ROLES.includes(role)) return true;
-  return false;
-}
-
 async function businessOwnerMeetsAlertRule(business, ruleId, category) {
   const ownerId = business?.owner_user_id;
   if (!ownerId) return true;
@@ -128,81 +118,81 @@ async function businessOwnerMeetsAlertRule(business, ruleId, category) {
   }
 }
 
+/**
+ * Destinatarios de alertas.
+ * De momento SOLO el CEO / titular de la empresa (owner).
+ * Trabajadores (código / invitedBy) NO reciben alertas ni push.
+ */
 async function resolveRecipients(businessId, ruleId, category, fallbackUserId, { force = false } = {}) {
-  if (!businessId) return fallbackUserId ? [fallbackUserId] : [];
+  if (!businessId) {
+    if (!fallbackUserId) return [];
+    try {
+      const account = await findAccountByUserId(fakeReq, fallbackUserId);
+      if (isWorkerAccountDoc(account)) return [];
+      return [fallbackUserId];
+    } catch {
+      return [];
+    }
+  }
   try {
+    // Si la regla está desactivada en el negocio, no emitir (salvo force).
+    if (!force && (ruleId || category)) {
+      const config = await getBusinessAlertConfig(businessId);
+      const rules = config?.rules || [];
+      const rule = rules.find((r) => r.id === ruleId || r.id === category) || null;
+      if (rule && rule.enabled === false) return [];
+    }
+
     const business = await findBusinessById(fakeReq, businessId);
-    if (!business?.members?.length) {
-      return business?.owner_user_id
-        ? [business.owner_user_id]
-        : (fallbackUserId ? [fallbackUserId] : []);
+    const ownerId = business?.owner_user_id || '';
+    if (ownerId) return [ownerId];
+    if (fallbackUserId) {
+      const account = await findAccountByUserId(fakeReq, fallbackUserId);
+      if (isWorkerAccountDoc(account)) return [];
+      return [fallbackUserId];
     }
-    const config = await getBusinessAlertConfig(businessId);
-    const rules = config?.rules || [];
-    const rule = rules.find((r) => r.id === ruleId || r.id === category) || null;
-    if (rule && !rule.enabled && !force) return [];
-
-    const userIds = new Set();
-    if (business.owner_user_id) userIds.add(business.owner_user_id);
-
-    if (rule?.recipientRoles?.length && !force) {
-      for (const m of business.members) {
-        if (!m.user_id) continue;
-        if (memberMatchesRecipientRoles(m.role, rule.recipientRoles)) {
-          userIds.add(m.user_id);
-        }
-      }
-      if (rule.customRecipients?.length) {
-        for (const uid of rule.customRecipients) {
-          if (uid) userIds.add(uid);
-        }
-      }
-    } else {
-      for (const m of business.members) {
-        if (!m.user_id) continue;
-        if (MANAGER_RECIPIENT_ROLES.includes(String(m.role || ''))) {
-          userIds.add(m.user_id);
-        }
-      }
-      if (rule?.customRecipients?.length) {
-        for (const uid of rule.customRecipients) {
-          if (uid) userIds.add(uid);
-        }
-      }
-    }
-
-    if (userIds.size > 0) return Array.from(userIds);
-    return fallbackUserId ? [fallbackUserId] : [business.owner_user_id].filter(Boolean);
+    return [];
   } catch {
-    return fallbackUserId ? [fallbackUserId] : [];
+    return [];
   }
 }
 
+/** Cuenta de trabajador (invitado / código), no el CEO titular. */
+function isWorkerAccountDoc(account) {
+  if (!account) return false;
+  if (String(account.accountType || '') === 'user') return true;
+  if (String(account.invitedBy || '').trim()) return true;
+  return false;
+}
+
 async function resolveChannels(businessId, ruleId, category, { force = false } = {}) {
-  if (!businessId) return ['inApp'];
+  if (!businessId) {
+    return force || isCeoUrgentMobilePushRule(ruleId, category)
+      ? ['inApp', 'push']
+      : ['inApp', 'push'];
+  }
   try {
     const config = await getBusinessAlertConfig(businessId);
     if (!config) {
-      return force || isCeoUrgentMobilePushRule(ruleId, category)
-        ? ['inApp', 'push']
-        : ['inApp'];
+      // Sin doc de settings: mismo default que seed (push + inApp).
+      return ['inApp', 'push'];
     }
     if (config.global?.muteAll && !force) return [];
     const rules = config.rules || [];
     const rule = rules.find((r) => r.id === ruleId || r.id === category);
     const channels = rule?.channels?.length
       ? [...rule.channels]
-      : [...(config.global?.defaultChannels || ['inApp'])];
+      : [...(config.global?.defaultChannels || ['push', 'inApp'])];
 
     if (!channels.includes('inApp')) channels.push('inApp');
 
-    // CEO urgentes (caja / impagos / pedido eliminado): forzar push aunque el negocio solo tenga inApp.
+    // CEO urgentes (caja / impagos / pack gerente): forzar push aunque el negocio solo tenga inApp.
     if ((force || isCeoUrgentMobilePushRule(ruleId, category)) && !channels.includes('push')) {
       channels.push('push');
     }
     return channels;
   } catch {
-    return force ? ['inApp', 'push'] : ['inApp'];
+    return ['inApp', 'push'];
   }
 }
 
@@ -312,6 +302,7 @@ export async function emitGlobalAlert({
     if (dedupKey) {
       const existing = await findOpenAlertDoc(category, dedupKey);
       if (existing) {
+        // Alerta ya abierta: actualizar in-app, NUNCA reenviar push (1 vez y listo).
         const refreshed = {
           ...existing,
           title,
@@ -336,14 +327,30 @@ export async function emitGlobalAlert({
     const saved = await saveNotification(fakeReq, notifBase);
     const sanitized = sanitizeNotification(saved);
 
+    // Push móvil: una sola vez por alerta (no reenviar si ya se envió).
+    const alreadyPushed = Boolean(saved?.mobilePushSentAt);
+    let didQueuePush = false;
+
     for (const uid of recipientUserIds) {
       broadcastToUser(uid, 'notification', sanitized);
 
-      if ((!quiet || bypassQuiet) && channels.includes('push')) {
+      if (
+        !alreadyPushed
+        && (!quiet || bypassQuiet)
+        && channels.includes('push')
+      ) {
+        didQueuePush = true;
+        const pushRoute = sanitized.route || '/saas/alerts';
+        const pushId = String(sanitized.id || saved?._id || '');
         sendPushToUser(fakeReq, uid, {
           title: sanitized.title,
           body: sanitized.message,
-          data: { route: sanitized.route || '/saas/alerts', notificationId: sanitized.id },
+          data: {
+            route: pushRoute,
+            notificationId: pushId,
+          },
+          // Misma alerta = mismo collapse → iOS sustituye, no apila.
+          collapseId: pushId || undefined,
         }, { ruleId, category, channels }).catch(() => null);
       }
 
@@ -359,6 +366,18 @@ export async function emitGlobalAlert({
             }).catch(() => null);
           }
         } catch { /* email best-effort */ }
+      }
+    }
+
+    if (didQueuePush && saved?._id) {
+      try {
+        await saveNotification(fakeReq, {
+          ...saved,
+          mobilePushSentAt: now,
+          updatedAt: now,
+        });
+      } catch {
+        /* best-effort: el dedup de alerta abierta ya evita re-push */
       }
     }
 

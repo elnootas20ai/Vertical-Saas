@@ -15,6 +15,7 @@ import {
   getPlatformChangelog,
   getAlertsConfig,
   saveAlertsConfig,
+  resetAlertsToManagerFocus,
   getPaymentGateway,
   savePaymentGateway,
   getDriverCashConfig,
@@ -61,6 +62,7 @@ settingsRouter.put('/business-hours/:userId', saveBusinessHours);
 // ADM-09: Alerts config por negocio
 settingsRouter.get('/alerts/:businessId', getAlertsConfig);
 settingsRouter.put('/alerts/:businessId', saveAlertsConfig);
+settingsRouter.post('/alerts/:businessId/manager-focus', resetAlertsToManagerFocus);
 
 // ADM-06: Export/Import de datos del tenant
 settingsRouter.get('/export/:userId', exportTenantData);

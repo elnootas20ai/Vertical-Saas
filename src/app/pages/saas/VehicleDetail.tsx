@@ -43,9 +43,20 @@ import {
   GripVertical, ImagePlus, Bell, Star, Share2, TrendingDown, Settings2, FolderOpen,
 } from 'lucide-react';
 import { VehicleDocDossier } from '../../components/saas/VehicleDocDossier';
+import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
 import { PeriodBadge } from '../../components/ui/PeriodBadge';
 import { parseLocaleNumber } from '../../lib/numberFormat';
 import { VEHICLE_STATUS_TOKEN, type VehicleStatus } from '../../components/saas/DesignTokens';
+import {
+  DOCUMENTS_DB_NAME,
+  createDocumentViaApi,
+  updateDocumentViaApi,
+  type OcrData,
+} from '../../lib/documentsApi';
+import { buildOcrDocumentFields } from '../../lib/ocrDocumentSave';
+import { authFetch, getAuthHeaders } from '../../lib/authApi';
+import { getApiBase } from '../../lib/apiBase';
+import { toast } from 'sonner';
 
 // ─── Image compression utility ────────────────────────────────────────────────
 
@@ -2157,6 +2168,7 @@ Vehiculo bien cuidado, sin golpes ni rayones significativos. Toda la documentaci
 ];
 
 function PortalPublishSection({ vehicle }: { vehicle: Vehicle }) {
+  const navigate = useNavigate();
   const [copiedPortal, setCopiedPortal] = useState<string | null>(null);
 
   const copyText = (portalName: string, text: string) => {
@@ -2168,12 +2180,31 @@ function PortalPublishSection({ vehicle }: { vehicle: Vehicle }) {
 
   return (
     <div className="space-y-4">
+      <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900 dark:bg-emerald-950/20">
+        <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+          Gestión comercial de publicación
+        </p>
+        <p className="mt-1 text-xs text-emerald-800/80 dark:text-emerald-200/80">
+          Canales activos, estado y precio se gestionan en Publicación y venta (core del vertical).
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            navigate(`/saas/vertical/compraventa/publicacion-venta?vehicleId=${encodeURIComponent(vehicle.id)}`)
+          }
+          className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+        >
+          <Globe className="h-3.5 w-3.5" />
+          Abrir Publicación y venta
+        </button>
+      </div>
+
       <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 p-4">
         <div className="flex items-center gap-2 mb-1">
           <Globe className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-          <h3 className="font-bold text-gray-900 dark:text-gray-100 text-sm">Publicación en portales</h3>
+          <h3 className="font-bold text-gray-900 dark:text-gray-100 text-sm">Plantillas para copiar</h3>
         </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Copia el texto para publicar en el portal que prefieras. Cada plantilla está adaptada al estilo del portal.</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Texto auxiliar para pegar en portales. No sustituye el estado de publicación del vehículo.</p>
 
         <div className="space-y-3">
           {PORTAL_TEMPLATES.map(portal => {
@@ -2188,36 +2219,19 @@ function PortalPublishSection({ vehicle }: { vehicle: Vehicle }) {
                     <span className={`font-bold text-sm ${portal.color}`}>{portal.name}</span>
                   </div>
                   <button
+                    type="button"
                     onClick={() => copyText(portal.name, text)}
-                    className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
-                      isCopied
-                        ? 'bg-green-100 text-green-700 border border-green-300'
-                        : `bg-white dark:bg-gray-800 ${portal.color} border border-current hover:opacity-80`
-                    }`}
+                    className="rounded-lg bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-gray-700 hover:bg-white"
                   >
-                    {isCopied ? <><Check className="w-3.5 h-3.5" />¡Copiado!</> : <><Copy className="w-3.5 h-3.5" />Copiar texto</>}
+                    {isCopied ? 'Copiado' : 'Copiar'}
                   </button>
                 </div>
-                {/* Preview */}
-                <div className="bg-white dark:bg-gray-800 px-4 py-3">
-                  <pre className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap font-sans line-clamp-6">{text}</pre>
-                  <button
-                    onClick={() => copyText(portal.name, text)}
-                    className="mt-2 text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 flex items-center gap-1 transition-colors"
-                  >
-                    <ExternalLink className="w-3 h-3" />Ver texto completo y copiar
-                  </button>
-                </div>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap bg-white px-4 py-3 text-xs text-gray-600 dark:bg-gray-900 dark:text-gray-300">
+                  {text}
+                </pre>
               </div>
             );
           })}
-        </div>
-
-        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-          <p className="text-xs text-amber-700 flex items-start gap-2">
-            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-            Recuerda completar las fotos del vehículo antes de publicar. Los portales priorizan anuncios con imágenes de calidad.
-          </p>
         </div>
       </div>
     </div>
@@ -2270,10 +2284,11 @@ export function VehicleDetail() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { id } = useParams();
-  const { vehicles, updateVehicle, deleteVehicle, documents } = useApp();
+  const { vehicles, updateVehicle, deleteVehicle, documents, refreshDocuments } = useApp();
   const { user } = useAuth();
 
   const [activeTab, setActiveTab] = useState<MainTab>('ficha');
+  const [showOcr, setShowOcr] = useState(false);
 
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [showScrapModal, setShowScrapModal] = useState(false);
@@ -2861,7 +2876,7 @@ export function VehicleDetail() {
             <div className={`font-bold ${marginColor}`}>{margin.toLocaleString('es-ES')}€</div>
           </div>
         </div>
-        <button onClick={() => navigate('/saas/sales')} className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-2xl transition-colors text-sm flex items-center justify-center gap-2">
+        <button onClick={() => navigate(`/saas/vertical/compraventa/ventas?newSale=1&vehicleId=${encodeURIComponent(vehicle.id)}`)} className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-bold rounded-2xl transition-colors text-sm flex items-center justify-center gap-2">
           <TrendingUp className="w-4 h-4" />Crear venta
         </button>
       </div>
@@ -3296,10 +3311,17 @@ export function VehicleDetail() {
             </div>
             <div className="space-y-1.5">
               {[
-                { label: 'Precio de compra', value: `${vehicle.purchasePrice.toLocaleString('es-ES')}€` },
-                { label: 'Taller y preparación', value: '850€' },
-                { label: 'Publicidad', value: '200€' },
-                { label: 'Otros gastos', value: '200€' },
+                { label: 'Precio de compra', value: `${(vehicle.purchasePrice || 0).toLocaleString('es-ES')}€` },
+                {
+                  label: 'Reparaciones / taller',
+                  value: totalCosts > 0 ? `${totalCosts.toLocaleString('es-ES')}€` : '—',
+                },
+                {
+                  label: 'Gastos de preparación',
+                  value: Math.max(totalAssociatedCosts, prepCostTotal) > 0
+                    ? `${Math.max(totalAssociatedCosts, prepCostTotal).toLocaleString('es-ES')}€`
+                    : '—',
+                },
               ].map(item => (
                 <div key={item.label} className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <span className="text-gray-600 dark:text-gray-400 text-sm">{item.label}</span>
@@ -3309,9 +3331,16 @@ export function VehicleDetail() {
               <div className="border-t-2 border-gray-200 dark:border-gray-700 pt-1.5">
                 <div className="flex items-center justify-between p-2.5 bg-blue-50 rounded-lg">
                   <span className="font-bold text-blue-900 text-sm">Coste total</span>
-                  <span className="font-bold text-blue-900">{totalCost.toLocaleString('es-ES')}€</span>
+                  <span className="font-bold text-blue-900">{realTotalCost.toLocaleString('es-ES')}€</span>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => navigate(`/saas/vertical/compraventa/gastos-preparacion?vehicleId=${vehicle.id}`)}
+                className="mt-2 w-full text-xs font-semibold text-blue-600 hover:text-blue-700"
+              >
+                Gestionar gastos de preparación →
+              </button>
             </div>
           </div>
         </div>
@@ -3599,7 +3628,7 @@ export function VehicleDetail() {
       <div className="p-5 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-xl">
         <h3 className="font-bold text-green-900 mb-2">Crear operación de venta</h3>
         <p className="text-sm text-green-700 mb-4">Inicia el proceso de venta creando una nueva operación</p>
-        <button onClick={() => navigate('/saas/sales')} className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-colors text-sm">➕ Crear venta</button>
+        <button onClick={() => navigate(`/saas/vertical/compraventa/ventas?newSale=1&vehicleId=${encodeURIComponent(vehicle.id)}`)} className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-colors text-sm">➕ Crear venta</button>
       </div>
       <div className="bg-white dark:bg-gray-800 rounded-xl border-2 border-gray-200 dark:border-gray-700 p-5">
         <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Resumen para venta</h3>
@@ -3914,14 +3943,16 @@ export function VehicleDetail() {
               vehicleName={`${vehicle.brand || ''} ${vehicle.model || ''}`.trim()}
               registrationPlate={vehicle.registrationPlate}
               vehicleImageUrl={vehicle.images?.[0]?.url || vehicle.imageUrl}
+              onOcr={() => setShowOcr(true)}
+              onUpload={() => navigate(`/saas/documents?tab=vehiculo&vehicleId=${encodeURIComponent(vehicle.id)}`)}
               documents={(documents || [])
-                .filter((d: any) => d.vehicleId === vehicle.id || d.relatedToId === vehicle.id)
-                .map((d: any) => ({
-                  id: d.id || d._id,
+                .filter((d) => d.vehicleId === vehicle.id || d.relatedToId === vehicle.id)
+                .map((d) => ({
+                  id: d.id || d._id || '',
                   name: d.name || 'Documento',
                   docSubCategory: d.docSubCategory || 'otro',
                   status: d.status || 'draft',
-                  createdAt: d.createdAt instanceof Date ? d.createdAt.toISOString() : (d.createdAt || ''),
+                  createdAt: d.createdAt instanceof Date ? d.createdAt.toISOString() : String(d.createdAt || ''),
                   registrationPlate: d.registrationPlate || vehicle.registrationPlate,
                   itvExpiryDate: d.itvExpiryDate,
                   ocrConfidence: d.ocrConfidence || 0,
@@ -3934,6 +3965,87 @@ export function VehicleDetail() {
       </div>
 
       {/* Modals */}
+      <SAAS__OcrScanModal
+        isOpen={showOcr}
+        onClose={() => setShowOcr(false)}
+        userId={user?.user_id || user?.id}
+        targetModule="documentacion"
+        defaultOcrMode="vehicle"
+        lockOcrMode
+        autoOpenCamera={false}
+        context={{ vehicleId: vehicle.id }}
+        vehicles={[
+          {
+            id: vehicle.id,
+            brand: vehicle.brand,
+            model: vehicle.model,
+            registrationPlate: vehicle.registrationPlate,
+            vin: vehicle.vin,
+          },
+        ]}
+        onDocumentCreated={async (payload) => {
+          const userId = user?.user_id || user?.id || '';
+          if (!userId) throw new Error('Sesión no válida');
+          const fileName = payload.file
+            ? String((payload.file as File).name || 'scan').replace(/[^a-zA-Z0-9._-]/g, '-')
+            : 'scan';
+          const ocrData = (payload.ocrData || null) as OcrData | null;
+          const fields = buildOcrDocumentFields({
+            name: String(payload.name || ocrData?.documentTypeLabel || fileName),
+            ocrData,
+            vehicleId: vehicle.id,
+            vehicles: [
+              {
+                id: vehicle.id,
+                brand: vehicle.brand,
+                model: vehicle.model,
+                registrationPlate: vehicle.registrationPlate,
+                vin: vehicle.vin,
+              },
+            ],
+            mimeType: (payload.fileMimeType as string) || undefined,
+            fileName,
+          });
+
+          let record;
+          if (payload.documentId) {
+            record = await updateDocumentViaApi(userId, String(payload.documentId), {
+              ...fields,
+              vehicleId: vehicle.id,
+              name: fields.name,
+            });
+          } else {
+            record = await createDocumentViaApi(userId, {
+              ...fields,
+              vehicleId: vehicle.id,
+              user_id: userId,
+            });
+          }
+
+          if (payload.fileBase64 && record._id && record._rev) {
+            try {
+              const buf = Uint8Array.from(atob(String(payload.fileBase64)), (c) => c.charCodeAt(0));
+              await authFetch(
+                `${getApiBase()}/api/couch/attachment/${encodeURIComponent(DOCUMENTS_DB_NAME)}/${encodeURIComponent(record._id)}/${encodeURIComponent(fileName)}?rev=${encodeURIComponent(record._rev)}`,
+                {
+                  method: 'PUT',
+                  headers: {
+                    'Content-Type': (payload.fileMimeType as string) || 'application/octet-stream',
+                    ...getAuthHeaders(),
+                  },
+                  body: buf,
+                },
+              );
+            } catch (e) {
+              console.error('Error uploading OCR attachment:', e);
+            }
+          }
+
+          await refreshDocuments();
+          setShowOcr(false);
+          toast.success('Documento guardado en el expediente del vehículo');
+        }}
+      />
       <SAAS__MoveVehicleModal
         isOpen={showMoveModal}
         onClose={() => setShowMoveModal(false)}

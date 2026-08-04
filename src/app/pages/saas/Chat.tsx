@@ -19,6 +19,9 @@ import {
   type ChatMessage,
   type ChatChannel,
 } from '../../lib/chatApi';
+import { mergeBusinessMembers } from '../../lib/schedulesDisplay';
+import { NewChatConversationModal } from '../../components/saas/chat/NewChatConversationModal';
+import { toast } from 'sonner';
 import {
   MessageSquare,
   Send,
@@ -27,11 +30,9 @@ import {
   Users,
   Loader2,
   Search,
-  Hash,
   ChevronDown,
   X,
   Plus,
-  UserPlus,
   Settings,
   Trash2,
   Pencil,
@@ -40,7 +41,42 @@ import {
   MessageCircle,
   Archive,
   AtSign,
+  UsersRound,
 } from 'lucide-react';
+
+/** Fusiona mensaje SSE con optimistic temp-* para no duplicar burbujas. */
+function mergeIncomingChatMessage(prev: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+  if (prev.some((m) => m.messageId === msg.messageId)) return prev;
+  const tempIdx = prev.findIndex(
+    (m) =>
+      String(m.messageId || '').startsWith('temp-')
+      && m.userId === msg.userId
+      && m.channelId === msg.channelId
+      && m.text === msg.text,
+  );
+  if (tempIdx >= 0) {
+    const next = [...prev];
+    next[tempIdx] = msg;
+    return next;
+  }
+  return [...prev, msg];
+}
+
+function mergeRemoteMessages(prev: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
+  const temps = prev.filter(
+    (m) =>
+      String(m.messageId || '').startsWith('temp-')
+      && !remote.some(
+        (r) =>
+          r.userId === m.userId
+          && r.channelId === m.channelId
+          && r.text === m.text,
+      ),
+  );
+  return [...remote, ...temps].sort((a, b) =>
+    String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+  );
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -310,232 +346,6 @@ function MessageRow({ message, isOwn, showAvatar, userId, onReply, onReact, onEd
   );
 }
 
-// ─── NewChatModal ───────────────────────────────────────────────────────────
-
-interface NewChatModalProps {
-  open: boolean;
-  onClose: () => void;
-  onCreateDM: (memberId: string) => void;
-  onCreateGroup: (name: string, memberIds: string[]) => void;
-  onInviteMember: () => void;
-  members: Array<{ user_id: string; fullName: string; role?: string; email?: string }>;
-  userId: string;
-}
-
-function NewChatModal({ open, onClose, onCreateDM, onCreateGroup, onInviteMember, members, userId }: NewChatModalProps) {
-  const [mode, setMode] = useState<'select' | 'group'>('select');
-  const [groupName, setGroupName] = useState('');
-  const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
-  const [searchQ, setSearchQ] = useState('');
-
-  if (!open) return null;
-
-  const otherMembers = members.filter((m) => m.user_id !== userId);
-  const filtered = otherMembers.filter(
-    (m) =>
-      m.fullName.toLowerCase().includes(searchQ.toLowerCase()) ||
-      (m.email || '').toLowerCase().includes(searchQ.toLowerCase()),
-  );
-
-  const toggleMember = (id: string) => {
-    setSelectedMembers((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  };
-
-  const handleCreateGroup = () => {
-    if (groupName.trim() && selectedMembers.length > 0) {
-      onCreateGroup(groupName.trim(), [...selectedMembers, userId]);
-      setGroupName('');
-      setSelectedMembers([]);
-      setMode('select');
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-            {mode === 'select' ? 'Nueva conversación' : 'Crear grupo'}
-          </h3>
-          <div className="flex items-center gap-1.5">
-            {mode === 'select' && (
-              <button
-                type="button"
-                onClick={() => {
-                  onInviteMember();
-                  onClose();
-                }}
-                className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors text-xs font-semibold"
-                title="Invitar trabajador"
-              >
-                <UserPlus className="w-4 h-4" />
-                Invitar
-              </button>
-            )}
-            <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-              <X className="w-5 h-5 text-gray-500" />
-            </button>
-          </div>
-        </div>
-
-        {mode === 'select' && (
-          <>
-            <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-700">
-              <button
-                onClick={() => setMode('group')}
-                className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-              >
-                <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
-                  <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                </div>
-                <div className="text-left">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Crear grupo</p>
-                  <p className="text-xs text-gray-500">Chat con varios miembros del equipo</p>
-                </div>
-              </button>
-            </div>
-
-            <div className="px-5 py-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  value={searchQ}
-                  onChange={(e) => setSearchQ(e.target.value)}
-                  placeholder="Buscar miembros..."
-                  className="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto px-5 pb-4">
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-2">Mensaje directo</p>
-              {filtered.map((member) => (
-                <button
-                  key={member.user_id}
-                  onClick={() => {
-                    onCreateDM(member.user_id);
-                    onClose();
-                  }}
-                  className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-                >
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white ${getAvatarColor(member.user_id)}`}>
-                    {getInitials(member.fullName)}
-                  </div>
-                  <div className="text-left flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{member.fullName}</p>
-                    <p className="text-[11px] text-gray-400 truncate">{member.role || member.email || ''}</p>
-                  </div>
-                </button>
-              ))}
-              {filtered.length === 0 && (
-                <p className="text-sm text-gray-400 text-center py-8">No se encontraron miembros</p>
-              )}
-            </div>
-          </>
-        )}
-
-        {mode === 'group' && (
-          <>
-            <div className="px-5 py-3 space-y-3">
-              <div>
-                <label className="text-xs font-semibold text-gray-500 mb-1 block">Nombre del grupo</label>
-                <input
-                  type="text"
-                  value={groupName}
-                  onChange={(e) => setGroupName(e.target.value)}
-                  placeholder="Ej: Marketing, Ventas..."
-                  className="w-full px-3 py-2.5 bg-gray-100 dark:bg-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                  autoFocus
-                />
-              </div>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  value={searchQ}
-                  onChange={(e) => setSearchQ(e.target.value)}
-                  placeholder="Buscar miembros..."
-                  className="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                />
-              </div>
-            </div>
-
-            {selectedMembers.length > 0 && (
-              <div className="px-5 py-1 flex flex-wrap gap-1.5">
-                {selectedMembers.map((id) => {
-                  const m = members.find((x) => x.user_id === id);
-                  if (!m) return null;
-                  return (
-                    <span
-                      key={id}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-xs font-medium"
-                    >
-                      {m.fullName}
-                      <button onClick={() => toggleMember(id)}>
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="flex-1 overflow-y-auto px-5 pb-4">
-              {filtered.map((member) => {
-                const selected = selectedMembers.includes(member.user_id);
-                return (
-                  <button
-                    key={member.user_id}
-                    onClick={() => toggleMember(member.user_id)}
-                    className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-xl transition-colors ${
-                      selected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'
-                    }`}
-                  >
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white ${getAvatarColor(member.user_id)}`}>
-                      {getInitials(member.fullName)}
-                    </div>
-                    <div className="text-left flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{member.fullName}</p>
-                      <p className="text-[11px] text-gray-400 truncate">{member.role || ''}</p>
-                    </div>
-                    <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-colors ${
-                      selected
-                        ? 'bg-blue-600 border-blue-600'
-                        : 'border-gray-300 dark:border-gray-600'
-                    }`}>
-                      {selected && <Check className="w-3 h-3 text-white" />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="px-5 py-3 border-t border-gray-200 dark:border-gray-700 flex gap-2">
-              <button
-                onClick={() => { setMode('select'); setSelectedMembers([]); setGroupName(''); }}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleCreateGroup}
-                disabled={!groupName.trim() || selectedMembers.length === 0}
-                className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Crear grupo ({selectedMembers.length})
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Chat Component ────────────────────────────────────────────────────
 
 export function Chat() {
@@ -543,7 +353,7 @@ export function Chat() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { channelId: urlChannelId } = useParams<{ channelId?: string }>();
-  const { user } = useAuth();
+  const { user, listUsers } = useAuth();
   const { currentBusiness } = useBusiness();
 
   const [channels, setChannels] = useState<ChatChannel[]>([]);
@@ -561,6 +371,9 @@ export function Chat() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [showMobileSidebar, setShowMobileSidebar] = useState(!urlChannelId);
+  const [apiMembers, setApiMembers] = useState<
+    Array<{ user_id: string; fullName?: string; email?: string; role?: string; employment?: unknown }>
+  >([]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -572,16 +385,65 @@ export function Chat() {
   const userName = user?.fullName || user?.firstName || 'Usuario';
   const userAvatar = user?.avatar || '';
 
-  const teamMembers = useMemo(() => {
-    if (!currentBusiness?.members) return [];
-    // Solo miembros activos/aceptados para chat 1:1 y selección.
-    return currentBusiness.members.filter((m: any) => m?.status === 'active' || !m?.status);
-  }, [currentBusiness]);
+  useEffect(() => {
+    if (!businessId) {
+      setApiMembers([]);
+      return;
+    }
+    let cancelled = false;
+    listUsers(businessId)
+      .then((users) => {
+        if (cancelled) return;
+        setApiMembers(
+          (users || []).map((u: any) => ({
+            user_id: u.user_id,
+            fullName: u.fullName,
+            email: u.email,
+            role: u.role,
+            employment: u.employment,
+          })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setApiMembers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, listUsers]);
 
-  const pendingMembersCount = useMemo(() => {
-    if (!currentBusiness?.members) return 0;
-    return currentBusiness.members.filter((m: any) => m?.status === 'pending').length;
-  }, [currentBusiness]);
+  /** Contactos únicos: business.members + listUsers, sin duplicados. */
+  const teamMembers = useMemo(
+    () =>
+      mergeBusinessMembers(
+        (currentBusiness?.members || []) as {
+          user_id: string;
+          fullName?: string;
+          email?: string;
+          role?: string;
+          employment?: unknown;
+        }[],
+        apiMembers,
+      ),
+    [currentBusiness?.members, apiMembers],
+  );
+
+  const chatPickerMembers = useMemo(
+    () =>
+      teamMembers.map((m) => {
+        const emp = (m.employment || {}) as { department?: string };
+        return {
+          user_id: m.user_id,
+          fullName: m.fullName,
+          email: m.email,
+          role: m.role,
+          department: String(emp.department || '').trim() || undefined,
+        };
+      }),
+    [teamMembers],
+  );
+
+  const pendingMembersCount = 0;
 
   const activeChannel = useMemo(() => {
     return channels.find((ch) => ch.channelId === activeChannelId) || null;
@@ -591,14 +453,14 @@ export function Chat() {
 
   const getChannelDisplayName = useCallback(
     (channel: ChatChannel) => {
-      if (channel.channelType === 'general') return '# general';
-      if (channel.channelType === 'group') return `# ${channel.name}`;
+      if (channel.channelType === 'general') return 'Todo el equipo';
+      if (channel.channelType === 'group') return channel.name || 'Grupo';
       if (channel.channelType === 'direct') {
         const otherId = channel.members.find((id) => id !== userId);
         const member = teamMembers.find((m) => m.user_id === otherId);
         return member?.fullName || 'Mensaje directo';
       }
-      return channel.name || 'Canal';
+      return channel.name || 'Conversación';
     },
     [userId, teamMembers],
   );
@@ -606,7 +468,7 @@ export function Chat() {
   const getChannelIcon = (channel: ChatChannel) => {
     if (channel.channelType === 'direct') return <MessageCircle className="w-4 h-4" />;
     if (channel.channelType === 'group') return <Users className="w-4 h-4" />;
-    return <Hash className="w-4 h-4" />;
+    return <UsersRound className="w-4 h-4" />;
   };
 
   // ─── Load channels ──────────────────────────────────────────────────────
@@ -628,6 +490,7 @@ export function Chat() {
       }
     } catch (err) {
       console.error('Error loading channels:', err);
+      toast.error('No se pudo cargar el chat. Recarga la página.');
     } finally {
       setLoading(false);
     }
@@ -703,18 +566,42 @@ export function Chat() {
     }
   }, [activeChannelId, loadMessages]);
 
+  // Resync silencioso mientras el hilo está abierto (no depender solo del SSE).
+  useEffect(() => {
+    if (!businessId || !activeChannelId) return;
+    const sync = async () => {
+      try {
+        const res = await listChatMessages(businessId, activeChannelId, 100);
+        setMessages((prev) => mergeRemoteMessages(prev, res.messages || []));
+      } catch {
+        /* ignore */
+      }
+    };
+    const id = window.setInterval(() => void sync(), 6_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void sync();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [businessId, activeChannelId]);
+
   // ─── SSE handlers ─────────────────────────────────────────────────────
+
+  const activeChannelIdRef = useRef(activeChannelId);
+  activeChannelIdRef.current = activeChannelId;
+  const businessIdRef = useRef(businessId);
+  businessIdRef.current = businessId;
 
   const handleIncomingMessage = useCallback(
     (data: unknown) => {
       const msg = data as ChatMessage;
-      if (msg.businessId !== businessId) return;
+      if (msg.businessId !== businessIdRef.current) return;
 
-      if (msg.channelId === activeChannelId) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.messageId === msg.messageId)) return prev;
-          return [...prev, msg];
-        });
+      if (msg.channelId === activeChannelIdRef.current) {
+        setMessages((prev) => mergeIncomingChatMessage(prev, msg));
         setTimeout(() => scrollToBottom(), 100);
       }
 
@@ -731,7 +618,7 @@ export function Chat() {
         ),
       );
     },
-    [businessId, activeChannelId, scrollToBottom],
+    [scrollToBottom],
   );
 
   const handleReactionUpdate = useCallback((data: unknown) => {
@@ -878,14 +765,20 @@ export function Chat() {
         replyTo: replyTo?.messageId,
       });
       if (res.message) {
-        setMessages((prev) =>
-          prev.map((m) => (m.messageId === optimisticMsg.messageId ? res.message! : m)),
-        );
+        setMessages((prev) => {
+          if (prev.some((m) => m.messageId === res.message!.messageId)) {
+            return prev.filter((m) => m.messageId !== optimisticMsg.messageId);
+          }
+          return prev.map((m) =>
+            m.messageId === optimisticMsg.messageId ? res.message! : m,
+          );
+        });
       }
     } catch (err) {
       console.error('Error sending message:', err);
       setMessages((prev) => prev.filter((m) => m.messageId !== optimisticMsg.messageId));
       setInputText(text);
+      toast.error(err instanceof Error ? err.message : 'No se pudo enviar el mensaje');
     } finally {
       setSending(false);
       inputRef.current?.focus();
@@ -936,7 +829,7 @@ export function Chat() {
   };
 
   const handleCreateDM = async (targetUserId: string) => {
-    if (!businessId) return;
+    if (!businessId || !userId || !targetUserId || targetUserId === userId) return;
     try {
       const res = await createChannel(businessId, {
         name: '',
@@ -944,35 +837,44 @@ export function Chat() {
         members: [userId, targetUserId],
       });
       if (res.channel) {
-        if (!res.existing) {
-          setChannels((prev) => [res.channel!, ...prev]);
-        }
-        setActiveChannelId(res.channel.channelId);
-        navigate(`/saas/chat/${res.channel.channelId}`);
-        setShowMobileSidebar(false);
-      }
-    } catch (err) {
-      console.error('Error creating DM:', err);
-    }
-  };
-
-  const handleCreateGroup = async (name: string, memberIds: string[]) => {
-    if (!businessId) return;
-    try {
-      const res = await createChannel(businessId, {
-        name,
-        channelType: 'group',
-        members: memberIds,
-      });
-      if (res.channel) {
-        setChannels((prev) => [res.channel!, ...prev]);
+        setChannels((prev) => {
+          if (prev.some((c) => c.channelId === res.channel!.channelId)) return prev;
+          return [res.channel!, ...prev];
+        });
         setActiveChannelId(res.channel.channelId);
         navigate(`/saas/chat/${res.channel.channelId}`);
         setShowMobileSidebar(false);
         setShowNewChat(false);
       }
     } catch (err) {
+      console.error('Error creating DM:', err);
+      toast.error(err instanceof Error ? err.message : 'No se pudo abrir el chat');
+    }
+  };
+
+  const handleCreateGroup = async (name: string, memberIds: string[]) => {
+    if (!businessId) return;
+    try {
+      const uniqueMembers = [...new Set(memberIds.filter(Boolean))];
+      const res = await createChannel(businessId, {
+        name,
+        channelType: 'group',
+        members: uniqueMembers,
+      });
+      if (res.channel) {
+        setChannels((prev) => {
+          if (prev.some((c) => c.channelId === res.channel!.channelId)) return prev;
+          return [res.channel!, ...prev];
+        });
+        setActiveChannelId(res.channel.channelId);
+        navigate(`/saas/chat/${res.channel.channelId}`);
+        setShowMobileSidebar(false);
+        setShowNewChat(false);
+        toast.success('Grupo creado');
+      }
+    } catch (err) {
       console.error('Error creating group:', err);
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear el grupo');
     }
   };
 
@@ -1079,7 +981,7 @@ export function Chat() {
             {generalChannels.length > 0 && (
               <div className="mb-3">
                 <p className="px-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">
-                  Canales
+                  Grupos
                 </p>
                 {generalChannels.map((ch) => (
                   <button
@@ -1214,16 +1116,16 @@ export function Chat() {
                   {activeChannel.channelType === 'general' && (
                     <>
                       <div className="hidden sm:block h-4 w-px bg-gray-200 dark:bg-gray-700" />
-                      <p className="hidden sm:block text-xs text-gray-400 dark:text-gray-500">
-                        Canal del equipo · {teamMembers.length} miembro{teamMembers.length !== 1 ? 's' : ''}
+                      <p className="hidden sm:block text-xs text-stone-400 dark:text-stone-500">
+                        Todo el equipo · {teamMembers.length} persona{teamMembers.length !== 1 ? 's' : ''}
                       </p>
                     </>
                   )}
                   {activeChannel.channelType === 'group' && (
                     <>
                       <div className="hidden sm:block h-4 w-px bg-gray-200 dark:bg-gray-700" />
-                      <p className="hidden sm:block text-xs text-gray-400 dark:text-gray-500">
-                        {activeChannel.members.length} miembro{activeChannel.members.length !== 1 ? 's' : ''}
+                      <p className="hidden sm:block text-xs text-stone-400 dark:text-stone-500">
+                        Grupo · {activeChannel.members.length} persona{activeChannel.members.length !== 1 ? 's' : ''}
                       </p>
                     </>
                   )}
@@ -1441,7 +1343,7 @@ export function Chat() {
                   Selecciona una conversación
                 </p>
                 <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">
-                  Elige un canal o mensaje directo de la barra lateral, o crea una nueva conversación.
+                  Elige un grupo o mensaje directo, o crea uno nuevo con el botón +.
                 </p>
                 <button
                   onClick={() => { setShowNewChat(true); setShowMobileSidebar(true); }}
@@ -1456,18 +1358,20 @@ export function Chat() {
         </div>
       </div>
 
-      {/* New Chat Modal */}
-      <NewChatModal
+      <NewChatConversationModal
         open={showNewChat}
         onClose={() => setShowNewChat(false)}
         onCreateDM={(memberId) => {
-          handleCreateDM(memberId);
+          void handleCreateDM(memberId);
           setShowNewChat(false);
         }}
-        onCreateGroup={handleCreateGroup}
+        onCreateGroup={(name, memberIds) => {
+          void handleCreateGroup(name, memberIds);
+        }}
         onInviteMember={() => navigate('/saas/team')}
-        members={teamMembers}
+        members={chatPickerMembers}
         userId={userId}
+        businessType={currentBusiness?.businessType}
       />
     </Layout>
   );

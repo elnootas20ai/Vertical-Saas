@@ -18,7 +18,8 @@ export function resolvePathAfterBusinessSwitch(
   const nextIsDelivery = isStrictDeliveryBusinessType(nextBusinessType);
 
   const onRestaurantOps =
-    path.startsWith('/saas/caja')
+    path.startsWith('/saas/restaurant-ops')
+    || path.startsWith('/saas/caja')
     || path.startsWith('/saas/sala')
     || path.startsWith('/saas/cocina')
     || path.startsWith('/saas/lista-espera')

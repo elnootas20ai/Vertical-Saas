@@ -13,6 +13,7 @@ const OPS_ALERT_KEYS = new Set([
   'email_send_fail',
   'backup_failed',
   'backup_stale',
+  'daily_ops_digest',
 ]);
 
 /**

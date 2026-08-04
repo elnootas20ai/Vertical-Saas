@@ -54,24 +54,24 @@ export function VehicleListCard({ vehicle, selected, onSelect }: VehicleListCard
       onClick={onSelect}
       className={`group w-full rounded-2xl border p-3 text-left transition-all duration-150 ${
         selected
-          ? 'border-amber-400/90 bg-amber-50/60 shadow-md ring-1 ring-amber-400/25 dark:border-amber-500/60 dark:bg-amber-950/25'
-          : 'border-gray-200/90 bg-white hover:border-gray-300 hover:shadow-sm dark:border-gray-700/90 dark:bg-gray-900 dark:hover:border-gray-600'
+          ? 'border-[var(--v-blue,#2563eb)] bg-blue-50/70 shadow-md ring-1 ring-blue-500/20 dark:border-blue-500/60 dark:bg-blue-950/30'
+          : 'border-slate-200/90 bg-white hover:border-blue-200 hover:shadow-sm dark:border-slate-700/90 dark:bg-slate-900 dark:hover:border-blue-800'
       }`}
     >
       <div className="flex gap-3">
-        <div className="h-[72px] w-[96px] shrink-0 overflow-hidden rounded-xl border border-gray-100 dark:border-gray-800">
+        <div className="h-[72px] w-[96px] shrink-0 overflow-hidden rounded-xl border border-slate-100 dark:border-slate-800">
           <VehiclePhoto vehicle={vehicle} />
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+              <p className="truncate text-sm font-bold tracking-tight text-slate-900 dark:text-slate-100">
                 {vehicle.brand} {vehicle.model}
               </p>
-              <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
                 {vehicle.year}
-                <span className="mx-1 text-gray-300 dark:text-gray-600">·</span>
+                <span className="mx-1 text-slate-300 dark:text-slate-600">·</span>
                 {formatVehicleKm(vehicle.km)}
               </p>
             </div>
@@ -84,9 +84,9 @@ export function VehicleListCard({ vehicle, selected, onSelect }: VehicleListCard
 
           <div className="mt-2.5 flex items-end justify-between gap-2">
             <div className="min-w-0 space-y-0.5">
-              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Margen{' '}
-                <span className={`font-semibold tabular-nums ${marginPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                <span className={`font-semibold tabular-nums ${marginPositive ? 'text-[var(--v-green,#22c55e)]' : 'text-[var(--v-rose,#e11d48)]'}`}>
                   {marginPositive ? '+' : ''}
                   {formatVehiclePrice(margin)}
                 </span>
@@ -95,7 +95,7 @@ export function VehicleListCard({ vehicle, selected, onSelect }: VehicleListCard
                 {vehicle.daysInStock} días en stock
               </p>
             </div>
-            <p className="shrink-0 text-base font-bold tabular-nums tracking-tight text-gray-900 dark:text-gray-100">
+            <p className="shrink-0 text-base font-extrabold tabular-nums tracking-tight text-slate-900 dark:text-slate-100">
               {formatVehiclePrice(vehicle.price)}
             </p>
           </div>

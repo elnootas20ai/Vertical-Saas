@@ -372,6 +372,19 @@ export async function saveAlertsConfig(businessId: string, alerts: AlertsConfig)
   });
 }
 
+/** Apaga el ruido: solo pack gerente / delivery CEO. */
+export async function resetAlertsToManagerFocus(businessId: string): Promise<{
+  enabledCount: number;
+  totalRules: number;
+  vertical: string;
+  message?: string;
+}> {
+  return apiRequest(`/api/settings/alerts/${encodeURIComponent(businessId)}/manager-focus`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
 // ─── ADM-01: Impersonation ────────────────────────────────────────────────────
 
 export async function impersonateUser(targetUserId: string): Promise<{ accessToken: string; user: { fullName: string; email: string } }> {

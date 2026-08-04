@@ -5,6 +5,7 @@
 import {
   DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS,
   DELIVERY_LEGACY_DUPLICATE_RULE_IDS,
+  isDeliveryCompactAlertRuleId,
 } from './alertRulesCatalog.js';
 
 const CEO_SET = new Set(DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS);
@@ -24,13 +25,9 @@ export function isDeliveryAlertsReviewPending(review) {
   return !review?.completedAt;
 }
 
+/** Solo el pack compacto (6 bloques reales). El resto no entra en revisión ni ajustes. */
 export function isDeliveryReviewRule(rule) {
   const id = String(rule?.id || '');
   if (!id || LEGACY_SET.has(id)) return false;
-  if (CEO_SET.has(id)) return true;
-  if (id.startsWith('delivery_') || id.startsWith('sala_')) return true;
-  if (id === 'register_high_return') return true;
-  if (rule?.category === 'delivery' || rule?.category === 'sala') return true;
-  if (rule?.department === 'delivery' || rule?.department === 'pdvs') return true;
-  return false;
+  return isDeliveryCompactAlertRuleId(id) || CEO_SET.has(id);
 }

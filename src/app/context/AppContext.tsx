@@ -555,6 +555,16 @@ export interface Document {
   notes?: string;
   expiresAt?: string;
   createdAt: Date;
+  /** Expediente compraventa / OCR */
+  vehicleId?: string;
+  vehicleName?: string;
+  clientId?: string;
+  clientName?: string;
+  docSubCategory?: string;
+  registrationPlate?: string;
+  vin?: string;
+  itvExpiryDate?: string;
+  ocrConfidence?: number;
 }
 
 export interface Location {
@@ -810,15 +820,75 @@ function deserializeDocument(d: any): Document {
   return { ...d, createdAt: new Date(d.createdAt) };
 }
 
+function mapDocumentRecordToApp(r: DocumentRecord): Document {
+  return {
+    id: r.id,
+    _id: r._id,
+    _rev: r._rev,
+    name: r.name,
+    type: r.docType,
+    status: r.status,
+    relatedTo: r.relatedTo,
+    relatedToId: r.relatedToId,
+    templateId: r.templateId,
+    notes: r.notes,
+    expiresAt: r.expiresAt,
+    createdAt: new Date(r.createdAt),
+    vehicleId: r.vehicleId || (r.relatedTo === 'vehicle' ? r.relatedToId : undefined),
+    vehicleName: r.vehicleName,
+    clientId: r.clientId,
+    clientName: r.clientName,
+    docSubCategory: r.docSubCategory,
+    registrationPlate: r.registrationPlate,
+    vin: r.vin,
+    itvExpiryDate: r.itvExpiryDate,
+    ocrConfidence: r.ocrConfidence,
+  };
+}
+
 function deserializeNotification(notification: NotificationRecord): AppNotification {
+  const status = String((notification as AppNotification & { status?: string }).status || '');
+  // status 'seen'/'resolved' cuenta como leída aunque el booleano venga mal.
+  const read =
+    Boolean(notification.read)
+    || (status !== '' && status !== 'new');
   return {
     ...notification,
     metadata: notification.metadata || {},
     route: notification.route || '',
     entityId: notification.entityId || '',
     entityType: notification.entityType || '',
+    read,
     updatedAt: notification.updatedAt || notification.createdAt,
   };
+}
+
+/**
+ * Al hidratar desde API, no reabrir la campanita si el cliente ya marcó leído
+ * (el servidor a veces tarda o falla y devolvía read=false → badge “3” otra vez).
+ */
+function mergeServerNotificationsPreferringLocalRead(
+  serverList: AppNotification[],
+  localList: AppNotification[],
+): AppNotification[] {
+  const localById = new Map(localList.map((n) => [n.id, n]));
+  return capNotifications(
+    serverList.map((server) => {
+      const local = localById.get(server.id);
+      if (!local) return server;
+      if (local.read && !server.read) {
+        return {
+          ...server,
+          read: true,
+          updatedAt: local.updatedAt || server.updatedAt,
+        };
+      }
+      if (String(local.updatedAt || '') > String(server.updatedAt || '')) {
+        return { ...server, ...local, id: server.id };
+      }
+      return server;
+    }),
+  );
 }
 
 /** Max notifications kept in React state (newest first). */
@@ -1070,7 +1140,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const parkingZonesStorageKey = `vertial-parking-zones:${scopeKey}`;
   const leadsStorageKey = `vertial-leads:${scopeKey}`;
   const clientsStorageKey = `vertial-clients:${scopeKey}`;
-  const notificationsStorageKey = `vertial-notifications:${scopeKey}`;
+  // Inbox personal: siempre por usuario (no por empresa). Si se clavea por business,
+  // al cambiar de tienda se recarga/persiste vacío y parece que “se borraron”.
+  const notificationsStorageKey = authUser?.user_id
+    ? `vertial-notifications:u:${authUser.user_id}`
+    : 'vertial-notifications:guest';
 
   useEffect(() => {
     pruneVertialStorageIfNeeded();
@@ -1241,6 +1315,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return [];
     }
   });
+  /** Evita persistir [] antes de la primera carga (eso vaciaba el inbox al arrancar). */
+  const [notificationsHydrated, setNotificationsHydrated] = useState(false);
 
   const [sales, setSales] = useState<Sale[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -1534,6 +1610,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!authUser?.user_id) {
+      setNotificationsHydrated(false);
       try {
         const saved = localStorage.getItem('vertial-notifications:guest');
         setNotifications(saved ? capNotifications(JSON.parse(saved).map(deserializeNotification)) : []);
@@ -1545,14 +1622,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     let cancelled = false;
+    setNotificationsHydrated(false);
+
+    // Restaura caché al instante (por si la API tarda o falla).
+    try {
+      const cached = localStorage.getItem(notificationsStorageKey);
+      if (cached) {
+        setNotifications(capNotifications(JSON.parse(cached).map(deserializeNotification)));
+      }
+    } catch {
+      /* ignore */
+    }
 
     listNotificationsRequest(authUser.user_id)
       .then((response) => {
-        if (!cancelled) {
-          setNotifications(
-            capNotifications((response.notifications || []).map(deserializeNotification)),
-          );
-        }
+        if (cancelled) return;
+        const fromServer = (response.notifications || []).map(deserializeNotification);
+        setNotifications((prev) => mergeServerNotificationsPreferringLocalRead(fromServer, prev));
+        setNotificationsHydrated(true);
       })
       .catch((error) => {
         console.error('Error loading notifications:', error);
@@ -1569,6 +1656,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setNotifications([]);
           }
         }
+        if (!cancelled) setNotificationsHydrated(true);
       });
 
     return () => {
@@ -1631,20 +1719,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     listDocumentsRequest(authUser.user_id)
       .then((records: DocumentRecord[]) => {
         if (cancelled) return;
-        const mapped: Document[] = records.map((r) => ({
-          id: r.id,
-          _id: r._id,
-          _rev: r._rev,
-          name: r.name,
-          type: r.docType,
-          status: r.status,
-          relatedTo: r.relatedTo,
-          relatedToId: r.relatedToId,
-          templateId: r.templateId,
-          notes: r.notes,
-          expiresAt: r.expiresAt,
-          createdAt: new Date(r.createdAt),
-        }));
+        const mapped: Document[] = records.map((r) => mapDocumentRecordToApp(r));
         setDocuments(mapped);
       })
       .catch((err) => {
@@ -1701,8 +1776,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     persistVertialJsonCache(clientsStorageKey, clients);
   }, [clients, clientsStorageKey, authUser?.user_id]);
   useEffect(() => {
+    if (!notificationsHydrated) return;
     persistNotificationsCache(notificationsStorageKey, notifications);
-  }, [notifications, notificationsStorageKey]);
+  }, [notifications, notificationsStorageKey, notificationsHydrated]);
 
   const canAccessFeature = () =>
     Boolean(subscription.billingExempt) ||
@@ -1770,6 +1846,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const withoutCurrent = prev.filter((item) => item.id !== nextNotification.id);
         return capNotifications([nextNotification, ...withoutCurrent]);
       });
+      // Misma señal que SSE: popup/toast en Topbar aunque el stream vaya lento.
+      try {
+        window.dispatchEvent(new CustomEvent('vertial:notification', { detail: nextNotification }));
+      } catch {
+        /* ignore */
+      }
       return nextNotification;
     } catch {
       return null;
@@ -1781,14 +1863,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const stamp = new Date().toISOString();
+    // Optimista: la campanita baja al momento (el API a veces devolvía status 'new' y reabría el badge).
+    setNotifications((prev) =>
+      prev.map((notification) =>
+        notification.id === id
+          ? { ...notification, read, updatedAt: stamp }
+          : notification,
+      ),
+    );
+
     if (!authUser?.user_id) {
-      setNotifications((prev) =>
-        prev.map((notification) =>
-          notification.id === id
-            ? { ...notification, read, updatedAt: new Date().toISOString() }
-            : notification,
-        ),
-      );
       return;
     }
 
@@ -1797,42 +1882,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (response.notification) {
         const nextNotification = deserializeNotification(response.notification);
         setNotifications((prev) =>
-          prev.map((notification) => (notification.id === id ? nextNotification : notification)),
+          prev.map((notification) =>
+            notification.id === id
+              ? { ...nextNotification, read: Boolean(read) || Boolean(nextNotification.read) }
+              : notification,
+          ),
         );
       }
     } catch {
-      setNotifications((prev) =>
-        prev.map((notification) =>
-          notification.id === id
-            ? { ...notification, read, updatedAt: new Date().toISOString() }
-            : notification,
-        ),
-      );
+      /* ya actualizado en local */
     }
   };
 
   const markAllNotificationsAsRead = async () => {
+    const stamp = new Date().toISOString();
+    setNotifications((prev) =>
+      prev.map((notification) => ({
+        ...notification,
+        read: true,
+        updatedAt: stamp,
+      })),
+    );
+
     if (!authUser?.user_id) {
-      setNotifications((prev) =>
-        prev.map((notification) => ({
-          ...notification,
-          read: true,
-          updatedAt: new Date().toISOString(),
-        })),
-      );
       return;
     }
 
     try {
       await markAllNotificationsReadRequest(authUser.user_id);
-    } catch { /* silent */ }
-    setNotifications((prev) =>
-      prev.map((notification) => ({
-        ...notification,
-        read: true,
-        updatedAt: new Date().toISOString(),
-      })),
-    );
+    } catch { /* local ya limpio */ }
   };
 
   const trackActivity = (payload: {
@@ -2482,15 +2560,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     enabled: Boolean(authUser?.user_id),
   });
 
-  // RT-02: Web Push (PWA) + push nativo iOS/Android en app Capacitor
+  // Push nativo/web: solo CEO/empresa. Trabajadores (código) no registran token.
+  const ceoPushUserId = authUser && !isWorkerAccount(authUser) ? (authUser.user_id ?? null) : null;
   usePushNotifications({
-    userId: authUser?.user_id ?? null,
-    token: sseToken,
+    userId: ceoPushUserId,
+    token: ceoPushUserId ? sseToken : null,
   });
   useNativePushNotifications({
-    userId: authUser?.user_id ?? null,
-    token: sseToken,
+    userId: ceoPushUserId,
+    token: ceoPushUserId ? sseToken : null,
   });
+
+  // Gate de permiso del sistema: también solo CEO
+  // (PushPermissionGate se monta abajo y filtra trabajadores)
 
   const refreshClients = async () => {
     if (!authUser?.user_id) return;
@@ -2518,20 +2600,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!authUser?.user_id) return;
     try {
       const records = await listDocumentsRequest(authUser.user_id);
-      setDocuments(records.map((r) => ({
-        id: r.id,
-        _id: r._id,
-        _rev: r._rev,
-        name: r.name,
-        type: r.docType,
-        status: r.status,
-        relatedTo: r.relatedTo,
-        relatedToId: r.relatedToId,
-        templateId: r.templateId,
-        notes: r.notes,
-        expiresAt: r.expiresAt,
-        createdAt: new Date(r.createdAt),
-      })));
+      setDocuments(records.map((r) => mapDocumentRecordToApp(r)));
     } catch {
       // Silenciado: la lista actual permanece como fallback.
     }
@@ -2562,7 +2631,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={value}>
       {children}
-      <PushPermissionGate userId={authUser?.user_id ?? null} />
+      <PushPermissionGate userId={ceoPushUserId} />
     </AppContext.Provider>
   );
 }

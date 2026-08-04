@@ -28,10 +28,48 @@ import {
   findAccountByUserId,
   logAccountActivity,
   getDeliveryDbName,
+  getCatalogDbName,
   getAllDocuments,
 } from '../services/couchdb.js';
 import { broadcastToBusiness, broadcastToUser } from '../services/sseService.js';
 import logger from '../services/logger.js';
+import { tryAutoIssueForDiningOrder } from '../services/verifactuIssueService.js';
+import { registerDiningSaleInTpvSession } from '../services/diningCajaService.js';
+import { maybeDeductRecipeStockForDiningOrder } from '../services/diningStockService.js';
+import { ensureDiningOrderIncomeServer } from '../services/diningOrderFinanceService.js';
+import { syncClientAfterDiningOrder } from '../services/restaurantClientSync.js';
+import { redeemClientLoyaltyPoints } from '../services/restaurantLoyaltyRedeem.js';
+import { emitGlobalAlert } from '../services/alertEmitter.js';
+import { randomUUID } from 'crypto';
+
+/** Rechaza ítems de carta marcados agotados / inactivos. */
+async function assertComandaCatalogAvailable(req, userId, comanda) {
+  const items = Array.isArray(comanda?.items) ? comanda.items : [];
+  if (items.length === 0) return;
+  const catalogDb = getCatalogDbName();
+  await ensureDatabase(req, catalogDb);
+  const blocked = [];
+  for (const line of items) {
+    const productId = String(line?.productId || line?.catalogItemId || '').trim();
+    if (!productId) continue;
+    let catalogItem;
+    try {
+      catalogItem = await getDocument(req, catalogDb, productId);
+    } catch {
+      continue;
+    }
+    if (!catalogItem || catalogItem.type !== 'catalog_item') continue;
+    if (catalogItem.user_id && catalogItem.user_id !== userId) continue;
+    if (catalogItem.active === false || catalogItem.available === false) {
+      blocked.push(String(catalogItem.name || line.name || productId));
+    }
+  }
+  if (blocked.length > 0) {
+    const err = new Error(`Agotado en carta: ${[...new Set(blocked)].join(', ')}`);
+    err.code = 'CATALOG_UNAVAILABLE';
+    throw err;
+  }
+}
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -305,10 +343,11 @@ export async function listOrders(req, res) {
   try {
     const { userId } = req.params;
     if (!userId) return badRequest(res, 'Falta userId');
-    const { status, tableId, dateFrom, dateTo } = req.query || {};
+    const { status, tableId, clientId, dateFrom, dateTo } = req.query || {};
     const filters = {};
     if (status) filters.status = status.split(',');
     if (tableId) filters.tableId = tableId;
+    if (clientId) filters.clientId = String(clientId).trim();
     if (dateFrom) filters.dateFrom = dateFrom;
     if (dateTo) filters.dateTo = dateTo;
 
@@ -370,14 +409,54 @@ export async function createOrder(req, res) {
 export async function updateOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
-    const { order } = req.body || {};
+    const { order, loyaltyRedeem } = req.body || {};
     if (!order || typeof order !== 'object') return badRequest(res, 'Faltan datos del pedido');
 
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
 
+    let redeemMeta = existing.loyaltyRedeem || null;
+    const redeemPts = Math.max(0, Math.floor(Number(loyaltyRedeem?.points || 0)));
+    if (redeemPts > 0) {
+      const clientId = String(
+        loyaltyRedeem?.clientId || order.clientId || existing.clientId || '',
+      ).trim();
+      if (!clientId || clientId.startsWith('tpv-')) {
+        return badRequest(res, 'Vincula un cliente CRM para canjear puntos');
+      }
+      try {
+        const redeemed = await redeemClientLoyaltyPoints(req, userId, {
+          clientId,
+          points: redeemPts,
+          orderId,
+          reason: String(order.discountReason || loyaltyRedeem?.reason || 'LOYALTY'),
+        });
+        if (!redeemed) return badRequest(res, 'No se pudo canjear puntos');
+        redeemMeta = {
+          points: redeemed.pointsDebited,
+          discountEuro: redeemed.discountEuro,
+          clientId,
+          redeemedAt: new Date().toISOString(),
+        };
+        if (!(Number(order.discount) > 0) && !(Number(order.discountPercent) > 0)) {
+          order.discount = redeemed.discountEuro;
+          order.discountPercent = 0;
+          order.discountReason = order.discountReason
+            || `LOYALTY ${redeemed.pointsDebited} pts`;
+        }
+      } catch (redeemErr) {
+        if (redeemErr?.code === 'LOYALTY_INSUFFICIENT') {
+          return badRequest(res, redeemErr.message);
+        }
+        throw redeemErr;
+      }
+    }
+
     const db = getSalaDbName();
-    const doc = buildDiningOrderDocument(userId, order, existing);
+    const doc = buildDiningOrderDocument(userId, {
+      ...order,
+      ...(redeemMeta ? { loyaltyRedeem: redeemMeta } : {}),
+    }, existing);
     const saved = await putDocument(req, db, doc._id, doc);
     const sanitized = sanitizeDiningOrder({ ...doc, _rev: saved.rev });
 
@@ -399,6 +478,15 @@ export async function addComanda(req, res) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Pedido no encontrado' });
     if (existing.status === 'closed' || existing.status === 'cancelled') {
       return badRequest(res, 'No se puede añadir comanda a un pedido cerrado o cancelado');
+    }
+
+    try {
+      await assertComandaCatalogAvailable(req, userId, comanda);
+    } catch (availErr) {
+      if (availErr?.code === 'CATALOG_UNAVAILABLE') {
+        return badRequest(res, availErr.message);
+      }
+      throw availErr;
     }
 
     const result = addComandaToOrder(existing, comanda);
@@ -534,7 +622,7 @@ export async function cancelComanda(req, res) {
 export async function payOrder(req, res) {
   try {
     const { userId, orderId } = req.params;
-    const { payment } = req.body || {};
+    const { payment, salesPointId, salesPointName, registerInCaja = true } = req.body || {};
     if (!payment || typeof payment !== 'object') return badRequest(res, 'Falta el objeto payment');
 
     const existing = await ensureDiningOrderOwner(req, userId, orderId);
@@ -544,22 +632,94 @@ export async function payOrder(req, res) {
     }
 
     const now = new Date().toISOString();
-    const payments = [...(existing.payments || []), { ...payment, paidAt: now }];
+    const paymentId = String(payment.id || randomUUID()).trim();
+    const paymentRow = { ...payment, id: paymentId, paidAt: now };
+    const payments = [...(existing.payments || []), paymentRow];
     const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-    const isPaid = totalPaid >= existing.total;
+    const isPaid = totalPaid >= Number(existing.total || 0) - 0.02;
 
     const db = getSalaDbName();
-    const doc = buildDiningOrderDocument(userId, {
+    let doc = buildDiningOrderDocument(userId, {
       payments,
       status: isPaid ? 'paid' : existing.status,
       paidAt: isPaid ? now : existing.paidAt,
     }, existing);
-    const saved = await putDocument(req, db, doc._id, doc);
-    const sanitized = sanitizeDiningOrder({ ...doc, _rev: saved.rev });
+    let saved = await putDocument(req, db, doc._id, doc);
+    let savedDoc = { ...doc, _rev: saved.rev };
+
+    if (isPaid && !savedDoc.verifactuRecordId) {
+      try {
+        const actorId = req.authUser?.userId || req.authUser?.user_id || userId;
+        const vf = await tryAutoIssueForDiningOrder(req, savedDoc, actorId);
+        if (vf?.record) {
+          doc = buildDiningOrderDocument(userId, {
+            verifactuRecordId: vf.record.id,
+            verifactuFullNumber: vf.record.fullNumber,
+            verifactuQrUrl: vf.record.qrUrl,
+            verifactuHuella: vf.record.huella,
+            invoiceGenerated: true,
+          }, savedDoc);
+          saved = await putDocument(req, db, doc._id, doc);
+          savedDoc = { ...doc, _rev: saved.rev };
+        }
+      } catch (vfErr) {
+        logger.warn({ err: vfErr, orderId: savedDoc._id }, 'Verifactu auto (sala) omitido');
+      }
+    }
+
+    let cajaRegistration = null;
+    if (registerInCaja !== false) {
+      const pdvId = String(salesPointId || payment.salesPointId || '').trim();
+      const tableNote = savedDoc.tableName
+        || (savedDoc.tableNumber != null ? `Mesa ${savedDoc.tableNumber}` : 'Sala');
+      const splitLabel = String(payment.splitLabel || '').trim();
+      cajaRegistration = await registerDiningSaleInTpvSession(req, userId, {
+        pdvId,
+        diningOrder: savedDoc,
+        amount: Number(payment.amount || 0),
+        paymentMethod: payment.method || 'efectivo',
+        registeredBy: payment.paidByName || payment.paidBy || 'TPV',
+        description: splitLabel
+          ? `${tableNote}${salesPointName ? ` · ${salesPointName}` : ''} · ${splitLabel}`
+          : `${tableNote}${salesPointName ? ` · ${salesPointName}` : ''}`,
+        paymentId,
+        tip: Number(payment.tip || 0),
+      });
+    }
+
+    if (isPaid) {
+      await maybeDeductRecipeStockForDiningOrder(req, userId, savedDoc, {
+        performedBy: payment.paidByName || payment.paidBy || 'system',
+      });
+      try {
+        const financeOk = await ensureDiningOrderIncomeServer(req, userId, savedDoc);
+        if (financeOk && !savedDoc.financialMovementId) {
+          doc = buildDiningOrderDocument(userId, {
+            financialMovementId: `dining:${savedDoc._id}`,
+          }, savedDoc);
+          saved = await putDocument(req, db, doc._id, doc);
+          savedDoc = { ...doc, _rev: saved.rev };
+        }
+      } catch (finErr) {
+        logger.warn({ err: finErr, orderId: savedDoc._id }, 'Finanzas mesa omitidas');
+      }
+      try {
+        await syncClientAfterDiningOrder(req, userId, savedDoc);
+      } catch (loyErr) {
+        logger.warn({ err: loyErr, orderId: savedDoc._id }, 'Loyalty mesa omitida');
+      }
+    }
+
+    const sanitized = sanitizeDiningOrder(savedDoc);
 
     broadcastToUser(userId, 'sala:order_updated', sanitized);
 
-    return res.json({ ok: true, order: sanitized, fullyPaid: isPaid });
+    return res.json({
+      ok: true,
+      order: sanitized,
+      fullyPaid: isPaid,
+      cajaRegistration,
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al registrar pago' });
   }
@@ -759,7 +919,7 @@ export async function mergeOrders(req, res) {
       if (sourceId === targetOrderId) continue;
       const source = await getDocument(req, db, sourceId);
       if (!source || source.type !== 'dining_order' || source.user_id !== userId) continue;
-      if (!['open', 'served'].includes(source.status)) continue;
+      if (!['open', 'served', 'pending_payment'].includes(source.status)) continue;
 
       mergedComandas.push(...(source.comandas || []));
 
@@ -962,5 +1122,54 @@ export async function linkClientToOrder(req, res) {
     return res.json({ ok: true, order: sanitized });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al vincular cliente' });
+  }
+}
+
+/**
+ * Alerta in-app/push para el equipo de sala (lista de espera avisada, etc.).
+ * No crea delivery_order.
+ */
+export async function emitSalaStaffAlert(req, res) {
+  try {
+    const { userId } = req.params;
+    const {
+      title,
+      message,
+      category = 'sala_waitlist_notified',
+      route = '/saas/lista-espera',
+      entityId = '',
+      entityType = 'waitlist',
+      businessId = '',
+      dedupKey = '',
+    } = req.body || {};
+    if (!userId) return badRequest(res, 'Falta userId');
+    if (!title || !message) return badRequest(res, 'Falta title/message');
+
+    const account = await findAccountByUserId(req, userId);
+    const bid = String(businessId || account?.business_id || account?.businessId || '')
+      .replace(/^business:/, '')
+      .trim();
+
+    const alert = await emitGlobalAlert({
+      businessId: bid,
+      userId,
+      source: 'restaurant',
+      ruleId: category,
+      category,
+      priority: 'medium',
+      level: 'info',
+      title: String(title).slice(0, 120),
+      message: String(message).slice(0, 400),
+      entityId: String(entityId || ''),
+      entityType: String(entityType || 'waitlist'),
+      route: String(route || '/saas/lista-espera'),
+      dedupKey: String(dedupKey || `${category}-${entityId || Date.now()}`),
+      force: true,
+      metadata: { from: 'sala_staff_alert' },
+    });
+
+    return res.json({ ok: true, alert: alert || null });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al emitir alerta sala' });
   }
 }

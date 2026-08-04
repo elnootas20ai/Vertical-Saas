@@ -4,6 +4,7 @@ import { sumAggregatorRows } from '../../lib/deliveryIntegrationsUi';
 import type { FoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
 import { emptyFoodFamilyCounts } from '../../lib/shiftFoodFamilyCounts';
 import { DeliveryFoodUnitLabel } from './delivery/DeliveryFoodUnitIcon';
+import { VERTIAL_CASH_TEXT, VERTIAL_CARD_TEXT } from '../../lib/vertialUiTokens';
 
 function fmtMoney(value: number | undefined | null): string {
   const n = Number(value);
@@ -69,14 +70,17 @@ export function AggregatorCashSummary({
               <div className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 tabular-nums">
                 {fmtMoney(row.totalSales)}€
               </div>
+              <div className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-100 mt-0.5">
+                Hecho en app: {fmtMoney(row.totalSales)}€
+              </div>
               {(Number(row.cashSales) || 0) > 0 ? (
-                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mt-0.5 tabular-nums">
-                  Efectivo en caja: {fmtMoney(row.cashSales)}€
+                <div className={`text-sm font-black tabular-nums mt-0.5 ${VERTIAL_CASH_TEXT}`}>
+                  No pagado efectivo: {fmtMoney(row.cashSales)}€
                 </div>
               ) : null}
               {(Number(row.cardSales) || 0) > 0 ? (
-                <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mt-0.5 tabular-nums">
-                  Tarjeta: {fmtMoney(row.cardSales)}€
+                <div className={`text-sm font-black tabular-nums mt-0.5 ${VERTIAL_CARD_TEXT}`}>
+                  No pagado tarjeta: {fmtMoney(row.cardSales)}€
                 </div>
               ) : null}
               <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
@@ -95,7 +99,7 @@ export function AggregatorCashSummary({
         })}
       </div>
       <p className="text-[10px] text-zinc-400 dark:text-zinc-500">
-        El efectivo declarado de cada plataforma suma al arqueo de la caja TPV.
+        El total es lo hecho en el integrador (Excel). Solo el no pagado en efectivo suma al arqueo.
         {foodByChannel
           ? ' Los conteos son los del cierre (o los estimados del turno si no se guardaron).'
           : ''}

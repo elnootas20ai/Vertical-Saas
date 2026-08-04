@@ -709,6 +709,74 @@ export function getOnboardingTourSteps(
   personalization?: OnboardingTourPersonalization,
 ): OnboardingTourStep[] {
   const t = String(businessType || '').trim();
+
+  if (t === 'butcherShop') {
+    return [
+      {
+        id: 'butcher_welcome',
+        icon: <Package className="w-7 h-7 text-white" />,
+        iconBg: 'bg-gradient-to-br from-red-500 to-rose-700',
+        title: personalization?.businessName
+          ? `Bienvenido a ${personalization.businessName}`
+          : 'Bienvenido a tu carnicería',
+        description:
+          'En pocos pasos dejas listo el mostrador: productos a €/kg, báscula, primera venta y (si quieres) repartos a domicilio.',
+        hint: 'Puedes repetir este tour desde Ayuda.',
+      },
+      {
+        id: 'butcher_products',
+        icon: <Package className="w-7 h-7 text-white" />,
+        iconBg: 'bg-gradient-to-br from-amber-500 to-orange-600',
+        title: 'Crea tus cortes',
+        description:
+          'Da de alta productos con precio €/kg y stock mínimo. Ese listado es el mismo que verás en el TPV.',
+        hint: 'Menú Carnicería → Productos.',
+        route: '/saas/butcher-products',
+        checklist: ['Al menos un corte con precio €/kg', 'Stock mínimo definido'],
+      },
+      {
+        id: 'butcher_scale',
+        icon: <Clock className="w-7 h-7 text-white" />,
+        iconBg: 'bg-gradient-to-br from-cyan-500 to-blue-600',
+        title: 'Configura la báscula',
+        description:
+          'Registra el dispositivo de pesaje. En el TPV podrás leer peso estable o introducir kg a mano.',
+        route: '/saas/vertical/carniceria/basculas',
+        checklist: ['Báscula registrada o modo manual listo'],
+      },
+      {
+        id: 'butcher_tpv',
+        icon: <Store className="w-7 h-7 text-white" />,
+        iconBg: 'bg-gradient-to-br from-emerald-500 to-green-600',
+        title: 'Haz la primera venta',
+        description:
+          'Abre el TPV, elige un corte, pesa o introduce kg y cobra. El stock baja solo en el servidor.',
+        route: '/saas/vertical/carniceria/tpv',
+        checklist: ['Una venta cobrada en el TPV'],
+      },
+      {
+        id: 'butcher_delivery',
+        icon: <Tags className="w-7 h-7 text-white" />,
+        iconBg: 'bg-gradient-to-br from-violet-500 to-purple-600',
+        title: '¿Repartos a domicilio?',
+        description:
+          'Opcional: activa repartos en la pantalla Repartos y crea encargos con dirección. Si no entregas, sáltate este paso.',
+        route: '/saas/vertical/carniceria/reparto',
+        checklist: ['Activar o decidir no usar repartos'],
+      },
+      {
+        id: 'butcher_done',
+        icon: <Building2 className="w-7 h-7 text-white" />,
+        iconBg: 'bg-gradient-to-br from-gray-700 to-gray-900',
+        title: '¡Carnicería lista!',
+        description:
+          'Ya tienes el flujo base. Usa Compras para lotes, Despiece para rendimientos y el Centro operativo para el día a día.',
+        hint: 'Centro operativo: /saas/butcher-hub',
+        route: '/saas/butcher-hub',
+      },
+    ];
+  }
+
   if (!isGuidedActivationBusinessType(t)) return [];
 
   if (t === 'carDealership') {

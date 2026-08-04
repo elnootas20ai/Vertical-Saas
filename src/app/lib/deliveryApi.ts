@@ -207,7 +207,10 @@ export function notifyCajaRegistration(caja?: CajaRegistrationResult | null): Ca
   if (caja.status === 'registered' || caja.status === 'nothing_to_register' || caja.status === 'already_registered') {
     return caja.status;
   }
-  toast.warning(caja.message || 'El cobro no quedó registrado en caja. Revisa que la caja esté abierta.');
+  // Solo avisar si no hay caja abierta; fallo de red/Couch lo cubre el airbag local (sin ruido).
+  if (caja.status === 'no_open_session' || caja.status === 'no_pdv') {
+    toast.warning(caja.message || 'El cobro no quedó registrado en caja. Revisa que la caja esté abierta.');
+  }
   return caja.status;
 }
 
@@ -1005,13 +1008,18 @@ export async function listDriverCashSessionsRequest(userId: string): Promise<Dri
 
 export async function listCajaBootstrapRequest(
   userId: string,
+  options?: { salesPointId?: string; businessId?: string },
 ): Promise<{ sessions: TpvRegisterSession[]; driverSessions: DriverCashSession[] }> {
   const id = normalizeUserId(userId);
+  const params = new URLSearchParams();
+  if (options?.salesPointId?.trim()) params.set('salesPointId', options.salesPointId.trim());
+  if (options?.businessId?.trim()) params.set('businessId', options.businessId.trim());
+  const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{
     ok: boolean;
     sessions: TpvRegisterSession[];
     driverSessions: DriverCashSession[];
-  }>(`/api/delivery/caja-bootstrap/${encodeURIComponent(id)}`);
+  }>(`/api/delivery/caja-bootstrap/${encodeURIComponent(id)}${qs}`);
   return {
     sessions: payload.sessions || [],
     driverSessions: payload.driverSessions || [],

@@ -119,6 +119,7 @@ import { butcherClientsRouter } from './routers/butcherClientsRouter.js';
 import { butcherOrdersRouter } from './routers/butcherOrdersRouter.js';
 import { butcherSalesRouter } from './routers/butcherSalesRouter.js';
 import { butcherReportsRouter } from './routers/butcherReportsRouter.js';
+import { butcherPurchaseRouter } from './routers/butcherPurchaseRouter.js';
 import {
   viewSignaturePublic,
   acceptSignaturePublic,
@@ -155,6 +156,7 @@ import { markSystemActivity, shouldRunBackgroundEngine } from './services/engine
 import { startSupplierInvoicePolling } from './services/supplierInvoiceScheduler.js';
 import { runAutoOrdersForAllUsers } from './services/autoOrderService.js';
 import { startSubscriptionLifecycle } from './services/subscriptionLifecycle.js';
+import { startDailyOpsDigest } from './services/dailyOpsDigest.js';
 import { createVerticalRouter } from './services/verticalCrudFactory.js';
 import { allVerticalConfigs } from './verticalConfigs/all.js';
 import { requireAuthAndEmailVerified } from './middleware/auth.js';
@@ -1049,6 +1051,7 @@ const internalRouters = [
   ['/api/butcher-orders',  ...saasAuthGate, butcherOrdersRouter],
   ['/api/butcher-sales',   ...saasAuthGate, butcherSalesRouter],
   ['/api/butcher-reports', ...saasAuthGate, butcherReportsRouter],
+  ['/api/butcher-purchases', ...saasAuthGate, butcherPurchaseRouter],
   ['/api/delivery/alerts', ...saasAuthGate, deliveryAlertRouter],
   ['/api/delivery-reports', ...saasAuthGate, deliveryReportsRouter],
   ['/api/recipes',         ...saasAuthGate, recipeRouter],
@@ -1398,7 +1401,15 @@ El JSON debe tener esta estructura:
   "vin": "número de bastidor / VIN",
   "vehicleBrand": "marca del vehículo",
   "vehicleModel": "modelo del vehículo",
+  "version": "versión / acabado si aparece (ej: Sport, Ambition)",
   "vehicleYear": 2021,
+  "vehicleColor": "color del vehículo si aparece",
+  "fuelType": "gasolina | diesel | hibrido | electrico | glp | otro",
+  "transmission": "manual | automatico | semiauto",
+  "power": 150,
+  "mileage": 45000,
+  "doors": 5,
+  "bodyType": "turismo | SUV | furgoneta | etc.",
   "ownerName": "nombre del titular / propietario",
   "ownerNif": "NIF/NIE/CIF del titular",
   "buyerName": "nombre del comprador (si contrato/factura)",
@@ -1426,6 +1437,7 @@ El JSON debe tener esta estructura:
 }
 confidenceScore es un número 0-100 indicando tu nivel de certeza global.
 Si algún campo no se puede determinar, usa null.
+power es potencia en CV (número). mileage es kilómetros si aparecen en el documento.
 Los campos financieros (subtotal, taxRate, lines, etc.) solo se rellenan si el documento contiene importes.
 isScrapyard se pone true si el documento es de un desguace/CAT, false si es de compraventa general.`;
 
@@ -3292,6 +3304,9 @@ if (backgroundEnginesEnabled) {
 
   // S-06: Subscription lifecycle — trial expiry, grace period, suspension + emails
   startSubscriptionLifecycle();
+
+  // Resumen diario a ALERTS_ADMIN (backup + uptime); solo prod salvo ALERTS_OPS_IN_DEV
+  startDailyOpsDigest();
 }
 
 // CRM-02: Workflow engine scheduler — runs every 4 hours

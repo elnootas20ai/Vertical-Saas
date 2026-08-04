@@ -58,8 +58,8 @@ interface UsePushNotificationsOptions {
 }
 
 /**
- * Web Push (PWA). No llama a requestPermission solo:
- * el soft prompt de PushPermissionGate pide 1 vez; aquí solo suscribe si granted.
+ * Web Push (PWA). Solo suscribe si el permiso del navegador ya está granted
+ * (lo pide PushPermissionGate una vez, como cualquier app).
  */
 export function usePushNotifications({ userId, token }: UsePushNotificationsOptions) {
   const subscriptionRef = useRef<PushSubscription | null>(null);
@@ -71,7 +71,7 @@ export function usePushNotifications({ userId, token }: UsePushNotificationsOpti
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
     if (!('Notification' in window)) return;
 
-    // Solo si el usuario (o el soft prompt) ya concedió.
+    // Solo si el permiso del sistema ya está concedido.
     if (Notification.permission !== 'granted') return;
 
     if (readPushConsent(userId).decision !== 'accepted') {

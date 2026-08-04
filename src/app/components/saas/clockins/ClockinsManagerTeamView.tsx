@@ -198,23 +198,32 @@ export function ClockinsManagerTeamView({
 
   const loadMemberHistory = useCallback(
     async (memberId: string) => {
-      if (historyByMember[memberId] || !businessId) return;
+      if (!businessId || !memberId) return;
       setHistoryLoading(memberId);
       try {
         const all = await fetchClockins(businessId, { memberId, recordsOnly: true });
+        // Incluye hoy (antes se excluía selectedDate y el CEO no veía la sesión cerrada).
         const recent = all
-          .filter((r) => r.date !== selectedDate)
-          .sort((a, b) => b.date.localeCompare(a.date))
+          .filter((r) => (r.entries?.length || 0) > 0)
+          .sort((a, b) =>
+            b.date.localeCompare(a.date)
+            || String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+          )
           .slice(0, 14);
         setHistoryByMember((prev) => ({ ...prev, [memberId]: recent }));
       } catch {
-        /* silencioso */
+        setHistoryByMember((prev) => ({ ...prev, [memberId]: prev[memberId] || [] }));
       } finally {
         setHistoryLoading(null);
       }
     },
-    [businessId, historyByMember, selectedDate],
+    [businessId],
   );
+
+  // Si cambia el día, invalidar caché de “Últimos días”.
+  useEffect(() => {
+    setHistoryByMember({});
+  }, [selectedDate]);
 
   const toggleExpand = (record: EnrichedClockinRecord) => {
     const next = expandedId === record._id ? null : record._id;

@@ -279,6 +279,29 @@ export async function cancelReservation(
   return item;
 }
 
+/** Cancela reservas activas de una mesa y la deja libre (Sala / TPV «Cancelar reserva»). */
+export async function cancelActiveReservationsForTable(
+  userId: string,
+  tableId: string,
+  actor: { userId: string; userName: string },
+): Promise<{ cancelled: number }> {
+  const tid = String(tableId || '').trim();
+  if (!tid) return { cancelled: 0 };
+  const all = await listReservations(userId);
+  const active = all.filter(
+    (r) =>
+      String(r.tableId || '').trim() === tid
+      && !['cancelled', 'finished', 'no_show', 'seated'].includes(String(r.status || '')),
+  );
+  for (const r of active) {
+    await cancelReservation(userId, r, actor);
+  }
+  if (active.length === 0) {
+    await syncTableReserved(userId, tid, '', false);
+  }
+  return { cancelled: active.length };
+}
+
 export async function finalizeReservation(
   userId: string,
   reservation: RestaurantReservation,

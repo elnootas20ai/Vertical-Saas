@@ -8,7 +8,7 @@ import {
   checkVehicleDuplicatesRequest,
   VehicleDuplicateError,
 } from '../../../../lib/vehicleApi';
-import { createAcquisitionRequest } from '../../../../lib/vehicleAcquisitionApi';
+import { createAcquisitionRequest, updateAcquisitionRequest, type VehicleAcquisition } from '../../../../lib/vehicleAcquisitionApi';
 import {
   SettingsWizardFooter,
   SettingsWizardShell,
@@ -137,12 +137,45 @@ type ComprasNewPurchaseWizardProps = {
   open: boolean;
   onClose: () => void;
   onCreated?: (acquisitionId: string) => void;
+  onUpdated?: (acquisitionId: string) => void;
+  editing?: VehicleAcquisition | null;
 };
 
-export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNewPurchaseWizardProps) {
+function formFromAcquisition(
+  acquisition: VehicleAcquisition,
+  vehicle?: Vehicle | null,
+): CompraWizardFormState {
+  return {
+    supplierType: acquisition.sellerType === 'empresa' ? 'proveedor' : 'particular',
+    supplierName: acquisition.sellerName || '',
+    purchaseDate: (acquisition.acquisitionDate || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
+    purchasePrice: acquisition.costCompra > 0 ? String(acquisition.costCompra) : '',
+    notes: acquisition.notes || '',
+    registrationPlate: acquisition.registrationPlate || vehicle?.registrationPlate || '',
+    vin: vehicle?.vin || '',
+    brand: vehicle?.brand || '',
+    model: vehicle?.model || '',
+    version: vehicle?.version || '',
+    year: vehicle?.year ? String(vehicle.year) : String(new Date().getFullYear()),
+    mileage: vehicle?.mileage != null ? String(vehicle.mileage) : '',
+    color: vehicle?.color || '',
+    fuelType: vehicle?.fuelType || '',
+    transmission: vehicle?.transmission || '',
+    power: vehicle?.power != null ? String(vehicle.power) : '',
+  };
+}
+
+export function ComprasNewPurchaseWizard({
+  open,
+  onClose,
+  onCreated,
+  onUpdated,
+  editing = null,
+}: ComprasNewPurchaseWizardProps) {
   const { user } = useAuth();
-  const { addVehicle } = useApp();
+  const { addVehicle, vehicles, updateVehicle } = useApp();
   const userId = user?.userId || user?._id || '';
+  const isEdit = Boolean(editing?.id);
 
   const [step, setStep] = useState<StepId>('compra');
   const [form, setForm] = useState<CompraWizardFormState>(emptyForm);
@@ -152,13 +185,18 @@ export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNe
   const stepIndex = STEPS.findIndex((s) => s.id === step);
   const isLastStep = stepIndex === STEPS.length - 1;
 
+  const linkedVehicle = useMemo(() => {
+    if (!editing?.vehicleId) return null;
+    return (vehicles ?? []).find((v) => v.id === editing.vehicleId) ?? null;
+  }, [editing, vehicles]);
+
   useEffect(() => {
     if (!open) return;
     setStep('compra');
-    setForm(emptyForm());
+    setForm(editing ? formFromAcquisition(editing, linkedVehicle) : emptyForm());
     setFieldErrors({});
     setSaving(false);
-  }, [open]);
+  }, [open, editing, linkedVehicle]);
 
   const set = useCallback((key: keyof CompraWizardFormState, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -213,6 +251,42 @@ export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNe
     try {
       const plate = form.registrationPlate.trim().toUpperCase();
       const vin = form.vin.trim().toUpperCase();
+      const purchasePrice = parseLocaleNumber(form.purchasePrice);
+
+      if (isEdit && editing) {
+        await updateAcquisitionRequest(userId, editing.id, {
+          sellerType: form.supplierType === 'proveedor' ? 'empresa' : 'particular',
+          acquisitionType: form.supplierType === 'proveedor' ? 'compra_empresa' : 'compra_particular',
+          sellerName: form.supplierName.trim(),
+          costCompra: purchasePrice,
+          acquisitionDate: form.purchaseDate,
+          notes: form.notes.trim() || undefined,
+          registrationPlate: plate,
+        });
+        if (editing.vehicleId) {
+          await updateVehicle(editing.vehicleId, {
+            brand: form.brand.trim(),
+            model: form.model.trim(),
+            version: form.version.trim() || undefined,
+            year: Number(form.year),
+            registrationPlate: plate,
+            vin: vin || undefined,
+            mileage: form.mileage.trim() ? parseLocaleNumber(form.mileage) : undefined,
+            color: form.color.trim() || undefined,
+            fuelType: (form.fuelType || undefined) as Vehicle['fuelType'],
+            transmission: (form.transmission || undefined) as Vehicle['transmission'],
+            power: form.power.trim() ? parseLocaleNumber(form.power) : undefined,
+            purchasePrice,
+            purchaseDate: form.purchaseDate,
+            notes: form.notes.trim() || undefined,
+          });
+        }
+        toast.success('Compra actualizada');
+        onUpdated?.(editing.id);
+        onClose();
+        return;
+      }
+
       const duplicates = await checkVehicleDuplicatesRequest(userId, {
         registrationPlate: plate,
         vin: vin || undefined,
@@ -223,7 +297,6 @@ export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNe
         return;
       }
 
-      const purchasePrice = parseLocaleNumber(form.purchasePrice);
       const vehiclePayload = {
         brand: form.brand.trim(),
         model: form.model.trim(),
@@ -239,7 +312,7 @@ export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNe
         purchasePrice,
         purchaseDate: form.purchaseDate,
         notes: form.notes.trim() || undefined,
-        status: 'entrada' as Vehicle['status'],
+        status: 'available' as Vehicle['status'],
         origin: (form.supplierType === 'particular' ? 'particular' : 'empresa') as Vehicle['origin'],
       };
 
@@ -267,7 +340,7 @@ export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNe
         setStep('vehiculo');
         return;
       }
-      toast.error(error instanceof Error ? error.message : 'No se pudo registrar la compra');
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar la compra');
     } finally {
       setSaving(false);
     }
@@ -279,7 +352,7 @@ export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNe
     <SettingsWizardShell
       isOpen={open}
       onClose={onClose}
-      title="Nueva compra"
+      title={isEdit ? 'Editar compra' : 'Nueva compra'}
       subtitle={`Paso ${stepIndex + 1} de ${STEPS.length} · ${STEPS[stepIndex].title}`}
       icon={<ShoppingCart className="h-5 w-5 text-amber-600" strokeWidth={2} />}
       steps={wizardSteps}
@@ -298,7 +371,7 @@ export function ComprasNewPurchaseWizard({ open, onClose, onCreated }: ComprasNe
           onSave={handleSave}
           isLastStep={isLastStep}
           saving={saving}
-          saveLabel="Guardar"
+          saveLabel={isEdit ? 'Guardar cambios' : 'Guardar'}
           disableNext={saving}
           disableSave={saving}
         />

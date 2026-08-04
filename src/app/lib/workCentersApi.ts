@@ -292,6 +292,29 @@ export async function listWorkCentersForDelivery(
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
+/** Lectura directa por id (útil si el listado filtrado no incluye la tienda asignada al trabajador). */
+export async function getWorkCenterById(workCenterId: string): Promise<WorkCenter | null> {
+  const raw = String(workCenterId || '').trim();
+  if (!raw) return null;
+  const id = raw.startsWith('wc:') ? raw.slice(3) : raw;
+  try {
+    const doc = await req<unknown>(
+      `/api/couch/doc/${encodeURIComponent(WORK_CENTERS_DB)}/${encodeURIComponent(id)}`,
+    );
+    return normalizeWorkCenter(doc);
+  } catch {
+    // Fallback: buscar en el listado cacheado (legacy / otra DB).
+    const docs = await listAllWorkCenterDocs();
+    for (const d of docs) {
+      const wc = normalizeWorkCenter(d);
+      if (wc && (wc._id === id || wc.id === id || wc._id === raw || wc.id === raw)) {
+        return wc;
+      }
+    }
+    return null;
+  }
+}
+
 export async function createWorkCenter(
   userId: string,
   payload: Omit<CreateWorkCenterPayload, 'user_id'>,

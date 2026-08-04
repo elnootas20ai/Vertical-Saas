@@ -8,7 +8,6 @@ import {
   Calendar,
   Camera,
   Save,
-  Edit3,
   Briefcase,
   Building2,
   Clock,
@@ -20,7 +19,10 @@ import {
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
-import { buildDefaultPersonalData } from '../../../lib/workerProfileCompletion';
+import {
+  buildDefaultPersonalData,
+  resolveWorkerProfileCompletion,
+} from '../../../lib/workerProfileCompletion';
 import { normalizeBirthDateIso } from '../../../lib/birthDateIso';
 import { BirthDateEsField } from '../../../components/saas/BirthDateEsField';
 import {
@@ -32,13 +34,18 @@ import {
   normalizeEmergencyPhone,
   normalizeIbanInput,
 } from '../../../lib/employmentBankUtils';
+import { formatDateEs } from '../../../lib/formatDateEs';
 import { toast } from 'sonner';
+
+const inputClass =
+  'w-full px-3 py-2.5 rounded-lg border text-sm transition-all bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none';
+const inputDisabledClass =
+  'w-full px-3 py-2.5 rounded-lg border text-sm bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed';
 
 export function WorkerProfile() {
   const { t } = useTranslation();
   const { user, updateUser } = useAuth();
 
-  const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     firstName: user?.firstName || '',
@@ -113,34 +120,35 @@ export function WorkerProfile() {
       return;
     }
     toast.success('Perfil guardado');
-    setIsEditing(false);
   };
 
   const initials = `${formData.firstName?.[0] || ''}${formData.lastName?.[0] || ''}`.toUpperCase() || 'UU';
   const employment = user?.employment;
-  const completion = user?.workerProfileCompletion;
+  const completion = user ? resolveWorkerProfileCompletion(user) : null;
 
   return (
     <Layout title={t('worker.profile.title')} subtitle={t('worker.profile.subtitle')}>
       <div className="space-y-6">
-        {completion && !completion.fullyCompleted && (
+        {completion && !completion.workerCompleted && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-900/20 flex items-start gap-3">
             <AlertCircle className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
             <div>
               <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">Ficha incompleta</p>
               <p className="text-xs text-amber-700 dark:text-amber-300 mt-0.5">
-                {completion.workerCompleted
-                  ? 'Tu parte está completa. RRHH completará el alta laboral.'
-                  : 'Completa tus datos personales para que tu empresa pueda darte de alta.'}
+                Rellena tus datos y pulsa Guardar para que tu empresa pueda darte de alta.
               </p>
             </div>
           </div>
         )}
 
-        {completion?.fullyCompleted && (
+        {completion?.workerCompleted && (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-900/20 flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-            <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">Ficha de trabajador completa</p>
+            <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
+              {completion.fullyCompleted
+                ? 'Ficha de trabajador completa'
+                : 'Tu parte está completa. RRHH puede completar el alta laboral.'}
+            </p>
           </div>
         )}
 
@@ -175,16 +183,12 @@ export function WorkerProfile() {
             </div>
             <button
               type="button"
-              onClick={() => (isEditing ? void handleSave() : setIsEditing(true))}
+              onClick={() => void handleSave()}
               disabled={isSaving}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                isEditing
-                  ? 'bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60'
-                  : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-              }`}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-all bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : isEditing ? <Save className="w-4 h-4" /> : <Edit3 className="w-4 h-4" />}
-              {isSaving ? t('common.saving', 'Guardando…') : isEditing ? t('common.save') : t('common.edit')}
+              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              {isSaving ? t('common.saving', 'Guardando…') : t('common.save')}
             </button>
           </div>
         </div>
@@ -216,7 +220,7 @@ export function WorkerProfile() {
               <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4">
                 <Calendar className="w-4 h-4 text-amber-500 mb-2" />
                 <p className="text-xs text-gray-400 dark:text-gray-500">{t('worker.profile.startDateLabel')}</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{employment.startDate}</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5">{formatDateEs(employment.startDate)}</p>
               </div>
             )}
           </div>
@@ -247,12 +251,8 @@ export function WorkerProfile() {
                   type="text"
                   value={(formData as Record<string, string>)[field.key]}
                   onChange={(e) => handleChange(field.key, e.target.value)}
-                  disabled={!isEditing || field.disabled}
-                  className={`w-full px-3 py-2.5 rounded-lg border text-sm transition-all ${
-                    isEditing && !field.disabled
-                      ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
-                      : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                  }`}
+                  disabled={Boolean(field.disabled)}
+                  className={field.disabled ? inputDisabledClass : inputClass}
                 />
               </div>
             ))}
@@ -264,12 +264,7 @@ export function WorkerProfile() {
               <BirthDateEsField
                 value={formData.birthDate}
                 onChange={(iso) => handleChange('birthDate', iso)}
-                disabled={!isEditing}
-                className={`w-full px-3 py-2.5 rounded-lg border text-sm transition-all ${
-                  isEditing
-                    ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
-                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                }`}
+                className={inputClass}
               />
             </div>
           </div>
@@ -293,12 +288,7 @@ export function WorkerProfile() {
                   type="text"
                   value={(formData as Record<string, string>)[field.key]}
                   onChange={(e) => handleChange(field.key, e.target.value)}
-                  disabled={!isEditing}
-                  className={`w-full px-3 py-2.5 rounded-lg border text-sm transition-all ${
-                    isEditing
-                      ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none'
-                      : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                  }`}
+                  className={inputClass}
                 />
               </div>
             ))}
@@ -318,13 +308,8 @@ export function WorkerProfile() {
                 type="text"
                 value={formData.emergencyContact}
                 onChange={(e) => handleChange('emergencyContact', normalizeEmergencyContact(e.target.value))}
-                disabled={!isEditing}
                 maxLength={80}
-                className={`w-full px-3 py-2.5 rounded-lg border text-sm transition-all ${
-                  isEditing
-                    ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none'
-                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 cursor-not-allowed'
-                }`}
+                className={inputClass}
               />
             </div>
             <div>
@@ -333,13 +318,8 @@ export function WorkerProfile() {
                 type="tel"
                 value={formData.emergencyPhone}
                 onChange={(e) => handleChange('emergencyPhone', normalizeEmergencyPhone(e.target.value))}
-                disabled={!isEditing}
                 maxLength={20}
-                className={`w-full px-3 py-2.5 rounded-lg border text-sm transition-all ${
-                  isEditing
-                    ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none'
-                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 cursor-not-allowed'
-                }`}
+                className={inputClass}
               />
             </div>
           </div>
@@ -357,14 +337,9 @@ export function WorkerProfile() {
                 type="text"
                 value={formData.bankAccount}
                 onChange={(e) => handleChange('bankAccount', formatIbanInput(e.target.value))}
-                disabled={!isEditing}
                 maxLength={IBAN_DISPLAY_MAX_LENGTH}
                 placeholder="ES00 0000 0000 0000 0000 0000"
-                className={`px-3 py-2.5 rounded-lg border transition-all ${IBAN_INPUT_CLASS} ${
-                  isEditing
-                    ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none'
-                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                }`}
+                className={`px-3 py-2.5 rounded-lg border transition-all ${IBAN_INPUT_CLASS} bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none`}
               />
             </div>
             <div>
@@ -373,17 +348,24 @@ export function WorkerProfile() {
                 type="text"
                 value={formData.bankName}
                 onChange={(e) => handleChange('bankName', normalizeBankName(e.target.value))}
-                disabled={!isEditing}
                 maxLength={60}
                 placeholder="Ej: CaixaBank, BBVA…"
-                className={`w-full px-3 py-2.5 rounded-lg border text-sm transition-all ${
-                  isEditing
-                    ? 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 outline-none'
-                    : 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                }`}
+                className={inputClass}
               />
             </div>
           </div>
+        </div>
+
+        <div className="flex justify-end pb-2">
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={isSaving}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {isSaving ? t('common.saving', 'Guardando…') : t('common.save')}
+          </button>
         </div>
       </div>
     </Layout>

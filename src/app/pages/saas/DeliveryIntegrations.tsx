@@ -12,10 +12,12 @@ import {
 } from '../../lib/webApi';
 import { Layout } from '../../components/saas/Layout';
 import { DEFAULT_DELIVERY_INTEGRATIONS, AGGREGATOR_PLATFORMS } from '../../lib/deliveryIntegrationsUi';
+import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 
 export function DeliveryIntegrations() {
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
+  const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
 
   const [integrations, setIntegrations] = useState<DeliveryIntegrations>(DEFAULT_DELIVERY_INTEGRATIONS);
   const [loading, setLoading] = useState(true);
@@ -89,10 +91,12 @@ export function DeliveryIntegrations() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
             <Plug className="w-6 h-6 text-purple-600" />
-            Integraciones
+            {isRestaurant ? 'Integradores' : 'Integraciones'}
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Conecta Glovo, Uber Eats, Just Eat y Flipdish. Activa cada plataforma para recibir pedidos automáticos.
+            {isRestaurant
+              ? 'Conecta Glovo, Uber Eats, Just Eat y Flipdish si también recibes pedidos de plataformas en el local.'
+              : 'Conecta Glovo, Uber Eats, Just Eat y Flipdish. Activa cada plataforma para recibir pedidos automáticos.'}
             {activeCount > 0 && (
               <span className="ml-1 text-green-600 font-medium">{activeCount} activa{activeCount === 1 ? '' : 's'}.</span>
             )}

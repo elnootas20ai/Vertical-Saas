@@ -39,3 +39,8 @@ export { RestaurantSalaTpvPage } from './RestaurantSalaTpvPage';
 export { RestaurantReservationsPage } from './RestaurantReservationsPage';
 export { RestaurantWaitlistPage } from './RestaurantWaitlistPage';
 export { RestaurantCajaPage } from './RestaurantCajaPage';
+export { RestaurantOpsCenter } from './RestaurantOpsCenter';
+export {
+  buildRestaurantOpsSnapshot,
+  formatDwellMinutes,
+} from './restaurantOpsSnapshot';

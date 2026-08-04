@@ -23,12 +23,12 @@ export function ComprasListCard({ purchase, selected, onSelect }: ComprasListCar
       onClick={onSelect}
       className={`w-full rounded-2xl border p-3.5 text-left transition-all duration-150 ${
         selected
-          ? 'border-amber-400/90 bg-amber-50/60 shadow-md ring-1 ring-amber-400/25 dark:border-amber-500/60 dark:bg-amber-950/25'
-          : 'border-gray-200/90 bg-white hover:border-gray-300 hover:shadow-sm dark:border-gray-700/90 dark:bg-gray-900 dark:hover:border-gray-600'
+          ? 'border-[var(--v-blue,#2563eb)] bg-blue-50/70 shadow-md ring-1 ring-blue-500/20 dark:border-blue-500/60 dark:bg-blue-950/30'
+          : 'border-slate-200/90 bg-white hover:border-blue-200 hover:shadow-sm dark:border-slate-700/90 dark:bg-slate-900 dark:hover:border-blue-800'
       }`}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 truncate text-sm font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+        <p className="min-w-0 truncate text-sm font-bold tracking-tight text-slate-900 dark:text-slate-100">
           {purchase.vehicleLabel || 'Vehículo sin asignar'}
         </p>
         <span
@@ -38,14 +38,14 @@ export function ComprasListCard({ purchase, selected, onSelect }: ComprasListCar
         </span>
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+      <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
         <span>{formatCompraDate(purchase.purchaseDate)}</span>
-        <span className="font-bold tabular-nums text-gray-900 dark:text-gray-100">
+        <span className="font-extrabold tabular-nums text-slate-900 dark:text-slate-100">
           {formatCompraPrice(purchase.purchasePrice)}
         </span>
       </div>
 
-      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
         <SupplierIcon className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">
           {purchaseSupplierLabel(purchase.supplierType)}

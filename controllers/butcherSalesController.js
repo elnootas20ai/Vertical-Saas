@@ -7,10 +7,28 @@ import {
   updateButcherClientCounters,
   analyzeButcherClientHabitsAsync,
 } from '../services/butcherShop.js';
-import { ensureDatabase, getDocument, putDocument } from '../services/couchdb.js';
+import { ensureDatabase, findAccountByUserId, getDocument, putDocument } from '../services/couchdb.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
+import { applySaleStockDeduction, restoreSaleStock } from '../services/butcherStockPipeline.js';
+import { syncCrmAfterButcherSale } from '../services/butcherClientSync.js';
+import {
+  ensureButcherSaleIncomeServer,
+  ensureButcherSaleVoidServer,
+} from '../services/butcherSaleFinance.js';
+import { tryAutoIssueForButcherSale } from '../services/verifactuIssueService.js';
+import logger from '../services/logger.js';
 
 function bad(res, error) { return res.status(400).json({ ok: false, error }); }
+
+function resolveBusinessId(account, sale = {}) {
+  return String(
+    sale.business_id
+    || sale.businessId
+    || account?.businessId
+    || account?.business_id
+    || '',
+  ).replace(/^business:/, '').trim();
+}
 
 export async function listButcherSales(req, res) {
   try {
@@ -32,21 +50,64 @@ export async function createButcherSale(req, res) {
     if (!userId) return bad(res, 'Falta userId');
     if (!sale) return bad(res, 'Falta el objeto sale');
 
-    const ticketNumber = await getNextButcherTicketNumber(req, userId);
-    const total = (sale.items || []).reduce((s, it) => s + (Number(it.quantity || 0) * Number(it.pricePerUnit || 0)), 0);
-    const totalWeight = (sale.items || []).reduce((s, it) => s + Number(it.quantity || 0), 0);
+    const account = await findAccountByUserId(req, userId).catch(() => null);
+    const businessId = resolveBusinessId(account, sale);
+
+    const requestedTicket = String(sale.ticketNumber || '').trim();
+    const ticketNumber = requestedTicket || await getNextButcherTicketNumber(req, userId);
+    const total = Number(sale.total) > 0
+      ? Number(sale.total)
+      : (sale.items || []).reduce((s, it) => s + (Number(it.quantity || 0) * Number(it.pricePerUnit || 0)), 0);
+    const totalWeight = Number(sale.totalWeight) > 0
+      ? Number(sale.totalWeight)
+      : (sale.items || []).reduce((s, it) => {
+        const unit = String(it.unit || 'kg').toLowerCase();
+        if (unit === 'ud' || unit === 'unidades' || unit === 'unit') return s;
+        return s + Number(it.quantity || 0);
+      }, 0);
+
+    const stockResult = await applySaleStockDeduction(req, userId, sale.items || []);
 
     const db = getButcherDbName();
     await ensureDatabase(req, db);
-    const doc = buildButcherSaleDocument(userId, { ...sale, ticketNumber, total, totalWeight });
+    let doc = buildButcherSaleDocument(userId, {
+      ...sale,
+      business_id: businessId || undefined,
+      businessId: businessId || undefined,
+      ticketNumber,
+      total,
+      totalWeight,
+      stockAllocations: stockResult.allocations || [],
+      storeId: sale.storeId || sale.tiendaId || sale.pointOfSaleId || null,
+      tiendaId: sale.tiendaId || sale.storeId || sale.pointOfSaleId || null,
+    });
     await putDocument(req, db, doc._id, doc);
+
+    try {
+      const vf = await tryAutoIssueForButcherSale(req, doc, account?.user_id || userId);
+      if (vf?.record) {
+        doc = buildButcherSaleDocument(userId, {
+          ...doc,
+          verifactuRecordId: vf.record.id,
+          verifactuFullNumber: vf.record.fullNumber,
+          verifactuQrUrl: vf.record.qrUrl,
+          verifactuHuella: vf.record.huella,
+        }, doc);
+        const vfSaved = await putDocument(req, db, doc._id, doc);
+        doc = { ...doc, _rev: vfSaved.rev };
+      }
+    } catch (vfErr) {
+      logger.warn({ err: vfErr, saleId: doc._id }, 'Verifactu auto (carnicería) omitido');
+    }
 
     updateButcherClientCounters(req, userId, sale.clientId, total).catch(() => {});
     if (sale.clientId) {
       analyzeButcherClientHabitsAsync(req, userId, sale.clientId).catch(() => {});
     }
+    syncCrmAfterButcherSale(req, userId, doc).catch(() => {});
+    ensureButcherSaleIncomeServer(req, userId, doc).catch(() => {});
 
-    return res.json({ ok: true, sale: sanitizeButcherSale(doc) });
+    return res.json({ ok: true, sale: sanitizeButcherSale(doc), stock: stockResult });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message || 'Error al crear venta' });
   }
@@ -80,6 +141,8 @@ export async function voidButcherSale(req, res) {
     }
     if (doc.status === 'voided') return bad(res, 'La venta ya está anulada');
 
+    await restoreSaleStock(req, userId, doc.items || [], doc.stockAllocations || null);
+
     doc.status = 'voided';
     doc.updatedAt = new Date().toISOString();
     await putDocument(req, db, doc._id, doc);
@@ -94,7 +157,9 @@ export async function voidButcherSale(req, res) {
           await putDocument(req, db, client._id, client);
         }
       } catch { /* non-blocking */ }
+      analyzeButcherClientHabitsAsync(req, userId, doc.clientId).catch(() => {});
     }
+    ensureButcherSaleVoidServer(req, userId, doc).catch(() => {});
 
     return res.json({ ok: true, sale: sanitizeButcherSale(doc) });
   } catch (e) {
@@ -158,6 +223,14 @@ export async function getButcherSalesStats(req, res) {
         month: { count: salesMonth.length, revenue: sum(salesMonth) },
         avgTicket: avg(completed),
         topProducts,
+        byMethodToday: (() => {
+          const byMethod = { cash: 0, card: 0, bizum: 0, mixed: 0 };
+          for (const s of salesToday) {
+            const k = String(s.paymentMethod || 'cash');
+            byMethod[k] = (byMethod[k] || 0) + Number(s.total || 0);
+          }
+          return byMethod;
+        })(),
       },
     });
   } catch (e) {

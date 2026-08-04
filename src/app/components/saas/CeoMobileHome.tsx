@@ -31,6 +31,7 @@ import {
 } from '../../lib/alertCenterApi';
 import { fetchActiveNow, type ActiveMember } from '../../lib/clockinsApi';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import { DeliveryMobileDashboardBlocks } from '../../verticals/delivery/DeliveryMobileDashboardBlocks';
 
 function eur(n: number): string {
   return n.toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -60,9 +61,8 @@ export function CeoMobileHome() {
     || currentBusiness?.id?.replace(/^business:/, '')
     || '';
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
-  const isDeliveryLike =
-    isDeliveryBusinessType(currentBusiness?.businessType)
-    || isRestaurantBusinessType(currentBusiness?.businessType);
+  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
 
   const [loading, setLoading] = useState(true);
   const [ops, setOps] = useState<OpsCenterData | null>(null);
@@ -82,7 +82,7 @@ export function CeoMobileHome() {
       const [alertRes, activeRes, opsRes] = await Promise.all([
         fetchAlertSummary(businessId).catch(() => null),
         fetchActiveNow(businessId).catch(() => [] as ActiveMember[]),
-        isDeliveryLike && dataUserId
+        isDelivery && dataUserId
           ? getOpsCenterRequest(dataUserId, {
               businessId,
               salesPointId,
@@ -97,7 +97,7 @@ export function CeoMobileHome() {
     } finally {
       setLoading(false);
     }
-  }, [businessId, dataUserId, isDeliveryLike, store.activeSalesPointId]);
+  }, [businessId, dataUserId, isDelivery, store.activeSalesPointId]);
 
   useEffect(() => {
     void load();
@@ -109,7 +109,7 @@ export function CeoMobileHome() {
     onRefresh: () => {
       void load();
     },
-    enabled: !!businessId && isDeliveryLike,
+    enabled: !!businessId && isDelivery,
     fallbackPollMs: 45_000,
   });
 
@@ -165,14 +165,18 @@ export function CeoMobileHome() {
           </button>
         </div>
 
-        {/* Tienda */}
+        {/* Local */}
         <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3.5">
           <div className="flex items-center gap-2 mb-2">
             <Store className="w-4 h-4 text-gray-500" />
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">Tienda</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">
+              {isRestaurant ? 'Local' : 'Tienda'}
+            </p>
           </div>
           {store.loading ? (
-            <p className="text-sm text-gray-400">Cargando tiendas…</p>
+            <p className="text-sm text-gray-400">
+              {isRestaurant ? 'Cargando locales…' : 'Cargando tiendas…'}
+            </p>
           ) : store.pointsOfSale.length <= 1 ? (
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
               {store.displayLabelForActive
@@ -251,8 +255,8 @@ export function CeoMobileHome() {
               </div>
             </button>
 
-            {/* Caja */}
-            {isDeliveryLike && (
+            {/* Caja — solo delivery (datos de ops delivery). Restaurant usa atajos a /saas/caja. */}
+            {isDelivery && (
               <button
                 type="button"
                 onClick={() => navigate('/saas/vertical/delivery/caja')}
@@ -295,8 +299,8 @@ export function CeoMobileHome() {
               </button>
             )}
 
-            {/* Sin cobrar */}
-            {isDeliveryLike && (
+            {/* Sin cobrar — solo delivery */}
+            {isDelivery && (
               <button
                 type="button"
                 onClick={() => navigate('/saas/delivery-ops')}
@@ -323,15 +327,15 @@ export function CeoMobileHome() {
               </button>
             )}
 
-            {/* Resumen del día */}
-            {isDeliveryLike && ops?.kpis && (
+            {/* Resumen del día — solo delivery */}
+            {isDelivery && ops?.kpis && (
               <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Hoy en el local</p>
                   <button
                     type="button"
                     onClick={() => navigate('/saas/delivery-ops')}
-                    className="text-xs font-semibold text-violet-600 dark:text-violet-400"
+                    className="text-xs font-semibold text-[var(--v-blue,#2563eb)]"
                   >
                     Operativa →
                   </button>
@@ -362,6 +366,37 @@ export function CeoMobileHome() {
               </section>
             )}
 
+            {/* Marcas · pagos · tiempos (misma visión dashboard desktop, adaptada) */}
+            {isDelivery && dataUserId && businessId ? (
+              <DeliveryMobileDashboardBlocks
+                dataUserId={dataUserId}
+                businessId={businessId}
+                businessName={businessName}
+                salesPointId={store.activeSalesPointId || null}
+                stores={store.pointsOfSale.map((pdv) => ({
+                  id: String(pdv.id || pdv._id || ''),
+                  name: pointOfSaleDisplayLabel(pdv),
+                })).filter((s) => s.id)}
+                pdvs={store.pointsOfSale.map((pdv) => ({
+                  id: String(pdv.id || pdv._id || '').trim(),
+                  name: pointOfSaleDisplayLabel(pdv),
+                  workCenterId: String(pdv.workCenterId || '').trim() || null,
+                })).filter((p) => p.id)}
+              />
+            ) : null}
+
+            {/* Atajos restaurant (sala) */}
+            {isRestaurant && (
+              <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+                <p className="mb-3 text-sm font-bold text-gray-900 dark:text-gray-100">Operativa del local</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <QuickLink label="Centro ops" onClick={() => navigate('/saas/restaurant-ops')} />
+                  <QuickLink label="Sala" onClick={() => navigate('/saas/sala')} />
+                  <QuickLink label="TPV sala" onClick={() => navigate('/saas/caja/tpv')} />
+                  <QuickLink label="Caja" onClick={() => navigate('/saas/caja')} />
+                </div>
+              </section>
+            )}
             {/* Equipo fichado */}
             <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
               <div className="flex items-center justify-between mb-3">
@@ -405,12 +440,18 @@ export function CeoMobileHome() {
 
             {/* Atajos */}
             <div className="grid grid-cols-2 gap-2 pt-1">
-              {isDeliveryLike && (
+              {isDelivery && (
                 <QuickLink label="TPV" onClick={() => navigate('/saas/vertical/delivery/tpv')} />
               )}
+              {isRestaurant && (
+                <QuickLink label="Cocina" onClick={() => navigate('/saas/cocina')} />
+              )}
               <QuickLink label="Alertas" onClick={() => navigate('/saas/alerts')} />
-              {isDeliveryLike && (
+              {isDelivery && (
                 <QuickLink label="Caja" onClick={() => navigate('/saas/vertical/delivery/caja')} />
+              )}
+              {isRestaurant && (
+                <QuickLink label="Reservas" onClick={() => navigate('/saas/reservations')} />
               )}
               <QuickLink label="Documentos OCR" onClick={() => navigate('/saas/documents')} />
             </div>

@@ -29,6 +29,7 @@ import {
   listPickupOrders,
   linkClientToOrder,
   listTableTicketStats,
+  emitSalaStaffAlert,
 } from '../controllers/salaController.js';
 
 const salaRouter = Router();
@@ -72,6 +73,9 @@ salaRouter.get('/pickups/:userId', listPickupOrders);
 
 // CRM link
 salaRouter.put('/orders/:userId/:orderId/client', linkClientToOrder);
+
+// Staff alerts (waitlist avisado, etc.)
+salaRouter.post('/staff-alert/:userId', emitSalaStaffAlert);
 
 // Table ticket timing stats
 salaRouter.get('/table-stats/:userId', listTableTicketStats);

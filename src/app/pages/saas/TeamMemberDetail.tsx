@@ -44,10 +44,10 @@ import {
   UserPlus,
   X,
 } from 'lucide-react';
+import { formatDateEs } from '../../lib/formatDateEs';
 import { formatIbanInput } from '../../lib/employmentBankUtils';
 import { computeTotalLaborCost, formatLaborCurrency, computeLaborCostBreakdown, applyLaborCostToEmployment } from '../../lib/laborCost';
 import { Layout } from '../../components/saas/Layout';
-import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import type {
@@ -60,13 +60,24 @@ import type {
 } from '../../lib/authApi';
 import { listClockins, formatMinutes } from '../../lib/clockinsApi';
 import type { ClockinRecord } from '../../lib/clockinsApi';
-import { getSchedule, WEEKDAYS, WEEKDAY_LABELS, computeWeeklyHours } from '../../lib/schedulesApi';
-import type { ScheduleTemplate } from '../../lib/schedulesApi';
+import {
+  getSchedule,
+  saveSchedule,
+  defaultWeekly,
+  getMonday,
+  WEEKDAYS,
+  WEEKDAY_LABELS,
+  computeWeeklyHours,
+  computeDayHours,
+  computeDayWorkMinutes,
+  inferWorkdayFromWeeklyHours,
+} from '../../lib/schedulesApi';
+import type { ScheduleTemplate, DayShift, Weekday } from '../../lib/schedulesApi';
+import { ScheduleTimeField } from '../../components/saas/ScheduleTimeField';
 import {
   listVacations,
   getSettings,
-  getDaysUsed,
-  getDaysAllowed,
+  getMemberVacationBalance,
   reviewVacation,
   LEAVE_TYPE_LABELS,
   STATUS_LABELS,
@@ -86,12 +97,15 @@ import {
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
 import { toast } from 'sonner';
-import {
-  computeWorkerProfileCompletion,
-  HR_OWNED_FIELD_DEFS,
-} from '../../lib/workerProfileCompletion';
 
-const HR_MANAGER_ROLES = new Set(['Admin', 'Superadmin', 'Gerente', 'Administrador', 'Encargado']);
+const HR_MANAGER_ROLES = new Set([
+  'Admin',
+  'Superadmin',
+  'Gerente',
+  'Administrador',
+  'Encargado',
+  'Gestor',
+]);
 
 const inputClassName =
   'w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100';
@@ -150,6 +164,7 @@ function buildEmploymentInfo(emp?: EmploymentInfo): EmploymentInfo {
     terminationType: emp?.terminationType,
     contractType: emp?.contractType || '',
     workday: emp?.workday || '',
+    hoursPerWeek: emp?.hoursPerWeek,
     salary: emp?.salary || '',
     bankAccount: emp?.bankAccount || '',
     bankName: emp?.bankName || '',
@@ -264,12 +279,20 @@ interface PayrollUploadModalProps {
   member: AuthUser;
   currentUser: AuthUser;
   businessId: string;
+  initialType?: PayrollDocumentType;
   onClose: () => void;
   onUploaded: (doc: PayrollDocument) => void;
 }
 
-function PayrollUploadModal({ member, currentUser, businessId, onClose, onUploaded }: PayrollUploadModalProps) {
-  const [documentType, setDocumentType] = useState<PayrollDocumentType>('nomina');
+function PayrollUploadModal({
+  member,
+  currentUser,
+  businessId,
+  initialType = 'nomina',
+  onClose,
+  onUploaded,
+}: PayrollUploadModalProps) {
+  const [documentType, setDocumentType] = useState<PayrollDocumentType>(initialType);
   const [name, setName] = useState('');
   const [period, setPeriod] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
@@ -504,6 +527,9 @@ export function TeamMemberDetail() {
   // Schedule
   const [schedule, setSchedule] = useState<ScheduleTemplate | null>(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState(false);
+  const [editWeekly, setEditWeekly] = useState<Record<Weekday, DayShift>>(() => defaultWeekly());
+  const [savingSchedule, setSavingSchedule] = useState(false);
 
   // Vacations
   const [vacations, setVacations] = useState<VacationRequest[]>([]);
@@ -522,16 +548,17 @@ export function TeamMemberDetail() {
   const [payrollDocs, setPayrollDocs] = useState<PayrollDocument[]>([]);
   const [payrollLoading, setPayrollLoading] = useState(false);
   const [showPayrollUpload, setShowPayrollUpload] = useState(false);
+  const [payrollUploadType, setPayrollUploadType] = useState<PayrollDocumentType>('nomina');
+  const openPayrollUpload = (type: PayrollDocumentType = 'nomina') => {
+    setPayrollUploadType(type);
+    setShowPayrollUpload(true);
+  };
   const [payrollDeleting, setPayrollDeleting] = useState<string | null>(null);
   const [editingHr, setEditingHr] = useState(false);
   const [hrForm, setHrForm] = useState<EmploymentInfo>(() => buildEmploymentInfo());
   const [savingHr, setSavingHr] = useState(false);
 
   const canManageHr = HR_MANAGER_ROLES.has(String(user?.role || ''));
-  const profileCompletion = member
-    ? (member.workerProfileCompletion || computeWorkerProfileCompletion(member))
-    : null;
-
   // ─── Load member ────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -567,6 +594,10 @@ export function TeamMemberDetail() {
         mutualInsurance: hrForm.mutualInsurance?.trim() || '',
         contractType: hrForm.contractType,
         workday: hrForm.workday,
+        hoursPerWeek:
+          hrForm.hoursPerWeek != null && Number(hrForm.hoursPerWeek) > 0
+            ? Number(hrForm.hoursPerWeek)
+            : undefined,
         salary: hrForm.salary?.trim() || '',
         department: hrForm.department?.trim() || '',
         position: hrForm.position?.trim() || '',
@@ -600,7 +631,7 @@ export function TeamMemberDetail() {
     if (!businessId || !userId) return;
     setClockinsLoading(true);
     try {
-      const all = await listClockins(businessId, { memberId: userId });
+      const all = await listClockins(businessId, { memberId: userId, recordsOnly: true });
       setClockins(all.filter((c) => c.date.startsWith(clockinMonth)));
     } catch {
       setClockins([]);
@@ -615,12 +646,67 @@ export function TeamMemberDetail() {
     try {
       const s = await getSchedule(businessId, userId);
       setSchedule(s);
+      if (s?.weekly) setEditWeekly(s.weekly);
     } catch {
       setSchedule(null);
     } finally {
       setScheduleLoading(false);
     }
   }, [businessId, userId]);
+
+  const startEditSchedule = () => {
+    setEditWeekly(schedule?.weekly || defaultWeekly());
+    setEditingSchedule(true);
+  };
+
+  const updateEditDay = (day: Weekday, field: keyof DayShift, value: string | boolean) => {
+    setEditWeekly((prev) => ({ ...prev, [day]: { ...prev[day], [field]: value } }));
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!businessId || !userId || !member) return;
+    setSavingSchedule(true);
+    try {
+      const weekStart = schedule?.week_start || getMonday();
+      const saved = await saveSchedule(
+        businessId,
+        userId,
+        member.fullName || member.email || userId,
+        editWeekly,
+        schedule && schedule.week_start === weekStart ? schedule : null,
+        schedule?.template_id,
+        weekStart,
+        schedule?.work_center_id,
+        schedule?.work_center_name,
+      );
+      setSchedule(saved);
+      setEditingSchedule(false);
+
+      // Vacaciones/jornada: horas salen del horario, no hay que rellenar a mano.
+      const hours = computeWeeklyHours(editWeekly);
+      if (hours > 0 && canManageHr) {
+        const workday = inferWorkdayFromWeeklyHours(hours);
+        const result = await updateUser(userId, {
+          employment: applyLaborCostToEmployment(
+            buildEmploymentInfo({
+              ...member.employment,
+              hoursPerWeek: hours,
+              workday: workday || member.employment?.workday || '',
+            }),
+          ),
+        } as any);
+        if (result.success && result.user) {
+          setMember(result.user as AuthUser);
+          setHrForm(buildEmploymentInfo(result.user.employment));
+        }
+      }
+      toast.success(`Horario guardado · ${hours.toLocaleString('es-ES', { maximumFractionDigits: 1 })} h/sem`);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar el horario');
+    } finally {
+      setSavingSchedule(false);
+    }
+  };
 
   const loadVacations = useCallback(async () => {
     if (!businessId || !userId) return;
@@ -740,20 +826,25 @@ export function TeamMemberDetail() {
   // ─── Computed vacation data ─────────────────────────────────────────────────
 
   const vacationSummary = useMemo(() => {
-    if (!vacationSettings || !userId || !member) return { allowed: 0, used: 0, pending: 0, remaining: 0 };
-    const startDate = member.employment?.startDate || '';
-    const endDate = member.employment?.endDate || '';
-    const allowed = getDaysAllowed(vacationSettings, userId, {
-      startDate,
-      endDate,
+    if (!vacationSettings || !userId || !member) {
+      return { allowed: 0, used: 0, pending: 0, remaining: 0, requestable: 0 };
+    }
+    const bal = getMemberVacationBalance(vacationSettings, vacations, userId, {
+      startDate: member.employment?.startDate || '',
+      endDate: member.employment?.endDate || '',
       year: vacationYear,
+      hoursPerWeek: member.employment?.hoursPerWeek,
+      workday: member.employment?.workday,
+      scheduleWeeklyHours: schedule ? computeWeeklyHours(schedule.weekly) : undefined,
     });
-    const used = getDaysUsed(vacations, userId, vacationYear);
-    const pendingDays = vacations
-      .filter((v) => v.status === 'pending' && v.leaveType === 'vacation' && new Date(v.startDate).getFullYear() === vacationYear)
-      .reduce((sum, v) => sum + v.totalDays, 0);
-    return { allowed, used, pending: pendingDays, remaining: Math.max(0, allowed - used) };
-  }, [vacationSettings, vacations, userId, vacationYear, member]);
+    return {
+      allowed: bal.accrued,
+      used: bal.used,
+      pending: bal.pending,
+      remaining: bal.remaining,
+      requestable: bal.requestable,
+    };
+  }, [vacationSettings, vacations, userId, vacationYear, member, schedule]);
 
   // ─── Clockin summary ───────────────────────────────────────────────────────
 
@@ -870,7 +961,7 @@ export function TeamMemberDetail() {
               <Umbrella className="w-3.5 h-3.5 text-emerald-500" />
               <span className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase">Vacaciones</span>
             </div>
-            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{vacationSummary.remaining > 0 ? `${vacationSummary.remaining}d` : '—'}</p>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{vacationSummary.requestable > 0 ? `${vacationSummary.requestable}d` : '0d'}</p>
           </div>
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 cursor-pointer hover:border-purple-300 dark:hover:border-purple-700 transition-colors" onClick={() => setActiveTab('labor-cost')}>
             <div className="flex items-center gap-2 mb-1">
@@ -947,10 +1038,6 @@ export function TeamMemberDetail() {
         ═══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'info' && (
           <div className="space-y-6">
-            {profileCompletion && !profileCompletion.hrCompleted && (
-              <HrGestorChecklist mode="hr" />
-            )}
-
             {/* Datos personales */}
             <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
               <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
@@ -967,7 +1054,7 @@ export function TeamMemberDetail() {
                 {emp.emergencyPhone?.trim() ? (
                   <InfoField label="Teléfono de emergencia" value={emp.emergencyPhone} />
                 ) : null}
-                <InfoField label="Fecha de registro" value={member.createdAt ? new Date(member.createdAt).toLocaleDateString('es-ES') : undefined} />
+                <InfoField label="Fecha de registro" value={member.createdAt ? formatDateEs(member.createdAt) : undefined} />
               </div>
             </div>
 
@@ -1068,14 +1155,49 @@ export function TeamMemberDetail() {
                       <select
                         className={inputClassName}
                         value={hrForm.workday || ''}
-                        onChange={(e) => setHrForm((prev) => ({ ...prev, workday: e.target.value }))}
+                        onChange={(e) => {
+                          const workday = e.target.value;
+                          setHrForm((prev) => {
+                            const next = { ...prev, workday };
+                            // Prefill horas si aún no hay valor (vacaciones se prorratean con esto).
+                            if (prev.hoursPerWeek == null || !(Number(prev.hoursPerWeek) > 0)) {
+                              if (workday === 'completa') next.hoursPerWeek = 40;
+                              else if (workday === 'media' || workday === 'parcial') next.hoursPerWeek = 20;
+                            }
+                            return next;
+                          });
+                        }}
                       >
                         <option value="">Sin especificar</option>
-                        <option value="completa">Completa</option>
+                        <option value="completa">Completa (40 h)</option>
                         <option value="parcial">Parcial</option>
-                        <option value="media">Media jornada</option>
+                        <option value="media">Media jornada (20 h)</option>
                         <option value="flexible">Flexible</option>
                       </select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">
+                        Horas / semana
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        step={0.5}
+                        className={inputClassName}
+                        value={hrForm.hoursPerWeek != null ? hrForm.hoursPerWeek : ''}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setHrForm((prev) => ({
+                            ...prev,
+                            hoursPerWeek: raw === '' ? undefined : Number(raw),
+                          }));
+                        }}
+                        placeholder="Ej: 40 o 20"
+                      />
+                      <p className="mt-1 text-[11px] text-gray-400">
+                        Se rellena solo con el horario de la invitación / pestaña Horarios
+                      </p>
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Salario bruto anual</label>
@@ -1159,13 +1281,21 @@ export function TeamMemberDetail() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <InfoField label="Rol" value={member.role} />
-                  <InfoField label="Fecha de alta" value={emp.startDate ? new Date(emp.startDate).toLocaleDateString('es-ES') : undefined} />
+                  <InfoField label="Fecha de alta" value={emp.startDate ? formatDateEs(emp.startDate) : undefined} />
                   <InfoField label="Grupo de cotización" value={emp.contributionGroup} />
                   <InfoField label="Mutua" value={emp.mutualInsurance} />
                   <InfoField label="Departamento" value={emp.department} />
                   <InfoField label="Cargo / Posición" value={emp.position} />
                   <InfoField label="Tipo de contrato" value={emp.contractType ? CONTRACT_TYPE_LABELS[emp.contractType] || emp.contractType : undefined} />
                   <InfoField label="Jornada" value={emp.workday ? WORKDAY_LABELS[emp.workday] || emp.workday : undefined} />
+                  <InfoField
+                    label="Horas / semana"
+                    value={
+                      emp.hoursPerWeek != null && Number(emp.hoursPerWeek) > 0
+                        ? `${Number(emp.hoursPerWeek).toLocaleString('es-ES', { maximumFractionDigits: 1 })} h`
+                        : undefined
+                    }
+                  />
                   <InfoField label="Salario bruto anual" value={emp.salary} />
                   <InfoField label="Horario" value={emp.schedule} />
                   {emp.notes && (
@@ -1198,7 +1328,7 @@ export function TeamMemberDetail() {
                   Información de baja
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <InfoField label="Fecha de baja" value={new Date(emp.endDate).toLocaleDateString('es-ES')} />
+                  <InfoField label="Fecha de baja" value={formatDateEs(emp.endDate)} />
                   <InfoField label="Tipo de baja" value={emp.terminationType ? TERMINATION_LABELS[emp.terminationType] || emp.terminationType : undefined} />
                   <InfoField label="Motivo" value={emp.terminationReason} />
                 </div>
@@ -1342,7 +1472,7 @@ export function TeamMemberDetail() {
                 <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
                 <div>
                   <p className="text-sm font-bold text-amber-800 dark:text-amber-200">Revisión de coste pendiente</p>
-                  <p className="text-xs text-amber-600 dark:text-amber-400">La próxima revisión estaba prevista para el {new Date(emp.nextCostReview).toLocaleDateString('es-ES')}</p>
+                  <p className="text-xs text-amber-600 dark:text-amber-400">La próxima revisión estaba prevista para el {formatDateEs(emp.nextCostReview)}</p>
                 </div>
               </div>
             )}
@@ -1358,7 +1488,7 @@ export function TeamMemberDetail() {
                 <InfoField label="Tipo de contrato" value={emp.contractType ? CONTRACT_TYPE_LABELS[emp.contractType] || emp.contractType : undefined} />
                 <InfoField label="Pagas al año" value={laborBreakdown ? String(laborBreakdown.payPeriodsPerYear) : undefined} />
                 <InfoField label="Bruto anual" value={laborBreakdown ? formatCurrency(laborBreakdown.annualGross) : undefined} />
-                <InfoField label="Próxima revisión" value={emp.nextCostReview ? new Date(emp.nextCostReview).toLocaleDateString('es-ES') : undefined} />
+                <InfoField label="Próxima revisión" value={emp.nextCostReview ? formatDateEs(emp.nextCostReview) : undefined} />
                 <InfoField label="Moneda" value={emp.costCurrency || 'EUR'} />
               </div>
             </div>
@@ -1449,7 +1579,7 @@ export function TeamMemberDetail() {
                               <div className="flex items-center gap-2 mt-0.5">
                                 <span className="text-[11px] text-gray-400 dark:text-gray-500 capitalize">{a.type === 'branch' ? 'Sede' : a.type === 'work_center' ? 'Centro de trabajo' : a.type === 'project' ? 'Proyecto' : 'Cliente'}</span>
                                 <span className="text-[11px] text-gray-400">·</span>
-                                <span className="text-[11px] text-gray-400">Desde {new Date(a.startDate).toLocaleDateString('es-ES')}</span>
+                                <span className="text-[11px] text-gray-400">Desde {formatDateEs(a.startDate)}</span>
                                 {a.isPrimary && (
                                   <>
                                     <span className="text-[11px] text-gray-400">·</span>
@@ -1481,7 +1611,7 @@ export function TeamMemberDetail() {
                               </div>
                               <div>
                                 <p className="text-sm font-medium text-gray-600 dark:text-gray-400">{a.entityName}</p>
-                                <span className="text-[11px] text-gray-400">{new Date(a.startDate).toLocaleDateString('es-ES')} → {a.endDate ? new Date(a.endDate).toLocaleDateString('es-ES') : '—'}</span>
+                                <span className="text-[11px] text-gray-400">{formatDateEs(a.startDate)} → {a.endDate ? formatDateEs(a.endDate) : '—'}</span>
                               </div>
                             </div>
                             <span className="rounded-full bg-gray-100 dark:bg-gray-700 px-2.5 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400">Finalizada</span>
@@ -1501,30 +1631,151 @@ export function TeamMemberDetail() {
         ═══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'schedule' && (
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-6">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-blue-500" />
-              Horario laboral
-            </h3>
-            <a href="/saas/equipo/horarios-vacaciones" className="text-xs font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1 mb-4">Ver en Horarios y Vacaciones →</a>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-blue-500" />
+                  Horario laboral
+                </h3>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Viene de la plantilla de la invitación. Aquí puedes ver y cambiar los días que trabaja.
+                </p>
+              </div>
+              {canManageHr && !scheduleLoading && !editingSchedule && (
+                <button
+                  type="button"
+                  onClick={startEditSchedule}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  <Edit2 className="w-4 h-4" />
+                  {schedule ? 'Cambiar horario' : 'Asignar horario'}
+                </button>
+              )}
+            </div>
 
             {scheduleLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
               </div>
+            ) : editingSchedule ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="rounded-full bg-blue-50 dark:bg-blue-900/30 px-3 py-1 text-sm font-bold text-blue-700 dark:text-blue-300">
+                    {computeWeeklyHours(editWeekly).toLocaleString('es-ES', { maximumFractionDigits: 1 })} h / semana
+                  </span>
+                  <span className="text-xs text-gray-400">
+                    Horas en formato 24 h (ej. salida 17:00 = 5 de la tarde)
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {WEEKDAYS.map((day) => {
+                    const shift = editWeekly[day];
+                    const dayH = computeDayHours(shift);
+                    return (
+                      <div
+                        key={day}
+                        className={`flex flex-wrap items-center gap-3 rounded-xl p-3 ${
+                          shift.enabled
+                            ? 'bg-stone-50 dark:bg-stone-900/40'
+                            : 'bg-stone-50/50 opacity-70 dark:bg-stone-900/20'
+                        }`}
+                      >
+                        <label className="flex w-28 shrink-0 cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={shift.enabled}
+                            onChange={(e) => updateEditDay(day, 'enabled', e.target.checked)}
+                            className="h-4 w-4 rounded border-stone-300 text-[#2563EB] focus:ring-blue-500"
+                          />
+                          <span className="text-sm font-semibold text-stone-800 dark:text-stone-200">
+                            {weekdayLabels[day]}
+                          </span>
+                        </label>
+                        {shift.enabled ? (
+                          <>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <ScheduleTimeField
+                                compact
+                                label="Entrada"
+                                value={shift.start}
+                                onChange={(v) => updateEditDay(day, 'start', v)}
+                              />
+                              <ScheduleTimeField
+                                compact
+                                label="Salida"
+                                value={shift.end}
+                                onChange={(v) => updateEditDay(day, 'end', v)}
+                              />
+                              <span className="mx-1 text-xs text-stone-300">|</span>
+                              <ScheduleTimeField
+                                compact
+                                label="Ini. pausa"
+                                value={shift.breakStart}
+                                onChange={(v) => updateEditDay(day, 'breakStart', v)}
+                              />
+                              <ScheduleTimeField
+                                compact
+                                label="Fin pausa"
+                                value={shift.breakEnd}
+                                onChange={(v) => updateEditDay(day, 'breakEnd', v)}
+                              />
+                            </div>
+                            <span className="ml-auto text-xs font-bold tabular-nums text-stone-600 dark:text-stone-300">
+                              {dayH.toLocaleString('es-ES', { maximumFractionDigits: 1 })} h
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-sm italic text-stone-400">Libre</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={savingSchedule}
+                    onClick={() => void handleSaveSchedule()}
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {savingSchedule ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                    Guardar horario
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingSchedule}
+                    onClick={() => {
+                      setEditingSchedule(false);
+                      if (schedule?.weekly) setEditWeekly(schedule.weekly);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-900 dark:text-stone-200"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
             ) : !schedule ? (
-              <div className="text-center py-12 text-gray-500 dark:text-gray-400">
-                <CalendarDays className="w-10 h-10 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
+              <div className="py-12 text-center text-gray-500 dark:text-gray-400">
+                <CalendarDays className="mx-auto mb-3 h-10 w-10 text-gray-300 dark:text-gray-600" />
                 <p className="font-medium">No hay horario asignado</p>
-                <p className="text-sm mt-1">Puedes asignar un horario desde la sección de Horarios.</p>
+                <p className="mt-1 text-sm">
+                  Si la invitación tenía plantilla, debería aparecer aquí al aceptar.
+                  {canManageHr ? ' También puedes asignarlo ahora.' : ''}
+                </p>
               </div>
             ) : (
               <>
-                <div className="mb-4 flex items-center gap-3">
-                  <span className="rounded-full bg-blue-50 dark:bg-blue-900/30 px-3 py-1 text-sm font-bold text-blue-700 dark:text-blue-300">
-                    {computeWeeklyHours(schedule.weekly)}h / semana
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-bold text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                    {computeWeeklyHours(schedule.weekly).toLocaleString('es-ES', { maximumFractionDigits: 1 })} h / semana
                   </span>
                   {schedule.template_id && (
-                    <span className="text-xs text-gray-400 dark:text-gray-500">Plantilla asignada</span>
+                    <span className="text-xs text-gray-400 dark:text-gray-500">Desde plantilla de invitación</span>
+                  )}
+                  {schedule.week_start && (
+                    <span className="text-xs text-gray-400 dark:text-gray-500">
+                      Semana del {schedule.week_start}
+                    </span>
                   )}
                 </div>
 
@@ -1532,38 +1783,39 @@ export function TeamMemberDetail() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-100 dark:border-gray-700">
-                        <th className="py-2 px-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Día</th>
-                        <th className="py-2 px-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Entrada</th>
-                        <th className="py-2 px-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Salida</th>
-                        <th className="py-2 px-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Descanso</th>
-                        <th className="py-2 px-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase">Horas</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Día</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Entrada</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Salida</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Descanso</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">Horas</th>
                       </tr>
                     </thead>
                     <tbody>
                       {WEEKDAYS.map((day) => {
                         const shift = schedule.weekly[day];
-                        if (!shift.enabled) {
+                        if (!shift?.enabled) {
                           return (
                             <tr key={day} className="border-b border-gray-50 dark:border-gray-800">
-                              <td className="py-3 px-3 font-medium text-gray-900 dark:text-gray-100">{weekdayLabels[day]}</td>
-                              <td colSpan={4} className="py-3 px-3 text-gray-400 dark:text-gray-500 italic">Libre</td>
+                              <td className="px-3 py-3 font-medium text-gray-900 dark:text-gray-100">{weekdayLabels[day]}</td>
+                              <td colSpan={4} className="px-3 py-3 italic text-gray-400 dark:text-gray-500">Libre</td>
                             </tr>
                           );
                         }
-                        const [sh, sm] = shift.start.split(':').map(Number);
-                        const [eh, em] = shift.end.split(':').map(Number);
-                        const [bsh, bsm] = shift.breakStart.split(':').map(Number);
-                        const [beh, bem] = shift.breakEnd.split(':').map(Number);
-                        const work = (eh * 60 + em) - (sh * 60 + sm);
-                        const brk = (beh * 60 + bem) - (bsh * 60 + bsm);
-                        const hours = Math.max(0, work - Math.max(0, brk)) / 60;
+                        const hours = computeDayHours(shift);
+                        const breakUsed =
+                          computeDayWorkMinutes(shift) <
+                          computeDayWorkMinutes({ ...shift, breakStart: '00:00', breakEnd: '00:00' });
                         return (
                           <tr key={day} className="border-b border-gray-50 dark:border-gray-800">
-                            <td className="py-3 px-3 font-medium text-gray-900 dark:text-gray-100">{weekdayLabels[day]}</td>
-                            <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{shift.start}</td>
-                            <td className="py-3 px-3 text-gray-700 dark:text-gray-300">{shift.end}</td>
-                            <td className="py-3 px-3 text-gray-500 dark:text-gray-400">{shift.breakStart} - {shift.breakEnd}</td>
-                            <td className="py-3 px-3 font-semibold text-gray-900 dark:text-gray-100">{hours.toFixed(1)}h</td>
+                            <td className="px-3 py-3 font-medium text-gray-900 dark:text-gray-100">{weekdayLabels[day]}</td>
+                            <td className="px-3 py-3 text-gray-700 dark:text-gray-300">{shift.start}</td>
+                            <td className="px-3 py-3 text-gray-700 dark:text-gray-300">{shift.end}</td>
+                            <td className="px-3 py-3 text-gray-500 dark:text-gray-400">
+                              {breakUsed ? `${shift.breakStart} - ${shift.breakEnd}` : '—'}
+                            </td>
+                            <td className="px-3 py-3 font-semibold text-gray-900 dark:text-gray-100">
+                              {hours.toLocaleString('es-ES', { maximumFractionDigits: 1 })}h
+                            </td>
                           </tr>
                         );
                       })}
@@ -1678,7 +1930,7 @@ export function TeamMemberDetail() {
         ═══════════════════════════════════════════════════════════════════════ */}
         {activeTab === 'vacations' && (
           <div className="space-y-4">
-            <a href="/saas/equipo/horarios-vacaciones" className="text-xs font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1">Ver gestión completa en Horarios y Vacaciones →</a>
+            <a href="/saas/equipo/solicitudes" className="text-xs font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1">Ver gestión completa en Solicitudes RRHH →</a>
             {vacationsLoading ? (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
@@ -1688,7 +1940,7 @@ export function TeamMemberDetail() {
                 {/* Balance cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-                    <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Asignados</p>
+                    <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Cargados</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-1">{vacationSummary.allowed} <span className="text-sm font-normal text-gray-400">días</span></p>
                   </div>
                   <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
@@ -1701,8 +1953,8 @@ export function TeamMemberDetail() {
                   </div>
                   <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
                     <p className="text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase">Disponibles</p>
-                    <p className={`text-2xl font-bold mt-1 ${vacationSummary.remaining > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {vacationSummary.remaining} <span className="text-sm font-normal text-gray-400">días</span>
+                    <p className={`text-2xl font-bold mt-1 ${vacationSummary.requestable > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-stone-500 dark:text-stone-400'}`}>
+                      {vacationSummary.requestable} <span className="text-sm font-normal text-gray-400">días</span>
                     </p>
                   </div>
                 </div>
@@ -1734,8 +1986,8 @@ export function TeamMemberDetail() {
                         {vacations.map((vac) => (
                           <tr key={vac._id} className="border-b border-gray-50 dark:border-gray-800 hover:bg-gray-50/50 dark:hover:bg-gray-800/50">
                             <td className="py-3 px-4 text-gray-700 dark:text-gray-300">{leaveLabels[vac.leaveType] || vac.leaveType}</td>
-                            <td className="py-3 px-4 text-gray-700 dark:text-gray-300">{new Date(vac.startDate).toLocaleDateString('es-ES')}</td>
-                            <td className="py-3 px-4 text-gray-700 dark:text-gray-300">{new Date(vac.endDate).toLocaleDateString('es-ES')}</td>
+                            <td className="py-3 px-4 text-gray-700 dark:text-gray-300">{formatDateEs(vac.startDate)}</td>
+                            <td className="py-3 px-4 text-gray-700 dark:text-gray-300">{formatDateEs(vac.endDate)}</td>
                             <td className="py-3 px-4 font-semibold text-gray-900 dark:text-gray-100">{vac.totalDays}</td>
                             <td className="py-3 px-4">
                               <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -1889,7 +2141,11 @@ export function TeamMemberDetail() {
                   className="w-full rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 pl-9 pr-4 py-2.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 outline-none focus:border-blue-400"
                 />
               </div>
-              <button className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors">
+              <button
+                type="button"
+                onClick={() => openPayrollUpload('nomina')}
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+              >
                 <Upload className="w-4 h-4" />
                 Subir archivo
               </button>
@@ -1903,9 +2159,11 @@ export function TeamMemberDetail() {
                     <Receipt className="w-4 h-4 text-emerald-500" />
                     Nóminas y documentos laborales
                   </h4>
-                  {(user?.role === 'Admin' || user?.role === 'Superadmin') && (
+                  {(HR_MANAGER_ROLES.has(String(user?.role || ''))
+                    || Boolean(currentBusiness?.owner_user_id && user?.user_id === currentBusiness.owner_user_id)) && (
                     <button
-                      onClick={() => setShowPayrollUpload(true)}
+                      type="button"
+                      onClick={() => openPayrollUpload('nomina')}
                       className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 px-3 py-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
                     >
                       <Upload className="w-3.5 h-3.5" />
@@ -2043,7 +2301,11 @@ export function TeamMemberDetail() {
                 <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                   <ScrollText className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
                   <p className="text-sm">Contratos de trabajo, anexos y prórrogas.</p>
-                  <button className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/30 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => openPayrollUpload('contrato')}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/30 px-3 py-2 text-xs font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                  >
                     <Upload className="w-3.5 h-3.5" />
                     Subir contrato
                   </button>
@@ -2058,15 +2320,47 @@ export function TeamMemberDetail() {
                   <ShieldCheck className="w-4 h-4 text-purple-500" />
                   Documentación del trabajador
                 </h4>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">DNI/NIE, cuenta bancaria, certificados...</p>
-                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                  <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
-                  <p className="text-sm">Sube documentos de identidad y datos bancarios.</p>
-                  <button className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-purple-50 dark:bg-purple-900/30 px-3 py-2 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors">
-                    <Upload className="w-3.5 h-3.5" />
-                    Subir documento
-                  </button>
-                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">DNI/NIE, pasaporte, permisos…</p>
+                {payrollDocs.filter((d) => ['dni_nie', 'pasaporte', 'permiso_trabajo', 'carnet_conducir'].includes(d.documentType)).length === 0 ? (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    <ShieldCheck className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
+                    <p className="text-sm">Sube documentos de identidad (DNI anverso/reverso).</p>
+                    <button
+                      type="button"
+                      onClick={() => openPayrollUpload('dni_nie')}
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-purple-50 dark:bg-purple-900/30 px-3 py-2 text-xs font-semibold text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      Subir DNI / documento
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {payrollDocs
+                      .filter((d) => ['dni_nie', 'pasaporte', 'permiso_trabajo', 'carnet_conducir'].includes(d.documentType))
+                      .map((doc) => (
+                        <div key={doc._id} className="flex items-center justify-between rounded-xl border border-gray-100 dark:border-gray-700 p-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-gray-900 dark:text-gray-100">{doc.name}</p>
+                            <p className="text-xs text-gray-500">{PAYROLL_DOC_TYPE_LABELS[doc.documentType]}</p>
+                          </div>
+                          {doc.fileData ? (
+                            <a href={doc.fileData} download={doc.fileName || doc.name} className="text-xs font-semibold text-blue-600">
+                              Descargar
+                            </a>
+                          ) : null}
+                        </div>
+                      ))}
+                    <button
+                      type="button"
+                      onClick={() => openPayrollUpload('dni_nie')}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-purple-50 dark:bg-purple-900/30 px-3 py-2 text-xs font-semibold text-purple-700 dark:text-purple-300"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      Subir otro
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2089,7 +2383,7 @@ export function TeamMemberDetail() {
                       <div key={exp._id} className="flex items-center justify-between rounded-xl border border-gray-100 dark:border-gray-700 p-3">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{exp.concept}</p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{exp.category} · {new Date(exp.date).toLocaleDateString('es-ES')}</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{exp.category} · {formatDateEs(exp.date)}</p>
                         </div>
                         <div className="flex items-center gap-3 flex-shrink-0">
                           <span className="font-bold text-sm text-gray-900 dark:text-gray-100">{exp.amount.toFixed(2)} €</span>
@@ -2120,7 +2414,11 @@ export function TeamMemberDetail() {
                 <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                   <File className="w-8 h-8 mx-auto mb-2 text-gray-300 dark:text-gray-600" />
                   <p className="text-sm">Sube certificados, informes y demás documentación.</p>
-                  <button className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-gray-50 dark:bg-gray-700 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => openPayrollUpload('certificado')}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-gray-50 dark:bg-gray-700 px-3 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                  >
                     <Upload className="w-3.5 h-3.5" />
                     Subir documento
                   </button>
@@ -2170,6 +2468,7 @@ export function TeamMemberDetail() {
           member={member}
           currentUser={user!}
           businessId={businessId}
+          initialType={payrollUploadType}
           onClose={() => setShowPayrollUpload(false)}
           onUploaded={(doc) => {
             setPayrollDocs((prev) => [doc, ...prev]);

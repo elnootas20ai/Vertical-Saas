@@ -295,11 +295,21 @@ export function RestaurantSplitBillModal({ total, lines = [], onConfirm, onClose
             </>
           ) : null}
 
+          {tab === 'items' && !itemPartsValid ? (
+            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+              Reparte al menos un artículo a cada parte (ninguna parte puede quedar a 0 €).
+            </p>
+          ) : null}
           <button
             type="button"
             disabled={confirmDisabled}
             onClick={handleConfirm}
             className="w-full min-h-[48px] rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50 touch-manipulation"
+            title={
+              tab === 'items' && !itemPartsValid
+                ? 'Reparte artículos a todas las partes'
+                : undefined
+            }
           >
             {submitting ? 'Dividiendo…' : 'Confirmar división'}
           </button>

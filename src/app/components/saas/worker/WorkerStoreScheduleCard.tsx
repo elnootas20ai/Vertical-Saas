@@ -1,9 +1,16 @@
-import { Store, Clock, MapPin } from 'lucide-react';
+import { Store, Clock, MapPin, CalendarRange } from 'lucide-react';
 import type { WorkCenter } from '../../../lib/workCentersApi';
+import type { DayShift, ScheduleTemplate } from '../../../lib/schedulesApi';
+import {
+  WEEKDAYS,
+  WEEKDAY_LABELS,
+  getMonday,
+} from '../../../lib/schedulesApi';
 import {
   formatStoreHoursToday,
   getScheduleDayKeyForDate,
   listStoreHoursWeek,
+  type StoreHoursToday,
 } from '../../../lib/workerStoreHours';
 import { SCHEDULE_DAY_LABELS_ES } from '../../../lib/businessHoursUtils';
 import { useBusiness } from '../../../context/BusinessContext';
@@ -12,22 +19,73 @@ import { getHrLocationCopy } from '../../../lib/retailLocationCopy';
 interface WorkerStoreScheduleCardProps {
   workCenter: WorkCenter | null;
   storeLabel?: string;
+  /** true si ya hay tienda en la invitación / Equipo (aunque aún no cargue el horario). */
+  hasAssignment?: boolean;
   compact?: boolean;
+  /** Horario de tienda ya calculado sobre el centro real (no stub). */
+  storeHoursToday?: StoreHoursToday | null;
+  /** Turno personal de hoy (Horarios / plantilla de invitación). */
+  personalShiftToday?: DayShift | null;
+  hasPersonalSchedule?: boolean;
+  personalDayOff?: boolean;
+  memberSchedule?: ScheduleTemplate | null;
+  scheduleLoading?: boolean;
+  storeResolving?: boolean;
+}
+
+function shiftLabel(shift: DayShift | null | undefined): string {
+  if (!shift?.enabled) return 'Libre';
+  const start = String(shift.start || '').trim();
+  const end = String(shift.end || '').trim();
+  if (!start || !end) return 'Turno';
+  return `${start} – ${end}`;
 }
 
 export function WorkerStoreScheduleCard({
   workCenter,
   storeLabel,
+  hasAssignment = false,
   compact = false,
+  storeHoursToday: storeHoursProp,
+  personalShiftToday = null,
+  hasPersonalSchedule = false,
+  personalDayOff = false,
+  memberSchedule = null,
+  scheduleLoading = false,
+  storeResolving = false,
 }: WorkerStoreScheduleCardProps) {
   const { currentBusiness } = useBusiness();
   const hrCopy = getHrLocationCopy(currentBusiness?.businessType);
   const todayKey = getScheduleDayKeyForDate();
-  const today = formatStoreHoursToday(workCenter);
-  const week = listStoreHoursWeek(workCenter);
+  const storeToday = storeHoursProp || formatStoreHoursToday(workCenter);
+  const storeWeek = listStoreHoursWeek(workCenter);
   const title = storeLabel || workCenter?.name || hrCopy.workerStoreFallback;
+  const dayLabels = WEEKDAY_LABELS.es;
 
-  if (!workCenter) {
+  const personalHeadline = scheduleLoading
+    ? 'Cargando tu turno…'
+    : personalShiftToday
+      ? `Tu turno: ${shiftLabel(personalShiftToday)}`
+      : hasPersonalSchedule && personalDayOff
+        ? 'Hoy libre (según tu horario)'
+        : hasPersonalSchedule
+          ? 'Sin turno hoy'
+          : null;
+
+  const storeHeadline =
+    storeResolving
+      ? 'Cargando horario de tienda…'
+      : storeToday.status === 'open'
+        ? `Tienda: ${storeToday.headline}`
+        : storeToday.status === 'closed'
+          ? 'Tienda cerrada hoy'
+          : storeToday.status === 'outside_hours'
+            ? `Tienda fuera de horario (${storeToday.from} – ${storeToday.to})`
+            : hasAssignment
+              ? 'Horario de tienda no definido'
+              : null;
+
+  if (!workCenter && !hasAssignment && !hasPersonalSchedule) {
     return (
       <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 p-4">
         <div className="flex items-start gap-3">
@@ -51,12 +109,29 @@ export function WorkerStoreScheduleCard({
             <Store className="w-5 h-5 text-orange-600 shrink-0" />
             <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{title}</p>
-              <p className="text-xs text-gray-600 dark:text-gray-400">
-                Hoy ({SCHEDULE_DAY_LABELS_ES[todayKey]}):{' '}
-                <span className={today.open ? 'font-semibold text-emerald-700 dark:text-emerald-400' : 'font-semibold'}>
-                  {today.open ? today.label : 'Cerrado'}
-                </span>
-              </p>
+              {personalHeadline ? (
+                <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                  {personalHeadline}
+                </p>
+              ) : null}
+              {storeHeadline ? (
+                <p
+                  className={`text-xs ${
+                    storeToday.status === 'open'
+                      ? 'text-gray-600 dark:text-gray-400'
+                      : storeToday.status === 'no_schedule'
+                        ? 'text-gray-500 dark:text-gray-400'
+                        : 'text-rose-600 dark:text-rose-400'
+                  }`}
+                >
+                  {storeHeadline}
+                </p>
+              ) : null}
+              {!personalHeadline && !storeHeadline ? (
+                <p className="text-xs text-gray-500">
+                  Hoy ({SCHEDULE_DAY_LABELS_ES[todayKey]})
+                </p>
+              ) : null}
             </div>
           </div>
           <Clock className="w-5 h-5 text-orange-400 shrink-0" />
@@ -64,6 +139,16 @@ export function WorkerStoreScheduleCard({
       </div>
     );
   }
+
+  const personalWeek = memberSchedule
+    ? WEEKDAYS.map((day) => ({
+        day,
+        label: dayLabels[day],
+        isToday: day === WEEKDAYS[(new Date().getDay() + 6) % 7],
+        text: shiftLabel(memberSchedule.weekly[day]),
+        open: Boolean(memberSchedule.weekly[day]?.enabled),
+      }))
+    : [];
 
   return (
     <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 overflow-hidden">
@@ -76,31 +161,136 @@ export function WorkerStoreScheduleCard({
           <p className="text-xs text-gray-500 dark:text-gray-400">{hrCopy.scheduleCardSubtitle}</p>
         </div>
       </div>
-      <div className="px-5 py-3 bg-orange-50/60 dark:bg-orange-950/20 border-b border-orange-100 dark:border-orange-900/40">
-        <p className="text-xs uppercase tracking-wide text-orange-700 dark:text-orange-300 font-semibold mb-1">Hoy</p>
-        <p className={`text-lg font-bold ${today.open ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500'}`}>
-          {today.open ? today.label : 'Cerrado'}
+
+      {/* Turno personal (prioridad) */}
+      <div className="px-5 py-3 bg-emerald-50/70 dark:bg-emerald-950/20 border-b border-emerald-100 dark:border-emerald-900/40">
+        <p className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300 font-semibold mb-1 flex items-center gap-1.5">
+          <CalendarRange className="w-3.5 h-3.5" />
+          Tu horario
         </p>
+        {scheduleLoading ? (
+          <p className="text-sm text-gray-500">Cargando tu turno…</p>
+        ) : personalShiftToday ? (
+          <>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              {shiftLabel(personalShiftToday)}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Turno de hoy ({SCHEDULE_DAY_LABELS_ES[todayKey]}). Semana del {memberSchedule?.week_start || getMonday()}.
+            </p>
+          </>
+        ) : hasPersonalSchedule && personalDayOff ? (
+          <>
+            <p className="text-lg font-bold text-gray-700 dark:text-gray-200">Hoy libre</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              Día libre según tu horario.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              Sin turno asignado
+            </p>
+          </>
+        )}
       </div>
-      <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {week.map((row) => (
-          <div
-            key={row.dayKey}
-            className={`flex items-center justify-between px-5 py-2.5 text-sm ${
-              row.isToday ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''
-            }`}
-          >
-            <span className={`${row.isToday ? 'font-semibold text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>
-              {row.label}
-              {row.isToday ? ' · hoy' : ''}
-            </span>
-            <span className={row.open ? 'text-gray-900 dark:text-gray-100 font-medium' : 'text-gray-400'}>
-              {row.text}
-            </span>
+
+      {/* Horario de tienda */}
+      <div className="px-5 py-3 bg-orange-50/60 dark:bg-orange-950/20 border-b border-orange-100 dark:border-orange-900/40">
+        <p className="text-xs uppercase tracking-wide text-orange-700 dark:text-orange-300 font-semibold mb-1">
+          Horario de la tienda
+        </p>
+        {storeResolving ? (
+          <p className="text-sm text-gray-500">Cargando…</p>
+        ) : storeToday.status === 'open' ? (
+          <>
+            <p className="text-lg font-bold text-gray-900 dark:text-gray-100">{storeToday.headline}</p>
+            <p className="text-xs text-gray-500 mt-0.5">Abierta ahora</p>
+          </>
+        ) : storeToday.status === 'outside_hours' ? (
+          <>
+            <p className="text-lg font-bold text-rose-600 dark:text-rose-400">Fuera de horario</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Horario del día: {storeToday.from} – {storeToday.to}. Puedes fichar igual (trabajo fuera / local cerrado).
+            </p>
+          </>
+        ) : storeToday.status === 'closed' ? (
+          <>
+            <p className="text-lg font-bold text-rose-600 dark:text-rose-400">Cerrada hoy</p>
+            <p className="text-xs text-gray-500 mt-0.5">Hoy la tienda está cerrada. Puedes fichar igual si te corresponde.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              No definido en el local
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              El fichaje usa tu turno y la tienda asignada.
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* Semana: prioriza patrón personal */}
+      {personalWeek.length > 0 ? (
+        <div className="divide-y divide-gray-100 dark:divide-gray-700">
+          <div className="px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            Tu patrón semanal
           </div>
-        ))}
-      </div>
-      {workCenter.address ? (
+          {personalWeek.map((row) => (
+            <div
+              key={row.day}
+              className={`flex items-center justify-between px-5 py-2.5 text-sm ${
+                row.isToday ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''
+              }`}
+            >
+              <span
+                className={
+                  row.isToday
+                    ? 'font-semibold text-blue-700 dark:text-blue-300'
+                    : 'text-gray-700 dark:text-gray-300'
+                }
+              >
+                {row.label}
+                {row.isToday ? ' · hoy' : ''}
+              </span>
+              <span className={row.open ? 'text-gray-900 dark:text-gray-100 font-medium' : 'text-gray-400'}>
+                {row.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : storeWeek.length > 0 ? (
+        <div className="divide-y divide-gray-100 dark:divide-gray-700">
+          <div className="px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            Semana de la tienda
+          </div>
+          {storeWeek.map((row) => (
+            <div
+              key={row.dayKey}
+              className={`flex items-center justify-between px-5 py-2.5 text-sm ${
+                row.isToday ? 'bg-blue-50/60 dark:bg-blue-950/20' : ''
+              }`}
+            >
+              <span
+                className={
+                  row.isToday
+                    ? 'font-semibold text-blue-700 dark:text-blue-300'
+                    : 'text-gray-700 dark:text-gray-300'
+                }
+              >
+                {row.label}
+                {row.isToday ? ' · hoy' : ''}
+              </span>
+              <span className={row.open ? 'text-gray-900 dark:text-gray-100 font-medium' : 'text-gray-400'}>
+                {row.text}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {workCenter?.address ? (
         <div className="px-5 py-3 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 border-t border-gray-100 dark:border-gray-700">
           <MapPin className="w-3.5 h-3.5 shrink-0" />
           {[workCenter.address, workCenter.city].filter(Boolean).join(', ')}

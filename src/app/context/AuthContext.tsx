@@ -86,7 +86,14 @@ export interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isInitializing: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; redirectTo?: string; error?: string; code?: string; lockUntil?: string }>;
+  login: (email: string, password: string) => Promise<{
+    success: boolean;
+    redirectTo?: string;
+    error?: string;
+    code?: string;
+    lockUntil?: string;
+    otpHint?: string;
+  }>;
   register: (data: RegisterPayload) => Promise<{
     success: boolean;
     redirectTo?: string;
@@ -269,9 +276,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
-    setUser(nextUser);
+    // Completitud siempre desde personalData/employment (evita banner con flag viejo).
+    const normalized: User = {
+      ...nextUser,
+      workerProfileCompletion: computeWorkerProfileCompletion(nextUser),
+      workerIdentityCompleted:
+        Boolean(nextUser.workerIdentityCompleted) || hasMinimumWorkerIdentity(nextUser),
+    };
+    setUser(normalized);
     setIsAuthenticated(true);
-    persistSession(nextUser);
+    persistSession(normalized);
   }, []);
 
   useEffect(() => {
@@ -469,10 +483,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const login = async (email: string, password: string): Promise<{ success: boolean; redirectTo?: string; error?: string; code?: string; lockUntil?: string }> => {
+  const login = async (
+    email: string,
+    password: string,
+  ): Promise<{
+    success: boolean;
+    redirectTo?: string;
+    error?: string;
+    code?: string;
+    lockUntil?: string;
+    otpHint?: string;
+  }> => {
     try {
       clearVertialClientCaches();
       const response = await loginRequest(email, password);
+      if ((response as { requiresLoginCode?: boolean }).requiresLoginCode) {
+        return {
+          success: false,
+          code: 'REQUIRES_LOGIN_CODE',
+          error:
+            typeof (response as { message?: string }).message === 'string'
+              ? (response as { message: string }).message
+              : 'Introduce el código que te hemos enviado por email',
+          otpHint:
+            typeof (response as { otpHint?: string }).otpHint === 'string'
+              ? (response as { otpHint: string }).otpHint
+              : undefined,
+        };
+      }
       if (!response.user) {
         return { success: false, error: 'No se recibió usuario desde el backend' };
       }
@@ -776,15 +814,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const listUsers = async (businessId?: string): Promise<User[]> => {
+  const listUsers = useCallback(async (businessId?: string): Promise<User[]> => {
     const response = await listUsersRequest(businessId);
     return response.users || [];
-  };
+  }, []);
 
-  const listRoles = async (): Promise<RoleDefinition[]> => {
+  const listRoles = useCallback(async (): Promise<RoleDefinition[]> => {
     const response = await listRolesRequest();
     return response.roles || [];
-  };
+  }, []);
 
   const acceptInvite = async (
     token: string,

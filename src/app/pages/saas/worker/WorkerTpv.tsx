@@ -28,7 +28,7 @@ import { WorkerTpvClinic } from './WorkerTpvClinic';
 import { WorkerTpvHotel } from './WorkerTpvHotel';
 import { WorkerTpvTaxi } from './WorkerTpvTaxi';
 import { WorkerTpvStockReview } from './WorkerTpvStockReview';
-import { ButcherTpvPage } from '../ButcherTpvPage';
+import { WorkerTpvButcherShop } from './WorkerTpvButcherShop';
 import { HairSalonWorkstationPage } from '../HairSalonWorkstationPage';
 import { Layout } from '../../../components/saas/Layout';
 import { TpvChromeScope } from '../../../context/TpvChromeContext';
@@ -76,7 +76,7 @@ const VERTICAL_MODULE: Partial<Record<BusinessType, React.ComponentType>> = {
   academy: WorkerTpvAcademy,
   gym: WorkerTpvGym,
   realEstate: WorkerTpvRealEstate,
-  butcherShop: ButcherTpvPage,
+  butcherShop: WorkerTpvButcherShop,
 };
 
 const VERTICAL_INFO: Partial<Record<BusinessType, { label: string; icon: React.ReactNode }>> = {

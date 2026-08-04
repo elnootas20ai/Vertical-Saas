@@ -6,6 +6,8 @@ export type CompraListItem = {
   id: string;
   vehicleLabel: string;
   status: PurchaseStatus;
+  /** Estado real de adquisición en API (para transiciones). */
+  acquisitionStatus?: string;
   purchaseDate: string;
   purchasePrice: number;
   supplierName: string;

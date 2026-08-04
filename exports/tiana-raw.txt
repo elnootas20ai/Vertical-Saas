@@ -1,0 +1,387 @@
+﻿{
+  "day": "2026-07-28",
+  "pdv": "MODOMIO TIANA",
+  "session": {
+    "id": "tpvreg-b48a8cf0-2982-44a5-a3aa-259177d2d2e3",
+    "status": "closed",
+    "openedAt": "2026-07-28T18:41:41.694Z",
+    "closedAt": "2026-07-28T21:55:07.574Z",
+    "productClosingCounts": {
+      "pizza": 33,
+      "burger": 4,
+      "taco": 5,
+      "byChannel": {
+        "glovo": {
+          "pizza": 0,
+          "burger": 0,
+          "taco": 0
+        },
+        "ubereats": {
+          "pizza": 4,
+          "burger": 1,
+          "taco": 1
+        },
+        "justeat": {
+          "pizza": 8,
+          "burger": 2,
+          "taco": 2
+        },
+        "flipdish": {
+          "pizza": 2,
+          "burger": 0,
+          "taco": 0
+        }
+      }
+    },
+    "sessionMoney": {
+      "efectivo": 86.4,
+      "visa": 202.1,
+      "bizum": 0,
+      "justeat": 174.16,
+      "uber": 98.18,
+      "glovo": 0,
+      "app": 34.19,
+      "total": 595.03
+    }
+  },
+  "ordersCount": 14,
+  "ordersByChannel": {
+    "tpv": 14
+  },
+  "modomio": {
+    "money": {
+      "efectivo": 78.5,
+      "visa": 176.3,
+      "bizum": 0,
+      "justeat": 0,
+      "uber": 0,
+      "glovo": 0,
+      "app": 0,
+      "otro": 47.49,
+      "total": 302.29
+    },
+    "pizza": 19,
+    "orders": 11,
+    "orderRows": [
+      {
+        "orderNumber": "PED-5118L8",
+        "channel": "tpv",
+        "payBucket": "visa",
+        "paymentMethod": "tarjeta",
+        "amount": 63.5,
+        "pizza": 4,
+        "money": {
+          "efectivo": 0,
+          "visa": 63.5,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 63.5
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:06:23.984Z"
+      },
+      {
+        "orderNumber": "PED-5268LO",
+        "channel": "tpv",
+        "payBucket": "efectivo",
+        "paymentMethod": "efectivo",
+        "amount": 7,
+        "pizza": 0,
+        "money": {
+          "efectivo": 7,
+          "visa": 0,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 7
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:38:16.853Z"
+      },
+      {
+        "orderNumber": "PED-52IEH9",
+        "channel": "tpv",
+        "payBucket": "visa",
+        "paymentMethod": "tarjeta",
+        "amount": 32.8,
+        "pizza": 2,
+        "money": {
+          "efectivo": 0,
+          "visa": 32.8,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 32.8
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:47:44.346Z"
+      },
+      {
+        "orderNumber": "PED-52GC8I",
+        "channel": "tpv",
+        "payBucket": "otro",
+        "paymentMethod": "otro",
+        "amount": 31.99,
+        "pizza": 2,
+        "money": {
+          "efectivo": 0,
+          "visa": 0,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 31.99,
+          "total": 31.99
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:46:08.209Z"
+      },
+      {
+        "orderNumber": "PED-52ARET",
+        "channel": "tpv",
+        "payBucket": "visa",
+        "paymentMethod": "tarjeta",
+        "amount": 47.5,
+        "pizza": 3,
+        "money": {
+          "efectivo": 0,
+          "visa": 47.5,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 47.5
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:41:47.849Z"
+      },
+      {
+        "orderNumber": "PED-523JII",
+        "channel": "tpv",
+        "payBucket": "otro",
+        "paymentMethod": "otro",
+        "amount": 15.5,
+        "pizza": 1,
+        "money": {
+          "efectivo": 0,
+          "visa": 0,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 15.5,
+          "total": 15.5
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:36:11.345Z"
+      },
+      {
+        "orderNumber": "PED-5305IZ",
+        "channel": "tpv",
+        "payBucket": "efectivo",
+        "paymentMethod": "efectivo",
+        "amount": 32.5,
+        "pizza": 2,
+        "money": {
+          "efectivo": 32.5,
+          "visa": 0,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 32.5
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T20:01:32.548Z"
+      },
+      {
+        "orderNumber": "PED-519HTY",
+        "channel": "tpv",
+        "payBucket": "visa",
+        "paymentMethod": "tarjeta",
+        "amount": 17,
+        "pizza": 1,
+        "money": {
+          "efectivo": 0,
+          "visa": 17,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 17
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:12:49.578Z"
+      },
+      {
+        "orderNumber": "PED-50XX0K",
+        "channel": "tpv",
+        "payBucket": "visa",
+        "paymentMethod": "tarjeta",
+        "amount": 15.5,
+        "pizza": 1,
+        "money": {
+          "efectivo": 0,
+          "visa": 15.5,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 15.5
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:03:49.025Z"
+      },
+      {
+        "orderNumber": "PED-51UVCD",
+        "channel": "tpv",
+        "payBucket": "efectivo",
+        "paymentMethod": "efectivo",
+        "amount": 22,
+        "pizza": 2,
+        "money": {
+          "efectivo": 22,
+          "visa": 0,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 22
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:29:26.617Z"
+      },
+      {
+        "orderNumber": "PED-515IAM",
+        "channel": "tpv",
+        "payBucket": "efectivo",
+        "paymentMethod": "efectivo",
+        "amount": 17,
+        "pizza": 1,
+        "money": {
+          "efectivo": 17,
+          "visa": 0,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 17
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:09:43.531Z"
+      }
+    ]
+  },
+  "blackburger": {
+    "money": {
+      "efectivo": 7.9,
+      "visa": 25.8,
+      "bizum": 0,
+      "justeat": 0,
+      "uber": 0,
+      "glovo": 0,
+      "app": 0,
+      "otro": 0,
+      "total": 33.7
+    },
+    "burger": 1,
+    "taco": 2,
+    "totalBurgers": 3,
+    "orders": 3,
+    "orderRows": [
+      {
+        "orderNumber": "PED-56KBSC",
+        "channel": "tpv",
+        "payBucket": "visa",
+        "paymentMethod": "tarjeta",
+        "amount": 12.9,
+        "burger": 0,
+        "taco": 1,
+        "totalUnits": 1,
+        "money": {
+          "efectivo": 0,
+          "visa": 12.9,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 12.9
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T21:41:12.648Z"
+      },
+      {
+        "orderNumber": "PED-56LGB3",
+        "channel": "tpv",
+        "payBucket": "efectivo",
+        "paymentMethod": "efectivo",
+        "amount": 7.9,
+        "burger": 0,
+        "taco": 1,
+        "totalUnits": 1,
+        "money": {
+          "efectivo": 7.9,
+          "visa": 0,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 7.9
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T21:42:05.250Z"
+      },
+      {
+        "orderNumber": "PED-51FLEC",
+        "channel": "tpv",
+        "payBucket": "visa",
+        "paymentMethod": "tarjeta",
+        "amount": 12.9,
+        "burger": 1,
+        "taco": 0,
+        "totalUnits": 1,
+        "money": {
+          "efectivo": 0,
+          "visa": 12.9,
+          "bizum": 0,
+          "justeat": 0,
+          "uber": 0,
+          "glovo": 0,
+          "app": 0,
+          "otro": 0,
+          "total": 12.9
+        },
+        "status": "entregado",
+        "createdAt": "2026-07-28T19:17:33.756Z"
+      }
+    ]
+  }
+}

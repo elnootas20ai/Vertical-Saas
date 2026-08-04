@@ -1,6 +1,7 @@
 import {
   cancelDeliveryOrderRequest,
   createDeliveryOrderRequest,
+  listTpvRegisterSessionsRequest,
   updateDeliveryOrderRequest,
   updateTpvRegisterSessionRequest,
   type DeliveryOrder,
@@ -13,12 +14,51 @@ import {
   removeTpvOfflineItem,
   type TpvOfflineQueueItem,
 } from './tpvTabletOffline';
+import { mergeTpvRegisterTransactions } from './tpvLocalCajaSale';
 
 export type TpvOfflineSyncResult = {
   synced: number;
   failed: number;
   remaining: number;
 };
+
+function queuePriority(type: string): number {
+  if (type === 'order_create' || type === 'order_update' || type === 'order_cancel') return 0;
+  if (type === 'register_tx' || type === 'sale') return 1;
+  return 2;
+}
+
+async function syncRegisterSession(
+  userId: string,
+  localSession: TpvRegisterSession,
+): Promise<boolean> {
+  const list = await listTpvRegisterSessionsRequest(userId);
+  const remote = list.find((s) => s._id === localSession._id);
+  if (!remote) {
+    await updateTpvRegisterSessionRequest(userId, localSession);
+    return true;
+  }
+  const mergedTxs = mergeTpvRegisterTransactions(remote.transactions, localSession.transactions);
+  const linkedOrderIds = [...new Set([
+    ...(remote.linkedOrderIds || []),
+    ...(localSession.linkedOrderIds || []),
+  ])];
+  const salesByChannel: Record<string, number> = {};
+  for (const t of mergedTxs) {
+    if (t.type === 'sale' && t.channel) {
+      salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + Number(t.amount || 0);
+    }
+  }
+  await updateTpvRegisterSessionRequest(userId, {
+    ...remote,
+    ...localSession,
+    _rev: remote._rev,
+    transactions: mergedTxs,
+    linkedOrderIds,
+    salesByChannel,
+  });
+  return true;
+}
 
 async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
   const p = item.payload;
@@ -37,6 +77,8 @@ async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
     const userId = String(p.userId || '').trim();
     const order = p.order as DeliveryOrder | undefined;
     if (!userId || !order?._id) return false;
+    // Pedidos offline temporales no se pueden actualizar en servidor hasta crear.
+    if (String(order._id).startsWith('offline-order:')) return false;
     await updateDeliveryOrderRequest(userId, order);
     return true;
   }
@@ -51,42 +93,32 @@ async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
       return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err || '');
-      // Idempotente: si ya se canceló online, la cola no debe quedarse pillada.
       if (/ya est[aá] cancelado|already cancelled|404|no encontrado/i.test(msg)) return true;
       throw err;
     }
   }
 
-  if (item.type === 'register_tx') {
+  if (item.type === 'register_tx' || item.type === 'sale') {
     const userId = String(p.userId || '').trim();
     const session = p.session as TpvRegisterSession | undefined;
     if (!userId || !session?._id) return false;
-    await updateTpvRegisterSessionRequest(userId, session);
+    await syncRegisterSession(userId, session);
     return true;
   }
 
-  if (item.type === 'sale') {
-    const userId = String(p.userId || '').trim();
-    const sessionId = String(p.sessionId || '').trim();
-    const session = p.session as TpvRegisterSession | undefined;
-    const tx = p.tx as TpvRegisterTransaction | undefined;
-    if (!userId || !sessionId || !session || !tx) return false;
-    await updateTpvRegisterSessionRequest(userId, session);
-    return true;
-  }
-
-  // clock_in / clock_out: sincronización futura vía API de fichajes
   return false;
 }
 
-/** Intenta vaciar la cola offline. Devuelve estadísticas. */
+/** Intenta vaciar la cola offline (pedidos antes que caja). Sync silencioso por defecto. */
 export async function flushTpvOfflineQueue(): Promise<TpvOfflineSyncResult> {
   if (!isBrowserOnline()) {
     const remaining = listTpvOfflineQueue().length;
     return { synced: 0, failed: 0, remaining };
   }
 
-  const queue = listTpvOfflineQueue();
+  const queue = [...listTpvOfflineQueue()].sort(
+    (a, b) => queuePriority(a.type) - queuePriority(b.type) || a.createdAt.localeCompare(b.createdAt),
+  );
   let synced = 0;
   let failed = 0;
 

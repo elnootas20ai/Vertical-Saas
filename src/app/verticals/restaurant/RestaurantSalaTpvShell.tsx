@@ -1,7 +1,8 @@
 /**
  * Shell TPV sala (CEO / tablet).
- * Flujo: local → fichaje + caja (TpvRegisterGate) → plano mesas → TPV de mesa.
- * No monta WorkerTpvDelivery. El cobro de mesa usa RestaurantTableTpvFlow.
+ * Flujo: local → fichaje + caja → plano mesas → TPV de mesa.
+ *
+ * Importante: no disparar notify/refresh en bucle (eso “no para de abrirse”).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,18 +18,20 @@ import { resolveBusinessScopeId } from '../../lib/deliverySetup';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import {
   coerceSelectedPdvId,
-  DELIVERY_ACTIVE_STORE_CHANGED,
   notifyDeliveryActiveStoreChanged,
   readDeliveryOpsSelectedPdvId,
   writeDeliveryOpsSelectedPdvId,
 } from '../../lib/deliveryOpsPdvSelection';
 import { needsCeoTpvStoreBootstrap } from '../../lib/ceoTpvStoreBootstrap';
-import { RESTAURANT_CAJA_PATH } from '../../lib/retailOpsPaths';
-import {
-  bootstrapRestaurantCeoTpvStores,
-  buildRestaurantCeoTpvStoreRows,
-} from './ceoTpvStores';
+import { bootstrapRestaurantCeoTpvStores, buildRestaurantCeoTpvStoreRows } from './ceoTpvStores';
 import { RestaurantTpvFloorBoard } from './RestaurantTpvFloorBoard';
+import { RestaurantTabletBottomNav } from './RestaurantTabletBottomNav';
+import type { DeliverySidebarStoreRow, PointOfSale } from '../../lib/deliveryApi';
+import { isBrowserOnline } from '../../lib/tpvTabletOffline';
+import { flushTpvOfflineQueue } from '../../lib/tpvOfflineSync';
+
+const SALA_PATH = '/saas/sala';
+const RESTAURANT_OPS_PATH = '/saas/restaurant-ops';
 
 type Props = {
   tabletMode?: boolean;
@@ -39,6 +42,7 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   const { currentBusiness, businesses, businessesFetchSettled } = useBusiness();
   const {
     pointsOfSale,
+    allPointsOfSale,
     retailWorkCenters,
     activeSalesPointId,
     setActiveSalesPoint,
@@ -55,32 +59,65 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
   const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
   const [forceStorePicker, setForceStorePicker] = useState(false);
   const [ceoBootstrapLoading, setCeoBootstrapLoading] = useState(false);
+  const [pdvWaitTimedOut, setPdvWaitTimedOut] = useState(false);
+  const [seedPdvs, setSeedPdvs] = useState<PointOfSale[]>([]);
+  const [seedRows, setSeedRows] = useState<DeliverySidebarStoreRow[]>([]);
+
   const ceoBootstrapDoneRef = useRef(false);
   const ceoBootstrapInflightRef = useRef(false);
-  const lastSyncedStorePdvRef = useRef<string | null>(null);
+  const lastBusinessIdRef = useRef<string | null>(null);
+  const pinnedPdvRef = useRef<string | null>(null);
 
+  // Solo al cambiar de empresa de verdad (no en cada render / Strict Mode).
   useEffect(() => {
+    if (!businessId) return;
+    if (lastBusinessIdRef.current === businessId) return;
+    lastBusinessIdRef.current = businessId;
     ceoBootstrapDoneRef.current = false;
     ceoBootstrapInflightRef.current = false;
+    pinnedPdvRef.current = null;
+    setSelectedPdvId(null);
+    setForceStorePicker(false);
+    setPdvWaitTimedOut(false);
+    setSeedPdvs([]);
+    setSeedRows([]);
   }, [businessId]);
 
-  const storeRows = useMemo(
-    () =>
-      buildRestaurantCeoTpvStoreRows(
-        retailWorkCenters,
-        pointsOfSale,
-        currentBusiness,
-        businesses,
-      ),
-    [retailWorkCenters, pointsOfSale, currentBusiness, businesses],
-  );
+  // Vaciar cola offline de sala al entrar en TPV con red.
+  useEffect(() => {
+    if (!isBrowserOnline()) return;
+    void flushTpvOfflineQueue();
+  }, []);
+
+  const pdvPool = useMemo(() => {
+    const fromScope = pointsOfSale.filter((p) => p.active !== false);
+    if (fromScope.length > 0) return fromScope;
+    const fromAll = allPointsOfSale.filter((p) => p.active !== false);
+    if (fromAll.length > 0) return fromAll;
+    return seedPdvs.filter((p) => p.active !== false);
+  }, [pointsOfSale, allPointsOfSale, seedPdvs]);
+
+  const storeRows = useMemo(() => {
+    const built = buildRestaurantCeoTpvStoreRows(
+      retailWorkCenters,
+      pdvPool,
+      currentBusiness,
+      businesses,
+    );
+    if (built.length > 0) return built;
+    return seedRows;
+  }, [retailWorkCenters, pdvPool, currentBusiness, businesses, seedRows]);
 
   const shouldBootstrap = useMemo(() => {
     if (tabletMode) return false;
     if (!businessesFetchSettled || !businessId || !dataUserId || !user || !currentBusiness) {
       return false;
     }
-    return needsCeoTpvStoreBootstrap(retailWorkCenters, pointsOfSale, storeRows);
+    if (ceoBootstrapDoneRef.current) return false;
+    if (pdvPool.length > 0) {
+      return needsCeoTpvStoreBootstrap(retailWorkCenters, pointsOfSale, storeRows);
+    }
+    return true;
   }, [
     tabletMode,
     businessesFetchSettled,
@@ -91,6 +128,7 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
     retailWorkCenters,
     pointsOfSale,
     storeRows,
+    pdvPool.length,
   ]);
 
   useEffect(() => {
@@ -105,15 +143,34 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
 
     void (async () => {
       try {
-        await bootstrapRestaurantCeoTpvStores(user, currentBusiness, businesses, {
+        const state = await bootstrapRestaurantCeoTpvStores(user, currentBusiness, businesses, {
           accountBusinessCount: businesses.length,
         });
         if (cancelled) return;
+
+        const nextRows = buildRestaurantCeoTpvStoreRows(
+          state.workCenters || [],
+          state.pointsOfSale || [],
+          currentBusiness,
+          businesses,
+        );
+        const rowPdvIds = new Set(
+          nextRows.map((r) => String(r.pdvId || '').trim()).filter(Boolean),
+        );
+        const nextPdvs = (state.pointsOfSale || []).filter((p) => {
+          if (p.active === false) return false;
+          if (rowPdvIds.size === 0) return true;
+          return rowPdvIds.has(String(p._id || '').trim());
+        });
+
+        setSeedPdvs(nextPdvs);
+        setSeedRows(nextRows);
         ceoBootstrapDoneRef.current = true;
-        window.dispatchEvent(new Event('work-centers:changed'));
-        await refreshStores();
+
+        // Refresco silencioso: SIN work-centers:changed (eso reabría el gate en bucle).
+        void refreshStores().catch(() => null);
       } catch {
-        /* selector manual */
+        ceoBootstrapDoneRef.current = true;
       } finally {
         ceoBootstrapInflightRef.current = false;
         if (!cancelled) setCeoBootstrapLoading(false);
@@ -122,15 +179,12 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
 
     return () => {
       cancelled = true;
-      ceoBootstrapInflightRef.current = false;
+      // No resetear inflight aquí: Strict Mode cancela y relanzaría bootstrap en bucle.
     };
   }, [shouldBootstrap, user, currentBusiness, businesses, refreshStores]);
 
   const effectiveStoresLoading = storesLoading || ceoBootstrapLoading;
-  const activePdvs = useMemo(
-    () => pointsOfSale.filter((p) => p.active !== false),
-    [pointsOfSale],
-  );
+  const activePdvs = pdvPool;
 
   const resolvedInitialPdvId = useMemo(() => {
     if (forceStorePicker || !businessId || !dataUserId || activePdvs.length === 0) return null;
@@ -138,36 +192,83 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
     return coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
   }, [forceStorePicker, businessId, dataUserId, activePdvs, activeSalesPointId]);
 
-  const effectivePdvId = forceStorePicker ? null : (selectedPdvId || resolvedInitialPdvId);
+  const scopedSelectedPdvId = useMemo(() => {
+    const id = String(selectedPdvId || '').trim();
+    if (!id) return null;
+    if (activePdvs.some((p) => p._id === id)) return id;
+    return null;
+  }, [selectedPdvId, activePdvs]);
+
+  const effectivePdvId = forceStorePicker
+    ? null
+    : (scopedSelectedPdvId || resolvedInitialPdvId || pinnedPdvRef.current);
+
+  // Fijar PDV una vez y no cambiar (evita remount del gate).
+  useEffect(() => {
+    if (!effectivePdvId) return;
+    if (pinnedPdvRef.current === effectivePdvId) return;
+    if (activePdvs.some((p) => p._id === effectivePdvId)) {
+      pinnedPdvRef.current = effectivePdvId;
+    }
+  }, [effectivePdvId, activePdvs]);
+
+  const gatePdvId = useMemo(() => {
+    const pinned = pinnedPdvRef.current;
+    if (pinned && activePdvs.some((p) => p._id === pinned)) return pinned;
+    return effectivePdvId || undefined;
+  }, [effectivePdvId, activePdvs]);
 
   const awaitingPdvResolution =
     !tabletMode
     && !forceStorePicker
-    && !effectivePdvId
+    && !gatePdvId
     && activePdvs.length === 0
-    && (effectiveStoresLoading || !businessesFetchSettled || !businessId || !dataUserId);
-
-  useEffect(() => {
-    lastSyncedStorePdvRef.current = null;
-  }, [businessId]);
-
-  useEffect(() => {
-    if (forceStorePicker || !businessId || !dataUserId) return;
-    const pdvId = coerceSelectedPdvId(
-      activePdvs,
-      readDeliveryOpsSelectedPdvId(businessId, dataUserId) || activeSalesPointId,
+    && (
+      effectiveStoresLoading
+      || shouldBootstrap
+      || !businessesFetchSettled
+      || !businessId
+      || !dataUserId
     );
-    if (!pdvId) return;
-    setSelectedPdvId((prev) => (prev === pdvId ? prev : pdvId));
-    if (lastSyncedStorePdvRef.current === pdvId && activeSalesPointId === pdvId) return;
-    if (activeSalesPointId !== pdvId) {
-      lastSyncedStorePdvRef.current = pdvId;
-      setActiveSalesPoint(pdvId);
+
+  const noStoresConfigured =
+    !tabletMode
+    && !forceStorePicker
+    && !gatePdvId
+    && !effectiveStoresLoading
+    && businessesFetchSettled
+    && Boolean(businessId)
+    && Boolean(dataUserId)
+    && activePdvs.length === 0
+    && ceoBootstrapDoneRef.current
+    && pdvWaitTimedOut;
+
+  useEffect(() => {
+    if (!awaitingPdvResolution) {
+      setPdvWaitTimedOut(false);
       return;
     }
-    lastSyncedStorePdvRef.current = pdvId;
+    const timer = window.setTimeout(() => setPdvWaitTimedOut(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, [awaitingPdvResolution]);
+
+  // Elegir local UNA vez, sin notify (el notify reabría el TPV en bucle).
+  useEffect(() => {
+    if (tabletMode || forceStorePicker || selectedPdvId || pinnedPdvRef.current) return;
+    if (!businessId || !dataUserId || activePdvs.length === 0) return;
+    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const id = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
+    if (!id) return;
+    pinnedPdvRef.current = id;
+    setSelectedPdvId(id);
+    if (activeSalesPointId !== id) {
+      setActiveSalesPoint(id);
+    }
+    writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
   }, [
+    tabletMode,
     forceStorePicker,
+    selectedPdvId,
     businessId,
     dataUserId,
     activePdvs,
@@ -175,47 +276,64 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
     setActiveSalesPoint,
   ]);
 
-  useEffect(() => {
-    const onStore = () => {
-      if (forceStorePicker || !businessId || !dataUserId) return;
-      const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-      const pdvId = coerceSelectedPdvId(activePdvs, saved || activeSalesPointId);
-      if (pdvId) setSelectedPdvId(pdvId);
-    };
-    window.addEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
-    return () => window.removeEventListener(DELIVERY_ACTIVE_STORE_CHANGED, onStore);
-  }, [forceStorePicker, businessId, dataUserId, activePdvs, activeSalesPointId]);
-
   const selectedPdvName = useMemo(() => {
-    if (!effectivePdvId) return '';
-    return pointsOfSale.find((p) => p._id === effectivePdvId)?.name || '';
-  }, [effectivePdvId, pointsOfSale]);
+    const id = gatePdvId || '';
+    if (!id) return '';
+    return (
+      pdvPool.find((p) => p._id === id)?.name
+      || pointsOfSale.find((p) => p._id === id)?.name
+      || allPointsOfSale.find((p) => p._id === id)?.name
+      || ''
+    );
+  }, [gatePdvId, pdvPool, pointsOfSale, allPointsOfSale]);
 
   const handleSelectStore = useCallback(
     (pdvId: string) => {
       const id = String(pdvId || '').trim();
       if (!id) return;
+      pinnedPdvRef.current = id;
       if (businessId && dataUserId) {
         writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
-        notifyDeliveryActiveStoreChanged();
       }
       setActiveSalesPoint(id);
       setForceStorePicker(false);
       setSelectedPdvId(id);
+      // Notify solo en elección manual explícita.
+      notifyDeliveryActiveStoreChanged();
     },
     [businessId, dataUserId, setActiveSalesPoint],
   );
 
   const handleChangeStore = useCallback(() => {
+    pinnedPdvRef.current = null;
     if (businessId && dataUserId) {
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, null);
-      notifyDeliveryActiveStoreChanged();
     }
     setForceStorePicker(true);
     setSelectedPdvId(null);
   }, [businessId, dataUserId]);
 
-  if (awaitingPdvResolution) {
+  if (noStoresConfigured) {
+    return (
+      <div className="flex h-[100svh] min-h-[100svh] flex-col items-center justify-center gap-4 bg-stone-100 p-6 text-center dark:bg-stone-950">
+        <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+          No hay locales configurados
+        </p>
+        <p className="max-w-sm text-sm text-stone-500">
+          Crea el local con PDV activo en Configuración antes de abrir el TPV.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate('/saas/settings/tienda')}
+          className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white"
+        >
+          Configurar local
+        </button>
+      </div>
+    );
+  }
+
+  if (awaitingPdvResolution && !pdvWaitTimedOut) {
     return (
       <div className="flex h-[100svh] min-h-[100svh] items-center justify-center bg-stone-100 dark:bg-stone-950">
         <div className="px-6 text-center">
@@ -226,7 +344,38 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
     );
   }
 
-  if (!tabletMode && (!effectivePdvId || forceStorePicker)) {
+  if (awaitingPdvResolution && pdvWaitTimedOut) {
+    return (
+      <div className="flex h-[100svh] min-h-[100svh] items-center justify-center bg-stone-100 dark:bg-stone-950">
+        <div className="px-6 text-center">
+          <p className="mb-2 text-sm font-semibold text-stone-900 dark:text-stone-100">
+            Tarda más de lo habitual en conectar
+          </p>
+          <p className="mb-4 text-sm text-stone-500">
+            Puedes elegir el local a mano o volver al centro operativo.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => setForceStorePicker(true)}
+              className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white"
+            >
+              Elegir local
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate(RESTAURANT_OPS_PATH)}
+              className="rounded-xl border border-stone-300 px-4 py-2.5 text-sm font-semibold text-stone-700 dark:border-stone-600 dark:text-stone-200"
+            >
+              Centro operativo
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!tabletMode && (!gatePdvId || forceStorePicker)) {
     return (
       <CeoTpvStorePicker
         storeName={currentBusiness?.name}
@@ -235,15 +384,17 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
         loading={effectiveStoresLoading}
         restaurantMode
         onSelect={handleSelectStore}
-        onBack={() => navigate(RESTAURANT_CAJA_PATH, { replace: true })}
+        onBack={() => navigate(SALA_PATH, { replace: true })}
       />
     );
   }
 
-  const gatePdvId = effectivePdvId || activeSalesPointId || undefined;
+  const tabletNav = tabletMode ? (
+    <RestaurantTabletBottomNav active="mesas" />
+  ) : null;
 
   return (
-    <TpvChromeScope insetBottomBar bottomBar={null}>
+    <TpvChromeScope insetBottomBar={tabletMode} bottomBar={null}>
       <div className="fixed inset-0 z-30 flex min-h-0 flex-col overflow-hidden bg-stone-100 dark:bg-stone-950">
         <TpvOfflineBanner />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -260,6 +411,7 @@ export function RestaurantSalaTpvShell({ tabletMode = false }: Props) {
             />
           </TpvRegisterGate>
         </div>
+        {tabletNav}
       </div>
     </TpvChromeScope>
   );

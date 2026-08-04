@@ -194,8 +194,8 @@ export const SALE_CLIENT_OPTIONS: SaleClientOption[] = [
 
 export function defaultFiscalForm(ccaa = 'ES-MD'): FiscalFormInput {
   return {
-    origin: 'eu',
-    seller: 'eu_private',
+    origin: 'spain',
+    seller: 'private',
     ccaa,
     vehicleId: '',
     acquisitionId: '',
@@ -365,7 +365,8 @@ function analyzePurchase(
         legalRefs: ['Art. 92 LIVA (deducción)', 'Art. 131 LIVA (REBU no aplicable)'],
         reminders: [
           'Factura de compra con IVA desglosado obligatoria.',
-          `Pagas ${formatEuro(round2(base + vat))} (IVA incl.) pero recuperas ${formatEuro(vat)}: coste real ${formatEuro(round2(base))}.`,
+          `Pagas ${formatEuro(round2(base + vat))} (IVA incl.) pero recuperas ${formatEuro(vat)}: coste estimado ${formatEuro(round2(base))}.`,
+          'Introduce la base imponible (sin IVA). Si el precio de stock incluye IVA, divídelo por 1,21.',
         ],
       };
     }
@@ -522,7 +523,7 @@ function analyzePurchase(
       legalRefs: ['Art. 86 LIVA (importación)', 'Arancel aduanero (~10% orientativo)'],
       reminders: [
         'DUA obligatorio · arancel orientativo según partida.',
-        `Desembolso en aduana ${formatEuro(round2(cif + tariff + vat))} (arancel + IVA); recuperas el IVA ${formatEuro(vat)}. Coste real ${formatEuro(round2(cif + tariff))}.`,
+        `Desembolso en aduana ${formatEuro(round2(cif + tariff + vat))} (arancel + IVA); recuperas el IVA ${formatEuro(vat)}. Coste estimado ${formatEuro(round2(cif + tariff))}.`,
       ],
     };
   }
@@ -551,7 +552,7 @@ function analyzeSale(
       invoiceNotes: ['Operación exenta por exportación (art. 21 LIVA).', 'Expedir DUA de exportación.'],
       legalRefs: ['Art. 21 LIVA'],
       reminders: ['Documentación aduanera de salida.'],
-      model303Hint: '0 € — operación exenta exportación.',
+      model303Hint: '0 € — estimación: operación exenta exportación.',
     };
   }
 
@@ -571,7 +572,7 @@ function analyzeSale(
       ].filter(Boolean),
       legalRefs: ['Art. 25.Uno LIVA', 'Art. 135.Dos LIVA'],
       reminders: ['Modelo 349 · CMR del transporte.'],
-      model303Hint: '0 € — entrega intracomunitaria exenta.',
+      model303Hint: '0 € — estimación: entrega intracomunitaria exenta.',
     };
   }
 
@@ -585,7 +586,7 @@ function analyzeSale(
       invoiceNotes: ['Exenta art. 25.Dos LIVA — IVA en país del comprador.'],
       legalRefs: ['Art. 25.Dos LIVA', 'Art. 13.2ª LIVA'],
       reminders: ['Sin REBU en vehículos nuevos intracomunitarios.'],
-      model303Hint: '0 € — exenta en origen.',
+      model303Hint: '0 € — estimación: exenta en origen.',
     };
   }
 
@@ -618,7 +619,7 @@ function analyzeSale(
         'Factura por el total sin desglose de IVA.',
         'Conserva justificante de compra para acreditar el margen.',
       ],
-      model303Hint: `${formatEuro(marginVat)} — IVA devengado del margen (no visible en factura).`,
+      model303Hint: `${formatEuro(marginVat)} — estimación IVA del margen (no visible en factura).`,
     };
   }
 
@@ -634,7 +635,7 @@ function analyzeSale(
     invoiceNotes: [`Base imponible: ${formatEuro(base)}`, `IVA 21%: ${formatEuro(vat)}`],
     legalRefs: ['Art. 4 y 90 LIVA'],
     reminders: ['Factura con IVA desglosado.'],
-    model303Hint: `${formatEuro(vat)} — cuota devengada régimen general.`,
+    model303Hint: `${formatEuro(vat)} — estimación cuota régimen general.`,
   };
 }
 

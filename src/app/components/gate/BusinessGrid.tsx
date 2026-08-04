@@ -74,7 +74,17 @@ const BUSINESS_TYPE_COLORS: Record<string, string> = {
   butcherShop: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
 };
 
-type SortKey = 'name' | 'employees' | 'profit' | 'alerts' | 'recent';
+type SortKey = 'created' | 'name' | 'employees' | 'profit' | 'alerts' | 'recent';
+
+function businessCreatedMs(b: Business): number {
+  const raw = String(b.createdAt || '').trim();
+  const ms = raw ? new Date(raw).getTime() : NaN;
+  if (Number.isFinite(ms)) return ms;
+  // Fallback estable si falta createdAt (ids tipo biz_… o timestamp embebido)
+  const id = String(b.business_id || b.id || '');
+  const fromId = Number(id.replace(/\D/g, '').slice(-13));
+  return Number.isFinite(fromId) ? fromId : 0;
+}
 
 function formatMetricValue(label: string, value: number): string {
   if (label === 'Pedidos' || label === 'Activos' || label === 'Empleados') {
@@ -316,7 +326,7 @@ export function BusinessGrid({
 }: BusinessGridProps) {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<BusinessType | 'all'>('all');
-  const [sortBy, setSortBy] = useState<SortKey>('name');
+  const [sortBy, setSortBy] = useState<SortKey>('created');
   const [showFilters, setShowFilters] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -365,6 +375,10 @@ export function BusinessGrid({
       const sa = snapshotMap.get(a.business_id)!;
       const sb = snapshotMap.get(b.business_id)!;
       switch (sortBy) {
+        case 'created': {
+          const diff = businessCreatedMs(a) - businessCreatedMs(b);
+          return diff !== 0 ? diff : a.name.localeCompare(b.name, 'es');
+        }
         case 'name':
           return a.name.localeCompare(b.name, 'es');
         case 'employees':
@@ -386,10 +400,10 @@ export function BusinessGrid({
   const clearFilters = useCallback(() => {
     setSearch('');
     setFilterType('all');
-    setSortBy('name');
+    setSortBy('created');
   }, []);
 
-  const hasActiveFilters = search.trim() !== '' || filterType !== 'all' || sortBy !== 'name';
+  const hasActiveFilters = search.trim() !== '' || filterType !== 'all' || sortBy !== 'created';
 
   return (
     <div className="space-y-3">
@@ -461,6 +475,7 @@ export function BusinessGrid({
             onChange={(e) => setSortBy(e.target.value as SortKey)}
             className="appearance-none pl-8 pr-7 py-2 text-xs font-medium bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-600 dark:text-gray-400 focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-400 cursor-pointer"
           >
+            <option value="created">Orden de creación</option>
             <option value="name">Nombre A-Z</option>
             <option value="employees">Más empleados</option>
             <option value="profit">Mayor beneficio</option>

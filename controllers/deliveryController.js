@@ -1349,7 +1349,8 @@ async function maybeRegisterTpvSaleOnTpvChannelOrderCreate(req, userId, doc, acc
     paymentMethod: doc.paymentMethod || 'efectivo',
     registeredBy: account?.fullName || doc.takenByName || 'TPV',
     description: `TPV rápido · ${doc.customerName || ''}`.trim(),
-    mode: 'increment',
+    // targetTotal: idempotente si el cliente ya escribió la venta en caja local.
+    mode: 'targetTotal',
     callerAccount: req.callerAccount || account,
   });
 }
@@ -1469,12 +1470,12 @@ export async function registerPayment(req, res) {
       metadata: { paymentMethod: pm, paidAmount: newPaid, paymentStatus, paymentsCount: payments.length, ...cashExtras },
     });
 
-    // CAJA-03/10: auto-register transaction on open TPV register session (misma tienda)
+    // CAJA-03/10: auto-register en caja abierta (idempotente por orderId / targetTotal).
     const cajaRegistration = await autoRegisterTpvSaleForOrder(req, userId, doc, {
-      amount: partAmount,
+      amount: newPaid,
       paymentMethod: pm || 'efectivo',
       registeredBy: account.fullName || 'Sistema',
-      mode: 'increment',
+      mode: 'targetTotal',
       callerAccount: req.callerAccount || account,
     });
 

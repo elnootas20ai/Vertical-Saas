@@ -688,7 +688,11 @@ export function Quotes() {
         targetId = sale.id;
         await convertQuote(quote, 'sale', targetId);
         showToast(`Presupuesto convertido a venta (${sale.id.slice(-6)})`);
-        navigate('/saas/sales');
+        navigate(
+          currentBusiness?.businessType === 'carDealership'
+            ? `/saas/vertical/compraventa/ventas?saleId=${encodeURIComponent(sale.id)}`
+            : '/saas/sales',
+        );
       } else if (target === 'invoice') {
         const count = quotes.filter((q) => q.convertedToInvoiceId).length + 1;
         const year = new Date().getFullYear();
@@ -706,7 +710,11 @@ export function Quotes() {
         targetId = sale.id;
         await convertQuote(quote, 'sale', targetId);
         showToast('Presupuesto convertido a reserva');
-        navigate('/saas/sales');
+        navigate(
+          currentBusiness?.businessType === 'carDealership'
+            ? `/saas/vertical/compraventa/ventas?saleId=${encodeURIComponent(sale.id)}`
+            : '/saas/sales',
+        );
       }
 
       const updatedQuotes = await listQuotes(userId);
@@ -1605,7 +1613,13 @@ export function Quotes() {
                     <span>Presupuesto convertido</span>
                     {selectedQuote.convertedToSaleId && (
                       <button
-                        onClick={() => navigate(`/saas/sales/${selectedQuote.convertedToSaleId}`)}
+                        onClick={() =>
+                          navigate(
+                            currentBusiness?.businessType === 'carDealership'
+                              ? `/saas/vertical/compraventa/ventas?saleId=${encodeURIComponent(selectedQuote.convertedToSaleId!)}`
+                              : `/saas/sales/${selectedQuote.convertedToSaleId}`,
+                          )
+                        }
                         className="ml-2 underline hover:no-underline font-medium"
                       >
                         Ver venta →

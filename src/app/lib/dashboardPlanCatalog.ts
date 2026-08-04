@@ -31,7 +31,7 @@ export interface DashboardWidgetPlanEntry {
 export const DASHBOARD_WIDGET_CATALOG: DashboardWidgetPlanEntry[] = [
   { id: 'kpis_main', label: 'KPIs principales', minPlan: 'basic', basicPreview: true },
   { id: 'quick_access', label: 'Accesos rápidos', minPlan: 'basic', basicPreview: true },
-  { id: 'alertas', label: 'Centro de alertas', minPlan: 'basic', basicPreview: true },
+  { id: 'alertas', label: 'Alertas', minPlan: 'basic', basicPreview: true },
   { id: 'operations', label: 'Operativa del negocio', minPlan: 'basic', basicPreview: true },
   { id: 'actividad', label: 'Actividad reciente', minPlan: 'normal' },
   { id: 'charts', label: 'Gráficas principales', minPlan: 'normal' },

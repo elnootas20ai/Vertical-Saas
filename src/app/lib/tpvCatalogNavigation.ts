@@ -1,10 +1,16 @@
 import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
-import { isDefaultBrandNamePlaceholder, isDefaultCommercialBrand, sortBrandsForDisplay } from './brandUtils';
+import { isDefaultBrandNamePlaceholder, sortBrandsForDisplay } from './brandUtils';
 import { resolveBrandLogo } from './brandPlaceholders';
 import { UNIVERSAL_CATALOG_CATEGORIES } from './deliveryBrandLineKinds';
 import { shouldClearBrandForCategory, allCommercialLineBrands } from './deliveryCatalogImportLogic';
 import { isTpvWarehouseOnlyCatalogItem } from './tpvCatalogScope';
+import {
+  isBrandFoodCategory,
+  resolveTpvFamilyKey,
+  TPV_FAMILY_DEFS,
+  type TpvFamilyKey,
+} from './tpvCatalogFamilies';
 
 export type TpvCatalogScope =
   | { kind: 'all' }
@@ -18,6 +24,16 @@ export type TpvCatalogSection = {
   color?: string;
   shortCode?: string;
   logo?: string;
+};
+
+export type BuildTpvCatalogSectionsOptions = {
+  /** false en bar/restaurante: sin pestaña Todos. */
+  includeAllTab?: boolean;
+  /**
+   * brand_families: marca(s) primero, luego Bebidas/Cafés/Postres…;
+   * dentro de cada familia, subfamilias (categoria Excel).
+   */
+  layout?: 'default' | 'brand_families';
 };
 
 function foldKey(s: string): string {
@@ -61,6 +77,8 @@ export function parseTpvSectionId(id: string): TpvCatalogScope | null {
 export function isTpvSellableCatalogItem(item: CatalogItem | null | undefined): boolean {
   if (!item) return false;
   if (item.active === false) return false;
+  /** Agotado en cocina / carta (`available: false`). */
+  if (item.available === false) return false;
   if (item.itemType !== 'product' && item.itemType !== 'combo') return false;
   if (isTpvWarehouseOnlyCatalogItem(item)) return false;
   return true;
@@ -74,7 +92,7 @@ function isUnbranded(item: CatalogItem): boolean {
   return !(item.brandIds?.length);
 }
 
-/** Agrupa productos sin línea (Excel: bebidas, complementos…) en pestañas compartidas. */
+/** Agrupa productos genéricos / compartidos entre marcas en pestañas superiores. */
 function sharedGroupKeyForCategory(category: string): string {
   const raw = String(category || '').trim();
   const key = foldKey(raw);
@@ -90,7 +108,10 @@ function sharedGroupKeyForCategory(category: string): string {
     if (key === 'otros') return 'otros';
     return key || 'otros';
   }
-  if (/refresco|cerveza|vino|bebida|zumo|agua|café|cafe/.test(key)) return 'bebidas';
+  // Cervezas / Vinos: pestañas propias (no mezclar todo en «Bebidas»).
+  if (/cerveza/.test(key)) return 'cervezas';
+  if (/^vinos?$/.test(key) || key === 'vino' || /lambrusco/.test(key)) return 'vinos';
+  if (/refresco|bebida|zumo|agua|café|cafe/.test(key)) return 'bebidas';
   if (/salsa|complement|extra|side|guarnicion/.test(key)) return 'complementos';
   if (/postre|helado|dulce/.test(key)) return 'postres';
   return 'general';
@@ -98,12 +119,56 @@ function sharedGroupKeyForCategory(category: string): string {
 
 const SHARED_GROUP_LABELS: Record<string, string> = {
   bebidas: 'Bebidas',
+  cervezas: 'Cervezas',
+  vinos: 'Vinos',
   complementos: 'Complementos',
   postres: 'Postres',
   extras: 'Extras',
   otros: 'Otros',
   general: 'General',
 };
+
+/**
+ * Organizador usado por más de una marca (reglas catalogCategories o productos).
+ * Esos organizadores salen del TPV de cada marca y van a pestaña compartida.
+ */
+export function categoryUsedByMultipleBrands(
+  category: string,
+  brands: Brand[],
+  catalog: CatalogItem[],
+): boolean {
+  const catKey = foldKey(category);
+  if (!catKey) return false;
+
+  let brandsWithRule = 0;
+  for (const brand of brands || []) {
+    const cats = brand.catalogCategories || [];
+    if (cats.some((c) => foldKey(c) === catKey)) {
+      brandsWithRule += 1;
+      if (brandsWithRule >= 2) return true;
+    }
+  }
+
+  const productBrandIds = new Set<string>();
+  for (const item of catalog || []) {
+    if (!isSellable(item)) continue;
+    if (foldKey(item.category) !== catKey) continue;
+    for (const id of item.brandIds || []) {
+      const bid = String(id || '').trim();
+      if (bid) productBrandIds.add(bid);
+      if (productBrandIds.size >= 2) return true;
+    }
+  }
+  return false;
+}
+
+function isCrossBrandOrganizerCategory(
+  category: string,
+  brands: Brand[],
+  catalog: CatalogItem[],
+): boolean {
+  return categoryUsedByMultipleBrands(category, brands, catalog);
+}
 
 export function sharedGroupLabel(groupKey: string): string {
   return SHARED_GROUP_LABELS[groupKey] || groupKey.charAt(0).toUpperCase() + groupKey.slice(1);
@@ -135,13 +200,29 @@ export function commercialBrandsForTpvTabs(brands: Brand[], catalog: CatalogItem
   );
 }
 
+function sharedSectionColor(groupKey: string): string {
+  if (groupKey === 'bebidas') return '#2563EB';
+  if (groupKey === 'cafes') return '#92400E';
+  if (groupKey === 'cervezas') return '#059669';
+  if (groupKey === 'vinos') return '#7C3AED';
+  if (groupKey === 'postres') return '#DB2777';
+  if (groupKey === 'complementos') return '#7C3AED';
+  return '#4B5563';
+}
+
 /** Pestañas superiores: Todos + genéricos/compartidos + líneas comerciales (marcas). */
-export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[]): TpvCatalogSection[] {
+export function buildTpvCatalogSections(
+  brands: Brand[],
+  catalog: CatalogItem[],
+  options?: BuildTpvCatalogSectionsOptions,
+): TpvCatalogSection[] {
   const sections: TpvCatalogSection[] = [];
   const brandTabs = commercialBrandsForTpvTabs(brands, catalog);
   const hasSellable = catalog.some(isSellable);
+  const includeAllTab = options?.includeAllTab !== false;
+  const layout = options?.layout ?? 'default';
 
-  if (hasSellable) {
+  if (includeAllTab && hasSellable) {
     sections.push({
       id: formatTpvSectionId({ kind: 'all' }),
       scope: { kind: 'all' },
@@ -151,11 +232,46 @@ export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[])
     });
   }
 
-  // Genéricos (Bebidas, Complementos…) arriba, junto a las marcas.
+  if (layout === 'brand_families') {
+    for (const brand of brandTabs) {
+      sections.push({
+        id: formatTpvSectionId({ kind: 'brand', brandId: brand._id }),
+        scope: { kind: 'brand', brandId: brand._id },
+        label: brand.name,
+        color: brand.primaryColor,
+        shortCode: brand.shortCode,
+        logo: resolveBrandLogo(brand),
+      });
+    }
+
+    const familyKeys = new Set<TpvFamilyKey>();
+    for (const item of catalog) {
+      if (!isSellable(item)) continue;
+      const fam = resolveTpvFamilyKey(String(item.category || ''));
+      if (fam) familyKeys.add(fam);
+    }
+    for (const def of [...TPV_FAMILY_DEFS].sort((a, b) => a.order - b.order)) {
+      if (!familyKeys.has(def.key)) continue;
+      sections.push({
+        id: formatTpvSectionId({ kind: 'shared', groupKey: def.key }),
+        scope: { kind: 'shared', groupKey: def.key },
+        label: def.label,
+        color: sharedSectionColor(def.key),
+        shortCode: def.key.slice(0, 3).toUpperCase(),
+      });
+    }
+    return sections;
+  }
+
+  // Genéricos: sin marca, O organizadores que usan varias marcas (salen de cada marca).
   const sharedKeys = new Set<string>();
   for (const item of catalog) {
-    if (!isSellable(item) || !isUnbranded(item)) continue;
-    sharedKeys.add(sharedGroupKeyForCategory(item.category));
+    if (!isSellable(item)) continue;
+    const cat = String(item.category || '').trim();
+    if (!cat) continue;
+    if (isUnbranded(item) || isCrossBrandOrganizerCategory(cat, brands, catalog)) {
+      sharedKeys.add(sharedGroupKeyForCategory(cat));
+    }
   }
 
   for (const groupKey of [...sharedKeys].sort((a, b) =>
@@ -165,7 +281,7 @@ export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[])
       id: formatTpvSectionId({ kind: 'shared', groupKey }),
       scope: { kind: 'shared', groupKey },
       label: sharedGroupLabel(groupKey),
-      color: groupKey === 'bebidas' ? '#2563EB' : groupKey === 'complementos' ? '#7C3AED' : '#4B5563',
+      color: sharedSectionColor(groupKey),
       shortCode: groupKey.slice(0, 3).toUpperCase(),
     });
   }
@@ -184,15 +300,34 @@ export function buildTpvCatalogSections(brands: Brand[], catalog: CatalogItem[])
   return sections;
 }
 
-function itemsInScope(catalog: CatalogItem[], scope: TpvCatalogScope): CatalogItem[] {
+export type TpvCatalogLayout = 'default' | 'brand_families';
+
+function itemsInScope(
+  catalog: CatalogItem[],
+  scope: TpvCatalogScope,
+  brands: Brand[] = [],
+  layout: TpvCatalogLayout = 'default',
+): CatalogItem[] {
   const sellable = catalog.filter(isSellable);
   if (scope.kind === 'all') return sellable;
   if (scope.kind === 'brand') {
-    return sellable.filter((i) => (i.brandIds || []).includes(scope.brandId));
+    return sellable.filter((i) => {
+      if (!(i.brandIds || []).includes(scope.brandId)) return false;
+      const cat = String(i.category || '').trim();
+      if (layout === 'brand_families') return isBrandFoodCategory(cat);
+      if (cat && isCrossBrandOrganizerCategory(cat, brands, catalog)) return false;
+      return true;
+    });
   }
-  return sellable.filter(
-    (i) => isUnbranded(i) && sharedGroupKeyForCategory(i.category) === scope.groupKey,
-  );
+  if (layout === 'brand_families') {
+    return sellable.filter((i) => resolveTpvFamilyKey(String(i.category || '')) === scope.groupKey);
+  }
+  return sellable.filter((i) => {
+    const cat = String(i.category || '').trim();
+    if (sharedGroupKeyForCategory(cat) !== scope.groupKey) return false;
+    if (isUnbranded(i)) return true;
+    return isCrossBrandOrganizerCategory(cat, brands, catalog);
+  });
 }
 
 /** Categorías de la franja inferior (Refrescos, Pizzas…), orden según marca o catálogo. */
@@ -200,18 +335,26 @@ export function categoriesForTpvScope(
   scope: TpvCatalogScope,
   brands: Brand[],
   catalog: CatalogItem[],
+  layout: TpvCatalogLayout = 'default',
 ): string[] {
-  const items = itemsInScope(catalog, scope);
+  const items = itemsInScope(catalog, scope, brands, layout);
   if (items.length === 0) return [];
 
   if (scope.kind === 'brand') {
     const brand = brands.find((b) => b._id === scope.brandId);
     const fromItems = new Set<string>();
     items.forEach((item) => {
-      if (item.category?.trim()) fromItems.add(item.category.trim());
+      const cat = item.category?.trim();
+      if (!cat) return;
+      if (layout !== 'brand_families' && isCrossBrandOrganizerCategory(cat, brands, catalog)) return;
+      fromItems.add(cat);
     });
     if (brand?.catalogCategories?.length) {
-      const ordered = brand.catalogCategories.filter((cat) => fromItems.has(cat));
+      const ordered = brand.catalogCategories.filter((cat) => {
+        if (!fromItems.has(cat)) return false;
+        if (layout === 'brand_families') return isBrandFoodCategory(cat);
+        return !isCrossBrandOrganizerCategory(cat, brands, catalog);
+      });
       const extra = [...fromItems]
         .filter((cat) => !brand.catalogCategories!.includes(cat))
         .sort((a, b) => a.localeCompare(b, 'es'));
@@ -229,16 +372,21 @@ export function categoriesForTpvScope(
 }
 
 /** Pestaña inicial: con catálogo → «Todos» si tiene productos; si no, la primera sección con stock. */
-export function defaultTpvSectionId(sections: TpvCatalogSection[], catalog?: CatalogItem[]): string {
+export function defaultTpvSectionId(
+  sections: TpvCatalogSection[],
+  catalog?: CatalogItem[],
+  brands: Brand[] = [],
+  layout: TpvCatalogLayout = 'default',
+): string {
   if (sections.length === 0) return '';
 
   if (catalog && catalog.length > 0) {
     const allSection = sections.find((s) => s.scope.kind === 'all');
-    if (allSection && itemsInScope(catalog, allSection.scope).length > 0) {
+    if (allSection && itemsInScope(catalog, allSection.scope, brands, layout).length > 0) {
       return allSection.id;
     }
     for (const section of sections) {
-      if (itemsInScope(catalog, section.scope).length > 0) return section.id;
+      if (itemsInScope(catalog, section.scope, brands, layout).length > 0) return section.id;
     }
   }
 
@@ -249,8 +397,13 @@ export function defaultTpvSectionId(sections: TpvCatalogSection[], catalog?: Cat
   return sections[0]?.id ?? '';
 }
 
-export function tpvSectionProductCount(catalog: CatalogItem[], scope: TpvCatalogScope): number {
-  return itemsInScope(catalog, scope).length;
+export function tpvSectionProductCount(
+  catalog: CatalogItem[],
+  scope: TpvCatalogScope,
+  brands: Brand[] = [],
+  layout: TpvCatalogLayout = 'default',
+): number {
+  return itemsInScope(catalog, scope, brands, layout).length;
 }
 
 export function filterTpvCatalogProducts(
@@ -259,6 +412,8 @@ export function filterTpvCatalogProducts(
   selectedCategory: string | null,
   productSearch: string,
   clientProductScores: Record<string, number>,
+  brands: Brand[] = [],
+  layout: TpvCatalogLayout = 'default',
 ): CatalogItem[] {
   const q = foldKey(productSearch);
 
@@ -273,7 +428,7 @@ export function filterTpvCatalogProducts(
     });
   } else {
     if (!scope) return [];
-    items = itemsInScope(catalog, scope);
+    items = itemsInScope(catalog, scope, brands, layout);
     if (selectedCategory) {
       items = items.filter((i) => i.category === selectedCategory);
     }
@@ -327,6 +482,8 @@ export function searchTpvProducts(
   scope: TpvCatalogScope | null,
   selectedCategory: string | null,
   clientProductScores: Record<string, number>,
+  brands: Brand[] = [],
+  layout: TpvCatalogLayout = 'default',
 ): CatalogItem[] {
   const q = foldKey(productSearch);
 
@@ -348,7 +505,7 @@ export function searchTpvProducts(
   }
 
   if (!scope) return [];
-  let items = itemsInScope(catalog, scope);
+  let items = itemsInScope(catalog, scope, brands, layout);
   if (selectedCategory) {
     items = items.filter((i) => i.category === selectedCategory);
   }

@@ -179,7 +179,7 @@ export function VehicleDocDossier({ vehicleId, vehicleName, registrationPlate, v
               </button>
             )}
             <button
-              onClick={() => navigate(`/saas/documents?vehicleId=${vehicleId}`)}
+              onClick={() => navigate(`/saas/documents?tab=vehiculo&vehicleId=${encodeURIComponent(vehicleId)}`)}
               className="flex items-center justify-center gap-1.5 px-3 py-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 hover:border-gray-400 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 transition-colors"
             >
               <ExternalLink className="w-3.5 h-3.5" /> Ver todos

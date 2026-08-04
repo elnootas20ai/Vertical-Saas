@@ -40,6 +40,13 @@ function channelCard(session: TpvRegisterSession, channel: string): number {
   return round2(Number(session.aggregatorClosingCard?.[channel] || 0));
 }
 
+function channelTotal(session: TpvRegisterSession, channel: string): number {
+  const fromAgg = round2(Number(session.aggregatorClosingTotals?.[channel] || 0));
+  if (fromAgg > 0) return fromAgg;
+  const unpaid = round2(channelCash(session, channel) + channelCard(session, channel));
+  return unpaid;
+}
+
 function channelFood(
   session: TpvRegisterSession,
   channel: string,
@@ -136,11 +143,14 @@ export function buildAccumulatedCajaClosingsAoa(
           `${p.label} pizzas`,
           `${p.label} burgers`,
           `${p.label} tacos`,
-          `${p.label} efectivo`,
-          `${p.label} tarjeta`,
+          `${p.label} total`,
+          `${p.label} no pag. efectivo`,
+          `${p.label} no pag. tarjeta`,
         ])
       : []),
-    ...(includeApps ? ['Efectivo apps total', 'Tarjeta apps total'] : []),
+    ...(includeApps
+      ? ['Apps total (hecho)', 'No pag. efectivo apps', 'No pag. tarjeta apps']
+      : []),
     'Fondo inicial',
     'Esperado en caja',
     'Contado',
@@ -170,23 +180,27 @@ export function buildAccumulatedCajaClosingsAoa(
 
     let appsCash = 0;
     let appsCard = 0;
+    let appsDone = 0;
     const appCols: unknown[] = [];
     if (includeApps) {
       for (const p of platforms) {
         const ch = p.channel;
+        const total = channelTotal(s, ch);
         const cash = channelCash(s, ch);
         const card = channelCard(s, ch);
+        appsDone += total;
         appsCash += cash;
         appsCard += card;
         appCols.push(
           channelFood(s, ch, 'pizza'),
           channelFood(s, ch, 'burger'),
           channelFood(s, ch, 'taco'),
+          fmtNum(total),
           fmtNum(cash),
           fmtNum(card),
         );
       }
-      appCols.push(fmtNum(appsCash), fmtNum(appsCard));
+      appCols.push(fmtNum(appsDone), fmtNum(appsCash), fmtNum(appsCard));
     }
 
     const statusLabel =

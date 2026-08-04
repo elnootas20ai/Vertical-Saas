@@ -234,10 +234,17 @@ export function AlertProRow({
     onClick?.();
   };
 
+  const isNew = alert.status === 'new';
+  const isSeen = alert.status === 'seen';
+
   return (
     <div
-      className={`rounded-xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 transition-all border-l-[3px] ${accent} ${
-        alert.status === 'new' ? 'ring-1 ring-amber-500/20' : ''
+      className={`rounded-xl border transition-all border-l-[3px] ${accent} ${
+        isNew
+          ? 'border-amber-300/90 bg-amber-50/70 ring-1 ring-amber-400/35 dark:border-amber-800 dark:bg-amber-950/30 dark:ring-amber-700/40'
+          : isSeen
+            ? 'border-zinc-200/90 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-900/50'
+            : 'border-zinc-200/90 bg-white dark:border-zinc-800 dark:bg-zinc-900/80'
       } ${alert.status === 'resolved' ? 'opacity-55' : ''} ${isOpen ? 'p-4 pl-3.5' : 'p-3 pl-3'}`}
     >
       <button
@@ -251,20 +258,28 @@ export function AlertProRow({
       >
         <div className="flex items-start gap-3">
           <div
-            className={`flex shrink-0 items-center justify-center rounded-lg ${isOpen ? 'mt-0.5 h-9 w-9' : 'h-8 w-8'}`}
+            className={`relative flex shrink-0 items-center justify-center rounded-lg ${isOpen ? 'mt-0.5 h-9 w-9' : 'h-8 w-8'}`}
             style={{ backgroundColor: `${sourceColor}14` }}
           >
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: sourceColor }} />
+            {isNew ? (
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-zinc-900 animate-pulse" />
+            ) : null}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <p className={`font-semibold text-zinc-900 dark:text-zinc-100 ${isOpen ? 'text-sm line-clamp-2' : 'text-sm line-clamp-1'}`}>
+              <p className={`font-semibold text-zinc-900 dark:text-zinc-100 ${isOpen ? 'text-sm line-clamp-2' : 'text-sm line-clamp-1'} ${isNew ? 'font-bold' : ''}`}>
                 {alert.title}
               </p>
               <div className="flex shrink-0 items-center gap-1.5">
-                {alert.status === 'new' && (
-                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                {isNew && (
+                  <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
                     Nueva
+                  </span>
+                )}
+                {isSeen && (
+                  <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
+                    Vista
                   </span>
                 )}
                 {collapsible && (

@@ -55,6 +55,10 @@ export interface Business {
   businessType: BusinessType;
   /** Solo vertical restaurant: bar | restaurant | bar_restaurant */
   restaurantFormat?: RestaurantFormat | null;
+  /** Carnicería: activar repartos a domicilio */
+  ownDeliveryEnabled?: boolean;
+  /** Margen objetivo % sugerencia precio €/kg */
+  butcherTargetMarginPct?: number;
   name: string;
   legalName: string;
   taxId: string;
@@ -87,6 +91,8 @@ export interface CreateBusinessPayload {
   logo?: string;
   businessType?: BusinessType;
   restaurantFormat?: RestaurantFormat | null;
+  ownDeliveryEnabled?: boolean;
+  butcherTargetMarginPct?: number;
 }
 
 export interface UpdateBusinessPayload extends Partial<CreateBusinessPayload> {}

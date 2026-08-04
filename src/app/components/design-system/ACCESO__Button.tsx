@@ -24,10 +24,10 @@ export const ACCESO__Button = forwardRef<HTMLButtonElement, ACCESO__ButtonProps>
     const baseStyles = 'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
     
     const variantStyles = {
-      primary: 'bg-[#0f1419] text-white hover:bg-[#1a1f26] focus:ring-gray-900',
-      secondary: 'bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 hover:bg-gray-200 focus:ring-gray-500',
-      ghost: 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 focus:ring-gray-500',
-      outline: 'border-2 border-gray-300 text-gray-900 dark:text-gray-100 hover:border-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 focus:ring-gray-500'
+      primary: 'bg-[var(--v-blue,#2563eb)] text-white hover:bg-[#1d4ed8] focus:ring-blue-500 shadow-sm shadow-blue-600/20',
+      secondary: 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700 focus:ring-slate-500',
+      ghost: 'text-slate-700 dark:text-slate-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 focus:ring-blue-500',
+      outline: 'border-2 border-slate-300 text-slate-900 dark:text-slate-100 hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 focus:ring-blue-500'
     };
     
     const sizeStyles = {

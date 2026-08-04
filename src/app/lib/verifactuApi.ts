@@ -14,6 +14,9 @@ export interface VerifactuSettings {
   environment: VerifactuEnvironment;
   series: string;
   nextNumber: number;
+  autoIssueOnSale: boolean;
+  pricesIncludeTax: boolean;
+  defaultTaxRate: number;
   issuerNif: string;
   issuerName: string;
   issuerAddress: string;
@@ -75,6 +78,7 @@ export interface VerifactuRecord {
   huellaAnterior: string | null;
   qrUrl: string;
   rectifiesId: string | null;
+  source?: { kind?: string; orderId?: string; [key: string]: unknown } | null;
   notes: string;
   createdAt: string;
 }

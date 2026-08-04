@@ -404,11 +404,11 @@ export function RestaurantReservationsPage() {
   const handleSeat = async (item: RestaurantReservation) => {
     setSaving(true);
     try {
-      const { tableId } = await seatGuest(userId, item, actor, businessId);
-      toast.success('Cliente sentado en mesa · Ve a Sala para servir');
-      writeSalaTpvOpenTable({ tableId });
+      const { tableId, orderId } = await seatGuest(userId, item, actor, businessId);
+      toast.success('Cliente sentado · Abriendo TPV');
+      writeSalaTpvOpenTable({ tableId, orderId });
       await loadData();
-      navigate('/saas/sala');
+      navigate(`/saas/caja/tpv?mesa=${encodeURIComponent(tableId)}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo sentar al cliente');
     } finally {

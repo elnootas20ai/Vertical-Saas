@@ -1,23 +1,23 @@
+import type { PointOfSale } from './pointsOfSaleApi';
+import type { WorkCenter } from './workCentersApi';
 import type { Business } from './businessApi';
+import { listWorkCentersForDelivery } from './workCentersApi';
 import {
   dedupePointsOfSale,
   ensureTabletCodesForPointsOfSale,
   listPointsOfSaleRequest,
-  type PointOfSale,
-} from './deliveryApi';
+} from './pointsOfSaleApi';
 import {
   filterPointsOfSaleForWorkCenters,
-  markDeliveryPdvSessionConfirmed,
-  notifyDeliveryWorkCentersChanged,
+  markPdvSessionConfirmed,
   normalizeBusinessScopeId,
+  notifyWorkCentersChanged,
   resolveBusinessScopeId,
-  resolveDeliveryDataUserId,
-  selectDeliveryPointOfSale,
+  resolveStoreDataUserId,
+  selectActivePointOfSale,
   workCentersStrictlyForBusiness,
-} from './deliverySetup';
-import { listWorkCentersForDelivery, type WorkCenter } from './workCentersApi';
-
-type AuthLike = { user_id?: string; id?: string } | null | undefined;
+  type AuthLike,
+} from './businessStoreScope';
 
 export type CompraventaStoresState = {
   dataUserId: string;
@@ -31,7 +31,7 @@ export function isCompraventaBusinessType(businessType?: string | null): boolean
 
 /**
  * Solo centros con businessId de ESTA compraventa. Sin huérfanos, sin reasignar legacy
- * ni mezclar tiendas de otras empresas de la cuenta (p. ej. Badalona en Veneautos).
+ * ni mezclar tiendas de otras empresas de la cuenta.
  */
 export function scopeCompraventaWorkCenters(
   workCenters: WorkCenter[],
@@ -55,13 +55,34 @@ export function listCompraventaSidebarWorkCenters(workCenters: WorkCenter[]): Wo
   return workCenters.filter((wc) => wc.active !== false && !wc.deletedAt);
 }
 
-/** Tiendas/PDV de compraventa: alcance estricto por empresa activa (independiente de delivery). */
+/** Snapshot de activación: expositor + PDV (sin marcas ni catálogo). */
+export function snapshotCompraventaStoreActivation(
+  state: Pick<CompraventaStoresState, 'workCenters' | 'pointsOfSale'>,
+): { hasActiveRetailStore: boolean; hasActivePdv: boolean; retailStores: WorkCenter[] } {
+  const retailStores = state.workCenters.filter(
+    (wc) =>
+      wc.active !== false &&
+      !wc.deletedAt &&
+      (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+  );
+  const activePdvs = state.pointsOfSale.filter(
+    (p) => p.active !== false && String(p._id || '').trim(),
+  );
+  const storeReady = retailStores.length > 0;
+  return {
+    retailStores,
+    hasActiveRetailStore: storeReady,
+    hasActivePdv: storeReady && activePdvs.length > 0,
+  };
+}
+
+/** Tiendas/PDV de compraventa: alcance estricto por empresa activa. */
 export async function loadCompraventaStores(
   authUser: AuthLike,
   business?: Business | null,
   options?: LoadCompraventaStoresOptions,
 ): Promise<CompraventaStoresState> {
-  const dataUserId = resolveDeliveryDataUserId(authUser, business);
+  const dataUserId = resolveStoreDataUserId(authUser, business);
   const businessId = resolveBusinessScopeId(business);
   if (!dataUserId || !businessId) {
     return { dataUserId: dataUserId || '', workCenters: [], pointsOfSale: [] };
@@ -79,6 +100,7 @@ export async function loadCompraventaStores(
   let pointsOfSale = filterPointsOfSaleForWorkCenters(
     dedupePointsOfSale(rawPdvs, dedupeOpts),
     workCenters,
+    { businessId },
   );
 
   if (options?.ensureTabletCodes === true && pointsOfSale.length > 0) {
@@ -88,7 +110,7 @@ export async function loadCompraventaStores(
   return { dataUserId, workCenters, pointsOfSale };
 }
 
-/** Post-alta compraventa: PDV + tienda activa (sin marcas ni catálogo delivery). */
+/** Post-alta compraventa: PDV + tienda activa. */
 export async function bootstrapCompraventaStoreAfterCreate(
   authUser: AuthLike,
   business: Business | null | undefined,
@@ -97,14 +119,14 @@ export async function bootstrapCompraventaStoreAfterCreate(
     pointOfSale: PointOfSale;
   },
 ): Promise<void> {
-  const dataUserId = resolveDeliveryDataUserId(authUser, business);
+  const dataUserId = resolveStoreDataUserId(authUser, business);
   const { pointOfSale } = payload;
   const businessId = resolveBusinessScopeId(business);
 
-  if (businessId && dataUserId && pointOfSale.active !== false) {
-    selectDeliveryPointOfSale(business, dataUserId, pointOfSale._id);
+  if (businessId && dataUserId && pointOfSale.active !== false && pointOfSale._id) {
+    selectActivePointOfSale(business, dataUserId, pointOfSale._id);
   }
 
-  notifyDeliveryWorkCentersChanged(businessId);
-  if (dataUserId) markDeliveryPdvSessionConfirmed(dataUserId);
+  notifyWorkCentersChanged(businessId);
+  if (dataUserId) markPdvSessionConfirmed(dataUserId);
 }

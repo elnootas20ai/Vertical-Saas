@@ -66,9 +66,11 @@ describe('buildAccumulatedCajaClosingsAoa', () => {
     ]);
 
     expect(platforms.map((p) => p.channel)).toEqual(['justeat']);
-    expect(header).toContain('Just Eat efectivo');
-    expect(header).not.toContain('Glovo efectivo');
-    expect(header).not.toContain('Uber Eats efectivo');
+    expect(header).toContain('Just Eat total');
+    expect(header).toContain('Just Eat no pag. efectivo');
+    expect(header).not.toContain('Glovo total');
+    expect(header).not.toContain('Uber Eats total');
+    expect(header).toContain('Apps total (hecho)');
     expect(header[header.length - 1]).toBe('Notas cierre');
     expect(rows[1][rows[1].length - 1]).toBe('Descuadre leve');
   });
@@ -76,7 +78,7 @@ describe('buildAccumulatedCajaClosingsAoa', () => {
   it('sin datos de apps no añade bloque de integradores', () => {
     const { header, platforms } = buildAccumulatedCajaClosingsAoa([closedSession()]);
     expect(platforms).toEqual([]);
-    expect(header).not.toContain('Efectivo apps total');
+    expect(header).not.toContain('Apps total (hecho)');
     expect(header).toContain('Notas cierre');
   });
 });

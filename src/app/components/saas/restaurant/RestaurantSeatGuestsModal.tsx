@@ -5,6 +5,8 @@ type Props = {
   tableLabel: string;
   capacity?: number;
   defaultGuests?: number;
+  /** Texto del botón principal. Por defecto: Abrir mesa. */
+  confirmLabel?: string;
   onConfirm: (guests: number) => void;
   onCancel: () => void;
 };
@@ -15,6 +17,7 @@ export function RestaurantSeatGuestsModal({
   tableLabel,
   capacity = 4,
   defaultGuests = 2,
+  confirmLabel,
   onConfirm,
   onCancel,
 }: Props) {
@@ -73,7 +76,9 @@ export function RestaurantSeatGuestsModal({
             onClick={() => onConfirm(guests)}
             className="w-full py-3.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm touch-manipulation"
           >
-            Abrir mesa · {guests} comensal{guests === 1 ? '' : 'es'}
+            {confirmLabel
+              ? `${confirmLabel} · ${guests} comensal${guests === 1 ? '' : 'es'}`
+              : `Abrir mesa · ${guests} comensal${guests === 1 ? '' : 'es'}`}
           </button>
         </div>
       </div>

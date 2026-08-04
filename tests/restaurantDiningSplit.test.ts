@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import {
+  buildDiningCajaPayItems,
   buildSplitPartViews,
   computeEqualSplitAmounts,
+  diningOrderHasPendingKitchen,
   flattenDiningAccountLines,
   scaleAmountsToTotal,
+  scaleDiningLinesToPayAmount,
 } from '../src/app/lib/restaurantDiningTpv';
 import type { DiningOrder } from '../src/app/lib/salaApi';
 
@@ -161,6 +164,82 @@ describe('flattenDiningAccountLines', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].comandaId).toBe('c1');
     expect(lines[0].itemId).toBe('i1');
+    expect(lines[0].productId).toBe('p1');
     expect(lines[0].lineTotal).toBe(20);
+  });
+
+  it('prorratea líneas al importe de un split (suma = payAmount)', () => {
+    const order = makeOrder({
+      total: 30,
+      comandas: [
+        {
+          id: 'c1',
+          orderNumber: 1,
+          status: 'served',
+          sentToKitchenAt: '',
+          readyAt: '',
+          servedAt: '',
+          createdBy: 'u1',
+          createdByName: 'Ana',
+          createdAt: '',
+          notes: '',
+          items: [
+            { id: 'i1', productId: 'p1', name: 'Pizza', price: 20, quantity: 1, category: '', notes: '', modifiers: [], status: 'served', cancelledReason: '', cancelledBy: '' },
+            { id: 'i2', productId: 'p2', name: 'Cerveza', price: 5, quantity: 2, category: '', notes: '', modifiers: [], status: 'served', cancelledReason: '', cancelledBy: '' },
+          ],
+        },
+      ],
+    });
+    const lines = flattenDiningAccountLines(order);
+    const scaled = scaleDiningLinesToPayAmount(lines, 15, 30);
+    expect(scaled.length).toBe(2);
+    expect(scaled.reduce((s, l) => s + l.total, 0)).toBeCloseTo(15, 2);
+    expect(scaled.every((l) => l.catalogItemId)).toBe(true);
+
+    const full = buildDiningCajaPayItems({ order, payAmount: 30, dueAmount: 30, fallbackName: 'Cuenta' });
+    expect(full.reduce((s, l) => s + l.total, 0)).toBeCloseTo(30, 2);
+    expect(full.find((l) => l.name === 'Pizza')?.quantity).toBe(1);
+  });
+
+  it('detecta comandas pendientes en cocina', () => {
+    const pending = makeOrder({
+      comandas: [
+        {
+          id: 'c1',
+          orderNumber: 1,
+          status: 'sent_to_kitchen',
+          sentToKitchenAt: '',
+          readyAt: '',
+          servedAt: '',
+          createdBy: 'u1',
+          createdByName: 'Ana',
+          createdAt: '',
+          notes: '',
+          items: [
+            { id: 'i1', productId: 'p1', name: 'Pizza', price: 10, quantity: 1, category: '', notes: '', modifiers: [], status: 'pending', cancelledReason: '', cancelledBy: '' },
+          ],
+        },
+      ],
+    });
+    expect(diningOrderHasPendingKitchen(pending)).toBe(true);
+    expect(diningOrderHasPendingKitchen(makeOrder({
+      comandas: [
+        {
+          id: 'c1',
+          orderNumber: 1,
+          status: 'ready',
+          sentToKitchenAt: '',
+          readyAt: '',
+          servedAt: '',
+          createdBy: 'u1',
+          createdByName: 'Ana',
+          createdAt: '',
+          notes: '',
+          items: [
+            { id: 'i1', productId: 'p1', name: 'Pizza', price: 10, quantity: 1, category: '', notes: '', modifiers: [], status: 'ready', cancelledReason: '', cancelledBy: '' },
+          ],
+        },
+      ],
+    }))).toBe(false);
   });
 });

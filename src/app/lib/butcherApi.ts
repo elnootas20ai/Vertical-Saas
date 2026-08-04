@@ -44,7 +44,15 @@ export interface ButcherClient {
 }
 
 export type OrderType = 'simple' | 'reservation' | 'special';
-export type OrderStatus = 'pending' | 'preparing' | 'ready' | 'picked_up' | 'cancelled';
+export type OrderStatus =
+  | 'pending'
+  | 'preparing'
+  | 'ready'
+  | 'out_for_delivery'
+  | 'delivered'
+  | 'picked_up'
+  | 'cancelled';
+export type FulfillmentMode = 'pickup' | 'delivery';
 
 export interface OrderItem {
   productId: string | null;
@@ -68,6 +76,12 @@ export interface ButcherOrder {
   total: number;
   pickupDate: string;
   pickupTime: string;
+  fulfillmentMode: FulfillmentMode;
+  deliveryAddress: string;
+  deliveryNotes: string;
+  assignedWorkerId: string;
+  assignedWorkerName: string;
+  cashOnDelivery: boolean;
   status: OrderStatus;
   priority: string;
   notes: string;
@@ -129,6 +143,7 @@ export interface SalesStats {
   month: { count: number; revenue: number };
   avgTicket: number;
   topProducts: { name: string; qty: number; revenue: number }[];
+  byMethodToday?: { cash: number; card: number; bizum: number; mixed: number };
 }
 
 // ─── Product types ──────────────────────────────────────────────────────────

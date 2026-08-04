@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Lock, Receipt, Save, Scale, Trash2, X } from 'lucide-react';
+import { CupSoda, Lock, Receipt, Save, Scale, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Brand } from '../../../lib/brandApi';
 import {
@@ -25,43 +25,32 @@ import { deliveryBrandLineKindLabel } from '../../../lib/deliveryBrandLineKinds'
 const saveBtnClass =
   'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-gray-900 bg-gray-900 px-2.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-black dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900';
 
-function RuleStatusRow({
-  label,
-  active,
-  activeText,
-  inactiveText,
+function ActiveRuleSummary({
+  monoOn,
+  splitMode,
 }: {
-  label: string;
-  active: boolean;
-  activeText: string;
-  inactiveText: string;
+  monoOn: boolean;
+  splitMode: 'majority' | 'equal';
 }) {
+  const mixLabel =
+    splitMode === 'equal'
+      ? 'si el pedido mezcla marcas, bebidas/postres a medias'
+      : 'si el pedido mezcla marcas, bebidas/postres a la que más vende';
+  const monoLabel = monoOn
+    ? 'si solo hay una marca, todo a esa'
+    : 'si solo hay una marca, la bebida puede quedar sin asignar';
+
   return (
-    <div className="flex items-start gap-2 py-1.5">
-      <span
-        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
-          active
-            ? 'bg-emerald-600 text-white'
-            : 'bg-gray-200 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-        }`}
-        aria-hidden
-      >
-        {active ? <Check className="h-2.5 w-2.5" strokeWidth={3} /> : <X className="h-2.5 w-2.5" strokeWidth={3} />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-semibold text-gray-800 dark:text-gray-200">
-          {label}
-        </p>
-        <p
-          className={`text-[10px] leading-snug ${
-            active
-              ? 'font-medium text-emerald-700 dark:text-emerald-400'
-              : 'text-gray-500 dark:text-gray-400'
-          }`}
-        >
-          {active ? `Activado · ${activeText}` : `No activado · ${inactiveText}`}
-        </p>
-      </div>
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50/90 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/40">
+      <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+        Ahora mismo
+      </p>
+      <p className="mt-1 text-[11px] leading-snug text-emerald-950 dark:text-emerald-100">
+        {monoLabel}. Y {mixLabel}.
+      </p>
+      <p className="mt-1.5 text-[10px] text-emerald-800/80 dark:text-emerald-300/80">
+        Lo de cada marca sigue yendo a su marca. Esto solo mueve bebidas, postres y similares sin marca.
+      </p>
     </div>
   );
 }
@@ -359,110 +348,125 @@ export function BrandBillingSettingsPanel({
 
           <div className="mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
             <div className="flex items-start gap-2.5 border-b border-gray-100 px-3 py-2.5 dark:border-gray-800">
-              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900">
-                <Scale className="h-3.5 w-3.5" />
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white">
+                <CupSoda className="h-3.5 w-3.5" />
               </span>
               <div className="min-w-0">
                 <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
-                  Reglas de cruce (bebidas / postres sin marca)
+                  ¿Quién se lleva la bebida o el postre?
                 </p>
                 <p className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-                  Elige cómo repartir lo compartido cuando el ticket mezcla 2 o más marcas.
-                  Los productos de cada marca siguen yendo a su marca.
+                  En el ticket lo de cada marca ya tiene dueño. Una bebida o un postre a menudo no.
+                  Aquí eliges a qué marca (hoja Excel) se apunta ese dinero.
                 </p>
               </div>
             </div>
 
-            <div className="space-y-1.5 border-b border-gray-100 px-3 py-2.5 dark:border-gray-800">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                Pedido con varias marcas
+            <div className="space-y-2 border-b border-gray-100 px-3 py-3 dark:border-gray-800">
+              <div className="flex items-center gap-1.5">
+                <Scale className="h-3.5 w-3.5 text-gray-400" />
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                  1 · Pedido con 2 o más marcas
+                </p>
+              </div>
+              <p className="text-[11px] leading-snug text-gray-600 dark:text-gray-300">
+                Elige <span className="font-semibold">una</span> forma de repartir bebidas/postres sin marca:
               </p>
-              {SHARED_SPLIT_MODE_OPTIONS.map((opt) => {
-                const selected = splitMode === opt.value;
-                return (
-                  <label
-                    key={opt.value}
-                    className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-2.5 py-2 transition-colors ${
-                      selected
-                        ? 'border-gray-900 bg-gray-50 dark:border-gray-100 dark:bg-gray-800/60'
-                        : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800/40'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="sharedSplitMode"
-                      className="mt-1 h-3.5 w-3.5 border-gray-300 text-gray-900 focus:ring-gray-900"
-                      checked={selected}
-                      onChange={() => {
-                        setConfig((prev) => ({
-                          ...prev,
-                          sharedSplitMode: opt.value,
-                        }));
-                      }}
-                    />
-                    <span className="min-w-0">
-                      <span className="block text-xs font-semibold text-gray-900 dark:text-gray-100">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {SHARED_SPLIT_MODE_OPTIONS.map((opt) => {
+                  const selected = splitMode === opt.value;
+                  return (
+                    <label
+                      key={opt.value}
+                      className={`relative flex cursor-pointer flex-col rounded-xl border-2 px-3 py-2.5 transition-colors ${
+                        selected
+                          ? 'border-indigo-600 bg-indigo-50/80 dark:border-indigo-400 dark:bg-indigo-950/40'
+                          : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="sharedSplitMode"
+                          className="h-3.5 w-3.5 border-gray-300 text-indigo-600 focus:ring-indigo-600"
+                          checked={selected}
+                          onChange={() => {
+                            setConfig((prev) => ({
+                              ...prev,
+                              sharedSplitMode: opt.value,
+                            }));
+                          }}
+                        />
+                        <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                          {opt.shortLabel}
+                        </span>
+                        {selected ? (
+                          <span className="ml-auto rounded-full bg-indigo-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                            Activa
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="mt-1.5 text-[11px] font-semibold leading-snug text-gray-800 dark:text-gray-200">
                         {opt.label}
                       </span>
-                      <span className="mt-0.5 block text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                      <span className="mt-1 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
                         {opt.hint}
                       </span>
-                      <span className="mt-1 block text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-                        Ej.: {opt.example}
+                      <span className="mt-2 rounded-lg bg-white/80 px-2 py-1.5 text-[10px] font-medium leading-snug text-indigo-900 ring-1 ring-indigo-100 dark:bg-gray-950/50 dark:text-indigo-100 dark:ring-indigo-900">
+                        Ejemplo: {opt.example}
                       </span>
-                    </span>
-                  </label>
-                );
-              })}
+                    </label>
+                  );
+                })}
+              </div>
             </div>
 
-            <label className="flex cursor-pointer items-start gap-2.5 border-b border-gray-100 px-3 py-2.5 transition-colors hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/50">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900 dark:border-gray-600 dark:text-gray-100"
-                checked={monoOn}
-                onChange={(e) => {
-                  setConfig((prev) => ({
-                    ...prev,
-                    monoBrandTakesAll: e.target.checked,
-                  }));
-                }}
-              />
-              <span className="min-w-0">
-                <span className="block text-xs font-semibold text-gray-900 dark:text-gray-100">
-                  Solo una marca → todo a esa
-                </span>
-                <span className="mt-0.5 block text-[10px] leading-snug text-gray-500 dark:text-gray-400">
-                  Si el ticket no mezcla marcas, bebidas y postres van enteros a esa marca.
-                </span>
-              </span>
-            </label>
-
-            <div className="border-t border-gray-100 bg-gray-50/80 px-3 py-2 dark:border-gray-800 dark:bg-gray-800/30">
-              <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                Estado actual
+            <div className="space-y-2 border-b border-gray-100 px-3 py-3 dark:border-gray-800">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                2 · Pedido de una sola marca
               </p>
-              <RuleStatusRow
-                label="Solo una marca → todo a esa"
-                active={monoOn}
-                activeText="bebidas/postres van a esa marca"
-                inactiveText="quedan sin marca asignada"
-              />
-              <RuleStatusRow
-                label="Marca dominante (cruce)"
-                active={splitMode === 'majority'}
-                activeText="compartidos enteros a quien más vende en el ticket"
-                inactiveText="no se usa esta regla"
-              />
-              <RuleStatusRow
-                label="A medias 1 a 1 (cruce)"
-                active={splitMode === 'equal'}
-                activeText="compartidos partidos a partes iguales entre las marcas del ticket"
-                inactiveText="no se usa esta regla"
-              />
-              <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                3 o más marcas: agrúpalas en las hojas de arriba para facturarlas juntas. Pulsa
-                Guardar para aplicar.
+              <label
+                className={`flex cursor-pointer items-start gap-2.5 rounded-xl border-2 px-3 py-2.5 transition-colors ${
+                  monoOn
+                    ? 'border-emerald-600 bg-emerald-50/70 dark:border-emerald-500 dark:bg-emerald-950/30'
+                    : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 dark:border-gray-600"
+                  checked={monoOn}
+                  onChange={(e) => {
+                    setConfig((prev) => ({
+                      ...prev,
+                      monoBrandTakesAll: e.target.checked,
+                    }));
+                  }}
+                />
+                <span className="min-w-0">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                      Todo a esa marca
+                    </span>
+                    {monoOn ? (
+                      <span className="rounded-full bg-emerald-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                        Recomendado
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="mt-1 block text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                    Si el ticket es solo marca A + una bebida, la bebida se apunta entera a marca A.
+                    Casi siempre conviene dejarlo marcado.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div className="space-y-2 bg-gray-50/80 px-3 py-3 dark:bg-gray-800/30">
+              <ActiveRuleSummary monoOn={monoOn} splitMode={splitMode} />
+              <p className="text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                Las hojas de arriba agrupan marcas en el Excel. Si tienes 3 marcas y quieres
+                facturar dos juntas, ponlas en la misma hoja. Pulsa <span className="font-semibold">Guardar</span> para aplicar.
               </p>
             </div>
           </div>

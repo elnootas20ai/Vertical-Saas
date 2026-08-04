@@ -326,6 +326,8 @@ interface DeliveryClientResumenProps {
   onNewOrder: () => void;
   onGoToPedidos: () => void;
   onGoToPromociones?: () => void;
+  /** Bar/restaurante reutiliza la misma ficha con copy de mesas. */
+  opsVariant?: 'delivery' | 'restaurant';
 }
 
 export function DeliveryClientResumen({
@@ -342,7 +344,9 @@ export function DeliveryClientResumen({
   onNewOrder,
   onGoToPedidos,
   onGoToPromociones,
+  opsVariant = 'delivery',
 }: DeliveryClientResumenProps) {
+  const isRestaurant = opsVariant === 'restaurant';
   const analytics = useMemo(() => computeDeliveryAnalytics(orders), [orders]);
 
   const computed = useMemo(() => {
@@ -437,8 +441,8 @@ export function DeliveryClientResumen({
           onClick={onNewOrder}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
         >
-          <ShoppingBag className="h-4 w-4" />
-          Nuevo pedido
+          {isRestaurant ? <UtensilsCrossed className="h-4 w-4" /> : <ShoppingBag className="h-4 w-4" />}
+          {isRestaurant ? 'Abrir TPV sala' : 'Nuevo pedido'}
         </button>
       </div>
 
@@ -453,9 +457,11 @@ export function DeliveryClientResumen({
         />
         <StatCard
           icon={<Hash className="h-4 w-4 text-blue-600" />}
-          label="Pedidos"
+          label={isRestaurant ? 'Cuentas' : 'Pedidos'}
           value={String(totalOrders || orders.length)}
-          sub={analytics.deliveredCount > 0 ? `${analytics.deliveredCount} entregados` : undefined}
+          sub={analytics.deliveredCount > 0
+            ? (isRestaurant ? `${analytics.deliveredCount} cerradas` : `${analytics.deliveredCount} entregados`)
+            : undefined}
         />
         <StatCard
           icon={<TrendingUp className="h-4 w-4 text-violet-600" />}
@@ -464,7 +470,7 @@ export function DeliveryClientResumen({
         />
         <StatCard
           icon={<Calendar className="h-4 w-4 text-amber-600" />}
-          label="Último pedido"
+          label={isRestaurant ? 'Última visita' : 'Último pedido'}
           value={computed?.lastPurchase ? formatDate(computed.lastPurchase) : '—'}
           sub={analyticsUnlocked && analytics.avgDaysBetween != null ? `Cada ~${Math.round(analytics.avgDaysBetween)} días` : undefined}
         />
@@ -595,7 +601,9 @@ export function DeliveryClientResumen({
           <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
             <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-700">
               <div>
-                <h3 className="font-bold text-gray-900 dark:text-gray-100">Últimos pedidos</h3>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100">
+                  {isRestaurant ? 'Últimas cuentas' : 'Últimos pedidos'}
+                </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">Historial reciente</p>
               </div>
               {hasActivity && (
@@ -611,17 +619,21 @@ export function DeliveryClientResumen({
             {!hasActivity ? (
               <div className="px-5 py-12 text-center">
                 <Package className="mx-auto mb-3 h-10 w-10 text-gray-300 dark:text-gray-600" />
-                <p className="font-medium text-gray-700 dark:text-gray-300">Sin pedidos todavía</p>
+                <p className="font-medium text-gray-700 dark:text-gray-300">
+                  {isRestaurant ? 'Sin cuentas todavía' : 'Sin pedidos todavía'}
+                </p>
                 <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                  Cuando este cliente pida por TPV o delivery, aparecerá aquí con estadísticas automáticas.
+                  {isRestaurant
+                    ? 'Cuando este cliente coma en mesa con ficha vinculada, aparecerá aquí.'
+                    : 'Cuando este cliente pida por TPV o delivery, aparecerá aquí con estadísticas automáticas.'}
                 </p>
                 <button
                   type="button"
                   onClick={onNewOrder}
                   className="mt-4 inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black dark:bg-gray-100 dark:text-gray-900"
                 >
-                  <ShoppingBag className="h-4 w-4" />
-                  Crear primer pedido
+                  {isRestaurant ? <UtensilsCrossed className="h-4 w-4" /> : <ShoppingBag className="h-4 w-4" />}
+                  {isRestaurant ? 'Abrir TPV sala' : 'Crear primer pedido'}
                 </button>
               </div>
             ) : (
@@ -636,7 +648,9 @@ export function DeliveryClientResumen({
                         ? <Truck className="h-4 w-4 text-indigo-600" />
                         : order.deliveryType === 'recogida'
                           ? <Store className="h-4 w-4 text-violet-600" />
-                          : <ShoppingBag className="h-4 w-4 text-emerald-600" />}
+                          : order.deliveryType === 'sala'
+                            ? <UtensilsCrossed className="h-4 w-4 text-amber-600" />
+                            : <ShoppingBag className="h-4 w-4 text-emerald-600" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -723,6 +737,7 @@ interface DeliveryClientPedidosTabProps {
   canExpandDetalle?: boolean;
   maxOrdersVisible?: number;
   totalOrdersCount?: number;
+  opsVariant?: 'delivery' | 'restaurant';
 }
 
 function OrderRow({ order, canExpandDetalle }: { order: DeliveryOrder; canExpandDetalle: boolean }) {
@@ -762,7 +777,7 @@ function OrderRow({ order, canExpandDetalle }: { order: DeliveryOrder; canExpand
       </button>
       {open && (
         <div className="border-t border-gray-100 bg-gray-50/50 px-5 py-4 dark:border-gray-700 dark:bg-gray-900/30">
-          {order.customerAddress && order.deliveryType === 'domicilio' && (
+          {order.customerAddress && (order.deliveryType === 'domicilio' || order.deliveryType === 'sala') && (
             <p className="mb-3 flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
               <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
               {order.customerAddress}
@@ -800,7 +815,9 @@ export function DeliveryClientPedidosTab({
   canExpandDetalle = true,
   maxOrdersVisible,
   totalOrdersCount,
+  opsVariant = 'delivery',
 }: DeliveryClientPedidosTabProps) {
+  const isRestaurant = opsVariant === 'restaurant';
   const visibleOrders = useMemo(() => {
     if (maxOrdersVisible == null || maxOrdersVisible === Infinity) return orders;
     return orders.slice(0, maxOrdersVisible);
@@ -853,38 +870,46 @@ export function DeliveryClientPedidosTab({
 
       {orders.length > 0 && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <MiniStat label="Total pedidos" value={String(totalOrdersCount ?? orders.length)} />
+          <MiniStat label={isRestaurant ? 'Total cuentas' : 'Total pedidos'} value={String(totalOrdersCount ?? orders.length)} />
           <MiniStat label="Total gastado" value={formatEuro(analytics.totalSpent)} />
           <MiniStat label="Ticket medio" value={formatEuro(visibleOrders.length ? analytics.totalSpent / visibleOrders.length : 0)} />
-          <MiniStat label="Entregados" value={String(analytics.deliveredCount)} />
+          <MiniStat label={isRestaurant ? 'Cerradas' : 'Entregados'} value={String(analytics.deliveredCount)} />
         </div>
       )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-gray-600 dark:text-gray-400">
           {search.trim()
-            ? `${filtered.length} de ${orders.length} pedidos`
-            : `${totalOrdersCount ?? orders.length} pedido${(totalOrdersCount ?? orders.length) !== 1 ? 's' : ''} en total`}
+            ? `${filtered.length} de ${orders.length} ${isRestaurant ? 'cuentas' : 'pedidos'}`
+            : `${totalOrdersCount ?? orders.length} ${isRestaurant ? 'cuenta' : 'pedido'}${(totalOrdersCount ?? orders.length) !== 1 ? 's' : ''} en total`}
         </p>
         <button
           type="button"
           onClick={onNewOrder}
           className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
         >
-          <ShoppingBag className="h-4 w-4" />
-          Nuevo pedido
+          {isRestaurant ? <UtensilsCrossed className="h-4 w-4" /> : <ShoppingBag className="h-4 w-4" />}
+          {isRestaurant ? 'Abrir TPV sala' : 'Nuevo pedido'}
         </button>
       </div>
 
       {orders.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-200 bg-white py-16 text-center dark:border-gray-700 dark:bg-gray-800">
           <Receipt className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-          <p className="font-semibold text-gray-800 dark:text-gray-200">Este cliente aún no tiene pedidos</p>
-          <p className="mt-1 text-sm text-gray-500">Los pedidos del TPV y delivery aparecerán aquí automáticamente.</p>
+          <p className="font-semibold text-gray-800 dark:text-gray-200">
+            {isRestaurant ? 'Este cliente aún no tiene cuentas de mesa' : 'Este cliente aún no tiene pedidos'}
+          </p>
+          <p className="mt-1 text-sm text-gray-500">
+            {isRestaurant
+              ? 'Al vincular el cliente en una mesa, las cuentas cobradas aparecerán aquí.'
+              : 'Los pedidos del TPV y delivery aparecerán aquí automáticamente.'}
+          </p>
         </div>
       ) : filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gray-200 py-12 text-center dark:border-gray-700">
-          <p className="text-sm text-gray-500">Ningún pedido coincide con la búsqueda</p>
+          <p className="text-sm text-gray-500">
+            {isRestaurant ? 'Ninguna cuenta coincide con la búsqueda' : 'Ningún pedido coincide con la búsqueda'}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">

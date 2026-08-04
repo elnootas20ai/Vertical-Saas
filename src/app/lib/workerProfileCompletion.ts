@@ -196,6 +196,7 @@ export const WORKER_BUSINESS_REQUIRED_ITEM_IDS = new Set([
   'worker-tasks',
   'worker-stock-review',
   'worker-calendar',
+  'worker-requests',
   'worker-clock',
   'worker-chat',
   'worker-docs',
@@ -277,7 +278,8 @@ export function getWorkerPayrollMissingIds(
   user?: Pick<AuthUser, 'personalData' | 'employment' | 'workerProfileCompletion'> | null,
 ): string[] {
   if (!user) return WORKER_PAYROLL_FIELD_DEFS.map((f) => f.id);
-  const completion = user.workerProfileCompletion || computeWorkerProfileCompletion(user);
+  // Siempre desde datos vivos; no confiar en workerProfileCompletion guardado.
+  const completion = computeWorkerProfileCompletion(user);
   const payrollIds = new Set(WORKER_PAYROLL_FIELD_DEFS.map((f) => f.id));
   return (completion.workerMissing || []).filter((id) => payrollIds.has(id as typeof WORKER_PAYROLL_FIELD_DEFS[number]['id']));
 }
@@ -301,12 +303,22 @@ export function needsWorkerPayrollSetup(
 }
 
 export function getWorkerPayrollMissingLabels(
-  user?: Pick<AuthUser, 'workerProfileCompletion'> | null,
+  user?: Pick<AuthUser, 'personalData' | 'employment' | 'workerProfileCompletion'> | null,
 ): string[] {
-  const missing = user?.workerProfileCompletion?.workerMissing || [];
+  const missing = getWorkerPayrollMissingIds(user);
   return WORKER_PAYROLL_FIELD_DEFS
     .filter((f) => missing.includes(f.id))
     .map((f) => f.label);
+}
+
+/** Completitud viva (ignora flag obsoleto en sesión/Couch). */
+export function resolveWorkerProfileCompletion(
+  user?: Pick<AuthUser, 'personalData' | 'employment' | 'workerProfileCompletion'> | null,
+): WorkerProfileCompletion {
+  if (!user) {
+    return computeWorkerProfileCompletion({});
+  }
+  return computeWorkerProfileCompletion(user);
 }
 
 export function resolveLandingAfterWorkerSetup(

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   allocateSharedUnitsByPresence,
   assignBrandToSheetExclusive,
+  coalesceTacoIntoBurgerSheets,
   enforceExclusiveBrandAssignment,
   isBrandBillingUnlocked,
   resolveBrandFoodUnitKey,
@@ -100,7 +101,7 @@ describe('suggestBillingSheetsFromBrands / unlock', () => {
     expect(sheets[1].unitColumns[0].key).toBe('burger');
   });
 
-  it('la 3ª marca tacos sale como hoja propia', () => {
+  it('la 3ª marca tacos va con la hoja Black Burger (misma pestaña Excel)', () => {
     const brands = [
       {
         _id: 'm1', id: 'm1', type: 'brand', business_id: 'b', user_id: 'u',
@@ -119,9 +120,39 @@ describe('suggestBillingSheetsFromBrands / unlock', () => {
       },
     ];
     const sheets = suggestBillingSheetsFromBrands(brands);
-    expect(sheets).toHaveLength(3);
-    expect(sheets.map((s) => s.unitColumns[0]?.key)).toEqual(['pizza', 'burger', 'taco']);
-    expect(sheets[2].label).toContain('TACOS');
+    expect(sheets).toHaveLength(2);
+    expect(sheets[0].unitColumns.map((c) => c.key)).toEqual(['pizza']);
+    expect(sheets[1].brandIds).toEqual(['b1', 't1']);
+    expect(sheets[1].unitColumns.map((c) => c.key)).toEqual(['burger', 'taco']);
+  });
+
+  it('coalesce une hoja TACOS suelta en la hoja burger', () => {
+    const brands = [
+      {
+        _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Black Burger', description: '', logo: '', website: '', deliveryLineKind: 'burger_fastfood',
+        active: true, createdAt: '', updatedAt: '',
+      },
+      {
+        _id: 't1', id: 't1', type: 'brand', business_id: 'b', user_id: 'u',
+        name: 'Tacos', description: '', logo: '', website: '', deliveryLineKind: 'tacos_mexican',
+        active: true, createdAt: '', updatedAt: '',
+      },
+    ];
+    const sheets = [
+      {
+        id: 'bb', label: 'BLACK BURGER', brandIds: ['b1'],
+        unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+      },
+      {
+        id: 'tc', label: 'TACOS', brandIds: ['t1'],
+        unitColumns: [{ key: 'taco', header: 'TOTAL TACOS' }],
+      },
+    ];
+    const merged = coalesceTacoIntoBurgerSheets(sheets, brands);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].brandIds).toEqual(['b1', 't1']);
+    expect(merged[0].unitColumns.map((c) => c.key)).toEqual(['burger', 'taco']);
   });
 
   it('no se activa con una sola marca', () => {

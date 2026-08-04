@@ -15,9 +15,42 @@ import {
   getWasteReporting,
   VALID_WASTE_TYPES,
 } from '../services/butcherWasteService.js';
+import { applyCuttingBreakdown } from '../services/butcherStockPipeline.js';
 
 function bad(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+export async function runButcherDespiece(req, res) {
+  try {
+    const { userId } = req.params;
+    if (!userId) return bad(res, 'Falta userId');
+    const body = req.body || {};
+    const result = await applyCuttingBreakdown(req, userId, {
+      origenProductId: body.origenProductId,
+      kg: body.kg,
+      cortes: body.cortes || [],
+      mermaPct: body.mermaPct,
+    });
+    if (!result.ok) return bad(res, result.error || 'Error en despiece');
+
+    // Registrar merma implícita si hay kg
+    if (Number(result.mermaKg || 0) > 0) {
+      try {
+        await registerWasteService(req, userId, {
+          productId: body.origenProductId,
+          productName: body.origenNombre || '',
+          wasteKg: result.mermaKg,
+          wasteType: 'recortes',
+          notes: `Merma implícita despiece${body.recipeId ? ` (${body.recipeId})` : ''}`,
+        });
+      } catch { /* non-blocking */ }
+    }
+
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error?.message || 'Error en despiece' });
+  }
 }
 
 // --- Products ---------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   SAAS__CreateSaleModal,
@@ -26,8 +26,9 @@ import type { VentaListItem } from './ventasListData';
 
 export function VentasModuleShell() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, listUsers } = useAuth();
-  const { vehicles, clients, addClient } = useApp();
+  const { vehicles, clients, addClient, deleteSale } = useApp();
   const userId = user?.user_id || user?.userId || user?._id || '';
   const userFullName = user?.fullName?.trim() || '';
   const isWorker = isWorkerAccount(user);
@@ -38,6 +39,21 @@ export function VentasModuleShell() {
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [prefillVehicleId, setPrefillVehicleId] = useState('');
+  const [prefillClientId, setPrefillClientId] = useState('');
+
+  useEffect(() => {
+    if (searchParams.get('newSale') !== '1') return;
+    setPrefillVehicleId(searchParams.get('vehicleId') || '');
+    setPrefillClientId(searchParams.get('clientId') || '');
+    setModalOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('newSale');
+    next.delete('vehicleId');
+    next.delete('clientId');
+    next.delete('fromCrm');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const vehicleExpensesById = useMemo(() => {
     const map: Record<string, number> = {};
@@ -88,6 +104,18 @@ export function VentasModuleShell() {
       ),
     [visibleSalesRecords, vehicleExpensesById],
   );
+
+  // Deep-link desde hub / entregas: ?saleId=
+  useEffect(() => {
+    const saleId = searchParams.get('saleId');
+    if (!saleId || sales.length === 0) return;
+    if (sales.some((s) => s.id === saleId)) {
+      setSelectedId(saleId);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('saleId');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, sales]);
 
   const selectedSale = useMemo(
     () => sales.find((s) => s.id === selectedId) ?? null,
@@ -198,8 +226,31 @@ export function VentasModuleShell() {
     async (actionId: 'edit' | 'reserve' | 'confirm' | 'deliver' | 'cancel') => {
       if (!selectedRecord || !userId) return;
 
-      if (actionId === 'edit' || actionId === 'cancel') {
-        navigate(`/saas/sales/${selectedRecord.id}`);
+      if (actionId === 'edit') {
+        navigate(`/saas/sales/${selectedRecord.id}?edit=1`);
+        return;
+      }
+
+      if (actionId === 'cancel') {
+        if (selectedRecord.stage === 'delivered') {
+          toast.error('No se puede cancelar una venta ya entregada');
+          return;
+        }
+        const ok = window.confirm(
+          `¿Cancelar y eliminar la venta de ${selectedRecord.vehicleName || 'este vehículo'}? Esta acción no se puede deshacer.`,
+        );
+        if (!ok) return;
+        setActionLoading(true);
+        try {
+          await deleteSale(selectedRecord.id);
+          setSalesRecords((prev) => prev.filter((s) => s.id !== selectedRecord.id));
+          setSelectedId(null);
+          toast.success('Venta cancelada');
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'No se pudo cancelar la venta');
+        } finally {
+          setActionLoading(false);
+        }
         return;
       }
 
@@ -212,13 +263,11 @@ export function VentasModuleShell() {
           return;
         }
         if (actionId === 'confirm') {
-          const saved = await updateSaleStage(userId, selectedRecord, 'sold', 'Venta confirmada desde módulo Ventas');
-          setSalesRecords((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
-          toast.success('Venta confirmada — vehículo marcado como vendido');
+          navigate(`/saas/sales/${selectedRecord.id}?close=1`);
           return;
         }
         if (actionId === 'deliver') {
-          navigate('/saas/vertical/compraventa/entregas');
+          navigate(`/saas/vertical/compraventa/entregas?saleId=${encodeURIComponent(selectedRecord.id)}`);
         }
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'No se pudo actualizar la venta');
@@ -226,7 +275,7 @@ export function VentasModuleShell() {
         setActionLoading(false);
       }
     },
-    [selectedRecord, userId, navigate],
+    [selectedRecord, userId, navigate, deleteSale],
   );
 
   return (
@@ -246,6 +295,7 @@ export function VentasModuleShell() {
       detailPanel={(
         <VentasDetailPanel
           sale={selectedSale}
+          history={selectedRecord?.stageHistory || []}
           actionsDisabled={actionLoading}
           onAction={handleAction}
         />
@@ -253,7 +303,11 @@ export function VentasModuleShell() {
       overlay={(
         <SAAS__CreateSaleModal
           isOpen={modalOpen}
-          onClose={() => setModalOpen(false)}
+          onClose={() => {
+            setModalOpen(false);
+            setPrefillVehicleId('');
+            setPrefillClientId('');
+          }}
           onCreate={handleCreateSale}
           onCreateClient={handleCreateClient}
           onAddVehicle={() => {
@@ -264,6 +318,8 @@ export function VentasModuleShell() {
           clients={clients || []}
           teamMemberOptions={responsableOptions}
           existingSales={visibleSalesRecords}
+          initialVehicleId={prefillVehicleId || undefined}
+          initialClientId={prefillClientId || undefined}
         />
       )}
     />

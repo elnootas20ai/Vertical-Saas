@@ -92,7 +92,7 @@ function loadAppleScript(): Promise<void> {
 async function ensureAppleAuthReady(): Promise<void> {
   if (!appleWebClientConfigured) {
     throw new Error(
-      'Sign in with Apple no está configurado (falta VITE_APPLE_CLIENT_ID / Services ID)',
+      'No se pudo iniciar sesión con Apple. Inténtalo de nuevo más tarde.',
     );
   }
   await loadAppleScript();

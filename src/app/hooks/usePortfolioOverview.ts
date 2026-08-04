@@ -38,6 +38,8 @@ import {
   pickPrimaryPdvIdFromList,
   portfolioOrderFetchFrom,
   prevCalendarMonthKey,
+  comparableMonthThroughDay,
+  sumFinanceIncomeThroughDay,
   sumFinanceMonthForBusiness,
   type CompanyBillingBreakdown,
   type PortfolioClientMetrics,
@@ -46,6 +48,13 @@ import {
   type StoreDeliveryMetrics,
   type StoreOpsPulse,
 } from '../lib/portfolioMetrics';
+import {
+  ceoCajaMixFromSessions,
+  ceoCajaMonthlyTotals,
+  yearMonthFromSession,
+  type CeoCajaChannelMix,
+} from '../lib/cajaUrielClosingsExcelExport';
+import type { TpvRegisterSession } from '../lib/deliveryApi';
 import { localCalendarDayKey } from '../lib/tpvCajaScope';
 import { computeEbitdaForMonth } from '../lib/ebitdaMetrics';
 import { resolveBusinessDataUserId } from '../lib/tenantUserId';
@@ -122,6 +131,12 @@ export type PortfolioBusiness = {
   isDelivery: boolean;
   isRestaurant: boolean;
   team: TeamDashboardSnapshot;
+  /** Mix cierre por canales (sesiones de caja del mes). */
+  cajaMix: CeoCajaChannelMix | null;
+  /** Sesiones del mes (export Excel CEO). */
+  cajaSessionsMonth: TpvRegisterSession[];
+  /** Totales mensuales recientes (COMPARATIVA lite). */
+  cajaMonthlyTotals: Array<{ yearMonth: string; label: string; total: number }>;
 };
 
 export type PortfolioTotals = {
@@ -156,6 +171,7 @@ const EMPTY_FINANCE: PortfolioFinanceTotals = {
   incomeMonth: 0,
   expensesMonth: 0,
   incomePrevMonth: 0,
+  incomePrevMonthMtd: 0,
   expensesPrevMonth: 0,
   profitMonth: 0,
   ebitdaMonth: 0,
@@ -189,6 +205,9 @@ function buildPlaceholderRow(business: Business): PortfolioBusiness {
     isDelivery: isDeliveryBusinessType(business.businessType),
     isRestaurant: isRestaurantBusinessType(business.businessType),
     team: { ...EMPTY_TEAM_DASHBOARD_SNAPSHOT, totalMembers: business.members?.length ?? 0 },
+    cajaMix: null,
+    cajaSessionsMonth: [],
+    cajaMonthlyTotals: [],
   };
 }
 
@@ -345,6 +364,7 @@ function financeForBusiness(
   monthKey: string,
   businessId: string,
   accountBusinessCount: number,
+  todayKey: string,
 ): PortfolioFinanceTotals {
   const prevMonthKey = prevCalendarMonthKey(monthKey);
   const base = sumFinanceMonthForBusiness(movements, monthKey, businessId);
@@ -358,10 +378,13 @@ function financeForBusiness(
       ...movements.filter((m) => !String(m.businessId || '').replace(/^business:/, '').trim()),
     ];
   }
+  const throughDay = comparableMonthThroughDay(todayKey, prevMonthKey);
+  const incomePrevMonthMtd = sumFinanceIncomeThroughDay(scoped, prevMonthKey, throughDay);
   const ebitda = computeEbitdaForMonth(scoped, monthKey, { level: 'all' });
   return {
     ...base,
     incomePrevMonth: prev.incomeMonth,
+    incomePrevMonthMtd,
     expensesPrevMonth: prev.expensesMonth,
     ebitdaMonth: Math.round(ebitda.ebitda * 100) / 100,
     ebitdaMarginMonth: Math.round(ebitda.ebitdaMargin * 10) / 10,
@@ -403,6 +426,8 @@ export function usePortfolioOverview(
   const reloadSeqRef = useRef(0);
   const suppressLiveRefreshRef = useRef(false);
   const hasLoadedOnceRef = useRef(false);
+  const rowsCacheRef = useRef<PortfolioBusiness[]>([]);
+  const teamFetchedAtRef = useRef(0);
 
   const businessIdsKey = useMemo(
     () =>
@@ -416,6 +441,8 @@ export function usePortfolioOverview(
     const silent = reloadOpts?.silent === true;
     const businessesSnapshot = businessesRef.current;
     const force = reloadOpts?.force === true;
+    /** SSE / poll: no re-pedir equipo ni clientes (caro y casi no cambia en 90s). */
+    const skipSlowSecondary = silent && !force;
 
     if (reloadInflightRef.current && !force) {
       if (silent) return reloadInflightRef.current;
@@ -609,6 +636,7 @@ export function usePortfolioOverview(
         financeMovements,
         monthKey,
         businessesSnapshot.map((b) => b.business_id),
+        todayKey,
       );
       financeTotals.cashBalance = getTotalBalance(bankAccounts);
       const scopedForEbitda =
@@ -672,27 +700,59 @@ export function usePortfolioOverview(
             metrics = applyTpvCashMetrics(metrics, sessions, s.pdvIds, todayKey);
           }
 
+          const pdvSet = new Set(s.pdvIds.map((id) => String(id || '').trim()).filter(Boolean));
+          const sessionsForBiz = (s.dataUserId ? sessionsByUser.get(s.dataUserId) || [] : []).filter(
+            (sess) => pdvSet.size === 0 || pdvSet.has(String(sess.pointOfSaleId || '').trim()),
+          );
+          const cajaSessionsMonth = sessionsForBiz.filter(
+            (sess) => yearMonthFromSession(sess) === monthKey,
+          );
+          const cajaMixRaw =
+            s.isDelivery && sessionsForBiz.length > 0
+              ? ceoCajaMixFromSessions(sessionsForBiz, monthKey)
+              : null;
+          const cajaMix =
+            cajaMixRaw
+            && (cajaMixRaw.total > 0 || cajaMixRaw.pizza > 0 || cajaMixRaw.burger > 0 || cajaMixRaw.taco > 0)
+              ? cajaMixRaw
+              : null;
+          const cajaMonthlyTotals = s.isDelivery
+            ? ceoCajaMonthlyTotals(sessionsForBiz, 12)
+            : [];
+
           const storeNameById = new Map(stores.map((st) => [st.id, st.name]));
           const brands = enrichBrandsWithBilling(brandsBase, billing, storeNameById);
           const members = (s.business.members || []).map((m) => ({
             user_id: m.user_id,
             fullName: m.fullName,
           }));
-          const team = await fetchTeamDashboardSnapshot(s.business.business_id, members).catch(
-            () => ({ ...EMPTY_TEAM_DASHBOARD_SNAPSHOT, totalMembers: members.length }),
-          );
+
+          const prevRow = rowsCacheRef.current.find((r) => r.businessId === s.business.business_id);
+          const teamFreshEnough =
+            skipSlowSecondary
+            && prevRow?.team
+            && Date.now() - teamFetchedAtRef.current < 120_000;
+          const team = teamFreshEnough
+            ? prevRow.team
+            : await fetchTeamDashboardSnapshot(s.business.business_id, members).catch(
+                () => ({ ...EMPTY_TEAM_DASHBOARD_SNAPSHOT, totalMembers: members.length }),
+              );
 
           const rowFinance = financeForBusiness(
             financeMovements,
             monthKey,
             s.business.business_id,
             businessesSnapshot.length,
+            todayKey,
           );
-          const clients = s.dataUserId
-            ? await loadClientMetricsForBusiness(s.dataUserId, s.business.business_id, monthKey).catch(
-                () => emptyPortfolioClientMetrics(),
-              )
-            : emptyPortfolioClientMetrics();
+          const clients =
+            skipSlowSecondary && prevRow?.clients
+              ? prevRow.clients
+              : s.dataUserId
+                ? await loadClientMetricsForBusiness(s.dataUserId, s.business.business_id, monthKey).catch(
+                    () => emptyPortfolioClientMetrics(),
+                  )
+                : emptyPortfolioClientMetrics();
 
           return {
             businessId: s.business.business_id,
@@ -711,13 +771,23 @@ export function usePortfolioOverview(
             isDelivery: s.isDelivery,
             isRestaurant: s.isRestaurant,
             team,
+            cajaMix,
+            cajaSessionsMonth,
+            cajaMonthlyTotals,
           };
         }),
       );
 
       if (seq !== reloadSeqRef.current) return;
       setFinance(financeTotals);
-      setRows(loaded.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es')));
+      // Más activa primero (como Comparativa entre empresas · ventas), luego nombre.
+      const sortedLoaded = loaded.sort((a, b) => (
+        (b.metrics.revenueMonth || 0) - (a.metrics.revenueMonth || 0)
+        || a.business.name.localeCompare(b.business.name, 'es')
+      ));
+      rowsCacheRef.current = sortedLoaded;
+      if (!skipSlowSecondary) teamFetchedAtRef.current = Date.now();
+      setRows(sortedLoaded);
       setLastUpdatedAt(new Date());
       setError(financeLoadWarning);
       hasLoadedOnceRef.current = true;
@@ -725,7 +795,10 @@ export function usePortfolioOverview(
       if (seq !== reloadSeqRef.current) return;
       setError(e instanceof Error ? e.message : 'No se pudo cargar el panorama');
       if (loaded.length > 0) {
-        setRows(loaded.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es')));
+        setRows(loaded.sort((a, b) => (
+          (b.metrics.revenueMonth || 0) - (a.metrics.revenueMonth || 0)
+          || a.business.name.localeCompare(b.business.name, 'es')
+        )));
         hasLoadedOnceRef.current = true;
       } else {
         setRows([]);
@@ -784,7 +857,10 @@ export function usePortfolioOverview(
       }
       const next = [...byId.values()].filter((r) => businessIds.has(r.businessId));
       if (!changed && next.length === prev.length) return prev;
-      return next.sort((a, b) => a.business.name.localeCompare(b.business.name, 'es'));
+      return next.sort((a, b) => (
+        (b.metrics.revenueMonth || 0) - (a.metrics.revenueMonth || 0)
+        || a.business.name.localeCompare(b.business.name, 'es')
+      ));
     });
   }, [businessIdsKey, businesses]);
 

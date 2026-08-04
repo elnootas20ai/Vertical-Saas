@@ -16,12 +16,14 @@ export function getButcherDbName() {
 }
 
 const ORDER_TYPES = ['simple', 'reservation', 'special'];
-const ORDER_STATUSES = ['pending', 'preparing', 'ready', 'picked_up', 'cancelled'];
+const ORDER_STATUSES = ['pending', 'preparing', 'ready', 'out_for_delivery', 'delivered', 'picked_up', 'cancelled'];
+const FULFILLMENT_MODES = ['pickup', 'delivery'];
 const SALE_STATUSES = ['completed', 'pending', 'voided'];
 const PAYMENT_METHODS = ['cash', 'card', 'bizum', 'mixed'];
 
 function normalizeOrderType(v) { return ORDER_TYPES.includes(String(v || '')) ? String(v) : 'simple'; }
 function normalizeOrderStatus(v) { return ORDER_STATUSES.includes(String(v || '')) ? String(v) : 'pending'; }
+function normalizeFulfillment(v) { return FULFILLMENT_MODES.includes(String(v || '')) ? String(v) : 'pickup'; }
 function normalizeSaleStatus(v) { return SALE_STATUSES.includes(String(v || '')) ? String(v) : 'completed'; }
 function normalizePayment(v) { return PAYMENT_METHODS.includes(String(v || '')) ? String(v) : 'cash'; }
 
@@ -143,6 +145,12 @@ export function buildButcherOrderDocument(userId, data = {}, existing = null) {
     total: Number(data.total ?? existing?.total ?? 0),
     pickupDate: String(data.pickupDate || existing?.pickupDate || ''),
     pickupTime: String(data.pickupTime || existing?.pickupTime || ''),
+    fulfillmentMode: normalizeFulfillment(data.fulfillmentMode ?? existing?.fulfillmentMode),
+    deliveryAddress: String(data.deliveryAddress || existing?.deliveryAddress || ''),
+    deliveryNotes: String(data.deliveryNotes || existing?.deliveryNotes || ''),
+    assignedWorkerId: String(data.assignedWorkerId || existing?.assignedWorkerId || ''),
+    assignedWorkerName: String(data.assignedWorkerName || existing?.assignedWorkerName || ''),
+    cashOnDelivery: Boolean(data.cashOnDelivery ?? existing?.cashOnDelivery ?? false),
     status: normalizeOrderStatus(data.status ?? existing?.status),
     priority: String(data.priority || existing?.priority || 'normal'),
     notes: String(data.notes || existing?.notes || ''),
@@ -163,6 +171,12 @@ export function sanitizeButcherOrder(doc) {
     clientId: doc.clientId || null, clientName: doc.clientName || '', clientPhone: doc.clientPhone || '',
     items: Array.isArray(doc.items) ? doc.items : [],
     total: Number(doc.total || 0), pickupDate: doc.pickupDate || '', pickupTime: doc.pickupTime || '',
+    fulfillmentMode: normalizeFulfillment(doc.fulfillmentMode),
+    deliveryAddress: doc.deliveryAddress || '',
+    deliveryNotes: doc.deliveryNotes || '',
+    assignedWorkerId: doc.assignedWorkerId || '',
+    assignedWorkerName: doc.assignedWorkerName || '',
+    cashOnDelivery: Boolean(doc.cashOnDelivery),
     status: normalizeOrderStatus(doc.status), priority: doc.priority || 'normal',
     notes: doc.notes || '', preparedBy: doc.preparedBy || '',
     stockReserved: Boolean(doc.stockReserved), linkedSaleId: doc.linkedSaleId || null,
@@ -205,6 +219,8 @@ export function buildButcherSaleDocument(userId, data = {}, existing = null) {
     type: 'butcher_sale',
     id,
     user_id: userId,
+    business_id: String(data.business_id || data.businessId || existing?.business_id || '').replace(/^business:/, '').trim() || undefined,
+    businessId: String(data.businessId || data.business_id || existing?.businessId || existing?.business_id || '').replace(/^business:/, '').trim() || undefined,
     ticketNumber: String(data.ticketNumber || existing?.ticketNumber || ''),
     clientId: data.clientId || existing?.clientId || null,
     clientName: String(data.clientName || existing?.clientName || ''),
@@ -218,6 +234,18 @@ export function buildButcherSaleDocument(userId, data = {}, existing = null) {
     status: normalizeSaleStatus(data.status ?? existing?.status),
     fromOrderId: data.fromOrderId || existing?.fromOrderId || null,
     soldBy: String(data.soldBy || existing?.soldBy || ''),
+    pointOfSaleId: data.pointOfSaleId || data.pdvId || existing?.pointOfSaleId || null,
+    pointOfSaleName: String(data.pointOfSaleName || data.pdvName || existing?.pointOfSaleName || ''),
+    storeId: data.storeId || data.tiendaId || existing?.storeId || data.pointOfSaleId || existing?.pointOfSaleId || null,
+    tiendaId: data.tiendaId || data.storeId || existing?.tiendaId || data.pointOfSaleId || existing?.pointOfSaleId || null,
+    terminalId: data.terminalId || existing?.terminalId || null,
+    stockAllocations: Array.isArray(data.stockAllocations)
+      ? data.stockAllocations
+      : (existing?.stockAllocations || []),
+    verifactuRecordId: data.verifactuRecordId || existing?.verifactuRecordId || null,
+    verifactuFullNumber: data.verifactuFullNumber || existing?.verifactuFullNumber || null,
+    verifactuQrUrl: data.verifactuQrUrl || existing?.verifactuQrUrl || null,
+    verifactuHuella: data.verifactuHuella || existing?.verifactuHuella || null,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
     deletedAt: data.deletedAt || existing?.deletedAt || null,
@@ -228,6 +256,8 @@ export function sanitizeButcherSale(doc) {
   if (!doc) return null;
   return {
     _id: doc._id, _rev: doc._rev, type: 'butcher_sale', id: doc._id, user_id: doc.user_id,
+    business_id: doc.business_id || doc.businessId || undefined,
+    businessId: doc.businessId || doc.business_id || undefined,
     ticketNumber: doc.ticketNumber || '', clientId: doc.clientId || null,
     clientName: doc.clientName || '', clientPhone: doc.clientPhone || '',
     date: doc.date || '', items: Array.isArray(doc.items) ? doc.items : [],
@@ -236,6 +266,16 @@ export function sanitizeButcherSale(doc) {
     paymentDetails: doc.paymentDetails || null,
     status: normalizeSaleStatus(doc.status),
     fromOrderId: doc.fromOrderId || null, soldBy: doc.soldBy || '',
+    pointOfSaleId: doc.pointOfSaleId || null,
+    pointOfSaleName: doc.pointOfSaleName || '',
+    storeId: doc.storeId || doc.tiendaId || doc.pointOfSaleId || null,
+    tiendaId: doc.tiendaId || doc.storeId || doc.pointOfSaleId || null,
+    terminalId: doc.terminalId || null,
+    stockAllocations: Array.isArray(doc.stockAllocations) ? doc.stockAllocations : [],
+    verifactuRecordId: doc.verifactuRecordId || null,
+    verifactuFullNumber: doc.verifactuFullNumber || null,
+    verifactuQrUrl: doc.verifactuQrUrl || null,
+    verifactuHuella: doc.verifactuHuella || null,
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,

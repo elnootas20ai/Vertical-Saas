@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -89,13 +89,21 @@ import {
 } from '../../lib/tpvRegisterScope';
 import { isRestaurantBusinessType, isDeliveryOpsBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
-import { changeTableStatusRequest, type DiningOrder } from '../../lib/salaApi';
+import {
+  cancelDiningOrderRequest,
+  changeTableStatusRequest,
+  linkClientToOrderRequest,
+  mergeDiningOrdersRequest,
+  type DiningOrder,
+} from '../../lib/salaApi';
 import { tableStatusOnOpen, tableStatusOnPaid, tableStatusOnRelease, tableStatusOnOrderAdded } from '../../lib/restaurantTableStatus';
 import {
   addCartToDiningAccount,
   applyDiningOrderDiscount,
+  buildDiningCajaPayItems,
   buildSplitPartViews,
   diningOrderDueAmount,
+  diningOrderHasPendingKitchen,
   flattenDiningAccountLines,
   moveDiningOrderToTable,
   payAndCloseDiningOrder,
@@ -105,10 +113,14 @@ import {
   voidDiningAccountLine,
   type DiningAccountLineView,
 } from '../../lib/restaurantDiningTpv';
+import { WorkerTpvStaffConsumption } from './worker/WorkerTpvStaffConsumption';
 import { RestaurantChangeTableModal } from '../../components/saas/restaurant/RestaurantChangeTableModal';
+import { RestaurantMergeTableModal } from '../../components/saas/restaurant/RestaurantMergeTableModal';
 import { RestaurantSplitBillModal, type SplitBillResult } from '../../components/saas/restaurant/RestaurantSplitBillModal';
 import { RestaurantAccountDiscountModal } from '../../components/saas/restaurant/RestaurantAccountDiscountModal';
 import { TpvSplitPaymentModal } from '../../components/saas/tpv/TpvSplitPaymentModal';
+import { TpvModalRoot } from '../../components/saas/tpv/TpvModalRoot';
+import { RestaurantItemPaySelectModal } from '../../components/saas/restaurant/RestaurantItemPaySelectModal';
 import {
   formatSplitPartsSummary,
   type TpvSplitPaymentPart,
@@ -123,9 +135,11 @@ import {
 } from '../../lib/deliverySetup';
 import { ClockedInWorkerBubbles } from '../../components/saas/ClockedInWorkerBubbles';
 import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
+import { StoreHoursStatusBanner } from '../../components/saas/StoreHoursStatusBanner';
+import { resolveWorkerWorkCenter } from '../../lib/workerStoreHours';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../lib/tpvTabletOffline';
+import { ensureLocalCajaSaleForOrder } from '../../lib/tpvLocalCajaSale';
 import { CeoTpvStorePicker, buildCeoTpvStoreRows } from '../../components/saas/CeoTpvStorePicker';
-import { WorkerTpvDelivery } from './worker/WorkerTpvDelivery';
 import { WorkerTpvStockReview } from './worker/WorkerTpvStockReview';
 import { WorkerTpvBottomBar } from '../../components/saas/WorkerTpvBottomBar';
 import { TpvChromeScope, useTpvOrderFlowChrome, useTpvOrderFlowActive } from '../../context/TpvChromeContext';
@@ -167,7 +181,18 @@ import {
   Split,
   Percent,
   Zap,
+  Wallet,
+  Combine,
+  Ban,
+  UserRound,
+  Utensils,
 } from 'lucide-react';
+
+/** Lazy: evita ciclo TpvRapidoPage ↔ WorkerTpvDelivery que deja el TPV de mesa en undefined. */
+const WorkerTpvDeliveryLazy = lazy(async () => {
+  const mod = await import('./worker/WorkerTpvDelivery');
+  return { default: mod.WorkerTpvDelivery };
+});
 
 type Step = 'client' | 'delivery' | 'products' | 'payment';
 type PaymentMethod = TpvPaymentMethod | 'mixto';
@@ -303,7 +328,7 @@ function isDeliveryQuickAttentionClient(client: Client | null | undefined): bool
   return Boolean(client && client.id === DELIVERY_QUICK_ATTENTION_CLIENT_ID);
 }
 
-/** Ficha CRM creada desde atención rápida (con o sin teléfono / perdido). */
+/** Ficha CRM creada desde atención rápida (solo cuando hay teléfono completo). */
 function isQuickAttentionCrmClient(client: Client | null | undefined): boolean {
   return Boolean(client?.tags?.includes('quick-attention'));
 }
@@ -608,6 +633,13 @@ function TpvRapidoCeoBoard() {
     return pdv?.name || '';
   }, [effectivePdvId, pointsOfSale]);
 
+  const activeStoreHoursWorkCenter = useMemo(() => {
+    if (!effectivePdvId) return null;
+    const pdv = pointsOfSale.find((p) => p._id === effectivePdvId);
+    const ref = String(pdv?.workCenterId || effectivePdvId).trim();
+    return resolveWorkerWorkCenter(retailWorkCenters, ref);
+  }, [effectivePdvId, pointsOfSale, retailWorkCenters]);
+
   const handleSelectStore = useCallback(
     (pdvId: string) => {
       const id = String(pdvId || '').trim();
@@ -675,7 +707,7 @@ function TpvRapidoCeoBoard() {
             <button
               type="button"
               onClick={() => setForceStorePicker(true)}
-              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white"
+              className="rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] px-4 py-2.5 text-sm font-semibold text-white"
             >
               Elegir tienda
             </button>
@@ -712,6 +744,7 @@ function TpvRapidoCeoBoard() {
     >
       <div className="flex flex-col overflow-hidden h-full min-h-0 bg-gray-50 dark:bg-gray-950">
         <TpvOfflineBanner />
+        <StoreHoursStatusBanner workCenter={activeStoreHoursWorkCenter} compact className="shrink-0" />
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
           <TpvRegisterGate
             fillParent
@@ -728,11 +761,20 @@ function TpvRapidoCeoBoard() {
                 }}
               />
             ) : (
-              <WorkerTpvDelivery
-                ceoMode
-                forcedPdvId={effectivePdvId}
-                onChangeStore={handleChangeStore}
-              />
+              <Suspense
+                fallback={(
+                  <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-stone-400" />
+                    <p className="text-sm text-stone-500">Cargando TPV…</p>
+                  </div>
+                )}
+              >
+                <WorkerTpvDeliveryLazy
+                  ceoMode
+                  forcedPdvId={effectivePdvId}
+                  onChangeStore={handleChangeStore}
+                />
+              </Suspense>
             )}
           </TpvRegisterGate>
         </div>
@@ -774,6 +816,8 @@ export type TpvRapidoOrderFlowProps = {
   restaurantPermissions?: RestaurantTpvPermissions;
   /** Cuando el flujo se monta fuera del árbol del gate (p. ej. vista embebida en tablet). */
   registerOverride?: TpvRegisterContextType;
+  /** Desde el plano: abrir carta o ir directo a cobro. */
+  restaurantOpenIntent?: 'order' | 'pay';
 };
 
 export function TpvRapidoOrderFlow({
@@ -788,6 +832,7 @@ export function TpvRapidoOrderFlow({
   onRestaurantTableChange,
   restaurantPermissions,
   registerOverride,
+  restaurantOpenIntent = 'order',
 }: TpvRapidoOrderFlowProps = {}) {
   useTpvOrderFlowChrome(true);
   const orderFlowChrome = useTpvOrderFlowActive();
@@ -933,12 +978,15 @@ export function TpvRapidoOrderFlow({
     restaurantModeProp ?? isRestaurantBusinessType(currentBusiness?.businessType),
   );
 
-  const [currentStep, setCurrentStep] = useState<Step>(() =>
-    startAsRestaurant ? restaurantFlowResetStep() : 'client',
-  );
+  const [currentStep, setCurrentStep] = useState<Step>(() => {
+    if (startAsRestaurant && restaurantOpenIntent === 'pay') return 'payment';
+    return startAsRestaurant ? restaurantFlowResetStep() : 'client';
+  });
   const [completedSteps, setCompletedSteps] = useState<Set<Step>>(() =>
     startAsRestaurant ? restaurantFlowCompletedSteps() : new Set(),
   );
+  /** Aplicar una sola vez el salto a cobro desde el plano de mesas. */
+  const restaurantPayIntentAppliedRef = useRef(false);
 
   // Step 1 - Client
   const [phonePrefix, setPhonePrefix] = useState('+34');
@@ -1032,6 +1080,8 @@ export function TpvRapidoOrderFlow({
   // Step 4 - Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [paymentSplitOpen, setPaymentSplitOpen] = useState(false);
+  /** Restaurant mesa: choice → items | amounts (como delivery al cobrar). */
+  const [restaurantSplitStep, setRestaurantSplitStep] = useState<null | 'choice' | 'items' | 'amounts'>(null);
   const [pendingSplitParts, setPendingSplitParts] = useState<TpvSplitPaymentPart[] | null>(null);
   const [cashGiven, setCashGiven] = useState('');
   // Propina (solo cobro de cuenta de mesa en restaurante/bar)
@@ -1062,8 +1112,12 @@ export function TpvRapidoOrderFlow({
   const [createdOrder, setCreatedOrder] = useState<DeliveryOrder | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [changeTableOpen, setChangeTableOpen] = useState(false);
+  const [mergeTableOpen, setMergeTableOpen] = useState(false);
   const [splitBillOpen, setSplitBillOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
+  const [restaurantClientPickerOpen, setRestaurantClientPickerOpen] = useState(false);
+  const [restaurantClientQuery, setRestaurantClientQuery] = useState('');
+  const [restaurantStaffConsumptionOpen, setRestaurantStaffConsumptionOpen] = useState(false);
   const actionBusyRef = useRef(false);
 
   const tpvErrorMeta = useMemo(
@@ -1151,9 +1205,15 @@ export function TpvRapidoOrderFlow({
       .catch(() => {});
   }, [userId, brands]);
 
+  const tpvCatalogLayout = isRestaurantMode ? 'brand_families' as const : 'default' as const;
+
   const catalogSections = useMemo(
-    () => buildTpvCatalogSections(brands, catalog),
-    [brands, catalog],
+    () =>
+      buildTpvCatalogSections(brands, catalog, {
+        includeAllTab: !isRestaurantMode,
+        layout: tpvCatalogLayout,
+      }),
+    [brands, catalog, isRestaurantMode, tpvCatalogLayout],
   );
 
   const selectedScope = useMemo(
@@ -1171,19 +1231,19 @@ export function TpvRapidoOrderFlow({
   useEffect(() => {
     if (brandInitRef.current || catalogSections.length === 0) return;
     brandInitRef.current = true;
-    setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
-  }, [catalogSections, catalog]);
+    setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog, brands, tpvCatalogLayout));
+  }, [catalogSections, catalog, brands, tpvCatalogLayout]);
 
   useEffect(() => {
     if (!selectedSectionId || loadingCatalog || catalog.length === 0) return;
     const scope = parseTpvSectionId(selectedSectionId);
-    if (!scope || tpvSectionProductCount(catalog, scope) > 0) return;
-    const fallback = defaultTpvSectionId(catalogSections, catalog);
+    if (!scope || tpvSectionProductCount(catalog, scope, brands, tpvCatalogLayout) > 0) return;
+    const fallback = defaultTpvSectionId(catalogSections, catalog, brands, tpvCatalogLayout);
     if (fallback && fallback !== selectedSectionId) {
       setSelectedSectionId(fallback);
       setSelectedCategory(null);
     }
-  }, [selectedSectionId, loadingCatalog, catalog, catalogSections]);
+  }, [selectedSectionId, loadingCatalog, catalog, catalogSections, brands, tpvCatalogLayout]);
 
   useEffect(() => {
     if (!userId || !tpvCatalogBusinessId || businesses.length === 0) return;
@@ -1344,8 +1404,8 @@ export function TpvRapidoOrderFlow({
   // ─── Derived ───────────────────────────────────────────────────────────────
   const categories = useMemo(() => {
     if (!selectedScope) return [];
-    return categoriesForTpvScope(selectedScope, brands, catalog);
-  }, [selectedScope, brands, catalog]);
+    return categoriesForTpvScope(selectedScope, brands, catalog, tpvCatalogLayout);
+  }, [selectedScope, brands, catalog, tpvCatalogLayout]);
 
   const clientProductScores = useMemo(() => {
     if (!selectedClient?.id) return {};
@@ -1620,7 +1680,26 @@ export function TpvRapidoOrderFlow({
     [isRestaurantMode, deliveryFlowClient, deliveryType, cart.length, restaurantDiningOrder, restaurantTable],
   );
 
-  const saleClient = isRestaurantMode ? tableWalkInClient : deliveryFlowClient;
+  const restaurantLinkedClient = useMemo(() => {
+    if (!isRestaurantMode) return null;
+    if (selectedClient?.id && selectedClient.id !== RESTAURANT_WALKIN_CLIENT_ID) {
+      return selectedClient;
+    }
+    const linkedId = String(restaurantDiningOrder?.clientId || '').trim();
+    const linkedName = String(restaurantDiningOrder?.clientName || '').trim();
+    if (linkedId) {
+      return {
+        ...tableWalkInClient,
+        id: linkedId,
+        name: linkedName || 'Cliente sala',
+      };
+    }
+    return null;
+  }, [isRestaurantMode, selectedClient, restaurantDiningOrder?.clientId, restaurantDiningOrder?.clientName, tableWalkInClient]);
+
+  const saleClient = isRestaurantMode
+    ? (restaurantLinkedClient || tableWalkInClient)
+    : deliveryFlowClient;
 
   const orderReady =
     !!effectiveOrderTakerId &&
@@ -1802,7 +1881,7 @@ export function TpvRapidoOrderFlow({
     setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
-      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
+      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog, brands, tpvCatalogLayout));
     }
     setPaymentMethod(null);
     setCashGiven('');
@@ -2095,27 +2174,34 @@ export function TpvRapidoOrderFlow({
       setCurrentStep('delivery');
     };
 
+    // Solo nombre (sin teléfono completo) → NO crear ficha en CRM.
+    // El pedido usa cliente sintético TPV (nombre en cocina/ticket).
+    if (!hasPhone) {
+      toast.message('Pedido rápido sin CRM', {
+        description: 'Solo nombre: no se guarda en clientes. Con teléfono completo sí.',
+      });
+      finishWithClient(null, '');
+      return;
+    }
+
     setCreatingClient(true);
     try {
       let crmClient: Client | null = null;
-
-      if (hasPhone) {
-        try {
-          const { clients: matches } = await searchClientsByPhoneRequest(
-            searchUid,
-            phoneDigits,
-            5,
-            undefined,
-            undefined,
-            { includeLegacy: true, fallbackAll: true },
-          );
-          const exact = matches.find(
-            (c) => String(c.phone || '').replace(/\D/g, '') === phoneDigits,
-          );
-          if (exact) crmClient = exact;
-        } catch {
-          // Si falla la búsqueda, intentamos crear igual.
-        }
+      try {
+        const { clients: matches } = await searchClientsByPhoneRequest(
+          searchUid,
+          phoneDigits,
+          5,
+          undefined,
+          undefined,
+          { includeLegacy: true, fallbackAll: true },
+        );
+        const exact = matches.find(
+          (c) => String(c.phone || '').replace(/\D/g, '') === phoneDigits,
+        );
+        if (exact) crmClient = exact;
+      } catch {
+        // Si falla la búsqueda, intentamos crear igual.
       }
 
       if (crmClient) {
@@ -2124,31 +2210,26 @@ export function TpvRapidoOrderFlow({
         return;
       }
 
-      const lost = !hasPhone;
       const clientData: Omit<Client, 'id' | 'createdAt'> = {
         type: 'client',
         user_id: searchUid,
         ...(bizId ? { businessId: bizId, business_id: bizId } : {}),
         clientType: 'particular',
         name,
-        phone: hasPhone ? phoneDigits : '',
+        phone: phoneDigits,
         phonePrefix: '+34',
         email: '',
         status: 'active',
         responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
         branch_id: primaryBranchId,
-        tags: lost
-          ? ['tpv', 'quick-attention', 'cliente-perdido']
-          : ['tpv', 'quick-attention'],
+        tags: ['tpv', 'quick-attention'],
         address: '',
         city: '',
-        notes: lost
-          ? 'Atención rápida TPV — no dejó teléfono (cliente perdido)'
-          : 'Alta desde atención rápida TPV',
+        notes: 'Alta desde atención rápida TPV',
         consents: { dataProcessing: false, commercial: false, thirdParty: false },
         defaultPaymentMethod: '',
         addresses: [],
-        commercialStatus: lost ? 'prospect' : 'active',
+        commercialStatus: 'active',
         stats: {
           totalOrders: 0,
           lastOrderDate: null,
@@ -2157,30 +2238,22 @@ export function TpvRapidoOrderFlow({
           totalSpent: 0,
           createdFrom: 'tpv',
           acquisitionKind: 'organic',
-          ...(lost ? { lostFromQuickAttention: true } : {}),
         },
       };
 
       try {
         const created = await addClient(clientData);
         if (created) {
-          toast.success(lost ? 'Guardado como cliente perdido' : 'Cliente guardado en CRM');
-          finishWithClient(created, hasPhone ? phoneDigits : '');
+          toast.success('Cliente guardado en CRM');
+          finishWithClient(created, phoneDigits);
           return;
         }
       } catch {
-        // Sin teléfono no bloqueamos el pedido: seguimos en modo rápido.
+        // Fallo al crear: el pedido puede seguir sin CRM.
       }
 
-      if (lost) {
-        toast.message('Pedido rápido sin teléfono', {
-          description: 'Puedes cobrar igual; el CRM se sincronizará cuando el servidor lo permita.',
-        });
-        finishWithClient(null, '');
-        return;
-      }
-
-      toast.error('No se pudo guardar el cliente. Revisa el teléfono o continúa sin él.');
+      toast.error('No se pudo guardar el cliente. Revisa el teléfono o continúa solo con el nombre.');
+      finishWithClient(null, '');
     } catch (err: unknown) {
       // Último recurso: no impedir el pedido rápido.
       toast.message('Continuamos sin guardar en CRM', {
@@ -2443,7 +2516,7 @@ export function TpvRapidoOrderFlow({
             : null;
 
         const orderData: Partial<DeliveryOrder> = {
-          // Atención rápida ya crea ficha CRM (o cliente perdido); walk-in sala sigue sin clientId.
+          // Atención rápida sin teléfono: cliente sintético (sin CRM). Con teléfono: ficha CRM.
           clientId: walkInSale ? '' : saleClient.id,
           customerName: saleClient.name,
           customerPhone: walkInSale
@@ -2504,9 +2577,8 @@ export function TpvRapidoOrderFlow({
         // Sin conexión: encolar el pedido para sincronizar al reconectar (solo flujo
         // delivery puro; en restaurante hay mesas/cuentas que requieren el servidor).
         if (!isBrowserOnline() && !restaurantTable && !restaurantDiningOrder) {
-          enqueueTpvOfflineItem('order_create', { userId, orderData });
           const offlineId = `offline-order:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
-          setCreatedOrder({
+          const offlineOrder = {
             ...orderData,
             _id: offlineId,
             id: offlineId,
@@ -2515,14 +2587,31 @@ export function TpvRapidoOrderFlow({
             orderNumber: orderData.orderNumber || 'PENDIENTE',
             createdAt: now,
             updatedAt: now,
-          } as DeliveryOrder);
-          toast.info('Sin conexión — pedido guardado en cola; se enviará al recuperar la conexión');
+          } as DeliveryOrder;
+          enqueueTpvOfflineItem('order_create', { userId, orderData });
+          if (!collectOnDelivery) {
+            await ensureLocalCajaSaleForOrder(registerFromGate, offlineOrder, {
+              paymentMethod: orderData.paymentMethod,
+              amount: payableTotal,
+              registeredBy: takerName || 'TPV',
+            });
+          }
+          setCreatedOrder(offlineOrder);
           return;
         }
 
         // Primero guardar pedido y mostrar éxito; luego ticket cocina.
         // Si se imprime antes, en tablet el bridge nativo puede dejar la UI en «Enviando…».
         let { order: created, cajaStatus } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+
+        // Airbag: si el servidor no metió caja, la sesión local sí cuenta el cobro.
+        if (!collectOnDelivery) {
+          await ensureLocalCajaSaleForOrder(registerFromGate, created, {
+            paymentMethod: created.paymentMethod,
+            amount: Number(created.paidAmount || payableTotal),
+            registeredBy: takerName || 'TPV',
+          });
+        }
 
         // Recogida: cobro dividido tras crear (caja por tramo).
         if (
@@ -2586,6 +2675,16 @@ export function TpvRapidoOrderFlow({
     [restaurantDiningOrder],
   );
 
+  // Cobrar desde el plano: saltar a pago cuando la cuenta ya tiene importe.
+  useEffect(() => {
+    if (!isRestaurantMode || restaurantOpenIntent !== 'pay') return;
+    if (restaurantPayIntentAppliedRef.current) return;
+    if (accountDue <= 0 && cart.length === 0) return;
+    restaurantPayIntentAppliedRef.current = true;
+    setCompletedSteps((prev) => new Set(prev).add('products'));
+    setCurrentStep('payment');
+  }, [isRestaurantMode, restaurantOpenIntent, accountDue, cart.length]);
+
   const splitParts = useMemo(
     () => (restaurantDiningOrder ? buildSplitPartViews(restaurantDiningOrder) : []),
     [restaurantDiningOrder],
@@ -2595,7 +2694,7 @@ export function TpvRapidoOrderFlow({
   const nextUnpaidSplitPart = splitParts.find((p) => !p.paid) || null;
 
   const restaurantAccountMode = Boolean(
-    embeddedInRestaurantTpv && restaurantDiningOrder && !restaurantTable?.isCounter,
+    embeddedInRestaurantTpv && restaurantDiningOrder,
   );
 
   /** Importe que se cobra ahora (para calculadora de cambio). */
@@ -2660,13 +2759,14 @@ export function TpvRapidoOrderFlow({
       createdBy: effectiveOrderTakerId || userId,
       createdByName: selectedOrderTaker?.name || user?.fullName || 'TPV',
       sendToKitchen: false,
+      currentOrder: restaurantDiningOrder,
     });
     onRestaurantDiningOrderUpdated?.(order);
     setCart([]);
     setProductPickerReset((n) => n + 1);
   }, [
     restaurantAccountMode,
-    restaurantDiningOrder?._id,
+    restaurantDiningOrder,
     userId,
     cart,
     effectiveOrderTakerId,
@@ -2720,21 +2820,28 @@ export function TpvRapidoOrderFlow({
       setSubmitting(true);
       actionBusyRef.current = true;
       try {
-        const { order } = await addCartToDiningAccount({
+        const { order, queuedOffline } = await addCartToDiningAccount({
           userId,
           orderId: restaurantDiningOrder._id,
           lines: cart,
           createdBy: effectiveOrderTakerId || userId,
           createdByName: selectedOrderTaker?.name || user?.fullName || 'TPV',
           sendToKitchen,
+          currentOrder: restaurantDiningOrder,
         });
         onRestaurantDiningOrderUpdated?.(order);
-        if (restaurantTable && !restaurantTable.isCounter) {
+        if (restaurantTable && !restaurantTable.isCounter && isBrowserOnline()) {
           await changeTableStatusRequest(userId, restaurantTable.id, tableStatusOnOrderAdded());
         }
         setCart([]);
         setProductPickerReset((n) => n + 1);
-        toast.success(sendToKitchen ? 'Enviado a cocina' : 'Añadido a la cuenta');
+        if (queuedOffline) {
+          toast.message(sendToKitchen
+            ? 'Sin red · comanda en cola (se enviará a cocina al sincronizar)'
+            : 'Sin red · añadido en local (se sincronizará al volver la red)');
+        } else {
+          toast.success(sendToKitchen ? 'Enviado a cocina' : 'Añadido a la cuenta');
+        }
       } catch (err: unknown) {
         showTpvError(err, 'añadir_cuenta', 'Error al añadir a la cuenta');
       } finally {
@@ -2756,19 +2863,35 @@ export function TpvRapidoOrderFlow({
     ],
   );
 
-  const handlePayAccountAmount = useCallback(async (payAmount?: number, splitLabel?: string) => {
+  const handlePayAccountAmount = useCallback(async (
+    payAmount?: number,
+    splitLabel?: string,
+    methodOverride?: PaymentMethod | null,
+    splitParts?: TpvSplitPaymentPart[] | null,
+  ) => {
     if (actionBusyRef.current) return;
-    if (!restaurantDiningOrder?._id || !userId || !register?.session) return;
+    if (!restaurantDiningOrder?._id || !userId) return;
+    if (!register?.session) {
+      toast.error('Abre la caja de la tienda para cobrar');
+      return;
+    }
     if (restaurantPermissions && !restaurantPermissions.canPay) {
       toast.error('No tienes permiso para cobrar');
       return;
     }
-    const method = paymentMethod;
-    if (!method) {
-      if (currentStep === 'products' && cart.length === 0 && accountDue > 0) {
-        completeStep('products');
+    const parts = splitParts?.length ? splitParts : null;
+    const singleMethod = methodOverride || paymentMethod;
+    if (!parts && !singleMethod) {
+      if (currentStep !== 'payment') {
+        setCompletedSteps((prev) => new Set(prev).add('products'));
+        setCurrentStep('payment');
+      } else {
+        toast.error('Elige forma de pago');
       }
-      toast.error('Elige forma de pago');
+      return;
+    }
+    if (!parts && singleMethod === 'mixto') {
+      toast.error('Configura el pago dividido');
       return;
     }
 
@@ -2784,6 +2907,7 @@ export function TpvRapidoOrderFlow({
           createdBy: effectiveOrderTakerId || userId,
           createdByName: selectedOrderTaker?.name || user?.fullName || 'TPV',
           sendToKitchen: false,
+          currentOrder: restaurantDiningOrder,
         });
         diningOrder = added.order;
         onRestaurantDiningOrderUpdated?.(diningOrder);
@@ -2796,112 +2920,166 @@ export function TpvRapidoOrderFlow({
         return;
       }
 
-      const amount = payAmount != null ? Math.min(payAmount, due) : due;
       const tipValue = Math.max(0, parseDecimalPadValue(tipInput) || 0);
       const pdvId = String(register.session.pointOfSaleId || '').trim();
       const pdvName = String(register.session.pointOfSaleName || '').trim();
       const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
-      const now = new Date().toISOString();
       const tableNote = restaurantTable
         ? `Mesa ${restaurantTable.number}${restaurantTable.roomName ? ` · ${restaurantTable.roomName}` : ''}`
         : '';
-
       const walkInSale = isTpvSyntheticClientId(saleClient?.id);
-      const orderData: Partial<DeliveryOrder> = {
-        clientId: walkInSale ? '' : (saleClient?.id || ''),
-        customerName: saleClient?.name || tableNote || 'Sala',
-        customerPhone: walkInSale
-          ? ''
-          : formatTicketCustomerPhone(
-              saleClient?.phone,
-              saleClient?.phonePrefix || phonePrefix,
-            ),
-        customerAddress: formatTicketCustomerAddress({
-          street: saleClient?.address,
-          city: saleClient?.city,
-          postalCode: saleClient?.postalCode,
-        }),
-        channel: 'tpv',
-        deliveryType: 'recogida',
-        status: 'entregado',
-        salesPointId: pdvId,
-        salesPointName: pdvName,
-        business_id: writeBusinessId || tpvCatalogBusinessId || businessId || '',
-        takenBy: effectiveOrderTakerId || userId,
-        takenByName: takerName,
-        items: [{
-          id: splitLabel || 'cuenta',
-          name: splitLabel ? `${tableNote || 'Cuenta'} · ${splitLabel}` : (tableNote || 'Cuenta mesa'),
-          quantity: 1,
-          unitPrice: amount,
-          total: amount,
-        }],
-        totalAmount: amount,
-        notes: splitLabel ? `${tableNote} · ${splitLabel}` : tableNote,
-        paymentMethod: normalizeTpvPaymentMethod(method),
-        paymentStatus: 'paid',
-        paidAmount: amount,
-        paidAt: now,
-        paymentCollected: true,
-        paymentCollectedAt: now,
-        paymentCollectedBy: takerName,
-        orderNumber: `PED-${Date.now().toString(36).toUpperCase().slice(-6)}`,
-        ...(restaurantTable ? { tableNumber: restaurantTable.number, tableId: restaurantTable.id } : {}),
-        ...(method === 'efectivo' && changeAmount != null && changeAmount >= 0
-          ? {
-              amountReceived: cashGivenAmount,
-              changeGiven: Number(changeAmount.toFixed(2)),
-            }
-          : {}),
-      };
 
-      const { order: cajaOrder } = await createDeliveryOrderWithCajaStatus(userId, orderData);
+      const slices: Array<{ amount: number; method: string; label: string; amountReceived?: number; changeGiven?: number }> =
+        parts
+          ? parts
+              .map((p, i) => ({
+                amount: Math.min(Number(p.amount) || 0, due),
+                method: normalizeTpvPaymentMethod(p.method),
+                label: parts.length > 1 ? `Parte ${i + 1}` : (splitLabel || ''),
+                amountReceived: Number(p.amountReceived) > 0 ? Number(p.amountReceived) : undefined,
+                changeGiven: Number(p.changeGiven) >= 0 ? Number(p.changeGiven) : undefined,
+              }))
+              .filter((s) => s.amount > 0)
+          : [{
+              amount: payAmount != null ? Math.min(payAmount, due) : due,
+              method: normalizeTpvPaymentMethod(singleMethod!),
+              label: splitLabel || '',
+            }];
 
-      // Ticket cliente después de cobrar (no bloquear la UI con el bridge nativo).
-      if (currentBusiness) {
-        const ticketItems = splitLabel
-          ? orderData.items
-          : flattenDiningAccountLines(diningOrder).map((line) => ({
-              quantity: line.quantity,
-              name: line.name,
-              total: line.lineTotal,
-              notes: line.notes,
-            }));
-        const ticketBusiness = businessTicketInfoFrom(currentBusiness);
-        const ticketOrder = {
-          ...cajaOrder,
-          items: ticketItems as DeliveryOrder['items'],
-        } as DeliveryOrder;
-        window.setTimeout(() => {
-          void printDeliveryTicket({
-            order: ticketOrder,
-            business: ticketBusiness,
-            salesPointName: pdvName,
-            cashierName: takerName,
-            variant: 'customer',
-            accountEmail: user?.email,
-          });
-        }, 0);
+      if (slices.length === 0) {
+        toast.error('Importe no válido');
+        return;
       }
-      notifyDeliveryOpsLive({
-        reason: 'order_paid',
-        businessId: cajaOrder.business_id || writeBusinessId || businessId,
-      });
 
-      const closedOrder = await payAndCloseDiningOrder({
-        userId,
-        order: diningOrder,
-        payment: {
-          method: normalizeTpvPaymentMethod(method),
-          amount,
-          tip: tipValue,
-          paidBy: effectiveOrderTakerId || userId,
-          paidByName: takerName,
-          splitLabel: splitLabel || '',
-        },
-      });
-      onRestaurantDiningOrderUpdated?.(closedOrder);
+      let closedOrder = diningOrder;
+      for (let i = 0; i < slices.length; i++) {
+        const slice = slices[i];
+        const stillDueBefore = diningOrderDueAmount(closedOrder);
+        const amount = Math.min(slice.amount, stillDueBefore);
+        if (amount <= 0) continue;
+        const now = new Date().toISOString();
+        const payItems = buildDiningCajaPayItems({
+          order: closedOrder,
+          payAmount: amount,
+          dueAmount: stillDueBefore,
+          fallbackName: slice.label
+            ? `${tableNote || 'Cuenta'} · ${slice.label}`
+            : (tableNote || 'Cuenta mesa'),
+        });
+
+        // Cobro + caja nativa + stock/finanzas en sala (sin delivery_order sintético).
+        const kitchenPending = diningOrderHasPendingKitchen(closedOrder);
+        const payResult = await payAndCloseDiningOrder({
+          userId,
+          order: closedOrder,
+          payment: {
+            method: slice.method,
+            amount,
+            tip: i === slices.length - 1 ? tipValue : 0,
+            paidBy: effectiveOrderTakerId || userId,
+            paidByName: takerName,
+            splitLabel: slice.label || '',
+            ...(slice.method === 'efectivo'
+              ? {
+                  amountReceived: slice.amountReceived != null
+                    ? slice.amountReceived
+                    : (i === 0 && changeAmount != null && changeAmount >= 0 ? cashGivenAmount : amount),
+                  changeGiven: slice.changeGiven != null
+                    ? slice.changeGiven
+                    : (i === 0 && changeAmount != null && changeAmount >= 0
+                      ? Number(changeAmount.toFixed(2))
+                      : 0),
+                }
+              : {}),
+          },
+          salesPointId: pdvId,
+          salesPointName: pdvName,
+          registerInCaja: true,
+          forceCloseIfKitchenPending: true,
+        });
+        closedOrder = payResult.order;
+        onRestaurantDiningOrderUpdated?.(closedOrder);
+        if (kitchenPending && (closedOrder.status === 'closed' || diningOrderDueAmount(closedOrder) <= 0.02)) {
+          toast.message('Cuenta cobrada con cocina pendiente', {
+            description: 'Se forzó el cierre de mesa. Avisa a cocina si hace falta.',
+          });
+        }
+
+        const cajaStatus = payResult.cajaRegistration?.status;
+        if (cajaStatus === 'queued_offline' || payResult.queuedOffline) {
+          toast.message('Sin red · cobro en cola', {
+            description: 'Se registrará en caja al recuperar conexión',
+          });
+        } else if (cajaStatus && !isCajaRegistrationOk(cajaStatus)) {
+          toast.error(
+            payResult.cajaRegistration?.message
+              || 'Cobrado en mesa, pero no quedó en caja — revisa que el turno esté abierto',
+          );
+        }
+
+        if (i === slices.length - 1 && currentBusiness) {
+          const ticketItems = slice.label && slices.length > 1
+            ? payItems.map((line) => ({
+                quantity: line.quantity,
+                name: line.name,
+                total: line.total,
+                notes: line.notes,
+              }))
+            : flattenDiningAccountLines(closedOrder).map((line) => ({
+                quantity: line.quantity,
+                name: line.name,
+                total: line.lineTotal,
+                notes: line.notes,
+              }));
+          const ticketBusiness = businessTicketInfoFrom(currentBusiness);
+          const ticketOrder = {
+            _id: closedOrder._id,
+            id: closedOrder.id || closedOrder._id,
+            orderNumber: `MESA-${restaurantTable?.number ?? closedOrder.tableNumber ?? '?'}`,
+            customerName: walkInSale ? (tableNote || 'Sala') : (saleClient?.name || tableNote || 'Sala'),
+            customerPhone: walkInSale
+              ? ''
+              : formatTicketCustomerPhone(
+                  saleClient?.phone,
+                  saleClient?.phonePrefix || phonePrefix,
+                ),
+            customerAddress: formatTicketCustomerAddress({
+              street: saleClient?.address,
+              city: saleClient?.city,
+              postalCode: saleClient?.postalCode,
+            }),
+            channel: 'tpv',
+            deliveryType: 'sala',
+            status: 'entregado',
+            items: ticketItems as DeliveryOrder['items'],
+            totalAmount: Number(closedOrder.total || amount),
+            paymentMethod: slice.method,
+            paymentStatus: 'paid',
+            paidAmount: Number(closedOrder.total || amount),
+            paidAt: closedOrder.paidAt || now,
+            takenByName: takerName,
+            salesPointName: pdvName,
+            tableNumber: restaurantTable?.number ?? closedOrder.tableNumber,
+            business_id: writeBusinessId || tpvCatalogBusinessId || businessId || '',
+            verifactuFullNumber: closedOrder.verifactuFullNumber,
+            verifactuQrUrl: closedOrder.verifactuQrUrl,
+          } as DeliveryOrder;
+          window.setTimeout(() => {
+            void printDeliveryTicket({
+              order: ticketOrder,
+              business: ticketBusiness,
+              salesPointName: pdvName,
+              cashierName: takerName,
+              variant: 'customer',
+              accountEmail: user?.email,
+            });
+          }, 0);
+        }
+      }
+
       setTipInput('');
+      setPendingSplitParts(null);
+      setRestaurantSplitStep(null);
 
       const stillDue = diningOrderDueAmount(closedOrder);
       if (stillDue <= 0.02 || closedOrder.status === 'closed') {
@@ -2911,10 +3089,19 @@ export function TpvRapidoOrderFlow({
             occupiedBy: '',
           });
         }
-        toast.success('Cuenta cobrada');
+        toast.success(
+          parts?.length
+            ? `Cuenta cobrada · ${formatSplitPartsSummary(parts)}`
+            : 'Cuenta cobrada',
+        );
         onRestaurantOrderComplete?.();
       } else {
-        toast.success(splitLabel ? `${splitLabel} cobrada · quedan ${formatPrice(stillDue)}` : `Cobrado ${formatPrice(amount)}`);
+        const paidNow = slices.reduce((s, x) => s + x.amount, 0);
+        toast.success(
+          splitLabel
+            ? `${splitLabel} cobrada · quedan ${formatPrice(stillDue)}`
+            : `Cobrado ${formatPrice(paidNow)} · quedan ${formatPrice(stillDue)}`,
+        );
       }
     } catch (err: unknown) {
       showTpvError(err, 'cobrar_cuenta', 'Error al cobrar la cuenta');
@@ -2929,9 +3116,7 @@ export function TpvRapidoOrderFlow({
     restaurantPermissions,
     paymentMethod,
     currentStep,
-    cart.length,
-    accountDue,
-    completeStep,
+    cart,
     effectiveOrderTakerId,
     selectedOrderTaker?.name,
     user?.fullName,
@@ -2952,9 +3137,93 @@ export function TpvRapidoOrderFlow({
   ]);
 
   const handlePayFullAccount = useCallback(async () => {
+    if (paymentMethod === 'mixto' && pendingSplitParts?.length) {
+      await handlePayAccountAmount(undefined, undefined, 'mixto', pendingSplitParts);
+      return;
+    }
     const part = hasActiveSplit ? nextUnpaidSplitPart : null;
     await handlePayAccountAmount(part?.amount, part?.label);
-  }, [hasActiveSplit, nextUnpaidSplitPart, handlePayAccountAmount]);
+  }, [hasActiveSplit, nextUnpaidSplitPart, handlePayAccountAmount, paymentMethod, pendingSplitParts]);
+
+  const goToRestaurantPaymentStep = useCallback(() => {
+    setPaymentMethod(null);
+    setPendingSplitParts(null);
+    setRestaurantSplitStep(null);
+    setCashGiven('');
+    setCompletedSteps((prev) => new Set(prev).add('products'));
+    setCurrentStep('payment');
+  }, []);
+
+  const handleRestaurantAccountChargeClick = useCallback(() => {
+    if (currentStep !== 'payment') {
+      goToRestaurantPaymentStep();
+      return;
+    }
+    if (!paymentMethod) {
+      toast.error('Elige forma de pago');
+      return;
+    }
+    void handlePayFullAccount();
+  }, [paymentMethod, currentStep, goToRestaurantPaymentStep, handlePayFullAccount]);
+
+  const handleRestaurantSplitChargeClick = useCallback(() => {
+    if (!nextUnpaidSplitPart) return;
+    if (currentStep !== 'payment') {
+      goToRestaurantPaymentStep();
+      return;
+    }
+    if (!paymentMethod) {
+      toast.error('Elige forma de pago');
+      return;
+    }
+    void handlePayAccountAmount(nextUnpaidSplitPart.amount, nextUnpaidSplitPart.label);
+  }, [
+    nextUnpaidSplitPart,
+    paymentMethod,
+    currentStep,
+    goToRestaurantPaymentStep,
+    handlePayAccountAmount,
+  ]);
+
+  const restaurantSplitItems = useMemo((): DeliveryOrderItem[] => {
+    const fromAccount = accountLines.map((line) => ({
+      id: line.itemId || line.key,
+      name: line.name,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      total: line.lineTotal,
+      notes: line.notes,
+    }));
+    const fromCart = cart.map((line, idx) => {
+      const qty = Number(line.quantity) || 0;
+      const unit = cartLineUnitPrice(line.catalogItem.unitPrice, line.customization);
+      return {
+        id: line.lineId || `cart-${idx}`,
+        name: String(line.catalogItem?.name || 'Producto'),
+        quantity: qty,
+        unitPrice: unit,
+        total: cartLineTotal(line.catalogItem.unitPrice, qty, line.customization),
+        notes: '',
+      };
+    });
+    return [...fromAccount, ...fromCart] as DeliveryOrderItem[];
+  }, [accountLines, cart]);
+
+  const openRestaurantPaymentSplit = useCallback(() => {
+    if (restaurantSplitItems.length === 0 && cashChargeTotal <= 0) {
+      toast.error('No hay productos para dividir');
+      return;
+    }
+    setRestaurantSplitStep('choice');
+  }, [restaurantSplitItems.length, cashChargeTotal]);
+
+  const handleRestaurantSplitPartsConfirm = useCallback((parts: TpvSplitPaymentPart[]) => {
+    setRestaurantSplitStep(null);
+    setPendingSplitParts(parts);
+    setPaymentMethod('mixto');
+    setCashGiven('');
+    void handlePayAccountAmount(undefined, undefined, 'mixto', parts);
+  }, [handlePayAccountAmount]);
 
   const handleConfirmChangeTable = useCallback(async (target: DiningTable) => {
     if (actionBusyRef.current) return;
@@ -3017,6 +3286,130 @@ export function TpvRapidoOrderFlow({
     showTpvError,
   ]);
 
+  const handleConfirmMergeTable = useCallback(async (sourceOrderId: string, sourceTable: DiningTable) => {
+    if (actionBusyRef.current) return;
+    if (!restaurantDiningOrder?._id || !userId) return;
+    if (restaurantPermissions && restaurantPermissions.canMoveTable === false) {
+      toast.error('No tienes permiso para unir mesas');
+      return;
+    }
+    setSubmitting(true);
+    actionBusyRef.current = true;
+    try {
+      const beforeLines = flattenDiningAccountLines(restaurantDiningOrder).length;
+      const { order: merged, freedTables } = await mergeDiningOrdersRequest(
+        userId,
+        [sourceOrderId],
+        restaurantDiningOrder._id,
+      );
+      const afterLines = flattenDiningAccountLines(merged).length;
+      if (!freedTables && afterLines <= beforeLines) {
+        throw new Error('No se pudo unir: la otra mesa no tiene cuenta abierta válida');
+      }
+      onRestaurantDiningOrderUpdated?.(merged);
+      setMergeTableOpen(false);
+      toast.success(`Mesa ${sourceTable.number} unida a esta cuenta`);
+    } catch (err: unknown) {
+      showTpvError(err, 'unir_mesa', 'No se pudo unir la mesa');
+    } finally {
+      actionBusyRef.current = false;
+      setSubmitting(false);
+    }
+  }, [
+    restaurantDiningOrder,
+    userId,
+    restaurantPermissions,
+    onRestaurantDiningOrderUpdated,
+    showTpvError,
+  ]);
+
+  const handleLinkRestaurantClient = useCallback(async (client: Client) => {
+    if (!client?.id || isTpvSyntheticClientId(client.id)) return;
+    selectClient(client);
+    setRestaurantClientPickerOpen(false);
+    setRestaurantClientQuery('');
+    if (!restaurantDiningOrder?._id || !userId || restaurantTable?.isCounter) {
+      toast.success(`Cliente ${client.name}`);
+      return;
+    }
+    try {
+      const updated = await linkClientToOrderRequest(
+        userId,
+        restaurantDiningOrder._id,
+        client.id,
+        client.name,
+      );
+      onRestaurantDiningOrderUpdated?.(updated);
+      toast.success(`Cliente ${client.name} vinculado a la mesa`);
+    } catch (err: unknown) {
+      showTpvError(err, 'vincular_cliente', 'Cliente elegido, pero no se pudo guardar en la cuenta');
+    }
+  }, [
+    selectClient,
+    restaurantDiningOrder,
+    userId,
+    restaurantTable?.isCounter,
+    onRestaurantDiningOrderUpdated,
+    showTpvError,
+  ]);
+
+  // CRM → TPV: si llegamos con clientId en URL, vincularlo a la cuenta al abrir mesa.
+  useEffect(() => {
+    if (!isRestaurantMode || !userId || !restaurantDiningOrder?._id) return;
+    if (restaurantTable?.isCounter) return;
+    const client = selectedClient;
+    if (!client?.id || isTpvSyntheticClientId(client.id)) return;
+    if (appliedClientIdFromUrl.current !== client.id) return;
+    if (String(restaurantDiningOrder.clientId || '') === client.id) return;
+    let cancelled = false;
+    linkClientToOrderRequest(userId, restaurantDiningOrder._id, client.id, client.name)
+      .then((updated) => {
+        if (!cancelled) onRestaurantDiningOrderUpdated?.(updated);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [
+    isRestaurantMode,
+    userId,
+    restaurantDiningOrder?._id,
+    restaurantDiningOrder?.clientId,
+    restaurantTable?.isCounter,
+    selectedClient,
+    onRestaurantDiningOrderUpdated,
+  ]);
+
+  const handleConfirmCancelAccount = useCallback(async () => {
+    if (actionBusyRef.current) return;
+    if (!restaurantDiningOrder?._id || !userId || !restaurantTable || restaurantTable.isCounter) return;
+    if (restaurantPermissions && restaurantPermissions.canVoidComanda === false) {
+      toast.error('No tienes permiso para anular la cuenta');
+      return;
+    }
+    if (!window.confirm('¿Anular la cuenta y liberar la mesa? No se registra cobro en caja.')) {
+      return;
+    }
+    setSubmitting(true);
+    actionBusyRef.current = true;
+    try {
+      // cancelDiningOrderRequest ya libera la mesa en backend
+      await cancelDiningOrderRequest(userId, restaurantDiningOrder._id, 'Anulada desde TPV sala');
+      toast.success('Cuenta anulada · mesa libre');
+      onRestaurantOrderComplete?.();
+    } catch (err: unknown) {
+      showTpvError(err, 'anular_cuenta', 'No se pudo anular la cuenta');
+    } finally {
+      actionBusyRef.current = false;
+      setSubmitting(false);
+    }
+  }, [
+    restaurantDiningOrder,
+    userId,
+    restaurantTable,
+    restaurantPermissions,
+    onRestaurantOrderComplete,
+    showTpvError,
+  ]);
+
   const handleConfirmSplitBill = useCallback(async (result: SplitBillResult) => {
     if (actionBusyRef.current) return;
     if (!restaurantDiningOrder?._id || !userId) return;
@@ -3064,6 +3457,7 @@ export function TpvRapidoOrderFlow({
     discountPercent?: number;
     discount?: number;
     reason: string;
+    loyaltyRedeem?: { points: number; clientId?: string; reason?: string };
   }) => {
     if (actionBusyRef.current) return;
     if (!restaurantDiningOrder?._id || !userId) return;
@@ -3077,11 +3471,14 @@ export function TpvRapidoOrderFlow({
       const order = await applyDiningOrderDiscount({
         userId,
         orderId: restaurantDiningOrder._id,
-        ...payload,
+        discountPercent: payload.discountPercent,
+        discount: payload.discount,
+        discountReason: payload.reason,
+        loyaltyRedeem: payload.loyaltyRedeem,
       });
       onRestaurantDiningOrderUpdated?.(order);
       setDiscountOpen(false);
-      toast.success('Descuento aplicado');
+      toast.success(payload.loyaltyRedeem ? 'Puntos canjeados' : 'Descuento aplicado');
     } catch (err: unknown) {
       showTpvError(err, 'aplicar_descuento', 'No se pudo aplicar el descuento');
     } finally {
@@ -3161,7 +3558,7 @@ export function TpvRapidoOrderFlow({
     setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
-      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
+      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog, brands, tpvCatalogLayout));
     }
     setPaymentMethod(null);
     setCashGiven('');
@@ -3204,7 +3601,7 @@ export function TpvRapidoOrderFlow({
     setProductPickerReset((n) => n + 1);
     setSelectedCategory(null);
     if (catalogSections.length > 0) {
-      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog));
+      setSelectedSectionId(defaultTpvSectionId(catalogSections, catalog, brands, tpvCatalogLayout));
     }
     setPaymentMethod(null);
     setCashGiven('');
@@ -3261,6 +3658,26 @@ export function TpvRapidoOrderFlow({
               {createdOrder.ticketNumber && (
                 <p className="text-sm font-mono text-gray-500 mt-2">Ticket {createdOrder.ticketNumber}</p>
               )}
+              {createdOrder.verifactuFullNumber && (
+                <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-left dark:border-violet-800 dark:bg-violet-950/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
+                    Verifactu
+                  </p>
+                  <p className="mt-1 text-sm font-bold tabular-nums text-violet-950 dark:text-violet-100">
+                    {createdOrder.verifactuFullNumber}
+                  </p>
+                  {createdOrder.verifactuQrUrl ? (
+                    <a
+                      href={createdOrder.verifactuQrUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-block text-xs font-medium text-violet-700 underline dark:text-violet-300"
+                    >
+                      Abrir QR AEAT
+                    </a>
+                  ) : null}
+                </div>
+              )}
             </div>
             <div className="flex flex-wrap gap-3 mt-4 justify-center w-full max-w-md">
               {currentBusiness && (
@@ -3305,6 +3722,81 @@ export function TpvRapidoOrderFlow({
           onClose={() => setChangeTableOpen(false)}
         />
       ) : null}
+      {mergeTableOpen && userId && restaurantTable && restaurantDiningOrder && !restaurantTable.isCounter ? (
+        <RestaurantMergeTableModal
+          userId={userId}
+          currentTableId={restaurantTable.id}
+          currentOrderId={restaurantDiningOrder._id}
+          onSelect={(sourceOrderId, sourceTable) => void handleConfirmMergeTable(sourceOrderId, sourceTable)}
+          onClose={() => setMergeTableOpen(false)}
+        />
+      ) : null}
+      {restaurantClientPickerOpen ? (
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+          <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:max-w-md sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100">Cliente de la mesa</h3>
+                <p className="text-xs text-gray-500">Busca por nombre o teléfono</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRestaurantClientPickerOpen(false)}
+                className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-2 p-3">
+              <input
+                autoFocus
+                value={restaurantClientQuery}
+                onChange={(e) => {
+                  const q = e.target.value;
+                  setRestaurantClientQuery(q);
+                  setPhoneInput(q);
+                }}
+                placeholder="Nombre o teléfono…"
+                className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-950"
+              />
+              {restaurantLinkedClient && !isTpvSyntheticClientId(restaurantLinkedClient.id) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSelection();
+                    setRestaurantClientPickerOpen(false);
+                    toast.message('Cliente desvinculado en pantalla (la cuenta mantiene el vínculo hasta elegir otro)');
+                  }}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300"
+                >
+                  Quitar selección actual · {restaurantLinkedClient.name}
+                </button>
+              ) : null}
+              <div className="max-h-64 space-y-1 overflow-y-auto">
+                {isSearching ? (
+                  <p className="py-6 text-center text-sm text-gray-500">Buscando…</p>
+                ) : results.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-gray-500">
+                    {restaurantClientQuery.trim().length < 1 ? 'Escribe para buscar' : 'Sin resultados'}
+                  </p>
+                ) : (
+                  results.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => void handleLinkRestaurantClient(c)}
+                      className="flex w-full flex-col rounded-xl border border-gray-100 px-3 py-2.5 text-left hover:bg-sky-50 dark:border-gray-800 dark:hover:bg-sky-950/30"
+                    >
+                      <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
+                      <span className="text-xs text-gray-500">{c.phone || 'Sin teléfono'}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {splitBillOpen && restaurantDiningOrder ? (
         <RestaurantSplitBillModal
           total={accountDue > 0 ? accountDue : Number(restaurantDiningOrder.total || 0)}
@@ -3320,6 +3812,9 @@ export function TpvRapidoOrderFlow({
           currentDiscount={Number(restaurantDiningOrder.discount || 0)}
           currentDiscountPercent={Number(restaurantDiningOrder.discountPercent || 0)}
           submitting={submitting}
+          loyaltyPoints={Number((saleClient as { loyalty?: { points?: number } } | null)?.loyalty?.points || 0)}
+          clientId={String(saleClient?.id || restaurantDiningOrder.clientId || '')}
+          clientName={String(saleClient?.name || restaurantDiningOrder.clientName || '')}
           onApply={(payload) => void handleApplyAccountDiscount(payload)}
           onClear={() => void handleClearAccountDiscount()}
           onClose={() => setDiscountOpen(false)}
@@ -3443,6 +3938,61 @@ export function TpvRapidoOrderFlow({
                   <span className="hidden sm:inline">Dto.</span>
                 </button>
               ) : null}
+              {restaurantPermissions?.canMoveTable !== false ? (
+                <button
+                  type="button"
+                  onClick={() => setMergeTableOpen(true)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-violet-200 dark:border-violet-800 text-[10px] font-semibold text-violet-700 dark:text-violet-300 hover:bg-violet-50 dark:hover:bg-violet-950/30 touch-manipulation"
+                  title="Unir otra mesa a esta cuenta"
+                >
+                  <Combine className="w-3 h-3" />
+                  <span className="hidden sm:inline">Unir</span>
+                </button>
+              ) : null}
+              {restaurantPermissions?.canVoidComanda !== false ? (
+                <button
+                  type="button"
+                  onClick={() => void handleConfirmCancelAccount()}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-rose-200 dark:border-rose-800 text-[10px] font-semibold text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 touch-manipulation"
+                  title="Anular cuenta y liberar mesa"
+                >
+                  <Ban className="w-3 h-3" />
+                  <span className="hidden sm:inline">Anular</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setRestaurantClientQuery('');
+                  setRestaurantClientPickerOpen(true);
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-sky-200 dark:border-sky-800 text-[10px] font-semibold text-sky-800 dark:text-sky-200 hover:bg-sky-50 dark:hover:bg-sky-950/30 touch-manipulation max-w-[9rem]"
+                title="Vincular cliente CRM a la mesa"
+              >
+                <UserRound className="w-3 h-3 shrink-0" />
+                <span className="truncate">
+                  {restaurantLinkedClient && !isTpvSyntheticClientId(restaurantLinkedClient.id)
+                    ? restaurantLinkedClient.name
+                    : 'Cliente'}
+                </span>
+              </button>
+              {restaurantPermissions?.canStaffConsumption ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!register || !isTpvRegisterSessionOpen(register.session)) {
+                      toast.error('Abre la caja de la tienda para registrar consumo');
+                      return;
+                    }
+                    setRestaurantStaffConsumptionOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-amber-200 dark:border-amber-800 text-[10px] font-semibold text-amber-800 dark:text-amber-200 hover:bg-amber-50 dark:hover:bg-amber-950/30 touch-manipulation"
+                  title="Consumo del equipo"
+                >
+                  <Utensils className="w-3 h-3" />
+                  <span className="hidden sm:inline">Consumo</span>
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -3547,21 +4097,34 @@ export function TpvRapidoOrderFlow({
           )}
         </div>
         <div className="flex gap-1 flex-wrap">
-          <button
-            type="button"
-            onClick={handleCancelOrder}
-            className={`px-3 rounded-lg border-2 border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
-          >
-            {isRestaurantMode ? 'Vaciar ticket' : 'Cancelar pedido'}
-          </button>
-          <button
-            type="button"
-            onClick={goToPreviousStep}
-            disabled={isRestaurantMode ? currentStep === 'products' : currentStep === 'client'}
-            className={`px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
-          >
-            Atrás
-          </button>
+          {isRestaurantMode ? (
+            <button
+              type="button"
+              onClick={() => void handleGoBack()}
+              className={`inline-flex items-center gap-1.5 px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
+            >
+              <ArrowLeft className="w-4 h-4 shrink-0" />
+              Volver
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={handleCancelOrder}
+                className={`px-3 rounded-lg border-2 border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
+              >
+                Cancelar pedido
+              </button>
+              <button
+                type="button"
+                onClick={goToPreviousStep}
+                disabled={currentStep === 'client'}
+                className={`px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
+              >
+                Atrás
+              </button>
+            </>
+          )}
           {restaurantAccountMode && cart.length > 0 ? (
             <>
               <button
@@ -3586,20 +4149,34 @@ export function TpvRapidoOrderFlow({
             hasActiveSplit && nextUnpaidSplitPart ? (
               <button
                 type="button"
-                onClick={() => void handlePayAccountAmount(nextUnpaidSplitPart.amount, nextUnpaidSplitPart.label)}
-                disabled={submitting}
+                onClick={handleRestaurantSplitChargeClick}
+                disabled={submitting || (currentStep === 'payment' && !paymentMethod)}
                 className={`flex-1 min-w-[120px] px-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold touch-manipulation disabled:opacity-40 ${tabletMode ? 'min-h-[44px] py-2 text-base' : 'py-2.5 text-sm'}`}
               >
-                {submitting ? 'Cobrando…' : `Cobrar ${nextUnpaidSplitPart.label} · ${formatPrice(nextUnpaidSplitPart.amount)}`}
+                {submitting
+                  ? 'Cobrando…'
+                  : currentStep !== 'payment'
+                    ? 'Continuar al pago'
+                    : !paymentMethod
+                      ? 'Elige forma de pago'
+                      : `Cobrar ${nextUnpaidSplitPart.label} · ${formatPrice(nextUnpaidSplitPart.amount)}`}
               </button>
             ) : (
             <button
               type="button"
-              onClick={() => void handlePayFullAccount()}
-              disabled={submitting || (cart.length === 0 && accountDue <= 0)}
+              onClick={handleRestaurantAccountChargeClick}
+              disabled={submitting || (cart.length === 0 && accountDue <= 0) || (currentStep === 'payment' && !paymentMethod)}
               className={`flex-1 min-w-[120px] px-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold touch-manipulation disabled:opacity-40 ${tabletMode ? 'min-h-[44px] py-2 text-base' : 'py-2.5 text-sm'}`}
             >
-              {submitting ? 'Cobrando…' : cart.length > 0 ? 'Cobrar todo' : `Cobrar ${formatPrice(accountDue)}`}
+              {submitting
+                ? 'Cobrando…'
+                : currentStep !== 'payment'
+                  ? 'Continuar al pago'
+                  : !paymentMethod
+                    ? 'Elige forma de pago'
+                    : cart.length > 0
+                      ? 'Cobrar todo'
+                      : `Cobrar ${formatPrice(accountDue)}`}
             </button>
             )
           ) : (
@@ -3616,6 +4193,18 @@ export function TpvRapidoOrderFlow({
       </div>
     </div>
   );
+
+  if (isRestaurantMode && restaurantStaffConsumptionOpen && register && userId) {
+    return (
+      <WorkerTpvStaffConsumption
+        userId={userId}
+        onBack={() => setRestaurantStaffConsumptionOpen(false)}
+        register={register}
+        salesPointId={register.session?.pointOfSaleId}
+        salesPointName={register.session?.pointOfSaleName}
+      />
+    );
+  }
 
   return (
     <>
@@ -4230,6 +4819,8 @@ export function TpvRapidoOrderFlow({
               onSelectedSectionChange={setSelectedSectionId}
               loading={loadingCatalog}
               catalog={catalog}
+              brands={brands}
+              catalogLayout={tpvCatalogLayout}
               clientProductScores={clientProductScores}
               resetSignal={productPickerReset}
               selectedCategory={selectedCategory}
@@ -4509,7 +5100,7 @@ export function TpvRapidoOrderFlow({
                             ))}
                           </div>
                         ) : null}
-                        {cart.length > 0 && !restaurantAccountMode ? (
+                        {(cart.length > 0 || (restaurantAccountMode && accountDue > 0)) ? (
                           <>
                         <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
                           Promoción
@@ -4634,7 +5225,7 @@ export function TpvRapidoOrderFlow({
                         <button
                           type="button"
                           onClick={() => completeStep('products')}
-                          className="w-full mt-3 min-h-[44px] py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm transition-colors touch-manipulation"
+                          className="w-full mt-3 min-h-[44px] py-3 rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-sm transition-colors touch-manipulation"
                         >
                           Continuar al pago
                         </button>
@@ -4697,6 +5288,17 @@ export function TpvRapidoOrderFlow({
               </div>
             )}
 
+            {(restaurantAccountMode || cashChargeTotal > 0) && (
+              <div className="mb-3">
+                <p className={LABEL_CLASS}>Cómo va a pagar</p>
+                {restaurantAccountMode ? (
+                  <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100 -mt-1 mb-2">
+                    {formatPrice(cashChargeTotal)}
+                  </p>
+                ) : null}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-2">
               {([
                 { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
@@ -4708,6 +5310,7 @@ export function TpvRapidoOrderFlow({
                   onClick={() => {
                     setPaymentMethod(key);
                     setPendingSplitParts(null);
+                    setRestaurantSplitStep(null);
                     if (key === 'efectivo') {
                       // Exacto por defecto: no hace falta teclear; solo cambiar si entrega otro billete.
                       setCashGiven(cashChargeTotal.toFixed(2));
@@ -4730,6 +5333,10 @@ export function TpvRapidoOrderFlow({
               <button
                 type="button"
                 onClick={() => {
+                  if (restaurantAccountMode) {
+                    openRestaurantPaymentSplit();
+                    return;
+                  }
                   if (deliveryType === 'domicilio' || tabletMode) {
                     setPaymentMethod('mixto');
                     setPendingSplitParts(null);
@@ -4945,6 +5552,81 @@ export function TpvRapidoOrderFlow({
           onClose={() => setChangeTableOpen(false)}
         />
       ) : null}
+      {mergeTableOpen && userId && restaurantTable && restaurantDiningOrder && !restaurantTable.isCounter ? (
+        <RestaurantMergeTableModal
+          userId={userId}
+          currentTableId={restaurantTable.id}
+          currentOrderId={restaurantDiningOrder._id}
+          onSelect={(sourceOrderId, sourceTable) => void handleConfirmMergeTable(sourceOrderId, sourceTable)}
+          onClose={() => setMergeTableOpen(false)}
+        />
+      ) : null}
+      {restaurantClientPickerOpen ? (
+        <div className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+          <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-xl dark:bg-gray-900 sm:max-w-md sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-gray-100">Cliente de la mesa</h3>
+                <p className="text-xs text-gray-500">Busca por nombre o teléfono</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRestaurantClientPickerOpen(false)}
+                className="rounded-lg p-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-2 p-3">
+              <input
+                autoFocus
+                value={restaurantClientQuery}
+                onChange={(e) => {
+                  const q = e.target.value;
+                  setRestaurantClientQuery(q);
+                  setPhoneInput(q);
+                }}
+                placeholder="Nombre o teléfono…"
+                className="w-full rounded-xl border-2 border-gray-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-sky-400 dark:border-gray-700 dark:bg-gray-950"
+              />
+              {restaurantLinkedClient && !isTpvSyntheticClientId(restaurantLinkedClient.id) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSelection();
+                    setRestaurantClientPickerOpen(false);
+                    toast.message('Cliente desvinculado en pantalla (la cuenta mantiene el vínculo hasta elegir otro)');
+                  }}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-left text-xs font-semibold text-gray-600 dark:border-gray-700 dark:text-gray-300"
+                >
+                  Quitar selección actual · {restaurantLinkedClient.name}
+                </button>
+              ) : null}
+              <div className="max-h-64 space-y-1 overflow-y-auto">
+                {isSearching ? (
+                  <p className="py-6 text-center text-sm text-gray-500">Buscando…</p>
+                ) : results.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-gray-500">
+                    {restaurantClientQuery.trim().length < 1 ? 'Escribe para buscar' : 'Sin resultados'}
+                  </p>
+                ) : (
+                  results.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => void handleLinkRestaurantClient(c)}
+                      className="flex w-full flex-col rounded-xl border border-gray-100 px-3 py-2.5 text-left hover:bg-sky-50 dark:border-gray-800 dark:hover:bg-sky-950/30"
+                    >
+                      <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">{c.name}</span>
+                      <span className="text-xs text-gray-500">{c.phone || 'Sin teléfono'}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {splitBillOpen && restaurantDiningOrder ? (
         <RestaurantSplitBillModal
           total={accountDue > 0 ? accountDue : Number(restaurantDiningOrder.total || 0)}
@@ -4960,6 +5642,9 @@ export function TpvRapidoOrderFlow({
           currentDiscount={Number(restaurantDiningOrder.discount || 0)}
           currentDiscountPercent={Number(restaurantDiningOrder.discountPercent || 0)}
           submitting={submitting}
+          loyaltyPoints={Number((saleClient as { loyalty?: { points?: number } } | null)?.loyalty?.points || 0)}
+          clientId={String(saleClient?.id || restaurantDiningOrder.clientId || '')}
+          clientName={String(saleClient?.name || restaurantDiningOrder.clientName || '')}
           onApply={(payload) => void handleApplyAccountDiscount(payload)}
           onClear={() => void handleClearAccountDiscount()}
           onClose={() => setDiscountOpen(false)}
@@ -4980,12 +5665,107 @@ export function TpvRapidoOrderFlow({
           }}
         />
       ) : null}
+      {restaurantSplitStep === 'choice' ? (
+        <TpvModalRoot>
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/50 border-0"
+            aria-label="Cerrar"
+            onClick={() => setRestaurantSplitStep(null)}
+          />
+          <div className="relative bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-sm p-5 mx-auto">
+            <button
+              type="button"
+              onClick={() => setRestaurantSplitStep(null)}
+              disabled={submitting}
+              className="absolute top-3 right-3 p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+            >
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+            <div className="text-center mb-4 pr-6">
+              <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-violet-100 dark:bg-violet-950/40 flex items-center justify-center">
+                <Split className="w-6 h-6 text-violet-700 dark:text-violet-300" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Pago dividido</h3>
+              {restaurantTable ? (
+                <p className="text-sm text-gray-500 mt-1">Mesa {restaurantTable.number}</p>
+              ) : null}
+              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-2 tabular-nums">
+                {formatPrice(cashChargeTotal)}
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-3 font-medium">
+                ¿Cómo quieres dividir el cobro?
+              </p>
+            </div>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setRestaurantSplitStep('items')}
+                disabled={submitting || restaurantSplitItems.length === 0}
+                className="w-full flex items-start gap-3 text-left py-3.5 px-3 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-colors disabled:opacity-50"
+              >
+                <ShoppingBag className="w-6 h-6 text-violet-700 dark:text-violet-300 shrink-0 mt-0.5" />
+                <span>
+                  <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">Por artículos</span>
+                  <span className="block text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
+                    Cada producto en efectivo o tarjeta
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRestaurantSplitStep('amounts')}
+                disabled={submitting || cashChargeTotal <= 0}
+                className="w-full flex items-start gap-3 text-left py-3.5 px-3 rounded-2xl border-2 border-violet-200 dark:border-violet-800 bg-white dark:bg-gray-900 hover:bg-violet-50 dark:hover:bg-violet-950/20 transition-colors disabled:opacity-50"
+              >
+                <Wallet className="w-6 h-6 text-violet-700 dark:text-violet-300 shrink-0 mt-0.5" />
+                <span>
+                  <span className="block text-sm font-bold text-gray-900 dark:text-gray-100">Por importes</span>
+                  <span className="block text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
+                    Parte el total en tanto y tanto (€)
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRestaurantSplitStep(null)}
+                disabled={submitting}
+                className="w-full py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Atrás
+              </button>
+            </div>
+          </div>
+        </TpvModalRoot>
+      ) : null}
+      {restaurantSplitStep === 'items' ? (
+        <RestaurantItemPaySelectModal
+          items={restaurantSplitItems}
+          total={cashChargeTotal}
+          title="Pago por artículos"
+          subtitle={restaurantTable ? `Mesa ${restaurantTable.number}` : 'Cuenta'}
+          loading={submitting}
+          onClose={() => setRestaurantSplitStep(null)}
+          onBack={() => setRestaurantSplitStep('choice')}
+          onConfirm={handleRestaurantSplitPartsConfirm}
+        />
+      ) : null}
+      {restaurantSplitStep === 'amounts' ? (
+        <TpvSplitPaymentModal
+          total={cashChargeTotal}
+          title="Pago por importes"
+          subtitle={restaurantTable ? `Mesa ${restaurantTable.number}` : 'Cuenta'}
+          loading={submitting}
+          onClose={() => setRestaurantSplitStep('choice')}
+          onConfirm={handleRestaurantSplitPartsConfirm}
+        />
+      ) : null}
     </TpvFullscreenShell>
     {quickNamePromptOpen
       && typeof document !== 'undefined'
       && createPortal(
         <div
-          className="fixed inset-0 z-[110] flex items-center justify-center p-4 sm:p-6"
+          className="fixed inset-0 z-[220] flex items-center justify-center p-4 sm:p-6"
           role="dialog"
           aria-modal="true"
           aria-labelledby="tpv-quick-name-title"
@@ -5006,7 +5786,7 @@ export function TpvRapidoOrderFlow({
                   Pedido rápido
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  Solo hace falta el nombre. El teléfono es opcional: si lo da, se guarda en el CRM; si no, cliente perdido.
+                  Solo hace falta el nombre. Si pones teléfono completo (9 dígitos), se guarda en el CRM; si no, no se crea cliente.
                 </p>
               </div>
               <button
@@ -5076,7 +5856,7 @@ export function TpvRapidoOrderFlow({
                 />
               </div>
               <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                No es obligatorio. Vacío = cliente perdido en CRM.
+                No es obligatorio. Vacío o incompleto = no se guarda en CRM.
               </p>
             </div>
             <div className="flex justify-end gap-2 pt-1">
@@ -5092,9 +5872,9 @@ export function TpvRapidoOrderFlow({
                 type="button"
                 onClick={() => void confirmQuickAttentionName()}
                 disabled={creatingClient}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold touch-manipulation disabled:opacity-50"
+                className="px-5 py-2.5 rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white text-sm font-bold touch-manipulation disabled:opacity-50"
               >
-                {creatingClient ? 'Guardando…' : 'Continuar'}
+                {creatingClient ? 'Guardando en CRM…' : 'Continuar'}
               </button>
             </div>
           </div>
@@ -5255,7 +6035,7 @@ function ClientResultCard({ client, onSelect }: { client: Client; onSelect: () =
     <button
       type="button"
       onClick={onSelect}
-      className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-gray-900 dark:hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 active:bg-gray-100 dark:active:bg-gray-800 transition-colors text-left cursor-pointer touch-manipulation"
+      className="w-full flex items-center gap-3 p-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 hover:border-gray-900 dark:hover:border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800/60 active:bg-gray-100 dark:active:bg-gray-800 transition-colors text-left cursor-pointer"
     >
       <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-sm font-bold text-gray-600 dark:text-gray-300 shrink-0">
         {getInitials(client.name)}

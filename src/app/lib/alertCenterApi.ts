@@ -219,6 +219,14 @@ export async function bulkUpdateAlertStatus(businessId: string, alertIds: string
   );
 }
 
+/** Resuelve todas las alertas pendientes del negocio (bandeja). */
+export async function resolveAllUnresolvedAlerts(businessId: string) {
+  return request<{ updated: number; errors: number; message?: string }>(
+    `/api/alerts/${encodeURIComponent(businessId)}/resolve-all`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}
+
 export async function assignAlert(businessId: string, alertId: string, assignment: { userIds?: string[]; roles?: string[] }) {
   return request<{ alert: AlertRecord }>(
     `/api/alerts/${encodeURIComponent(businessId)}/${encodeURIComponent(alertId)}/assign`,

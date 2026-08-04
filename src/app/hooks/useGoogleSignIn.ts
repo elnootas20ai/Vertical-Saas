@@ -16,6 +16,10 @@ interface GoogleCredentialResponse {
 
 type OnCredentialCallback = (credential: string) => void;
 
+function isGoogleSdkReady(): boolean {
+  return Boolean(window.google?.accounts?.id);
+}
+
 export function useGoogleSignIn(onCredential: OnCredentialCallback) {
   const callbackRef = useRef(onCredential);
   const [ready, setReady] = useState(false);
@@ -23,12 +27,15 @@ export function useGoogleSignIn(onCredential: OnCredentialCallback) {
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID.trim()) {
-      console.warn('[GoogleSignIn] VITE_GOOGLE_CLIENT_ID no configurado en el build');
       return;
     }
 
+    let cancelled = false;
+    let pollTimer: ReturnType<typeof setInterval> | undefined;
+
     const initGoogle = () => {
-      window.google?.accounts.id.initialize({
+      if (cancelled || !isGoogleSdkReady()) return;
+      window.google!.accounts.id.initialize({
         client_id: GOOGLE_CLIENT_ID,
         callback: (response: GoogleCredentialResponse) => {
           callbackRef.current(response.credential);
@@ -39,24 +46,58 @@ export function useGoogleSignIn(onCredential: OnCredentialCallback) {
       setReady(true);
     };
 
-    if (window.google?.accounts?.id) {
+    if (isGoogleSdkReady()) {
       initGoogle();
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
-    const existing = document.querySelector(`script[src="${GOOGLE_GSI_SRC}"]`);
+    const existing = document.querySelector(`script[src="${GOOGLE_GSI_SRC}"]`) as HTMLScriptElement | null;
+
+    const onScriptLoad = () => {
+      if (!cancelled) initGoogle();
+    };
+
     if (existing) {
-      existing.addEventListener('load', initGoogle);
-      return;
+      // Si el script ya cargó en otra pantalla, 'load' no vuelve a disparar.
+      if (isGoogleSdkReady()) {
+        initGoogle();
+      } else {
+        existing.addEventListener('load', onScriptLoad);
+        let tries = 0;
+        pollTimer = setInterval(() => {
+          if (cancelled) return;
+          if (isGoogleSdkReady()) {
+            initGoogle();
+            if (pollTimer) clearInterval(pollTimer);
+            return;
+          }
+          if (++tries > 40) {
+            if (pollTimer) clearInterval(pollTimer);
+          }
+        }, 100);
+      }
+      return () => {
+        cancelled = true;
+        existing.removeEventListener('load', onScriptLoad);
+        if (pollTimer) clearInterval(pollTimer);
+      };
     }
 
     const script = document.createElement('script');
     script.src = GOOGLE_GSI_SRC;
     script.async = true;
     script.defer = true;
-    script.onload = initGoogle;
+    script.onload = onScriptLoad;
     script.onerror = () => console.error('[GoogleSignIn] Error cargando Google Identity Services');
     document.head.appendChild(script);
+
+    return () => {
+      cancelled = true;
+      script.onload = null;
+      if (pollTimer) clearInterval(pollTimer);
+    };
   }, []);
 
   const prompt = useCallback(() => {
@@ -72,9 +113,8 @@ export function useGoogleSignIn(onCredential: OnCredentialCallback) {
       if (!element || !window.google?.accounts?.id) return;
       // Evita botones duplicados si el efecto corre dos veces (p. ej. React Strict Mode) o el tema cambia.
       element.replaceChildren();
-      const width =
-        options?.width ??
-        Math.min(400, Math.max(280, Math.floor(element.getBoundingClientRect().width || 320)));
+      const measured = Math.floor(element.getBoundingClientRect().width || 0);
+      const width = options?.width ?? Math.min(400, Math.max(280, measured || 320));
       window.google.accounts.id.renderButton(element, {
         type: 'standard',
         // Estilos actuales de GIS: filled_blue / filled_black suelen verse más “nuevos” que outline.

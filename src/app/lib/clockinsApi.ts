@@ -1,7 +1,11 @@
 import { getApiBase } from './apiBase';
 import { authFetch } from './authApi';
 import { ensureCouchDb } from './ensureCouchDb';
-import { pickActiveClockinRecord, sortClockinsByClockIn } from './clockinHistoryUtils';
+import {
+  pickActiveClockinRecord,
+  sortClockinsByClockIn,
+  todayDateStr,
+} from './clockinHistoryUtils';
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
 const DB = (env.VITE_COUCHDB_DB || 'vertial') + '-clockins';
@@ -192,16 +196,13 @@ export async function listClockins(
   }
 }
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export async function listTodayClockinSessions(
   businessId: string,
   memberId: string,
 ): Promise<ClockinRecord[]> {
   const records = await listClockins(businessId, {
-    date: todayStr(),
+    // Día local (como el backend Madrid), no UTC de toISOString.
+    date: todayDateStr(),
     memberId,
     recordsOnly: true,
   });
@@ -360,29 +361,14 @@ export async function adjustClockinEntry(
 }
 
 /**
- * Returns the display time for a clock entry based on schedule rules:
- * - clock_in: if actual < scheduled_start → scheduled_start; otherwise actual
- * - clock_out: if actual > scheduled_end → scheduled_end; otherwise actual
+ * Hora a mostrar en UI: siempre la real del fichaje (antes/después del turno).
+ * El recorte a horario programado sigue aplicándose solo en totales (computeMinutes / nómina).
  */
 export function getDisplayTime(
   entry: ClockEntry,
-  record: ClockinRecord,
+  _record?: ClockinRecord,
 ): string {
-  const actualDate = new Date(entry.time);
-  const dateStr = record.date;
-
-  if (entry.type === 'clock_in' && record.scheduled_start) {
-    const [h, m] = record.scheduled_start.split(':').map(Number);
-    const scheduled = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
-    if (actualDate < scheduled) return scheduled.toISOString();
-  }
-
-  if (entry.type === 'clock_out' && record.scheduled_end) {
-    const [h, m] = record.scheduled_end.split(':').map(Number);
-    const scheduled = new Date(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
-    if (actualDate > scheduled) return scheduled.toISOString();
-  }
-
+  void _record;
   return entry.time;
 }
 

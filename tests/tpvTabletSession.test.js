@@ -123,4 +123,34 @@ describe('tpvTabletSession — rutas tablet', () => {
       globalThis.window = prev;
     }
   });
+
+  it('leaveTpvTabletSession con keepAuthAndGoTo no hace logout (admin)', async () => {
+    writeTpvTabletBinding({
+      terminalCode: 'STORE-001',
+      pdvId: 'pdv-1',
+      workCenterId: 'wc-1',
+      businessId: 'biz-1',
+      dataUserId: 'owner-1',
+    });
+    let logoutCalls = 0;
+    const replaced = [];
+    const prev = globalThis.window;
+    globalThis.window = {
+      location: {
+        replace: (url) => {
+          replaced.push(url);
+        },
+      },
+    };
+    try {
+      await leaveTpvTabletSession(async () => {
+        logoutCalls += 1;
+      }, { keepAuthAndGoTo: '/saas/delivery-ops' });
+      expect(logoutCalls).toBe(0);
+      expect(readTpvTabletBinding()).toBeNull();
+      expect(replaced).toEqual(['/saas/delivery-ops']);
+    } finally {
+      globalThis.window = prev;
+    }
+  });
 });

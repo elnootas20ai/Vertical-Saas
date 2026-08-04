@@ -44,6 +44,36 @@ function countOpenItems(order: DiningOrder): number {
   );
 }
 
+/** Hay pedido TPV real (líneas o importe), no solo mesa sentada / cuenta vacía. */
+export function diningOrderHasTpvPedido(order: DiningOrder | null | undefined): boolean {
+  if (!order || !isOpenDiningOrder(order)) return false;
+  if (Number(order.total || 0) > 0) return true;
+  return countOpenItems(order) > 0;
+}
+
+/**
+ * Estado visual en el plano del TPV:
+ * «Ocupada» / «Cuenta» solo si hay pedido TPV; si no, libre (salvo reservada / por limpiar).
+ */
+export function resolveTpvFloorVisualStatus(
+  table: { status: DiningTableStatus },
+  openOrder?: DiningOrder | null,
+): DiningTableStatus {
+  const status = table.status;
+  if (status === 'hidden') return 'hidden';
+  if (status === 'unavailable') return 'unavailable';
+  if (status === 'reserved') return 'reserved';
+
+  if (diningOrderHasTpvPedido(openOrder)) {
+    if (openOrder?.status === 'pending_payment' || status === 'pending_payment') {
+      return 'pending_payment';
+    }
+    return 'occupied';
+  }
+
+  return 'available';
+}
+
 function occupiedMinutesFrom(table: ExtendedDiningTable): number | null {
   const at = String(table.occupiedAt || '').trim();
   if (!at) return null;

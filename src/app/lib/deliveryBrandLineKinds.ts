@@ -73,7 +73,7 @@ export const DELIVERY_BRAND_LINE_PRESETS: DeliveryBrandLinePreset[] = [
     suggestedName: 'Cocina',
     shortCode: 'COC',
     primaryColor: '#EA580C',
-    description: 'Platos preparados, menús y raciones para delivery o recogida.',
+    description: 'Platos preparados, menús y raciones para sala, para llevar o recogida.',
     typicalCategories: ['Entrantes', 'Principales', 'Postres', 'Complementos'],
   },
   {

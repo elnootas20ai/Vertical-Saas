@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { toast } from 'sonner';
 import { useAuth } from '../../../context/AuthContext';
+import { isWorkerAccount } from '../../../lib/authApi';
 import { isVertialNativeApp } from '../../../lib/vertialPrint/isNativeApp';
 import {
   readPushConsent,
@@ -32,10 +33,11 @@ async function readDeviceStatus(): Promise<DeviceStatus> {
   return 'prompt';
 }
 
-/** Bloque Ajustes: estado del dispositivo + reactivar solo si el usuario cambió de idea. */
+/** Bloque Ajustes: estado del dispositivo + reactivar solo si el usuario cambió de idea. Solo CEO/empresa. */
 export function DevicePushStatusCard() {
   const { user } = useAuth();
   const userId = user?.user_id || null;
+  const isWorker = isWorkerAccount(user);
   const [device, setDevice] = useState<DeviceStatus>('loading');
   const [consent, setConsent] = useState<PushConsentDecision>('unset');
   const [busy, setBusy] = useState(false);
@@ -47,11 +49,12 @@ export function DevicePushStatusCard() {
   }, [userId]);
 
   useEffect(() => {
+    if (isWorker) return;
     void refresh();
     const onChange = () => void refresh();
     window.addEventListener('vertial:push-consent-changed', onChange);
     return () => window.removeEventListener('vertial:push-consent-changed', onChange);
-  }, [refresh]);
+  }, [refresh, isWorker]);
 
   const handleEnable = async () => {
     if (!userId || busy) return;
@@ -73,7 +76,7 @@ export function DevicePushStatusCard() {
           window.dispatchEvent(new CustomEvent('vertial:push-register-now'));
           toast.success('Avisos activados');
         } else {
-          writePushConsent(userId, 'declined');
+          writePushConsent(userId, 'declined', { force: true });
           toast.message('Sin permiso del sistema');
         }
       } else if ('Notification' in window) {
@@ -83,7 +86,7 @@ export function DevicePushStatusCard() {
           window.dispatchEvent(new CustomEvent('vertial:push-register-now'));
           toast.success('Avisos activados');
         } else {
-          writePushConsent(userId, 'declined');
+          writePushConsent(userId, 'declined', { force: true });
           toast.message('Sin permiso del navegador');
         }
       }
@@ -93,6 +96,7 @@ export function DevicePushStatusCard() {
     }
   };
 
+  if (isWorker) return null;
   if (device === 'unsupported' || device === 'loading') return null;
 
   const active = device === 'granted' || consent === 'accepted';

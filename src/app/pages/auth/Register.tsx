@@ -564,17 +564,8 @@ export function Register() {
                       <span className="inline-block w-4 h-4 shrink-0 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" aria-hidden />
                       <span>Cargando Google…</span>
                     </div>
-                  ) : !googleReady && googleTimedOut ? (
-                    <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center rounded-lg border border-amber-200 bg-amber-50 py-2 px-3 text-xs text-amber-800 text-center">
-                      Google no cargó. Regístrate con email.
-                    </div>
-                  ) : (
+                  ) : !googleReady && googleTimedOut ? null : (
                     <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
-                  )}
-                  {!showGoogleAuth && (
-                    <div className="w-full max-w-sm py-1.5 px-2 border border-gray-200 dark:border-gray-600 rounded-lg text-[10px] text-gray-500 dark:text-gray-400 text-center">
-                      Google no disponible (revisa VITE_GOOGLE_CLIENT_ID en build).
-                    </div>
                   )}
                   {showAppleAuth ? (
                     <div className="w-full max-w-sm">

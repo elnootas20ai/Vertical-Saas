@@ -52,9 +52,7 @@ export function formatClock(iso: string | undefined): string {
   return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-export function formatMoneyEs(n: number): string {
-  return `${n.toFixed(2).replace('.', ',')}€`;
-}
+export { formatMoneyEs } from './formatNumberEs';
 
 function barKindForSession(session: TpvRegisterSession, selectedDate: string, now: Date): CajaTimelineBarKind {
   if (session.status === 'open' && isTpvRegisterSessionFromPriorCalendarDay(session, now)) {

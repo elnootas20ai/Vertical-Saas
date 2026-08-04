@@ -108,25 +108,103 @@ export function countOpenScheduleDays(schedule: WeekSchedule | null | undefined)
   return ALL_SCHEDULE_DAY_KEYS.filter((day) => schedule[day]?.open).length;
 }
 
+/**
+ * Normaliza cualquier formato razonable a `HH:mm`.
+ * Devuelve `''` si no se puede parsear (para inputs / blank).
+ */
+export function normalizeScheduleTimeValue(
+  value: string | null | undefined,
+  fallback = '',
+): string {
+  const raw = String(value || '').trim();
+  if (!raw) return fallback;
+  let m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(raw);
+  if (m) return `${m[1].padStart(2, '0')}:${m[2]}`;
+  m = /^([01]?\d|2[0-3])h([0-5]\d)?$/i.exec(raw);
+  if (m) return `${m[1].padStart(2, '0')}:${(m[2] || '00').padStart(2, '0')}`;
+  m = /^([01]?\d|2[0-3])$/.exec(raw);
+  if (m) return `${m[1].padStart(2, '0')}:00`;
+  return fallback;
+}
+
+/** HH:mm → minutos desde 00:00; `-1` si no es hora válida. */
+export function scheduleTimeToMinutes(value: string | null | undefined): number {
+  const normalized = normalizeScheduleTimeValue(value);
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(normalized);
+  if (!m) return -1;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+/** Primera tienda activa con horario válido (opcionalmente preferida). */
+export function pickStoreOpeningHours(
+  workCenters: WorkCenter[],
+  preferredId?: string | null,
+): BusinessHoursConfig | null {
+  const active = workCenters.filter((wc) => wc.active !== false);
+  const preferred = String(preferredId || '').trim();
+  if (preferred) {
+    const match = active.find(
+      (wc) =>
+        (wc.id === preferred || wc._id === preferred)
+        && hasValidBusinessHoursConfig(wc.openingHours),
+    );
+    if (match?.openingHours) return normalizeBusinessHoursConfig(match.openingHours);
+  }
+  const first = active.find((wc) => hasValidBusinessHoursConfig(wc.openingHours));
+  return first?.openingHours ? normalizeBusinessHoursConfig(first.openingHours) : null;
+}
+
+/**
+ * Horario inicial al crear un PDV: obliga a rellenar apertura/cierre de cada día abierto.
+ * Los cerrados cuentan como definidos; los abiertos empiezan sin hora.
+ */
+export function createBlankBusinessHoursConfig(): BusinessHoursConfig {
+  return {
+    timezone: 'Europe/Madrid',
+    schedule: {
+      monday: { open: true, from: '', to: '' },
+      tuesday: { open: true, from: '', to: '' },
+      wednesday: { open: true, from: '', to: '' },
+      thursday: { open: true, from: '', to: '' },
+      friday: { open: true, from: '', to: '' },
+      saturday: { open: true, from: '', to: '' },
+      sunday: { open: false, from: '', to: '' },
+    },
+    holidays: [],
+    lunchBreak: { enabled: false, from: '14:00', to: '16:00' },
+  };
+}
+
 /** Mensaje para UI si el horario no se puede guardar; `null` si es válido. */
 export function getBusinessHoursIssue(hours: BusinessHoursConfig | null | undefined): string | null {
   if (!hours?.schedule) {
-    return 'Activa al menos un día con horario de apertura y cierre.';
-  }
-  if (countOpenScheduleDays(hours.schedule) === 0) {
-    return 'Activa al menos un día (interruptor o letra L–D).';
+    return 'Configura el horario de cada día (L–D): abierto con horas o cerrado.';
   }
   for (const day of ALL_SCHEDULE_DAY_KEYS) {
     const d = hours.schedule[day];
-    if (!d?.open) continue;
+    if (!d || typeof d !== 'object') {
+      return `${SCHEDULE_DAY_LABELS_ES[day]}: indica si abre y su horario.`;
+    }
+    if (!d.open) continue;
     const from = String(d.from ?? '').trim();
     const to = String(d.to ?? '').trim();
     if (!from || !to) {
       return `${SCHEDULE_DAY_LABELS_ES[day]}: indica hora de apertura y de cierre.`;
     }
-    if (from === to) {
+    const fromMin = scheduleTimeToMinutes(from);
+    const toMin = scheduleTimeToMinutes(to);
+    if (fromMin < 0 || toMin < 0) {
+      return `${SCHEDULE_DAY_LABELS_ES[day]}: usa horas válidas (HH:mm).`;
+    }
+    if (fromMin === toMin) {
       return `${SCHEDULE_DAY_LABELS_ES[day]}: apertura y cierre no pueden ser la misma hora.`;
     }
+    if (fromMin > toMin) {
+      return `${SCHEDULE_DAY_LABELS_ES[day]}: la apertura debe ser antes del cierre.`;
+    }
+  }
+  if (countOpenScheduleDays(hours.schedule) === 0) {
+    return 'Activa al menos un día abierto con su horario (L–D).';
   }
   return null;
 }
@@ -137,30 +215,82 @@ export function hasValidBusinessHoursConfig(
   return getBusinessHoursIssue(hours) === null;
 }
 
+function looksLikeDaySchedule(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const d = value as Record<string, unknown>;
+  return 'open' in d || 'from' in d || 'to' in d;
+}
+
+/**
+ * Acepta `{ schedule: WeekSchedule }` o WeekSchedule plano en la raíz (legacy).
+ * `null` si no hay ningún día reconocible.
+ */
+export function coerceOpeningHoursConfig(
+  hours: BusinessHoursConfig | WeekSchedule | null | undefined,
+): BusinessHoursConfig | null {
+  if (!hours || typeof hours !== 'object') return null;
+  const raw = hours as Record<string, unknown>;
+  if (raw.schedule && typeof raw.schedule === 'object') {
+    const sched = raw.schedule as Record<string, unknown>;
+    const hasDays = ALL_SCHEDULE_DAY_KEYS.some((day) => looksLikeDaySchedule(sched[day]));
+    if (!hasDays) return null;
+    return hours as BusinessHoursConfig;
+  }
+  const hasFlatDays = ALL_SCHEDULE_DAY_KEYS.some((day) => looksLikeDaySchedule(raw[day]));
+  if (!hasFlatDays) return null;
+  const schedule = {} as WeekSchedule;
+  for (const day of ALL_SCHEDULE_DAY_KEYS) {
+    if (looksLikeDaySchedule(raw[day])) {
+      schedule[day] = raw[day] as DaySchedule;
+    }
+  }
+  return {
+    timezone: String(raw.timezone || DEFAULT_BUSINESS_HOURS_CONFIG.timezone).trim()
+      || DEFAULT_BUSINESS_HOURS_CONFIG.timezone,
+    schedule,
+    holidays: Array.isArray(raw.holidays) ? (raw.holidays as BusinessHoursConfig['holidays']) : [],
+    lunchBreak:
+      raw.lunchBreak && typeof raw.lunchBreak === 'object'
+        ? { ...DEFAULT_BUSINESS_HOURS_CONFIG.lunchBreak, ...(raw.lunchBreak as object) }
+        : { ...DEFAULT_BUSINESS_HOURS_CONFIG.lunchBreak },
+  };
+}
+
+/** Hay payload de horario (anidado o plano), aunque aún no pase validación estricta. */
+export function hasOpeningHoursPayload(
+  hours: BusinessHoursConfig | WeekSchedule | null | undefined,
+): boolean {
+  return coerceOpeningHoursConfig(hours) != null;
+}
+
 /** Rellena días faltantes y normaliza strings (datos legacy o Couch incompletos). */
 export function normalizeBusinessHoursConfig(
-  hours: BusinessHoursConfig | null | undefined,
+  hours: BusinessHoursConfig | WeekSchedule | null | undefined,
 ): BusinessHoursConfig {
+  const coerced = coerceOpeningHoursConfig(hours);
   const base = DEFAULT_BUSINESS_HOURS_CONFIG;
   const schedule = cloneWeekSchedule(base.schedule);
-  if (hours?.schedule && typeof hours.schedule === 'object') {
+  if (coerced?.schedule && typeof coerced.schedule === 'object') {
     for (const day of ALL_SCHEDULE_DAY_KEYS) {
-      const src = hours.schedule[day];
+      const src = coerced.schedule[day];
       if (!src || typeof src !== 'object') continue;
+      const fromRaw = String(src.from ?? '').trim();
+      const toRaw = String(src.to ?? '').trim();
+      // Si el día viene con from/to vacíos, no inventar 09:00–19:00 (eso ocultaba «incompleto»).
       schedule[day] = {
         open: Boolean(src.open),
-        from: String(src.from ?? schedule[day].from).trim() || schedule[day].from,
-        to: String(src.to ?? schedule[day].to).trim() || schedule[day].to,
+        from: fromRaw ? normalizeScheduleTimeValue(fromRaw, '') : '',
+        to: toRaw ? normalizeScheduleTimeValue(toRaw, '') : '',
       };
     }
   }
   return {
-    timezone: String(hours?.timezone || base.timezone).trim() || base.timezone,
+    timezone: String(coerced?.timezone || base.timezone).trim() || base.timezone,
     schedule,
-    holidays: Array.isArray(hours?.holidays) ? hours!.holidays : [],
+    holidays: Array.isArray(coerced?.holidays) ? coerced!.holidays : [],
     lunchBreak:
-      hours?.lunchBreak && typeof hours.lunchBreak === 'object'
-        ? { ...base.lunchBreak, ...hours.lunchBreak }
+      coerced?.lunchBreak && typeof coerced.lunchBreak === 'object'
+        ? { ...base.lunchBreak, ...coerced.lunchBreak }
         : { ...base.lunchBreak },
   };
 }

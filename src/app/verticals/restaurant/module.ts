@@ -13,6 +13,7 @@ export const RESTAURANT_MODULE: VerticalModuleDefinition = {
   id: 'restaurant',
   businessType: 'restaurant',
   routePrefixes: [
+    '/saas/restaurant-ops',
     '/saas/sala',
     '/saas/sala/setup',
     '/saas/reservations',

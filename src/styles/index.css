@@ -2,6 +2,7 @@
 @import './tailwind.css';
 @import './theme.css';
 @import './dark-mode.css';
+@import './vertial-saas.css';
 
 * {
   scrollbar-width: none;

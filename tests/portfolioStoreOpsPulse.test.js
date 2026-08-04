@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateStoreOpsPulses,
+  buildPdvBrandSameDayCompare,
   buildStoreOpsPulse,
   listMonthToDateDayKeys,
+  listPrevMonthToDateDayKeys,
+  listSameDayOfMonthKeys,
   listTrailingDayKeys,
+  monthOverMonthPct,
   rankStoreOpsPulses,
+  resolvePrevComparableDayKeys,
 } from '../src/app/lib/portfolioMetrics.ts';
 
 function order({ id, pdv, paidAt, total, items, status = 'entregado' }) {
@@ -40,6 +45,114 @@ describe('listTrailingDayKeys / listMonthToDateDayKeys', () => {
   it('builds month-to-date keys', () => {
     const keys = listMonthToDateDayKeys('2026-07-03');
     expect(keys).toEqual(['2026-07-01', '2026-07-02', '2026-07-03']);
+  });
+});
+
+describe('listSameDayOfMonthKeys / buildPdvBrandSameDayCompare', () => {
+  it('lists same day-of-month going back 3 months', () => {
+    expect(listSameDayOfMonthKeys('2026-08-04', 3)).toEqual([
+      '2026-05-04',
+      '2026-06-04',
+      '2026-07-04',
+      '2026-08-04',
+    ]);
+  });
+
+  it('clamps day when month is shorter', () => {
+    expect(listSameDayOfMonthKeys('2026-03-31', 1)).toEqual(['2026-02-28', '2026-03-31']);
+  });
+
+  it('lists prev month-to-date keys (fair MoM)', () => {
+    expect(listPrevMonthToDateDayKeys('2026-08-04')).toEqual([
+      '2026-07-01',
+      '2026-07-02',
+      '2026-07-03',
+      '2026-07-04',
+    ]);
+  });
+
+  it('resolvePrevComparableDayKeys uses MTD for month pulse', () => {
+    const keys = listMonthToDateDayKeys('2026-08-04');
+    expect(resolvePrevComparableDayKeys(keys, '2026-08-04')).toEqual(
+      listPrevMonthToDateDayKeys('2026-08-04'),
+    );
+  });
+
+  it('monthOverMonthPct: sin baseline no inventa negativo; con baseline sí cae', () => {
+    expect(monthOverMonthPct(30, 0)).toBeNull();
+    expect(monthOverMonthPct(0, 100)).toBe(-100);
+    expect(monthOverMonthPct(50, 100)).toBe(-50);
+  });
+
+  it('compares brand units for two PDVs on those days', () => {
+    const orders = [
+      {
+        _id: 'a1',
+        salesPointId: 'pdv-a',
+        status: 'entregado',
+        paymentStatus: 'paid',
+        paidAt: '2026-08-04T12:00:00',
+        deliveredAt: '2026-08-04T12:00:00',
+        createdAt: '2026-08-04T11:00:00',
+        totalAmount: 20,
+        paidAmount: 20,
+        items: [
+          {
+            id: 'i1',
+            name: 'Pizza',
+            quantity: 2,
+            unitPrice: 10,
+            total: 20,
+            brandIds: ['brand-mod'],
+          },
+        ],
+      },
+      {
+        _id: 'b1',
+        salesPointId: 'pdv-b',
+        status: 'entregado',
+        paymentStatus: 'paid',
+        paidAt: '2026-07-04T12:00:00',
+        deliveredAt: '2026-07-04T12:00:00',
+        createdAt: '2026-07-04T11:00:00',
+        totalAmount: 30,
+        paidAmount: 30,
+        items: [
+          {
+            id: 'i2',
+            name: 'Pizza',
+            quantity: 3,
+            unitPrice: 10,
+            total: 30,
+            brandIds: ['brand-mod'],
+          },
+        ],
+      },
+    ];
+
+    const cmp = buildPdvBrandSameDayCompare(orders, {
+      todayKey: '2026-08-04',
+      monthsBack: 1,
+      storeA: { storeName: 'Test1', pdvId: 'pdv-a', workCenterId: 'wc-a' },
+      storeB: { storeName: 'Badalona', pdvId: 'pdv-b', workCenterId: 'wc-b' },
+      brands: [{ id: 'brand-mod', name: 'Modomio', color: '#f00' }],
+    });
+
+    expect(cmp.dayKeys).toEqual(['2026-07-04', '2026-08-04']);
+    expect(cmp.brands).toHaveLength(1);
+    // Jul 4: A aún no existía → aActive false; B sí
+    expect(cmp.brands[0].points[0]).toMatchObject({
+      aUnits: 0,
+      bUnits: 3,
+      aActive: false,
+      bActive: true,
+    });
+    expect(cmp.brands[0].points[1]).toMatchObject({
+      aUnits: 2,
+      bUnits: 0,
+      aActive: true,
+      bActive: true,
+    });
   });
 });
 

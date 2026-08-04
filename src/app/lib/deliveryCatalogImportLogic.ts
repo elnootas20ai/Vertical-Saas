@@ -9,6 +9,7 @@ import {
   type TpvCategoryTemplateKey,
 } from './catalogCustomization';
 import type { CatalogItem } from './deliveryApi';
+import { normalizeSubfamilyCategory, resolveTpvFamilyKey } from './tpvCatalogFamilies';
 
 export type ImportBrandLike = {
   _id: string;
@@ -163,11 +164,29 @@ export function isImportComboCategory(category: string): boolean {
   return foldKey(normalizeImportCategory(category)) === 'combos';
 }
 
-export function normalizeImportCategory(value: string): string {
+export function normalizeImportCategory(
+  value: string,
+  options?: { preserveSubfamilies?: boolean },
+): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
+  if (options?.preserveSubfamilies) {
+    const sub = normalizeSubfamilyCategory(raw);
+    if (sub) return sub;
+  }
   const alias = IMPORT_CATEGORY_ALIASES[foldKey(raw)];
-  if (alias) return alias;
+  if (alias) {
+    // Con subfamilias: no aplastar Cervezas/Refrescos → Bebidas.
+    if (
+      options?.preserveSubfamilies
+      && foldKey(alias) === 'bebidas'
+      && foldKey(raw) !== 'bebidas'
+      && foldKey(raw) !== 'bebida'
+    ) {
+      return raw.replace(/^\w/, (c) => c.toUpperCase());
+    }
+    return alias;
+  }
   return raw;
 }
 
@@ -224,6 +243,10 @@ export function resolveCommercialLineIdsFromText(
 }
 
 export function shouldClearBrandForCategory(category: string): boolean {
+  const family = resolveTpvFamilyKey(category);
+  if (family === 'bebidas' || family === 'postres' || family === 'complementos' || family === 'cafes') {
+    return true;
+  }
   const c = foldKey(normalizeImportCategory(category));
   return (
     c === 'bebidas' ||
@@ -411,15 +434,24 @@ export function resolveCatalogImportBrandIds(
   // heurística. Las inferencias por nombre/categoría son solo para filas sin línea.
   if (explicitBrandIds.length > 0) return explicitBrandIds;
 
-  if (shouldClearBrandForCategory(category)) return [];
-
   const fromProductName = inferCommercialLineBrandIdFromProductName(productName, brands);
   if (fromProductName) return [fromProductName];
+
+  const active = brands.filter((b) => b.active !== false);
+  const commercial = commercialLineBrands(active);
+  const defaultId = defaultBrandIdForCatalogImport(brands);
+
+  // Una sola línea comercial activa: comida, bebida, postre… pertenecen a esa marca.
+  // Si se vacían brandIds en bebidas/postres, la pestaña de marca queda rota en el TPV.
+  if (commercial.length <= 1) {
+    return defaultId ? [defaultId] : [];
+  }
+
+  if (shouldClearBrandForCategory(category)) return [];
 
   const inferred = inferCommercialLineBrandId(category, brands, productName);
   if (inferred) return [inferred];
 
-  const defaultId = defaultBrandIdForCatalogImport(brands);
   return defaultId ? [defaultId] : [];
 }
 

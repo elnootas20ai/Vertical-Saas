@@ -27,6 +27,7 @@ import { notifyDeliveryWorkCentersChanged, normalizeBusinessScopeId } from '../l
 import { notifyDeliveryActiveStoreChanged } from '../lib/deliveryOpsPdvSelection';
 import { clearAllRetailScopeCaches } from '../verticals/retailScopeRegistry';
 import { isTpvTabletBindingAllowedForAuth, readTpvTabletBinding, sanitizeTpvTabletBindingForAuth } from '../lib/tpvTabletSession';
+import { recordBusinessOpen } from '../lib/businessUsageOrder';
 
 export type { BusinessContextType } from './businessContextRef';
 
@@ -228,24 +229,18 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
     setBusinessesLoadError(null);
 
     const fetchWithRetry = async (): Promise<Business[]> => {
-      try {
-        const response = await listBusinessesRequest(userId);
-        return response.businesses || [];
-      } catch (firstError) {
-        await new Promise((r) => setTimeout(r, 450));
+      const delaysMs = [0, 400, 900, 1600];
+      let lastMessage = 'No se pudieron cargar las empresas';
+      for (let i = 0; i < delaysMs.length; i += 1) {
+        if (delaysMs[i] > 0) await new Promise((r) => setTimeout(r, delaysMs[i]));
         try {
           const response = await listBusinessesRequest(userId);
           return response.businesses || [];
-        } catch (secondError) {
-          const message =
-            secondError instanceof Error
-              ? secondError.message
-              : firstError instanceof Error
-                ? firstError.message
-                : 'No se pudieron cargar las empresas';
-          if (refreshCurrentUser && isEmailVerificationBlockedError(message)) {
+        } catch (err) {
+          lastMessage = err instanceof Error ? err.message : lastMessage;
+          if (refreshCurrentUser && isEmailVerificationBlockedError(lastMessage)) {
             await refreshCurrentUser();
-            await new Promise((r) => setTimeout(r, 150));
+            await new Promise((r) => setTimeout(r, 200));
             try {
               const response = await listBusinessesRequest(userId);
               return response.businesses || [];
@@ -253,27 +248,12 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
               /* sesión aún sincronizando */
             }
           }
-          throw new Error(message);
         }
       }
+      throw new Error(lastMessage);
     };
 
-    try {
-      const list = await fetchWithRetry();
-      if (loadSeq !== businessesLoadSeqRef.current) return;
-
-      if (list.length === 0 && userLikelyHasBusinesses(userId)) {
-        const cached = readBusinessesCache(userId);
-        if (cached.length > 0) {
-          setBusinesses(cached);
-          resolveCurrentBusiness(cached, userId, user?.linkedBusinessId);
-        }
-        setBusinessesLoadError(
-          'El servidor devolvió 0 empresas, pero esta cuenta ya tenía negocios en este navegador. No se ha borrado nada: reintenta la carga.',
-        );
-        return;
-      }
-
+    const applyBusinessList = (list: Business[]) => {
       setBusinesses(list);
       sanitizeTpvTabletBindingForAuth({
         authUser: { user_id: userId },
@@ -283,25 +263,55 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       resolveCurrentBusiness(list, userId, user?.linkedBusinessId);
       if (list.length > 0) {
         writeBusinessesCache(userId, list);
-        setBusinessesLoadError(null);
       } else {
         clearBusinessesCache(userId);
         storeBusinessId(userId, null);
-        setBusinessesLoadError(null);
       }
+      setBusinessesLoadError(null);
+    };
+
+    /** Si hay caché local, entrar sin muro de error; revalidar en silencio. */
+    const applyCacheSilently = (cached: Business[]): boolean => {
+      if (cached.length === 0) return false;
+      setBusinesses(cached);
+      resolveCurrentBusiness(cached, userId, user?.linkedBusinessId);
+      setBusinessesLoadError(null);
+      return true;
+    };
+
+    try {
+      const list = await fetchWithRetry();
+      if (loadSeq !== businessesLoadSeqRef.current) return;
+
+      if (list.length === 0 && userLikelyHasBusinesses(userId)) {
+        const cached = readBusinessesCache(userId);
+        if (applyCacheSilently(cached)) {
+          // Reintento suave: a veces el API aún no tiene el índice listo.
+          window.setTimeout(() => {
+            if (loadSeq !== businessesLoadSeqRef.current) return;
+            void listBusinessesRequest(userId)
+              .then((response) => {
+                if (loadSeq !== businessesLoadSeqRef.current) return;
+                const next = response.businesses || [];
+                if (next.length > 0) applyBusinessList(next);
+              })
+              .catch(() => undefined);
+          }, 2200);
+          return;
+        }
+      }
+
+      applyBusinessList(list);
     } catch (error) {
       console.error('Error loading businesses:', error);
       if (loadSeq !== businessesLoadSeqRef.current) return;
       const cached = readBusinessesCache(userId);
+      if (applyCacheSilently(cached)) {
+        return;
+      }
       const message =
         error instanceof Error ? error.message : 'No se pudieron cargar las empresas';
-      if (cached.length > 0) {
-        setBusinesses(cached);
-        resolveCurrentBusiness(cached, userId, user?.linkedBusinessId);
-        setBusinessesLoadError(
-          `${message} Se muestran los datos guardados en este navegador.`,
-        );
-      } else if (isEmailVerificationBlockedError(message)) {
+      if (isEmailVerificationBlockedError(message)) {
         setBusinessesLoadError(null);
       } else {
         setBusinessesLoadError(message);
@@ -406,6 +416,7 @@ export function BusinessProvider({ children }: { children: ReactNode }) {
       setCurrentBusiness(found);
       if (user?.user_id) {
         storeBusinessId(user.user_id, found.business_id);
+        recordBusinessOpen(user.user_id, found.business_id);
       }
       notifyDeliveryActiveStoreChanged();
     },

@@ -67,8 +67,12 @@ export async function requireActiveSubscription(req, res, next) {
     const account = await findAccountByUserId(req, authUser.userId);
     if (!account) return next();
 
-    // Trabajadores: el acceso operativo lo gobierna el dueño / membresía.
-    if (account.accountType === 'user' || !account.subscription) return next();
+    // Trabajadores: nunca se cortan por billing del titular (ni por accountType ni por invitedBy).
+    const isWorker =
+      account.accountType === 'user'
+      || Boolean(String(account.invitedBy || '').trim())
+      || !account.subscription;
+    if (isWorker) return next();
 
     if (!shouldBlockSubscriptionAccess(account.subscription)) return next();
 

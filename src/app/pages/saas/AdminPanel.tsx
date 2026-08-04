@@ -1336,6 +1336,11 @@ function ClientsTab({
     [ownerAccountsBase],
   );
 
+  const paymentSentCount = useMemo(
+    () => ownerAccountsBase.filter((a) => a.subscription?.status === 'payment_sent').length,
+    [ownerAccountsBase],
+  );
+
   const activeFilterCount = [filterPlan, filterStatus, filterBlocked, filterCard, filterVerification].filter(Boolean).length;
 
   const clearFilters = () => {
@@ -1346,15 +1351,66 @@ function ClientsTab({
     setFilterVerification('');
   };
 
+  const showPaymentSentQueue = () => {
+    setFilterVerification('');
+    setFilterStatus('payment_sent');
+    setShowFilters(true);
+  };
+
   return (
     <>
       <div className="space-y-6">
+        {paymentSentCount > 0 && (
+          <button
+            type="button"
+            onClick={showPaymentSentQueue}
+            className="w-full text-left rounded-2xl border border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/40 px-5 py-4 flex items-start gap-3 hover:bg-violet-100/80 dark:hover:bg-violet-950/60 transition-colors"
+          >
+            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-white">
+              <CreditCard className="w-4 h-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-bold text-violet-900 dark:text-violet-100">
+                  {paymentSentCount === 1
+                    ? '1 cliente ha avisado del pago'
+                    : `${paymentSentCount} clientes han avisado del pago`}
+                </span>
+                <span className="inline-flex items-center rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
+                  Revisar
+                </span>
+              </span>
+              <span className="mt-1 block text-xs text-violet-800/80 dark:text-violet-200/80">
+                Comprueba la transferencia y activa la suscripción (Pago avisado → Activar).
+              </span>
+            </span>
+            <AlertTriangle className="w-5 h-5 shrink-0 text-violet-600 dark:text-violet-300 mt-1" />
+          </button>
+        )}
+
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2">Clientes propietarios</p>
             <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{ownerAccountsBase.length}</p>
           </div>
+          <button
+            type="button"
+            onClick={showPaymentSentQueue}
+            className={`text-left rounded-2xl border p-5 transition-colors ${
+              paymentSentCount > 0
+                ? 'border-violet-300 bg-violet-50 hover:bg-violet-100/80 dark:border-violet-700 dark:bg-violet-950/30'
+                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+            }`}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wider text-violet-700 dark:text-violet-400 mb-2 flex items-center gap-1">
+              <CreditCard className="w-3.5 h-3.5" />
+              Pago avisado
+            </p>
+            <p className={`text-3xl font-bold ${paymentSentCount > 0 ? 'text-violet-700 dark:text-violet-300' : 'text-gray-400'}`}>
+              {paymentSentCount}
+            </p>
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -3618,6 +3674,7 @@ export function AdminPanel() {
   const [activeTab, setActiveTab] = useState<TabId>('clients');
   const [selectedAccount, setSelectedAccount] = useState<AuthUser | null>(null);
   const [auditUsers, setAuditUsers] = useState<AuthUser[]>([]);
+  const [paymentSentBadge, setPaymentSentBadge] = useState(0);
   const accountSaveCallbackRef = useRef<((u: AuthUser) => void) | null>(null);
 
   useModalClose(!!selectedAccount, () => setSelectedAccount(null));
@@ -3631,6 +3688,22 @@ export function AdminPanel() {
       setActiveTab('affiliate_requests');
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listUsers()
+      .then((users) => {
+        if (cancelled) return;
+        const n = users.filter(
+          (a) => !a.invitedBy && a.subscription?.status === 'payment_sent',
+        ).length;
+        setPaymentSentBadge(n);
+      })
+      .catch(() => {
+        if (!cancelled) setPaymentSentBadge(0);
+      });
+    return () => { cancelled = true; };
+  }, [listUsers, activeTab, selectedAccount]);
 
   useEffect(() => {
     if (activeTab === 'audit') {
@@ -3677,6 +3750,11 @@ export function AdminPanel() {
               >
                 <Icon className={`w-5 h-5 ${isActive ? 'text-amber-500' : ''}`} />
                 <span className="leading-tight text-center">{tab.label}</span>
+                {tab.id === 'clients' && paymentSentBadge > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[1.15rem] h-[1.15rem] px-1 rounded-full bg-violet-600 text-white text-[10px] font-bold leading-[1.15rem] text-center">
+                    {paymentSentBadge > 9 ? '9+' : paymentSentBadge}
+                  </span>
+                )}
               </button>
             );
           })}

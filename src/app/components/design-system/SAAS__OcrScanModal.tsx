@@ -10,6 +10,7 @@ import {
 } from '../../lib/ocrApi';
 import { createSupplierRequest } from '../../lib/deliveryApi';
 import { openNativeAppSettings } from '../../lib/vertialPrint/localNetworkPermission';
+import { matchVehicleByPlateOrVin } from '../../lib/ocrDocumentSave';
 import { toast } from 'sonner';
 
 const MAX_IMAGE_DIMENSION = 2000;
@@ -75,11 +76,13 @@ interface Props {
   userId?: string;
   targetModule?: string;
   context?: Record<string, unknown>;
-  vehicles?: Array<{ id: string; brand?: string; model?: string; registrationPlate?: string }>;
+  vehicles?: Array<{ id: string; brand?: string; model?: string; registrationPlate?: string; vin?: string }>;
   clients?: Array<{ id: string; name?: string; nif?: string }>;
   defaultOcrMode?: 'financial' | 'vehicle';
   /** Si true, al abrir intenta lanzar cámara (mobile capture). */
   autoOpenCamera?: boolean;
+  /** Oculta el toggle financiero/vehículo (flujo compraventa fijado). */
+  lockOcrMode?: boolean;
 }
 
 function formatCurrency(amount: number | null | undefined, currency?: string | null) {
@@ -200,7 +203,19 @@ async function pdfFileToPngBase64(file: File): Promise<string> {
   return dataUrl.split(',')[1] || '';
 }
 
-export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId, targetModule, context, vehicles, clients, defaultOcrMode, autoOpenCamera }: Props) {
+export function SAAS__OcrScanModal({
+  isOpen,
+  onClose,
+  onDocumentCreated,
+  userId,
+  targetModule,
+  context,
+  vehicles = [],
+  clients = [],
+  defaultOcrMode,
+  autoOpenCamera,
+  lockOcrMode = false,
+}: Props) {
   const { takePhotoDetailed, isNative } = useCamera();
   const [ocrMode, setOcrMode] = useState<'financial' | 'vehicle'>(defaultOcrMode || 'financial');
   const [step, setStep] = useState<Step>('upload');
@@ -222,6 +237,9 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [linkedSupplier, setLinkedSupplier] = useState<{ _id: string; name: string } | null>(null);
   const [stockMatchDecision, setStockMatchDecision] = useState<'pending' | 'confirmed'>('pending');
+  const contextVehicleId = String(context?.vehicleId || '').trim();
+  const [selectedVehicleId, setSelectedVehicleId] = useState(contextVehicleId);
+  const hideModeToggle = lockOcrMode || (defaultOcrMode === 'vehicle' && Boolean(contextVehicleId));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
@@ -259,8 +277,44 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
     setSupplierDecision('pending'); setCreatingSupplier(false); setLinkedSupplier(null);
     setStockMatchDecision('pending');
     setOcrMode(defaultOcrMode || 'financial');
+    setSelectedVehicleId(String(context?.vehicleId || '').trim());
     base64Ref.current = ''; mimeRef.current = '';
-  }, [defaultOcrMode, setPreview]);
+  }, [defaultOcrMode, context?.vehicleId, setPreview]);
+
+  const resolveVehicleId = useCallback(
+    (data: OcrResult | null | undefined) => {
+      if (selectedVehicleId) return selectedVehicleId;
+      if (contextVehicleId) return contextVehicleId;
+      const matched = matchVehicleByPlateOrVin(
+        vehicles,
+        data?.registrationPlate,
+        data?.vin,
+      );
+      return matched?.id || '';
+    },
+    [selectedVehicleId, contextVehicleId, vehicles],
+  );
+
+  const buildCreatedPayload = useCallback(
+    (data: OcrResult, extra: Record<string, unknown> = {}) => {
+      const vehicleId = resolveVehicleId(data);
+      const clientMatch = clients.find((c) => {
+        const nif = String(c.nif || '').replace(/[\s.-]/g, '').toUpperCase();
+        const hints = [data.ownerNif, data.buyerNif, data.sellerNif]
+          .map((x) => String(x || '').replace(/[\s.-]/g, '').toUpperCase())
+          .filter(Boolean);
+        return Boolean(nif && hints.includes(nif));
+      });
+      return {
+        name: data.documentTypeLabel || file?.name || 'Documento OCR',
+        ocrData: data,
+        vehicleId: vehicleId || undefined,
+        clientId: clientMatch?.id,
+        ...extra,
+      };
+    },
+    [resolveVehicleId, clients, file?.name],
+  );
 
   const handleClose = () => { reset(); onClose(); };
 
@@ -343,8 +397,9 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
         const result = await takePhotoDetailed({
           source,
           // Calidad alta suficiente para OCR sin saturar memoria en iOS.
-          quality: 90,
+          quality: 80,
           allowEditing: false,
+          maxWidth: 1600,
         });
 
         if (!result.ok) {
@@ -449,6 +504,14 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
 
       setOcrResult(scanRes.data);
       setScanMeta(scanRes.meta);
+      if (!selectedVehicleId && !contextVehicleId) {
+        const autoVehicle = matchVehicleByPlateOrVin(
+          vehicles,
+          scanRes.data?.registrationPlate,
+          scanRes.data?.vin,
+        );
+        if (autoVehicle) setSelectedVehicleId(autoVehicle.id);
+      }
       setStep('processing');
 
       const processRes = await processOcr({
@@ -481,17 +544,17 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
       if (processRes.status === 'auto_approved' && processRes.routeResult) {
         setStep('done');
         if (onDocumentCreated && scanRes.data && file) {
-          void onDocumentCreated({
-            name: scanRes.data.documentTypeLabel || file.name,
-            ocrData: scanRes.data,
-            file,
-            fileBase64: base64Ref.current,
-            fileMimeType: mimeRef.current,
-            proposalId: processRes.proposal?._id,
-            documentId: processRes.routeResult.documentId,
-            database: processRes.routeResult.database,
-            sideEffects: processRes.routeResult.sideEffects,
-          }).catch(() => {});
+          void onDocumentCreated(
+            buildCreatedPayload(scanRes.data, {
+              file,
+              fileBase64: base64Ref.current,
+              fileMimeType: mimeRef.current,
+              proposalId: processRes.proposal?._id,
+              documentId: processRes.routeResult.documentId,
+              database: processRes.routeResult.database,
+              sideEffects: processRes.routeResult.sideEffects,
+            }),
+          ).catch(() => {});
         }
       } else {
         setStep('result');
@@ -587,14 +650,17 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
       setStep('done');
 
       if (onDocumentCreated && ocrResult && file) {
-        await onDocumentCreated({
-          name: ocrResult.documentTypeLabel || file.name,
-          ocrData: ocrResult,
-          file, fileBase64: base64Ref.current, fileMimeType: mimeRef.current,
-          proposalId: proposal._id, documentId: res.routeResult.documentId,
-          database: res.routeResult.database,
-          sideEffects: res.routeResult.sideEffects,
-        }).catch(() => {});
+        await onDocumentCreated(
+          buildCreatedPayload(ocrResult, {
+            file,
+            fileBase64: base64Ref.current,
+            fileMimeType: mimeRef.current,
+            proposalId: proposal._id,
+            documentId: res.routeResult.documentId,
+            database: res.routeResult.database,
+            sideEffects: res.routeResult.sideEffects,
+          }),
+        ).catch(() => {});
       }
     } catch (err: unknown) {
       setError((err as Error).message || 'Error aprobando');
@@ -762,20 +828,26 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
               </div>
               {file && (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2 p-1 bg-gray-100 dark:bg-gray-700 rounded-xl">
-                    <button
-                      onClick={() => setOcrMode('financial')}
-                      className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${ocrMode === 'financial' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
-                    >
-                      Financiero / General
-                    </button>
-                    <button
-                      onClick={() => setOcrMode('vehicle')}
-                      className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${ocrMode === 'vehicle' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
-                    >
-                      Vehículo / Compraventa
-                    </button>
-                  </div>
+                  {!hideModeToggle ? (
+                    <div className="flex items-center gap-2 p-1 bg-gray-100 dark:bg-gray-700 rounded-xl">
+                      <button
+                        onClick={() => setOcrMode('financial')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${ocrMode === 'financial' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+                      >
+                        Financiero / General
+                      </button>
+                      <button
+                        onClick={() => setOcrMode('vehicle')}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${ocrMode === 'vehicle' ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100 shadow-sm' : 'text-gray-500 dark:text-gray-400'}`}
+                      >
+                        Vehículo / Compraventa
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-center text-xs font-medium text-violet-600 dark:text-violet-400">
+                      Modo vehículo · el documento irá al expediente del coche
+                    </p>
+                  )}
                   <button
                     onClick={startScan}
                     disabled={isPreparing || !base64Ref.current}
@@ -977,6 +1049,49 @@ export function SAAS__OcrScanModal({ isOpen, onClose, onDocumentCreated, userId,
                         {ocrResult.periodStart}{ocrResult.periodEnd ? ` \u2192 ${ocrResult.periodEnd}` : ''}
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {(ocrMode === 'vehicle' || vehicles.length > 0) && (
+                <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3 dark:border-violet-900 dark:bg-violet-950/30">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                      Expediente del vehículo
+                    </span>
+                    {(ocrResult.registrationPlate || ocrResult.vin) && (
+                      <span className="text-[11px] font-mono text-gray-500">
+                        {[ocrResult.registrationPlate, ocrResult.vin].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
+                  </div>
+                  {contextVehicleId ? (
+                    <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      {(() => {
+                        const v = vehicles.find((x) => x.id === contextVehicleId);
+                        return v
+                          ? `${v.brand || ''} ${v.model || ''}`.trim() + (v.registrationPlate ? ` · ${v.registrationPlate}` : '')
+                          : 'Vehículo del expediente actual';
+                      })()}
+                    </p>
+                  ) : (
+                    <select
+                      value={selectedVehicleId}
+                      onChange={(e) => setSelectedVehicleId(e.target.value)}
+                      className="w-full rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm dark:border-violet-800 dark:bg-gray-900"
+                    >
+                      <option value="">Seleccionar vehículo…</option>
+                      {vehicles.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {[v.brand, v.model, v.registrationPlate].filter(Boolean).join(' · ')}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!selectedVehicleId && !contextVehicleId && (
+                    <p className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                      Si no eliges coche, se intentará vincular por matrícula/VIN al guardar.
+                    </p>
                   )}
                 </div>
               )}

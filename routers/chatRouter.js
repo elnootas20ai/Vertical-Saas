@@ -2,11 +2,38 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { getCouchConfig, buildCouchAuthHeader } from '../services/couchdb.js';
 import { broadcastToBusiness } from '../services/sseService.js';
+import { notifyChatMessageRecipients } from '../services/chatNotifications.js';
 import logger from '../services/logger.js';
 
 const chatRouter = Router();
 
 const CHAT_DB = 'team_chat';
+
+function authUserId(req) {
+  return String(req.authUser?.userId || req.authUser?.user_id || '').trim();
+}
+
+let indexesReady = false;
+
+async function ensureIndexes(req) {
+  const indexes = [
+    { index: { fields: ['type', 'businessId', 'updatedAt'] }, name: 'chat-channels-sorted', type: 'json' },
+    { index: { fields: ['type', 'businessId', 'channelType'] }, name: 'chat-channels-type', type: 'json' },
+    { index: { fields: ['type', 'businessId', 'channelType', 'memberKey'] }, name: 'chat-dm-memberkey', type: 'json' },
+    { index: { fields: ['type', 'businessId', 'channelId', 'createdAt'] }, name: 'chat-msg-by-channel-time', type: 'json' },
+    { index: { fields: ['type', 'businessId', 'createdAt'] }, name: 'chat-by-business-time', type: 'json' },
+  ];
+  for (const idx of indexes) {
+    try {
+      await couchReq(req, `/${CHAT_DB}/_index`, {
+        method: 'POST',
+        body: JSON.stringify(idx),
+      });
+    } catch {
+      /* may already exist */
+    }
+  }
+}
 
 async function ensureChatDb(req) {
   const cfg = getCouchConfig(req);
@@ -14,11 +41,39 @@ async function ensureChatDb(req) {
   const auth = buildCouchAuthHeader(req);
   try {
     const res = await fetch(url, { method: 'PUT', headers: { Authorization: auth } });
-    if (res.ok || res.status === 412) return;
-    logger.warn({ tag: 'CHAT', msg: 'Could not ensure chat DB', status: res.status });
+    if (!res.ok && res.status !== 412) {
+      logger.warn({ tag: 'CHAT', msg: 'Could not ensure chat DB', status: res.status });
+    }
   } catch (err) {
     logger.warn({ tag: 'CHAT', msg: 'ensureChatDb error', error: err.message });
   }
+  if (!indexesReady) {
+    indexesReady = true;
+    await ensureIndexes(req).catch(() => {
+      indexesReady = false;
+    });
+  }
+}
+
+/** _find con sort; si Couch se queja del índice, reintenta sin sort. */
+async function chatFind(req, selector, { sort, limit = 200 } = {}) {
+  const tryBodies = [];
+  if (sort) {
+    tryBodies.push({ selector, sort, limit });
+  }
+  tryBodies.push({ selector, limit });
+
+  for (const body of tryBodies) {
+    const cRes = await couchReq(req, `/${CHAT_DB}/_find`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    if (cRes.ok) {
+      const data = await cRes.json();
+      return data.docs || [];
+    }
+  }
+  return [];
 }
 
 async function couchReq(req, path, init = {}) {
@@ -44,32 +99,19 @@ async function couchReq(req, path, init = {}) {
 chatRouter.get('/channels/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
-    const userId = req.authUser?.user_id || req.query.userId;
+    const userId = authUserId(req) || String(req.query.userId || '').trim();
 
     await ensureChatDb(req);
 
-    const body = {
-      selector: {
+    let channels = await chatFind(
+      req,
+      {
         type: 'chat_channel',
         businessId,
         archived: { $ne: true },
       },
-      sort: [{ updatedAt: 'desc' }],
-      limit: 200,
-    };
-
-    const cRes = await couchReq(req, `/${CHAT_DB}/_find`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-
-    if (!cRes.ok) {
-      if (cRes.status === 404) return res.json({ ok: true, channels: [] });
-      return res.json({ ok: true, channels: [] });
-    }
-
-    const data = await cRes.json();
-    let channels = data.docs || [];
+      { sort: [{ updatedAt: 'desc' }], limit: 200 },
+    );
 
     if (userId) {
       channels = channels.filter((ch) => {
@@ -77,6 +119,8 @@ chatRouter.get('/channels/:businessId', async (req, res) => {
         return (ch.members || []).includes(userId);
       });
     }
+
+    channels.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
 
     return res.json({ ok: true, channels });
   } catch (error) {
@@ -93,7 +137,7 @@ chatRouter.post('/channels/:businessId', async (req, res) => {
   try {
     const { businessId } = req.params;
     const { name, channelType, members, description } = req.body;
-    const userId = req.authUser?.user_id;
+    const userId = authUserId(req);
 
     if (!name?.trim() && channelType !== 'direct') {
       return res.status(400).json({ ok: false, error: 'El canal necesita un nombre' });
@@ -101,33 +145,35 @@ chatRouter.post('/channels/:businessId', async (req, res) => {
 
     await ensureChatDb(req);
 
-    if (channelType === 'direct' && members?.length === 2) {
-      const sorted = [...members].sort();
-      const existingBody = {
-        selector: {
+    // DMs: miembros únicos (evitar [a,a] o ids vacíos) y reutilizar conversación existente.
+    let memberList = Array.isArray(members)
+      ? [...new Set(members.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [];
+    if (channelType === 'direct') {
+      if (userId && !memberList.includes(userId)) memberList.push(userId);
+      memberList = [...new Set(memberList)];
+      if (memberList.length !== 2) {
+        return res.status(400).json({ ok: false, error: 'El mensaje directo necesita 2 personas' });
+      }
+      const sorted = [...memberList].sort();
+      const existing = await chatFind(
+        req,
+        {
           type: 'chat_channel',
           businessId,
           channelType: 'direct',
           memberKey: sorted.join(':'),
           archived: { $ne: true },
         },
-        limit: 1,
-      };
-      const existRes = await couchReq(req, `/${CHAT_DB}/_find`, {
-        method: 'POST',
-        body: JSON.stringify(existingBody),
-      });
-      if (existRes.ok) {
-        const existData = await existRes.json();
-        if (existData.docs?.length > 0) {
-          return res.json({ ok: true, channel: existData.docs[0], existing: true });
-        }
+        { limit: 1 },
+      );
+      if (existing.length > 0) {
+        return res.json({ ok: true, channel: existing[0], existing: true });
       }
     }
 
     const channelId = uuidv4();
     const now = new Date().toISOString();
-    const memberList = members || [];
     const sorted = channelType === 'direct' ? [...memberList].sort() : null;
 
     const doc = {
@@ -135,7 +181,7 @@ chatRouter.post('/channels/:businessId', async (req, res) => {
       type: 'chat_channel',
       channelId,
       businessId,
-      name: channelType === 'direct' ? '' : name.trim(),
+      name: channelType === 'direct' ? '' : String(name || '').trim(),
       description: description?.trim() || '',
       channelType: channelType || 'group',
       members: memberList,
@@ -253,25 +299,17 @@ chatRouter.post('/channels/:businessId/ensure-general', async (req, res) => {
 
     await ensureChatDb(req);
 
-    const findBody = {
-      selector: {
+    const existing = await chatFind(
+      req,
+      {
         type: 'chat_channel',
         businessId,
         channelType: 'general',
       },
-      limit: 1,
-    };
-
-    const findRes = await couchReq(req, `/${CHAT_DB}/_find`, {
-      method: 'POST',
-      body: JSON.stringify(findBody),
-    });
-
-    if (findRes.ok) {
-      const findData = await findRes.json();
-      if (findData.docs?.length > 0) {
-        return res.json({ ok: true, channel: findData.docs[0] });
-      }
+      { limit: 1 },
+    );
+    if (existing.length > 0) {
+      return res.json({ ok: true, channel: existing[0] });
     }
 
     const channelId = uuidv4();
@@ -320,29 +358,21 @@ chatRouter.get('/messages/:businessId/:channelId', async (req, res) => {
 
     await ensureChatDb(req);
 
-    const body = {
-      selector: {
+    const docs = await chatFind(
+      req,
+      {
         type: 'chat_message',
         businessId,
         channelId,
+        deleted: { $ne: true },
         ...(before ? { createdAt: { $lt: before } } : {}),
       },
-      sort: [{ createdAt: 'desc' }],
-      limit,
-    };
+      { sort: [{ createdAt: 'desc' }], limit },
+    );
 
-    const cRes = await couchReq(req, `/${CHAT_DB}/_find`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-
-    if (!cRes.ok) {
-      if (cRes.status === 404) return res.json({ ok: true, messages: [] });
-      return res.json({ ok: true, messages: [] });
-    }
-
-    const data = await cRes.json();
-    const messages = (data.docs || []).reverse();
+    const messages = [...docs].sort((a, b) =>
+      String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+    );
 
     return res.json({ ok: true, messages });
   } catch (error) {
@@ -446,6 +476,16 @@ chatRouter.post('/messages/:businessId/:channelId', async (req, res) => {
     updateChannelLastMessage(req, channelId, text.trim(), userName, now).catch(() => {});
 
     broadcastToBusiness(businessId, 'chat_message', doc);
+
+    // Campana + popup arriba + push al teléfono (no bloquea la respuesta)
+    couchReq(req, `/${CHAT_DB}/channel:${channelId}`)
+      .then(async (chRes) => {
+        const channel = chRes.ok ? await chRes.json() : { channelId, channelType: 'group', members: [] };
+        return notifyChatMessageRecipients(req, { businessId, channel, message: doc });
+      })
+      .catch((err) => {
+        logger.warn({ tag: 'CHAT', msg: 'notify recipients failed', error: err?.message });
+      });
 
     return res.json({ ok: true, message: doc });
   } catch (error) {
@@ -680,53 +720,5 @@ async function updateChannelLastMessage(req, channelId, text, userName, timestam
     // non-critical
   }
 }
-
-// ─── Indexes ────────────────────────────────────────────────────────────────
-
-async function ensureIndexes(req) {
-  const indexes = [
-    {
-      index: { fields: ['type', 'businessId', 'channelId', 'createdAt'] },
-      name: 'chat-msg-by-channel-time',
-      type: 'json',
-    },
-    {
-      index: { fields: ['type', 'businessId', 'createdAt'] },
-      name: 'chat-by-business-time',
-      type: 'json',
-    },
-    {
-      index: { fields: ['type', 'businessId', 'channelType', 'archived'] },
-      name: 'chat-channels-by-business',
-      type: 'json',
-    },
-    {
-      index: { fields: ['type', 'businessId', 'updatedAt'] },
-      name: 'chat-channels-sorted',
-      type: 'json',
-    },
-  ];
-
-  for (const idx of indexes) {
-    try {
-      await couchReq(req, `/${CHAT_DB}/_index`, {
-        method: 'POST',
-        body: JSON.stringify(idx),
-      });
-    } catch {
-      // index may already exist
-    }
-  }
-}
-
-let _indexCreated = false;
-chatRouter.use(async (req, _res, next) => {
-  if (!_indexCreated) {
-    _indexCreated = true;
-    await ensureChatDb(req);
-    ensureIndexes(req).catch(() => {});
-  }
-  next();
-});
 
 export { chatRouter };

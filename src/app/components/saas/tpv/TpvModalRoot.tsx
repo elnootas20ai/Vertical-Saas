@@ -7,10 +7,12 @@ export function dismissTpvKeyboard() {
   if (el instanceof HTMLElement) el.blur();
 }
 
-/** Modal TPV en document.body: evita que overflow-hidden del shell bloquee el scroll táctil. */
+/** Modal TPV en document.body: evita que overflow-hidden del shell bloquee el scroll táctil.
+ * z-[210] por encima del panel carta restaurant (z-55) y otros shells del gate.
+ */
 export function TpvModalRoot({
   children,
-  className = 'fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-6',
+  className = 'fixed inset-0 z-[210] flex items-end sm:items-center justify-center p-0 sm:p-6',
 }: {
   children: ReactNode;
   className?: string;

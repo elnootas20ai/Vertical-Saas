@@ -89,3 +89,70 @@ describe('filterRestaurantRetailWorkCenters', () => {
     ).toHaveLength(0);
   });
 });
+
+describe('buildRestaurantCeoTpvStoreRows', () => {
+  it('no deja el TPV vacío si solo hay PDV de la empresa (sin WC retail)', async () => {
+    const { buildRestaurantCeoTpvStoreRows } = await import(
+      '../src/app/verticals/restaurant/ceoTpvStores.ts'
+    );
+    const business = {
+      business_id: 'biz-bodegeta',
+      businessType: 'restaurant',
+      name: 'bodegeta',
+      createdAt: '2025-01-01T00:00:00.000Z',
+    };
+    const rows = buildRestaurantCeoTpvStoreRows(
+      [],
+      [
+        {
+          _id: 'pdv-1',
+          name: 'bodegeta',
+          code: 'BOD',
+          businessId: 'biz-bodegeta',
+          active: true,
+          terminals: [],
+        },
+      ],
+      business,
+      [business],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].pdvId).toBe('pdv-1');
+  });
+
+  it('incluye PDV etiquetado aunque el WC sea solo sala_room', async () => {
+    const { buildRestaurantCeoTpvStoreRows } = await import(
+      '../src/app/verticals/restaurant/ceoTpvStores.ts'
+    );
+    const business = {
+      business_id: 'biz-bodegeta',
+      businessType: 'restaurant',
+      name: 'bodegeta',
+      createdAt: '2025-01-01T00:00:00.000Z',
+    };
+    const rows = buildRestaurantCeoTpvStoreRows(
+      [
+        wc({
+          _id: 'wc-sala',
+          name: 'Terraza',
+          businessId: 'biz-bodegeta',
+          notes: 'sala_room:room_1',
+        }),
+      ],
+      [
+        {
+          _id: 'pdv-sala',
+          name: 'Local bodegeta',
+          code: 'LOC',
+          businessId: 'biz-bodegeta',
+          workCenterId: 'wc-sala',
+          active: true,
+          terminals: [],
+        },
+      ],
+      business,
+      [business],
+    );
+    expect(rows.some((r) => r.pdvId === 'pdv-sala')).toBe(true);
+  });
+});

@@ -1,0 +1,62 @@
+---
+description: Leyes visuales Vertial — marca, paleta, botones, logo sutil
+alwaysApply: true
+---
+
+# Leyes visuales Vertial (UI)
+
+Vertial debe reconocerse **a simple vista**: limpio, único, coherente con el **logo** (degradado verde → teal → azul). No improvisar colores ni botones por pantalla.
+
+Marca del logo (referencia): `#22C55E` → `#14B8A6` → `#2563EB`, oscuro `#0B1220`.
+
+## 1. Paleta (ley)
+
+| Rol | Uso | Tailwind orientativo |
+|-----|-----|----------------------|
+| **Fondo app** | Lienzo | `stone-50` / `stone-100` · dark `stone-950` |
+| **Superficie** | Cards, paneles, modales | `white` · dark `stone-900` |
+| **Texto** | Principal / secundario | `stone-900` / `stone-500` |
+| **Borde** | Separadores | `stone-200` · dark `stone-800` |
+| **Marca (acento)** | Detalles sutiles, barra logo, chips | degradado logo / teal-verde sutil |
+| **Avanzar / primario** | Guardar, crear, continuar, cobrar, confirmar OK | **azul** `#2563EB` · texto blanco |
+| **Retroceder / secundario** | Cancelar, volver, cerrar, “otro” | borde slate + texto slate · fondo blanco |
+| **Peligro / urgente** | Borrar, anular, limpiar | **rojo** `#E11D48` (sutil) |
+| **Éxito / aviso** | Toasts y estados | verde logo / ámbar (solo semántica, no CTA principal) |
+
+**Prohibido como CTA principal del SaaS:** `amber-500`, `violet-*`, gradientes Pro sueltos, `indigo` random, negro puro como “marca” salvo tipografía.
+
+El **ámbar** queda para avisos / “atención”, no para “el botón bonito de Vertial”.
+
+## 2. Botones (ley)
+
+Solo **3 gestos visuales**:
+
+1. **Avanzar** — relleno azul (`#2563EB` / tokens `VERTIAL_BTN_PRIMARY`)
+2. **Retroceder** — outline slate (`VERTIAL_BTN_SECONDARY`)
+3. **Peligro** — rojo sutil (`VERTIAL_BTN_DANGER`)
+
+Mismo radio: `rounded-xl`. Altura táctil ops: `min-h-11`. No inventar un 4º estilo por módulo.
+
+## 3. Logo (ley)
+
+- El **logo Vertial** (o marca tipográfica) debe estar **siempre** en el entorno SaaS de forma **sutil**: sidebar / topbar / pie de modal clave / splash — no en cada card.
+- No sustituir el logo por iconos genéricos en la zona de marca.
+- Acentos cerca del logo: **azul/teal del degradado**, no ámbar.
+- Componente: `VertialLogo` + `public/vertial-logo.svg` / `src/assets/logo.svg`.
+
+## 4. Superficies y ritmo (ley)
+
+- Radios: `rounded-xl` controles · `rounded-2xl` paneles/modales.
+- Sombras: suaves o ninguna; nada de glow / multi-shadow.
+- Un módulo = cabecera (título + subtítulo + CTAs) + cuerpo; sin “dashboard marketing” dentro del panel.
+- Espaciado consistente (`gap-3` / `p-4` / `px-5`), no densidades distintas por vertical.
+
+## 5. Unicidad Vertial
+
+- Verticales cambian **contenido y menú**, no la piel.
+- Antes de un color o botón nuevo → ¿está en esta tabla? Si no → no.
+- Tokens reutilizables: `src/app/lib/vertialUiTokens.ts` (si existe, usarlo).
+
+## Al implementar UI
+
+Decir: qué ley aplicaste (avance/retroceso/logo/paleta) y que el look sigue siendo Vertial.

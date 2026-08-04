@@ -19,16 +19,15 @@ const TIER_RANK: Record<AlertPlanTier, number> = {
   pro: 2,
 };
 
-/** Plan Básico — mínimo (casi no se vende). */
+/** Plan Básico — pack delivery compacto esencial. */
 const BASIC_ALERT_RULE_IDS = new Set([
-  'lead_new',
-  'sale_cancelled',
-  'payment_received',
   'worker_no_clockin',
-  'stock_low',
-  'low_stock',
-  'delivery_no_address',
+  'document_missing_required',
   'delivery_register_not_opened',
+  'delivery_cash_pending_close',
+  'delivery_delayed_order',
+  'delivery_unpaid_order',
+  'delivery_order_cancelled',
 ]);
 
 const PRO_ALERT_DEPARTMENTS = new Set<AlertRuleDepartment>([
@@ -38,51 +37,9 @@ const PRO_ALERT_DEPARTMENTS = new Set<AlertRuleDepartment>([
   'sistema',
 ]);
 
-/** Plan Pro — el más completo. */
-const DELIVERY_PRO_ALERT_RULE_IDS = new Set([
-  'delivery_low_margin',
-  'delivery_channel_silent',
-  'delivery_repeat_incident_client',
-  'delivery_driver_mismatch',
-  'delivery_channel_incident',
-  'negative_cash_flow',
-  'low_sales_velocity',
-  'low_avg_margin',
-  'bank_unreconciled',
-  'tax_deadline_overdue',
-  'tax_deadline_approaching',
-  'invoice_pending_validation',
-  'supplier_invoice_duplicate',
-  'pending_validation_invoice',
-  'duplicate_invoice',
-  'invoice_missing_document',
-  'overdue_client_invoice',
-  'unpaid_client_invoice',
-  'client_multiple_pending',
-  'overdue_purchase',
-  'high_payables',
-  'expense_without_document',
-  'excess_preparation_cost',
-  'supplier_invoice_pending',
-  'supplier_invoice_unknown',
-  'supplier_invoice_overdue',
-  'worker_absent_pattern',
-  'worker_overtime',
-  'contract_expiring',
-  'document_expired',
-  'document_expiring',
-  'document_expiring_soon',
-  'document_missing_required',
-  'fleet_itv_expiring',
-  'fleet_insurance_expiring',
-  'itv_expired',
-  'itv_expiring',
-  'missing_vehicle_docs',
-  'contract_pending_sign',
-  'signature_pending',
-  'signature_rejected',
-  'signature_expiring',
-  'ocr_incomplete',
+/** Delivery: lo que no es Básico del pack compacto → Normal (descuadre / muy retrasado / docs caducidad). */
+const DELIVERY_PRO_ALERT_RULE_IDS = new Set<string>([
+  // Nada de marketing Pro vacío en delivery: el pack compacto vive en Básico/Normal.
 ]);
 
 const PRO_ALERT_RULE_IDS = new Set([
@@ -167,12 +124,12 @@ export function canAccessAlertTier(userTier: SubscriptionPlanTier, ruleTier: Ale
 export function alertTierDescription(tier: AlertPlanTier, vertical?: string | null): string {
   if (isDeliveryVertical(vertical)) {
     if (tier === 'basic') {
-      return 'Plan de entrada con avisos mínimos: leads, ventas canceladas, stock bajo y recordatorios simples.';
+      return 'Pack compacto: fichaje, docs empresa, caja, pedido retrasado, sin cobrar y cancelado.';
     }
     if (tier === 'normal') {
-      return 'El plan recomendado para el gerente: caja, incidencias, impagos, fichajes y control del negocio.';
+      return 'Mismo pack + descuadre de caja, pedido muy retrasado y caducidad de documentos.';
     }
-    return 'El más completo: finanzas avanzadas, fiscal, proveedores, documentación, márgenes, canales y control inteligente.';
+    return 'En delivery el pack útil ya está en Básico/Normal. Pro no añade interruptores vacíos.';
   }
   if (tier === 'basic') {
     return 'Pedidos, caja, stock crítico, impagos y fichajes. Incluidas desde el plan Básico.';
@@ -186,12 +143,12 @@ export function alertTierDescription(tier: AlertPlanTier, vertical?: string | nu
 export function alertTierExamples(tier: AlertPlanTier, vertical?: string | null): string {
   if (isDeliveryVertical(vertical)) {
     if (tier === 'basic') {
-      return 'Ej.: nuevo lead, venta cancelada, stock bajo, caja sin abrir, trabajador sin fichar.';
+      return 'Ej.: trabajador sin fichar, falta CIF, caja sin abrir, pedido retrasado, sin cobrar, cancelado.';
     }
     if (tier === 'normal') {
-      return 'Ej.: caja sin cerrar, descuadre, pedido cancelado, impago, trabajador sin fichar, producto agotado.';
+      return 'Ej.: descuadre, cierre con descuadre, pedido muy retrasado, documento caducado / por caducar.';
     }
-    return 'Ej.: margen bajo, canal sin pedidos, factura vencida, banco sin conciliar, contrato por firmar.';
+    return 'Sin reglas extra vacías en delivery.';
   }
   if (tier === 'basic') {
     return 'Ej.: pedido retrasado, cocina llena, caja sin cerrar, sin stock, trabajador sin fichar.';

@@ -75,7 +75,7 @@ export function OrderTicketButtons({
         onClick={() => print('kitchen')}
         disabled={Boolean(printing)}
         className={btnClass}
-        title="Comanda cocina: productos y notas, sin precios"
+        title="Comanda cocina: cliente, dirección, productos y notas (sin precios)"
       >
         {printing === 'kitchen' ? (
           <Loader2 className={`${iconClass} animate-spin`} />

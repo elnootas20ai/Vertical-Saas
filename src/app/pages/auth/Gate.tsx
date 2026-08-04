@@ -9,7 +9,6 @@ import {
   UserSearch,
   Receipt,
   Plus,
-  AlertTriangle,
   RefreshCw,
   Wrench,
   Loader2,
@@ -169,19 +168,23 @@ export function Gate() {
   } = useBusiness();
   const { vehicles, leads, clients, sales } = useApp();
 
+  const isWorkerUser = Boolean(
+    user && (user.accountType === 'user' || Boolean(String((user as { invitedBy?: string }).invitedBy || '').trim())),
+  );
+
   useEffect(() => {
     if (!user) return;
-    // Worker sin empresa enlazada → user-dashboard (espacio personal previo a aceptar invitación).
+    // Worker sin empresa enlazada → invitaciones / alta (sin Gate de empresas).
     if (user.accountType === 'user' && !user.linkedBusinessId) {
-      navigate('/saas/user-dashboard', { replace: true });
+      navigate('/saas/invitations', { replace: true });
       return;
     }
     // Worker invitado a una empresa → directo a su zona de trabajador.
-    const isWorker = Boolean(user.accountType === 'user' || (user as { invitedBy?: string }).invitedBy);
-    if (isWorker) {
+    if (isWorkerUser) {
       navigate(resolveWorkerSessionEntryPath(user), { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, isWorkerUser, navigate]);
+
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showComingSoonModal, setShowComingSoonModal] = useState(false);
@@ -262,9 +265,11 @@ export function Gate() {
   // Datos reales del onboarding (sin placeholders)
   const hasApiBusinesses = businesses.length > 0;
   const isBusinessesPending = !businessesFetchSettled || (isLoadingBusinesses && !hasApiBusinesses);
+  // Nunca muro de error si ya hay empresas (caché/API). Solo vacío real o reintento limpio.
   const showBusinessesLoadError =
     Boolean(businessesLoadError) &&
     !isBusinessesPending &&
+    !hasApiBusinesses &&
     !isTransientVerificationLoadError(businessesLoadError);
   const showTrulyEmptyBusinesses =
     businessesFetchSettled && !isBusinessesPending && !hasApiBusinesses && !businessesLoadError;
@@ -276,9 +281,21 @@ export function Gate() {
     if (first?.business_id) switchBusiness(first.business_id);
   }, [isBusinessesPending, hasApiBusinesses, currentBusiness, businesses, switchBusiness]);
 
+  // Sin empresas y fallo de red: reintentar solo, sin muro de error.
+  useEffect(() => {
+    if (!showBusinessesLoadError) return;
+    const id = window.setTimeout(() => {
+      void reloadBusinesses();
+    }, 1800);
+    return () => window.clearTimeout(id);
+  }, [showBusinessesLoadError, reloadBusinesses]);
+
   // Una sola empresa → ir directo al panel (esta pantalla solo tiene sentido con varias).
+  // Nunca para trabajador: el efecto de arriba ya lo manda a /saas/worker/*;
+  // si no, aquí ganaba la carrera y acababa en el home de empresa.
   useEffect(() => {
     if (location.pathname !== '/auth/gate') return;
+    if (isWorkerUser) return;
     if (isBusinessesPending || showBusinessesLoadError) return;
     if (businesses.length !== 1) return;
     const only = businesses[0];
@@ -289,6 +306,7 @@ export function Gate() {
     navigate(saasPathWithBusinessScope('/saas/dashboard', only.business_id), { replace: true });
   }, [
     location.pathname,
+    isWorkerUser,
     isBusinessesPending,
     showBusinessesLoadError,
     businesses,
@@ -299,6 +317,7 @@ export function Gate() {
 
   // Tras el onboarding, crear la empresa automáticamente con los datos ya recogidos.
   useEffect(() => {
+    if (isWorkerUser) return;
     if (!showTrulyEmptyBusinesses || !hasOnboardingCompany || autoProvisionAttempted.current) return;
 
     if (user?.onboardingData?.suppressAutoProvision) {
@@ -325,6 +344,7 @@ export function Gate() {
       })
       .finally(() => setIsAutoProvisioning(false));
   }, [
+    isWorkerUser,
     showTrulyEmptyBusinesses,
     hasOnboardingCompany,
     user?.onboardingCompleted,
@@ -437,6 +457,15 @@ export function Gate() {
     setInviteData({ email: '', role: 'comercial' });
   };
 
+  // No pintar el selector de empresas mientras redirige al trabajador.
+  if (isWorkerUser) {
+    return (
+      <div className="min-h-screen bg-[#03050a] flex items-center justify-center text-sm text-slate-400">
+        Abriendo tu espacio de trabajo…
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <header className="border-b border-gray-200/80 bg-white/95 backdrop-blur-sm dark:border-gray-700 dark:bg-gray-900/95">
@@ -463,29 +492,16 @@ export function Gate() {
             <div className="h-32 rounded-2xl bg-gray-200 dark:bg-gray-700" />
           </div>
         ) : showBusinessesLoadError ? (
-          <div className="rounded-2xl border border-amber-300 bg-amber-50/90 p-10 text-center dark:border-amber-700 dark:bg-amber-950/30">
-            <AlertTriangle className="mx-auto mb-3 h-10 w-10 text-amber-600" />
-            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">No se pudieron cargar tus empresas</h1>
+          <div className="mx-auto max-w-lg rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <Loader2 className="mx-auto mb-4 h-9 w-9 animate-spin text-blue-600" />
+            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Conectando con tus empresas…</h1>
             <p className="mx-auto mt-2 max-w-md text-sm text-gray-600 dark:text-gray-400">
-              Tus datos no se han borrado. Suele ser un fallo puntual de red o sincronización.
+              Un momento. Si tarda, pulsa reintentar.
             </p>
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <ACCESO__Button variant="primary" onClick={() => void reloadBusinesses()}>
-                <RefreshCw className="h-4 w-4" />
-                Reintentar
-              </ACCESO__Button>
-              {hasApiBusinesses && currentBusiness ? (
-                <ACCESO__Button
-                  variant="outline"
-                  onClick={() => {
-                    switchBusiness(currentBusiness.business_id);
-                    navigate(saasPathWithBusinessScope('/saas/dashboard', currentBusiness.business_id));
-                  }}
-                >
-                  Entrar con datos en caché
-                </ACCESO__Button>
-              ) : null}
-            </div>
+            <ACCESO__Button className="mt-6" variant="primary" onClick={() => void reloadBusinesses()}>
+              <RefreshCw className="h-4 w-4" />
+              Reintentar
+            </ACCESO__Button>
           </div>
         ) : showTrulyEmptyBusinesses ? (
           <div className="mx-auto max-w-lg rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center shadow-sm dark:border-gray-600 dark:bg-gray-800">

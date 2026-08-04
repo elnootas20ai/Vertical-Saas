@@ -70,10 +70,11 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('delivery_order_cancelled', 'delivery', 'delivery', 'Pedido cancelado', 'Un trabajador o el TPV canceló un pedido', { ...pushInApp, urgency: 'high' }),
 
   // ─── Sala (bar / restaurante) ─────────────────────────────────────────────
-  r('sala_long_occupied_table', 'sala', 'delivery', 'Mesa abierta demasiado tiempo', 'Mesa ocupada sin cobrar más tiempo del límite configurado', { ...pushInApp, urgency: 'medium' }),
-  r('sala_served_pending_close', 'sala', 'delivery', 'Mesa servida sin cobrar', 'Mesa servida pendiente de cobro demasiado tiempo', { ...pushInApp, urgency: 'medium' }),
-  r('sala_slow_kitchen_comanda', 'sala', 'delivery', 'Comanda lenta en cocina', 'Comanda enviada a cocina que supera el tiempo máximo de preparación', { ...pushInApp, urgency: 'high' }),
-  r('sala_incident', 'sala', 'delivery', 'Incidencia en sala', 'Ítems cancelados u otras incidencias en una mesa', { urgency: 'medium' }),
+  r('sala_long_occupied_table', 'sala', 'restaurant', 'Mesa abierta demasiado tiempo', 'Mesa ocupada sin cobrar más tiempo del límite configurado', { ...pushInApp, urgency: 'medium' }),
+  r('sala_served_pending_close', 'sala', 'restaurant', 'Mesa pendiente de cobro', 'Mesa servida o en cobro pendiente demasiado tiempo', { ...pushInApp, urgency: 'medium' }),
+  r('sala_slow_kitchen_comanda', 'sala', 'restaurant', 'Comanda lenta en cocina', 'Comanda enviada a cocina que supera el tiempo máximo de preparación', { ...pushInApp, urgency: 'high' }),
+  r('sala_incident', 'sala', 'restaurant', 'Incidencia en sala', 'Ítems cancelados u otras incidencias en una mesa', { urgency: 'medium' }),
+  r('sala_waitlist_notified', 'sala', 'restaurant', 'Cliente de espera avisado', 'El equipo avisó a un cliente de la lista de espera', { ...pushInApp, urgency: 'low' }),
 
   // ─── Finanzas / compras / conciliación / OCR ─────────────────────────────
   r('payment_received', 'finanzas', 'finanzas', 'Pago recibido', 'Se registra un cobro o pago', { enabled: false, urgency: 'low' }),
@@ -219,11 +220,11 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('acquisition_missing_docs', 'adquisiciones', 'verticales', 'Adquisición sin documentos', 'Vehículo adquirido sin documentación', { urgency: 'high' }),
   r('acquisition_excessive_cost', 'adquisiciones', 'verticales', 'Coste de adquisición elevado', 'Compra por encima del valor de mercado', { urgency: 'medium' }),
   r('butcher_product_out_of_stock', 'carniceria', 'verticales', 'Producto carnicería agotado', 'Producto sin stock en carnicería', { urgency: 'high' }),
-  r('butcher_stock_critical', 'carniceria', 'verticales', 'Stock crítico carnicería', 'Stock por debajo del nivel crítico', { urgency: 'critical' }),
+  r('butcher_stock_critical', 'carniceria', 'verticales', 'Stock crítico carnicería', 'Stock por debajo del nivel crítico', { ...pushInApp, urgency: 'critical' }),
   r('butcher_stock_low', 'carniceria', 'verticales', 'Stock bajo carnicería', 'Stock bajo en producto de carnicería', { urgency: 'medium' }),
-  r('butcher_batch_expired', 'carniceria', 'verticales', 'Lote caducado', 'Lote de producto caducado', { urgency: 'critical' }),
+  r('butcher_batch_expired', 'carniceria', 'verticales', 'Lote caducado', 'Lote de producto caducado', { ...pushInApp, urgency: 'critical' }),
   r('butcher_batch_expiring_soon', 'carniceria', 'verticales', 'Lote próximo a caducar', 'Lote que caduca en breve', { urgency: 'high' }),
-  r('butcher_waste_high', 'carniceria', 'verticales', 'Merma elevada', 'Merma del día por encima del umbral', { urgency: 'high' }),
+  r('butcher_waste_high', 'carniceria', 'verticales', 'Merma elevada', 'Merma del día por encima del umbral', { ...pushInApp, urgency: 'high' }),
   r('butcher_waste_repeated', 'carniceria', 'verticales', 'Merma repetida', 'Misma referencia con merma recurrente', { urgency: 'medium' }),
   r('butcher_waste_expired_product', 'carniceria', 'verticales', 'Producto caducado desechado', 'Desecho por caducidad', { urgency: 'high' }),
   r('butcher_register_pending', 'carniceria', 'verticales', 'Caja carnicería sin cerrar', 'Sesión de caja de carnicería abierta demasiado tiempo', { ...pushInApp, urgency: 'high' }),
@@ -244,23 +245,45 @@ export const ALL_ALERT_RULE_DEFINITIONS = [
   r('system_update', 'sistema', 'sistema', 'Actualización del sistema', 'Nueva versión o mantenimiento programado', { enabled: false, urgency: 'low' }),
 ];
 
-/** Paquete delivery al crear negocio: avisos al gerente/owner (caja, incidencias, equipo). */
+/**
+ * Pack delivery compacto (solo lo cableado y útil):
+ * 1 fichaje · 2 docs empresa · 3 caja abrir/cerrar · 4 descuadre · 5 pedido retrasado · 6 sin cobrar/cancelado.
+ * Sin producto agotado (aún no conectado de verdad).
+ */
 export const DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS = [
-  'delivery_cash_discrepancy',
+  'worker_no_clockin',
+  'document_missing_required',
+  'document_expired',
+  'document_expiring_soon',
   'delivery_register_not_opened',
   'delivery_cash_pending_close',
-  'delivery_register_closed_ok',
+  'delivery_cash_discrepancy',
   'delivery_register_closed_discrepancy',
-  'register_high_return',
-  'delivery_unpaid_order',
-  'delivery_failed_delivery',
   'delivery_delayed_order',
   'delivery_order_very_delayed',
-  'delivery_no_address',
-  'delivery_product_out_of_stock',
+  'delivery_unpaid_order',
   'delivery_order_cancelled',
-  'worker_no_clockin',
 ];
+
+/**
+ * Modo gerente (Uriel): pocas alertas que importan.
+ * Caja + fichaje. Sin stock/CRM/OCR/200 reglas de ruido.
+ * Delivery/restaurant añade el pack CEO al aplicar defaults.
+ */
+export const MANAGER_FOCUS_ENABLED_RULE_IDS = [
+  'worker_no_clockin',
+  'delivery_register_not_opened',
+  'delivery_cash_pending_close',
+  'delivery_cash_discrepancy',
+  'delivery_register_closed_discrepancy',
+];
+
+/** Reglas visibles en ajustes Delivery (mismo pack; el resto se oculta). */
+export const DELIVERY_COMPACT_VISIBLE_RULE_IDS = DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS;
+
+export function isDeliveryCompactAlertRuleId(id) {
+  return DELIVERY_COMPACT_VISIBLE_RULE_IDS.includes(String(id || ''));
+}
 
 /** Duplicados del motor general — desactivados cuando el motor delivery está activo. */
 export const DELIVERY_LEGACY_DUPLICATE_RULE_IDS = [
@@ -282,16 +305,42 @@ function defaultEnabledForDeliveryVertical(ruleId) {
   return false;
 }
 
+/** Reglas nuevas: silencio por defecto. Solo allowlist gerente / pack delivery. */
+export function defaultEnabledForNewAlertRule(ruleId, vertical = null) {
+  const id = String(ruleId || '');
+  if (vertical === 'delivery') {
+    return defaultEnabledForDeliveryVertical(id);
+  }
+  return MANAGER_FOCUS_ENABLED_RULE_IDS.includes(id);
+}
+
+/**
+ * Fuerza enabled solo en el pack gerente (o pack delivery si vertical delivery).
+ * No borra reglas: las apaga para que dejen de emitir.
+ */
+export function applyManagerFocusRuleDefaults(rules, options = {}) {
+  const vertical = options.vertical || null;
+  const allow = new Set(
+    vertical === 'delivery'
+      ? DELIVERY_CEO_DEFAULT_ENABLED_RULE_IDS
+      : MANAGER_FOCUS_ENABLED_RULE_IDS,
+  );
+  const list = Array.isArray(rules) ? rules : [];
+  return list.map((rule) => ({
+    ...rule,
+    enabled: allow.has(String(rule?.id || '')),
+  }));
+}
+
 export function mergeAlertRules(existing, options = {}) {
   const vertical = options.vertical || null;
   const byId = new Map((Array.isArray(existing) ? existing : []).map((rule) => [rule.id, rule]));
   for (const def of ALL_ALERT_RULE_DEFINITIONS) {
     if (!byId.has(def.id)) {
-      let enabled = def.enabled;
-      if (vertical === 'delivery' && isDeliveryScopedRuleId(def.id)) {
-        enabled = defaultEnabledForDeliveryVertical(def.id);
-      }
-      byId.set(def.id, { ...def, enabled });
+      byId.set(def.id, {
+        ...def,
+        enabled: defaultEnabledForNewAlertRule(def.id, vertical),
+      });
     } else {
       const prev = byId.get(def.id);
       byId.set(def.id, {

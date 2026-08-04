@@ -86,7 +86,7 @@ import { PipelineConfigTab } from '../../components/saas/settings/PipelineConfig
 import { EmailTemplatesTab } from '../../components/saas/settings/EmailTemplatesTab';
 import { BusinessHoursTab } from '../../components/saas/settings/BusinessHoursTab';
 import { DataPortabilityTab } from '../../components/saas/settings/DataPortabilityTab';
-import { AlertsTab } from '../../components/saas/settings/AlertsTab';
+import { AlertCenterSettingsPanel } from '../../components/saas/AlertCenterSettingsPanel';
 import { MyNotificationsTab } from '../../components/saas/settings/MyNotificationsTab';
 import { SalesPointsTab } from '../../components/saas/settings/SalesPointsTab';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
@@ -128,7 +128,7 @@ import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { useDocumentTemplates } from '../../hooks/useDocumentTemplates';
 import { SAAS__CreateZoneModal } from '../../components/design-system/SAAS__CreateZoneModal';
 import { IntegrationsPanel } from '../../components/saas/IntegrationsPanel';
-import type { ActiveSession, AuthUser, RoleDefinition } from '../../lib/authApi';
+import { isWorkerAccount, type ActiveSession, type AuthUser, type RoleDefinition } from '../../lib/authApi';
 import {
   buildTemplatePreview,
   createEmptyDocumentTemplate,
@@ -211,7 +211,7 @@ const TAB_KEYS: { id: TabId; slug: string; i18nKey?: string; label?: string }[] 
   { id: 'integrations', slug: 'integraciones', i18nKey: 'settings.tabs.integrations' },
   { id: 'billing', slug: 'facturacion', i18nKey: 'settings.tabs.billing' },
   { id: 'numbering', slug: 'numeracion', label: 'Numeración' },
-  { id: 'accountSecurity', slug: 'seguridad', label: 'Seguridad / Delete account' },
+  { id: 'accountSecurity', slug: 'seguridad', label: 'Seguridad' },
   { id: 'devices', slug: 'mis-dispositivos', label: 'Mis dispositivos' },
   { id: 'brands', slug: 'marca', label: 'Marca' },
   { id: 'pipeline', slug: 'pipeline', label: 'Pipeline' },
@@ -3422,17 +3422,10 @@ function TabAccountSecurity() {
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Seguridad</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Correo, contraseña y eliminación de cuenta / account deletion.
+            Verificación del correo y contraseña de acceso.
           </p>
         </div>
       </div>
-
-      <a
-        href="#eliminar-cuenta"
-        className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
-      >
-        Ir a Eliminar cuenta / Go to Delete account
-      </a>
 
       {/* Verificación de email */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
@@ -4000,11 +3993,12 @@ export function Settings() {
   }, [activeTab, currentBusiness?.businessType, navigate]);
 
   useEffect(() => {
+    if (isWorkerAccount(user)) return;
     if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (activeTab === 'billing') return;
     // iOS: la pantalla /saas/subscription ya es “solo clientes” (sin cobro).
     navigate('/saas/subscription', { replace: true });
-  }, [subscription, subscription.status, activeTab, navigate]);
+  }, [subscription, subscription.status, activeTab, navigate, user]);
 
   const teamStats = useMemo(() => {
     const members = currentBusiness?.members;
@@ -4923,7 +4917,16 @@ export function Settings() {
         )}
 
         {activeTab === 'alertas' && currentBusiness && (
-          <AlertsTab businessId={currentBusiness.business_id} />
+          <div className="space-y-3">
+            <div>
+              <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100">Alertas del negocio</h2>
+              <p className="text-sm text-stone-500">Pack gerente: caja, equipo y lo esencial. Sin listas eternas.</p>
+            </div>
+            <AlertCenterSettingsPanel
+              businessId={String(currentBusiness.business_id || '').replace(/^business:/, '')}
+              featured
+            />
+          </div>
         )}
 
         {activeTab === 'misNotificaciones' && <MyNotificationsTab />}

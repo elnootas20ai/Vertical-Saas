@@ -1,25 +1,19 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Send,
   Search,
   ArrowLeft,
   Users,
-  Check,
   CheckCheck,
   Loader2,
-  Hash,
-  MessageCircle,
   Plus,
-  X,
-  Smile,
-  Reply,
-  Pencil,
-  Trash2,
-  MoreHorizontal,
+  UsersRound,
   MessageSquare,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
+import { NewChatConversationModal } from '../../../components/saas/chat/NewChatConversationModal';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import { useSSE } from '../../../hooks/useSSE';
@@ -29,12 +23,45 @@ import {
   ensureGeneralChannel,
   listChatMessages,
   sendChatMessage,
-  editChatMessage,
-  deleteChatMessage,
-  toggleReaction,
   type ChatMessage,
   type ChatChannel,
 } from '../../../lib/chatApi';
+import { mergeBusinessMembers } from '../../../lib/schedulesDisplay';
+import { toast } from 'sonner';
+
+function mergeIncomingChatMessage(prev: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+  if (prev.some((m) => m.messageId === msg.messageId)) return prev;
+  const tempIdx = prev.findIndex(
+    (m) =>
+      String(m.messageId || '').startsWith('temp-')
+      && m.userId === msg.userId
+      && m.channelId === msg.channelId
+      && m.text === msg.text,
+  );
+  if (tempIdx >= 0) {
+    const next = [...prev];
+    next[tempIdx] = msg;
+    return next;
+  }
+  return [...prev, msg];
+}
+
+/** Sync silencioso: servidor + mensajes temp aún no confirmados. */
+function mergeRemoteMessages(prev: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
+  const temps = prev.filter(
+    (m) =>
+      String(m.messageId || '').startsWith('temp-')
+      && !remote.some(
+        (r) =>
+          r.userId === m.userId
+          && r.channelId === m.channelId
+          && r.text === m.text,
+      ),
+  );
+  return [...remote, ...temps].sort((a, b) =>
+    String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+  );
+}
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🔥', '👀', '💯', '🙌'];
 
@@ -66,8 +93,9 @@ function color(id: string) {
 
 export function WorkerChat() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, listUsers } = useAuth();
   const { currentBusiness } = useBusiness();
+  const [searchParams, setSearchParams] = useSearchParams();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -75,8 +103,10 @@ export function WorkerChat() {
   const userId = user?.user_id || '';
   const userName = user?.fullName || user?.firstName || 'Usuario';
   const userAvatar = user?.avatar || '';
-  const teamMembers = useMemo(() => currentBusiness?.members || [], [currentBusiness]);
 
+  const [apiMembers, setApiMembers] = useState<
+    Array<{ user_id: string; fullName?: string; email?: string; role?: string; employment?: unknown }>
+  >([]);
   const [channels, setChannels] = useState<ChatChannel[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -85,14 +115,71 @@ export function WorkerChat() {
   const [searchQuery, setSearchQuery] = useState('');
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [showNewDM, setShowNewDM] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
+
+  useEffect(() => {
+    if (!businessId) {
+      setApiMembers([]);
+      return;
+    }
+    let cancelled = false;
+    listUsers(businessId)
+      .then((users) => {
+        if (cancelled) return;
+        setApiMembers(
+          (users || []).map((u: any) => ({
+            user_id: u.user_id,
+            fullName: u.fullName,
+            email: u.email,
+            role: u.role,
+            employment: u.employment,
+          })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setApiMembers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, listUsers]);
+
+  const teamMembers = useMemo(
+    () =>
+      mergeBusinessMembers(
+        (currentBusiness?.members || []) as {
+          user_id: string;
+          fullName?: string;
+          email?: string;
+          role?: string;
+          employment?: unknown;
+        }[],
+        apiMembers,
+      ),
+    [currentBusiness?.members, apiMembers],
+  );
+
+  const chatPickerMembers = useMemo(
+    () =>
+      teamMembers.map((m) => {
+        const emp = (m.employment || {}) as { department?: string };
+        return {
+          user_id: m.user_id,
+          fullName: m.fullName,
+          email: m.email,
+          role: m.role,
+          department: String(emp.department || '').trim() || undefined,
+        };
+      }),
+    [teamMembers],
+  );
 
   const selectedChannel = channels.find((c) => c.channelId === selectedChannelId) || null;
 
   const getDisplayName = useCallback(
     (ch: ChatChannel) => {
-      if (ch.channelType === 'general') return '# general';
-      if (ch.channelType === 'group') return `# ${ch.name}`;
+      if (ch.channelType === 'general') return 'Todo el equipo';
+      if (ch.channelType === 'group') return ch.name || 'Grupo';
       const otherId = ch.members.find((id) => id !== userId);
       const m = teamMembers.find((x) => x.user_id === otherId);
       return m?.fullName || 'Mensaje directo';
@@ -117,6 +204,18 @@ export function WorkerChat() {
     })();
   }, [businessId, userId]);
 
+  // Deep link desde notificación / push: /saas/worker/chat?channel=...
+  useEffect(() => {
+    const channelFromUrl = String(searchParams.get('channel') || '').trim();
+    if (!channelFromUrl || loading) return;
+    if (channels.some((c) => c.channelId === channelFromUrl)) {
+      setSelectedChannelId(channelFromUrl);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('channel');
+    setSearchParams(next, { replace: true });
+  }, [channels, loading, searchParams, setSearchParams]);
+
   // Load messages
   useEffect(() => {
     if (!businessId || !selectedChannelId) return;
@@ -134,18 +233,42 @@ export function WorkerChat() {
     })();
   }, [businessId, selectedChannelId]);
 
-  // SSE
+  // Resync periódico: si el SSE falla o se pierde un evento, la conversación no se queda a 1 mensaje.
+  useEffect(() => {
+    if (!businessId || !selectedChannelId) return;
+    const sync = async () => {
+      try {
+        const res = await listChatMessages(businessId, selectedChannelId, 100);
+        setMessages((prev) => mergeRemoteMessages(prev, res.messages || []));
+      } catch {
+        /* ignore */
+      }
+    };
+    const id = window.setInterval(() => void sync(), 6_000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void sync();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [businessId, selectedChannelId]);
+
+  // SSE — canal activo en ref para no depender de closures obsoletas
+  const selectedChannelIdRef = useRef(selectedChannelId);
+  selectedChannelIdRef.current = selectedChannelId;
+  const businessIdRef = useRef(businessId);
+  businessIdRef.current = businessId;
+
   const token = useMemo(() => localStorage.getItem('vertial_access_token'), []);
   const sseHandlers = useMemo(
     () => ({
       chat_message: (data: unknown) => {
         const msg = data as ChatMessage;
-        if (msg.businessId !== businessId) return;
-        if (msg.channelId === selectedChannelId) {
-          setMessages((prev) => {
-            if (prev.some((m) => m.messageId === msg.messageId)) return prev;
-            return [...prev, msg];
-          });
+        if (msg.businessId !== businessIdRef.current) return;
+        if (msg.channelId === selectedChannelIdRef.current) {
+          setMessages((prev) => mergeIncomingChatMessage(prev, msg));
           setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
         }
         setChannels((prev) =>
@@ -166,7 +289,7 @@ export function WorkerChat() {
       },
       chat_channel_created: (data: unknown) => {
         const ch = data as ChatChannel;
-        if (ch.businessId !== businessId) return;
+        if (ch.businessId !== businessIdRef.current) return;
         setChannels((prev) => (prev.some((c) => c.channelId === ch.channelId) ? prev : [ch, ...prev]));
       },
       chat_reaction: (data: unknown) => {
@@ -174,7 +297,7 @@ export function WorkerChat() {
         setMessages((prev) => prev.map((m) => (m.messageId === messageId ? { ...m, reactions } : m)));
       },
     }),
-    [businessId, selectedChannelId],
+    [],
   );
 
   useSSE({ userId, token, businessId, handlers: sseHandlers, enabled: !!userId && !!businessId });
@@ -205,10 +328,18 @@ export function WorkerChat() {
 
     try {
       const res = await sendChatMessage(businessId, selectedChannelId, { text, userId, userName, userAvatar });
-      if (res.message) setMessages((prev) => prev.map((m) => (m.messageId === tempId ? res.message! : m)));
-    } catch {
+      if (res.message) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.messageId === res.message!.messageId)) {
+            return prev.filter((m) => m.messageId !== tempId);
+          }
+          return prev.map((m) => (m.messageId === tempId ? res.message! : m));
+        });
+      }
+    } catch (e) {
       setMessages((prev) => prev.filter((m) => m.messageId !== tempId));
       setMessageInput(text);
+      toast.error(e instanceof Error ? e.message : 'No se pudo enviar');
     } finally {
       setSending(false);
       inputRef.current?.focus();
@@ -216,16 +347,50 @@ export function WorkerChat() {
   };
 
   const handleCreateDM = async (targetId: string) => {
-    if (!businessId) return;
+    if (!businessId || !userId || !targetId || targetId === userId) return;
     try {
-      const res = await createChannel(businessId, { name: '', channelType: 'direct', members: [userId, targetId] });
+      const res = await createChannel(businessId, {
+        name: '',
+        channelType: 'direct',
+        members: [userId, targetId],
+      });
       if (res.channel) {
-        if (!res.existing) setChannels((prev) => [res.channel!, ...prev]);
+        setChannels((prev) => (
+          prev.some((c) => c.channelId === res.channel!.channelId)
+            ? prev
+            : [res.channel!, ...prev]
+        ));
         setSelectedChannelId(res.channel.channelId);
-        setShowNewDM(false);
+        setShowNewChat(false);
       }
     } catch (e) {
       console.error(e);
+      toast.error(e instanceof Error ? e.message : 'No se pudo abrir el chat');
+    }
+  };
+
+  const handleCreateGroup = async (name: string, memberIds: string[]) => {
+    if (!businessId) return;
+    try {
+      const uniqueMembers = [...new Set(memberIds.filter(Boolean))];
+      const res = await createChannel(businessId, {
+        name,
+        channelType: 'group',
+        members: uniqueMembers,
+      });
+      if (res.channel) {
+        setChannels((prev) => (
+          prev.some((c) => c.channelId === res.channel!.channelId)
+            ? prev
+            : [res.channel!, ...prev]
+        ));
+        setSelectedChannelId(res.channel.channelId);
+        setShowNewChat(false);
+        toast.success('Grupo creado');
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error(e instanceof Error ? e.message : 'No se pudo crear el grupo');
     }
   };
 
@@ -250,8 +415,9 @@ export function WorkerChat() {
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-bold text-gray-900 dark:text-gray-100">Conversaciones</h3>
               <button
-                onClick={() => setShowNewDM(true)}
+                onClick={() => setShowNewChat(true)}
                 className="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                title="Nueva conversación"
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -288,7 +454,9 @@ export function WorkerChat() {
                       </div>
                     ) : (
                       <div className="w-10 h-10 bg-gray-200 dark:bg-gray-600 rounded-full flex items-center justify-center">
-                        {ch.channelType === 'general' ? <Hash className="w-5 h-5 text-gray-500" /> : <Users className="w-5 h-5 text-gray-500" />}
+                        {ch.channelType === 'general'
+                          ? <UsersRound className="w-5 h-5 text-gray-500" />
+                          : <Users className="w-5 h-5 text-gray-500" />}
                       </div>
                     )}
                   </div>
@@ -329,18 +497,22 @@ export function WorkerChat() {
                 <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white ${
                   selectedChannel.channelType === 'direct'
                     ? color(selectedChannel.members.find((id) => id !== userId) || '')
-                    : 'bg-gray-400'
+                    : 'bg-stone-400'
                 }`}>
                   {selectedChannel.channelType === 'direct'
                     ? getInitials(getDisplayName(selectedChannel))
-                    : <Hash className="w-4 h-4 text-white" />}
+                    : selectedChannel.channelType === 'general'
+                      ? <UsersRound className="w-4 h-4 text-white" />
+                      : <Users className="w-4 h-4 text-white" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{getDisplayName(selectedChannel)}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {selectedChannel.channelType === 'general'
-                      ? `${teamMembers.length} miembros`
-                      : `${selectedChannel.members.length} miembros`}
+                      ? `Todo el equipo · ${teamMembers.length} personas`
+                      : selectedChannel.channelType === 'group'
+                        ? `Grupo · ${selectedChannel.members.length} personas`
+                        : 'Mensaje directo'}
                   </p>
                 </div>
               </div>
@@ -434,38 +606,20 @@ export function WorkerChat() {
         </div>
       </div>
 
-      {/* New DM modal */}
-      {showNewDM && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowNewDM(false)}>
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-sm max-h-[70vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="font-bold text-gray-900 dark:text-gray-100">Nuevo mensaje</h3>
-              <button onClick={() => setShowNewDM(false)} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
-                <X className="w-5 h-5 text-gray-500" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-3">
-              {teamMembers
-                .filter((m) => m.user_id !== userId)
-                .map((m) => (
-                  <button
-                    key={m.user_id}
-                    onClick={() => handleCreateDM(m.user_id)}
-                    className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
-                  >
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white ${color(m.user_id)}`}>
-                      {getInitials(m.fullName)}
-                    </div>
-                    <div className="text-left">
-                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{m.fullName}</p>
-                      <p className="text-[11px] text-gray-400">{m.role || ''}</p>
-                    </div>
-                  </button>
-                ))}
-            </div>
-          </div>
-        </div>
-      )}
+      <NewChatConversationModal
+        open={showNewChat}
+        onClose={() => setShowNewChat(false)}
+        onCreateDM={(memberId) => {
+          void handleCreateDM(memberId);
+        }}
+        onCreateGroup={(name, memberIds) => {
+          void handleCreateGroup(name, memberIds);
+        }}
+        members={chatPickerMembers}
+        userId={userId}
+        businessType={currentBusiness?.businessType}
+        allowInvite={false}
+      />
     </Layout>
   );
 }

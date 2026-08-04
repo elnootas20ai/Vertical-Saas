@@ -1,7 +1,7 @@
 import {
   getButcherDbName, ensureDatabase, getAllDocuments, putDocument, getDocument,
   buildButcherPurchaseEntryDocument, sanitizeButcherPurchaseEntry, listButcherPurchaseEntriesByUser,
-  buildButcherBatchDocument, sanitizeButcherBatch, listButcherBatchesByUser, generateBatchCode,
+  buildButcherBatchDocument, sanitizeButcherBatch, listButcherBatchesByUser,
   listButcherProductsByUser, sanitizeButcherProduct,
   findAccountByUserId, logAccountActivity,
   getCatalogDbName, listSuppliersByUser, sanitizeSupplier,
@@ -9,7 +9,16 @@ import {
   getDocumentsDbName, buildDocumentRecord,
   listPurchaseInvoicesByUser, sanitizePurchaseInvoice,
 } from '../services/couchdb.js';
+import { applyPurchaseStockIncrease } from '../services/butcherStockPipeline.js';
+import { formatBatchCodePrefix, nextBatchCode } from '../services/butcherMath.js';
 import logger from '../services/logger.js';
+
+async function generateBatchCode(req, userId, entryDate, animalType) {
+  const prefix = formatBatchCodePrefix(entryDate, animalType);
+  const batches = await listButcherBatchesByUser(req, userId);
+  const codes = batches.map((b) => b.batchNumber || b.batchCode).filter(Boolean);
+  return nextBatchCode(prefix, codes);
+}
 
 function bad(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -216,7 +225,37 @@ export async function confirmPurchaseEntry(req, res) {
       } catch (_) { /* batch may have been deleted */ }
     }
 
-    // 3. Update entry status
+    // 3. Sync stock + lote al catálogo TPV (bt_catalog / bt_lote) — canónico FEFO
+    let opsLotId = null;
+    try {
+      const sync = await applyPurchaseStockIncrease(req, userId, {
+        productId: existing.catalogProductId || existing.productId,
+        productName: existing.productName,
+        qtyKg: existing.quantityReceived,
+        costPerKg: existing.costPerUnit,
+        loteCode: batchCode,
+        expirationDate: existing.expirationDate,
+        supplierName: existing.supplierName,
+        legacyBatchId: batchId,
+      });
+      opsLotId = sync?.lotId || null;
+      if (opsLotId && batchId) {
+        try {
+          const batchDoc = await getDocument(req, db, batchId);
+          if (batchDoc && batchDoc.type === 'butcher_batch') {
+            await putDocument(req, db, {
+              ...batchDoc,
+              opsLotId,
+              updatedAt: now,
+            });
+          }
+        } catch { /* optional link */ }
+      }
+    } catch (syncErr) {
+      logger.warn({ tag: 'BUTCHER_PURCHASE_CONFIRM', err: syncErr?.message }, 'Sync catálogo ops falló (no bloquea confirmación)');
+    }
+
+    // 4. Update entry status
     const updatedEntry = buildButcherPurchaseEntryDocument(userId, {
       ...existing,
       status: 'confirmed',
@@ -224,6 +263,7 @@ export async function confirmPurchaseEntry(req, res) {
       confirmedAt: now,
       batchId,
       batchCode,
+      opsLotId,
       previousAvgCost,
       newAvgCost,
       costAnomaly,

@@ -13,6 +13,7 @@ import {
   Package,
   ChefHat,
   Truck,
+  Umbrella,
   Zap,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
@@ -40,6 +41,22 @@ const HOME_ITEM: BottomNavItem = {
   label: 'Inicio',
 };
 
+/** Inicio del trabajador: backoffice worker, nunca el dashboard de empresa. */
+const WORKER_HOME_ITEM: BottomNavItem = {
+  id: 'worker-home',
+  path: '/saas/worker/tasks',
+  icon: ClipboardList,
+  label: 'Inicio',
+  matchPaths: ['/saas/worker/tasks'],
+};
+
+const WORKER_CLOCK_ITEM: BottomNavItem = {
+  id: 'worker-clock',
+  path: '/saas/worker/clock',
+  icon: Zap,
+  label: 'Fichaje',
+};
+
 const CLIENTS_ITEM: BottomNavItem = {
   id: 'clients',
   path: '/saas/clients',
@@ -54,14 +71,6 @@ const ALERTS_ITEM: BottomNavItem = {
   icon: Bell,
   label: 'Alertas',
 };
-
-function hasWorkerPermission(permissions: AccountPermissionMatrix | undefined, key: string): boolean {
-  const value = permissions?.[key];
-  if (value === true) return true;
-  if (typeof value === 'string' && value.length > 0 && value !== 'none') return true;
-  if (typeof value === 'object' && value !== null) return true;
-  return false;
-}
 
 /** Dueño / admin: pestañas operativas del día según vertical. */
 function ownerNavItemsForVertical(businessType?: string | null): BottomNavItem[] {
@@ -143,72 +152,27 @@ function ownerNavItemsForVertical(businessType?: string | null): BottomNavItem[]
   ];
 }
 
-/** Trabajador: mismas verticales, pero rutas que sí puede usar en el día a día. */
+/** Trabajador: solo su backoffice (sin Inicio de empresa / Gate / clientes CEO). */
 function workerNavItemsForVertical(
-  businessType: string | null | undefined,
-  permissions: AccountPermissionMatrix | undefined,
+  _businessType: string | null | undefined,
+  _permissions: AccountPermissionMatrix | undefined,
 ): BottomNavItem[] {
-  if (isRestaurantBusinessType(businessType)) {
-    const items: BottomNavItem[] = [HOME_ITEM, { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' }];
-    if (hasWorkerPermission(permissions, 'delivery')) {
-      items.push({ id: 'cocina', path: '/saas/cocina', icon: ChefHat, label: 'Cocina' });
-    }
-    items.push(CLIENTS_ITEM);
-    return items;
-  }
-
-  if (isDeliveryBusinessType(businessType)) {
-    const items: BottomNavItem[] = [HOME_ITEM];
-    if (hasWorkerPermission(permissions, 'delivery')) {
-      items.push(
-        { id: 'sala', path: '/saas/sala', icon: Armchair, label: 'Sala' },
-        { id: 'cocina', path: '/saas/delivery-kitchen', icon: ChefHat, label: 'Cocina' },
-        {
-          id: 'reparto',
-          path: '/saas/vertical/delivery/reparto',
-          icon: Truck,
-          label: 'Reparto',
-          matchPaths: ['/saas/delivery-reparto'],
-        },
-      );
-    }
-    items.push(CLIENTS_ITEM);
-    return items;
-  }
-
-  if (businessType === 'workshop') {
-    return [
-      HOME_ITEM,
-      { id: 'workshop', path: '/saas/workshop', icon: Wrench, label: 'Taller' },
-      { id: 'parts', path: '/saas/parts', icon: Package, label: 'Recambios' },
-      CLIENTS_ITEM,
-    ];
-  }
-
-  if (businessType === 'carDealership') {
-    const items: BottomNavItem[] = [HOME_ITEM];
-    if (hasWorkerPermission(permissions, 'vehicles')) {
-      items.push({ id: 'vehicles', path: '/saas/vehicles', icon: Car, label: 'Vehículos' });
-    }
-    if (hasWorkerPermission(permissions, 'sales')) {
-      items.push({
-        id: 'sales',
-        path: '/saas/vertical/compraventa/ventas',
-        icon: TrendingUp,
-        label: 'Ventas',
-        matchPaths: ['/saas/sales'],
-      });
-    }
-    items.push(CLIENTS_ITEM);
-    return items;
-  }
-
-  const items: BottomNavItem[] = [HOME_ITEM];
-  if (hasWorkerPermission(permissions, 'sales')) {
-    items.push({ id: 'sales', path: '/saas/sales', icon: TrendingUp, label: 'Ventas' });
-  }
-  items.push(CLIENTS_ITEM);
-  return items;
+  return [
+    WORKER_HOME_ITEM,
+    WORKER_CLOCK_ITEM,
+    {
+      id: 'worker-requests',
+      path: '/saas/worker/requests',
+      icon: Umbrella,
+      label: 'Solicitudes',
+    },
+    {
+      id: 'worker-profile',
+      path: '/saas/worker/profile',
+      icon: Users,
+      label: 'Perfil',
+    },
+  ];
 }
 
 function navItemsForVertical(
@@ -262,7 +226,7 @@ export function BottomNav() {
 
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 safe-area-bottom"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 border-t border-slate-200 dark:border-slate-700 safe-area-bottom backdrop-blur-md"
       aria-label="Navegación principal"
     >
       <div className="flex items-stretch">
@@ -277,8 +241,8 @@ export function BottomNav() {
               onClick={() => navigate(path)}
               className={`relative flex-1 flex flex-col items-center justify-center gap-0.5 py-2 px-1 min-h-[52px] transition-colors ${
                 isActive
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-gray-500 dark:text-gray-400 active:text-gray-700 dark:active:text-gray-300'
+                  ? 'text-[var(--v-blue,#2563eb)]'
+                  : 'text-slate-500 dark:text-slate-400 active:text-slate-700'
               }`}
               aria-current={isActive ? 'page' : undefined}
             >
@@ -286,8 +250,8 @@ export function BottomNav() {
                 <Icon className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
                 {showBadge && (
                   <span
-                    className={`absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold text-white flex items-center justify-center ring-2 ring-white dark:ring-gray-800 ${
-                      highPriority ? 'bg-red-500' : 'bg-amber-500'
+                    className={`absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold text-white flex items-center justify-center ring-2 ring-white dark:ring-slate-900 ${
+                      highPriority ? 'bg-[var(--v-rose,#e11d48)]' : 'bg-[var(--v-blue,#2563eb)]'
                     }`}
                   >
                     {badgeCount > 99 ? '99+' : badgeCount}
@@ -295,8 +259,8 @@ export function BottomNav() {
                 )}
               </span>
               <span
-                className={`text-[10px] font-medium leading-tight ${
-                  isActive ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'
+                className={`text-[10px] font-semibold leading-tight ${
+                  isActive ? 'text-[var(--v-blue,#2563eb)]' : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
                 {label}

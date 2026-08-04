@@ -27,8 +27,6 @@ import {
 import { useBusiness } from '../../context/BusinessContext';
 import { payrollBulkSummaryMessage } from '../../lib/payrollBulkUpload';
 import { PayrollBulkUploadModal } from './PayrollBulkUploadModal';
-import { HrGestorChecklist } from './HrGestorChecklist';
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
@@ -468,10 +466,6 @@ export function PayrollTab({ members, currentUser, isAdmin }: PayrollTabProps) {
           </button>
         )}
       </div>
-
-      {isAdmin && (
-        <HrGestorChecklist mode="hr" compact />
-      )}
 
       {message && (
         <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">

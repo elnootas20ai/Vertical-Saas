@@ -25,6 +25,7 @@ import {
 } from '../services/deliveryOperationalAlertConfig.js';
 import {
   ALL_ALERT_RULE_DEFINITIONS,
+  applyManagerFocusRuleDefaults,
   mergeAlertRules,
 } from '../services/alertRulesCatalog.js';
 import { sanitizeDeliveryAlertsReview } from '../services/deliveryAlertsReview.js';
@@ -542,12 +543,17 @@ const VALID_CHANNELS = ['push', 'email', 'sms', 'inApp'];
 const VALID_URGENCIES = ['low', 'medium', 'high', 'critical'];
 const VALID_SCHEDULES = ['instant', 'digest_daily', 'digest_weekly'];
 
+function alertsVerticalForBusiness(business) {
+  const t = String(business?.businessType || '').trim();
+  return t === 'delivery' || t === 'restaurant' ? 'delivery' : null;
+}
+
 export async function getAlertsConfig(req, res) {
   try {
     const businessId = String(req.params.businessId || '').trim();
     if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
     const business = await findBusinessById(req, businessId);
-    const vertical = business?.businessType === 'delivery' ? 'delivery' : null;
+    const vertical = alertsVerticalForBusiness(business);
     const doc = await getSettingsDoc(req, 'alerts', businessId);
     const rules = mergeAlertRules(doc?.rules, { vertical });
     const operational = {
@@ -582,9 +588,7 @@ export async function saveAlertsConfig(req, res) {
 
     const { global: g, rules, operational: op, deliveryAlertsReview: reviewIn } = req.body || {};
     const business = await findBusinessById(req, businessId);
-    const vertical = (business?.businessType === 'delivery' || business?.businessType === 'restaurant')
-      ? 'delivery'
-      : null;
+    const vertical = alertsVerticalForBusiness(business);
 
     const sanitizedGlobal = {
       muteAll: Boolean(g?.muteAll),
@@ -648,6 +652,67 @@ export async function saveAlertsConfig(req, res) {
     } catch { /* sync best-effort */ }
 
     return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+}
+
+/**
+ * Modo gerente: apaga el ruido (~200 reglas) y deja solo el pack útil.
+ * No borra historial; solo cambia enabled en settings.
+ */
+export async function resetAlertsToManagerFocus(req, res) {
+  try {
+    const businessId = String(req.params.businessId || '').trim();
+    if (!businessId) return res.status(400).json({ ok: false, error: 'Falta businessId' });
+
+    const business = await findBusinessById(req, businessId);
+    const vertical = alertsVerticalForBusiness(business);
+    const existingDoc = await getSettingsDoc(req, 'alerts', businessId);
+    const merged = mergeAlertRules(existingDoc?.rules, { vertical });
+    const focused = applyManagerFocusRuleDefaults(merged, { vertical });
+    const enabledCount = focused.filter((r) => r.enabled).length;
+
+    await saveSettingsDoc(req, 'alerts', businessId, {
+      global: { ...DEFAULT_ALERTS_GLOBAL, ...(existingDoc?.global || {}) },
+      rules: focused,
+      deliveryAlertsReview: {
+        ...(existingDoc?.deliveryAlertsReview || {}),
+        completedAt: new Date().toISOString(),
+        managerFocusAt: new Date().toISOString(),
+      },
+      operational: {
+        cashRegister: sanitizeCashRegisterOperational(
+          existingDoc?.operational?.cashRegister || DEFAULT_CASH_REGISTER_OPERATIONAL,
+        ),
+        delivery: sanitizeDeliveryOperational(
+          existingDoc?.operational?.delivery || DEFAULT_DELIVERY_OPERATIONAL,
+        ),
+      },
+    });
+
+    try {
+      if (business?.owner_user_id) {
+        await syncCashRegisterAlertsToAccount(
+          req,
+          business.owner_user_id,
+          sanitizeCashRegisterOperational(
+            existingDoc?.operational?.cashRegister || DEFAULT_CASH_REGISTER_OPERATIONAL,
+          ),
+        );
+        if (vertical === 'delivery') {
+          await syncDeliveryLegacyFlagsOff(req, business.owner_user_id);
+        }
+      }
+    } catch { /* best-effort */ }
+
+    return res.json({
+      ok: true,
+      enabledCount,
+      totalRules: focused.length,
+      vertical: vertical || 'general',
+      message: `Modo gerente activo: ${enabledCount} alertas encendidas (el resto apagadas).`,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }

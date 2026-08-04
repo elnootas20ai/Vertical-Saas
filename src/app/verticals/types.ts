@@ -1,7 +1,7 @@
 import type { BusinessType } from '../lib/businessApi';
 
-/** Contrato de un vertical del SaaS (delivery, restaurant, compraventa, …). */
-export type VerticalModuleId = 'delivery' | 'restaurant' | 'compraventa';
+/** Contrato de un vertical del SaaS (delivery, restaurant, compraventa, butcher, …). */
+export type VerticalModuleId = 'delivery' | 'restaurant' | 'compraventa' | 'butcher';
 
 export interface VerticalModuleDefinition {
   id: VerticalModuleId;

@@ -1,5 +1,15 @@
 import { getApiBase } from './apiBase';
+import {
+  DEFAULT_BUSINESS_HOURS_CONFIG,
+  hasValidBusinessHoursConfig,
+  normalizeBusinessHoursConfig,
+  normalizeScheduleTimeValue,
+  scheduleTimeToMinutes,
+} from './businessHoursUtils';
 import { ensureCouchDb } from './ensureCouchDb';
+import { formatDateRangeEs } from './formatDateEs';
+import type { BusinessHoursConfig } from './settingsApi';
+
 const env = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 
 
@@ -88,45 +98,111 @@ export interface AssignmentRule {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** YYYY-MM-DD en calendario local (evita que toISOString() mueva el día en ES). */
+export function toLocalIsoDate(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function getMonday(date: Date = new Date()): string {
-  const d = new Date(date);
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const day = d.getDay();
-  const diff = (day === 0 ? -6 : 1 - day);
+  const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
+  return toLocalIsoDate(d);
 }
 
 export function emptyShift(): DayShift {
   return { enabled: false, start: '09:00', end: '17:00', breakStart: '13:00', breakEnd: '14:00' };
 }
 
-export function defaultWeekly(): Record<Weekday, DayShift> {
-  const base: DayShift = { enabled: true, start: '09:00', end: '17:00', breakStart: '13:00', breakEnd: '14:00' };
-  return {
-    monday: { ...base },
-    tuesday: { ...base },
-    wednesday: { ...base },
-    thursday: { ...base },
-    friday: { ...base },
-    saturday: { ...emptyShift() },
-    sunday: { ...emptyShift() },
-  };
+/**
+ * Convierte el horario de tienda (openingHours) en la plantilla semanal
+ * de turnos de trabajador. Es la base predeterminada de horarios RRHH.
+ */
+export function weeklyFromOpeningHours(
+  hours?: BusinessHoursConfig | null,
+): Record<Weekday, DayShift> {
+  const cfg = normalizeBusinessHoursConfig(
+    hours && hasValidBusinessHoursConfig(hours) ? hours : DEFAULT_BUSINESS_HOURS_CONFIG,
+  );
+  const lunchEnabled = Boolean(cfg.lunchBreak?.enabled);
+  // Sin pausa de tienda: misma hora inicio/fin → 0 min (no restar 1 h “fantasma”).
+  const breakStart = lunchEnabled
+    ? normalizeScheduleTimeValue(cfg.lunchBreak.from, '13:00')
+    : '00:00';
+  const breakEnd = lunchEnabled
+    ? normalizeScheduleTimeValue(cfg.lunchBreak.to, '14:00')
+    : '00:00';
+
+  const weekly = {} as Record<Weekday, DayShift>;
+  for (const day of WEEKDAYS) {
+    const d = cfg.schedule[day];
+    const start = normalizeScheduleTimeValue(d.from, '09:00');
+    const end = normalizeScheduleTimeValue(d.to, '19:00');
+    weekly[day] = {
+      enabled: Boolean(d.open),
+      start,
+      end,
+      breakStart,
+      breakEnd,
+    };
+  }
+  return weekly;
+}
+
+/** Solape en minutos entre [a0,a1) y [b0,b1) (línea temporal en minutos). */
+function overlapMinutes(a0: number, a1: number, b0: number, b1: number): number {
+  return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0));
+}
+
+/**
+ * Minutos trabajados en un día (resta pausa solo si cae dentro del turno).
+ * Si salida < entrada → turno nocturno (+24 h).
+ */
+export function computeDayWorkMinutes(shift: Pick<DayShift, 'enabled' | 'start' | 'end' | 'breakStart' | 'breakEnd'>): number {
+  if (!shift?.enabled) return 0;
+  const start = scheduleTimeToMinutes(shift.start);
+  const end = scheduleTimeToMinutes(shift.end);
+  if (start < 0 || end < 0) return 0;
+  if (end === start) return 0;
+
+  const workEnd = end < start ? end + 24 * 60 : end;
+  const work = workEnd - start;
+
+  const bStart = scheduleTimeToMinutes(shift.breakStart);
+  const bEnd = scheduleTimeToMinutes(shift.breakEnd);
+  if (bStart < 0 || bEnd < 0 || bEnd === bStart) return work;
+
+  const breakEnd = bEnd < bStart ? bEnd + 24 * 60 : bEnd;
+  const brk = Math.max(
+    overlapMinutes(start, workEnd, bStart, breakEnd),
+    overlapMinutes(start, workEnd, bStart + 1440, breakEnd + 1440),
+    overlapMinutes(start, workEnd, bStart - 1440, breakEnd - 1440),
+  );
+  return Math.max(0, work - brk);
+}
+
+/** Horas de un día (1 decimal). */
+export function computeDayHours(shift: DayShift): number {
+  return Math.round((computeDayWorkMinutes(shift) / 60) * 100) / 100;
+}
+
+/** Horario base de trabajador: prioriza horario de tienda si es válido. */
+export function defaultWeekly(openingHours?: BusinessHoursConfig | null): Record<Weekday, DayShift> {
+  return weeklyFromOpeningHours(openingHours);
 }
 
 export function computeWeeklyHours(weekly: Record<Weekday, DayShift>): number {
-  let total = 0;
+  let totalMin = 0;
   for (const day of WEEKDAYS) {
     const s = weekly[day];
-    if (!s.enabled) continue;
-    const [sh, sm] = s.start.split(':').map(Number);
-    const [eh, em] = s.end.split(':').map(Number);
-    const [bsh, bsm] = s.breakStart.split(':').map(Number);
-    const [beh, bem] = s.breakEnd.split(':').map(Number);
-    const work = (eh * 60 + em) - (sh * 60 + sm);
-    const brk = (beh * 60 + bem) - (bsh * 60 + bsm);
-    total += Math.max(0, work - Math.max(0, brk));
+    if (!s) continue;
+    totalMin += computeDayWorkMinutes(s);
   }
-  return Math.round((total / 60) * 100) / 100;
+  return Math.round((totalMin / 60) * 100) / 100;
 }
 
 export const WEEKDAY_LABELS: Record<string, Record<Weekday, string>> = {
@@ -155,9 +231,40 @@ export async function listSchedules(businessId: string, weekStart?: string): Pro
     .sort((a, b) => a.member_name.localeCompare(b.member_name));
 }
 
+/**
+ * Horario del miembro: prioriza la semana pedida (o la actual),
+ * si no hay, el más reciente (p. ej. asignado en la invitación).
+ */
 export async function getSchedule(businessId: string, memberId: string, weekStart?: string): Promise<ScheduleTemplate | null> {
-  const all = await listSchedules(businessId, weekStart);
-  return all.find(s => s.member_id === memberId) || null;
+  const all = await listSchedules(businessId);
+  const mine = all.filter((s) => s.member_id === memberId);
+  if (!mine.length) return null;
+  const target = weekStart || getMonday();
+  return (
+    mine.find((s) => s.week_start === target)
+    || mine.slice().sort((a, b) => String(b.week_start || '').localeCompare(String(a.week_start || '')))[0]
+    || null
+  );
+}
+
+/** Horas semanales del horario asignado (semana actual o la más reciente). */
+export async function getMemberScheduleWeeklyHours(
+  businessId: string,
+  memberId: string,
+): Promise<number | null> {
+  const s = await getSchedule(businessId, memberId);
+  if (!s) return null;
+  const h = Number(s.weeklyHours) > 0 ? Number(s.weeklyHours) : computeWeeklyHours(s.weekly);
+  return h > 0 ? h : null;
+}
+
+/** Inferir jornada a partir de horas semanales del horario (misma regla que backend). */
+export function inferWorkdayFromWeeklyHours(hours: number): string {
+  const h = Number(hours) || 0;
+  if (h <= 0) return '';
+  if (h >= 35) return 'completa';
+  if (h >= 18) return 'media';
+  return 'parcial';
 }
 
 export async function saveSchedule(
@@ -332,7 +439,7 @@ export async function checkScheduleConflicts(
 
       const vac = vacations.find(v => dateStr >= v.startDate && dateStr <= v.endDate);
       if (vac) {
-        warnings.push({ day, date: dateStr, reason: 'vacation', detail: `${vac.member_name} está de vacaciones (${vac.startDate} → ${vac.endDate})` });
+        warnings.push({ day, date: dateStr, reason: 'vacation', detail: `${vac.member_name} está de vacaciones (${formatDateRangeEs(vac.startDate, vac.endDate)})` });
         continue;
       }
 

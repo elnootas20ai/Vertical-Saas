@@ -28,9 +28,20 @@ describe('deliveryCatalogImport', () => {
     expect(normalizeImportCategory('Dato 14')).toBe('Dato 14');
   });
 
-  it('resolveCatalogImportBrandIds clears brand for drink synonyms', () => {
+  it('resolveCatalogImportBrandIds: 1 marca → comida y bebida van a esa marca', () => {
+    const brands = [
+      { _id: 'b1', name: 'Bodegeta', active: true, catalogCategories: ['Tapas'], isDefault: true },
+    ];
+    expect(resolveCatalogImportBrandIds([], 'Refrescos', brands)).toEqual(['b1']);
+    expect(resolveCatalogImportBrandIds([], 'Cervezas', brands, 'Mahou 33cl')).toEqual(['b1']);
+    expect(resolveCatalogImportBrandIds([], 'Tapas', brands)).toEqual(['b1']);
+    expect(resolveCatalogImportBrandIds([], 'Postres', brands)).toEqual(['b1']);
+  });
+
+  it('resolveCatalogImportBrandIds: varias marcas → bebidas compartidas sin brandIds', () => {
     const brands = [
       { _id: 'b1', name: 'modomio', active: true, catalogCategories: ['Pizzas'], isDefault: false },
+      { _id: 'b2', name: 'blackburger', active: true, catalogCategories: ['Burgers'], isDefault: false },
     ];
     expect(resolveCatalogImportBrandIds([], 'Refrescos', brands)).toEqual([]);
     expect(resolveCatalogImportBrandIds([], 'Cervezas', brands, 'Mahou 33cl')).toEqual([]);
@@ -62,7 +73,8 @@ describe('deliveryCatalogImport', () => {
       { _id: 'b1', name: 'modomio', active: true, catalogCategories: ['Pizzas'], isDefault: false },
       { _id: 'b2', name: 'Coca-Cola', active: true },
     ];
-    expect(resolveCatalogImportBrandIds([], 'Bebidas', brands)).toEqual([]);
+    // Coca-Cola no es línea comercial → 1 sola línea → Bebidas también a b1
+    expect(resolveCatalogImportBrandIds([], 'Bebidas', brands)).toEqual(['b1']);
     expect(resolveCatalogImportBrandIds([], 'Pizzas', brands)).toEqual(['b1']);
   });
 
@@ -170,8 +182,9 @@ describe('deliveryCatalogImport', () => {
   it('la columna linea explícita también gana en categorías compartidas', () => {
     const brands = [
       { _id: 'mod', name: 'modomio', active: true, deliveryLineKind: 'pizza', catalogCategories: ['Pizzas'] },
+      { _id: 'bb', name: 'blackburger', active: true, deliveryLineKind: 'burger_fastfood', catalogCategories: ['Burgers'] },
     ];
-    // Bebidas sin linea → pestaña compartida.
+    // Bebidas sin linea con varias marcas → pestaña compartida.
     expect(resolveCatalogImportBrandIds([], 'Bebidas', brands, 'Agua 50cl')).toEqual([]);
     // Bebidas con linea=modomio explícita → se respeta lo que puso el usuario.
     expect(resolveCatalogImportBrandIds(['mod'], 'Bebidas', brands, 'Limoncello')).toEqual(['mod']);

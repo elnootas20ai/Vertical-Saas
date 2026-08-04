@@ -15,7 +15,7 @@ const config: CapacitorConfig = {
       // Permissions are declared in AndroidManifest.xml and Info.plist
     },
     PushNotifications: {
-      // iOS: muestra banner/listado/sonido/badge con la app en primer plano
+      // Foreground: badge. Lock screen / background: lo pinta el SO (APNs/FCM alert).
       presentationOptions: ['badge', 'sound', 'alert'],
     },
     SplashScreen: {

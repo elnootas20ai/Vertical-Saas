@@ -1,0 +1,123 @@
+/**
+ * Cobro TPV → venta en caja local (airbag si Couch/red fallan).
+ * El cierre lee la sesión del dispositivo; el SaaS sincroniza después.
+ */
+import type { DeliveryOrder, TpvPaymentMethod, TpvRegisterSession, TpvRegisterTransaction } from './deliveryApi';
+import { normalizeTpvPaymentMethod } from './tpvCajaMath';
+import { resolveDeliveryOrderChargeTotal } from './deliveryTicketHelpers';
+
+type RegisterLike = {
+  session: TpvRegisterSession | null;
+  addTransaction: (tx: Omit<TpvRegisterTransaction, 'id' | 'date'>) => Promise<void>;
+} | null | undefined;
+
+export function sessionHasSaleForOrder(
+  session: TpvRegisterSession | null | undefined,
+  orderId: string,
+): boolean {
+  const oid = String(orderId || '').trim();
+  if (!oid || !session) return false;
+  return (session.transactions || []).some(
+    (t) => t?.type === 'sale' && String(t.orderId || t.linkedDeliveryOrderId || '').trim() === oid,
+  );
+}
+
+export function buildTpvSaleTxFromOrder(
+  order: Pick<
+    DeliveryOrder,
+    '_id' | 'orderNumber' | 'customerName' | 'channel' | 'paymentMethod' | 'paidAmount' | 'totalAmount'
+  >,
+  opts?: {
+    paymentMethod?: string | null;
+    amount?: number;
+    registeredBy?: string;
+    description?: string;
+  },
+): Omit<TpvRegisterTransaction, 'id' | 'date'> {
+  const amount =
+    opts?.amount != null && Number.isFinite(opts.amount)
+      ? Math.round(Number(opts.amount) * 100) / 100
+      : resolveDeliveryOrderChargeTotal(order as DeliveryOrder);
+  const paymentMethod = normalizeTpvPaymentMethod(
+    opts?.paymentMethod || order.paymentMethod || 'efectivo',
+  ) as TpvPaymentMethod;
+  return {
+    type: 'sale',
+    paymentMethod,
+    amount,
+    description:
+      opts?.description
+      || `Pedido ${order.orderNumber || ''} — ${order.customerName || ''}`.trim(),
+    orderId: String(order._id || '').trim(),
+    orderNumber: String(order.orderNumber || '').trim(),
+    linkedDeliveryOrderId: String(order._id || '').trim(),
+    channel: String(order.channel || 'tpv').trim() || 'tpv',
+    registeredBy: opts?.registeredBy || 'TPV',
+  };
+}
+
+/**
+ * Asegura la venta en la sesión local abierta.
+ * No lanza: el cobro del pedido no debe fallar por la caja.
+ */
+export async function ensureLocalCajaSaleForOrder(
+  register: RegisterLike,
+  order: Pick<
+    DeliveryOrder,
+    '_id' | 'orderNumber' | 'customerName' | 'channel' | 'paymentMethod' | 'paidAmount' | 'totalAmount'
+  >,
+  opts?: {
+    paymentMethod?: string | null;
+    amount?: number;
+    registeredBy?: string;
+  },
+): Promise<boolean> {
+  if (!register?.session || !register.addTransaction) return false;
+  const orderId = String(order._id || '').trim();
+  if (!orderId) return false;
+  if (sessionHasSaleForOrder(register.session, orderId)) return true;
+  const amount =
+    opts?.amount != null && Number.isFinite(opts.amount)
+      ? Number(opts.amount)
+      : resolveDeliveryOrderChargeTotal(order as DeliveryOrder);
+  if (!(amount > 0)) return false;
+  try {
+    await register.addTransaction(
+      buildTpvSaleTxFromOrder(order, { ...opts, amount }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Merge txs servidor + local sin duplicar ventas del mismo pedido. */
+export function mergeTpvRegisterTransactions(
+  serverTxs: TpvRegisterTransaction[] | undefined,
+  localTxs: TpvRegisterTransaction[] | undefined,
+): TpvRegisterTransaction[] {
+  const byId = new Map<string, TpvRegisterTransaction>();
+  for (const t of serverTxs || []) {
+    if (t?.id) byId.set(String(t.id), t);
+  }
+  for (const t of localTxs || []) {
+    if (!t?.id) continue;
+    const id = String(t.id);
+    if (byId.has(id)) continue;
+    if (t.type === 'sale') {
+      const oid = String(t.orderId || t.linkedDeliveryOrderId || '').trim();
+      const onum = String(t.orderNumber || '').trim();
+      const dup = [...byId.values()].some((s) => {
+        if (s.type !== 'sale') return false;
+        const sid = String(s.orderId || s.linkedDeliveryOrderId || '').trim();
+        const snum = String(s.orderNumber || '').trim();
+        return (oid && sid && oid === sid) || (onum && snum && onum === snum);
+      });
+      if (dup) continue;
+    }
+    byId.set(id, t);
+  }
+  return [...byId.values()].sort(
+    (a, b) => new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime(),
+  );
+}

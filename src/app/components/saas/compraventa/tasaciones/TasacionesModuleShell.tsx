@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '../../../../context/AuthContext';
 import { useBusiness } from '../../../../context/BusinessContext';
-import { listTradeInsRequest, acceptTradeInRequest, rejectTradeInRequest } from '../../../../lib/tradeInApi';
+import {
+  listTradeInsRequest,
+  acceptTradeInRequest,
+  rejectTradeInRequest,
+  deleteTradeInRequest,
+} from '../../../../lib/tradeInApi';
 import { mapTradeInToTasacion } from '../../../../lib/compraventaMappers';
 import { TasacionesListPanel } from './TasacionesListPanel';
 import { TasacionesDetailPanel } from './TasacionesDetailPanel';
@@ -22,6 +27,7 @@ export function TasacionesModuleShell() {
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [editingTasacion, setEditingTasacion] = useState<TasacionListItem | null>(null);
 
   const selectedTasacion = useMemo(
     () => tasaciones.find((t) => t.id === selectedId) ?? null,
@@ -100,12 +106,52 @@ export function TasacionesModuleShell() {
     }
   }, [userId, selectedTasacion, loadTasaciones]);
 
+  const handleEdit = useCallback(() => {
+    if (!selectedTasacion) return;
+    if (selectedTasacion.status === 'aceptada') {
+      toast.message('No se puede editar una tasación ya aceptada');
+      return;
+    }
+    setEditingTasacion(selectedTasacion);
+    setWizardOpen(true);
+  }, [selectedTasacion]);
+
+  const handleDelete = useCallback(async () => {
+    if (!userId || !selectedTasacion) return;
+    if (selectedTasacion.status === 'aceptada') {
+      toast.error('No se puede eliminar una tasación aceptada (ya generó compra/vehículo)');
+      return;
+    }
+    const ok = window.confirm(
+      `¿Eliminar la tasación de ${selectedTasacion.vehicleLabel || 'este vehículo'}?`,
+    );
+    if (!ok) return;
+
+    setActionLoading(true);
+    try {
+      await deleteTradeInRequest(userId, selectedTasacion.id);
+      setTasaciones((prev) => prev.filter((t) => t.id !== selectedTasacion.id));
+      setSelectedId(null);
+      toast.success('Tasación eliminada');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo eliminar la tasación');
+    } finally {
+      setActionLoading(false);
+    }
+  }, [userId, selectedTasacion]);
+
   return (
     <CompraventaSplitModuleShell
       title="Tasaciones"
       subtitle="Oportunidades de compra antes de entrar al inventario"
       headerAction={(
-        <TasacionesNewButton disabled={loading || actionLoading} onClick={() => setWizardOpen(true)} />
+        <TasacionesNewButton
+          disabled={loading || actionLoading}
+          onClick={() => {
+            setEditingTasacion(null);
+            setWizardOpen(true);
+          }}
+        />
       )}
       listPanel={(
         <TasacionesListPanel
@@ -119,16 +165,23 @@ export function TasacionesModuleShell() {
           tasacion={selectedTasacion}
           onAccept={handleAccept}
           onReject={handleReject}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
           actionsDisabled={actionLoading}
         />
       )}
       overlay={(
         <TasacionesNewWizard
           open={wizardOpen}
-          onClose={() => setWizardOpen(false)}
+          editing={editingTasacion}
+          onClose={() => {
+            setWizardOpen(false);
+            setEditingTasacion(null);
+          }}
           onCreated={async (tasacionId) => {
             await loadTasaciones();
             setSelectedId(tasacionId);
+            setEditingTasacion(null);
           }}
         />
       )}

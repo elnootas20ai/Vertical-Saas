@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   computeRestaurantTotals,
   computeSalesByDay,
+  computeSalesByWaiter,
   computeSalesByZone,
   computeTopProducts,
+  diningOrderIdsFromRegisterSession,
   filterBilledOrders,
+  filterOrdersForRegisterSession,
 } from '../src/app/verticals/restaurant/restaurantReports';
 import type { DiningOrder } from '../src/app/lib/salaApi';
+import type { TpvRegisterSession } from '../src/app/lib/deliveryApi';
 
 function makeBilledOrder(overrides: Partial<DiningOrder> = {}): DiningOrder {
   return {
@@ -97,5 +101,71 @@ describe('restaurantReports', () => {
     ]);
     expect(rows[0]).toEqual({ zone: 'Terraza', sales: 60, tickets: 1 });
     expect(rows[1]).toEqual({ zone: 'Interior', sales: 30, tickets: 1 });
+  });
+
+  it('extrae IDs de mesa del turno por linkedDiningOrderId / channel sala', () => {
+    const session = {
+      linkedOrderIds: ['order-legacy'],
+      transactions: [
+        { type: 'sale', channel: 'sala', linkedDiningOrderId: 'order-1', orderId: 'order-1' },
+        { type: 'sale', channel: 'delivery', orderId: 'del-1' },
+        { type: 'cash_in', orderId: 'ignore' },
+      ],
+    } as unknown as TpvRegisterSession;
+    expect([...diningOrderIdsFromRegisterSession(session)].sort()).toEqual([
+      'order-1',
+      'order-legacy',
+    ]);
+  });
+
+  it('filtra cuentas cobradas por turno de caja', () => {
+    const session = {
+      openedAt: '2026-07-01T10:00:00.000Z',
+      closedAt: '2026-07-01T22:00:00.000Z',
+      status: 'closed',
+      linkedOrderIds: [],
+      transactions: [
+        { type: 'sale', channel: 'sala', linkedDiningOrderId: 'order-1', orderId: 'order-1' },
+      ],
+    } as unknown as TpvRegisterSession;
+    const filtered = filterOrdersForRegisterSession(
+      [
+        makeBilledOrder({ _id: 'order-1' }),
+        makeBilledOrder({ _id: 'order-2', total: 99 }),
+      ],
+      session,
+    );
+    expect(filtered.map((o) => o._id)).toEqual(['order-1']);
+  });
+
+  it('agrupa ventas por camarero (paidByName)', () => {
+    const rows = computeSalesByWaiter([
+      makeBilledOrder({
+        payments: [{
+          id: 'p1', method: 'tarjeta', amount: 30, amountReceived: 0, changeGiven: 0,
+          tip: 2, paidBy: 'w1', paidByName: 'Ana', paidAt: '', splitLabel: '',
+        }],
+      }),
+      makeBilledOrder({
+        _id: 'o2',
+        total: 20,
+        payments: [{
+          id: 'p2', method: 'efectivo', amount: 20, amountReceived: 20, changeGiven: 0,
+          tip: 0, paidBy: 'w2', paidByName: 'Luis', paidAt: '', splitLabel: '',
+        }],
+      }),
+      makeBilledOrder({
+        _id: 'o3',
+        total: 10,
+        payments: [{
+          id: 'p3', method: 'tarjeta', amount: 10, amountReceived: 0, changeGiven: 0,
+          tip: 1, paidBy: 'w1', paidByName: 'Ana', paidAt: '', splitLabel: '',
+        }],
+      }),
+    ]);
+    expect(rows[0].waiterName).toBe('Ana');
+    expect(rows[0].sales).toBe(40);
+    expect(rows[0].tips).toBe(3);
+    expect(rows[1].waiterName).toBe('Luis');
   });
 });

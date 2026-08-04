@@ -17,6 +17,8 @@ export const ROLE_PERMISSION_OPTIONS = [
   { key: 'sala', label: 'Sala', description: 'Gestión de mesas, comandas y cobro en sala' },
   { key: 'scrapyard', label: 'Desguace', description: 'Entrada de vehiculos, despiece y bajas' },
   { key: 'construction.collections', label: 'Cobros de obra', description: 'Ver y gestionar cobros de clientes en obras' },
+  { key: 'butcher_purchases', label: 'Compras carnicería', description: 'Entradas de mercancía, lotes y costes' },
+  { key: 'butcher_waste', label: 'Merma carnicería', description: 'Registrar y revisar mermas / caducados' },
 ] as const;
 
 export const SCRAPYARD_PERMISSION_OPTIONS = [
@@ -41,7 +43,7 @@ export const DELIVERY_PERMISSION_OPTIONS = [
 
 export function getRolePermissionOptions(businessType?: string | null) {
   const copy = getRetailOpsUiCopy(businessType);
-  return ROLE_PERMISSION_OPTIONS.map((option) =>
+  const base = ROLE_PERMISSION_OPTIONS.map((option) =>
     option.key === 'delivery'
       ? {
           ...option,
@@ -50,6 +52,10 @@ export function getRolePermissionOptions(businessType?: string | null) {
         }
       : option,
   );
+  if (String(businessType || '') !== 'butcherShop') {
+    return base.filter((o) => o.key !== 'butcher_purchases' && o.key !== 'butcher_waste');
+  }
+  return base;
 }
 
 export function getDeliveryPermissionOptions(businessType?: string | null) {
@@ -173,6 +179,38 @@ export function formatRolePermissions(permissions: string[], businessType?: stri
     .join(', ');
 }
 
+/**
+ * Texto de permisos para la card de Equipo → Roles.
+ * Usa la matriz real del rol (aunque `role.permissions` venga vacío en el catálogo).
+ */
+export function formatRoleAccessSummary(
+  roleId: string,
+  roleDefinitions: RoleDefinition[] = [],
+  businessType?: string | null,
+): string {
+  const custom = roleDefinitions.find((r) => r.id === roleId);
+  if (custom?.permissions?.length) {
+    return formatRolePermissions(custom.permissions, businessType);
+  }
+
+  const matrix = buildRolePermissionsMatrix(roleId, roleDefinitions);
+  const options = getRolePermissionOptions(businessType);
+  const labelByKey = (key: string) => options.find((o) => o.key === key)?.label || key;
+  const active = Object.keys(matrix).filter((k) => matrix[k]?.view || matrix[k]?.edit);
+  if (!active.length) return 'Sin permisos base';
+  if (
+    roleId === 'Admin'
+    || roleId === 'Gerente'
+    || roleId === 'Administrador'
+    || roleId === 'Encargado'
+    || roleId === 'Gestor'
+  ) {
+    return 'Acceso completo al negocio';
+  }
+  if (active.length >= 8) return 'Acceso amplio al negocio';
+  return active.map(labelByKey).join(', ');
+}
+
 export function buildCustomRolePermissionMatrix(permissions: string[]): AccountPermissionMatrix {
   const matrix = Object.fromEntries(
     ROLE_PERMISSION_OPTIONS.map((option) => [option.key, { view: false, edit: false }]),
@@ -222,10 +260,11 @@ export function buildRolePermissionsMatrix(role = 'Usuario', roleDefinitions: Ro
     Comercial: ['vehicles', 'clients', 'sales', 'documents'],
     Administración: ['clients', 'documents', 'finance', 'ancove'],
     Taller: ['workshop', 'vehicles'],
-    Usuario: ['vehicles', 'clients', 'sales', 'delivery', 'cash_register'],
-    'Mostrador / Atención': ['clients', 'sales', 'delivery', 'cash_register', 'documents'],
-    Cocina: ['delivery', 'documents'],
-    Reparto: ['delivery', 'fleet'],
+    Usuario: ['vehicles', 'clients', 'sales', 'delivery', 'sala', 'cash_register'],
+    'Mostrador / Atención': ['clients', 'sales', 'delivery', 'sala', 'cash_register', 'documents', 'reservations', 'butcher_waste'],
+    'Obrador / Corte': ['sales', 'documents', 'butcher_waste', 'butcher_purchases'],
+    Cocina: ['delivery', 'sala', 'documents'],
+    Reparto: ['delivery', 'fleet', 'sales'],
     Operaciones: ['clients', 'documents', 'sales'],
   };
 

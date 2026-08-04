@@ -23,10 +23,10 @@ if (!user || !host || !repo) {
 
 const vars = {
   EMAIL_FROM_NAME: 'Vertial',
-  // Reply-To y contacto visibles al cliente: buzón público (no el personal de alertas).
-  EMAIL_REPLY_TO: 'hola@vertialapp.com',
-  PUBLIC_SUPPORT_EMAIL: 'hola@vertialapp.com',
-  DEFAULT_CONTACT_EMAIL: 'hola@vertialapp.com',
+  // Reply-To / contacto: noreply (no el personal de alertas).
+  EMAIL_REPLY_TO: 'vertial.noreply@gmail.com',
+  PUBLIC_SUPPORT_EMAIL: 'vertial.noreply@gmail.com',
+  DEFAULT_CONTACT_EMAIL: 'vertial.noreply@gmail.com',
   ALERTS_ADMIN_EMAIL: ADMIN_EMAIL,
   BUG_REPORT_EMAIL: ADMIN_EMAIL,
   AFFILIATE_EMAIL: ADMIN_EMAIL,

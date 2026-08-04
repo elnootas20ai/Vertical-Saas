@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Clock,
   FileText,
@@ -16,6 +17,10 @@ import {
   formatVehicleHistoryDate,
   type VehicleListItem,
 } from './vehiclesListData';
+import {
+  compraventaGastosPath,
+  compraventaPublicacionPath,
+} from '../../../lib/compraventaPaths';
 
 export type VehicleDetailTabId =
   | 'resumen'
@@ -49,10 +54,14 @@ function TabEmpty({
   icon: Icon,
   title,
   description,
+  actionLabel,
+  onAction,
 }: {
   icon: typeof LayoutGrid;
   title: string;
   description: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center dark:border-gray-700 dark:bg-gray-900">
@@ -61,6 +70,15 @@ function TabEmpty({
       </div>
       <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
       <p className="mt-2 max-w-sm text-sm text-gray-500 dark:text-gray-400">{description}</p>
+      {actionLabel && onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+        >
+          {actionLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -216,6 +234,7 @@ function VehicleDetailTabPanels({
   onRemoveDocument: (documentId: string) => Promise<void>;
   readOnly?: boolean;
 }) {
+  const navigate = useNavigate();
   switch (activeTab) {
     case 'resumen':
       return <ResumenTab vehicle={vehicle} onUpdateImages={onUpdateImages} readOnly={readOnly} />;
@@ -226,7 +245,9 @@ function VehicleDetailTabPanels({
         <TabEmpty
           icon={Receipt}
           title="Gastos de preparación"
-          description="Desglose de costes, proveedores e historial de reparaciones."
+          description="Desglose de costes, proveedores e historial de reparaciones en el módulo de gastos."
+          actionLabel="Abrir gastos de preparación"
+          onAction={() => navigate(compraventaGastosPath(vehicle.id))}
         />
       );
     case 'publicaciones':
@@ -234,7 +255,9 @@ function VehicleDetailTabPanels({
         <TabEmpty
           icon={Globe}
           title="Publicaciones"
-          description="Portales activos, anuncios publicados y estado de sincronización."
+          description="Canales activos y estado comercial se gestionan en Publicación y venta."
+          actionLabel="Abrir publicación y venta"
+          onAction={() => navigate(compraventaPublicacionPath(vehicle.id))}
         />
       );
     case 'documentacion':

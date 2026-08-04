@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { CalendarClock, ChevronDown, ChevronUp, Users } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronUp, Plus, Users } from 'lucide-react';
 import { reservationMinutesUntil } from '../../../lib/restaurantFloorReservations';
 import { STATUS_CFG, type RestaurantReservation } from '../../../lib/restaurantReservationTypes';
 
@@ -7,6 +7,10 @@ type Props = {
   reservations: RestaurantReservation[];
   seatingId?: string | null;
   onSeat: (reservation: RestaurantReservation) => void;
+  /** Abrir panel completo de gestión (sin salir del TPV). */
+  onManage?: () => void;
+  /** Abrir panel ya en modo nueva reserva. */
+  onCreate?: () => void;
   compact?: boolean;
   defaultOpen?: boolean;
 };
@@ -21,6 +25,8 @@ export function RestaurantTpvReservationsStrip({
   reservations,
   seatingId = null,
   onSeat,
+  onManage,
+  onCreate,
   compact = false,
   defaultOpen = false,
 }: Props) {
@@ -31,40 +37,77 @@ export function RestaurantTpvReservationsStrip({
     [reservations],
   );
 
-  if (reservations.length === 0) return null;
+  if (reservations.length === 0 && !onCreate && !onManage) return null;
 
   return (
     <div className="shrink-0 border-b border-stone-200 bg-stone-50 dark:border-stone-700 dark:bg-stone-900/80">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
+      <div
         className={`flex w-full items-center gap-2 text-left touch-manipulation ${
           compact ? 'px-2 py-2' : 'px-3 py-2.5'
         }`}
       >
-        <CalendarClock className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-stone-900 dark:text-stone-50">
-            Reservas hoy
-            <span className="ml-1.5 font-normal text-stone-500">({reservations.length})</span>
-          </p>
-          {dueCount > 0 ? (
-            <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
-              {dueCount} para sentar pronto
+        <button
+          type="button"
+          onClick={() => {
+            if (onManage && reservations.length === 0) {
+              onManage();
+              return;
+            }
+            setOpen((v) => !v);
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <CalendarClock className="h-4 w-4 shrink-0 text-violet-600 dark:text-violet-400" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-stone-900 dark:text-stone-50">
+              Reservas hoy
+              <span className="ml-1.5 font-normal text-stone-500">({reservations.length})</span>
             </p>
-          ) : (
-            <p className="text-[11px] text-stone-500">Próximas reservas del turno</p>
-          )}
-        </div>
-        {open ? (
-          <ChevronUp className="h-4 w-4 shrink-0 text-stone-400" />
-        ) : (
-          <ChevronDown className="h-4 w-4 shrink-0 text-stone-400" />
-        )}
-      </button>
+            {dueCount > 0 ? (
+              <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                {dueCount} para sentar pronto
+              </p>
+            ) : (
+              <p className="text-[11px] text-stone-500">
+                {reservations.length === 0 ? 'Sin reservas · gestiona aquí' : 'Próximas del turno'}
+              </p>
+            )}
+          </div>
+          {reservations.length > 0 ? (
+            open ? (
+              <ChevronUp className="h-4 w-4 shrink-0 text-stone-400" />
+            ) : (
+              <ChevronDown className="h-4 w-4 shrink-0 text-stone-400" />
+            )
+          ) : null}
+        </button>
+        {onCreate ? (
+          <button
+            type="button"
+            onClick={onCreate}
+            className="inline-flex h-9 shrink-0 items-center gap-1 rounded-lg bg-violet-600 px-2.5 text-xs font-semibold text-white"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+            Nueva
+          </button>
+        ) : null}
+        {onManage ? (
+          <button
+            type="button"
+            onClick={onManage}
+            className="inline-flex h-9 shrink-0 items-center rounded-lg border border-violet-200 bg-white px-2.5 text-xs font-semibold text-violet-800 dark:border-violet-800 dark:bg-stone-900 dark:text-violet-200"
+          >
+            Gestionar
+          </button>
+        ) : null}
+      </div>
 
-      {open ? (
-        <div className={`max-h-44 space-y-1.5 overflow-y-auto overscroll-contain ${compact ? 'px-2 pb-2' : 'px-3 pb-3'}`}>
+      {open && reservations.length > 0 ? (
+        <div
+          className={`max-h-44 space-y-1.5 overflow-y-auto overscroll-contain ${
+            compact ? 'px-2 pb-2' : 'px-3 pb-3'
+          }`}
+        >
           {reservations.map((reservation) => {
             const minutes = reservationMinutesUntil(reservation);
             const statusCfg = STATUS_CFG[reservation.status];

@@ -6,7 +6,7 @@ import {
   EMPTY_DELIVERY_ACTIVATION_FLAGS,
   type DeliveryActivationFlags,
 } from '../lib/deliveryActivationChecklist';
-import { listCatalogItemsRequest } from '../lib/deliveryApi';
+import { listCatalogItemsRequest, listScaleDevicesRequest } from '../lib/deliveryApi';
 import { filterCatalogItemsForBusinessScope } from '../lib/catalogBusinessScope';
 import {
   DELIVERY_BRANDS_CHANGED,
@@ -43,6 +43,12 @@ import {
   EMPTY_EVENTS_ACTIVATION_FLAGS,
   type EventsActivationFlags,
 } from '../lib/eventsActivationChecklist';
+import {
+  buildButcherActivationStepDefs,
+  EMPTY_BUTCHER_ACTIVATION_FLAGS,
+  type ButcherActivationFlags,
+} from '../lib/butcherActivationChecklist';
+import { getButcherSalesStatsRequest } from '../lib/butcherApi';
 import { loadEvents, loadEventServices } from '../lib/eventsFlow';
 import { createVerticalApi } from '../lib/verticalApiFactory';
 import { listWorkOrdersRequest } from '../lib/workshopApi';
@@ -84,6 +90,7 @@ import {
   isOnboardingTourActive,
   dismissOnboardingWelcomeTourForActivation,
   markOnboardingTourCompleted,
+  markTourCompleteAcknowledged,
   notifyGuidedActivationComplete,
   setActivationChecklistDismissed,
   setActivationChecklistForceVisible,
@@ -192,7 +199,8 @@ type ActivationFlagsBundle =
   | { kind: 'cleaning'; flags: CleaningActivationFlags }
   | { kind: 'gym'; flags: GymActivationFlags }
   | { kind: 'workshop'; flags: WorkshopActivationFlags }
-  | { kind: 'events'; flags: EventsActivationFlags };
+  | { kind: 'events'; flags: EventsActivationFlags }
+  | { kind: 'butcher'; flags: ButcherActivationFlags };
 
 function buildStepDefsForBusiness(
   businessType: string | null | undefined,
@@ -211,6 +219,8 @@ function buildStepDefsForBusiness(
               ? 'workshop'
               : businessType === 'events'
                 ? 'events'
+                : businessType === 'butcherShop'
+                  ? 'butcher'
               : null);
 
   if (kind === 'delivery') {
@@ -251,6 +261,12 @@ function buildStepDefsForBusiness(
       ? bundle.flags
       : EMPTY_EVENTS_ACTIVATION_FLAGS;
     return buildEventsActivationStepDefs(flags);
+  }
+  if (kind === 'butcher') {
+    const flags = bundle?.kind === 'butcher'
+      ? bundle.flags
+      : EMPTY_BUTCHER_ACTIVATION_FLAGS;
+    return buildButcherActivationStepDefs(flags);
   }
   return [];
 }
@@ -538,6 +554,38 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           };
           activationFlagsRef.current = nextBundle;
           setActivationFlags(nextBundle);
+          return;
+        }
+
+        if (businessType === 'butcherShop') {
+          const catalogApi = createVerticalApi<{ precioKg?: number }>('butcher-ops', 'catalog');
+          const [products, scales, salesRes, usersRes] = await Promise.all([
+            catalogApi.list(dataUserId).catch(() => []),
+            listScaleDevicesRequest(dataUserId).catch(() => []),
+            getButcherSalesStatsRequest(dataUserId).catch(() => ({ ok: false })),
+            businessId ? listUsersRequest(businessId).catch(() => ({ users: [] })) : Promise.resolve({ users: [] }),
+          ]);
+          if (cancelled) return;
+          const priced = products.filter((p) => Number(p.precioKg || 0) > 0);
+          const hasSale = Boolean(
+            salesRes && typeof salesRes === 'object' && 'ok' in salesRes && salesRes.ok
+            && Number((salesRes as { stats?: { today?: { count?: number }; month?: { count?: number } } }).stats?.month?.count
+              || (salesRes as { stats?: { today?: { count?: number } } }).stats?.today?.count
+              || 0) > 0,
+          );
+          const nextBundle: ActivationFlagsBundle = {
+            kind: 'butcher',
+            flags: {
+              ...companyFlags,
+              hasProduct: products.length > 0,
+              hasPricedProduct: priced.length > 0,
+              hasScaleOrManual: (scales || []).length > 0 || priced.length > 0,
+              hasSale,
+              hasTeamMember: (usersRes.users || []).length >= 2,
+            },
+          };
+          activationFlagsRef.current = nextBundle;
+          setActivationFlags(nextBundle);
         }
       } catch {
         if (cancelled || activationFlagsRef.current) return;
@@ -563,6 +611,10 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           setActivationFlags(fallback);
         } else if (businessType === 'events') {
           const fallback: ActivationFlagsBundle = { kind: 'events', flags: EMPTY_EVENTS_ACTIVATION_FLAGS };
+          activationFlagsRef.current = fallback;
+          setActivationFlags(fallback);
+        } else if (businessType === 'butcherShop') {
+          const fallback: ActivationFlagsBundle = { kind: 'butcher', flags: EMPTY_BUTCHER_ACTIVATION_FLAGS };
           activationFlagsRef.current = fallback;
           setActivationFlags(fallback);
         }
@@ -667,8 +719,12 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     }
     const prev = prevCompletionPctRef.current;
     prevCompletionPctRef.current = completionPct;
-    if (prev < 100) {
+    // prev===0 + 100%: hidratación (ya estaba completo); no toast de “Alta completada”.
+    // Solo celebrar si en esta sesión se pasó de incompleto (<100 y >0) a completo.
+    if (prev > 0 && prev < 100) {
       notifyGuidedActivationComplete(accountUserId, businessId);
+    } else if (prev === 0) {
+      markTourCompleteAcknowledged(accountUserId, businessId);
     }
   }, [completionPct, accountUserId, businessId, usesGuidedActivation]);
 

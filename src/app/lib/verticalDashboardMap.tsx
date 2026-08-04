@@ -16,6 +16,7 @@ import { VetDashboard } from '../pages/saas/dashboards/VetDashboard';
 import { CarWashDashboard } from '../pages/saas/dashboards/CarWashDashboard';
 import { TaxiDashboard } from '../pages/saas/dashboards/TaxiDashboard';
 import { SparePartsDashboard } from '../pages/saas/dashboards/SparePartsDashboard';
+import { ButcherDashboard } from '../pages/saas/dashboards/ButcherDashboard';
 import { RestaurantDashboard } from '../verticals/restaurant/RestaurantDashboard';
 
 export type VerticalDashboardProps = { onSelectGeneral?: () => void };
@@ -25,6 +26,7 @@ export const VERTICAL_DASHBOARD_MAP: Partial<
   Record<BusinessType, ComponentType<VerticalDashboardProps>>
 > = {
   restaurant: RestaurantDashboard,
+  butcherShop: ButcherDashboard,
   events: EventsDashboard,
   gym: GymDashboard,
   construction: ConstructionDashboard,

@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, ScanLine } from 'lucide-react';
 import { toast } from 'sonner';
 import { useApp, type Vehicle } from '../../../context/AppContext';
 import { useBusinessOptional } from '../../../context/BusinessContext';
 import { resolveVehicleListBusinessId } from '../../../lib/vehicleVertical';
+import {
+  VERTIAL_BTN_PRIMARY,
+  VERTIAL_BTN_SECONDARY,
+  VERTIAL_SURFACE,
+} from '../../../lib/vertialUiTokens';
 import type { VehicleStatus } from '../DesignTokens';
 import {
   addVehicleDocumentRequest,
@@ -16,6 +21,7 @@ import {
 import { VehiclesListPanel } from './VehiclesListPanel';
 import { VehicleDetailPanel } from './VehicleDetailPanel';
 import { VehicleCreateModal } from './VehicleCreateModal';
+import { VehicleOcrCreateModal } from './VehicleOcrCreateModal';
 import { VehicleConfirmDialog } from './VehicleConfirmDialog';
 import { mapAppVehicleToListItem } from './vehiclesListData';
 import { uiStatusToBackend } from './vehicleStatusMap';
@@ -42,6 +48,7 @@ export function VehiclesModuleShell() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [listView, setListView] = useState<ListViewMode>('active');
   const [createOpen, setCreateOpen] = useState(false);
+  const [ocrCreateOpen, setOcrCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
@@ -215,24 +222,34 @@ export function VehiclesModuleShell() {
   };
 
   return (
-    <div className="flex min-h-[calc(100dvh-7.5rem)] flex-col overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-950 md:min-h-[calc(100dvh-6.5rem)]">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200/80 px-4 py-3 dark:border-gray-800 md:px-5">
+    <div className={`flex min-h-[calc(100dvh-7.5rem)] flex-col overflow-hidden md:min-h-[calc(100dvh-6.5rem)] ${VERTIAL_SURFACE}`}>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 px-4 py-3 dark:border-slate-800 md:px-5">
         <div className="min-w-0">
-          <h1 className="text-base font-semibold tracking-tight text-gray-900 dark:text-gray-100">
+          <h1 className="vsaas-title text-base">
             Vehículos
           </h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="vsaas-subtitle text-xs">
             Lista, ficha e información rápida
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setCreateOpen(true)}
-          className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gray-900 px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 dark:bg-gray-100 dark:text-gray-900"
-        >
-          <Plus className="h-4 w-4" />
-          Nuevo vehículo
-        </button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setOcrCreateOpen(true)}
+            className={VERTIAL_BTN_SECONDARY}
+          >
+            <ScanLine className="h-4 w-4" />
+            Escanear documento
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className={VERTIAL_BTN_PRIMARY}
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo vehículo
+          </button>
+        </div>
       </div>
 
       <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(320px,400px)_minmax(0,1fr)]">
@@ -264,6 +281,15 @@ export function VehiclesModuleShell() {
       <VehicleCreateModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
+        onCreated={(vehicleId) => {
+          setListView('active');
+          setSelectedId(vehicleId);
+        }}
+      />
+
+      <VehicleOcrCreateModal
+        open={ocrCreateOpen}
+        onClose={() => setOcrCreateOpen(false)}
         onCreated={(vehicleId) => {
           setListView('active');
           setSelectedId(vehicleId);

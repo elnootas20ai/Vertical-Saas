@@ -47,3 +47,29 @@ export function mergeBusinessMembers(
 
   return Array.from(byId.values()).sort((a, b) => a.fullName.localeCompare(b.fullName, 'es'));
 }
+
+/** Quita duplicados por user_id (p. ej. business.members con filas repetidas en el chat). */
+export function dedupeTeamMembersByUserId<T extends { user_id?: string; fullName?: string; email?: string; role?: string }>(
+  members: T[],
+): T[] {
+  const byId = new Map<string, T>();
+  for (const m of members || []) {
+    const id = String(m?.user_id || '').trim();
+    if (!id || isDemoTeamMember(m)) continue;
+    const prev = byId.get(id);
+    if (!prev) {
+      byId.set(id, m);
+      continue;
+    }
+    byId.set(id, {
+      ...prev,
+      ...m,
+      fullName: String(m.fullName || prev.fullName || '').trim() || prev.fullName,
+      email: m.email || prev.email,
+      role: m.role || prev.role,
+    });
+  }
+  return Array.from(byId.values()).sort((a, b) =>
+    String(a.fullName || '').localeCompare(String(b.fullName || ''), 'es'),
+  );
+}

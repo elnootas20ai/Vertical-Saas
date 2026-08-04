@@ -7,7 +7,19 @@ import {
   getAllDocuments,
 } from './couchdb.js';
 
-export const WORK_BLOCKING_LEAVE_TYPES = ['vacation', 'other', 'sick'];
+/** Alineado con src/app/lib/hrRequestCatalog.ts (blocksWorkWhenApproved). */
+export const WORK_BLOCKING_LEAVE_TYPES = [
+  'vacation',
+  'sick',
+  'accident',
+  'unpaid',
+  'maternity',
+  'paternity',
+  'bereavement',
+  'marriage',
+  'training',
+  'other',
+];
 
 function getVacationsDbName() {
   const prefix = process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'vertial';

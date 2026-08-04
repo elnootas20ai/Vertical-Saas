@@ -9,11 +9,20 @@ import { SAAS__SignDocumentModal } from '../../components/design-system/SAAS__Si
 import { SAAS__SendToAgencyModal } from '../../components/design-system/SAAS__SendToAgencyModal';
 import { SAAS__EditDocumentModal } from '../../components/design-system/SAAS__EditDocumentModal';
 import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
-import { DOCUMENTS_DB_NAME, createDocumentRequest, type CompraventaDocCategory } from '../../lib/documentsApi';
+import {
+  DOCUMENTS_DB_NAME,
+  createDocumentRequest,
+  createDocumentViaApi,
+  updateDocumentViaApi,
+  type CompraventaDocCategory,
+  type OcrData,
+} from '../../lib/documentsApi';
 import { authFetch, getAuthHeaders } from '../../lib/authApi';
 import { getApiBase } from '../../lib/apiBase';
+import { buildOcrDocumentFields } from '../../lib/ocrDocumentSave';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
 import { useBusiness } from '../../context/BusinessContext';
+import { toast } from 'sonner';
 import {
   FileText, Upload, Plus, Search, Eye, Send, Edit2,
   CheckCircle, Car, User, Download, ScanLine, Filter,
@@ -394,37 +403,55 @@ export function DocumentsPage() {
     }
   }, [searchParams]);
 
+  const vehicleIdFromUrl = searchParams.get('vehicleId') || '';
+
+  useEffect(() => {
+    if (!vehicleIdFromUrl) return;
+    const vehicle = vehicles.find((v) => v.id === vehicleIdFromUrl);
+    if (vehicle?.registrationPlate) {
+      setSearchQuery(vehicle.registrationPlate);
+      return;
+    }
+    if (vehicle) {
+      setSearchQuery(`${vehicle.brand} ${vehicle.model}`.trim());
+      return;
+    }
+    setSearchQuery(vehicleIdFromUrl);
+  }, [vehicleIdFromUrl, vehicles]);
+
   // ── Map documents ─────────────────────────────────────────────────────────
 
   const allDocuments = useMemo<DocView[]>(() => {
     return documents.map((doc) => {
       const category = normalizeCategory(doc.type);
-      const vehicle = vehicles.find((v) => v.id === doc.relatedToId);
+      const vehicleId = doc.vehicleId || (doc.relatedTo === 'vehicle' ? doc.relatedToId : undefined);
+      const vehicle = vehicles.find((v) => v.id === vehicleId || v.id === doc.relatedToId);
       const costCenter = workCenters.find((wc) => wc.id === doc.relatedToId);
       const createdAt = doc.createdAt instanceof Date ? doc.createdAt.toISOString() : new Date().toISOString();
-      const raw = doc as any;
 
       return {
         id: doc.id,
         name: doc.name,
         category,
-        docSubCategory: raw.docSubCategory || 'otro',
+        docSubCategory: (doc.docSubCategory as CompraventaDocCategory) || 'otro',
         status: doc.status as DocumentStatus,
-        vehicleId: vehicle?.id || raw.vehicleId,
-        vehicleName: vehicle ? `${vehicle.brand} ${vehicle.model}` : (raw.vehicleName || undefined),
-        registrationPlate: raw.registrationPlate || vehicle?.registrationPlate || undefined,
-        vin: raw.vin || undefined,
-        clientName: raw.clientName || undefined,
-        supplierName: raw.supplierName || undefined,
+        vehicleId: vehicle?.id || vehicleId,
+        vehicleName: vehicle
+          ? `${vehicle.brand} ${vehicle.model}`
+          : (doc.vehicleName || undefined),
+        registrationPlate: doc.registrationPlate || vehicle?.registrationPlate || undefined,
+        vin: doc.vin || undefined,
+        clientName: doc.clientName || undefined,
+        supplierName: undefined,
         costCenterId: costCenter?.id,
         costCenterName: costCenter?.name,
         responsible: user?.name || 'Sistema',
         createdAt,
         updatedAt: createdAt,
-        expiresAt: raw.expiresAt || undefined,
-        itvExpiryDate: raw.itvExpiryDate || undefined,
-        ocrConfidence: raw.ocrConfidence || 0,
-        archived: raw.archived || false,
+        expiresAt: doc.expiresAt || undefined,
+        itvExpiryDate: doc.itvExpiryDate || undefined,
+        ocrConfidence: doc.ocrConfidence || 0,
+        archived: false,
       };
     });
   }, [documents, vehicles, workCenters, user?.name]);
@@ -443,11 +470,15 @@ export function DocumentsPage() {
   const filtered = useMemo(() => {
     let result = byTab;
 
+    if (vehicleIdFromUrl) {
+      result = result.filter((d) => d.vehicleId === vehicleIdFromUrl);
+    }
+
     if (statusFilter !== 'all') {
       result = result.filter(d => d.status === statusFilter);
     }
 
-    if (searchQuery) {
+    if (searchQuery && !vehicleIdFromUrl) {
       const q = searchQuery.toLowerCase();
       result = result.filter(d =>
         d.name.toLowerCase().includes(q) ||
@@ -471,7 +502,7 @@ export function DocumentsPage() {
     });
 
     return result;
-  }, [byTab, statusFilter, searchQuery, sortField, sortDir]);
+  }, [byTab, statusFilter, searchQuery, sortField, sortDir, vehicleIdFromUrl]);
 
   // ── Stats ─────────────────────────────────────────────────────────────────
 
@@ -613,25 +644,87 @@ export function DocumentsPage() {
     }
   };
 
-  const handleOcrDocument = async (payload: any) => {
+  const handleOcrDocument = async (payload: Record<string, unknown>) => {
     const userId = user?.id || 'guest';
-    const fileName = payload.file ? (payload.file as File).name.replace(/[^a-zA-Z0-9._-]/g, '-') : 'scan';
-    const record = await createDocumentRequest(userId, {
-      user_id: userId, name: payload.name, docType: payload.type, status: 'pending',
-      relatedTo: payload.relatedTo, relatedToId: payload.relatedToId,
-      ocrData: payload.ocrData, mimeType: payload.fileMimeType || undefined, fileName,
+    const fileName = payload.file
+      ? String((payload.file as File).name || 'scan').replace(/[^a-zA-Z0-9._-]/g, '-')
+      : 'scan';
+    const ocrData = (payload.ocrData || null) as OcrData | null;
+    const fields = buildOcrDocumentFields({
+      name: String(payload.name || ocrData?.documentTypeLabel || fileName),
+      ocrData,
+      vehicleId: (payload.vehicleId as string) || vehicleIdFromUrl || undefined,
+      clientId: (payload.clientId as string) || undefined,
+      vehicles: (vehicles || []).map((v) => ({
+        id: v.id,
+        brand: v.brand,
+        model: v.model,
+        registrationPlate: v.registrationPlate,
+        vin: v.vin,
+      })),
+      clients: (clients || []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        nif: (c as { nif?: string }).nif,
+        dni: (c as { dni?: string }).dni,
+      })),
+      mimeType: (payload.fileMimeType as string) || undefined,
+      fileName,
     });
-    if (payload.fileBase64 && record._id && record._rev) {
-      try {
-        const buf = Uint8Array.from(atob(payload.fileBase64), c => c.charCodeAt(0));
-        await authFetch(
-          `${getApiBase()}/api/couch/attachment/${encodeURIComponent(DOCUMENTS_DB_NAME)}/${encodeURIComponent(record._id)}/${encodeURIComponent(fileName)}?rev=${encodeURIComponent(record._rev)}`,
-          { method: 'PUT', headers: { 'Content-Type': payload.fileMimeType || 'application/octet-stream', ...getAuthHeaders(), ..._couchHeaders() }, body: buf },
-        );
-      } catch (e) { console.error('Error uploading OCR attachment:', e); }
+
+    try {
+      let record;
+      // Si el pipeline ya creó el doc, lo enriquecemos (vehículo/subcategoría) sin duplicar.
+      if (payload.documentId) {
+        record = await updateDocumentViaApi(userId, String(payload.documentId), {
+          ...fields,
+          name: fields.name,
+        });
+      } else {
+        record = await createDocumentViaApi(userId, {
+          ...fields,
+          user_id: userId,
+        });
+      }
+
+      if (payload.fileBase64 && record._id && record._rev) {
+        try {
+          const buf = Uint8Array.from(atob(String(payload.fileBase64)), (c) => c.charCodeAt(0));
+          await authFetch(
+            `${getApiBase()}/api/couch/attachment/${encodeURIComponent(DOCUMENTS_DB_NAME)}/${encodeURIComponent(record._id)}/${encodeURIComponent(fileName)}?rev=${encodeURIComponent(record._rev)}`,
+            {
+              method: 'PUT',
+              headers: {
+                'Content-Type': (payload.fileMimeType as string) || 'application/octet-stream',
+                ...getAuthHeaders(),
+                ..._couchHeaders(),
+              },
+              body: buf,
+            },
+          );
+        } catch (e) {
+          console.error('Error uploading OCR attachment:', e);
+        }
+      }
+
+      await refreshDocuments();
+      setShowOcr(false);
+      const linkedId = record.vehicleId || fields.vehicleId;
+      const qs = linkedId
+        ? `?tab=vehiculo&vehicleId=${encodeURIComponent(linkedId)}`
+        : isCompraventa
+          ? '?tab=vehiculo'
+          : '';
+      toast.success(
+        linkedId
+          ? 'Documento guardado en el expediente del vehículo'
+          : 'Documento escaneado. Revísalo y vincúlalo si hace falta.',
+      );
+      navigate(`/saas/documents${qs}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'No se pudo guardar el documento OCR');
+      throw error;
     }
-    navigate('/saas/documents');
-    window.location.reload();
   };
 
   const handleSignDocument = async (payload: any) => {
@@ -1052,7 +1145,28 @@ export function DocumentsPage() {
       {/* ── Modals ── */}
       <SAAS__UploadDocumentModal isOpen={showUpload} onClose={() => setShowUpload(false)} onUpload={handleUploadDocument} costCenters={workCenters || []} />
       <SAAS__GenerateFromTemplateModal isOpen={showGenerate} onClose={() => setShowGenerate(false)} onGenerate={handleGenerateFromTemplate} vehicles={vehicles || []} clients={clients || []} />
-      <SAAS__OcrScanModal isOpen={showOcr} onClose={() => setShowOcr(false)} onDocumentCreated={handleOcrDocument} targetModule="documentacion" />
+      <SAAS__OcrScanModal
+        isOpen={showOcr}
+        onClose={() => setShowOcr(false)}
+        onDocumentCreated={handleOcrDocument}
+        userId={user?.id}
+        targetModule="documentacion"
+        defaultOcrMode={isCompraventa ? 'vehicle' : 'financial'}
+        lockOcrMode={isCompraventa}
+        context={vehicleIdFromUrl ? { vehicleId: vehicleIdFromUrl } : undefined}
+        vehicles={(vehicles || []).map((v) => ({
+          id: v.id,
+          brand: v.brand,
+          model: v.model,
+          registrationPlate: v.registrationPlate,
+          vin: v.vin,
+        }))}
+        clients={(clients || []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          nif: (c as { nif?: string }).nif,
+        }))}
+      />
 
       {selectedDoc && showSign && (
         <SAAS__SignDocumentModal isOpen={showSign} onClose={() => { setShowSign(false); setSelectedDoc(null); }} document={selectedDoc} onSign={handleSignDocument} />

@@ -12,10 +12,10 @@ import {
 
 describe('retailOpsPaths — restaurant vs delivery', () => {
   it('restaurant paths never point to delivery-ops', () => {
-    expect(resolveRetailOpsHomePath('restaurant')).toBe('/saas/sala');
+    expect(resolveRetailOpsHomePath('restaurant')).toBe('/saas/restaurant-ops');
     expect(resolveRetailCeoTpvPath('restaurant')).toBe('/saas/caja/tpv');
     expect(resolveRetailCajaPath('restaurant')).toBe('/saas/caja');
-    expect(resolveTpvCeoExitPath('/saas/caja/tpv', 'restaurant')).toBe('/saas/sala');
+    expect(resolveTpvCeoExitPath('/saas/caja/tpv', 'restaurant')).toBe('/saas/restaurant-ops');
   });
 
   it('delivery paths stay on delivery vertical', () => {

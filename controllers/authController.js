@@ -77,7 +77,11 @@ import {
   verifyPassword,
   writeChangelog,
 } from '../services/couchdb.js';
-import { applyInviteScheduleTemplate } from '../services/inviteScheduleAssign.js';
+import {
+  applyInviteScheduleTemplate,
+  getShiftTemplateMeta,
+} from '../services/inviteScheduleAssign.js';
+import { applyInviteRoleTasks } from '../services/inviteRoleTasksAssign.js';
 import {
   mergeEmploymentInfo,
   mergePersonalData,
@@ -114,6 +118,7 @@ import {
   preserveAdminLockedPlan,
 } from '../shared/billing/adminPlanLock.js';
 import { sendAdminAlert } from '../services/adminAlerts.js';
+import { notifyInviteEmailFailed } from '../services/adminBusinessAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
 import { buildSubscriptionFromOnboarding } from '../shared/billing/onboardingSubscription.js';
@@ -125,6 +130,73 @@ import {
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
+}
+
+/** Admin SaaS Vertial (uriel@admin.com) o cuentas con requireLoginOtp. */
+function accountRequiresLoginOtp(account) {
+  if (!account) return false;
+  if (account.requireLoginOtp === true) return true;
+  return isVertialSuperAdminEmail(account.email);
+}
+
+/** Destino del código OTP (nunca revelar en la UI). */
+function resolveLoginOtpDestination(account) {
+  const dedicated = String(account?.loginOtpEmail || process.env.ADMIN_LOGIN_OTP_EMAIL || '')
+    .trim()
+    .toLowerCase();
+  if (dedicated.includes('@')) return dedicated;
+
+  // Super-admin: el código NO va a uriel@admin.com — buzón de seguridad.
+  if (isVertialSuperAdminEmail(account?.email)) {
+    const alerts = String(process.env.ALERTS_ADMIN_EMAIL || 'elnootas2.0@gmail.com')
+      .trim()
+      .toLowerCase();
+    if (alerts.includes('@')) return alerts;
+  }
+
+  return String(account?.email || '').trim().toLowerCase();
+}
+
+/** Mensaje genérico al cliente: nunca revelar a qué correo se envía el código. */
+const LOGIN_OTP_CLIENT_MESSAGE =
+  'Te hemos enviado un código por email. Caduca en 10 minutos.';
+
+function maskEmailForHint(email) {
+  const e = String(email || '').trim();
+  const at = e.indexOf('@');
+  if (at < 1) return 'tu correo';
+  const user = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  const visible = user.slice(0, Math.min(2, user.length));
+  return `${visible}***@${domain}`;
+}
+
+/**
+ * Genera OTP, lo guarda y lo envía al correo de seguridad.
+ * @returns {{ ok: true, to: string, hint: string } | { ok: false, status: number, code: string, error: string }}
+ */
+async function dispatchLoginOtp(req, account) {
+  if (!canResendLoginOtp(account)) {
+    return {
+      ok: false,
+      status: 429,
+      code: 'LOGIN_CODE_COOLDOWN',
+      error: 'Ya enviamos un código recientemente. Revisa tu correo o espera 1 minuto.',
+      hint: maskEmailForHint(resolveLoginOtpDestination(account)),
+    };
+  }
+
+  const code = String(crypto.randomInt(100000, 1000000));
+  await saveLoginOtp(req, account, code);
+  const to = resolveLoginOtpDestination(account);
+  const { subject, html } = buildLoginCodeEmail(account.email, code);
+  await sendEmail({ to, subject, html, requireDelivery: true });
+
+  return {
+    ok: true,
+    to,
+    hint: maskEmailForHint(to),
+  };
 }
 
 function getClientIp(req) {
@@ -803,14 +875,66 @@ export async function login(req, res) {
       return res.status(401).json({ ok: false, error: 'Email o contraseña incorrectos' });
     }
 
-    // S-03: Login exitoso → resetear contador (un acierto no debe dejar bloqueo)
-    const savedAccount = await saveAccount(req, {
+    // Contraseña correcta → limpiar bloqueo; aún no abrir sesión si pide OTP.
+    let unlockedAccount = await saveAccount(req, {
       ...account,
       status: 'active',
       inviteStatus: account.inviteStatus === 'pending' ? 'accepted' : account.inviteStatus,
-      lastLoginAt: new Date().toISOString(),
       failedLoginAttempts: 0,
       lockUntil: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Admin SaaS: segundo factor por email (sin tokens todavía).
+    if (accountRequiresLoginOtp(unlockedAccount)) {
+      try {
+        const otp = await dispatchLoginOtp(req, unlockedAccount);
+        if (!otp.ok && otp.status === 429) {
+          return res.status(200).json({
+            ok: true,
+            requiresLoginCode: true,
+            email: unlockedAccount.email,
+            message: otp.error || LOGIN_OTP_CLIENT_MESSAGE,
+          });
+        }
+        if (!otp.ok) {
+          return res.status(otp.status || 500).json({
+            ok: false,
+            code: otp.code,
+            error: otp.error || 'No se pudo enviar el código',
+          });
+        }
+
+        await logAccountActivity(req, {
+          actorUserId: unlockedAccount.user_id,
+          actorName: unlockedAccount.fullName,
+          targetUserId: unlockedAccount.user_id,
+          type: 'security',
+          action: 'Código de acceso enviado tras contraseña (admin)',
+          entityId: unlockedAccount.user_id,
+          entityLabel: unlockedAccount.fullName,
+          ip,
+          metadata: { otpHint: otp.hint },
+        });
+
+        return res.json({
+          ok: true,
+          requiresLoginCode: true,
+          email: unlockedAccount.email,
+          message: LOGIN_OTP_CLIENT_MESSAGE,
+        });
+      } catch (otpErr) {
+        console.error('[AUTH] Error enviando OTP admin:', otpErr?.message || otpErr);
+        return res.status(500).json({
+          ok: false,
+          error: 'Contraseña correcta, pero no se pudo enviar el código por email. Inténtalo de nuevo.',
+        });
+      }
+    }
+
+    const savedAccount = await saveAccount(req, {
+      ...unlockedAccount,
+      lastLoginAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
 
@@ -867,7 +991,7 @@ export async function login(req, res) {
   }
 }
 
-/** Envía un código de 6 dígitos al email para entrar sin esperar bloqueos por contraseña. */
+/** Envía un código de 6 dígitos al email (admin: correo de seguridad si está configurado). */
 export async function requestLoginCode(req, res) {
   try {
     const { email } = req.body || {};
@@ -883,21 +1007,16 @@ export async function requestLoginCode(req, res) {
       return res.json({ ok: true, message: 'Si el email existe, recibirás un código en breve' });
     }
 
-    if (!canResendLoginOtp(account)) {
-      return res.status(429).json({
+    const otp = await dispatchLoginOtp(req, account);
+    if (!otp.ok) {
+      return res.status(otp.status || 500).json({
         ok: false,
-        code: 'LOGIN_CODE_COOLDOWN',
-        error: 'Ya enviamos un código recientemente. Revisa tu correo o espera 1 minuto.',
+        code: otp.code,
+        error: otp.error,
       });
     }
 
-    const code = String(crypto.randomInt(100000, 1000000));
-    await saveLoginOtp(req, account, code);
-
-    const { subject, html } = buildLoginCodeEmail(account.email, code);
-    await sendEmail({ to: account.email, subject, html, requireDelivery: true });
-
-    logger.info({ tag: 'AUTH_LOGIN_CODE', to: account.email }, 'Código de acceso enviado');
+    logger.info({ tag: 'AUTH_LOGIN_CODE', to: otp.to, account: account.email }, 'Código de acceso enviado');
 
     await logAccountActivity(req, {
       actorUserId: account.user_id,
@@ -908,9 +1027,13 @@ export async function requestLoginCode(req, res) {
       entityId: account.user_id,
       entityLabel: account.fullName,
       ip: getClientIp(req),
+      metadata: { otpHint: otp.hint },
     });
 
-    return res.json({ ok: true, message: 'Si el email existe, recibirás un código en breve' });
+    return res.json({
+      ok: true,
+      message: 'Si el email existe, recibirás un código en breve',
+    });
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -1622,9 +1745,16 @@ export async function inviteUser(req, res) {
     if (!String(name || '').trim()) {
       return badRequest(res, 'El nombre es obligatorio');
     }
+    if (!String(workCenterId || '').trim()) {
+      return badRequest(res, 'Debes asignar una tienda o local al trabajador');
+    }
+    if (!String(scheduleTemplateId || '').trim()) {
+      return badRequest(res, 'Debes asignar una plantilla de horario al trabajador');
+    }
 
     const actorUserId = String(req.authUser?.userId || '').trim();
-    let invitedByDisplay = String(req.authUser?.email || '').trim();
+    // Nombre visible en el correo (nunca el email personal del admin, p. ej. elnootas…).
+    let invitedByDisplay = '';
     if (actorUserId) {
       try {
         const inviter = await findAccountByUserId(req, actorUserId);
@@ -1635,7 +1765,6 @@ export async function inviteUser(req, res) {
         /* noop */
       }
     }
-
     await ensureDatabase(req, ACCOUNTS_DB);
 
     let business = null;
@@ -1654,14 +1783,29 @@ export async function inviteUser(req, res) {
 
     const existingAccount = await findAccountByEmail(req, email);
     const resolvedCompanyName = business?.name || companyName;
+    if (!invitedByDisplay) {
+      invitedByDisplay = String(resolvedCompanyName || '').trim();
+    }
     const normalizedEmail = String(email).trim().toLowerCase();
     const resolvedPermissions = normalizePermissionMatrix(permissions, role || 'Usuario');
     const resolvedLanding = landingPage || WORKER_DEFAULT_LANDING_PATH;
+    // Horas/jornada salen de la plantilla de horario de la invitación (no se piden a mano).
+    let inviteWeeklyHours;
+    let inviteWorkday = '';
+    const tid = String(scheduleTemplateId || '').trim();
+    if (tid && business?.business_id) {
+      const meta = await getShiftTemplateMeta(req, business.business_id, tid);
+      if (meta.ok && meta.weeklyHours != null) {
+        inviteWeeklyHours = meta.weeklyHours;
+        inviteWorkday = meta.workday || '';
+      }
+    }
     const employmentPayload = {
       position,
       contractType,
       salary: grossMonthlySalary,
-      workday: 'completa',
+      workday: inviteWorkday || 'completa',
+      ...(inviteWeeklyHours != null && inviteWeeklyHours > 0 ? { hoursPerWeek: inviteWeeklyHours } : {}),
       payPeriodsPerYear: payPeriodsPerYear != null ? Number(payPeriodsPerYear) : undefined,
       salesPointId: workCenterId,
     };
@@ -1839,6 +1983,13 @@ export async function inviteUser(req, res) {
       emailSent = true;
     } catch (emailErr) {
       console.error('[AUTH] Error enviando email de invitación:', emailErr?.message);
+      notifyInviteEmailFailed({
+        toEmail: accountWithToken.email,
+        companyName: resolvedCompanyName,
+        invitedBy: invitedByDisplay,
+        errorMessage: emailErr?.message,
+        resend: false,
+      });
     }
 
     await logAccountActivity(req, {
@@ -1972,13 +2123,24 @@ export async function resendInvite(req, res) {
     const rawInviteToken = crypto.randomBytes(32).toString('hex');
     const refreshedAccount = await saveInviteToken(req, account, rawInviteToken);
 
+    let resendInvitedByDisplay = String(companyName || '').trim();
+    const resendActorId = String(req.authUser?.userId || '').trim();
+    if (resendActorId) {
+      try {
+        const inviter = await findAccountByUserId(req, resendActorId);
+        if (inviter?.fullName?.trim()) resendInvitedByDisplay = inviter.fullName.trim();
+      } catch {
+        /* noop */
+      }
+    }
+
     let emailSent = false;
     try {
       const { subject, html } = buildInvitationEmail({
         name: refreshedAccount.fullName,
         email: refreshedAccount.email,
         inviteToken: rawInviteToken,
-        invitedBy: req.authUser?.userId || refreshedAccount.invitedBy || '',
+        invitedBy: resendInvitedByDisplay,
         role,
         companyName,
         isExistingUser,
@@ -1987,11 +2149,18 @@ export async function resendInvite(req, res) {
       emailSent = true;
     } catch (emailErr) {
       console.error('[AUTH] Error reenviando email de invitación:', emailErr?.message);
+      notifyInviteEmailFailed({
+        toEmail: refreshedAccount.email,
+        companyName,
+        invitedBy: resendInvitedByDisplay,
+        errorMessage: emailErr?.message,
+        resend: true,
+      });
     }
 
     await logAccountActivity(req, {
       actorUserId: req.authUser?.userId || account.user_id,
-      actorName: '',
+      actorName: resendInvitedByDisplay,
       targetUserId: account.user_id,
       type: 'team',
       action: 'Invitación reenviada',
@@ -2147,6 +2316,11 @@ export async function acceptInvitation(req, res) {
     }
 
     const inviteEmployment = invitation.employment || {};
+    // Fecha de alta = día de aceptación si RRHH no la puso en la invitación.
+    const acceptDay = (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    })();
     const mergedEmployment = mergeEmploymentInfo(account.employment, {
       ...inviteEmployment,
       position: inviteEmployment.position || invitation.role || '',
@@ -2155,6 +2329,9 @@ export async function acceptInvitation(req, res) {
       salesPointId: inviteEmployment.salesPointId || '',
       workday: inviteEmployment.workday || 'completa',
       payPeriodsPerYear: inviteEmployment.payPeriodsPerYear,
+      startDate:
+        String(inviteEmployment.startDate || account.employment?.startDate || '').trim()
+        || acceptDay,
     });
     const profileDraft = {
       ...account,
@@ -2196,6 +2373,7 @@ export async function acceptInvitation(req, res) {
     });
 
     let scheduleApplied = false;
+    let accountAfterSchedule = updatedAccount;
     if (invitation.scheduleTemplateId) {
       let workCenterName = '';
       const salesPointId = String(inviteEmployment.salesPointId || '').trim();
@@ -2216,6 +2394,35 @@ export async function acceptInvitation(req, res) {
         workCenterName,
       });
       scheduleApplied = Boolean(scheduleResult.applied);
+      // Sincronizar horas/jornada desde el horario real (vacaciones, fichaje…).
+      if (scheduleApplied && scheduleResult.weeklyHours != null && scheduleResult.weeklyHours > 0) {
+        const syncedEmployment = mergeEmploymentInfo(accountAfterSchedule.employment, {
+          hoursPerWeek: scheduleResult.weeklyHours,
+          workday: scheduleResult.workday || inviteEmployment.workday || 'completa',
+        });
+        accountAfterSchedule = await saveAccount(req, {
+          ...accountAfterSchedule,
+          employment: syncedEmployment,
+          workerProfileCompletion: computeWorkerProfileCompletion({
+            ...accountAfterSchedule,
+            employment: syncedEmployment,
+          }),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    let roleTasksCreated = 0;
+    try {
+      const roleTasks = await applyInviteRoleTasks(req, {
+        businessId: business.business_id,
+        memberId: account.user_id,
+        role: invitation.role || accountAfterSchedule.role,
+        businessType: business.businessType || business.business_type,
+      });
+      roleTasksCreated = Number(roleTasks.created || 0);
+    } catch (tasksErr) {
+      console.error('[AUTH] Error sembrando tareas de rol al aceptar:', tasksErr?.message);
     }
 
     await logAccountActivity(req, {
@@ -2231,15 +2438,17 @@ export async function acceptInvitation(req, res) {
         role: invitation.role,
         scheduleTemplateId: invitation.scheduleTemplateId || '',
         scheduleApplied,
+        roleTasksCreated,
       },
     });
 
     return res.json({
       ok: true,
       invitation: sanitizeInvitation(savedInvitation),
-      user: sanitizeAccount(updatedAccount),
-      redirectTo: resolveRedirectAfterInvitationAccept(updatedAccount),
+      user: sanitizeAccount(accountAfterSchedule),
+      redirectTo: resolveRedirectAfterInvitationAccept(accountAfterSchedule),
       scheduleApplied,
+      roleTasksCreated,
     });
   } catch (error) {
     return res.status(500).json({
@@ -3274,7 +3483,7 @@ export async function acceptInvite(req, res) {
       || account.permissions
       || normalizePermissionMatrix(undefined, inviteRole);
     const inviteLanding = teamInvite?.landingPage || account.landingPage || WORKER_DEFAULT_LANDING_PATH;
-    const inviteEmployment = teamInvite?.employment || null;
+    let inviteEmployment = teamInvite?.employment || null;
     const inviteBusinessName = teamInvite?.businessName || account.companyName || '';
 
     if (!isExistingUser) {
@@ -3322,6 +3531,8 @@ export async function acceptInvite(req, res) {
     }
 
     // Marcar invitaciones in-app pendientes del mismo email/empresa como aceptadas.
+    // También recupera employment.salesPointId si solo estaba en la invitación (no en pendingTeamInvite).
+    let pendingInvitationEmployment = null;
     if (inviteBusinessId && account.email) {
       try {
         const pending = await findPendingInvitationForEmailAndBusiness(
@@ -3330,6 +3541,7 @@ export async function acceptInvite(req, res) {
           inviteBusinessId,
         );
         if (pending) {
+          pendingInvitationEmployment = pending.employment || null;
           await saveTeamInvitation(req, {
             ...pending,
             status: 'accepted',
@@ -3341,6 +3553,19 @@ export async function acceptInvite(req, res) {
       } catch (invErr) {
         console.error('[AUTH] Error cerrando team_invitation al aceptar:', invErr?.message);
       }
+    }
+
+    if (
+      (!inviteEmployment || !String(inviteEmployment.salesPointId || '').trim())
+      && pendingInvitationEmployment
+    ) {
+      inviteEmployment = mergeEmploymentInfo(inviteEmployment || {}, pendingInvitationEmployment);
+    }
+    if (
+      (!inviteEmployment || !String(inviteEmployment.salesPointId || '').trim())
+      && account.employment
+    ) {
+      inviteEmployment = mergeEmploymentInfo(inviteEmployment || {}, account.employment);
     }
 
     const updatedAccountDoc = {
@@ -3366,7 +3591,16 @@ export async function acceptInvite(req, res) {
       updatedAccountDoc.passwordHash = hashPassword(newPassword);
     }
     if (inviteEmployment) {
-      updatedAccountDoc.employment = mergeEmploymentInfo(account.employment, inviteEmployment);
+      const acceptDay = (() => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      })();
+      updatedAccountDoc.employment = mergeEmploymentInfo(account.employment, {
+        ...inviteEmployment,
+        startDate:
+          String(inviteEmployment.startDate || account.employment?.startDate || '').trim()
+          || acceptDay,
+      });
     }
     updatedAccountDoc.workerProfileCompletion = computeWorkerProfileCompletion({
       ...updatedAccountDoc,
@@ -3376,17 +3610,53 @@ export async function acceptInvite(req, res) {
 
     const savedAccount = await saveAccount(req, updatedAccountDoc);
 
+    let accountForTokens = savedAccount;
     if ((teamInvite?.scheduleTemplateId || account.onboardingData?.scheduleTemplateId) && inviteBusinessId) {
       try {
-        await applyInviteScheduleTemplate(req, {
+        const scheduleResult = await applyInviteScheduleTemplate(req, {
           businessId: inviteBusinessId,
           memberId: savedAccount.user_id,
           memberName: savedAccount.fullName,
           templateId: teamInvite?.scheduleTemplateId || account.onboardingData?.scheduleTemplateId,
           workCenterId: inviteEmployment?.salesPointId || account.employment?.salesPointId || '',
         });
+        if (scheduleResult.applied && scheduleResult.weeklyHours != null && scheduleResult.weeklyHours > 0) {
+          const syncedEmployment = mergeEmploymentInfo(accountForTokens.employment, {
+            hoursPerWeek: scheduleResult.weeklyHours,
+            workday: scheduleResult.workday || inviteEmployment?.workday || 'completa',
+          });
+          accountForTokens = await saveAccount(req, {
+            ...accountForTokens,
+            employment: syncedEmployment,
+            workerProfileCompletion: computeWorkerProfileCompletion({
+              ...accountForTokens,
+              employment: syncedEmployment,
+            }),
+            updatedAt: new Date().toISOString(),
+          });
+        }
       } catch (schedErr) {
         console.error('[AUTH] Error asignando plantilla de horario al aceptar:', schedErr?.message);
+      }
+    }
+
+    if (inviteBusinessId) {
+      try {
+        let bizType = '';
+        try {
+          const biz = await findBusinessById(req, inviteBusinessId);
+          bizType = String(biz?.businessType || biz?.business_type || '').trim();
+        } catch {
+          /* noop */
+        }
+        await applyInviteRoleTasks(req, {
+          businessId: inviteBusinessId,
+          memberId: accountForTokens.user_id,
+          role: inviteRole || accountForTokens.role,
+          businessType: bizType,
+        });
+      } catch (tasksErr) {
+        console.error('[AUTH] Error sembrando tareas de rol al aceptar (token):', tasksErr?.message);
       }
     }
 
@@ -3405,13 +3675,13 @@ export async function acceptInvite(req, res) {
     });
 
     const redirectTo = isTeamInvite
-      ? resolveRedirectAfterInvitationAccept(savedAccount)
+      ? resolveRedirectAfterInvitationAccept(accountForTokens)
       : '/auth/onboarding/business-type';
 
-    const { accessToken, refreshToken } = await issueTokens(req, res, savedAccount);
+    const { accessToken, refreshToken } = await issueTokens(req, res, accountForTokens);
     return res.json({
       ok: true,
-      user: sanitizeAccount(savedAccount),
+      user: sanitizeAccount(accountForTokens),
       accessToken,
       refreshToken,
       redirectTo,
@@ -4217,11 +4487,30 @@ export async function updateNotificationPreferences(req, res) {
 
     const incoming = req.body?.notificationPreferences || req.body || {};
     const current = normalizeNotificationPreferences(account.notificationPreferences);
+    const incomingPush = incoming.pushConsent && typeof incoming.pushConsent === 'object'
+      ? incoming.pushConsent
+      : {};
+    // Si la cuenta ya dijo «sí», no degradar a declined en merges accidentales.
+    let nextPushConsent = {
+      ...current.pushConsent,
+      ...incomingPush,
+    };
+    if (
+      current.pushConsent?.decision === 'accepted'
+      && incomingPush.decision === 'declined'
+      && incomingPush.force !== true
+    ) {
+      nextPushConsent = { ...current.pushConsent };
+    }
+    if (incomingPush.decision === 'accepted' || incomingPush.decision === 'declined') {
+      nextPushConsent.decidedAt = incomingPush.decidedAt || current.pushConsent?.decidedAt || new Date().toISOString();
+    }
     const merged = normalizeNotificationPreferences({
       ...current,
       ...incoming,
       clockin: { ...current.clockin, ...(incoming.clockin || {}) },
       team: { ...current.team, ...(incoming.team || {}) },
+      pushConsent: nextPushConsent,
     });
 
     const saved = await saveAccount(req, {

@@ -5,6 +5,7 @@ import {
   FileText,
   Loader2,
   Receipt,
+  Umbrella,
   Users,
   AlertTriangle,
 } from 'lucide-react';
@@ -17,6 +18,7 @@ type Props = {
   onOpenClockins: () => void;
   onOpenSchedules: () => void;
   onOpenPayroll: () => void;
+  onOpenRequests?: () => void;
 };
 
 function Metric({
@@ -51,8 +53,10 @@ export function TeamRrhhDashboardWidget({
   onOpenClockins,
   onOpenSchedules,
   onOpenPayroll,
+  onOpenRequests,
 }: Props) {
   const s = snapshot;
+  const openRequests = onOpenRequests || onOpenSchedules;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -120,7 +124,20 @@ export function TeamRrhhDashboardWidget({
               </div>
             )}
 
-            {(s.pendingVacationRequests > 0 || s.scheduleAlertsCount > 0) && (
+            {s.pendingVacationRequests > 0 && (
+              <button
+                type="button"
+                onClick={openRequests}
+                className="w-full flex items-center justify-between p-3 rounded-xl bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
+              >
+                <div className="flex items-center gap-2 text-xs font-medium text-rose-800 dark:text-rose-200">
+                  <Umbrella className="w-4 h-4" />
+                  Revisar {s.pendingVacationRequests} solicitud{s.pendingVacationRequests === 1 ? '' : 'es'} RRHH
+                </div>
+                <ArrowRight className="w-3.5 h-3.5 text-rose-600" />
+              </button>
+            )}
+            {s.scheduleAlertsCount > 0 && (
               <button
                 type="button"
                 onClick={onOpenSchedules}
@@ -128,14 +145,15 @@ export function TeamRrhhDashboardWidget({
               >
                 <div className="flex items-center gap-2 text-xs font-medium text-amber-800 dark:text-amber-200">
                   <AlertTriangle className="w-4 h-4" />
-                  Revisar horarios y vacaciones
+                  Revisar alertas de horarios
                 </div>
                 <ArrowRight className="w-3.5 h-3.5 text-amber-600" />
               </button>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1">
               <QuickLink icon={<Clock className="w-3.5 h-3.5" />} label="Fichajes" onClick={onOpenClockins} />
+              <QuickLink icon={<Umbrella className="w-3.5 h-3.5" />} label="Solicitudes" onClick={openRequests} />
               <QuickLink icon={<CalendarRange className="w-3.5 h-3.5" />} label="Horarios" onClick={onOpenSchedules} />
               <QuickLink icon={<Receipt className="w-3.5 h-3.5" />} label="Nóminas" onClick={onOpenPayroll} />
               <QuickLink icon={<FileText className="w-3.5 h-3.5" />} label="Equipo" onClick={onOpenTeam} />

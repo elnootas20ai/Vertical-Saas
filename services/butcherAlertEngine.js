@@ -25,6 +25,22 @@ import {
 import logger from './logger.js';
 import { canEmitPdvCashAlerts } from './pdvAlertUtils.js';
 import { shouldRunBackgroundEngine } from './engineIdleGate.js';
+import { getButcherOpsDbName } from './butcherStockPipeline.js';
+
+function mapOpsLotToBatchShape(lot) {
+  const estado = String(lot.estado || 'activo').toLowerCase();
+  const active = estado === 'activo' || estado === 'active';
+  return {
+    _id: lot._id,
+    productId: lot.productoId || '',
+    productName: lot.producto || '',
+    batchNumber: lot.codigoLote || lot._id,
+    expirationDate: lot.fechaCaducidad || '',
+    receptionWeightKg: Number(lot.kgRecibidos || 0),
+    currentWeightKg: Number(lot.kgDisponibles || 0),
+    status: active ? 'active' : (estado === 'caducado' ? 'expired' : 'consumed'),
+  };
+}
 
 const MAIN_INTERVAL_MS = 30 * 60_000;
 const SCALE_INTERVAL_MS = 5 * 60_000;
@@ -521,7 +537,7 @@ async function checkButcherOrders(ctx, orders, config) {
   const now = new Date();
 
   for (const o of orders) {
-    if (o.status === 'cancelled' || o.status === 'picked_up') continue;
+    if (o.status === 'cancelled' || o.status === 'picked_up' || o.status === 'delivered') continue;
 
     if (o.status === 'ready' && o.pickupDate && o.pickupDate < today) {
       const daysLate = daysBetween(o.pickupDate, now);
@@ -565,7 +581,7 @@ async function checkButcherOrders(ctx, orders, config) {
   }
 
   const todayReservations = orders.filter(
-    (o) => o.orderType === 'reservation' && o.pickupDate === today && !['cancelled', 'picked_up'].includes(o.status),
+    (o) => o.orderType === 'reservation' && o.pickupDate === today && !['cancelled', 'picked_up', 'delivered'].includes(o.status),
   );
   if (todayReservations.length > 0) {
     const a = await emit(ctx, {
@@ -598,10 +614,12 @@ async function runButcherAlertsForBusiness(business) {
 
   const bDb = getButcherDbName();
   const dDb = getDeliveryDbName();
+  const opsDb = getButcherOpsDbName();
 
-  const [products, batches, waste, scales, invCounts, tpvSessions, pointsOfSale, purchaseEntries, orders] = await Promise.all([
+  const [products, legacyBatches, opsLots, waste, scales, invCounts, tpvSessions, pointsOfSale, purchaseEntries, orders] = await Promise.all([
     fetchAllDocsOfType(bDb, 'butcher_product').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_batch').then((d) => d.filter((i) => i.user_id === ownerId)),
+    fetchAllDocsOfType(opsDb, 'bt_lote').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)).catch(() => []),
     fetchAllDocsOfType(bDb, 'butcher_waste').then((d) => d.filter((i) => i.user_id === ownerId)),
     fetchAllDocsOfType(bDb, 'butcher_scale_status').then((d) => d.filter((i) => i.business_id === businessId)),
     fetchAllDocsOfType(bDb, 'butcher_inventory_count').then((d) =>
@@ -612,6 +630,11 @@ async function runButcherAlertsForBusiness(business) {
     fetchAllDocsOfType(bDb, 'butcher_purchase_entry').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)),
     fetchAllDocsOfType(bDb, 'butcher_order').then((d) => d.filter((i) => i.user_id === ownerId && !i.deletedAt)),
   ]);
+
+  // Preferir bt_lote (FEFO); legacy butcher_batch solo si no hay ops lotes
+  const batches = opsLots.length > 0
+    ? opsLots.map(mapOpsLotToBatchShape)
+    : legacyBatches;
 
   if (products.length === 0 && batches.length === 0 && orders.length === 0) return 0;
 
@@ -625,6 +648,11 @@ async function runButcherAlertsForBusiness(business) {
   results.push(...await checkButcherInventory(ctx, invCounts, config));
   results.push(...await checkButcherPurchases(ctx, purchaseEntries, config));
   results.push(...await checkButcherOrders(ctx, orders, config));
+
+  try {
+    const { runButcherAutoReorderForUser } = await import('./butcherAutoReorder.js');
+    await runButcherAutoReorderForUser(fakeReq, ownerId);
+  } catch { /* non-blocking */ }
 
   return results.length;
 }
@@ -692,10 +720,12 @@ export async function getButcherAlertSummary(userId) {
   const today = now.toISOString().slice(0, 10);
   const bDb = getButcherDbName();
   const dDb = getDeliveryDbName();
+  const opsDb = getButcherOpsDbName();
 
-  const [products, batches, waste, scales, invCounts, tpvSessions, purchaseEntries] = await Promise.all([
+  const [products, legacyBatches, opsLots, waste, scales, invCounts, tpvSessions, purchaseEntries] = await Promise.all([
     fetchAllDocsOfType(bDb, 'butcher_product').then((d) => d.filter((i) => i.user_id === userId)),
     fetchAllDocsOfType(bDb, 'butcher_batch').then((d) => d.filter((i) => i.user_id === userId)),
+    fetchAllDocsOfType(opsDb, 'bt_lote').then((d) => d.filter((i) => i.user_id === userId && !i.deletedAt)).catch(() => []),
     fetchAllDocsOfType(bDb, 'butcher_waste').then((d) => d.filter((i) => i.user_id === userId)),
     fetchAllDocsOfType(bDb, 'butcher_scale_status'),
     fetchAllDocsOfType(bDb, 'butcher_inventory_count').then((d) =>
@@ -704,6 +734,10 @@ export async function getButcherAlertSummary(userId) {
     fetchAllDocsOfType(dDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === userId)),
     fetchAllDocsOfType(bDb, 'butcher_purchase_entry').then((d) => d.filter((i) => i.user_id === userId && !i.deletedAt)),
   ]);
+
+  const batches = opsLots.length > 0
+    ? opsLots.map(mapOpsLotToBatchShape)
+    : legacyBatches;
 
   const active = products.filter((p) => p.active);
   const outOfStock = active.filter((p) => p.minStockKg > 0 && Number(p.stockKg || 0) <= 0);

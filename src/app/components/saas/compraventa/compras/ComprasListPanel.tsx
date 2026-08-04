@@ -73,18 +73,18 @@ export function ComprasListPanel({
   const isEmptyStock = safePurchases.length === 0;
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-r border-gray-200/80 bg-[#fafafa] dark:border-gray-800 dark:bg-gray-950/60">
-      <div className="shrink-0 space-y-3 border-b border-gray-200/80 p-4 dark:border-gray-800">
+    <aside className="flex h-full min-h-0 flex-col border-r border-slate-200/80 bg-[var(--v-surface,#f5f7fb)] dark:border-slate-800 dark:bg-slate-950/60">
+      <div className="shrink-0 space-y-3 border-b border-slate-200/80 p-4 dark:border-slate-800">
         <div className="flex gap-2">
           <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar vehículo, proveedor…"
               disabled={isEmptyStock}
-              className="h-10 w-full rounded-xl border border-gray-200/80 bg-white pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-200/80 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              className="vsaas-input h-10 pl-10 pr-3 disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
           <button
@@ -93,15 +93,15 @@ export function ComprasListPanel({
             disabled={isEmptyStock}
             className={`relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               filtersOpen || activeFiltersCount > 0
-                ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                : 'border-gray-200/80 bg-white text-gray-500 dark:border-gray-700 dark:bg-gray-900'
+                ? 'border-[var(--v-blue,#2563eb)] bg-[var(--v-blue,#2563eb)] text-white'
+                : 'border-slate-200/80 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-900'
             }`}
             aria-label="Filtros"
             aria-expanded={filtersOpen}
           >
             <SlidersHorizontal className="h-4 w-4" />
             {activeFiltersCount > 0 ? (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold text-white">
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--v-rose,#e11d48)] px-1 text-[10px] font-bold text-white">
                 {activeFiltersCount}
               </span>
             ) : null}
@@ -114,20 +114,20 @@ export function ComprasListPanel({
               value={sortKey}
               onChange={(e) => setSortKey(e.target.value as CompraSortKey)}
               disabled={isEmptyStock}
-              className="h-8 appearance-none rounded-lg border border-gray-200/80 bg-white py-0 pl-2.5 pr-7 text-xs font-medium text-gray-700 focus:outline-none disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              className="h-8 appearance-none rounded-lg border border-slate-200/80 bg-white py-0 pl-2.5 pr-7 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
               aria-label="Ordenar"
             >
               {COMPRA_SORT_OPTIONS.map((opt) => (
                 <option key={opt.id} value={opt.id}>{opt.label}</option>
               ))}
             </select>
-            <ArrowUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+            <ArrowUpDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
           </div>
           {activeFiltersCount > 0 ? (
             <button
               type="button"
               onClick={() => { setStatusFilter('all'); setSupplierFilter('all'); }}
-              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+              className="vsaas-btn-urgent"
             >
               <X className="h-3 w-3" />
               Limpiar
@@ -136,15 +136,15 @@ export function ComprasListPanel({
         </div>
 
         {filtersOpen && !isEmptyStock ? (
-          <div className="grid gap-2 rounded-xl border border-gray-200/80 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
+          <div className="grid gap-2 rounded-xl border border-slate-200/80 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
             <label className="block">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Estado
               </span>
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as PurchaseStatus | 'all')}
-                className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-sm dark:border-gray-700 dark:bg-gray-950"
+                className="vsaas-input h-9"
               >
                 {PURCHASE_STATUS_FILTER_OPTIONS.map((opt) => (
                   <option key={opt.id} value={opt.id}>{opt.label}</option>
@@ -152,13 +152,13 @@ export function ComprasListPanel({
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                 Proveedor
               </span>
               <select
                 value={supplierFilter}
                 onChange={(e) => setSupplierFilter(e.target.value)}
-                className="h-9 w-full rounded-lg border border-gray-200 bg-white px-2.5 text-sm dark:border-gray-700 dark:bg-gray-950"
+                className="vsaas-input h-9"
               >
                 <option value="all">Todos</option>
                 {suppliers.map((name) => (
@@ -169,8 +169,8 @@ export function ComprasListPanel({
           </div>
         ) : null}
 
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          <span className="font-semibold text-gray-900 dark:text-gray-100">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          <span className="font-semibold text-slate-900 dark:text-slate-100">
             {filteredPurchases.length}
           </span>
           {' '}de {safePurchases.length} compras
@@ -179,19 +179,19 @@ export function ComprasListPanel({
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         {isEmptyStock ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-4 py-12 text-center dark:border-gray-700 dark:bg-gray-900">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
-              <ShoppingCart className="h-6 w-6 text-gray-400" strokeWidth={1.5} />
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 dark:bg-blue-950/40">
+              <ShoppingCart className="h-6 w-6 text-[var(--v-blue,#2563eb)]" strokeWidth={1.5} />
             </div>
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">No hay compras</p>
-            <p className="mt-1 max-w-[220px] text-xs text-gray-500">
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">No hay compras</p>
+            <p className="mt-1 max-w-[220px] text-xs text-slate-500">
               Registra la primera compra de vehículo para empezar.
             </p>
           </div>
         ) : filteredPurchases.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-4 py-12 text-center dark:border-gray-700 dark:bg-gray-900">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Sin resultados</p>
-            <p className="mt-1 text-xs text-gray-500">Prueba otro término o limpia los filtros.</p>
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-12 text-center dark:border-slate-700 dark:bg-slate-900">
+            <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Sin resultados</p>
+            <p className="mt-1 text-xs text-slate-500">Prueba otro término o limpia los filtros.</p>
           </div>
         ) : (
           filteredPurchases.map((purchase) => (

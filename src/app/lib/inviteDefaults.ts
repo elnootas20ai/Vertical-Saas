@@ -8,6 +8,7 @@ export const INVITE_LANDING_PAGE_DEFS = [
   { id: '/saas/vehicles', key: 'vehicles' },
   { id: '/saas/clients', key: 'clients' },
   { id: '/saas/sales', key: 'sales' },
+  { id: '/saas/vertical/compraventa/ventas', key: 'sales-compraventa' },
   { id: '/saas/workshop', key: 'workshop' },
   { id: '/saas/documents', key: 'documents' },
   { id: '/saas/calendar', key: 'calendar' },
@@ -42,6 +43,17 @@ const RETAIL_LANDING_IDS = new Set<InviteLandingPageId>([
   '/saas/team',
 ]);
 
+const COMPRAVENTA_LANDING_IDS = new Set<InviteLandingPageId>([
+  WORKER_DEFAULT_LANDING_PATH,
+  '/saas/vehicles',
+  '/saas/clients',
+  '/saas/vertical/compraventa/ventas',
+  '/saas/documents',
+  '/saas/calendar',
+  '/saas/payroll',
+  '/saas/team',
+]);
+
 const RESTAURANT_LANDING_IDS = new Set<InviteLandingPageId>([
   WORKER_DEFAULT_LANDING_PATH,
   '/saas/cocina',
@@ -69,7 +81,10 @@ export function getInviteLandingPagesForBusiness(
   if (isRestaurantBusinessType(bt)) {
     return INVITE_LANDING_PAGE_DEFS.filter((p) => RESTAURANT_LANDING_IDS.has(p.id));
   }
-  if (bt === 'carDealership' || bt === 'workshop' || bt === 'spareParts' || bt === 'scrapyard') {
+  if (bt === 'carDealership') {
+    return INVITE_LANDING_PAGE_DEFS.filter((p) => COMPRAVENTA_LANDING_IDS.has(p.id));
+  }
+  if (bt === 'workshop' || bt === 'spareParts' || bt === 'scrapyard') {
     return INVITE_LANDING_PAGE_DEFS.filter((p) => RETAIL_LANDING_IDS.has(p.id));
   }
   return INVITE_LANDING_PAGE_DEFS.filter((p) => GENERIC_LANDING_IDS.has(p.id));

@@ -64,6 +64,14 @@ export interface OcrResult {
   vehicleBrand?: string | null;
   vehicleModel?: string | null;
   vehicleYear?: number | null;
+  version?: string | null;
+  vehicleColor?: string | null;
+  fuelType?: string | null;
+  transmission?: string | null;
+  power?: number | string | null;
+  mileage?: number | string | null;
+  doors?: number | string | null;
+  bodyType?: string | null;
   ownerName?: string | null;
   ownerNif?: string | null;
   buyerName?: string | null;

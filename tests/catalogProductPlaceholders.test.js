@@ -13,6 +13,15 @@ describe('catalogProductPlaceholders', () => {
     );
   });
 
+  it('asigna café, bocata y pizza por nombre/categoría', () => {
+    expect(resolveCatalogProductPlaceholderKind({ name: 'Café con leche', category: 'Cafés' })).toBe('cafe');
+    expect(resolveCatalogProductPlaceholderUrl({ name: 'Café con leche', category: 'Cafés' })).toBe(
+      '/catalog-placeholders/photos/cafe.webp',
+    );
+    expect(resolveCatalogProductPlaceholderKind({ name: 'Bocata de jamón', category: 'Bocadillos' })).toBe('tapas');
+    expect(resolveCatalogProductPlaceholderKind({ name: 'Margarita', category: 'Pizzas' })).toBe('pizza');
+  });
+
   it('asigna pizza, combo y complemento', () => {
     expect(resolveCatalogProductPlaceholderKind({ name: 'Margarita', category: 'Pizzas' })).toBe('pizza');
     expect(resolveCatalogProductPlaceholderUrl({ name: 'Margarita', category: 'Pizzas' })).toBe(

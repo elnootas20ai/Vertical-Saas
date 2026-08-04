@@ -127,10 +127,14 @@ export async function markNotificationRead(req, res) {
       return res.status(404).json({ ok: false, error: 'Notificación no encontrada' });
     }
 
+    const now = new Date().toISOString();
+    const nextRead = Boolean(read);
     const savedNotification = await saveNotification(req, {
       ...notification,
-      read: Boolean(read),
-      updatedAt: new Date().toISOString(),
+      read: nextRead,
+      status: nextRead ? 'seen' : 'new',
+      seenAt: nextRead ? (notification.seenAt || now) : null,
+      updatedAt: now,
     });
 
     return res.json({
@@ -158,14 +162,21 @@ export async function markAllNotificationsRead(req, res) {
     }
 
     const notifications = await listNotificationsByUser(req, userId);
-    const unreadNotifications = notifications.filter((notification) => !notification.read);
+    // Incluye docs con read=true pero status aún 'new' (bug antiguo de la campanita).
+    const unreadNotifications = notifications.filter((notification) => {
+      const status = notification.status || (notification.read ? 'seen' : 'new');
+      return status === 'new' || !notification.read;
+    });
     const updatedNotifications = [];
+    const now = new Date().toISOString();
 
     for (const notification of unreadNotifications) {
       const savedNotification = await saveNotification(req, {
         ...notification,
         read: true,
-        updatedAt: new Date().toISOString(),
+        status: 'seen',
+        seenAt: notification.seenAt || now,
+        updatedAt: now,
       });
       updatedNotifications.push(savedNotification);
     }

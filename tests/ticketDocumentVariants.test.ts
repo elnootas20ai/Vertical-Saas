@@ -61,11 +61,14 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toMatch(/Metodo: Efectivo \(1\.50EUR\)/);
   });
 
-  it('cocina: productos + mods + notas, sin importes ni datos de cliente', () => {
+  it('cocina: nombre + calle arriba, luego pedido/tel/productos + mods + notas, sin importes', () => {
     const doc = buildTicketDocument({ ...baseOptions(), variant: 'kitchen' });
     expect(doc.title).toBe('COMANDA');
     expect(doc.total).toBe(0);
     expect(doc.base).toBe(0);
+    expect(doc.customerName).toBe('María García');
+    expect(doc.customerPhone).toBe('666123456');
+    expect(doc.customerAddress).toBe('Av. Principal 12, 3º');
     expect(doc.lines).toHaveLength(2);
     expect(doc.lines[0].added).toEqual(['Extra queso']);
     expect(doc.lines[0].removed).toEqual(['cebolla']);
@@ -73,9 +76,17 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(doc.orderNotes).toContain('Sin timbre');
 
     const text = decodeEscpos(encodeTicketEscpos(doc));
-    expect(text).toContain('COMANDA');
-    expect(text).toContain('Pedido: #1042');
+    // Nombre y calle los primeros datos útiles (antes de COMANDA / Pedido).
+    const nameIdx = text.indexOf('Maria Garcia');
+    const addrIdx = text.indexOf('Av. Principal 12');
+    const titleIdx = text.indexOf('COMANDA');
+    const orderIdx = text.indexOf('Pedido: #1042');
+    expect(nameIdx).toBeGreaterThanOrEqual(0);
+    expect(addrIdx).toBeGreaterThan(nameIdx);
+    expect(titleIdx).toBeGreaterThan(addrIdx);
+    expect(orderIdx).toBeGreaterThan(titleIdx);
     expect(text).toContain('Envio a domicilio');
+    expect(text).toContain('Tel: 666123456');
     expect(text).toContain('Pizza Margarita');
     expect(text).toContain('Extra queso');
     expect(text).toContain('DE MAS');
@@ -105,9 +116,6 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(sawRed).toBe(true);
     expect(text).not.toMatch(/TOTAL/);
     expect(text).not.toMatch(/Base imponible/);
-    expect(text).not.toMatch(/Cliente:/);
-    expect(text).not.toMatch(/666123456/);
-    expect(text).not.toMatch(/Dir:/);
     expect(text).not.toMatch(/Atendido:/);
     expect(text).not.toMatch(/NIF\/CIF/);
     expect(text).not.toMatch(/Tienda:/);

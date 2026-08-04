@@ -20,13 +20,21 @@ test('cada regla del catálogo tiene plan basic, normal o pro', () => {
   assert.ok(counts.pro >= 50, `pro: ${counts.pro}`);
 });
 
-test('reglas básicas delivery son mínimas', () => {
-  for (const id of ['lead_new', 'sale_cancelled', 'worker_no_clockin', 'stock_low']) {
+test('reglas básicas delivery son el pack compacto', () => {
+  for (const id of [
+    'worker_no_clockin',
+    'document_missing_required',
+    'delivery_register_not_opened',
+    'delivery_cash_pending_close',
+    'delivery_delayed_order',
+    'delivery_unpaid_order',
+    'delivery_order_cancelled',
+  ]) {
     assert.ok(BASIC_ALERT_RULE_IDS.has(id));
     assert.equal(resolveAlertPlanTier(id, 'delivery'), 'basic');
   }
-  assert.equal(resolveAlertPlanTier('delivery_delayed_order', 'delivery'), 'normal');
-  assert.equal(resolveAlertPlanTier('delivery_cash_pending_close', 'pdvs'), 'normal');
+  assert.equal(resolveAlertPlanTier('delivery_order_very_delayed', 'delivery'), 'normal');
+  assert.equal(resolveAlertPlanTier('delivery_cash_discrepancy', 'pdvs'), 'normal');
 });
 
 test('limpieza y verticales son Pro', () => {
@@ -35,8 +43,8 @@ test('limpieza y verticales son Pro', () => {
   assert.equal(resolveAlertPlanTier('user_login_new', 'sistema'), 'pro');
 });
 
-test('delivery operativo diario es Normal (plan recomendado)', () => {
-  assert.equal(resolveAlertPlanTier('delivery_delayed_order', 'delivery'), 'normal');
+test('delivery operativo diario: básico pack + normal extras', () => {
+  assert.equal(resolveAlertPlanTier('delivery_delayed_order', 'delivery'), 'basic');
   assert.equal(resolveAlertPlanTier('delivery_unassigned_order', 'delivery'), 'normal');
   assert.equal(resolveAlertPlanTier('register_high_return', 'pdvs'), 'normal');
   assert.equal(resolveAlertPlanTier('payment_overdue', 'finanzas'), 'normal');
@@ -56,7 +64,7 @@ test('delivery: básico mínimo, normal recomendado, pro el más grande', () => 
     if (!DELIVERY_DEPTS.has(rule.department)) continue;
     counts[resolveAlertPlanTier(rule.id, rule.department)]++;
   }
-  assert.ok(counts.basic <= 10, `basic=${counts.basic}`);
+  assert.ok(counts.basic <= 15, `basic=${counts.basic}`);
   assert.ok(counts.normal > counts.basic, `normal=${counts.normal}`);
   assert.ok(counts.pro > counts.normal, `pro=${counts.pro}`);
 });

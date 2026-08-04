@@ -30,9 +30,9 @@ set_kv() {
   fi
 }
 
-set_kv EMAIL_REPLY_TO hola@vertialapp.com
-set_kv PUBLIC_SUPPORT_EMAIL hola@vertialapp.com
-set_kv DEFAULT_CONTACT_EMAIL hola@vertialapp.com
+set_kv EMAIL_REPLY_TO vertial.noreply@gmail.com
+set_kv PUBLIC_SUPPORT_EMAIL vertial.noreply@gmail.com
+set_kv DEFAULT_CONTACT_EMAIL vertial.noreply@gmail.com
 set_kv MAX_LOGIN_ATTEMPTS 12
 set_kv LOCK_DURATION_MINUTES 2
 set_kv LOGIN_RATE_LIMIT_MAX 40

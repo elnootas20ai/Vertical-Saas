@@ -26,8 +26,7 @@ import {
   resolvePayPeriodsPerYear,
 } from '../../lib/laborCost';
 import { listShiftTemplates, type ShiftTemplate } from '../../lib/schedulesApi';
-import { HrGestorChecklist } from './HrGestorChecklist';
-
+import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
 // --- Types ---
 
 interface InviteResult {
@@ -488,8 +487,10 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   const { currentBusiness: ctxBusiness } = useBusiness();
   const roleOptions = useMemo(() => {
     if (roles?.length) return roles;
-    return getFunctionRolesForBusiness(ctxBusiness?.businessType);
-  }, [roles, ctxBusiness?.businessType]);
+    return getFunctionRolesForBusiness(ctxBusiness?.businessType, {
+      ownDeliveryEnabled: Boolean(ctxBusiness?.ownDeliveryEnabled),
+    });
+  }, [roles, ctxBusiness?.businessType, ctxBusiness?.ownDeliveryEnabled]);
 
   const businessList = businesses?.length ? businesses : ctxBusiness ? [ctxBusiness] : [];
   const hasMultipleBusinesses = businessList.length > 1;
@@ -669,6 +670,23 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     const salaryDigits = salaryDigitsFromDisplay(grossSalary);
     if (!salaryDigits) e.grossSalary = 'Indica el bruto mensual del contrato';
     else if (Number(salaryDigits) < 200) e.grossSalary = 'El importe parece demasiado bajo';
+    // Tienda obligatoria si hay locales: el trabajador la necesita para fichar y TPV.
+    const hasStoreOptions =
+      !workCentersLoading
+      && (
+        loadedWorkCenterOptions.length > 0
+        || (workCenters || []).some((wc) => wc.active !== false)
+      );
+    if (hasStoreOptions && !String(workCenterId || '').trim()) {
+      e.workCenterId = 'Selecciona la tienda o local del trabajador';
+    }
+    // Horario obligatorio: se aplica al aceptar la invitación.
+    if (!templatesLoading && shiftTemplates.length === 0) {
+      e.scheduleTemplateId =
+        'Crea una plantilla de horario en Equipo → Horarios y vacaciones antes de invitar.';
+    } else if (!templatesLoading && !String(scheduleTemplateId || '').trim()) {
+      e.scheduleTemplateId = 'Selecciona la plantilla de horario del trabajador';
+    }
     return e;
   }
 
@@ -705,7 +723,13 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
     const errs = validateStep2();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
-      setTouched({ contractType: true, role: true, grossSalary: true });
+      setTouched({
+        contractType: true,
+        role: true,
+        grossSalary: true,
+        workCenterId: true,
+        scheduleTemplateId: true,
+      });
       return;
     }
     if (isSubmitting) return;
@@ -852,10 +876,6 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     {t('team.inviteModal.successPending', 'Pendiente de aceptar')}
                   </span>
                 </div>
-              </div>
-
-              <div className="mb-3 w-full text-left">
-                <HrGestorChecklist mode="invite" compact />
               </div>
 
               <div className="w-full flex items-start gap-2.5 bg-violet-50 dark:bg-violet-900/20 border border-violet-100 dark:border-violet-800 rounded-2xl px-4 py-3 mb-5">
@@ -1035,8 +1055,6 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                 </>
               ) : (
                 <>
-                  <HrGestorChecklist mode="invite" compact className="mb-1" />
-
                   {/* Funcion del trabajador (primera linea) */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
@@ -1065,6 +1083,29 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                       selectRolePlaceholder={isRestaurantInvite ? 'Selecciona función (sala, cocina…)' : 'Selecciona función'}
                       businessType={inviteBusinessType}
                     />
+                    {role && (() => {
+                      const bundle = getRoleTaskBundle(role, inviteBusinessType);
+                      if (!bundle?.tasks?.length) return null;
+                      return (
+                        <div className="mt-2 rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2.5 dark:border-indigo-900 dark:bg-indigo-950/30">
+                          <p className="text-[11px] font-semibold text-indigo-700 dark:text-indigo-300">
+                            Al aceptar, verá en Mi trabajo:
+                          </p>
+                          <ul className="mt-1 space-y-0.5">
+                            {bundle.tasks.slice(0, 4).map((task) => (
+                              <li key={task.key} className="text-[11px] text-indigo-900/80 dark:text-indigo-100/80">
+                                · {task.title}
+                              </li>
+                            ))}
+                            {bundle.tasks.length > 4 ? (
+                              <li className="text-[11px] text-indigo-600/70 dark:text-indigo-300/70">
+                                · +{bundle.tasks.length - 4} más
+                              </li>
+                            ) : null}
+                          </ul>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Cargo / posición RRHH */}
@@ -1227,7 +1268,7 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                   {/* Centro de trabajo / local */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      {hrCopy.inviteWorkCenterLabel}
+                      {hrCopy.inviteWorkCenterLabel} <span className="text-red-500">*</span>
                     </label>
                     {workCentersLoading ? (
                       <div className="flex items-center gap-2.5 rounded-xl border-2 border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
@@ -1235,13 +1276,22 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         <p className="text-xs text-gray-500 dark:text-gray-400">{hrCopy.inviteWorkCentersLoading}</p>
                       </div>
                     ) : wcOptions.length > 0 ? (
-                      <SelectDropdown
-                        value={workCenterId}
-                        onChange={setWorkCenterId}
-                        options={wcOptions}
-                        placeholder={hrCopy.inviteWorkCenterPlaceholder}
-                        icon={<MapPin className="w-4 h-4" />}
-                      />
+                      <>
+                        <SelectDropdown
+                          value={workCenterId}
+                          onChange={(id) => {
+                            setWorkCenterId(id);
+                            clearFieldError('workCenterId');
+                          }}
+                          options={wcOptions}
+                          placeholder={hrCopy.inviteWorkCenterPlaceholder}
+                          icon={<MapPin className="w-4 h-4" />}
+                          error={errors.workCenterId}
+                        />
+                        {errors.workCenterId ? (
+                          <p className="mt-1 text-xs text-red-500">{errors.workCenterId}</p>
+                        ) : null}
+                      </>
                     ) : (
                       <div className="flex items-center gap-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
                         <MapPin className="h-4 w-4 shrink-0 text-gray-300" />
@@ -1252,13 +1302,13 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                     )}
                   </div>
 
-                  {/* Plantilla de horario */}
+                  {/* Plantilla de horario (obligatoria) */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                      Plantilla de horario
+                      Plantilla de horario <span className="text-red-500">*</span>
                     </label>
                     <p className="mb-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                      Al aceptar la invitación se le asignará este horario automáticamente (Control y semana).
+                      Obligatorio. Al aceptar la invitación se le asignará este horario automáticamente (Control y semana).
                     </p>
                     {templatesLoading ? (
                       <div className="flex items-center gap-2.5 rounded-xl border-2 border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
@@ -1266,18 +1316,28 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                         <p className="text-xs text-gray-500 dark:text-gray-400">Cargando plantillas…</p>
                       </div>
                     ) : shiftTemplates.length > 0 ? (
-                      <SelectDropdown
-                        value={scheduleTemplateId}
-                        onChange={setScheduleTemplateId}
-                        options={templateOptions}
-                        placeholder="Sin plantilla (asignar después)"
-                        icon={<Clock className="w-4 h-4" />}
-                      />
+                      <>
+                        <SelectDropdown
+                          value={scheduleTemplateId}
+                          onChange={(id) => {
+                            setScheduleTemplateId(id);
+                            clearFieldError('scheduleTemplateId');
+                          }}
+                          options={templateOptions}
+                          placeholder="Selecciona plantilla de horario"
+                          icon={<Clock className="w-4 h-4" />}
+                          error={errors.scheduleTemplateId}
+                        />
+                        {errors.scheduleTemplateId ? (
+                          <p className="mt-1 text-xs text-red-500">{errors.scheduleTemplateId}</p>
+                        ) : null}
+                      </>
                     ) : (
-                      <div className="flex items-start gap-2.5 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-3.5 py-2.5 dark:border-gray-700 dark:bg-gray-800/50">
-                        <Clock className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
-                        <p className="text-xs text-gray-400 dark:text-gray-500">
-                          No hay plantillas. Créalas en Equipo → Horarios y vacaciones → Configuración.
+                      <div className="flex items-start gap-2.5 rounded-xl border-2 border-dashed border-red-200 bg-red-50 px-3.5 py-2.5 dark:border-red-800 dark:bg-red-900/20">
+                        <Clock className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+                        <p className="text-xs text-red-600 dark:text-red-300">
+                          {errors.scheduleTemplateId
+                            || 'No hay plantillas. Créalas en Equipo → Horarios y vacaciones → Configuración antes de invitar.'}
                         </p>
                       </div>
                     )}

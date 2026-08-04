@@ -4,13 +4,17 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ArrowRight, Loader2, Store } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
+import { TpvRegisterGate } from '../../components/saas/TpvRegisterGate';
+import { TpvOfflineBanner } from '../../components/saas/TpvOfflineBanner';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { TpvChromeScope } from '../../context/TpvChromeContext';
 import { isStrictDeliveryBusinessType } from '../../lib/deliveryOpsTypes';
 import { coerceSelectedPdvId } from '../../lib/deliveryOpsPdvSelection';
 import {
@@ -19,14 +23,17 @@ import {
   type SalaQuickSetupRoomDraft,
 } from '../../lib/salaQuickSetup';
 import {
+  getDiningOrderRequest,
   getFloorConfigRequest,
   listDiningTablesRequest,
+  type DiningOrder,
   type DiningTable,
 } from '../../lib/salaApi';
-import { isSalaQuickSetupComplete } from '../../lib/salaQuickSetup';
+import { loadOpenDiningOrderForTable } from '../../lib/restaurantDiningTpv';
 import type { SalaRoom, SalaRoomType } from '../../lib/salaStudioTypes';
 import { RestaurantSalaQuickSetup } from './RestaurantSalaQuickSetup';
 import { RestaurantSalaLiveView } from './RestaurantSalaLiveView';
+import { RestaurantTpvTableAccount } from './RestaurantTpvTableAccount';
 import { applyRestaurantSalaQuickSetup } from './applyRestaurantSalaQuickSetup';
 import { clearRestaurantClientCaches } from './clearRestaurantClientCaches';
 import { clearOnboardingDraft } from './onboarding/draftStorage';
@@ -97,6 +104,9 @@ export function RestaurantSalaPage() {
   const [mapBusy, setMapBusy] = useState(false);
   const [rooms, setRooms] = useState<SalaRoom[]>([]);
   const [tables, setTables] = useState<DiningTable[]>([]);
+  const [accountTable, setAccountTable] = useState<DiningTable | null>(null);
+  const [accountOrder, setAccountOrder] = useState<DiningOrder | null>(null);
+  const [accountLoading, setAccountLoading] = useState(false);
   const bootRef = useRef('');
 
   // Solo refrescar tiendas: no vaciar caché de retail al abrir Sala
@@ -198,12 +208,11 @@ export function RestaurantSalaPage() {
 
       const tablesHere = tablesForBusiness(listed || [], businessId);
       const nextRooms = Array.isArray(config?.rooms) ? config.rooms : [];
-      const ready =
-        isSalaQuickSetupComplete(config)
-        || tablesHere.length > 0
-        || nextRooms.length > 0;
+      // Solo mapa real (mesas o zonas). El flag «setup complete» solo no basta:
+      // si no hay mapa, hay que mostrar el asistente (alta de bar/restaurante).
+      const hasMap = tablesHere.length > 0 || nextRooms.length > 0;
 
-      if (ready) {
+      if (hasMap) {
         enterLive(nextRooms, tablesHere);
         return;
       }
@@ -423,6 +432,63 @@ export function RestaurantSalaPage() {
     }
   };
 
+  const closeTableAccount = useCallback(() => {
+    setAccountTable(null);
+    setAccountOrder(null);
+    setAccountLoading(false);
+    if (!userId || !businessId) return;
+    void listDiningTablesRequest(userId)
+      .then((listed) => {
+        setTables(tablesForBusiness(listed || [], businessId));
+      })
+      .catch(() => undefined);
+  }, [userId, businessId]);
+
+  const handleOpenTableAccount = useCallback(
+    async (table: DiningTable, orderId?: string) => {
+      const tableId = String(table._id || table.id || '').trim();
+      if (!tableId || !userId) {
+        toast.error('No se puede abrir el pedido de la mesa');
+        return;
+      }
+      const pdvId = parentPdvId || activeSalesPointId || '';
+      if (!pdvId) {
+        toast.error('Falta el local de esta sala. Revisa Ajustes → Tienda.');
+        return;
+      }
+      if (activeSalesPointId !== pdvId) {
+        setActiveSalesPoint(pdvId);
+      }
+
+      setAccountTable(table);
+      setAccountOrder(null);
+      setAccountLoading(true);
+      try {
+        let order: DiningOrder | null = null;
+        const wantedId = String(orderId || '').trim();
+        if (wantedId) {
+          try {
+            order = await getDiningOrderRequest(userId, wantedId);
+          } catch {
+            order = null;
+          }
+        }
+        if (!order) {
+          order = await loadOpenDiningOrderForTable(userId, tableId);
+        }
+        setAccountOrder(order);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'No se pudo cargar el pedido');
+        setAccountTable(null);
+      } finally {
+        setAccountLoading(false);
+      }
+    },
+    [userId, parentPdvId, activeSalesPointId, setActiveSalesPoint],
+  );
+
+  const accountPdvId = parentPdvId || activeSalesPointId || undefined;
+
   if (view === 'loading' || storeLoading) {
     return (
       <Layout title="Sala" noPadding>
@@ -514,8 +580,58 @@ export function RestaurantSalaPage() {
             bootRef.current = '';
             void runFreshStart({ clearDraft: true });
           }}
+          onOpenTableAccount={(table, orderId) => {
+            void handleOpenTableAccount(table, orderId);
+          }}
         />
       </div>
+
+      {accountTable
+        && createPortal(
+          <div className="fixed inset-0 z-[90] flex min-h-0 flex-col overflow-hidden bg-stone-100 dark:bg-stone-950">
+            <TpvChromeScope insetBottomBar bottomBar={null}>
+              <TpvOfflineBanner />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <TpvRegisterGate
+                  fillParent
+                  initialManagerPdvId={accountPdvId}
+                  onDismissWithoutSession={closeTableAccount}
+                >
+                  {accountLoading ? (
+                    <div className="flex h-full min-h-0 flex-col items-center justify-center gap-3">
+                      <Loader2 className="h-8 w-8 animate-spin text-stone-400" />
+                      <p className="text-sm text-stone-500">Abriendo pedido de mesa…</p>
+                    </div>
+                  ) : (
+                    <RestaurantTpvTableAccount
+                      userId={userId}
+                      table={accountTable}
+                      order={accountOrder}
+                      tabletMode={false}
+                      onBack={closeTableAccount}
+                      onOrderChange={setAccountOrder}
+                      onTableChange={(nextTable, order) => {
+                        if ('_id' in nextTable || 'type' in nextTable) {
+                          const t = nextTable as DiningTable;
+                          setAccountTable(t);
+                          setTables((prev) => {
+                            const id = String(t._id || t.id || '');
+                            if (!id) return prev;
+                            return prev.map((row) =>
+                              String(row._id || row.id) === id ? { ...row, ...t } : row,
+                            );
+                          });
+                        }
+                        setAccountOrder(order);
+                      }}
+                    />
+                  )}
+                </TpvRegisterGate>
+              </div>
+            </TpvChromeScope>
+          </div>,
+          document.body,
+        )}
     </Layout>
   );
 }

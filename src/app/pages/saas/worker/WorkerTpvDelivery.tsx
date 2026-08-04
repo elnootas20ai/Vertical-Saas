@@ -103,6 +103,7 @@ import {
 } from 'lucide-react';
 import { enqueueTpvOfflineItem, isBrowserOnline } from '../../../lib/tpvTabletOffline';
 import { flushTpvOfflineQueue } from '../../../lib/tpvOfflineSync';
+import { ensureLocalCajaSaleForOrder } from '../../../lib/tpvLocalCajaSale';
 import { prefetchTpvCatalog } from '../../../lib/tpvCatalogCache';
 import { resolveRetailOpsWriteBusinessId, resolveTpvRegisterScope } from '../../../lib/tpvRegisterScope';
 import { useTpvIncomingOrderSounds } from '../../../hooks/useTpvIncomingOrderSounds';
@@ -1590,9 +1591,11 @@ export function WorkerTpvDelivery({
     }
 
     if (!beginAdvancing(order._id)) return;
+    let extras: Partial<DeliveryOrder> = {};
+    let payload: DeliveryOrder | null = null;
     try {
       const now = new Date().toISOString();
-      const extras: Partial<DeliveryOrder> = {};
+      extras = {};
       if (next === 'en_reparto') {
         extras.assemblyCompletedAt = now;
         extras.departedAt = now;
@@ -1630,7 +1633,7 @@ export function WorkerTpvDelivery({
           extras.changeGiven = cash.changeGiven;
         }
       }
-      const payload: DeliveryOrder = {
+      payload = {
         ...order,
         ...extras,
         status: next,
@@ -1675,23 +1678,32 @@ export function WorkerTpvDelivery({
         }
       }
 
+      if (!payload) return;
+
+      // Airbag caja: cobro → sesión local sí o sí (antes del servidor).
+      if (next === 'entregado' && extras.paymentCollected && extras.paidAmount) {
+        await ensureLocalCajaSaleForOrder(register, payload, {
+          paymentMethod: resolvedPayment,
+          amount: Number(extras.paidAmount),
+          registeredBy: user?.fullName || 'Tablet',
+        });
+      }
+
       if (!isBrowserOnline()) {
         enqueueTpvOfflineItem('order_update', { userId, order: payload });
-        setOrders(prev => prev.map(o => o._id === payload._id ? payload : o));
+        setOrders((prev) => prev.map((o) => (o._id === payload!._id ? payload! : o)));
         setDeliveryCompleteOrder(null);
         if (next === 'entregado') {
           setShowDelivered(true);
           setSelectedOrder(null);
-          toast.info(`Sin conexión — entrega guardada en cola (#${order.orderNumber})`);
-        } else {
-          if (selectedOrder?._id === payload._id) setSelectedOrder(payload);
-          toast.info(`Sin conexión — cambio guardado en cola (#${order.orderNumber})`);
+        } else if (selectedOrder?._id === payload._id) {
+          setSelectedOrder(payload);
         }
         return;
       }
 
       // UI al instante (montaje→reparto no espera al servidor); si falla, se revierte.
-      setOrders((prev) => prev.map((o) => (o._id === payload._id ? payload : o)));
+      setOrders((prev) => prev.map((o) => (o._id === payload!._id ? payload! : o)));
       setDeliveryCompleteOrder(null);
       if (next === 'entregado') {
         setShowDelivered(true);
@@ -1738,10 +1750,19 @@ export function WorkerTpvDelivery({
         toast.success(`Pedido #${order.orderNumber} → ${label}`);
       }
     } catch (err) {
-      // Revertir UI optimista si el servidor rechazó el avance.
-      setOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
-      if (selectedOrder?._id === order._id) setSelectedOrder(order);
-      toast.error(err instanceof Error ? err.message : 'Error al avanzar pedido');
+      // Si el servidor falla tras cobro: pedido queda en cola local (airbag), no revertir cobro en caja.
+      const paidLocally = Boolean(payload && next === 'entregado' && extras.paymentCollected);
+      if (paidLocally && payload) {
+        enqueueTpvOfflineItem('order_update', { userId, order: payload });
+        setOrders((prev) => prev.map((o) => (o._id === payload!._id ? payload! : o)));
+        setDeliveryCompleteOrder(null);
+        setShowDelivered(true);
+        setSelectedOrder(null);
+      } else {
+        setOrders((prev) => prev.map((o) => (o._id === order._id ? order : o)));
+        if (selectedOrder?._id === order._id) setSelectedOrder(order);
+        toast.error(err instanceof Error ? err.message : 'Error al avanzar pedido');
+      }
     } finally {
       endAdvancing(order._id);
     }
@@ -1758,6 +1779,7 @@ export function WorkerTpvDelivery({
     endAdvancing,
     businessId,
     businesses,
+    register,
   ]);
 
   const markOrderPaid = useCallback(
@@ -1772,8 +1794,37 @@ export function WorkerTpvDelivery({
         return;
       }
       setMarkingPaidId(order._id);
+      const now = new Date().toISOString();
+      const amount = resolveDeliveryOrderChargeTotal(order);
+      const localPaid: DeliveryOrder = {
+        ...order,
+        paymentMethod: method,
+        paymentCollected: true,
+        paymentCollectedAt: now,
+        paymentCollectedBy: user?.user_id || user?.id || user?.fullName || 'Tablet',
+        paymentStatus: 'paid',
+        paidAmount: amount,
+        paidAt: order.paidAt || now,
+        ...(method === 'efectivo' && cash
+          ? { amountReceived: cash.amountReceived, changeGiven: cash.changeGiven }
+          : {}),
+      };
       try {
-        const amount = resolveDeliveryOrderChargeTotal(order);
+        await ensureLocalCajaSaleForOrder(register, localPaid, {
+          paymentMethod: method,
+          amount,
+          registeredBy: user?.fullName || 'Tablet',
+        });
+
+        if (!isBrowserOnline()) {
+          enqueueTpvOfflineItem('order_update', { userId, order: localPaid });
+          setOrders((prev) => prev.map((o) => (o._id === localPaid._id ? localPaid : o)));
+          setSelectedOrder((prev) => (prev?._id === localPaid._id ? localPaid : prev));
+          setDeliveryCompleteOrder(null);
+          toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
+          return;
+        }
+
         const updated = await registerPaymentRequest(
           userId,
           order._id,
@@ -1786,7 +1837,7 @@ export function WorkerTpvDelivery({
         const merged: DeliveryOrder = {
           ...updated,
           paymentCollected: true,
-          paymentCollectedAt: updated.paymentCollectedAt || new Date().toISOString(),
+          paymentCollectedAt: updated.paymentCollectedAt || now,
           paymentCollectedBy:
             updated.paymentCollectedBy
             || user?.user_id
@@ -1803,12 +1854,16 @@ export function WorkerTpvDelivery({
         setDeliveryCompleteOrder(null);
         toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'No se pudo marcar como pagado');
+        enqueueTpvOfflineItem('order_update', { userId, order: localPaid });
+        setOrders((prev) => prev.map((o) => (o._id === localPaid._id ? localPaid : o)));
+        setSelectedOrder((prev) => (prev?._id === localPaid._id ? localPaid : prev));
+        setDeliveryCompleteOrder(null);
+        toast.success(`Pedido #${order.orderNumber} pagado · ${PAYMENT_LABELS[method]}`);
       } finally {
         setMarkingPaidId(null);
       }
     },
-    [userId, user?.user_id, user?.id, user?.fullName],
+    [userId, user?.user_id, user?.id, user?.fullName, register],
   );
 
   const requestMarkPaid = useCallback((order: DeliveryOrder) => {

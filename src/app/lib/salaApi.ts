@@ -186,6 +186,8 @@ export interface DiningOrderItem {
   status: ComandaItemStatus;
   cancelledReason: string;
   cancelledBy: string;
+  /** Marcas del producto de carta (misma lógica que delivery). */
+  brandIds?: string[];
 }
 
 export interface DiningComanda {
@@ -250,6 +252,10 @@ export interface DiningOrder {
   clientName: string;
   invoiceGenerated: boolean;
   financialMovementId: string;
+  verifactuRecordId?: string;
+  verifactuFullNumber?: string;
+  verifactuQrUrl?: string;
+  verifactuHuella?: string;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -368,6 +374,7 @@ export async function saveFloorConfigRequest(userId: string, config: Partial<Din
 export interface DiningOrderFilters {
   status?: string;
   tableId?: string;
+  clientId?: string;
   dateFrom?: string;
   dateTo?: string;
 }
@@ -377,6 +384,7 @@ export async function listDiningOrdersRequest(userId: string, filters?: DiningOr
   const params = new URLSearchParams();
   if (filters?.status) params.set('status', filters.status);
   if (filters?.tableId) params.set('tableId', filters.tableId);
+  if (filters?.clientId) params.set('clientId', filters.clientId);
   if (filters?.dateFrom) params.set('dateFrom', filters.dateFrom);
   if (filters?.dateTo) params.set('dateTo', filters.dateTo);
   const qs = params.toString();
@@ -399,11 +407,19 @@ export async function createDiningOrderRequest(userId: string, order: Partial<Di
   return data.order;
 }
 
-export async function updateDiningOrderRequest(userId: string, orderId: string, order: Partial<DiningOrder>) {
+export async function updateDiningOrderRequest(
+  userId: string,
+  orderId: string,
+  order: Partial<DiningOrder>,
+  extras?: { loyaltyRedeem?: { points: number; clientId?: string; reason?: string } },
+) {
   const uid = normalizeUserId(userId);
   const data = await request<{ order: DiningOrder }>(`/api/sala/orders/${uid}/${orderId}`, {
     method: 'PUT',
-    body: JSON.stringify({ order }),
+    body: JSON.stringify({
+      order,
+      ...(extras?.loyaltyRedeem ? { loyaltyRedeem: extras.loyaltyRedeem } : {}),
+    }),
   });
   return data.order;
 }
@@ -467,11 +483,37 @@ export async function updateComandaStatusRequest(
 
 // ─── Payments ────────────────────────────────────────────────────────────────
 
-export async function payDiningOrderRequest(userId: string, orderId: string, payment: Partial<DiningPayment>) {
+export type DiningCajaRegistration = {
+  status: string;
+  message?: string;
+};
+
+export async function payDiningOrderRequest(
+  userId: string,
+  orderId: string,
+  payment: Partial<DiningPayment>,
+  opts?: {
+    salesPointId?: string;
+    salesPointName?: string;
+    registerInCaja?: boolean;
+  },
+) {
   const uid = normalizeUserId(userId);
-  const data = await request<{ order: DiningOrder; fullyPaid: boolean }>(
+  const data = await request<{
+    order: DiningOrder;
+    fullyPaid: boolean;
+    cajaRegistration?: DiningCajaRegistration | null;
+  }>(
     `/api/sala/orders/${uid}/${orderId}/pay`,
-    { method: 'POST', body: JSON.stringify({ payment }) },
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        payment,
+        salesPointId: opts?.salesPointId,
+        salesPointName: opts?.salesPointName,
+        registerInCaja: opts?.registerInCaja !== false,
+      }),
+    },
   );
   return data;
 }
@@ -606,4 +648,25 @@ export async function linkClientToOrderRequest(
     { method: 'PUT', body: JSON.stringify({ clientId, clientName }) },
   );
   return data.order;
+}
+
+/** Alerta in-app/push al equipo (lista de espera avisada, etc.). */
+export async function emitSalaStaffAlertRequest(
+  userId: string,
+  payload: {
+    title: string;
+    message: string;
+    category?: string;
+    route?: string;
+    entityId?: string;
+    entityType?: string;
+    businessId?: string;
+    dedupKey?: string;
+  },
+) {
+  const uid = normalizeUserId(userId);
+  return request<{ ok: boolean }>(`/api/sala/staff-alert/${uid}`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }

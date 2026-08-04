@@ -6,6 +6,7 @@ import type { CompanyHoliday } from './companyHolidaysApi';
 import { isHoliday, getHolidayForDate } from './companyHolidaysApi';
 import type { AvailabilityBlock } from './availabilityBlocksApi';
 import { isBlockActiveOnDate } from './availabilityBlocksApi';
+import { formatDateEs, formatDateRangeEs } from './formatDateEs';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -267,7 +268,7 @@ export function detectVacationVsClockin(
       memberId: clockin.member_id,
       memberName: clockin.member_name,
       date: clockin.date,
-      description: `${clockin.member_name} fichó el ${clockin.date} pero tiene vacaciones aprobadas (${vacOnDate.startDate} → ${vacOnDate.endDate})`,
+      description: `${clockin.member_name} fichó el ${formatDateEs(clockin.date)} pero tiene vacaciones aprobadas (${formatDateRangeEs(vacOnDate.startDate, vacOnDate.endDate)})`,
       meta: { clockinId: clockin._id, vacationId: vacOnDate._id },
     });
   }
@@ -293,7 +294,7 @@ export function detectBlockVsClockin(
       memberId: clockin.member_id,
       memberName: clockin.member_name,
       date: clockin.date,
-      description: `${clockin.member_name} fichó el ${clockin.date} pero tiene bloqueo activo (${activeBlock.reason})`,
+      description: `${clockin.member_name} fichó el ${formatDateEs(clockin.date)} pero tiene bloqueo activo (${activeBlock.reason})`,
       meta: { clockinId: clockin._id, blockId: activeBlock._id, reason: activeBlock.reason },
     });
   }

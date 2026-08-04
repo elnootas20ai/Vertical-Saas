@@ -25,9 +25,12 @@ import {
   MapPin,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
+import { ScheduleTimeField } from '../../components/saas/ScheduleTimeField';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
+import { applyLaborCostToEmployment } from '../../lib/laborCost';
+import type { EmploymentInfo } from '../../lib/authApi';
 import { useWorkCenters } from '../../hooks/useWorkCenters';
 import type {
   ScheduleTemplate,
@@ -47,6 +50,7 @@ import {
   WEEKDAYS,
   WEEKDAY_LABELS,
   TEMPLATE_COLORS,
+  inferWorkdayFromWeeklyHours,
   listShiftTemplates,
   saveShiftTemplate,
   deleteShiftTemplate,
@@ -56,6 +60,7 @@ import {
   applyTemplateToMembers,
   autoAssignByRules,
 } from '../../lib/schedulesApi';
+import { pickStoreOpeningHours } from '../../lib/businessHoursUtils';
 import { listClockins } from '../../lib/clockinsApi';
 import type { ClockinRecord } from '../../lib/clockinsApi';
 
@@ -65,7 +70,7 @@ const MANAGER_ROLES = new Set(['Admin', 'Gerente']);
 
 export function Schedules() {
   const { t, i18n } = useTranslation();
-  const { user, listUsers } = useAuth();
+  const { user, listUsers, updateUser } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
 
@@ -121,17 +126,15 @@ export function Schedules() {
   const dayLabels = WEEKDAY_LABELS[lang] || WEEKDAY_LABELS.es;
 
   const currentWeekStart = useMemo(() => {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = (day === 0 ? -6 : 1 - day) + weekOffset * 7;
-    const d = new Date(now);
-    d.setDate(d.getDate() + diff);
-    return d.toISOString().slice(0, 10);
+    const base = new Date();
+    base.setDate(base.getDate() + weekOffset * 7);
+    return getMonday(base);
   }, [weekOffset]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!businessId) return;
-    setLoading(true);
+    const silent = Boolean(opts?.silent);
+    if (!silent) setLoading(true);
     try {
       const [scheds, memberList, tmpls, rls] = await Promise.all([
         listSchedules(businessId, currentWeekStart),
@@ -151,7 +154,7 @@ export function Schedules() {
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [businessId, canManage, currentWeekStart]);
 
@@ -176,11 +179,35 @@ export function Schedules() {
 
   // ── Schedule editing ──────────────────────────────────────────────────────
 
+  const storeHoursForDefaults = useCallback(
+    (preferredWorkCenterId?: string) => {
+      const preferred =
+        preferredWorkCenterId
+        || (filterWorkCenter !== 'all' ? filterWorkCenter : '')
+        || '';
+      return pickStoreOpeningHours(activeWorkCenters, preferred);
+    },
+    [activeWorkCenters, filterWorkCenter],
+  );
+
   const openEditor = (memberId: string) => {
     const existing = schedules.find(s => s.member_id === memberId);
-    setEditWeekly(existing ? { ...existing.weekly } : defaultWeekly());
-    setEditWorkCenterId(existing?.work_center_id || '');
-    setEditWorkCenterName(existing?.work_center_name || '');
+    const member = members.find((m) => m.user_id === memberId) as { workCenterId?: string } | undefined;
+    const preferredWc =
+      existing?.work_center_id
+      || String(member?.workCenterId || '').trim()
+      || '';
+    setEditWeekly(
+      existing
+        ? { ...existing.weekly }
+        : defaultWeekly(storeHoursForDefaults(preferredWc)),
+    );
+    const wc =
+      preferredWc
+        ? activeWorkCenters.find((c) => c.id === preferredWc || c._id === preferredWc)
+        : null;
+    setEditWorkCenterId(existing?.work_center_id || preferredWc || '');
+    setEditWorkCenterName(existing?.work_center_name || wc?.name || '');
     setEditingMemberId(memberId);
     setError('');
   };
@@ -197,21 +224,40 @@ export function Schedules() {
     setError('');
     try {
       const member = members.find(m => m.user_id === editingMemberId);
-      const existing = schedules.find(s => s.member_id === editingMemberId);
+      const existing =
+        schedules.find((s) => s.member_id === editingMemberId && s.week_start === currentWeekStart)
+        || schedules.find((s) => s.member_id === editingMemberId && !s.week_start)
+        || null;
+      const existingForWeek =
+        existing && (!existing.week_start || existing.week_start === currentWeekStart)
+          ? existing
+          : null;
       await saveSchedule(
         businessId,
         editingMemberId,
         member?.fullName || '',
         editWeekly,
-        existing,
+        existingForWeek,
         undefined,
         currentWeekStart,
         editWorkCenterId || undefined,
         editWorkCenterName || undefined,
       );
-      flash('Horario guardado correctamente');
-      await loadData();
-      setTimeout(closeEditor, 800);
+      // Horas/jornada salen del horario (invitación o edición), no a mano en RRHH.
+      const hours = computeWeeklyHours(editWeekly);
+      if (hours > 0 && canManage) {
+        const emp = ((member as { employment?: EmploymentInfo } | undefined)?.employment || {}) as EmploymentInfo;
+        await updateUser(editingMemberId, {
+          employment: applyLaborCostToEmployment({
+            ...emp,
+            hoursPerWeek: hours,
+            workday: inferWorkdayFromWeeklyHours(hours) || emp.workday || '',
+          } as EmploymentInfo),
+        } as any).catch(() => null);
+      }
+      flash(`Horario guardado · ${hours} h/sem`);
+      closeEditor();
+      await loadData({ silent: true });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -236,7 +282,7 @@ export function Schedules() {
       setEditingTemplate(null);
       setTemplateName('');
       setTemplateColor(TEMPLATE_COLORS[Math.floor(Math.random() * TEMPLATE_COLORS.length)]);
-      setTemplateWeekly(defaultWeekly());
+      setTemplateWeekly(defaultWeekly(storeHoursForDefaults()));
     }
     setShowTemplateModal(true);
     setError('');
@@ -249,8 +295,8 @@ export function Schedules() {
     try {
       await saveShiftTemplate(businessId, templateName.trim(), templateColor, templateWeekly, editingTemplate);
       flash('Plantilla guardada');
-      await loadData();
       setShowTemplateModal(false);
+      await loadData({ silent: true });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -1219,17 +1265,7 @@ function DayEditor({ weekly, dayLabels, onChange }: {
 }
 
 function TimeInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] text-gray-400 dark:text-gray-500 leading-none">{label}</span>
-      <input
-        type="time"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        className="px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none w-[5.5rem]"
-      />
-    </div>
-  );
+  return <ScheduleTimeField compact label={label} value={value} onChange={onChange} />;
 }
 
 function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {

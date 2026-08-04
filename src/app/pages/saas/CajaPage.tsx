@@ -5,6 +5,8 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveBusinessScopeId } from '../../lib/businessStoreScope';
+import { tpvSessionBelongsToBusiness } from '../../lib/tpvCajaScope';
 import {
   listCajaBootstrapRequest,
   updateTpvRegisterSessionRequest,
@@ -31,10 +33,17 @@ import {
 } from '../../lib/deliveryIntegrationsUi';
 import { AggregatorCashSummary } from '../../components/saas/AggregatorCashSummary';
 import { CajaTimelineBoard } from '../../components/saas/caja/CajaTimelineBoard';
-import { downloadUrielCajaClosingsExcel } from '../../lib/cajaUrielClosingsExcelExport';
+import {
+  downloadUrielCajaClosings,
+  type UrielCajaDownloadFormat,
+  type UrielCajaHistoryRange,
+} from '../../lib/cajaUrielClosingsExcelExport';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import { listBrandsRequest } from '../../lib/brandApi';
-import { suggestBillingSheetsFromBrands } from '../../lib/brandBillingConfig';
+import {
+  suggestBillingSheetsFromBrands,
+  syncBillingSheetsWithBrands,
+} from '../../lib/brandBillingConfig';
 import { RegisterClosingDetailPanel } from '../../components/saas/RegisterClosingDetailPanel';
 import { calcTpvExpectedCash, buildTpvRegisterSummary } from '../../lib/tpvCajaMath';
 import {
@@ -44,7 +53,7 @@ import {
   isTpvRegisterSessionFromPriorCalendarDay,
   localCalendarDayKey,
   localDayBoundsForKey,
-  sessionActiveOnCalendarDay,
+  sessionBelongsToCajaDay,
   sortRegisterSessionsForDisplay,
 } from '../../lib/tpvCajaScope';
 
@@ -92,7 +101,7 @@ function formatDayHeading(isoDate: string): string {
 }
 
 function sessionOnDate(session: TpvRegisterSession, isoDate: string): boolean {
-  return sessionActiveOnCalendarDay(session, isoDate);
+  return sessionBelongsToCajaDay(session, isoDate);
 }
 
 function isAutoValidatedEmptyTurn(session: TpvRegisterSession): boolean {
@@ -650,6 +659,10 @@ export function CajaPage() {
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
+  const businessId = useMemo(
+    () => resolveBusinessScopeId(currentBusiness),
+    [currentBusiness],
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -675,14 +688,39 @@ export function CajaPage() {
     setViewingClosingSession(session);
   }, []);
 
+  const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
+    ? activeStoreScope.allPointsOfSale
+    : activeStoreScope.pointsOfSale;
+
+  const scopedPdvIds = useMemo(
+    () => pointsOfSale.map((p) => String(p._id || '').trim()).filter(Boolean),
+    [pointsOfSale],
+  );
+  const scopedPdvKey = useMemo(
+    () => [...scopedPdvIds].sort().join('|'),
+    [scopedPdvIds],
+  );
+
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!dataUserId) return;
+    // Sin empresa activa no mezclar cajas de todos los negocios del dueño.
+    if (!businessId) {
+      setSessions([]);
+      setDriverSessions([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     const silent = options?.silent ?? hasLoadedOnceRef.current;
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(dataUserId);
-      const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values());
+      const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(dataUserId, {
+        businessId,
+      });
+      const pdvIds = scopedPdvKey ? scopedPdvKey.split('|') : [];
+      const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values())
+        .filter((s) => tpvSessionBelongsToBusiness(s, businessId, pdvIds));
       setSessions(unique);
       setDriverSessions(driverData);
       hasLoadedOnceRef.current = true;
@@ -692,7 +730,16 @@ export function CajaPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dataUserId]);
+  }, [dataUserId, businessId, scopedPdvKey]);
+
+  // Al cambiar de empresa, forzar recarga completa (mismo dueño ≠ mismos datos).
+  useEffect(() => {
+    hasLoadedOnceRef.current = false;
+    setSessions([]);
+    setDriverSessions([]);
+    setFilterPdv('');
+    setViewingClosingSession(null);
+  }, [businessId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -745,10 +792,6 @@ export function CajaPage() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [loadData]);
-
-  const pointsOfSale = activeStoreScope.allPointsOfSale.length > 0
-    ? activeStoreScope.allPointsOfSale
-    : activeStoreScope.pointsOfSale;
 
   const loadOrders = useCallback(async () => {
     if (!dataUserId) return;
@@ -898,19 +941,17 @@ export function CajaPage() {
 
   const excelClosedCount = sessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
-  const handleExcel = async () => {
+  const handleDownload = async (
+    format: UrielCajaDownloadFormat,
+    historyRange: UrielCajaHistoryRange = 'all',
+  ) => {
     try {
       const pdvId = String(
         filterPdv
         || activeStoreScope.activeSalesPointId
-        || sessions.find((s) => String(s.status || '') !== 'open')?.pointOfSaleId
         || '',
       ).trim();
-      if (!pdvId) {
-        toast.info('Elige un PDV para exportar el Excel de ingresos');
-        return;
-      }
-      const pdv = pointsOfSale.find((p) => p._id === pdvId);
+      const pdv = pdvId ? pointsOfSale.find((p) => p._id === pdvId) : undefined;
       const yearMonth = selectedDate.slice(0, 7);
 
       let billingSheets = null as ReturnType<typeof suggestBillingSheetsFromBrands> | null;
@@ -922,31 +963,55 @@ export function CajaPage() {
             listBrandsRequest(businessId),
           ]);
           if (cfg.sheets.length > 0) {
-            billingSheets = cfg.sheets;
+            // Une tacos con la hoja burger si estaban en hojas separadas.
+            billingSheets = syncBillingSheetsWithBrands(cfg.sheets, brands);
           } else {
             const suggested = suggestBillingSheetsFromBrands(brands);
             if (suggested.length > 0) billingSheets = suggested;
           }
         } catch (err) {
-          console.warn('Facturación marcas no disponible; Excel usa plantilla por defecto', err);
+          console.warn('Facturación marcas no disponible; descarga usa plantilla por defecto', err);
         }
       }
 
-      const { rows, fileName, sheetNames } = downloadUrielCajaClosingsExcel(sessions, {
-        pointOfSaleId: pdvId,
-        pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : pdvId,
+      const { rows, fileName, sheetNames, yearMonth: exportedMonth, historyRange: usedRange } = await downloadUrielCajaClosings(sessions, {
+        pointOfSaleId: pdvId || undefined,
+        pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : undefined,
+        pointsOfSale: pointsOfSale.map((p) => ({
+          id: String(p._id || '').trim(),
+          name: pointOfSaleDisplayLabel(p),
+          workCenterId: String(p.workCenterId || '').trim() || undefined,
+        })).filter((p) => p.id),
         yearMonth,
+        historyRange,
         billingSheets,
+        format,
       });
       if (rows === 0) {
-        toast.info('Aún no hay cierres de caja en este mes para ese PDV');
+        toast.info('Aún no hay cierres de caja con importes para exportar');
         return;
       }
+      const rangeLabel = usedRange === 'all'
+        ? 'historial'
+        : usedRange === 'year'
+          ? `año ${String(exportedMonth || yearMonth).slice(0, 4)}`
+          : `mes ${exportedMonth || yearMonth}`;
       const sheetsLabel = sheetNames.length ? sheetNames.join(' + ') : 'ingresos';
-      toast.success(`Excel ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
+      if (format === 'google-sheets') {
+        toast.success(
+          `Descargado ${fileName} (${rangeLabel}). Súbelo a Google Drive y ábrelo con Hojas de cálculo (${rows} día${rows === 1 ? '' : 's'}).`,
+          { duration: 7000 },
+        );
+        return;
+      }
+      if (format === 'csv') {
+        toast.success(`CSV ${sheetsLabel} · ${rangeLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
+        return;
+      }
+      toast.success(`Excel ${sheetsLabel} · ${rangeLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
     } catch (err) {
       console.error(err);
-      toast.error(err instanceof Error ? err.message : 'No se pudo generar el Excel');
+      toast.error(err instanceof Error ? err.message : 'No se pudo generar la descarga');
     }
   };
 
@@ -986,7 +1051,7 @@ export function CajaPage() {
         onOnlyOpenNowChange={setOnlyOpenNow}
         dayStats={dayStats}
         excelClosedCount={excelClosedCount}
-        onExcelClick={handleExcel}
+        onDownloadFormat={handleDownload}
         onBack={handleBack}
         selectedSessionId={expandedSessionId}
         onSelectSession={setExpandedSessionId}

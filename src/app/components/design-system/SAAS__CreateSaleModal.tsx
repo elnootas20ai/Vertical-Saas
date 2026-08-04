@@ -67,6 +67,7 @@ interface Vehicle {
   year: number;
   registrationPlate?: string;
   salePrice?: number;
+  purchasePrice?: number;
   /** Estado de stock (compraventa) — necesario para validar doble venta */
   status?: string;
 }
@@ -114,6 +115,9 @@ interface Props {
   teamMembers?: string[];
   /** Ventas ya registradas — evita asignar un vehículo con operación activa */
   existingSales?: SaleRecord[];
+  /** Prefill al abrir (p. ej. desde CRM ganado) */
+  initialVehicleId?: string;
+  initialClientId?: string;
 }
 
 const STAGE_OPTIONS = [
@@ -392,6 +396,8 @@ export function SAAS__CreateSaleModal({
   teamMemberOptions,
   teamMembers,
   existingSales = [],
+  initialVehicleId = '',
+  initialClientId = '',
 }: Props) {
   const responsableOptions = useMemo<SaleTeamMemberOption[]>(() => {
     if (teamMemberOptions && teamMemberOptions.length > 0) return teamMemberOptions;
@@ -418,15 +424,25 @@ export function SAAS__CreateSaleModal({
   }, [initialClients]);
 
   useEffect(() => {
-    if (isOpen) {
-      setFormData(buildInitialForm(defaultResponsable));
-      setWorkCenterId('');
-      setClientError('');
-      setSubmitError('');
-      setIsCreatingClient(false);
-      setIsSubmitting(false);
-    }
-  }, [isOpen, defaultResponsable.id, defaultResponsable.name]);
+    if (!isOpen) return;
+    const base = buildInitialForm(defaultResponsable);
+    const vehicle = initialVehicleId
+      ? vehicles.find((v) => v.id === initialVehicleId)
+      : undefined;
+    setFormData({
+      ...base,
+      vehicleId: initialVehicleId || '',
+      clientId: initialClientId || '',
+      totalPrice: vehicle?.salePrice ? String(vehicle.salePrice) : '',
+    });
+    setWorkCenterId('');
+    setClientError('');
+    setSubmitError('');
+    setIsCreatingClient(false);
+    setIsSubmitting(false);
+    // Solo al abrir el modal (y prefills); no re-resetear si cambia el array vehicles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, defaultResponsable.id, defaultResponsable.name, initialVehicleId, initialClientId]);
 
   const resetAndClose = () => {
     setFormData(buildInitialForm(defaultResponsable));

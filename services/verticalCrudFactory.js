@@ -174,7 +174,13 @@ export function createVerticalRouter(config) {
         await ensureDatabase(req, dbName);
         const doc = buildDocument(entityCfg, userId, data);
         const saved = await putDocument(req, dbName, doc._id, doc);
-        return res.status(201).json({ ok: true, item: sanitize(entityCfg, { ...doc, _rev: saved.rev }) });
+        const item = sanitize(entityCfg, { ...doc, _rev: saved.rev });
+        if (config.name === 'butcher-ops' && entityKey === 'catalog') {
+          import('./butcherCatalogBridge.js')
+            .then((m) => m.syncButcherCatalogToCore(req, userId, { ...doc, _rev: saved.rev }))
+            .catch(() => {});
+        }
+        return res.status(201).json({ ok: true, item });
       } catch (error) {
         return res.status(500).json({ ok: false, error: error.message || `Error al crear ${entityKey}` });
       }
@@ -199,7 +205,13 @@ export function createVerticalRouter(config) {
 
         const doc = buildDocument(entityCfg, userId, data, existing);
         const saved = await putDocument(req, dbName, doc._id, doc);
-        return res.json({ ok: true, item: sanitize(entityCfg, { ...doc, _rev: saved.rev }) });
+        const item = sanitize(entityCfg, { ...doc, _rev: saved.rev });
+        if (config.name === 'butcher-ops' && entityKey === 'catalog') {
+          import('./butcherCatalogBridge.js')
+            .then((m) => m.syncButcherCatalogToCore(req, userId, { ...doc, _rev: saved.rev }))
+            .catch(() => {});
+        }
+        return res.json({ ok: true, item });
       } catch (error) {
         return res.status(500).json({ ok: false, error: error.message || `Error al actualizar ${entityKey}` });
       }

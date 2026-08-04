@@ -167,11 +167,18 @@ export function Login() {
 
     setIsSubmitting(true);
     setLockInfo(null);
+    setCodeInfo(null);
     const result = await login(formData.email, formData.password);
     setIsSubmitting(false);
 
     if (result.success) {
       navigate(result.redirectTo || '/saas/dashboard');
+    } else if (result.code === 'REQUIRES_LOGIN_CODE') {
+      setLoginMode('emailCode');
+      setCodeValue('');
+      // No mostrar a qué correo va el código (buzón de seguridad admin).
+      setCodeInfo(null);
+      setErrors({});
     } else if (result.code === 'ACCOUNT_LOCKED') {
       setLockInfo({ lockUntil: result.lockUntil });
       setLoginMode('emailCode');
@@ -591,20 +598,8 @@ export function Login() {
                   </svg>
                   <span>{t('auth.googleLogin')}…</span>
                 </div>
-              ) : !googleReady && googleTimedOut ? (
-                <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-2 px-3 text-xs text-amber-800 text-center">
-                  Google (script) no cargó a tiempo. Revisa bloqueadores, CSP o red; puedes usar email y contraseña.
-                </div>
-              ) : (
+              ) : !googleReady && googleTimedOut ? null : (
                 <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
-              )}
-              {!showGoogleAuth && (
-                <div className="w-full max-w-sm py-3 px-4 border border-gray-200 dark:border-gray-600 rounded-lg text-xs text-gray-500 dark:text-gray-400 text-center">
-                  Inicio con Google no está activo en este sitio: falta{' '}
-                  <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">VITE_GOOGLE_CLIENT_ID</code> en el{' '}
-                  <strong>build</strong> del frontend (debe ser el mismo Client ID que{' '}
-                  <code className="font-mono bg-gray-100 dark:bg-gray-900 px-1 rounded">GOOGLE_CLIENT_ID</code> en el servidor).
-                </div>
               )}
               {showAppleAuth ? (
                 <div className="w-full max-w-sm">

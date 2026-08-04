@@ -69,7 +69,7 @@ function daysSince(dateStr: string) {
 export function CompraventaCrm() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { leads, clients, vehicles, user: authContextUser } = useApp();
+  const { leads, clients, vehicles, user: authContextUser, addClient } = useApp();
   const { user } = useAuth();
   const userId = user?.user_id || '';
   const financeUserId = useFinanceUserId();
@@ -163,10 +163,24 @@ export function CompraventaCrm() {
   }, [opportunities]);
 
   const handleStageChange = async (oppId: string, newStatus: OpportunityStatus) => {
+    const opp = opportunities.find((o) => o.id === oppId);
     const result = await changeOpportunityStageRequest(userId, oppId, newStatus);
     if (result) {
       setOpportunities((prev) => prev.map((o) => o.id === oppId ? result : o));
       toast.success(`Oportunidad movida a ${STAGE_MAP[newStatus]?.label || newStatus}`);
+      if (newStatus === 'won') {
+        const vehicleId = result.vehicleId || opp?.vehicleId || '';
+        const clientId = result.clientId || opp?.clientId || '';
+        if (vehicleId) {
+          const qs = new URLSearchParams({ newSale: '1', fromCrm: '1', vehicleId });
+          if (clientId) qs.set('clientId', clientId);
+          toast.message('Abriendo venta desde la oportunidad ganada…');
+          navigate(`/saas/vertical/compraventa/ventas?${qs.toString()}`);
+        } else {
+          toast.message('Oportunidad ganada. Selecciona vehículo al crear la venta.');
+          navigate('/saas/vertical/compraventa/ventas?newSale=1&fromCrm=1');
+        }
+      }
     }
   };
 
@@ -654,13 +668,63 @@ export function CompraventaCrm() {
   // ─── Clients tab ────────────────────────────────────────────────────────
 
   function renderClientsTab() {
+    const q = searchQuery.trim().toLowerCase();
+    const filteredClients = q
+      ? clients.filter((c) =>
+          [c.name, c.phone, c.email, c.responsible]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(q)),
+        )
+      : clients;
+
     return (
       <div className="mt-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-gray-500 dark:text-gray-400">{clients.length} clientes</p>
-          <button onClick={() => navigate('/saas/crm/clientes?tab=clients')} className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1">
-            <ExternalLink className="w-4 h-4" /> Vista completa
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredClients.length} de {clients.length} clientes
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar cliente…"
+                className="rounded-lg border border-gray-200 bg-white py-1.5 pl-8 pr-3 text-sm dark:border-gray-700 dark:bg-gray-900"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                const name = window.prompt('Nombre del cliente');
+                if (!name?.trim()) return;
+                try {
+                  const created = await addClient({
+                    name: name.trim(),
+                    email: '',
+                    phone: '',
+                    status: 'active',
+                    responsible: user?.fullName || 'Equipo comercial',
+                    notes: 'Creado desde CRM Compraventa',
+                  });
+                  toast.success('Cliente creado');
+                  if (created?.id) navigate(`/saas/crm/clientes/${created.id}`);
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : 'No se pudo crear');
+                }
+              }}
+              className="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              <Plus className="h-3.5 w-3.5" /> Nuevo
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/saas/crm/clientes?tab=clients')}
+              className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+            >
+              <ExternalLink className="w-4 h-4" /> Vista completa
+            </button>
+          </div>
         </div>
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           <div className="overflow-x-auto">
@@ -673,7 +737,7 @@ export function CompraventaCrm() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                {clients.slice(0, 50).map((client) => {
+                {filteredClients.slice(0, 50).map((client) => {
                   const clientOpps = opportunities.filter((o) => o.clientId === client.id);
                   return (
                     <tr key={client.id} onClick={() => navigate(`/saas/crm/clientes/${client.id}`)}

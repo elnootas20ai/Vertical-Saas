@@ -327,26 +327,69 @@ function VehicleCommercialPanel({
           <section>
             <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3">Canales de publicación</h3>
             <div className="space-y-2">
-              {(vehicle.publicationChannels || []).length === 0 && (
-                <p className="text-sm text-slate-400 italic">Sin canales de publicación configurados.</p>
-              )}
-              {(vehicle.publicationChannels || []).map(ch => {
-                const def = PUBLICATION_CHANNELS.find(c => c.id === ch.channelId);
+              {PUBLICATION_CHANNELS.map((def) => {
+                const existing = (vehicle.publicationChannels || []).find((ch) => ch.channelId === def.id);
+                const active = Boolean(existing?.active);
                 return (
-                  <div key={ch.channelId} className="flex items-center justify-between bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">{def?.icon || '📌'}</span>
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{def?.name || ch.channelName}</span>
+                  <div
+                    key={def.id}
+                    className="flex items-center justify-between gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="text-lg">{def.icon}</span>
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{def.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      {ch.active ? (
-                        <span className="inline-flex items-center gap-1 text-xs text-emerald-600"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Activo</span>
-                      ) : (
-                        <span className="text-xs text-slate-400">Retirado</span>
-                      )}
-                      {ch.url && (
-                        <a href={ch.url} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600"><ExternalLink className="w-3.5 h-3.5" /></a>
-                      )}
+                      {existing?.url ? (
+                        <a
+                          href={existing.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-500 hover:text-blue-600"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const now = new Date().toISOString();
+                          const channels = [...(vehicle.publicationChannels || [])];
+                          const idx = channels.findIndex((ch) => ch.channelId === def.id);
+                          if (idx >= 0) {
+                            channels[idx] = {
+                              ...channels[idx],
+                              active: !channels[idx].active,
+                              publishedAt: !channels[idx].active ? now : channels[idx].publishedAt,
+                              unpublishedAt: channels[idx].active ? now : null,
+                            };
+                          } else {
+                            channels.push({
+                              channelId: def.id,
+                              channelName: def.name,
+                              url: '',
+                              publishedAt: now,
+                              unpublishedAt: null,
+                              active: true,
+                              notes: '',
+                            });
+                          }
+                          void onUpdate(vehicle.id, {
+                            publicationChannels: channels,
+                            published: channels.some((ch) => ch.active),
+                          });
+                          toast.success(
+                            active ? `${def.name} desactivado` : `${def.name} activado`,
+                          );
+                        }}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                          active
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                            : 'bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {active ? 'Activo' : 'Activar'}
+                      </button>
                     </div>
                   </div>
                 );

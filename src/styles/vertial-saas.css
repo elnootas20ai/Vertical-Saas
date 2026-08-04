@@ -1,0 +1,411 @@
+/**
+ * Vertial SaaS — una sola línea visual (desde el logo).
+ * Usar estas clases / tokens en pantallas nuevas y al rediseñar módulos.
+ *
+ * Marca (logo): verde #22C55E → teal #14B8A6 → azul #2563EB, tinta #0B1220
+ * Avanzar: azul (acción principal) · rojo sutil (urgente / limpiar / alerta)
+ * Tipografía: Plus Jakarta Sans
+ */
+
+:root {
+  --v-ink: #0b1220;
+  --v-ink-soft: #1e293b;
+  --v-blue: #2563eb;
+  --v-blue-soft: #3b82f6;
+  --v-teal: #14b8a6;
+  --v-green: #22c55e;
+  --v-rose: #e11d48;
+  --v-rose-soft: #f43f5e;
+  --v-amber: #d97706;
+  --v-surface: #f5f7fb;
+  --v-surface-elevated: #ffffff;
+  --v-border: rgba(15, 23, 42, 0.08);
+  --v-border-strong: rgba(15, 23, 42, 0.12);
+  --v-muted: #64748b;
+  --v-radius: 1rem;
+  --v-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.04);
+  --v-shadow-hover: 0 4px 12px rgba(37, 99, 235, 0.1), 0 12px 32px rgba(15, 23, 42, 0.06);
+  --v-grad: linear-gradient(135deg, #22c55e 0%, #14b8a6 52%, #2563eb 100%);
+  --v-grad-soft: linear-gradient(
+    135deg,
+    rgba(34, 197, 94, 0.12) 0%,
+    rgba(20, 184, 166, 0.08) 45%,
+    rgba(37, 99, 235, 0.1) 100%
+  );
+  --v-mesh: radial-gradient(ellipse 70% 50% at 0% 0%, rgba(37, 99, 235, 0.07), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 100% 0%, rgba(20, 184, 166, 0.08), transparent 50%),
+    radial-gradient(ellipse 40% 30% at 80% 100%, rgba(34, 197, 94, 0.05), transparent 45%);
+}
+
+.dark {
+  --v-ink: #f1f5f9;
+  --v-ink-soft: #cbd5e1;
+  --v-surface: #0f1419;
+  --v-surface-elevated: #161b22;
+  --v-border: rgba(148, 163, 184, 0.12);
+  --v-border-strong: rgba(148, 163, 184, 0.18);
+  --v-muted: #94a3b8;
+  --v-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --v-shadow-hover: 0 4px 16px rgba(37, 99, 235, 0.18), 0 12px 32px rgba(0, 0, 0, 0.35);
+  --v-grad-soft: linear-gradient(
+    135deg,
+    rgba(34, 197, 94, 0.14) 0%,
+    rgba(20, 184, 166, 0.1) 45%,
+    rgba(37, 99, 235, 0.14) 100%
+  );
+  --v-mesh: radial-gradient(ellipse 70% 50% at 0% 0%, rgba(37, 99, 235, 0.12), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 100% 0%, rgba(20, 184, 166, 0.1), transparent 50%),
+    radial-gradient(ellipse 40% 30% at 80% 100%, rgba(34, 197, 94, 0.08), transparent 45%);
+}
+
+/* Page canvas */
+.vsaas-page {
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  color: var(--v-ink);
+}
+
+.vsaas-page-mesh {
+  position: relative;
+  isolation: isolate;
+}
+
+.vsaas-page-mesh::before {
+  content: '';
+  pointer-events: none;
+  position: absolute;
+  inset: -1rem -0.5rem 0;
+  z-index: -1;
+  border-radius: 1.5rem;
+  background: var(--v-mesh);
+}
+
+/* Brand mark strip (logo feel) */
+.vsaas-brand-bar {
+  height: 3px;
+  width: 100%;
+  border-radius: 9999px;
+  background: var(--v-grad);
+  opacity: 0.9;
+}
+
+.vsaas-brand-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.7rem;
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--v-blue);
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+}
+
+.dark .vsaas-brand-chip {
+  color: #93c5fd;
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(37, 99, 235, 0.28);
+}
+
+.vsaas-title {
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--v-ink);
+  line-height: 1.2;
+}
+
+.vsaas-subtitle {
+  font-size: 0.875rem;
+  color: var(--v-muted);
+  font-weight: 500;
+}
+
+/* Surfaces */
+.vsaas-card {
+  background: var(--v-surface-elevated);
+  border: 1px solid var(--v-border);
+  border-radius: var(--v-radius);
+  box-shadow: var(--v-shadow);
+}
+
+.vsaas-card-interactive {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.vsaas-card-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--v-shadow-hover);
+  border-color: rgba(37, 99, 235, 0.22);
+}
+
+.vsaas-panel-head {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--v-ink);
+}
+
+/* Advance actions */
+.vsaas-btn-advance {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--v-blue);
+  border: 1px solid transparent;
+  transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.25);
+}
+
+.vsaas-btn-advance:hover {
+  background: #1d4ed8;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
+}
+
+.vsaas-btn-advance:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.vsaas-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--v-ink-soft);
+  background: transparent;
+  border: 1px solid var(--v-border-strong);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.vsaas-btn-ghost:hover {
+  background: rgba(37, 99, 235, 0.06);
+  border-color: rgba(37, 99, 235, 0.25);
+  color: var(--v-blue);
+}
+
+.vsaas-btn-ghost-active {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--v-blue);
+}
+
+.vsaas-btn-urgent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--v-rose);
+  background: rgba(225, 29, 72, 0.06);
+  border: 1px solid rgba(225, 29, 72, 0.14);
+  transition: background 0.15s ease;
+}
+
+.vsaas-btn-urgent:hover {
+  background: rgba(225, 29, 72, 0.12);
+}
+
+.vsaas-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--v-blue);
+  transition: color 0.15s ease;
+}
+
+.vsaas-link:hover {
+  color: #1d4ed8;
+}
+
+.vsaas-tab-active {
+  border-color: var(--v-blue) !important;
+  color: var(--v-blue) !important;
+}
+
+.vsaas-badge-count {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--v-blue);
+}
+
+.vsaas-badge-urgent {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  background: rgba(225, 29, 72, 0.1);
+  color: var(--v-rose);
+  border: 1px solid rgba(225, 29, 72, 0.16);
+}
+
+.vsaas-badge-ok {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.dark .vsaas-badge-ok {
+  color: #86efac;
+}
+
+.vsaas-icon-blue {
+  color: var(--v-blue);
+}
+
+.vsaas-icon-teal {
+  color: var(--v-teal);
+}
+
+.vsaas-icon-green {
+  color: var(--v-green);
+}
+
+.vsaas-icon-rose {
+  color: var(--v-rose);
+}
+
+.vsaas-icon-amber {
+  color: var(--v-amber);
+}
+
+.vsaas-kpi-icon-blue {
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--v-blue);
+}
+
+.vsaas-kpi-icon-teal {
+  background: rgba(20, 184, 166, 0.12);
+  color: var(--v-teal);
+}
+
+.vsaas-kpi-icon-green {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.vsaas-kpi-icon-amber {
+  background: rgba(217, 119, 6, 0.12);
+  color: var(--v-amber);
+}
+
+.vsaas-kpi-icon-rose {
+  background: rgba(225, 29, 72, 0.1);
+  color: var(--v-rose);
+}
+
+.vsaas-row-hover:hover {
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.dark .vsaas-row-hover:hover {
+  background: rgba(37, 99, 235, 0.1);
+}
+
+.vsaas-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0.75rem;
+  border: 1px solid var(--v-border-strong);
+  background: var(--v-surface-elevated);
+  color: var(--v-ink);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.vsaas-input:focus {
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.vsaas-chip-on {
+  border-color: rgba(37, 99, 235, 0.35) !important;
+  background: rgba(37, 99, 235, 0.08) !important;
+  color: var(--v-blue) !important;
+  text-decoration: none !important;
+}
+
+.vsaas-chip-off {
+  border-color: var(--v-border-strong) !important;
+  color: var(--v-muted) !important;
+}
+
+/* ── Chrome SaaS (sidebar / topbar / carrusel) ─────────────────────────── */
+
+.vsaas-sidebar {
+  background: var(--v-surface-elevated);
+  border-right: 1px solid var(--v-border);
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+.vsaas-topbar-shell {
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid var(--v-border);
+  backdrop-filter: blur(10px);
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}
+
+.dark .vsaas-topbar-shell {
+  background: rgba(22, 27, 34, 0.92);
+}
+
+.vsaas-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border-radius: 0.75rem;
+  color: #64748b;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.vsaas-icon-btn:hover {
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--v-blue);
+}
+
+.vsaas-nav-active {
+  background: rgba(37, 99, 235, 0.1) !important;
+  color: #1e3a8a !important;
+  border-left: 2px solid var(--v-blue) !important;
+  font-weight: 600;
+}
+
+.dark .vsaas-nav-active {
+  background: rgba(37, 99, 235, 0.22) !important;
+  color: #bfdbfe !important;
+}
+
+.vsaas-nav-icon-active {
+  color: var(--v-blue) !important;
+}
+
+.dark .vsaas-nav-icon-active {
+  color: #93c5fd !important;
+}

@@ -43,13 +43,17 @@ export function RestaurantTpvShiftStrip({
     {
       icon: TrendingUp,
       label: 'Ventas',
-      value: shiftSales > 0 ? `${shiftSales.toFixed(2)} €` : '—',
+      value: shiftSales > 0
+        ? shiftSales.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })
+        : '—',
       highlight: false,
     },
     {
       icon: Receipt,
       label: 'Abiertas',
-      value: openAccounts.length > 0 ? `${openAccounts.length} · ${openTotal.toFixed(2)} €` : '0',
+      value: openAccounts.length > 0
+        ? `${openAccounts.length} · ${openTotal.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}`
+        : '0',
       highlight: openAccounts.length > 0,
     },
     {

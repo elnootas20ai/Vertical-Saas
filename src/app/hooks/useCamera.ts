@@ -11,6 +11,8 @@ export type UseCameraOptions = {
   quality?: number;
   allowEditing?: boolean;
   source?: 'camera' | 'photos' | 'prompt';
+  /** Limita el lado mayor en nativo (Capacitor) antes de devolver DataUrl — crítico para OCR. */
+  maxWidth?: number;
 };
 
 export type CameraPermissionStatus = {
@@ -74,7 +76,7 @@ export function useCamera() {
    */
   const takePhotoDetailed = useCallback(
     async (opts: UseCameraOptions = {}): Promise<TakePhotoResult> => {
-      const { quality = 85, allowEditing = false, source = 'prompt' } = opts;
+      const { quality = 85, allowEditing = false, source = 'prompt', maxWidth } = opts;
 
       if (isNative) {
         const needCamera = source === 'camera' || source === 'prompt';
@@ -114,6 +116,7 @@ export function useCamera() {
             source: sourceMap[source],
             // Mejor lectura OCR: evita recortes raros del editor nativo
             correctOrientation: true,
+            ...(typeof maxWidth === 'number' && maxWidth > 0 ? { width: maxWidth } : {}),
           });
           if (!photo.dataUrl) {
             return { ok: false, reason: 'cancelled', message: 'No se obtuvo ninguna imagen.' };

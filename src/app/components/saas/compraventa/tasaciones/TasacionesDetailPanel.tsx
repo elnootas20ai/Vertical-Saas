@@ -23,10 +23,10 @@ type TasacionesDetailPanelProps = {
   tasacion: TasacionListItem | null;
   onAccept?: () => void;
   onReject?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
   actionsDisabled?: boolean;
 };
-
-const PHOTO_SLOTS = 6;
 
 function DetailSection({
   title,
@@ -127,16 +127,12 @@ function TasacionDetailContent({ tasacion }: { tasacion: TasacionListItem }) {
       </DetailSection>
 
       <DetailSection title="Fotografías">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {Array.from({ length: PHOTO_SLOTS }, (_, index) => (
-            <div
-              key={index}
-              className="flex aspect-[4/3] flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-900/30"
-            >
-              <ImagePlus className="h-6 w-6 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
-              <span className="mt-1.5 text-[10px] font-medium text-gray-400">Sin foto</span>
-            </div>
-          ))}
+        <div className="flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-6 text-center dark:border-gray-700 dark:bg-gray-900/30">
+          <ImagePlus className="h-7 w-7 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
+          <p className="mt-2 text-sm font-medium text-gray-600 dark:text-gray-400">Sin fotografías</p>
+          <p className="mt-1 max-w-xs text-xs text-gray-400">
+            Las fotos de tasación se gestionan en el expediente del vehículo tras aceptar la compra.
+          </p>
         </div>
       </DetailSection>
 
@@ -174,6 +170,8 @@ export function TasacionesDetailPanel({
   tasacion,
   onAccept,
   onReject,
+  onEdit,
+  onDelete,
   actionsDisabled = false,
 }: TasacionesDetailPanelProps) {
   if (!tasacion) {
@@ -253,8 +251,10 @@ export function TasacionesDetailPanel({
         showActions
         disabled={actionsDisabled}
         onAction={(actionId) => {
+          if (actionId === 'edit') onEdit?.();
           if (actionId === 'accept') onAccept?.();
           if (actionId === 'reject') onReject?.();
+          if (actionId === 'delete') onDelete?.();
         }}
       />
 

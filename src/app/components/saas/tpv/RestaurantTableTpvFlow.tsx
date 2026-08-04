@@ -25,11 +25,17 @@ export type RestaurantTableTpvFlowProps = {
   onTableChange?: (table: RestaurantTableContext, order: DiningOrder) => void;
   permissions?: RestaurantTpvPermissions;
   tabletMode?: boolean;
+  /** Abrir en carta (`order`) o cobro (`pay`). */
+  openIntent?: 'order' | 'pay';
 };
 
 const TpvRapidoOrderFlowLazy = lazy(async () => {
   const mod = await import('../../../pages/saas/TpvRapidoPage');
-  return { default: mod.TpvRapidoOrderFlow };
+  const Comp = mod.TpvRapidoOrderFlow;
+  if (!Comp) {
+    throw new Error('TPV no listo. Recarga la página e inténtalo de nuevo.');
+  }
+  return { default: Comp };
 });
 
 class TpvFlowErrorBoundary extends Component<
@@ -53,10 +59,13 @@ class TpvFlowErrorBoundary extends Component<
           <p className="text-base font-semibold text-stone-900 dark:text-stone-50">
             No se pudo cargar el TPV
           </p>
-          <p className="max-w-md text-sm text-stone-500">{this.state.error}</p>
+          <p className="max-w-md text-sm text-stone-500 break-words">{this.state.error}</p>
           <button
             type="button"
-            onClick={this.props.onBack}
+            onClick={() => {
+              this.setState({ error: null });
+              this.props.onBack();
+            }}
             className="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-semibold text-white"
           >
             Volver al plano
@@ -77,6 +86,7 @@ export function RestaurantTableTpvFlow({
   onTableChange,
   permissions,
   tabletMode = true,
+  openIntent = 'order',
 }: RestaurantTableTpvFlowProps) {
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-gray-50 dark:bg-gray-950">
@@ -90,12 +100,14 @@ export function RestaurantTableTpvFlow({
           )}
         >
           <TpvRapidoOrderFlowLazy
+            key={`${table.id}-${openIntent}`}
             restaurantMode
             embeddedInRestaurantTpv
             tabletMode={tabletMode}
             restaurantTable={table}
             restaurantDiningOrder={order}
             restaurantPermissions={permissions}
+            restaurantOpenIntent={openIntent}
             onBack={onBack}
             onRestaurantDiningOrderUpdated={onOrderChange}
             onRestaurantOrderComplete={onOrderComplete}

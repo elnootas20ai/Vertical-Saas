@@ -25,7 +25,9 @@ const KANBAN_COLUMNS: { status: OrderStatus; label: string; icon: typeof Clock; 
   { status: 'pending', label: 'Pendientes', icon: Clock, color: 'border-amber-400', headerBg: 'bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300' },
   { status: 'preparing', label: 'Preparando', icon: ClipboardList, color: 'border-blue-400', headerBg: 'bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300' },
   { status: 'ready', label: 'Listos', icon: CheckCircle2, color: 'border-emerald-400', headerBg: 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300' },
+  { status: 'out_for_delivery', label: 'En reparto', icon: PackageCheck, color: 'border-violet-400', headerBg: 'bg-violet-50 dark:bg-violet-900/20 text-violet-800 dark:text-violet-300' },
   { status: 'picked_up', label: 'Recogidos', icon: PackageCheck, color: 'border-gray-400', headerBg: 'bg-gray-50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-400' },
+  { status: 'delivered', label: 'Entregados', icon: PackageCheck, color: 'border-gray-400', headerBg: 'bg-gray-50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-400' },
 ];
 
 const TYPE_BADGE: Record<string, string> = {
@@ -39,6 +41,7 @@ const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
   pending: 'preparing',
   preparing: 'ready',
   ready: 'picked_up',
+  out_for_delivery: 'delivered',
 };
 
 const PAGO_METHODS: { key: PaymentMethod; label: string }[] = [
@@ -53,8 +56,10 @@ interface DragOrderItem {
 }
 
 function canDropOnColumn(fromStatus: OrderStatus, toStatus: OrderStatus): boolean {
-  if (fromStatus === toStatus || fromStatus === 'picked_up' || fromStatus === 'cancelled') return false;
+  if (fromStatus === toStatus || fromStatus === 'picked_up' || fromStatus === 'delivered' || fromStatus === 'cancelled') return false;
   if (toStatus === 'picked_up') return fromStatus === 'ready';
+  if (toStatus === 'out_for_delivery') return fromStatus === 'ready';
+  if (toStatus === 'delivered') return fromStatus === 'out_for_delivery';
   return true;
 }
 
@@ -69,7 +74,7 @@ function OrderCard({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const dragHandleRef = useRef<HTMLDivElement>(null);
-  const draggable = order.status !== 'picked_up';
+  const draggable = order.status !== 'picked_up' && order.status !== 'delivered' && order.status !== 'cancelled';
 
   const [{ isDragging }, drag, preview] = useDrag({
     type: DND_ORDER_TYPE,
@@ -306,7 +311,10 @@ function ButcherWorkerOrdersBoard() {
   }, [userId, orders, applyLocalStatus]);
 
   const handleAdvance = async (order: ButcherOrder) => {
-    const next = NEXT_STATUS[order.status];
+    let next = NEXT_STATUS[order.status];
+    if (order.status === 'ready' && order.fulfillmentMode === 'delivery') {
+      next = 'out_for_delivery';
+    }
     if (!next) return;
     await handleStatusChange(order._id, order.status, next);
   };

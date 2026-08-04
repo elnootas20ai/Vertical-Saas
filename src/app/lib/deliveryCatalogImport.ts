@@ -558,7 +558,9 @@ export async function mapImportEntryToCatalogItem(
   const name = String(entry.name || '').trim();
   if (!name) return null;
 
-  const category = normalizeImportCategory(entry.category || '');
+  const category = normalizeImportCategory(entry.category || '', {
+    preserveSubfamilies: String(options.vertical || '').trim() === 'restaurant',
+  });
   const lineText = readImportLineText(entry);
   let brandCache = options.brandCache;
   let explicitBrandIds: string[] = [];

@@ -23,6 +23,8 @@ type Props = {
   onOrderChange: (order: DiningOrder) => void;
   onTableChange?: (table: DiningTable | RestaurantTableContext, order: DiningOrder) => void;
   tabletMode?: boolean;
+  /** Abrir en carta o directamente en cobro. */
+  openIntent?: 'order' | 'pay';
 };
 
 function isDiningTable(table: DiningTable | RestaurantTableContext): table is DiningTable {
@@ -62,6 +64,7 @@ export function RestaurantTpvTableAccount({
   onOrderChange,
   onTableChange,
   tabletMode = true,
+  openIntent = 'order',
 }: Props) {
   const { user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
@@ -99,6 +102,7 @@ export function RestaurantTpvTableAccount({
         table={restaurantTable}
         order={order}
         tabletMode={tabletMode}
+        openIntent={openIntent}
         permissions={permissions}
         onBack={onBack}
         onOrderChange={onOrderChange}

@@ -35,8 +35,12 @@ function mapSeller(origin: PurchaseOrigin, acquisition?: VehicleAcquisition | nu
 }
 
 function vehicleFirstRegistration(vehicle: Vehicle): string {
-  if (vehicle.purchaseDate) return vehicle.purchaseDate.slice(0, 10);
-  if (vehicle.year) return `${vehicle.year}-06-01`;
+  // Nunca inventar con purchaseDate (fecha de compra ≠ 1ª matriculación).
+  // Sin dato fiable dejamos vacío: el motor marca nuevo/usado como "Indica fecha y km".
+  const raw = (vehicle as { firstRegistrationDate?: string; firstRegistration?: string }).firstRegistrationDate
+    || (vehicle as { firstRegistrationDate?: string; firstRegistration?: string }).firstRegistration
+    || '';
+  if (raw && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
   return '';
 }
 

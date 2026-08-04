@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CalendarDays,
   ChevronLeft,
@@ -53,6 +53,25 @@ interface ClockinHistoryPanelProps {
   managerView?: boolean;
   /** Al pulsar un miembro del equipo → historial completo. */
   onViewMember?: (memberId: string) => void;
+  /** Incrementar tras fichar salida para recargar historial. */
+  refreshKey?: number;
+  /** Sesiones recién cerradas (optimistic merge mientras llega el API). */
+  seedRecords?: ClockinRecord[];
+}
+
+function upsertClockinRecords(base: ClockinRecord[], seeds: ClockinRecord[]): ClockinRecord[] {
+  const map = new Map<string, ClockinRecord>();
+  for (const r of base) {
+    if (r?._id) map.set(r._id, r);
+  }
+  for (const r of seeds) {
+    if (!r?._id) continue;
+    const prev = map.get(r._id);
+    if (!prev || String(r.updatedAt || '') >= String(prev.updatedAt || '')) {
+      map.set(r._id, r);
+    }
+  }
+  return sortClockinsByClockIn([...map.values()]);
 }
 
 function RecordRow({
@@ -211,6 +230,8 @@ export function ClockinHistoryPanel({
   memberId,
   managerView = false,
   onViewMember,
+  refreshKey = 0,
+  seedRecords,
 }: ClockinHistoryPanelProps) {
   const [mainTab, setMainTab] = useState<MainTab>(managerView ? 'team' : 'mine');
   const [rangeTab, setRangeTab] = useState<RangeTab>('week');
@@ -222,38 +243,80 @@ export function ClockinHistoryPanel({
   const [teamMembers, setTeamMembers] = useState<AuthUser[]>([]);
   const [activeNow, setActiveNow] = useState<ActiveMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const seedRef = useRef(seedRecords);
+  seedRef.current = seedRecords;
 
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
+    setLoadError('');
+    const today = todayDateStr();
+    const seeds = (seedRef.current || []).filter((r) => r?.status === 'completed');
+
+    // Mis fichajes: crítico. No debe fallar si el roster de equipo da 403.
     try {
-      const today = todayDateStr();
-      const [mine, todayRoster, weekAll, active, usersRes] = await Promise.all([
-        memberId ? listClockins(businessId, { memberId, recordsOnly: true }) : Promise.resolve([]),
-        fetchClockins(businessId, { date: today }),
-        listClockins(businessId, { recordsOnly: true }).then((all) =>
-          filterRecordsSince(
-            all.filter((r) => r.status === 'completed'),
-            dateDaysAgo(7),
-          ),
-        ),
-        fetchActiveNow(businessId).catch(() => [] as ActiveMember[]),
-        managerView ? listUsersRequest(businessId).catch(() => ({ users: [] as AuthUser[] })) : Promise.resolve({ users: [] as AuthUser[] }),
-      ]);
-      setMyRecords(sortClockinsByClockIn(mine.filter((r) => r.status === 'completed')));
-      setTeamToday(sortClockinsByClockIn(todayRoster));
-      setTeamWeek(weekAll);
-      setActiveNow(active);
-      setTeamMembers((usersRes.users || []).filter((u) => u.status !== 'inactive' && !isDemoTeamUser(u)));
-    } finally {
-      setLoading(false);
+      const mine = memberId
+        ? await listClockins(businessId, { memberId, recordsOnly: true })
+        : [];
+      const completed = mine.filter((r) => r.status === 'completed');
+      setMyRecords(upsertClockinRecords(completed, seeds));
+    } catch {
+      if (seeds.length) setMyRecords((prev) => upsertClockinRecords(prev, seeds));
+      setLoadError('No se pudo cargar tu historial. Pulsa Actualizar.');
     }
-  }, [businessId, memberId, managerView]);
+
+    // Equipo / activos: best-effort (no vacían mis fichajes).
+    const teamJobs: Promise<void>[] = [
+      fetchClockins(businessId, { date: today })
+        .then((todayRoster) => setTeamToday(sortClockinsByClockIn(todayRoster)))
+        .catch(() => undefined),
+      fetchActiveNow(businessId)
+        .then((active) => setActiveNow(active))
+        .catch(() => setActiveNow([])),
+    ];
+
+    if (managerView || mainTab === 'team') {
+      teamJobs.push(
+        listClockins(businessId, { recordsOnly: true })
+          .then((all) =>
+            setTeamWeek(
+              filterRecordsSince(
+                all.filter((r) => r.status === 'completed'),
+                dateDaysAgo(7),
+              ),
+            ),
+          )
+          .catch(() => undefined),
+      );
+    }
+
+    if (managerView) {
+      teamJobs.push(
+        listUsersRequest(businessId)
+          .then((usersRes) =>
+            setTeamMembers(
+              (usersRes.users || []).filter((u) => u.status !== 'inactive' && !isDemoTeamUser(u)),
+            ),
+          )
+          .catch(() => undefined),
+      );
+    }
+
+    await Promise.allSettled(teamJobs);
+    setLoading(false);
+  }, [businessId, memberId, managerView, mainTab]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
+
+  useEffect(() => {
+    const seeds = (seedRecords || []).filter((r) => r?.status === 'completed');
+    if (!seeds.length) return;
+    setMyRecords((prev) => upsertClockinRecords(prev, seeds));
+  }, [seedRecords]);
 
   const monthDate = useMemo(() => {
     const d = new Date();
@@ -450,9 +513,19 @@ export function ClockinHistoryPanel({
             </div>
           </div>
 
+          {loadError ? (
+            <p className="mx-4 mt-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
+              {loadError}
+            </p>
+          ) : null}
+
           <div>
             {filteredMine.length === 0 ? (
-              <p className="py-12 text-center text-sm text-gray-400">No hay fichajes en este periodo</p>
+              <p className="py-12 text-center text-sm text-gray-400">
+                {loadError
+                  ? 'No se pudo cargar el historial'
+                  : 'Aún no hay fichajes cerrados en este periodo. Al pulsar Salida, aparecerá aquí.'}
+              </p>
             ) : (
               filteredMine.map((entry) => (
                 <RecordRow

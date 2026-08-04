@@ -5,6 +5,8 @@ import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
+import { StoreHoursStatusBanner } from '../../components/saas/StoreHoursStatusBanner';
+import { resolveWorkerWorkCenter } from '../../lib/workerStoreHours';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
@@ -183,7 +185,7 @@ function FiltersBar({
     'px-3 py-2 rounded-lg text-sm font-semibold border transition-colors inline-flex items-center gap-1.5 shrink-0 ' +
     (pointOfSaleAccess.canCreatePointOfSale
       ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30'
-      : 'border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30');
+      : 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 text-[var(--v-blue,#2563eb)] dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30');
 
   const sel = 'w-full px-3 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:border-gray-900 dark:focus:border-gray-400 outline-none';
   const today = localDateInputValue();
@@ -849,9 +851,7 @@ function Alerts({
   if (!vis.length || bannerHidden) return null;
 
   const crit = vis.some((a) => a.severity === 'critical');
-  const bg = crit
-    ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-    : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800';
+  const accent = crit ? 'var(--v-rose,#e11d48)' : 'var(--v-amber,#d97706)';
   const ICONS: Record<string, typeof AlertTriangle> = {
     delayed_order: Timer,
     kitchen_saturated: ChefHat,
@@ -870,21 +870,28 @@ function Alerts({
   };
 
   return (
-    <div className={`rounded-xl border-2 ${bg} overflow-hidden shadow-sm`}>
-      <div className="w-full px-3 py-2.5 flex items-center gap-2">
+    <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="h-1 w-full" style={{ background: accent }} />
+      <div className="flex w-full items-center gap-2 px-3 py-2.5">
         <button
           type="button"
           onClick={() => setExp((v) => !v)}
-          className="flex-1 min-w-0 flex items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
         >
-          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${crit ? 'bg-red-100 dark:bg-red-900/40' : 'bg-amber-100 dark:bg-amber-900/40'}`}>
-            <Bell className={`w-4 h-4 ${crit ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
+            style={{
+              background: crit ? 'rgba(225,29,72,0.12)' : 'rgba(217,119,6,0.14)',
+              color: accent,
+            }}
+          >
+            <Bell className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <p className={`text-sm font-bold leading-tight ${crit ? 'text-red-900 dark:text-red-100' : 'text-amber-950 dark:text-amber-100'}`}>
+            <p className="text-sm font-bold leading-tight text-slate-900 dark:text-slate-100">
               {vis.length} alerta{vis.length !== 1 ? 's' : ''} pendiente{vis.length !== 1 ? 's' : ''}
             </p>
-            <p className={`text-xs mt-0.5 ${crit ? 'text-red-800/85 dark:text-red-200/90' : 'text-amber-900/75 dark:text-amber-200/85'}`}>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               {exp ? 'Toca para ocultar detalle' : `Operativa · ${dayLabel}${opsDate !== todayKey ? ' (día seleccionado)' : ''}`}
             </p>
           </div>
@@ -892,49 +899,56 @@ function Alerts({
         <button
           type="button"
           onClick={() => setExp((v) => !v)}
-          className={`shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-bold border ${
-            crit
-              ? 'bg-white dark:bg-gray-900 text-red-700 dark:text-red-300 border-red-200 dark:border-red-700'
-              : 'bg-white dark:bg-gray-900 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700'
-          }`}
+          className="shrink-0 rounded-xl bg-[var(--v-blue,#2563eb)] px-3 py-1.5 text-xs font-semibold text-white shadow-sm shadow-blue-600/20 hover:bg-[#1d4ed8]"
         >
           {exp ? 'Ocultar' : 'Ver alertas'}
         </button>
         <button
           type="button"
           onClick={dismissBanner}
-          className="p-2 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-white/60 dark:hover:bg-gray-900/30 shrink-0"
+          className="shrink-0 rounded-xl p-2 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
           title="Quitar aviso"
           aria-label="Quitar aviso de alertas"
         >
-          <X className="w-4 h-4" />
+          <X className="h-4 w-4" />
         </button>
       </div>
       {exp && (
-        <div className="px-3 pb-3 space-y-1.5 border-t border-black/5 dark:border-white/5 pt-2">
+        <div className="space-y-1.5 border-t border-slate-100 px-3 pb-3 pt-2 dark:border-slate-800">
           {vis.map((a) => {
             const I = ICONS[a.type] || AlertTriangle;
+            const rowCrit = a.severity === 'critical';
             return (
-              <div key={a.id} className="flex items-start gap-2 bg-white dark:bg-gray-800 rounded-lg p-2.5 border border-gray-100 dark:border-gray-700">
-                <I className={`w-4 h-4 mt-0.5 shrink-0 ${a.severity === 'critical' ? 'text-red-500' : 'text-amber-500'}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{a.title}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              <div
+                key={a.id}
+                className="flex items-start gap-2.5 rounded-xl border border-slate-100 bg-slate-50/70 p-2.5 dark:border-slate-800 dark:bg-slate-900/50"
+              >
+                <span
+                  className="mt-1 h-8 w-1 shrink-0 rounded-full"
+                  style={{ background: rowCrit ? 'var(--v-rose,#e11d48)' : 'var(--v-amber,#d97706)' }}
+                />
+                <I
+                  className="mt-0.5 h-4 w-4 shrink-0"
+                  style={{ color: rowCrit ? 'var(--v-rose,#e11d48)' : 'var(--v-amber,#d97706)' }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{a.title}</p>
+                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {a.message}
                     {a.createdAt && (
-                      <span className="text-gray-400 dark:text-gray-500">
+                      <span className="text-slate-400 dark:text-slate-500">
                         {' '}
                         · lleva {formatElapsedFromIso(a.createdAt, nowMs)}
                       </span>
                     )}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex shrink-0 items-center gap-1">
                   {opsAlertActionLabel(a) && (
                     <button
                       type="button"
                       onClick={() => handleOpsAlertAction(a, nav, activeOrders)}
-                      className="px-2 py-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg"
+                      className="rounded-xl px-2.5 py-1.5 text-xs font-semibold text-[var(--v-blue,#2563eb)] transition hover:bg-blue-50 dark:hover:bg-blue-950/30"
                     >
                       {opsAlertActionLabel(a)}
                     </button>
@@ -942,10 +956,10 @@ function Alerts({
                   <button
                     type="button"
                     onClick={() => setHide((p) => new Set(p).add(a.id))}
-                    className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg"
+                    className="rounded-lg p-1 text-slate-400 transition hover:text-slate-600 dark:hover:text-slate-300"
                     title="Quitar esta alerta"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
@@ -995,36 +1009,37 @@ function CashStatusBanner({
   };
 
   return (
-    <div className="relative rounded-xl border-2 border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 shadow-sm">
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+      <div className="h-1 w-full bg-[var(--v-amber,#d97706)]" />
       <button
         type="button"
         onClick={() => onNavigate('/saas/vertical/delivery/caja')}
-        className="w-full text-left px-4 py-3 pr-12 hover:bg-amber-100/80 dark:hover:bg-amber-900/20 transition-colors rounded-xl"
+        className="w-full rounded-2xl px-4 py-3 pr-12 text-left transition-colors hover:bg-slate-50/80 dark:hover:bg-slate-900/50"
       >
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center shrink-0">
-            <Banknote className="w-5 h-5 text-amber-700 dark:text-amber-400" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[rgba(217,119,6,0.14)]">
+            <Banknote className="h-5 w-5 text-[var(--v-amber,#d97706)]" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-bold text-amber-900 dark:text-amber-100">Panel de caja</p>
-            <p className="text-xs text-amber-800/90 dark:text-amber-200/90 mt-0.5">
+            <p className="text-sm font-bold text-slate-900 dark:text-slate-100">Panel de caja</p>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
               {openCount > 0 ? `${openCount} caja${openCount !== 1 ? 's' : ''} abierta${openCount !== 1 ? 's' : ''}` : 'Sin caja abierta'}
               {pendingValidation > 0 ? ` · ${pendingValidation} cierre${pendingValidation !== 1 ? 's' : ''} por validar` : ''}
               {pendingClose > 0 ? ` · ${pendingClose} sin cerrar (+14h)` : ''}
               {discrepancy >= 20 ? ` · descuadre hoy ${discrepancy.toFixed(2)}€` : ''}
             </p>
           </div>
-          <span className="text-xs font-bold text-amber-800 dark:text-amber-300 shrink-0 mt-1">Abrir →</span>
+          <span className="mt-1 shrink-0 text-xs font-semibold text-[var(--v-blue,#2563eb)]">Abrir →</span>
         </div>
       </button>
       <button
         type="button"
         onClick={dismiss}
-        className="absolute top-2.5 right-2.5 p-2 rounded-lg text-amber-700/70 dark:text-amber-300/70 hover:text-amber-900 dark:hover:text-amber-100 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+        className="absolute right-2.5 top-3.5 rounded-xl p-2 text-slate-400 transition hover:bg-slate-50 hover:text-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-200"
         title="Quitar aviso"
         aria-label="Quitar aviso de caja"
       >
-        <X className="w-4 h-4" />
+        <X className="h-4 w-4" />
       </button>
     </div>
   );
@@ -1245,7 +1260,7 @@ function AssemblyW({ orders, onAdv, brandLabels, nowMs }: {
               <OrderBrandBadges order={o} brandLabels={brandLabels} />
               <p className="text-xs text-gray-400 mt-0.5">{o.deliveryType === 'recogida' ? 'Recogida' : 'Domicilio'} — {ago(getOrderPhaseStartIso(o), nowMs)} en montaje</p>
             </div>
-            <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shrink-0">Completado</button>
+            <button onClick={() => onAdv(o, 'entregado')} className="px-3 py-1.5 bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white rounded-lg text-xs font-semibold shrink-0">Completado</button>
           </div>
         ))}
       </div>
@@ -1457,7 +1472,7 @@ function RevenueBreakdownW({
   title,
   data,
   labelForKey,
-  barClass = 'bg-violet-500 dark:bg-violet-400',
+  barClass = 'bg-[var(--v-blue,#2563eb)] dark:bg-blue-400',
 }: {
   title: string;
   data: Record<string, number>;
@@ -2028,6 +2043,20 @@ export function DeliveryOpsCenter() {
     return n;
   }, [isLiveAll, liveByPdv, data?.cashStatus]);
 
+  const opsStoreHoursWorkCenter = useMemo(() => {
+    if (isLiveAll) return null;
+    const pdvId = String(filters.salesPointId || '').trim();
+    if (!pdvId) return null;
+    const pdv = (data?.pointsOfSale || []).find((p) => p._id === pdvId);
+    const ref = String(pdv?.workCenterId || pdvId).trim();
+    return resolveWorkerWorkCenter(activeStoreScope.retailWorkCenters, ref);
+  }, [
+    isLiveAll,
+    filters.salesPointId,
+    data?.pointsOfSale,
+    activeStoreScope.retailWorkCenters,
+  ]);
+
   return (
     <Layout title="Centro Operativo" subtitle={layoutSubtitle} noPadding>
       <div className="px-3 md:px-4 pt-1 pb-4 md:pb-5">
@@ -2061,6 +2090,13 @@ export function DeliveryOpsCenter() {
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
+          {opsStoreHoursWorkCenter ? (
+            <StoreHoursStatusBanner
+              workCenter={opsStoreHoursWorkCenter}
+              compact
+              className="mt-2 rounded-lg"
+            />
+          ) : null}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 pt-1 pb-3 space-y-2.5">

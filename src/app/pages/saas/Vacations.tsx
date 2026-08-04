@@ -34,13 +34,14 @@ import {
   getSettings,
   saveSettings,
   getDaysUsed,
-  getDaysAllowed,
+  getMemberVacationBalance,
   countBusinessDays,
   LEAVE_TYPE_LABELS,
   STATUS_LABELS,
 } from '../../lib/vacationsApi';
 import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
 import type { AuthUser } from '../../lib/authApi';
+import { formatDateEs, formatDateRangeEs } from '../../lib/formatDateEs';
 import { toast } from 'sonner';
 
 type Tab = 'my' | 'team' | 'settings';
@@ -56,12 +57,14 @@ function memberEndDate(m: AuthUser | null | undefined): string | undefined {
   return m?.employment?.endDate || undefined;
 }
 
-function allowedFor(settings: VacationSettings, m: AuthUser, year: number): number {
-  return getDaysAllowed(settings, m.user_id, {
+function allowedFor(settings: VacationSettings, m: AuthUser, year: number, requests: VacationRequest[] = []): number {
+  return getMemberVacationBalance(settings, requests, m.user_id, {
     startDate: memberStartDate(m),
     endDate: memberEndDate(m),
     year,
-  });
+    hoursPerWeek: m.employment?.hoursPerWeek,
+    workday: m.employment?.workday,
+  }).requestable;
 }
 
 export function Vacations() {
@@ -129,15 +132,18 @@ export function Vacations() {
 
   const myRequests = requests.filter(r => r.member_id === user?.user_id);
   const pendingRequests = requests.filter(r => r.status === 'pending');
-  const myDaysUsed = user ? getDaysUsed(requests, user.user_id, currentYear) : 0;
-  const myDaysAllowed = user && settings
-    ? getDaysAllowed(settings, user.user_id, {
+  const myBalance = user && settings
+    ? getMemberVacationBalance(settings, requests, user.user_id, {
         startDate: memberStartDate(user),
         endDate: memberEndDate(user),
         year: currentYear,
+        hoursPerWeek: user.employment?.hoursPerWeek,
+        workday: user.employment?.workday,
       })
-    : 22;
-  const myDaysRemaining = Math.max(0, myDaysAllowed - myDaysUsed);
+    : null;
+  const myDaysUsed = myBalance?.used ?? 0;
+  const myDaysAllowed = myBalance?.accrued ?? 0;
+  const myDaysRemaining = myBalance?.requestable ?? 0;
 
   const departments = useMemo(() => {
     const depts = new Set<string>();
@@ -314,7 +320,7 @@ export function Vacations() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon={<Umbrella className="w-5 h-5" />} label="Días asignados" value={String(myDaysAllowed)} color="blue" />
             <StatCard icon={<CalendarDays className="w-5 h-5" />} label="Días usados" value={String(myDaysUsed)} color="amber" />
-            <StatCard icon={<Check className="w-5 h-5" />} label="Días restantes" value={String(myDaysRemaining)} color="green" />
+            <StatCard icon={<Check className="w-5 h-5" />} label="Días disponibles" value={String(myDaysRemaining)} color="green" />
             <StatCard icon={<Clock className="w-5 h-5" />} label="Pendientes" value={String(myRequests.filter(r => r.status === 'pending').length)} color="red" />
           </div>
         )}
@@ -347,8 +353,8 @@ export function Vacations() {
                         <td className="px-4 py-3">
                           <span className="text-sm font-medium text-gray-900 dark:text-white">{leaveLabels[req.leaveType]}</span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{req.startDate}</td>
-                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{req.endDate}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateEs(req.startDate)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateEs(req.endDate)}</td>
                         <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">{req.totalDays}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${statusColors[req.status]}`}>
@@ -519,7 +525,7 @@ export function Vacations() {
                                   )}
                                 </div>
                                 <p className="text-sm text-gray-600 dark:text-gray-300">
-                                  {leaveLabels[req.leaveType]} · {req.startDate} → {req.endDate} · <span className="font-semibold">{req.totalDays} días ({req.totalDays * HOURS_PER_DAY}h)</span>
+                                  {leaveLabels[req.leaveType]} · {formatDateRangeEs(req.startDate, req.endDate)} · <span className="font-semibold">{req.totalDays} días ({req.totalDays * HOURS_PER_DAY}h)</span>
                                 </p>
                                 {req.notes && <p className="text-xs text-gray-500 dark:text-gray-400">{req.notes}</p>}
                               </div>
@@ -532,7 +538,7 @@ export function Vacations() {
                             <div className="px-4 pb-4 pt-0 border-t border-amber-100 dark:border-amber-800/30">
                               <div className="pt-3 space-y-3">
                                 {member && settings && (() => {
-                                  const allowed = allowedFor(settings, member, currentYear);
+                                  const allowed = allowedFor(settings, member, currentYear, requests);
                                   const used = getDaysUsed(requests, member.user_id, currentYear);
                                   const remaining = Math.max(0, allowed - used);
                                   return (
@@ -630,7 +636,7 @@ export function Vacations() {
                                   </div>
                                 </td>
                                 <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{leaveLabels[req.leaveType]}</td>
-                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{req.startDate} → {req.endDate}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-300">{formatDateRangeEs(req.startDate, req.endDate)}</td>
                                 <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">{req.totalDays}</td>
                                 <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">{req.totalDays * HOURS_PER_DAY}</td>
                                 <td className="px-4 py-3">
@@ -682,7 +688,7 @@ export function Vacations() {
                       </thead>
                       <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
                         {filteredMembers.map(m => {
-                          const allowed = allowedFor(settings, m, currentYear);
+                          const allowed = allowedFor(settings, m, currentYear, requests);
                           const used = getDaysUsed(requests, m.user_id, currentYear);
                           const remaining = Math.max(0, allowed - used);
                           const pending = requests.filter(r => r.member_id === m.user_id && r.status === 'pending').length;
@@ -734,10 +740,10 @@ export function Vacations() {
                         <tr className="border-t-2 border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50">
                           <td className="px-4 py-3 text-sm font-bold text-gray-900 dark:text-white" colSpan={2}>Total</td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">
-                            {filteredMembers.reduce((sum, m) => sum + allowedFor(settings, m, currentYear), 0)}
+                            {filteredMembers.reduce((sum, m) => sum + allowedFor(settings, m, currentYear, requests), 0)}
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">
-                            {filteredMembers.reduce((sum, m) => sum + allowedFor(settings, m, currentYear), 0) * HOURS_PER_DAY}
+                            {filteredMembers.reduce((sum, m) => sum + allowedFor(settings, m, currentYear, requests), 0) * HOURS_PER_DAY}
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-gray-900 dark:text-white">
                             {filteredMembers.reduce((sum, m) => sum + getDaysUsed(requests, m.user_id, currentYear), 0)}
@@ -747,14 +753,14 @@ export function Vacations() {
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-green-600 dark:text-green-400">
                             {filteredMembers.reduce((sum, m) => {
-                              const a = allowedFor(settings, m, currentYear);
+                              const a = allowedFor(settings, m, currentYear, requests);
                               const u = getDaysUsed(requests, m.user_id, currentYear);
                               return sum + Math.max(0, a - u);
                             }, 0)}
                           </td>
                           <td className="px-4 py-3 text-center text-sm font-bold text-green-600 dark:text-green-400">
                             {filteredMembers.reduce((sum, m) => {
-                              const a = allowedFor(settings, m, currentYear);
+                              const a = allowedFor(settings, m, currentYear, requests);
                               const u = getDaysUsed(requests, m.user_id, currentYear);
                               return sum + Math.max(0, a - u);
                             }, 0) * HOURS_PER_DAY}

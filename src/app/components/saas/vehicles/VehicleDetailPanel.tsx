@@ -42,14 +42,14 @@ export function VehicleDetailPanel({
 }: VehicleDetailPanelProps) {
   if (!vehicle) {
     return (
-      <section className="flex h-full min-h-0 flex-col items-center justify-center bg-gray-50/50 px-8 text-center dark:bg-gray-950/50">
-        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white shadow-sm dark:bg-gray-900">
-          <Car className="h-8 w-8 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
+      <section className="flex h-full min-h-0 flex-col items-center justify-center bg-[var(--v-surface,#f5f7fb)]/80 px-8 text-center dark:bg-slate-950/50">
+        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-blue-100 bg-white shadow-sm dark:border-blue-900 dark:bg-slate-900">
+          <Car className="h-8 w-8 text-[var(--v-blue,#2563eb)]" strokeWidth={1.5} />
         </div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <h2 className="vsaas-title text-lg">
           Selecciona un vehículo
         </h2>
-        <p className="mt-2 max-w-sm text-sm text-gray-500 dark:text-gray-400">
+        <p className="mt-2 max-w-sm vsaas-subtitle text-sm">
           Elige un vehículo de la lista para ver su ficha, acciones y detalle.
         </p>
       </section>

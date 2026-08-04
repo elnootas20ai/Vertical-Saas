@@ -97,7 +97,7 @@ import {
 import { getUserActivityRequest } from '../../lib/authApi';
 import {
   buildCustomRolePermissionMatrix,
-  formatRolePermissions,
+  formatRoleAccessSummary,
   getInvitePermissionsForUser,
   loadCustomRoles,
   mergeRoleCatalog,
@@ -105,10 +105,10 @@ import {
 } from '../../lib/roleCatalog';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { getFunctionRolesForBusiness, getInviteRoleDisplayLabel } from '../../lib/inviteFunctionRoles';
+import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import { fetchTeamAlerts, type TeamAlert } from '../../lib/teamAlertsApi';
-import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
 import { canManagePayroll } from '../../lib/teamManagerAccess';
 
 type TeamTab = 'members' | 'roles' | 'activity' | 'staff-expenses' | 'staff-consumptions' | 'payroll';
@@ -871,6 +871,7 @@ const PERMISSION_MODULES = [
   { key: 'ancove', label: 'ANCOVE', icon: <Building2 className="w-3.5 h-3.5" /> },
   { key: 'team', label: 'Equipo', icon: <UsersRound className="w-3.5 h-3.5" /> },
   { key: 'delivery', label: 'Delivery / Pedidos', icon: <Package className="w-3.5 h-3.5" /> },
+  { key: 'sala', label: 'Sala / Mesas', icon: <Package className="w-3.5 h-3.5" /> },
   { key: 'cash_register', label: 'Caja / TPV', icon: <Banknote className="w-3.5 h-3.5" /> },
   { key: 'reports', label: 'Informes', icon: <FileText className="w-3.5 h-3.5" /> },
 ] as const;
@@ -881,6 +882,9 @@ function resolvePermissionModuleLabel(
 ): string {
   if (module.key === 'delivery') {
     return getRetailOpsUiCopy(businessType).permissionDeliveryModule;
+  }
+  if (module.key === 'sala') {
+    return isRestaurantBusinessType(businessType) ? 'Sala / Mesas' : 'Sala';
   }
   return module.label;
 }
@@ -922,6 +926,7 @@ function buildEmploymentInfo(overrides?: Partial<EmploymentInfo>): EmploymentInf
     startDate: overrides?.startDate || '',
     contractType: overrides?.contractType || '',
     workday: overrides?.workday || '',
+    hoursPerWeek: overrides?.hoursPerWeek,
     salary: overrides?.salary || '',
     bankAccount: formatIbanInput(overrides?.bankAccount || ''),
     bankName: overrides?.bankName || '',
@@ -1759,7 +1764,6 @@ function MemberDrawer({
 
               <div>
                 <p className="mb-3 text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">Información laboral</p>
-                <HrGestorChecklist mode="hr" compact className="mb-4" />
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Departamento</label>
@@ -1831,15 +1835,57 @@ function MemberDrawer({
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Jornada</label>
                     <div className="relative">
-                      <select className={`${inputClassName} appearance-none pr-9 cursor-pointer`} value={form.employment.workday} onChange={(event) => setForm((prev) => ({ ...prev, employment: { ...prev.employment, workday: event.target.value } }))}>
+                      <select
+                        className={`${inputClassName} appearance-none pr-9 cursor-pointer`}
+                        value={form.employment.workday}
+                        onChange={(event) => {
+                          const workday = event.target.value;
+                          setForm((prev) => {
+                            const nextHours =
+                              prev.employment.hoursPerWeek != null && Number(prev.employment.hoursPerWeek) > 0
+                                ? prev.employment.hoursPerWeek
+                                : workday === 'completa'
+                                  ? 40
+                                  : workday === 'media' || workday === 'parcial'
+                                    ? 20
+                                    : prev.employment.hoursPerWeek;
+                            return {
+                              ...prev,
+                              employment: { ...prev.employment, workday, hoursPerWeek: nextHours },
+                            };
+                          });
+                        }}
+                      >
                         <option value="">Sin especificar</option>
-                        <option value="completa">Completa</option>
+                        <option value="completa">Completa (40 h)</option>
                         <option value="parcial">Parcial</option>
-                        <option value="media">Media jornada</option>
+                        <option value="media">Media jornada (20 h)</option>
                         <option value="flexible">Flexible</option>
                       </select>
                       <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
                     </div>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Horas / semana</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={60}
+                      step={0.5}
+                      className={inputClassName}
+                      value={form.employment.hoursPerWeek != null ? form.employment.hoursPerWeek : ''}
+                      onChange={(event) => {
+                        const raw = event.target.value;
+                        setForm((prev) => ({
+                          ...prev,
+                          employment: {
+                            ...prev.employment,
+                            hoursPerWeek: raw === '' ? undefined : Number(raw),
+                          },
+                        }));
+                      }}
+                      placeholder="Ej: 40 o 20"
+                    />
                   </div>
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold text-gray-600 dark:text-gray-400">Salario bruto anual</label>
@@ -2850,7 +2896,20 @@ export function Team() {
   const { clients: contextClients, leads: contextLeads } = useApp();
   const [searchParams] = useSearchParams();
   const memberIdParam = searchParams.get('memberId');
-  const [activeTab, setActiveTab] = useState<TeamTab>('members');
+  const [activeTab, setActiveTab] = useState<TeamTab>(() => {
+    const tab = String(new URLSearchParams(window.location.search).get('tab') || '').trim();
+    if (
+      tab === 'members'
+      || tab === 'roles'
+      || tab === 'activity'
+      || tab === 'staff-expenses'
+      || tab === 'staff-consumptions'
+      || tab === 'payroll'
+    ) {
+      return tab;
+    }
+    return 'members';
+  });
   const [showInvite, setShowInvite] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
@@ -2974,7 +3033,9 @@ export function Team() {
     });
   }, [members, user?.user_id]);
   const roles = useMemo(() => {
-    const base = getFunctionRolesForBusiness(currentBusiness?.businessType);
+    const base = getFunctionRolesForBusiness(currentBusiness?.businessType, {
+      ownDeliveryEnabled: Boolean(currentBusiness?.ownDeliveryEnabled),
+    });
     return mergeRoleCatalog(base, customRoles, members);
   }, [customRoles, members, currentBusiness?.businessType]);
 
@@ -3681,7 +3742,10 @@ export function Team() {
 
         {activeTab === 'roles' && (
           <div className="space-y-3">
-            <div className="flex items-center justify-end">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Cada función tiene permisos y tareas de «Mi trabajo» que se asignan al invitar.
+              </p>
               <button
                 type="button"
                 onClick={() => setShowCreateRole(true)}
@@ -3693,22 +3757,70 @@ export function Team() {
             </div>
             {roles.map((role) => {
               const roleMembers = orderedMembers.filter((member) => member.role === role.id);
+              const taskBundle = getRoleTaskBundle(role.id, currentBusiness?.businessType);
+              const accessSummary = formatRoleAccessSummary(
+                role.id,
+                roles,
+                currentBusiness?.businessType,
+              );
               return (
                 <div key={role.id} className={`rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-5 border-l-4 ${getRoleToken(role.id).accentBorder}`}>
-                  <div className="mb-2 flex items-center gap-2">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
                     <RoleBadge role={role.id} businessType={currentBusiness?.businessType} />
                     <span className="text-xs text-gray-400 dark:text-gray-500">{role.users} usuario{role.users !== 1 ? 's' : ''}</span>
                   </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{role.description}</p>
-                  <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">Permisos base: {formatRolePermissions(role.permissions, currentBusiness?.businessType)}</p>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {roleMembers.length === 0 && <span className="text-xs italic text-gray-300 dark:text-gray-600">Sin trabajadores con esta funcion</span>}
-                    {roleMembers.map((member) => (
-                      <button key={member.user_id} type="button" onClick={() => navigate(`/saas/team/${member.user_id}`)} className="inline-flex items-center gap-2 rounded-xl border border-gray-100 dark:border-gray-700/50 bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700">
-                        <Avatar member={member} size="sm" />
-                        {member.fullName}
-                      </button>
-                    ))}
+                  <p className="text-sm text-gray-600 dark:text-gray-300">
+                    {taskBundle?.summary || role.description}
+                  </p>
+                  <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    <span className="font-semibold text-gray-600 dark:text-gray-300">Permisos: </span>
+                    {accessSummary}
+                  </p>
+                  {taskBundle?.tasks?.length ? (
+                    <div className="mt-3 rounded-xl bg-gray-50 dark:bg-gray-900/50 px-3 py-2.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                        Tareas en Mi trabajo ({taskBundle.tasks.length})
+                      </p>
+                      <ul className="mt-1.5 space-y-1">
+                        {taskBundle.tasks.map((task) => (
+                          <li key={task.key} className="text-xs text-gray-600 dark:text-gray-300">
+                            · {task.title}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs italic text-gray-400">
+                      Sin tareas predefinidas (función personalizada).
+                    </p>
+                  )}
+                  <div className="mt-4">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                      Personas con este rol
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {roleMembers.length === 0 && (
+                        <span className="text-xs italic text-gray-300 dark:text-gray-600">
+                          Sin trabajadores con esta función
+                        </span>
+                      )}
+                      {roleMembers.map((member) => (
+                        <button
+                          key={member.user_id}
+                          type="button"
+                          onClick={() => navigate(`/saas/team/${member.user_id}`)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-gray-100 dark:border-gray-700/50 bg-gray-50 dark:bg-gray-800 px-2.5 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                        >
+                          <Avatar member={member} size="sm" />
+                          <span className="flex flex-col items-start leading-tight">
+                            <span>{member.fullName}</span>
+                            <span className="text-[10px] font-normal text-gray-400">
+                              {getInviteRoleDisplayLabel(member.role, currentBusiness?.businessType)}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               );

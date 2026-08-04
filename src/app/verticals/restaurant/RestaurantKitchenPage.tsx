@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
@@ -24,6 +24,12 @@ import {
   type KitchenTicket,
 } from './restaurantKitchen';
 import {
+  RestaurantTabletBottomNav,
+  shouldShowRestaurantTabletNav,
+} from './RestaurantTabletBottomNav';
+import { setCatalogItemAvailabilityRequest } from '../../lib/deliveryApi';
+import { DELIVERY_CATALOG_CHANGED } from '../../lib/deliverySetup';
+import {
   ChefHat,
   CheckCircle2,
   Clock,
@@ -36,6 +42,7 @@ import {
   UtensilsCrossed,
   Volume2,
   VolumeX,
+  Ban,
 } from 'lucide-react';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -79,13 +86,17 @@ function KitchenTicketCard({
   now,
   onAdvance,
   onPrint,
+  onMarkOutOfStock,
   acting,
+  oosBusyId,
 }: {
   ticket: KitchenTicket;
   now: number;
   onAdvance: (ticket: KitchenTicket, next: ComandaStatus) => void;
   onPrint: (ticket: KitchenTicket) => void;
+  onMarkOutOfStock: (productId: string, name: string) => void;
   acting: boolean;
+  oosBusyId: string | null;
 }) {
   const mins = kitchenTicketMinutes(ticket, now);
   const isOvertime = ticket.status !== 'ready' && mins > OVERTIME_MINUTES;
@@ -138,7 +149,7 @@ function KitchenTicketCard({
             <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 shrink-0">
               {item.quantity}x
             </span>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <span className="text-sm text-gray-800 dark:text-gray-200">{item.name}</span>
               {item.modifiers.length > 0 && (
                 <p className="text-xs text-indigo-600 dark:text-indigo-400">
@@ -149,6 +160,19 @@ function KitchenTicketCard({
                 <p className="text-xs text-amber-600 dark:text-amber-400 italic">{item.notes}</p>
               )}
             </div>
+            {item.productId ? (
+              <button
+                type="button"
+                title="Marcar agotado en carta"
+                disabled={oosBusyId === item.productId}
+                onClick={() => onMarkOutOfStock(item.productId, item.name)}
+                className="shrink-0 p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-40"
+              >
+                {oosBusyId === item.productId
+                  ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : <Ban className="w-3.5 h-3.5" />}
+              </button>
+            ) : null}
           </div>
         ))}
       </div>
@@ -200,7 +224,9 @@ function KitchenColumn({
   now,
   onAdvance,
   onPrint,
+  onMarkOutOfStock,
   actingKey,
+  oosBusyId,
   emptyLabel,
 }: {
   title: string;
@@ -210,7 +236,9 @@ function KitchenColumn({
   now: number;
   onAdvance: (ticket: KitchenTicket, next: ComandaStatus) => void;
   onPrint: (ticket: KitchenTicket) => void;
+  onMarkOutOfStock: (productId: string, name: string) => void;
   actingKey: string | null;
+  oosBusyId: string | null;
   emptyLabel: string;
 }) {
   return (
@@ -236,7 +264,9 @@ function KitchenColumn({
               now={now}
               onAdvance={onAdvance}
               onPrint={onPrint}
+              onMarkOutOfStock={onMarkOutOfStock}
               acting={actingKey === t.key}
+              oosBusyId={oosBusyId}
             />
           ))
         )}
@@ -251,6 +281,7 @@ type MobileTab = 'nuevas' | 'preparacion' | 'listas';
 
 export function RestaurantKitchenPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { currentBusiness, businessesFetchSettled } = useBusiness();
   const businessType = currentBusiness?.businessType;
@@ -258,6 +289,7 @@ export function RestaurantKitchenPage() {
   const userId = resolveBusinessDataUserId(user, currentBusiness);
   const authUserId = user?.user_id || user?.id || null;
   const scopeBusinessId = resolveBusinessScopeId(currentBusiness);
+  const showTabletNav = shouldShowRestaurantTabletNav({ pathname: location.pathname });
 
   // Cocina de sala solo aplica a bar/restaurante; delivery tiene su propio KDS.
   useEffect(() => {
@@ -271,6 +303,7 @@ export function RestaurantKitchenPage() {
   const [orders, setOrders] = useState<DiningOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingKey, setActingKey] = useState<string | null>(null);
+  const [oosBusyId, setOosBusyId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('nuevas');
   const [soundEnabled, setSoundEnabled] = useState(() => {
     try { return localStorage.getItem(SOUND_KEY) !== 'off'; } catch { return true; }
@@ -391,6 +424,23 @@ export function RestaurantKitchenPage() {
     });
   }, [currentBusiness]);
 
+  const markOutOfStock = useCallback(async (productId: string, name: string) => {
+    if (!userId || !productId) return;
+    if (!window.confirm(`¿Marcar «${name}» como agotado en la carta?`)) return;
+    setOosBusyId(productId);
+    try {
+      await setCatalogItemAvailabilityRequest(userId, productId, false);
+      try {
+        window.dispatchEvent(new CustomEvent(DELIVERY_CATALOG_CHANGED));
+      } catch { /* ignore */ }
+      toast.success(`«${name}» agotado en carta`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo marcar agotado');
+    } finally {
+      setOosBusyId(null);
+    }
+  }, [userId]);
+
   const advanceComanda = useCallback(async (ticket: KitchenTicket, next: ComandaStatus) => {
     if (!userId) return;
     setActingKey(ticket.key);
@@ -424,18 +474,18 @@ export function RestaurantKitchenPage() {
 
   const mobileTickets = mobileTab === 'nuevas' ? colNew : mobileTab === 'preparacion' ? colPrep : colReady;
 
-  if (!isRestaurant) return null;
+  if (!isRestaurant) {
+    return (
+      <Navigate
+        to={isStrictDeliveryBusinessType(businessType) ? '/saas/delivery-kitchen' : '/saas/dashboard'}
+        replace
+      />
+    );
+  }
 
   return (
     <Layout title="Cocina" noPadding>
-      <div className="flex flex-col h-[calc(100vh-64px)] min-h-0">
-        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2.5 dark:border-amber-900/50 dark:bg-amber-950/40">
-          <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
-            Recibe comandas del <strong>TPV sala</strong> (mesa → pedir → enviar a cocina).
-            No muestra pedidos de Delivery.
-          </p>
-        </div>
-        {/* Barra de alertas */}
+      <div className={`flex flex-col h-[calc(100vh-64px)] min-h-0 ${showTabletNav ? 'pb-14' : ''}`}>
         {overtimeCount > 0 && (
           <div className="shrink-0 bg-red-50 dark:bg-red-900/30 border-b border-red-200 dark:border-red-800 px-4 py-2">
             <p className="text-xs font-semibold text-red-700 dark:text-red-400">
@@ -446,7 +496,18 @@ export function RestaurantKitchenPage() {
 
         {/* KPIs + acciones */}
         <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {!showTabletNav ? (
+              <button
+                type="button"
+                onClick={() => navigate('/saas/caja/tpv')}
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-stone-200 px-3 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:text-stone-200"
+                title="Volver a mesas"
+              >
+                <UtensilsCrossed className="w-3.5 h-3.5" />
+                Mesas
+              </button>
+            ) : null}
             <div className="grid grid-cols-3 gap-2 flex-1">
               {[
                 { label: 'Nuevas', value: colNew.length, bg: 'bg-amber-50 text-amber-700 border-amber-200' },
@@ -521,7 +582,9 @@ export function RestaurantKitchenPage() {
                 now={now}
                 onAdvance={advanceComanda}
                 onPrint={printComanda}
+                onMarkOutOfStock={markOutOfStock}
                 actingKey={actingKey}
+                oosBusyId={oosBusyId}
                 emptyLabel="Sin comandas nuevas"
               />
               <KitchenColumn
@@ -532,7 +595,9 @@ export function RestaurantKitchenPage() {
                 now={now}
                 onAdvance={advanceComanda}
                 onPrint={printComanda}
+                onMarkOutOfStock={markOutOfStock}
                 actingKey={actingKey}
+                oosBusyId={oosBusyId}
                 emptyLabel="Nada en los fogones"
               />
               <KitchenColumn
@@ -543,7 +608,9 @@ export function RestaurantKitchenPage() {
                 now={now}
                 onAdvance={advanceComanda}
                 onPrint={printComanda}
+                onMarkOutOfStock={markOutOfStock}
                 actingKey={actingKey}
+                oosBusyId={oosBusyId}
                 emptyLabel="Sin comandas listas"
               />
             </div>
@@ -564,7 +631,9 @@ export function RestaurantKitchenPage() {
                       now={now}
                       onAdvance={advanceComanda}
                       onPrint={printComanda}
+                      onMarkOutOfStock={markOutOfStock}
                       acting={actingKey === t.key}
+                      oosBusyId={oosBusyId}
                     />
                   ))}
                 </div>
@@ -572,6 +641,7 @@ export function RestaurantKitchenPage() {
             </div>
           </>
         )}
+        {showTabletNav ? <RestaurantTabletBottomNav active="cocina" /> : null}
       </div>
     </Layout>
   );

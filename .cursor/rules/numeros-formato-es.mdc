@@ -1,0 +1,33 @@
+---
+description: Números en UI siempre con formato español (100.000 / 100,00)
+alwaysApply: true
+---
+
+# Números — formato español
+
+En Vertial, **todo número visible al usuario** lleva formato `es-ES`. Nunca crudo.
+
+## Formato
+
+| Uso | Formato | Ejemplo malo | Ejemplo bien |
+|-----|--------|--------------|--------------|
+| Enteros / miles | punto de miles | `100000` | `100.000` |
+| Decimales / dinero | coma + 2 decimales | `100` o `100.5` | `100,00` / `100,50` |
+| Importe con moneda | + ` €` | `1234.5€` | `1.234,50 €` |
+| Cantidades (días, uds.) | miles; decimal solo si hace falta | `2.5` | `2,5` |
+
+## Cómo hacerlo
+
+- Usar `formatNumberEs`, `formatDecimalEs`, `formatMoneyEs`, `formatQtyEs` de `src/app/lib/formatNumberEs.ts`.
+- Locale: `es-ES` (`.` miles, `,` decimales).
+- **Prohibido** pintar `{total}`, `{price}`, `{amount}` sin formatear si el valor puede ser ≥ 1000 o es dinero.
+
+## Qué NO cambiar
+
+- Valores internos de formularios / API / CouchDB (números crudos en JSON).
+- `<input type="number">` y cálculos.
+- Contadores triviales 0–9 en badges si quedan legibles; si es importe o ≥ 1000 → siempre formatear.
+
+## Al crear UI nueva
+
+Cualquier cifra en pantalla → pasa por el helper. No inventar `toFixed(2)` ni concatenar a mano.

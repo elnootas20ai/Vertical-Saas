@@ -48,6 +48,9 @@ export interface WorkerTask {
   priority: TaskPriority;
   dueDate: string;
   category: string;
+  /** Clave de plantilla de rol (si viene del onboarding). */
+  templateKey?: string;
+  roleId?: string;
   timeEntries: TimeEntry[];
   totalSeconds: number;
   timerRunning: boolean;
@@ -142,21 +145,36 @@ export async function createWorkerTask(
   memberId: string,
   title: string,
   priority: TaskPriority = 'medium',
+  options?: {
+    description?: string;
+    category?: string;
+    templateKey?: string;
+    roleId?: string;
+    dueDate?: string;
+    id?: string;
+  },
 ): Promise<WorkerTask> {
   await ensureDb();
   const now = new Date().toISOString();
-  const id = `wtask:${businessId}:${memberId}:${Date.now()}`;
+  const templateKey = String(options?.templateKey || '').trim();
+  const id =
+    options?.id
+    || (templateKey
+      ? `wtask:${businessId}:${memberId}:tpl:${templateKey}`
+      : `wtask:${businessId}:${memberId}:${Date.now()}`);
   const task: WorkerTask = {
     _id: id,
     type: 'worker_task',
     business_id: businessId,
     member_id: memberId,
     title,
-    description: '',
+    description: String(options?.description || ''),
     status: 'pending',
     priority,
-    dueDate: new Date().toISOString().slice(0, 10),
-    category: 'general',
+    dueDate: options?.dueDate || new Date().toISOString().slice(0, 10),
+    category: options?.category || 'general',
+    ...(templateKey ? { templateKey } : {}),
+    ...(options?.roleId ? { roleId: options.roleId } : {}),
     timeEntries: [],
     totalSeconds: 0,
     timerRunning: false,
@@ -166,6 +184,54 @@ export async function createWorkerTask(
     updatedAt: now,
   };
   return saveTask(task);
+}
+
+/**
+ * Si faltan tareas de onboarding del rol (invites antiguos), las crea en cliente.
+ * Idempotente por templateKey.
+ */
+export async function ensureRoleOnboardingTasks(
+  businessId: string,
+  memberId: string,
+  roleId: string | null | undefined,
+  businessType?: string | null,
+): Promise<{ created: number; tasks: WorkerTask[] }> {
+  const { getRoleTaskTemplates } = await import('./roleTaskTemplates');
+  const templates = getRoleTaskTemplates(roleId, businessType);
+  if (!templates.length || !businessId || !memberId) {
+    return { created: 0, tasks: await listWorkerTasks(businessId, memberId) };
+  }
+
+  const existing = await listWorkerTasks(businessId, memberId);
+  const have = new Set(
+    existing
+      .map((t) => String(t.templateKey || ''))
+      .filter(Boolean)
+      .concat(
+        existing
+          .filter((t) => String(t._id || '').includes(':tpl:'))
+          .map((t) => String(t._id).split(':tpl:').pop() || ''),
+      ),
+  );
+
+  let created = 0;
+  for (const tpl of templates) {
+    if (have.has(tpl.key)) continue;
+    try {
+      await createWorkerTask(businessId, memberId, tpl.title, tpl.priority, {
+        description: tpl.description,
+        category: 'role_onboarding',
+        templateKey: tpl.key,
+        roleId: String(roleId || ''),
+      });
+      created += 1;
+    } catch {
+      /* conflicto / red: se reintenta en la próxima carga */
+    }
+  }
+
+  const tasks = created > 0 ? await listWorkerTasks(businessId, memberId) : existing;
+  return { created, tasks };
 }
 
 export async function startTaskTimer(task: WorkerTask): Promise<WorkerTask> {

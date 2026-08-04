@@ -21,6 +21,8 @@ describe('buildEmailVerificationEmail', () => {
     expect(html).toContain('Confirma tu dirección de email');
     expect(html).toContain('Verificar mi email');
     expect(html).toContain('24 horas');
+    expect(html).toContain('#2563eb');
+    expect(html).toContain('#09090b');
     expect(html).toContain(
       'https://app.vertial.test/auth/verify-email-pending?token=abc123token&email=usuario%40ejemplo.com',
     );

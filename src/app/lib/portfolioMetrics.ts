@@ -10,12 +10,21 @@ import {
   sumProductClosingCountsForDay,
 } from './shiftFoodFamilyCounts';
 import { soldProductCountsForDay } from './deliverySoldProductStats';
-import { attributeOrderRevenueByBrand } from '../../../shared/delivery/orderLineRevenueSplit.js';
+import {
+  attributeOrderRevenueByBrand,
+  attributeOrderUnitsByBrand,
+} from '../../../shared/delivery/orderLineRevenueSplit.js';
+import type { BrandBillingSplitRules } from './brandBillingConfig';
 
 export type PortfolioMetrics = {
   revenueToday: number;
   revenueMonth: number;
   revenuePrevMonth: number;
+  /**
+   * Facturación del mes anterior SOLO hasta el mismo día del mes (MTD vs MTD).
+   * Para MoM justo: no comparar mes incompleto con mes anterior entero.
+   */
+  revenuePrevMonthMtd: number;
   ordersToday: number;
   ordersMonth: number;
   ordersPrevMonth: number;
@@ -46,6 +55,8 @@ export type PortfolioFinanceTotals = {
   incomeMonth: number;
   expensesMonth: number;
   incomePrevMonth: number;
+  /** Ingresos mes anterior hasta el mismo día (comparable MoM). */
+  incomePrevMonthMtd: number;
   expensesPrevMonth: number;
   profitMonth: number;
   ebitdaMonth: number;
@@ -61,6 +72,7 @@ export function emptyPortfolioMetrics(): PortfolioMetrics {
     revenueToday: 0,
     revenueMonth: 0,
     revenuePrevMonth: 0,
+    revenuePrevMonthMtd: 0,
     ordersToday: 0,
     ordersMonth: 0,
     ordersPrevMonth: 0,
@@ -90,15 +102,113 @@ export function prevCalendarMonthKey(monthKey: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+export function monthDayNumber(dayKey: string): number {
+  const n = Number(String(dayKey || '').slice(8, 10));
+  return Number.isFinite(n) && n >= 1 ? n : 1;
+}
+
+export function lastDayOfYearMonth(yearMonth: string): number {
+  const [y, m] = String(yearMonth || '').split('-').map(Number);
+  if (!y || !m) return 28;
+  return new Date(y, m, 0).getDate();
+}
+
+/** Día tope para MoM justo: min(día de hoy, último día del mes anterior). */
+export function comparableMonthThroughDay(todayKey: string, prevMonthKey: string): number {
+  return Math.min(monthDayNumber(todayKey), lastDayOfYearMonth(prevMonthKey));
+}
+
 /** Inicio del mes anterior (UTC) para pedir pedidos con cobertura MoM completa. */
 export function portfolioOrderFetchFrom(monthKey: string): string {
   return `${prevCalendarMonthKey(monthKey)}-01T00:00:00.000Z`;
 }
 
+/**
+ * Variación % entre dos periodos.
+ * - Sin actividad en el periodo anterior (previous ≤ 0) → null
+ *   (empresa nueva / aún no había histórico: no pintar -100% falso).
+ * - Con actividad previa y caída a 0 (vacaciones, paro) → -100% (sí cuenta).
+ */
 export function monthOverMonthPct(current: number, previous: number): number | null {
   if (!Number.isFinite(current) || !Number.isFinite(previous)) return null;
-  if (previous === 0) return current > 0 ? 100 : null;
+  if (previous <= 0) return null;
   return Math.round(((current - previous) / previous) * 1000) / 10;
+}
+
+/**
+ * MoM solo si ambos periodos tienen actividad (umbrales).
+ * No usar para “caída a cero” (vacaciones): ahí usar monthOverMonthPct.
+ */
+export function comparableMomPct(
+  current: number,
+  previous: number,
+  options?: { minAmount?: number },
+): number | null {
+  const min = options?.minAmount ?? 1;
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return null;
+  if (previous < min || current < min) return null;
+  return monthOverMonthPct(current, previous);
+}
+
+/**
+ * Primer día con ingreso real en el conjunto de pedidos (yyyy-mm-dd).
+ * Sirve para no comparar meses anteriores al alta de la empresa.
+ */
+export function firstRevenueDayKey(orders: DeliveryOrder[]): string | null {
+  let min: string | null = null;
+  for (const o of orders || []) {
+    if (!isDeliveryOrderRevenue(o)) continue;
+    const when = orderRevenueAtIso(o);
+    if (!when) continue;
+    const d = new Date(when);
+    const folded = Number.isNaN(d.getTime())
+      ? String(when).slice(0, 10)
+      : localCalendarDayKey(d);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(folded)) continue;
+    if (!min || folded < min) min = folded;
+  }
+  return min;
+}
+
+/**
+ * Mismos días 1..N del mes anterior (comparable al mes en curso a la fecha).
+ * Ej. 2026-08-04 → 2026-07-01 … 2026-07-04.
+ */
+export function listPrevMonthToDateDayKeys(todayKey: string): string[] {
+  const [y, m, d] = String(todayKey || '').split('-').map(Number);
+  if (!y || !m || !d) return [];
+  const prev = new Date(y, m - 2, 1);
+  const lastDay = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate();
+  const endDay = Math.min(d, lastDay);
+  const out: string[] = [];
+  for (let day = 1; day <= endDay; day += 1) {
+    out.push(localCalendarDayKey(new Date(prev.getFullYear(), prev.getMonth(), day)));
+  }
+  return out;
+}
+
+/** True si dayKeys es mes-a-la-fecha (empieza el día 1 del mes de todayKey). */
+export function isMonthToDateDayKeys(dayKeys: string[], todayKey: string): boolean {
+  if (!dayKeys.length || !todayKey) return false;
+  const monthStart = `${todayKey.slice(0, 7)}-01`;
+  return dayKeys[0] === monthStart && dayKeys[dayKeys.length - 1] === todayKey;
+}
+
+/**
+ * Ventana anterior comparable al rango actual.
+ * Mes a la fecha → mismos días del mes ant. (no el mes entero).
+ * Otros rangos → N días previos contiguos.
+ *
+ * Nota: usa listTrailingDayKeys / shiftDayKey definidos más abajo (hoisted).
+ */
+export function resolvePrevComparableDayKeys(dayKeys: string[], todayKey: string): string[] {
+  if (!dayKeys.length) return [];
+  if (isMonthToDateDayKeys(dayKeys, todayKey)) {
+    return listPrevMonthToDateDayKeys(todayKey);
+  }
+  const firstKey = dayKeys[0];
+  const prevEnd = shiftDayKey(firstKey, -1);
+  return listTrailingDayKeys(prevEnd, dayKeys.length);
 }
 
 export function emptyPortfolioClientMetrics(): PortfolioClientMetrics {
@@ -235,6 +345,25 @@ function isRevenueInMonth(order: DeliveryOrder, monthKey: string): boolean {
   return when ? isInMonth(when, monthKey) : false;
 }
 
+function dayNumberFromIso(iso: string): number | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return monthDayNumber(localCalendarDayKey(d));
+}
+
+/** Ingresos del mes hasta el día N (1..throughDay), para MoM comparable. */
+function isRevenueInMonthThroughDay(
+  order: DeliveryOrder,
+  monthKey: string,
+  throughDay: number,
+): boolean {
+  if (!isRevenueInMonth(order, monthKey)) return false;
+  const when = orderRevenueAtIso(order);
+  if (!when) return false;
+  const day = dayNumberFromIso(when);
+  return day != null && day >= 1 && day <= throughDay;
+}
+
 export type StoreDeliveryMetrics = {
   deliveredToday: number;
   deliveredMonth: number;
@@ -301,10 +430,18 @@ export function computePortfolioMetrics(
   const revenueOrdersToday = scoped.filter((o) => isRevenueOnDay(o, todayKey));
   const revenueOrdersMonth = scoped.filter((o) => isRevenueInMonth(o, monthKey));
   const revenueOrdersPrevMonth = scoped.filter((o) => isRevenueInMonth(o, prevMonthKey));
+  const throughDay = comparableMonthThroughDay(todayKey, prevMonthKey);
+  const revenueOrdersPrevMonthMtd = scoped.filter((o) =>
+    isRevenueInMonthThroughDay(o, prevMonthKey, throughDay),
+  );
 
   const revenueToday = revenueOrdersToday.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
   const revenueMonth = revenueOrdersMonth.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
   const revenuePrevMonth = revenueOrdersPrevMonth.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0);
+  const revenuePrevMonthMtd = revenueOrdersPrevMonthMtd.reduce(
+    (s, o) => s + deliveryOrderRevenueAmount(o),
+    0,
+  );
 
   const revenueByChannel: Record<string, number> = {};
   const revenueByBrand: Record<string, number> = {};
@@ -341,6 +478,7 @@ export function computePortfolioMetrics(
     revenueToday,
     revenueMonth,
     revenuePrevMonth: Math.round(revenuePrevMonth * 100) / 100,
+    revenuePrevMonthMtd: Math.round(revenuePrevMonthMtd * 100) / 100,
     ordersToday: todayCreated.length,
     ordersMonth: scoped.filter((o) => isInMonth(String(o.createdAt || ''), monthKey)).length,
     ordersPrevMonth: scoped.filter((o) => isInMonth(String(o.createdAt || ''), prevMonthKey)).length,
@@ -443,11 +581,13 @@ export function consolidatePortfolioFinance(
   }[],
   monthKey: string,
   businessIds: string[],
+  todayKey?: string,
 ): PortfolioFinanceTotals {
   const totals: PortfolioFinanceTotals = {
     incomeMonth: 0,
     expensesMonth: 0,
     incomePrevMonth: 0,
+    incomePrevMonthMtd: 0,
     expensesPrevMonth: 0,
     profitMonth: 0,
     ebitdaMonth: 0,
@@ -457,30 +597,30 @@ export function consolidatePortfolioFinance(
   };
 
   const prevMonthKey = prevCalendarMonthKey(monthKey);
+  const dayKey = todayKey || `${monthKey}-${String(lastDayOfYearMonth(monthKey)).padStart(2, '0')}`;
+  const throughDay = comparableMonthThroughDay(dayKey, prevMonthKey);
 
   for (const bid of businessIds) {
     const row = sumFinanceMonthForBusiness(movements, monthKey, bid);
     const rowPrev = sumFinanceMonthForBusiness(movements, prevMonthKey, bid);
+    const scoped = movements.filter((m) => normalizeFinanceBusinessId(m.businessId) === normalizeFinanceBusinessId(bid));
     totals.incomeMonth += row.incomeMonth;
     totals.expensesMonth += row.expensesMonth;
     totals.incomePrevMonth += rowPrev.incomeMonth;
+    totals.incomePrevMonthMtd += sumFinanceIncomeThroughDay(scoped, prevMonthKey, throughDay);
     totals.expensesPrevMonth += rowPrev.expensesMonth;
     totals.profitMonth += row.profitMonth;
     totals.pendingAmount += row.pendingAmount;
   }
 
   if (businessIds.length === 1) {
-    const legacy = sumFinanceMonth(
-      movements.filter((m) => !normalizeFinanceBusinessId(m.businessId)),
-      monthKey,
-    );
-    const legacyPrev = sumFinanceMonth(
-      movements.filter((m) => !normalizeFinanceBusinessId(m.businessId)),
-      prevMonthKey,
-    );
+    const legacyMovements = movements.filter((m) => !normalizeFinanceBusinessId(m.businessId));
+    const legacy = sumFinanceMonth(legacyMovements, monthKey);
+    const legacyPrev = sumFinanceMonth(legacyMovements, prevMonthKey);
     totals.incomeMonth += legacy.incomeMonth;
     totals.expensesMonth += legacy.expensesMonth;
     totals.incomePrevMonth += legacyPrev.incomeMonth;
+    totals.incomePrevMonthMtd += sumFinanceIncomeThroughDay(legacyMovements, prevMonthKey, throughDay);
     totals.expensesPrevMonth += legacyPrev.expensesMonth;
     totals.profitMonth += legacy.profitMonth;
     totals.pendingAmount += legacy.pendingAmount;
@@ -489,6 +629,7 @@ export function consolidatePortfolioFinance(
   totals.incomeMonth = Math.round(totals.incomeMonth * 100) / 100;
   totals.expensesMonth = Math.round(totals.expensesMonth * 100) / 100;
   totals.incomePrevMonth = Math.round(totals.incomePrevMonth * 100) / 100;
+  totals.incomePrevMonthMtd = Math.round(totals.incomePrevMonthMtd * 100) / 100;
   totals.expensesPrevMonth = Math.round(totals.expensesPrevMonth * 100) / 100;
   totals.profitMonth = Math.round(totals.profitMonth * 100) / 100;
   totals.pendingAmount = Math.round(totals.pendingAmount * 100) / 100;
@@ -515,6 +656,7 @@ export function sumFinanceMonth(
     incomeMonth,
     expensesMonth,
     incomePrevMonth: 0,
+    incomePrevMonthMtd: 0,
     expensesPrevMonth: 0,
     profitMonth: incomeMonth - expensesMonth,
     ebitdaMonth: 0,
@@ -522,6 +664,24 @@ export function sumFinanceMonth(
     pendingAmount,
     cashBalance: 0,
   };
+}
+
+/** Ingresos de un mes solo hasta el día N (para MoM MTD vs MTD). */
+export function sumFinanceIncomeThroughDay(
+  movements: { date: string; type: string; totalAmount: number }[],
+  monthKey: string,
+  throughDay: number,
+): number {
+  let income = 0;
+  for (const m of movements) {
+    const date = String(m.date || '');
+    if (!date.startsWith(monthKey)) continue;
+    if (m.type !== 'cobro') continue;
+    const day = monthDayNumber(date.length >= 10 ? date.slice(0, 10) : `${monthKey}-01`);
+    if (day < 1 || day > throughDay) continue;
+    income += Number(m.totalAmount) || 0;
+  }
+  return Math.round(income * 100) / 100;
 }
 
 export function fmtEuro(n: number): string {
@@ -801,6 +961,106 @@ export function computeCompanyBillingBreakdown(
 
 // ─── Pulso operativo por tienda (7 días / mes) ───────────────────────────────
 
+/** Columnas del Excel Uriel (EFECTIVO · TPV · X · App · UBER · JUST EAT · GLOVO). */
+export type OpsExcelChannels = {
+  efectivo: number;
+  tpv: number;
+  x: number;
+  app: number;
+  uber: number;
+  justEat: number;
+  glovo: number;
+};
+
+export function emptyOpsExcelChannels(): OpsExcelChannels {
+  return {
+    efectivo: 0,
+    tpv: 0,
+    x: 0,
+    app: 0,
+    uber: 0,
+    justEat: 0,
+    glovo: 0,
+  };
+}
+
+export function sumOpsExcelChannels(a: OpsExcelChannels, b: OpsExcelChannels): OpsExcelChannels {
+  return {
+    efectivo: Math.round((a.efectivo + b.efectivo) * 100) / 100,
+    tpv: Math.round((a.tpv + b.tpv) * 100) / 100,
+    x: Math.round((a.x + b.x) * 100) / 100,
+    app: Math.round((a.app + b.app) * 100) / 100,
+    uber: Math.round((a.uber + b.uber) * 100) / 100,
+    justEat: Math.round((a.justEat + b.justEat) * 100) / 100,
+    glovo: Math.round((a.glovo + b.glovo) * 100) / 100,
+  };
+}
+
+export function opsExcelChannelsTotal(c: OpsExcelChannels): number {
+  return Math.round(
+    (c.efectivo + c.tpv + c.x + c.app + c.uber + c.justEat + c.glovo) * 100,
+  ) / 100;
+}
+
+/**
+ * Reparte un importe al bucket del Excel Uriel (mismo criterio que cierres):
+ * apps → Glovo/Uber/Just Eat/App; resto local por método de pago → Efectivo/TPV/X.
+ */
+export function addAmountToOpsExcelChannels(
+  acc: OpsExcelChannels,
+  amount: number,
+  channel: string | undefined | null,
+  paymentMethod: string | undefined | null,
+): void {
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (amt <= 0) return;
+  const ch = String(channel || '').toLowerCase().trim();
+  if (ch === 'glovo') {
+    acc.glovo = Math.round((acc.glovo + amt) * 100) / 100;
+    return;
+  }
+  if (ch === 'justeat' || ch === 'just_eat' || ch === 'just-eat') {
+    acc.justEat = Math.round((acc.justEat + amt) * 100) / 100;
+    return;
+  }
+  if (ch === 'ubereats' || ch === 'uber' || ch === 'uber_eats') {
+    acc.uber = Math.round((acc.uber + amt) * 100) / 100;
+    return;
+  }
+  if (ch === 'flipdish' || ch === 'app') {
+    acc.app = Math.round((acc.app + amt) * 100) / 100;
+    return;
+  }
+  const pm = String(paymentMethod || '').toLowerCase().trim();
+  if (pm === 'efectivo' || pm === 'cash') {
+    acc.efectivo = Math.round((acc.efectivo + amt) * 100) / 100;
+    return;
+  }
+  if (pm === 'bizum' || pm === 'otro') {
+    acc.x = Math.round((acc.x + amt) * 100) / 100;
+    return;
+  }
+  if (pm === 'online') {
+    acc.app = Math.round((acc.app + amt) * 100) / 100;
+    return;
+  }
+  // tarjeta / tpv / sin método → TPV (VISA en plantilla manual)
+  acc.tpv = Math.round((acc.tpv + amt) * 100) / 100;
+}
+
+function channelsFromOrders(orders: DeliveryOrder[]): OpsExcelChannels {
+  const acc = emptyOpsExcelChannels();
+  for (const o of orders) {
+    addAmountToOpsExcelChannels(
+      acc,
+      deliveryOrderRevenueAmount(o),
+      o.channel,
+      o.paymentMethod,
+    );
+  }
+  return acc;
+}
+
 export type StoreOpsDay = {
   dayKey: string;
   /** Ej. "Lun 22" */
@@ -815,6 +1075,8 @@ export type StoreOpsDay = {
   kebab: number;
   /** vs día anterior; null el primero del rango */
   revenueDeltaPct: number | null;
+  /** Desglose tipo Excel Uriel del día */
+  channels: OpsExcelChannels;
 };
 
 export type StoreOpsPulse = {
@@ -836,6 +1098,8 @@ export type StoreOpsPulse = {
   revenueToday: number;
   /** % del total del ranking; 0 hasta rankStoreOpsPulses */
   sharePercent: number;
+  /** Totales del rango · mismas columnas que el Excel */
+  channels: OpsExcelChannels;
 };
 
 const WEEKDAY_SHORT_ES = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -933,6 +1197,7 @@ export function emptyStoreOpsPulse(partial?: Partial<StoreOpsPulse>): StoreOpsPu
     kebab: 0,
     revenueToday: 0,
     sharePercent: 0,
+    channels: emptyOpsExcelChannels(),
     ...partial,
   };
 }
@@ -967,6 +1232,7 @@ export function buildStoreOpsPulse(
     const revenueOrders = scoped.filter((o) => isRevenueOnDay(o, dayKey));
     const revenue = Math.round(revenueOrders.reduce((s, o) => s + deliveryOrderRevenueAmount(o), 0) * 100) / 100;
     const ordersCount = revenueOrders.length;
+    const channels = channelsFromOrders(revenueOrders);
     const prevKey = index > 0 ? dayKeys[index - 1] : null;
     let revenueDeltaPct: number | null = null;
     if (prevKey) {
@@ -987,17 +1253,19 @@ export function buildStoreOpsPulse(
       taco: food.taco,
       kebab: food.kebab,
       revenueDeltaPct,
+      channels,
     };
   });
 
   const revenuePeriod = Math.round(days.reduce((s, d) => s + d.revenue, 0) * 100) / 100;
   const ordersPeriod = days.reduce((s, d) => s + d.orders, 0);
   const foodTot = sumDayFood(days);
+  const channels = days.reduce(
+    (acc, d) => sumOpsExcelChannels(acc, d.channels),
+    emptyOpsExcelChannels(),
+  );
 
-  const span = dayKeys.length;
-  const firstKey = dayKeys[0];
-  const prevEnd = shiftDayKey(firstKey, -1);
-  const prevKeys = listTrailingDayKeys(prevEnd, span);
+  const prevKeys = resolvePrevComparableDayKeys(dayKeys, todayKey);
   let revenuePrevPeriod = 0;
   for (const pk of prevKeys) {
     revenuePrevPeriod += scoped
@@ -1026,6 +1294,7 @@ export function buildStoreOpsPulse(
     kebab: foodTot.kebab,
     revenueToday: todayDay?.revenue ?? 0,
     sharePercent: 0,
+    channels,
   };
 }
 
@@ -1052,10 +1321,15 @@ export function aggregateStoreOpsPulses(pulses: StoreOpsPulse[]): {
   taco: number;
   kebab: number;
   revenueToday: number;
+  channels: OpsExcelChannels;
 } {
   const revenuePeriod = Math.round(pulses.reduce((s, p) => s + p.revenuePeriod, 0) * 100) / 100;
   const revenuePrevPeriod = Math.round(pulses.reduce((s, p) => s + p.revenuePrevPeriod, 0) * 100) / 100;
   const ordersPeriod = pulses.reduce((s, p) => s + p.ordersPeriod, 0);
+  const channels = pulses.reduce(
+    (acc, p) => sumOpsExcelChannels(acc, p.channels || emptyOpsExcelChannels()),
+    emptyOpsExcelChannels(),
+  );
   return {
     revenuePeriod,
     revenuePrevPeriod,
@@ -1067,5 +1341,228 @@ export function aggregateStoreOpsPulses(pulses: StoreOpsPulse[]): {
     taco: pulses.reduce((s, p) => s + p.taco, 0),
     kebab: pulses.reduce((s, p) => s + p.kebab, 0),
     revenueToday: Math.round(pulses.reduce((s, p) => s + p.revenueToday, 0) * 100) / 100,
+    channels,
+  };
+}
+
+/**
+ * Mismo día del mes hacia atrás (incluye hoy).
+ * Ej. 2026-08-04 + monthsBack 3 → 04/05, 04/06, 04/07, 04/08.
+ * Si el día no existe en el mes (31), se usa el último día de ese mes.
+ */
+export function listSameDayOfMonthKeys(todayKey: string, monthsBack = 3): string[] {
+  const [y, m, d] = String(todayKey || '').split('-').map(Number);
+  if (!y || !m || !d) return todayKey ? [todayKey] : [];
+  const back = Math.max(0, Math.floor(monthsBack));
+  const out: string[] = [];
+  for (let i = back; i >= 0; i -= 1) {
+    const anchor = new Date(y, m - 1 - i, 1);
+    const lastDay = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0).getDate();
+    const day = Math.min(d, lastDay);
+    out.push(localCalendarDayKey(new Date(anchor.getFullYear(), anchor.getMonth(), day)));
+  }
+  return out;
+}
+
+export type BrandSameDayPoint = {
+  dayKey: string;
+  aUnits: number;
+  bUnits: number;
+  aRevenue: number;
+  bRevenue: number;
+  /** False = antes del alta / primera venta de esa tienda (no comparar en negativo). */
+  aActive: boolean;
+  bActive: boolean;
+};
+
+export type BrandSameDaySeries = {
+  brandId: string;
+  brandName: string;
+  color: string;
+  points: BrandSameDayPoint[];
+};
+
+export type PdvBrandSameDayCompare = {
+  dayKeys: string[];
+  dayOfMonth: number;
+  storeAName: string;
+  storeBName: string;
+  brands: BrandSameDaySeries[];
+};
+
+type BrandMetaForCompare = {
+  id: string;
+  name: string;
+  color?: string;
+};
+
+function brandDayTotals(
+  orders: DeliveryOrder[],
+  dayKey: string,
+  pdvId: string,
+  workCenterId: string | null | undefined,
+  brandIds: string[],
+  rules?: BrandBillingSplitRules | null,
+): { units: Record<string, number>; revenue: Record<string, number> } {
+  const units: Record<string, number> = {};
+  const revenue: Record<string, number> = {};
+  for (const id of brandIds) {
+    units[id] = 0;
+    revenue[id] = 0;
+  }
+  if (!pdvId) return { units, revenue };
+
+  const pdvSet = new Set([pdvId]);
+  const scoped = orders.filter((o) => orderBelongsToPdvScope(o, pdvSet, pdvId, workCenterId));
+  const dayOrders = scoped.filter((o) => isRevenueOnDay(o, dayKey));
+
+  for (const order of dayOrders) {
+    const rev = deliveryOrderRevenueAmount(order);
+    const attributed = attributeOrderRevenueByBrand(order, rules || undefined);
+    const unitMap = attributeOrderUnitsByBrand(order, rules || undefined);
+    const attributedSum =
+      Object.values(attributed.byBrand).reduce((s, n) => s + (Number(n) || 0), 0)
+      + (Number(attributed.unbranded) || 0);
+    const scale = attributedSum > 0 && rev > 0 ? rev / attributedSum : 1;
+
+    for (const bid of brandIds) {
+      const u = Number(unitMap[bid]) || 0;
+      const r = (Number(attributed.byBrand[bid]) || 0) * scale;
+      if (u > 0) units[bid] = (units[bid] || 0) + u;
+      if (r > 0) revenue[bid] = (revenue[bid] || 0) + r;
+    }
+  }
+
+  for (const bid of brandIds) {
+    units[bid] = Math.round((units[bid] || 0) * 10) / 10;
+    revenue[bid] = Math.round((revenue[bid] || 0) * 100) / 100;
+  }
+  return { units, revenue };
+}
+
+/**
+ * Comparativa de marcas entre 2 PDVs: mismas unidades/€ el día N de los últimos meses.
+ */
+export function buildPdvBrandSameDayCompare(
+  orders: DeliveryOrder[],
+  opts: {
+    todayKey: string;
+    monthsBack?: number;
+    storeA: { storeName: string; pdvId: string; workCenterId?: string | null };
+    storeB: { storeName: string; pdvId: string; workCenterId?: string | null };
+    brands: BrandMetaForCompare[];
+    rules?: BrandBillingSplitRules | null;
+  },
+): PdvBrandSameDayCompare {
+  const todayKey = opts.todayKey;
+  const dayKeys = listSameDayOfMonthKeys(todayKey, opts.monthsBack ?? 3);
+  const dayOfMonth = Number(String(todayKey).slice(8, 10)) || 0;
+  const brands = (opts.brands || [])
+    .map((b) => ({
+      id: String(b.id || '').trim(),
+      name: String(b.name || '').trim() || 'Marca',
+      color: b.color || '#2563EB',
+    }))
+    .filter((b) => b.id);
+
+  if (brands.length === 0 || dayKeys.length === 0) {
+    return {
+      dayKeys,
+      dayOfMonth,
+      storeAName: opts.storeA.storeName,
+      storeBName: opts.storeB.storeName,
+      brands: [],
+    };
+  }
+
+  const brandIds = brands.map((b) => b.id);
+
+  const ordersA = orders.filter((o) =>
+    orderBelongsToPdvScope(
+      o,
+      new Set([opts.storeA.pdvId]),
+      opts.storeA.pdvId,
+      opts.storeA.workCenterId,
+    ),
+  );
+  const ordersB = orders.filter((o) =>
+    orderBelongsToPdvScope(
+      o,
+      new Set([opts.storeB.pdvId]),
+      opts.storeB.pdvId,
+      opts.storeB.workCenterId,
+    ),
+  );
+  const firstA = firstRevenueDayKey(ordersA);
+  const firstB = firstRevenueDayKey(ordersB);
+
+  const aByDay = dayKeys.map((dk) =>
+    brandDayTotals(
+      orders,
+      dk,
+      opts.storeA.pdvId,
+      opts.storeA.workCenterId,
+      brandIds,
+      opts.rules,
+    ),
+  );
+  const bByDay = dayKeys.map((dk) =>
+    brandDayTotals(
+      orders,
+      dk,
+      opts.storeB.pdvId,
+      opts.storeB.workCenterId,
+      brandIds,
+      opts.rules,
+    ),
+  );
+
+  const series: BrandSameDaySeries[] = brands
+    .map((b) => {
+      const points: BrandSameDayPoint[] = dayKeys.map((dayKey, i) => {
+        const aActive = !firstA || dayKey >= firstA;
+        const bActive = !firstB || dayKey >= firstB;
+        return {
+          dayKey,
+          aUnits: aActive ? aByDay[i].units[b.id] || 0 : 0,
+          bUnits: bActive ? bByDay[i].units[b.id] || 0 : 0,
+          aRevenue: aActive ? aByDay[i].revenue[b.id] || 0 : 0,
+          bRevenue: bActive ? bByDay[i].revenue[b.id] || 0 : 0,
+          aActive,
+          bActive,
+        };
+      });
+      return {
+        brandId: b.id,
+        brandName: b.name,
+        color: b.color,
+        points,
+      };
+    })
+    .filter((s) =>
+      s.points.some(
+        (p) =>
+          (p.aActive && (p.aUnits > 0 || p.aRevenue > 0))
+          || (p.bActive && (p.bUnits > 0 || p.bRevenue > 0)),
+      ),
+    )
+    .sort((x, y) => {
+      const xu = x.points.reduce(
+        (s, p) => s + (p.aActive ? p.aUnits : 0) + (p.bActive ? p.bUnits : 0),
+        0,
+      );
+      const yu = y.points.reduce(
+        (s, p) => s + (p.aActive ? p.aUnits : 0) + (p.bActive ? p.bUnits : 0),
+        0,
+      );
+      return yu - xu || x.brandName.localeCompare(y.brandName, 'es');
+    });
+
+  return {
+    dayKeys,
+    dayOfMonth,
+    storeAName: opts.storeA.storeName,
+    storeBName: opts.storeB.storeName,
+    brands: series,
   };
 }

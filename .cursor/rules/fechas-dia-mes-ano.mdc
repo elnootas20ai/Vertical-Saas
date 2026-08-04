@@ -1,0 +1,32 @@
+---
+description: Fechas en UI siempre día/mes/año (es-ES)
+alwaysApply: true
+---
+
+# Fechas — día / mes / año
+
+En Vertial, **toda fecha visible al usuario** va en formato español: **día / mes / año**.
+
+## Formato
+
+| Uso | Formato | Ejemplo |
+|-----|---------|---------|
+| Solo fecha | `DD/MM/YYYY` | `03/09/2026` |
+| Rango | `DD/MM/YYYY → DD/MM/YYYY` | `03/09/2026 → 05/09/2026` |
+| Fecha + hora | `DD/MM/YYYY, HH:mm` | `03/09/2026, 14:30` |
+
+## Cómo hacerlo
+
+- Usar `formatDateEs`, `formatDateRangeEs`, `formatDateTimeEs` de `src/app/lib/formatDateEs.ts`.
+- **Prohibido** mostrar ISO crudo (`2026-09-03`) en textos, tablas, toasts, tickets o notificaciones de UI.
+- Locale: `es-ES` (día y mes con 2 dígitos).
+
+## Qué NO cambiar
+
+- Persistencia / API / CouchDB: sigue `yyyy-mm-dd` o ISO.
+- `<input type="date">` y `value` del formulario: siguen `yyyy-mm-dd` (estándar HTML).
+- Claves internas, IDs, queries y comparaciones de fechas.
+
+## Al tocar UI
+
+Si ves `{algo.startDate}` o `{fecha}` con aspecto ISO → pásalo por `formatDateEs` / `formatDateRangeEs` antes de pintar.

@@ -3,6 +3,7 @@ export { WorkerPayrollSetup } from './WorkerPayrollSetup';
 export { WorkerHome } from './WorkerHome';
 export { WorkerTasks } from './WorkerTasks';
 export { WorkerCalendar } from './WorkerCalendar';
+export { WorkerRequests } from './WorkerRequests';
 export { WorkerClock } from './WorkerClock';
 export { WorkerChat } from './WorkerChat';
 export { WorkerDocs } from './WorkerDocs';

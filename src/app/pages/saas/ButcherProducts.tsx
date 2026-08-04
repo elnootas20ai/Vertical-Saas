@@ -2,11 +2,12 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import { createVerticalApi, type VerticalEntity } from '../../lib/verticalApiFactory';
 import {
   Search, Plus, X, Edit2, Trash2, Filter,
   Beef, Package, Tag, Thermometer,
-  Loader2,
+  Loader2, CircleDollarSign,
 } from 'lucide-react';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { toast } from 'sonner';
@@ -25,6 +26,7 @@ interface Product extends VerticalEntity {
   stockMinimo: number;
   conservacion: 'refrigerado' | 'congelado';
   origen: string;
+  costePorKg?: number;
 }
 
 type ProductForm = Omit<Product, keyof VerticalEntity>;
@@ -49,8 +51,32 @@ const EMPTY_FORM: ProductForm = {
 
 export function ButcherProducts() {
   const { user } = useAuth();
-  const api = useMemo(() => createVerticalApi<Product>('butcher-ops', 'products'), []);
+  const { currentBusiness, updateBusiness } = useBusiness();
+  const marginPct = Number(currentBusiness?.butcherTargetMarginPct ?? 30);
+  const [marginDraft, setMarginDraft] = useState(String(marginPct));
+  const [savingMargin, setSavingMargin] = useState(false);
+  // Misma entidad que el TPV (`bt_catalog`) — un solo catálogo de venta
+  const api = useMemo(() => createVerticalApi<Product>('butcher-ops', 'catalog'), []);
+  const legacyProductsApi = useMemo(() => createVerticalApi<Product>('butcher-ops', 'products'), []);
   const userId = user?.user_id || user?.id || '';
+
+  useEffect(() => {
+    setMarginDraft(String(Number(currentBusiness?.butcherTargetMarginPct ?? 30)));
+  }, [currentBusiness?.butcherTargetMarginPct]);
+
+  const saveMargin = async () => {
+    if (!currentBusiness?.business_id) return;
+    const next = Math.max(0, Math.min(90, Number(marginDraft) || 30));
+    setSavingMargin(true);
+    try {
+      await updateBusiness(currentBusiness.business_id, { butcherTargetMarginPct: next });
+      toast.success(`Margen objetivo: ${next}%`);
+    } catch {
+      toast.error('No se pudo guardar el margen');
+    } finally {
+      setSavingMargin(false);
+    }
+  };
 
   const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,12 +95,38 @@ export function ButcherProducts() {
     }
     setLoading(true);
     try {
-      const list = await api.list(userId);
+      let list = await api.list(userId);
+      // Migración suave: productos antiguos (bt_product) → catálogo TPV si faltan
+      if (list.length === 0) {
+        const legacy = await legacyProductsApi.list(userId).catch(() => [] as Product[]);
+        for (const p of legacy) {
+          try {
+            await api.create(userId, {
+              ref: p.ref || '',
+              nombre: p.nombre,
+              categoria: p.categoria || 'otros',
+              precioKg: Number(p.precioKg || 0),
+              precioUnidad: null,
+              stock: Number(p.stock || 0),
+              stockMinimo: Number(p.stockMinimo || 0),
+              unidadVenta: 'peso',
+              bloqueado: false,
+              motivoBloqueo: null,
+              fechaCaducidad: null,
+              lote: null,
+              precioActualizado: true,
+              conservacion: p.conservacion || 'refrigerado',
+              origen: p.origen || '',
+            } as Partial<Product>);
+          } catch { /* skip */ }
+        }
+        if (legacy.length > 0) list = await api.list(userId);
+      }
       setItems(list);
     } finally {
       setLoading(false);
     }
-  }, [userId, api]);
+  }, [userId, api, legacyProductsApi]);
 
   useEffect(() => {
     loadData();
@@ -166,6 +218,23 @@ export function ButcherProducts() {
     }
   };
 
+  const suggestPrice = async (p: Product) => {
+    if (!userId) return;
+    const cost = Number(p.costePorKg || 0);
+    if (!(cost > 0)) {
+      toast.error('Sin coste €/kg — confirma una compra primero');
+      return;
+    }
+    const suggested = Math.round((cost / (1 - Math.min(0.9, marginPct / 100))) * 100) / 100;
+    try {
+      await api.update(userId, p._id, { precioKg: suggested, precioActualizado: true } as Partial<Product>);
+      toast.success(`Precio sugerido: ${suggested.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}/kg (margen ${marginPct}%)`);
+      await loadData();
+    } catch {
+      toast.error('No se pudo actualizar el precio');
+    }
+  };
+
   const STAT_CARDS = [
     { label: 'Total productos', value: stats.total, icon: Beef, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-900/30' },
     { label: 'Bajo stock', value: stats.bajoStock, icon: Package, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/30' },
@@ -188,6 +257,32 @@ export function ButcherProducts() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 mb-6">
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-4">
+          <div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-white">Margen objetivo</p>
+            <p className="text-xs text-gray-500">Se usa al sugerir precio €/kg desde el coste</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={90}
+              step={1}
+              value={marginDraft}
+              onChange={(e) => setMarginDraft(e.target.value)}
+              className="w-20 px-2 py-1.5 rounded-lg border-2 border-gray-200 dark:border-gray-700 bg-transparent text-sm text-right"
+            />
+            <span className="text-sm text-gray-500">%</span>
+            <button
+              type="button"
+              disabled={savingMargin}
+              onClick={() => { void saveMargin(); }}
+              className="px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-xs font-bold disabled:opacity-50"
+            >
+              {savingMargin ? '…' : 'Guardar'}
+            </button>
+          </div>
+        </div>
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div className="relative flex-1 w-full sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -251,6 +346,14 @@ export function ButcherProducts() {
                     <td className="px-4 py-3"><span className="inline-flex items-center gap-1.5 text-sm"><span className={`w-2 h-2 rounded-full ${st.dot}`} />{st.label}</span></td>
                     <td className="px-4 py-3 text-right">
                       <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          title={`Sugerir precio (margen ${marginPct}%)`}
+                          onClick={() => { void suggestPrice(p); }}
+                          className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/30 text-gray-500 hover:text-emerald-600 transition"
+                        >
+                          <CircleDollarSign className="w-4 h-4" />
+                        </button>
                         <button type="button" onClick={() => openEdit(p)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition"><Edit2 className="w-4 h-4" /></button>
                         <button type="button" onClick={() => handleDelete(p._id)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-500 hover:text-red-600 transition"><Trash2 className="w-4 h-4" /></button>
                       </div>

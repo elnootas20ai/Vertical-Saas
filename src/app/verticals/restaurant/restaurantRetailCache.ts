@@ -27,7 +27,13 @@ function sanitizeSnapshot(
     activeBusiness,
     allBusinesses,
   );
-  const allPointsOfSale = filterPointsOfSaleForWorkCenters(snapshot.allPointsOfSale, retail);
+  const bid = String(businessId || activeBusiness.business_id || '')
+    .replace(/^business:/, '')
+    .trim();
+  // businessId obligatorio: sin retail (solo salas) no vaciar PDVs de la empresa.
+  const allPointsOfSale = filterPointsOfSaleForWorkCenters(snapshot.allPointsOfSale, retail, {
+    businessId: bid || undefined,
+  });
   return { retailWorkCenters: retail, allPointsOfSale };
 }
 
@@ -52,10 +58,24 @@ export function readRestaurantRetailCache(
       activeBusiness,
       allBusinesses,
     );
-    const rows = buildDeliverySidebarStoreRows(
+    let rows = buildDeliverySidebarStoreRows(
       sanitized.retailWorkCenters,
       sanitized.allPointsOfSale,
     );
+    const openable = rows.some((r) => r.pdvId && !r.needsPdv && !r.inactive);
+    if (!openable && sanitized.allPointsOfSale.length > 0) {
+      rows = sanitized.allPointsOfSale
+        .filter((p) => p.active !== false)
+        .map((pdv) => ({
+          rowId: pdv._id,
+          pdvId: pdv._id,
+          workCenterId: pdv.workCenterId,
+          title: String(pdv.name || '').trim() || 'Local',
+          code: pdv.code,
+          inactive: false,
+          needsPdv: false,
+        }));
+    }
     if (rows.length === 0) return null;
 
     return {
@@ -82,10 +102,24 @@ export function writeRestaurantRetailCache(
     activeBusiness,
     allBusinesses,
   );
-  const rows = buildDeliverySidebarStoreRows(
+  let rows = buildDeliverySidebarStoreRows(
     sanitized.retailWorkCenters,
     sanitized.allPointsOfSale,
   );
+  const openable = rows.some((r) => r.pdvId && !r.needsPdv && !r.inactive);
+  if (!openable && sanitized.allPointsOfSale.length > 0) {
+    rows = sanitized.allPointsOfSale
+      .filter((p) => p.active !== false)
+      .map((pdv) => ({
+        rowId: pdv._id,
+        pdvId: pdv._id,
+        workCenterId: pdv.workCenterId,
+        title: String(pdv.name || '').trim() || 'Local',
+        code: pdv.code,
+        inactive: false,
+        needsPdv: false,
+      }));
+  }
   if (rows.length === 0) return;
   try {
     localStorage.setItem(

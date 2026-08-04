@@ -8,6 +8,7 @@ import {
   CalendarDays, Clock, ThumbsUp, ThumbsDown, FileText, Info, Ban, PartyPopper,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
+import { ScheduleTimeField } from '../../components/saas/ScheduleTimeField';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
@@ -19,9 +20,11 @@ import {
   listShiftTemplates, saveShiftTemplate, deleteShiftTemplate, listAssignmentRules, saveAssignmentRule, deleteAssignmentRule,
   applyTemplateToMembers, autoAssignByRules, checkScheduleConflicts,
 } from '../../lib/schedulesApi';
+import { pickStoreOpeningHours } from '../../lib/businessHoursUtils';
 
 import type { VacationRequest, VacationSettings, LeaveType, VacationStatus } from '../../lib/vacationsApi';
 import { listVacations, createVacationRequest, reviewVacation, deleteVacation, getSettings, saveSettings, getDaysUsed, getDaysAllowed, countVacationRequestDays, LEAVE_TYPE_LABELS, STATUS_LABELS } from '../../lib/vacationsApi';
+import { listHrRequestTypesForWorker } from '../../lib/hrRequestCatalog';
 
 import type { CompanyHoliday, HolidayScope } from '../../lib/companyHolidaysApi';
 import { listCompanyHolidays, saveCompanyHoliday, deleteCompanyHoliday, importPresetHolidays, SCOPE_LABELS } from '../../lib/companyHolidaysApi';
@@ -39,6 +42,7 @@ import { SchedulesWeekPanel } from '../../components/saas/schedules/SchedulesWee
 import { VacationsTeamPanel } from '../../components/saas/schedules/VacationsTeamPanel';
 import { SchedulesControlPanel } from '../../components/saas/schedules/SchedulesControlPanel';
 import { mergeBusinessMembers } from '../../lib/schedulesDisplay';
+import { formatDateRangeEs } from '../../lib/formatDateEs';
 
 type Tab = 'calendar' | 'vacations' | 'control' | 'config';
 type ConfigSubTab = 'holidays' | 'blocks' | 'templates' | 'rules';
@@ -128,27 +132,34 @@ export function SchedulesVacations() {
   useModalClose(showBulkModal, () => setShowBulkModal(false));
 
   const currentWeekStart = useMemo(() => {
-    const now = new Date();
-    const day = now.getDay();
-    const diff = (day === 0 ? -6 : 1 - day) + weekOffset * 7;
-    const d = new Date(now);
-    d.setDate(d.getDate() + diff);
-    return d.toISOString().slice(0, 10);
+    const base = new Date();
+    base.setDate(base.getDate() + weekOffset * 7);
+    return getMonday(base);
   }, [weekOffset]);
 
-  const weekDates = useMemo(() => WEEKDAYS.map((_, i) => { const d = new Date(currentWeekStart + 'T00:00:00'); d.setDate(d.getDate() + i); return d; }), [currentWeekStart]);
-  const weekEnd = useMemo(() => weekDates[6]?.toISOString().slice(0, 10) || currentWeekStart, [weekDates, currentWeekStart]);
+  const weekDates = useMemo(() => WEEKDAYS.map((_, i) => { const d = new Date(currentWeekStart + 'T12:00:00'); d.setDate(d.getDate() + i); return d; }), [currentWeekStart]);
+  const weekEnd = useMemo(() => {
+    const d = weekDates[6];
+    if (!d) return currentWeekStart;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }, [weekDates, currentWeekStart]);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!businessId) return;
-    setLoading(true);
+    const silent = Boolean(opts?.silent);
+    // silent: no pantalla completa de carga (si no, el modal de editar horario se desmonta y se queda bugeado).
+    if (!silent) setLoading(true);
     try {
       const [scheds, memberList, tmpls, rls, vacs, vs, hols, blks] = await Promise.all([
         listSchedules(businessId, currentWeekStart),
         listUsers(businessId).catch(() => []),
         canManage ? listShiftTemplates(businessId) : Promise.resolve([]),
         canManage ? listAssignmentRules(businessId) : Promise.resolve([]),
-        listVacations(businessId, { year: currentYear }),
+        // Sin filtro de año: el calendario necesita ausencias que cruzan años (p. ej. Dic→Ene).
+        listVacations(businessId),
         getSettings(businessId),
         listCompanyHolidays(businessId, currentYear),
         listBlocks(businessId, { from: currentWeekStart, to: weekEnd }),
@@ -161,7 +172,7 @@ export function SchedulesVacations() {
         ),
       );
       setTemplates(tmpls); setRules(rls); setVacations(vacs); setVacSettings(vs); setHolidays(hols); setBlocks(blks);
-    } catch (e: any) { setError(e.message); } finally { setLoading(false); }
+    } catch (e: any) { setError(e.message); } finally { if (!silent) setLoading(false); }
   }, [businessId, canManage, currentWeekStart, weekEnd, currentYear, currentBusiness?.members]);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -205,7 +216,7 @@ export function SchedulesVacations() {
 
   useEffect(() => { if (tab === 'control') loadClockins(); }, [tab, comparisonDate, loadClockins]);
 
-  const goToAlertTab = (actionTab: string) => {
+  const navigateToAlertTab = (actionTab: string) => {
     if (actionTab === 'calendar' || actionTab === 'vacations' || actionTab === 'control') {
       setTab(actionTab as Tab);
       return;
@@ -227,17 +238,70 @@ export function SchedulesVacations() {
   }, [members, canManage, user?.user_id, filterWorkCenter]);
 
   const totalTeamHours = schedules.reduce((s, sc) => s + sc.weeklyHours, 0);
-  const membersOnVacation = new Set(
-    vacations.filter((v) => v.status === 'approved' && v.startDate <= weekEnd && v.endDate >= currentWeekStart).map((v) => v.member_id),
+  const membersOnLeave = new Set(
+    vacations
+      .filter((v) =>
+        (v.status === 'approved' || v.status === 'pending')
+        && v.startDate <= weekEnd
+        && v.endDate >= currentWeekStart,
+      )
+      .map((v) => v.member_id),
   );
   const activeAlerts = alerts.filter(a => a.severity === 'critical' || a.severity === 'warning');
 
+  const storeHoursForDefaults = useCallback(
+    (preferredWorkCenterId?: string) => {
+      const preferred =
+        preferredWorkCenterId
+        || (filterWorkCenter !== 'all' ? filterWorkCenter : '')
+        || '';
+      return pickStoreOpeningHours(activeWorkCenters, preferred);
+    },
+    [activeWorkCenters, filterWorkCenter],
+  );
+
   const openEditor = async (memberId: string) => {
-    const existing = schedules.find(s => s.member_id === memberId);
-    const w = existing ? { ...existing.weekly } : defaultWeekly();
-    setEditWeekly(w); setEditWorkCenterId(existing?.work_center_id || ''); setEditWorkCenterName(existing?.work_center_name || '');
-    setEditingMemberId(memberId); setEditWarnings([]); setError('');
-    try { setEditWarnings(await checkScheduleConflicts(businessId, memberId, w, currentWeekStart)); } catch {}
+    const existing =
+      schedules.find((s) => s.member_id === memberId && s.week_start === currentWeekStart)
+      || schedules.find((s) => s.member_id === memberId)
+      || null;
+    const member = members.find((m) => m.user_id === memberId) as { workCenterId?: string } | undefined;
+    const preferredWc =
+      existing?.work_center_id
+      || String(member?.workCenterId || '').trim()
+      || '';
+    const w = existing
+      ? { ...existing.weekly }
+      : defaultWeekly(storeHoursForDefaults(preferredWc));
+    setEditWeekly(w);
+    const wc =
+      preferredWc
+        ? activeWorkCenters.find((c) => c.id === preferredWc || c._id === preferredWc)
+        : null;
+    setEditWorkCenterId(existing?.work_center_id || preferredWc || '');
+    setEditWorkCenterName(existing?.work_center_name || wc?.name || '');
+    setEditingMemberId(memberId);
+    setEditWarnings([]);
+    setError('');
+    try { setEditWarnings(await checkScheduleConflicts(businessId, memberId, w, currentWeekStart)); } catch { /* ignore */ }
+  };
+
+  /** CTA de alerta: no solo cambia de tab (si ya estás en Semana no hacía nada). */
+  const handleAlertAction = (alert: ScheduleAlert) => {
+    if (alert.type === 'schedule_undefined') {
+      setTab('calendar');
+      const ids = alert.memberIds.filter(Boolean);
+      if (ids.length === 0) return;
+      if (templates.length > 0 && ids.length > 1) {
+        setBulkTemplateId(templates[0]?._id || '');
+        setBulkSelectedMembers(new Set(ids));
+        setShowBulkModal(true);
+        return;
+      }
+      void openEditor(ids[0]);
+      return;
+    }
+    navigateToAlertTab(alert.actionTab);
   };
 
   const handleSaveSchedule = async () => {
@@ -245,23 +309,52 @@ export function SchedulesVacations() {
     setSaving(true); setError('');
     try {
       const member = members.find(m => m.user_id === editingMemberId);
-      const existing = schedules.find(s => s.member_id === editingMemberId);
-      await saveSchedule(businessId, editingMemberId, member?.fullName || '', editWeekly, existing, undefined, currentWeekStart, editWorkCenterId || undefined, editWorkCenterName || undefined);
-      flash('Horario guardado'); await loadData(); setTimeout(() => setEditingMemberId(null), 600);
+      const existing =
+        schedules.find((s) => s.member_id === editingMemberId && s.week_start === currentWeekStart)
+        || schedules.find((s) => s.member_id === editingMemberId && !s.week_start)
+        || null;
+      // Si el doc es de otra semana, no reutilizar _id/_rev (crear el de la semana actual).
+      const existingForWeek =
+        existing && (!existing.week_start || existing.week_start === currentWeekStart)
+          ? existing
+          : null;
+      await saveSchedule(
+        businessId,
+        editingMemberId,
+        member?.fullName || '',
+        editWeekly,
+        existingForWeek,
+        undefined,
+        currentWeekStart,
+        editWorkCenterId || undefined,
+        editWorkCenterName || undefined,
+      );
+      flash('Horario guardado');
+      setEditingMemberId(null);
+      await loadData({ silent: true });
     } catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
   const openTemplateModal = (existing?: ShiftTemplate) => {
     if (existing) { setEditingTemplate(existing); setTemplateName(existing.name); setTemplateColor(existing.color); setTemplateWeekly({ ...existing.weekly }); }
-    else { setEditingTemplate(null); setTemplateName(''); setTemplateColor(TEMPLATE_COLORS[Math.floor(Math.random() * TEMPLATE_COLORS.length)]); setTemplateWeekly(defaultWeekly()); }
+    else {
+      setEditingTemplate(null);
+      setTemplateName('');
+      setTemplateColor(TEMPLATE_COLORS[Math.floor(Math.random() * TEMPLATE_COLORS.length)]);
+      setTemplateWeekly(defaultWeekly(storeHoursForDefaults()));
+    }
     setShowTemplateModal(true); setError('');
   };
 
   const handleSaveTemplate = async () => {
     if (!businessId || !templateName.trim()) return;
     setSaving(true); setError('');
-    try { await saveShiftTemplate(businessId, templateName.trim(), templateColor, templateWeekly, editingTemplate); flash('Plantilla guardada'); await loadData(); setShowTemplateModal(false); }
-    catch (e: any) { setError(e.message); } finally { setSaving(false); }
+    try {
+      await saveShiftTemplate(businessId, templateName.trim(), templateColor, templateWeekly, editingTemplate);
+      flash('Plantilla guardada');
+      setShowTemplateModal(false);
+      await loadData({ silent: true });
+    } catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
   const openRuleModal = (existing?: AssignmentRule) => {
@@ -276,22 +369,57 @@ export function SchedulesVacations() {
     try {
       const tmpl = templates.find(t => t._id === ruleTemplateId);
       await saveAssignmentRule(businessId, { name: ruleName.trim(), criteria: ruleCriteria, criteria_value: ruleCriteriaValue.trim(), template_id: ruleTemplateId, template_name: tmpl?.name || '', active: editingRule?.active ?? true }, editingRule);
-      flash('Regla guardada'); await loadData(); setShowRuleModal(false);
+      flash('Regla guardada');
+      setShowRuleModal(false);
+      await loadData({ silent: true });
     } catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
   const handleAutoAssign = async () => {
     if (!businessId || rules.length === 0) return;
     setSaving(true); setError('');
-    try { const r = await autoAssignByRules(businessId, rules, templates, members, schedules, currentWeekStart); flash(`Auto-asignación: ${r.applied} aplicados, ${r.skipped} omitidos`); await loadData(); }
-    catch (e: any) { setError(e.message); } finally { setSaving(false); }
+    try {
+      const r = await autoAssignByRules(businessId, rules, templates, members, schedules, currentWeekStart);
+      flash(`Auto-asignación: ${r.applied} aplicados, ${r.skipped} omitidos`);
+      await loadData({ silent: true });
+    } catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
   const handleVacSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!businessId || !user) return;
     if (!vacFormData.startDate || !vacFormData.endDate) { setError('Selecciona las fechas'); return; }
     setSaving(true); setError('');
-    try { await createVacationRequest(businessId, user.user_id, user.fullName || user.email, vacFormData, vacSettings); flash('Solicitud enviada'); setShowVacForm(false); setVacFormData({ startDate: '', endDate: '', leaveType: 'vacation', notes: '' }); await loadData(); }
+    try {
+      const saved = await createVacationRequest(
+        businessId,
+        user.user_id,
+        user.fullName || user.email,
+        vacFormData,
+        vacSettings,
+        {
+          notifyOwnerUserId: currentBusiness?.owner_user_id,
+          existingRequests: vacations.filter((v) => v.member_id === user.user_id),
+          employmentStartDate: user.employment?.startDate,
+          employmentEndDate: user.employment?.endDate,
+          hoursPerWeek: user.employment?.hoursPerWeek,
+          workday: user.employment?.workday,
+          scheduleWeeklyHours: (() => {
+            const sch = schedules.find((s) => s.member_id === user.user_id);
+            if (!sch) return undefined;
+            const h = computeWeeklyHours(sch.weekly);
+            return h > 0 ? h : undefined;
+          })(),
+        },
+      );
+      flash(
+        saved.needsHrReview
+          ? 'Enviada con solape — RRHH debe valorar'
+          : 'Solicitud enviada a RRHH',
+      );
+      setShowVacForm(false);
+      setVacFormData({ startDate: '', endDate: '', leaveType: 'vacation', notes: '' });
+      await loadData({ silent: true });
+    }
     catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
@@ -302,20 +430,21 @@ export function SchedulesVacations() {
       const result = await reviewVacation(record, decision, user.user_id, user.fullName || user.email, note);
       setReviewNotes(prev => { const n = { ...prev }; delete n[record._id]; return n; });
       const autoMsg = result.autoDisabledShifts?.length ? ` (${result.autoDisabledShifts.length} turnos desactivados)` : '';
-      flash(decision === 'approved' ? `Aprobada${autoMsg}` : 'Rechazada'); await loadData();
+      flash(decision === 'approved' ? `Aprobada${autoMsg}` : 'Rechazada');
+      await loadData({ silent: true });
     } catch (e: any) { setError(e.message); }
   };
 
   const handleSaveHoliday = async () => {
     if (!businessId || !holidayForm.date || !holidayForm.name.trim()) return;
     setSaving(true); setError('');
-    try { await saveCompanyHoliday(businessId, holidayForm); flash('Festivo guardado'); await loadData(); setShowHolidayModal(false); }
+    try { await saveCompanyHoliday(businessId, holidayForm); flash('Festivo guardado'); setShowHolidayModal(false); await loadData({ silent: true }); }
     catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
   const handleImportHolidays = async () => {
     if (!businessId) return; setSaving(true);
-    try { const created = await importPresetHolidays(businessId, currentYear, holidays); flash(`${created.length} festivos importados`); await loadData(); }
+    try { const created = await importPresetHolidays(businessId, currentYear, holidays); flash(`${created.length} festivos importados`); await loadData({ silent: true }); }
     catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
@@ -323,7 +452,7 @@ export function SchedulesVacations() {
     if (!businessId || !blockForm.member_id || !blockForm.startDate || !blockForm.endDate) return;
     const member = members.find(m => m.user_id === blockForm.member_id);
     setSaving(true); setError('');
-    try { await saveBlock(businessId, { ...blockForm, member_name: member?.fullName || '', createdBy: user?.user_id || '' }); flash('Bloqueo guardado'); await loadData(); setShowBlockModal(false); }
+    try { await saveBlock(businessId, { ...blockForm, member_name: member?.fullName || '', createdBy: user?.user_id || '' }); flash('Bloqueo guardado'); setShowBlockModal(false); await loadData({ silent: true }); }
     catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
@@ -336,7 +465,9 @@ export function SchedulesVacations() {
       const tmpl = templates.find(t => t._id === bulkTemplateId); if (!tmpl) return;
       const selected = members.filter(m => bulkSelectedMembers.has(m.user_id));
       const result = await applyTemplateToMembers(businessId, tmpl, selected, schedules, currentWeekStart, undefined, undefined, true);
-      flash(`Aplicada a ${result.applied.length}, ${result.skipped.length} omitidos`); await loadData(); setShowBulkModal(false);
+      flash(`Aplicada a ${result.applied.length}, ${result.skipped.length} omitidos`);
+      setShowBulkModal(false);
+      await loadData({ silent: true });
     } catch (e: any) { setError(e.message); } finally { setSaving(false); }
   };
 
@@ -344,7 +475,7 @@ export function SchedulesVacations() {
 
   const visibleTabs: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'calendar', label: 'Semana', icon: <CalendarRange className="w-4 h-4" /> },
-    { id: 'vacations', label: 'Vacaciones', icon: <Umbrella className="w-4 h-4" />, badge: canManage ? pendingVacations : undefined },
+    { id: 'vacations', label: 'Solicitudes', icon: <Umbrella className="w-4 h-4" />, badge: canManage ? pendingVacations : undefined },
     ...(canManage ? [
       { id: 'control' as Tab, label: 'Control', icon: <Timer className="w-4 h-4" />, badge: activeAlerts.length || undefined },
       { id: 'config' as Tab, label: 'Configuración', icon: <Settings2 className="w-4 h-4" /> },
@@ -374,7 +505,7 @@ export function SchedulesVacations() {
                   <p className="text-sm font-semibold">{a.title}</p>
                   <p className="text-xs opacity-80 mt-0.5">{a.description}</p>
                 </div>
-                <button onClick={() => goToAlertTab(a.actionTab)} className="text-xs font-medium underline shrink-0">{a.actionLabel}</button>
+                <button type="button" onClick={() => handleAlertAction(a)} className="text-xs font-medium underline shrink-0">{a.actionLabel}</button>
                 <button onClick={() => { dismissAlert(a.id); setAlerts(prev => prev.filter(x => x.id !== a.id)); }} className="p-1 opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
               </div>
             ))}
@@ -384,7 +515,7 @@ export function SchedulesVacations() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard icon={<Users className="w-5 h-5" />} label="Con horario" value={`${schedules.length}/${members.length}`} color="blue" />
-          <StatCard icon={<Umbrella className="w-5 h-5" />} label="De vacaciones" value={String(membersOnVacation.size)} color="green" />
+          <StatCard icon={<Umbrella className="w-5 h-5" />} label="Ausentes / pendientes" value={String(membersOnLeave.size)} color="green" />
           <StatCard icon={<Timer className="w-5 h-5" />} label="Horas/sem equipo" value={`${totalTeamHours}h`} color="amber" />
           <StatCard icon={<AlertTriangle className="w-5 h-5" />} label="Alertas activas" value={String(activeAlerts.length)} color={activeAlerts.length > 0 ? 'red' : 'green'} />
         </div>
@@ -419,6 +550,7 @@ export function SchedulesVacations() {
               weekOffset={weekOffset}
               dayLabels={dayLabels}
               lang={lang}
+              leaveLabels={leaveLabels}
               canManage={canManage}
               saving={saving}
               blockLabels={blockLabels}
@@ -436,13 +568,20 @@ export function SchedulesVacations() {
         {/* VACACIONES */}
         {tab === 'vacations' && (
           <VacationsTeamPanel
-            members={visibleMembers.map((m) => ({
-              user_id: m.user_id,
-              fullName: m.fullName || m.name || m.email || m.user_id,
-              role: String(m.role || ''),
-              startDate: m.employment?.startDate,
-              endDate: m.employment?.endDate,
-            }))}
+            members={visibleMembers.map((m) => {
+              const sch = schedules.find((s) => s.member_id === m.user_id);
+              const scheduleHrs = sch ? computeWeeklyHours(sch.weekly) : undefined;
+              return {
+                user_id: m.user_id,
+                fullName: m.fullName || m.name || m.email || m.user_id,
+                role: String(m.role || ''),
+                startDate: m.employment?.startDate,
+                endDate: m.employment?.endDate,
+                hoursPerWeek: m.employment?.hoursPerWeek,
+                workday: m.employment?.workday,
+                scheduleWeeklyHours: scheduleHrs && scheduleHrs > 0 ? scheduleHrs : undefined,
+              };
+            })}
             vacations={vacations}
             vacSettings={vacSettings}
             currentYear={currentYear}
@@ -475,7 +614,7 @@ export function SchedulesVacations() {
             lang={lang}
             alerts={alerts}
             onDateChange={setComparisonDate}
-            onGoToTab={goToAlertTab}
+            onAlertAction={handleAlertAction}
           />
         )}
 
@@ -524,7 +663,7 @@ export function SchedulesVacations() {
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
               {!blocks.length ? <div className="py-16 text-center text-gray-400"><Ban className="w-10 h-10 mx-auto mb-3" /><p className="text-sm">Sin bloqueos</p></div> : (
                 <div className="overflow-x-auto"><table className="w-full"><thead><tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50"><th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Miembro</th><th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Fechas</th><th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Motivo</th><th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Horario</th><th className="px-4 py-3 w-10"></th></tr></thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">{blocks.map(b => <tr key={b._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30"><td className="px-4 py-3 text-sm font-medium">{b.member_name}</td><td className="px-4 py-3 text-sm tabular-nums">{b.startDate} → {b.endDate}</td><td className="px-4 py-3"><span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: BLOCK_REASON_COLORS[b.reason] + '20', color: BLOCK_REASON_COLORS[b.reason] }}>{blockLabels[b.reason]}</span></td><td className="px-4 py-3 text-sm text-gray-500">{b.allDay ? 'Todo el día' : `${b.startTime}-${b.endTime}`}</td><td className="px-4 py-3"><button onClick={() => deleteBlock(b).then(loadData)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td></tr>)}</tbody></table></div>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">{blocks.map(b => <tr key={b._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30"><td className="px-4 py-3 text-sm font-medium">{b.member_name}</td><td className="px-4 py-3 text-sm tabular-nums">{formatDateRangeEs(b.startDate, b.endDate)}</td><td className="px-4 py-3"><span className="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: BLOCK_REASON_COLORS[b.reason] + '20', color: BLOCK_REASON_COLORS[b.reason] }}>{blockLabels[b.reason]}</span></td><td className="px-4 py-3 text-sm text-gray-500">{b.allDay ? 'Todo el día' : `${b.startTime}-${b.endTime}`}</td><td className="px-4 py-3"><button onClick={() => deleteBlock(b).then(loadData)} className="p-1 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td></tr>)}</tbody></table></div>
               )}
             </div>
           </>
@@ -608,7 +747,7 @@ export function SchedulesVacations() {
         {/* MODAL: VACATION FORM */}
         {showVacForm && <Modal onClose={() => setShowVacForm(false)} title="Solicitar vacaciones">
           <form onSubmit={handleVacSubmit} className="space-y-4">
-            <div><label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label><select value={vacFormData.leaveType} onChange={e => setVacFormData({ ...vacFormData, leaveType: e.target.value as LeaveType })} className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none">{(Object.keys(leaveLabels) as LeaveType[]).map(lt => <option key={lt} value={lt}>{leaveLabels[lt]}</option>)}</select></div>
+            <div><label className="text-xs font-medium text-gray-500 block mb-1">Tipo</label><select value={vacFormData.leaveType} onChange={e => setVacFormData({ ...vacFormData, leaveType: e.target.value as LeaveType })} className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none">{listHrRequestTypesForWorker().map(t => <option key={t.id} value={t.id}>{leaveLabels[t.id] || t.label}</option>)}</select></div>
             <div className="grid grid-cols-2 gap-3"><div><label className="text-xs font-medium text-gray-500 block mb-1">Desde</label><input type="date" value={vacFormData.startDate} onChange={e => setVacFormData({ ...vacFormData, startDate: e.target.value })} className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none" required /></div><div><label className="text-xs font-medium text-gray-500 block mb-1">Hasta</label><input type="date" value={vacFormData.endDate} onChange={e => setVacFormData({ ...vacFormData, endDate: e.target.value })} className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 outline-none" required /></div></div>
             {vacFormData.startDate && vacFormData.endDate && vacFormData.startDate <= vacFormData.endDate && <p className="text-sm text-gray-500"><span className="font-semibold">{countVacationRequestDays(vacFormData.startDate, vacFormData.endDate, vacSettings)}</span> día(s) según política</p>}
             <div><label className="text-xs font-medium text-gray-500 block mb-1">Notas</label><textarea value={vacFormData.notes} onChange={e => setVacFormData({ ...vacFormData, notes: e.target.value })} rows={2} placeholder="Opcional..." className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 placeholder:text-gray-400 outline-none" /></div>
@@ -683,7 +822,7 @@ function DayEditor({ weekly, dayLabels, onChange }: { weekly: Record<Weekday, Da
 }
 
 function TInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
-  return <div className="flex flex-col gap-0.5"><span className="text-[10px] text-gray-400 leading-none">{label}</span><input type="time" value={value} onChange={e => onChange(e.target.value)} className="px-2 py-1 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 w-[5.5rem] outline-none" /></div>;
+  return <ScheduleTimeField compact label={label} value={value} onChange={onChange} />;
 }
 
 function StatCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {

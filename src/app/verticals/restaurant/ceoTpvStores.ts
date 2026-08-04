@@ -31,14 +31,16 @@ export function buildRestaurantCeoTpvStoreRows(
   businesses: Pick<Business, 'business_id' | 'businessType' | 'createdAt' | 'name'>[] = [],
 ): DeliverySidebarStoreRow[] {
   if (!business) return [];
+  const businessId = String(business.business_id || '').replace(/^business:/, '').trim();
   const retail = filterRestaurantRetailWorkCenters(workCenters, business, businesses);
-  const scopedPdvs = filterPointsOfSaleForWorkCenters(pointsOfSale, retail);
+  // businessId obligatorio: sin retail (solo salas) no vaciar PDVs de la empresa.
+  const scopedPdvs = filterPointsOfSaleForWorkCenters(pointsOfSale, retail, { businessId });
   const rows = buildDeliverySidebarStoreRows(retail, scopedPdvs).filter(
     (r) => !r.inactive && !r.needsPdv && Boolean(r.pdvId),
   );
   if (rows.length > 0) return rows;
 
-  // Fallback: PDVs activos enlazados a WC del restaurante (por si falta fila sidebar).
+  // Fallback: PDVs activos de la empresa (aunque no haya fila WC→PDV).
   return scopedPdvs
     .filter((p) => p.active !== false)
     .map((pdv) => ({

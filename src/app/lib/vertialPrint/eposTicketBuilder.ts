@@ -155,8 +155,20 @@ export function buildEposTicket(
   // Margen superior mínimo (~0,1 cm; antes 1 línea / ~0,4 cm).
   // Sin feed de línea completa: ahorra ~0,3 cm arriba.
 
-  // Comanda cocina: solo pedido + productos + notas (sin cliente ni datos fiscales)
+  // Comanda cocina: nombre + calle arriba del todo; luego pedido/tipo/tel, productos, notas
   if (doc.variant === 'kitchen') {
+    builder.addTextAlign('left');
+    if (doc.customerName) {
+      setTextSize(builder, 2, 2);
+      boldLine(builder, doc.customerName, titleCols);
+      setTextSize(builder, 1, 1);
+    }
+    if (doc.customerAddress) {
+      setTextSize(builder, 1, 2);
+      boldLine(builder, doc.customerAddress, tallCols);
+      setTextSize(builder, 1, 1);
+    }
+    sep(builder, width);
     builder.addTextAlign('center');
     setTextSize(builder, 2, 2);
     boldLine(builder, doc.title, titleCols);
@@ -168,8 +180,14 @@ export function buildEposTicket(
     boldLine(builder, `Pedido: #${doc.orderNumber}`, tallCols);
     setTextSize(builder, 1, 1);
     if (doc.deliveryTypeLabel) {
+      // Un poco más marcado que Pedido/Tel: 2x2 + negrita (domicilio / recogida).
+      setTextSize(builder, 2, 2);
+      boldLine(builder, doc.deliveryTypeLabel, titleCols);
+      setTextSize(builder, 1, 1);
+    }
+    if (doc.customerPhone) {
       setTextSize(builder, 1, 2);
-      boldLine(builder, doc.deliveryTypeLabel, tallCols);
+      boldLine(builder, `Tel: ${doc.customerPhone}`, tallCols);
       setTextSize(builder, 1, 1);
     }
     sep(builder, width);

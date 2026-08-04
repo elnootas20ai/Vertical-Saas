@@ -66,6 +66,7 @@ import { DeliveryFoodUnitIcon } from './delivery/DeliveryFoodUnitIcon';
 import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
+import { QuietTip } from './QuietTip';
 import { buildShiftBrandRevenue, getOrderBrandShares } from '../../lib/registerShiftBrandBilling';
 import { listBrandsRequest } from '../../lib/brandApi';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
@@ -149,6 +150,17 @@ import {
   MoreVertical, Save,
 } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
+import {
+  VERTIAL_BTN_PRIMARY,
+  VERTIAL_BTN_SECONDARY,
+  VERTIAL_CASH_BG,
+  VERTIAL_CASH_BORDER,
+  VERTIAL_CASH_TEXT,
+  VERTIAL_CARD_BG,
+  VERTIAL_CARD_BORDER,
+  VERTIAL_CARD_TEXT,
+} from '../../lib/vertialUiTokens';
+import { VertialLogo } from '../VertialLogo';
 
 // ─── Denomination config (EUR) ──────────────────────────────────────────────
 
@@ -1657,129 +1669,100 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   );
 
   return (
-    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6`}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
-        <div className="flex-shrink-0 p-6 border-b border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Lock className="w-5 h-5 text-zinc-600" /> Cierre de caja</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4`}>
+      <div className="bg-white dark:bg-stone-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
+        <div className="flex-shrink-0 px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">
+                <Lock className="w-5 h-5 text-stone-500 shrink-0" /> Cierre de caja
+              </h2>
+              <p className="text-xs text-stone-500 dark:text-stone-400 truncate mt-0.5">
                 {session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {session.workerName}
-                {showDeliveryClosingSlots ? ' · Contar efectivo + apps' : ''}
               </p>
             </div>
-            <button onClick={onCancel} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl"><X className="w-5 h-5 text-gray-500" /></button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-11 !min-w-11 !px-0 shrink-0`}
+              aria-label="Cerrar"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
           {draftRestored ? (
-            <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-              Borrador recuperado — lo que guardaste antes sigue aquí.
+            <p className="mt-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
+              Borrador recuperado
             </p>
           ) : null}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2.5 space-y-2.5">
           {restaurantWarnings.length > 0 ? (
-            <div className="rounded-xl border border-zinc-300 bg-zinc-50 dark:bg-zinc-900/50 dark:border-zinc-600 p-4 space-y-1">
-              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" /> Sala con actividad pendiente
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2.5 py-2 space-y-0.5">
+              <p className="text-xs font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Sala con actividad pendiente
               </p>
-              <ul className="text-xs text-zinc-700 dark:text-zinc-300 list-disc pl-5 space-y-0.5">
+              <ul className="text-[11px] text-amber-800 dark:text-amber-200 list-disc pl-4 space-y-0.5">
                 {restaurantWarnings.map((w) => (
                   <li key={w}>{w}</li>
                 ))}
               </ul>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 pt-1">
-                Puedes cerrar la caja igualmente; revisa que no queden cuentas sin cobrar.
-              </p>
             </div>
           ) : null}
 
-          {/* 1) Totales del día */}
+          {/* 1) Totales TPV */}
           {showDeliveryClosingSlots ? (
-            <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/60 dark:bg-zinc-900/30 p-3 sm:p-4 space-y-3">
-              <div>
-                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">1. Totales del día</p>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  Efectivo y tarjeta del TPV, y unidades vendidas en TPV (sin apps).
-                </p>
-              </div>
+            <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-3 space-y-3 shadow-sm">
+              <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">1. Totales TPV</p>
 
               <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl border-2 border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/25 p-3 shadow-sm">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                    <Banknote className="w-3.5 h-3.5" /> Efectivo total
-                  </p>
-                  <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-emerald-900 dark:text-emerald-100">
+                <div className={`rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-3 py-2.5`}>
+                  <QuietTip tip="Dinero cobrado en efectivo en el TPV de tienda (pedidos propios).">
+                    <p className={`text-xs font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
+                      <Banknote className="w-3.5 h-3.5" /> Efectivo
+                    </p>
+                  </QuietTip>
+                  <p className={`mt-0.5 text-2xl sm:text-3xl font-black tabular-nums tracking-tight ${VERTIAL_CASH_TEXT}`}>
                     {summary.salesByMethod.efectivo.toFixed(2)}€
                   </p>
-                  <p className="text-[10px] text-emerald-800/70 dark:text-emerald-200/60 mt-0.5">Cobros en efectivo (caja)</p>
                 </div>
-                <div className="rounded-xl border-2 border-sky-200/80 dark:border-sky-800/60 bg-sky-50/70 dark:bg-sky-950/25 p-3 shadow-sm">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300 flex items-center gap-1">
-                    <CreditCard className="w-3.5 h-3.5" /> Tarjeta total
-                  </p>
-                  <p className="mt-1 text-2xl font-black tabular-nums tracking-tight text-sky-900 dark:text-sky-100">
+                <div className={`rounded-xl border ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} px-3 py-2.5`}>
+                  <QuietTip tip="Dinero cobrado con tarjeta en el TPV de tienda.">
+                    <p className={`text-xs font-semibold flex items-center gap-1 ${VERTIAL_CARD_TEXT}`}>
+                      <CreditCard className="w-3.5 h-3.5" /> Tarjeta
+                    </p>
+                  </QuietTip>
+                  <p className={`mt-0.5 text-2xl sm:text-3xl font-black tabular-nums tracking-tight ${VERTIAL_CARD_TEXT}`}>
                     {summary.salesByMethod.tarjeta.toFixed(2)}€
                   </p>
-                  <p className="text-[10px] text-sky-800/70 dark:text-sky-200/60 mt-0.5">Cobros con tarjeta (caja)</p>
                 </div>
               </div>
 
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                Toca para editar unidades
-              </p>
               <div className="grid grid-cols-3 gap-2">
-                <label className="rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-700 bg-white dark:bg-zinc-900 p-3 flex flex-col gap-1 cursor-text shadow-sm hover:border-indigo-500 hover:shadow-md hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-all active:scale-[0.99]">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1.5">
-                    <DeliveryFoodUnitIcon unit="pizza" className="w-4 h-4" />
-                    Pizzas
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={manualFood.pizza}
-                    onChange={(e) => handleFoodSlotChange('pizza', e.target.value)}
-                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border-2 border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/50 dark:bg-indigo-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                  {Number(manualFood.pizza || 0) !== tpvSystemFood.pizza ? (
-                    <span className="text-[10px] text-zinc-500">Sistema: {tpvSystemFood.pizza}</span>
-                  ) : null}
-                </label>
-                <label className="rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-700 bg-white dark:bg-zinc-900 p-3 flex flex-col gap-1 cursor-text shadow-sm hover:border-indigo-500 hover:shadow-md hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-all active:scale-[0.99]">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1.5">
-                    <DeliveryFoodUnitIcon unit="burger" className="w-4 h-4" />
-                    Burgers
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={manualFood.burger}
-                    onChange={(e) => handleFoodSlotChange('burger', e.target.value)}
-                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border-2 border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/50 dark:bg-indigo-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                  {Number(manualFood.burger || 0) !== tpvSystemFood.burger ? (
-                    <span className="text-[10px] text-zinc-500">Sistema: {tpvSystemFood.burger}</span>
-                  ) : null}
-                </label>
-                <label className="rounded-xl border-2 border-dashed border-indigo-300 dark:border-indigo-700 bg-white dark:bg-zinc-900 p-3 flex flex-col gap-1 cursor-text shadow-sm hover:border-indigo-500 hover:shadow-md hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-all active:scale-[0.99]">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-700 dark:text-indigo-300 inline-flex items-center gap-1.5">
-                    <DeliveryFoodUnitIcon unit="taco" className="w-4 h-4" />
-                    Tacos
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={manualFood.taco}
-                    onChange={(e) => handleFoodSlotChange('taco', e.target.value)}
-                    className="w-full px-2.5 py-2.5 text-base font-bold tabular-nums border-2 border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/50 dark:bg-indigo-950/40 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                  />
-                  {Number(manualFood.taco || 0) !== tpvSystemFood.taco ? (
-                    <span className="text-[10px] text-zinc-500">Sistema: {tpvSystemFood.taco}</span>
-                  ) : null}
-                </label>
+                {([
+                  { key: 'pizza' as const, label: 'Pizzas' },
+                  { key: 'burger' as const, label: 'Burgers' },
+                  { key: 'taco' as const, label: 'Tacos' },
+                ]).map((u) => (
+                  <label
+                    key={u.key}
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 flex flex-col gap-1 cursor-text"
+                  >
+                    <span className="text-xs font-medium text-stone-500 inline-flex items-center gap-1">
+                      <DeliveryFoodUnitIcon unit={u.key} className="w-4 h-4" />
+                      {u.label}
+                    </span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={manualFood[u.key]}
+                      onChange={(e) => handleFoodSlotChange(u.key, e.target.value)}
+                      className="w-full min-h-11 px-2 py-2 text-xl font-black tabular-nums border border-slate-200 dark:border-slate-700 rounded-xl bg-stone-50 dark:bg-stone-900 text-stone-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                  </label>
+                ))}
               </div>
 
               <ShiftBrandBillingSummary
@@ -1790,29 +1773,23 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 compact
               />
 
-              <div className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 overflow-hidden shadow-sm">
+              <div className="rounded-lg border border-stone-200 dark:border-stone-700 overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setShowDayOrders((v) => !v)}
-                  className={`w-full px-3 py-3 flex items-center justify-between text-left transition-all active:scale-[0.99] cursor-pointer ${
+                  className={`w-full min-h-11 px-2.5 py-2 flex items-center justify-between text-left touch-manipulation active:scale-[0.99] ${
                     showDayOrders
-                      ? 'bg-indigo-600 text-white dark:bg-indigo-500'
-                      : 'bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700'
                   }`}
                 >
-                  <span className={`text-xs font-bold ${showDayOrders ? 'text-white' : 'text-indigo-900 dark:text-indigo-100'}`}>
-                    Pedidos del turno
-                    <span className={`ml-1.5 font-semibold ${showDayOrders ? 'text-indigo-100' : 'text-indigo-600 dark:text-indigo-300'}`}>
-                      ({dayOrdersBreakdown.orderCount})
-                    </span>
-                    <span className={`ml-2 text-[10px] font-semibold uppercase tracking-wide ${showDayOrders ? 'text-indigo-200' : 'text-indigo-500'}`}>
-                      {showDayOrders ? 'Plegar' : 'Toca para abrir'}
-                    </span>
+                  <span className={`text-xs font-bold ${showDayOrders ? 'text-white' : 'text-stone-800 dark:text-stone-100'}`}>
+                    Pedidos ({dayOrdersBreakdown.orderCount})
                   </span>
                   {showDayOrders ? (
-                    <ChevronUp className="w-5 h-5 text-white shrink-0" />
+                    <ChevronUp className="w-4 h-4 text-white shrink-0" />
                   ) : (
-                    <ChevronDown className="w-5 h-5 text-indigo-600 dark:text-indigo-300 shrink-0" />
+                    <ChevronDown className="w-4 h-4 text-stone-500 shrink-0" />
                   )}
                 </button>
                 {showDayOrders && (
@@ -1838,7 +1815,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                                     #{order.orderNumber} · {order.customerName || 'Cliente'}
                                   </p>
                                   <p className="text-[10px] text-gray-500 mt-0.5">
-                                    {time} · {order.channel || '—'} · {order.itemCount} uds
+                                    {time} · {order.channel || '—'} · {order.itemCount} unidades
                                   </p>
                                   <p className="text-[10px] text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
                                     {order.items
@@ -1903,15 +1880,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
           )}
 
-          {/* 2–5) Integraciones por app */}
           {showDeliveryClosingSlots && (
             <div className="space-y-2">
-              <div>
-                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Apps de delivery</p>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Por app: línea de pizzas, línea de burgers y línea de tacos (cantidad + efectivo + tarjeta).
-                </p>
-              </div>
+              <p className="text-sm font-semibold text-stone-900 dark:text-stone-100 px-0.5">
+                2. Integradores
+              </p>
               <AggregatorClosingEditor
                 autoRows={aggregatorRows}
                 foodByChannel={foodReport.byAggregator}
@@ -1922,23 +1895,25 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 }
                 onSnapshotChange={handleAppsSnapshotChange}
                 onManualDraftChange={handleAppsManualDraftChange}
-                title="Por integración"
+                title="Apps de delivery"
                 startStep={2}
               />
             </div>
           )}
 
           {/* Arqueo */}
-          <div className="rounded-xl border-2 border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-900/50 p-4 space-y-3 shadow-sm">
-            <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-              {showDeliveryClosingSlots ? `${1 + closingPlatforms.length + 1}. Arqueo` : 'Arqueo'}
+          <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-3 space-y-3 shadow-sm">
+            <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+              {showDeliveryClosingSlots ? '3. Arqueo' : 'Arqueo'}
             </p>
 
             {showDeliveryClosingSlots && (
-              <label className="block rounded-xl border-2 border-dashed border-emerald-400 dark:border-emerald-600 bg-white dark:bg-zinc-900 p-3 cursor-text shadow-md hover:border-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-all active:scale-[0.99]">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-700 dark:text-emerald-300 flex items-center gap-1">
-                  <Banknote className="w-3.5 h-3.5" /> Efectivo contado · toca para escribir
-                </span>
+              <label className={`block rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-3 py-2 cursor-text`}>
+                <QuietTip tip="Lo que hay ahora en el cajón. Cuéntalo y escríbelo aquí.">
+                  <span className={`text-xs font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
+                    <Banknote className="w-3.5 h-3.5" /> Efectivo contado
+                  </span>
+                </QuietTip>
                 <input
                   type="text"
                   inputMode="decimal"
@@ -1950,81 +1925,86 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   }}
                   onBlur={() => setCashSlotFocused(false)}
                   onChange={(e) => handleCashSlotChange(e.target.value)}
-                  className="mt-1.5 w-full px-2.5 py-3 text-2xl font-black tabular-nums border-2 border-emerald-300 dark:border-emerald-700 rounded-lg bg-emerald-50/60 dark:bg-emerald-950/40 text-emerald-950 dark:text-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  className={`mt-1 w-full min-h-12 px-2 py-2 text-3xl font-black tabular-nums border ${VERTIAL_CASH_BORDER} rounded-xl bg-white dark:bg-slate-950 ${VERTIAL_CASH_TEXT} focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-500`}
                 />
-                <span className="text-[10px] text-zinc-500">Lo que hay físicamente en la caja</span>
               </label>
             )}
 
-            <div className="flex justify-between text-sm">
-              <span className="text-zinc-600 dark:text-zinc-300">Efectivo TPV (pedidos + fondo − salidas)</span>
-              <span className="font-bold tabular-nums text-zinc-900 dark:text-zinc-100">{expectedTpv.toFixed(2)}€</span>
-            </div>
-            {showDeliveryClosingSlots && (
-              <div className="flex justify-between text-sm">
-                <span className="text-zinc-600 dark:text-zinc-300">+ Efectivo integraciones</span>
-                <span className="font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{aggregatorCashTotal.toFixed(2)}€</span>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between gap-2 items-baseline">
+                <QuietTip tip="Fondo + cobros en efectivo − salidas y devoluciones del TPV.">
+                  <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Efectivo TPV</span>
+                </QuietTip>
+                <span className={`text-lg font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{expectedTpv.toFixed(2)}€</span>
               </div>
-            )}
-            {showDeliveryClosingSlots && aggregatorCardTotal > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-zinc-600 dark:text-zinc-300">Tarjeta apps (info)</span>
-                <span className="font-bold tabular-nums text-sky-700 dark:text-sky-300">{aggregatorCardTotal.toFixed(2)}€</span>
+              {showDeliveryClosingSlots && (
+                <div className="flex justify-between gap-2 items-baseline">
+                  <QuietTip tip="Pedidos de Glovo/Just Eat/etc. cobrados en efectivo en tienda. Entra en el cajón.">
+                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>+ No pagado apps (efectivo)</span>
+                  </QuietTip>
+                  <span className={`text-lg font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{aggregatorCashTotal.toFixed(2)}€</span>
+                </div>
+              )}
+              {showDeliveryClosingSlots && aggregatorCardTotal > 0 && (
+                <div className="flex justify-between gap-2 items-baseline">
+                  <QuietTip tip="Pedidos de apps cobrados con tarjeta en tienda. No suma al cajón de efectivo.">
+                    <span className={`font-medium ${VERTIAL_CARD_TEXT}`}>No pagado apps (tarjeta)</span>
+                  </QuietTip>
+                  <span className={`text-lg font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>{aggregatorCardTotal.toFixed(2)}€</span>
+                </div>
+              )}
+              <div className="border-t border-slate-200 dark:border-slate-800 pt-2 flex justify-between items-baseline">
+                <QuietTip tip="Lo que debería haber en el cajón: Efectivo TPV + no pagado apps en efectivo.">
+                  <span className={`font-semibold ${VERTIAL_CASH_TEXT}`}>Esperado en caja</span>
+                </QuietTip>
+                <span className={`text-2xl sm:text-3xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{expected.toFixed(2)}€</span>
               </div>
-            )}
-            <div className="border-t border-zinc-200 dark:border-zinc-700 pt-2 flex justify-between items-baseline">
-              <span className="text-zinc-900 dark:text-zinc-100 font-bold">Esperado en caja</span>
-              <span className="text-emerald-800 dark:text-emerald-200 text-xl font-black tabular-nums">{expected.toFixed(2)}€</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-zinc-600 dark:text-zinc-300">Contado</span>
-              <span className="font-bold tabular-nums text-zinc-900 dark:text-zinc-100">{countedTotal.toFixed(2)}€</span>
+              <div className="flex justify-between gap-2 items-baseline">
+                <QuietTip tip="Lo que has escrito arriba al contar el cajón.">
+                  <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Contado</span>
+                </QuietTip>
+                <span className={`text-xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{countedTotal.toFixed(2)}€</span>
+              </div>
             </div>
             {countedTotal > 0 && (
-              <div className={`mt-1 p-3 rounded-xl border-2 ${diff === 0 ? 'bg-emerald-50 border-emerald-300 dark:bg-emerald-950/30 dark:border-emerald-700' : 'bg-amber-50 border-amber-300 dark:bg-amber-950/30 dark:border-amber-700'}`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Diferencia</span>
+              <div className={`px-3 py-2.5 rounded-xl border ${diff === 0 ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <QuietTip tip="Contado menos esperado. 0 = cuadra. + sobra. − falta.">
+                    <span className="text-sm font-semibold text-stone-800 dark:text-stone-100 inline-flex items-center gap-1.5">
+                      {diff === 0 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertTriangle className="w-4 h-4 text-amber-600" />}
+                      {diff === 0 ? 'La caja cuadra' : diff > 0 ? 'Sobrante' : 'Falta efectivo'}
+                    </span>
+                  </QuietTip>
                   <span className={`text-2xl font-black tabular-nums ${diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>
                     {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
                   </span>
                 </div>
-                {diff === 0 && (
-                  <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1 flex items-center gap-1 font-semibold">
-                    <CheckCircle2 className="w-3.5 h-3.5" /> La caja cuadra
-                  </p>
-                )}
-                {diff !== 0 && (
-                  <p className="text-xs mt-1 flex items-center gap-1 text-amber-800 dark:text-amber-200 font-semibold">
-                    <AlertTriangle className="w-3.5 h-3.5" /> {diff > 0 ? 'Sobrante' : 'Falta efectivo'}
-                  </p>
-                )}
               </div>
-            )}
-            {showDeliveryClosingSlots && (
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 pt-1">
-                El total del día (TPV + apps) está abajo en «Total del día».
-              </p>
             )}
           </div>
 
-          {/* Detalle opcional (plegado) */}
-          <div className="rounded-xl border-2 border-indigo-200 dark:border-indigo-800 overflow-hidden shadow-sm">
+          {/* Detalle opcional — CTA azul Vertial para que se vea en tablet */}
+          <div
+            className={`rounded-xl overflow-hidden border ${
+              showExtraDetail
+                ? 'border-blue-600'
+                : 'border-blue-500 ring-2 ring-blue-500/25 shadow-sm shadow-blue-600/15'
+            }`}
+          >
             <button
               type="button"
               onClick={() => setShowExtraDetail((v) => !v)}
-              className={`w-full px-3 py-3 flex items-center justify-between text-left text-xs font-bold transition-all active:scale-[0.99] cursor-pointer ${
+              className={`w-full min-h-12 px-3 py-2.5 flex items-center justify-between text-left text-sm font-bold touch-manipulation active:scale-[0.99] ${
                 showExtraDetail
-                  ? 'bg-indigo-600 text-white dark:bg-indigo-500'
-                  : 'bg-indigo-50 text-indigo-900 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-100 dark:hover:bg-indigo-950/70'
+                  ? 'bg-blue-700 text-white'
+                  : 'bg-[var(--v-blue,#2563eb)] text-white hover:bg-[#1d4ed8]'
               }`}
             >
-              <span>
-                {showExtraDetail ? 'Ocultar detalle del turno' : 'Ver detalle del turno (ventas, salidas…)'}
-                {!showExtraDetail ? (
-                  <span className="ml-2 text-[10px] uppercase tracking-wide text-indigo-500 dark:text-indigo-300">Toca</span>
-                ) : null}
+              <span className="inline-flex items-center gap-2">
+                <Receipt className="w-4 h-4 shrink-0 opacity-90" />
+                {showExtraDetail ? 'Ocultar detalle' : 'Detalle del turno'}
               </span>
-              {showExtraDetail ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5 text-indigo-600 dark:text-indigo-300" />}
+              {showExtraDetail ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
             </button>
             {showExtraDetail && (
               <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-4">
@@ -2048,8 +2028,16 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 </div>
 
                 <div className="flex gap-2 flex-wrap text-[11px]">
-                  {summary.salesByMethod.efectivo > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Efectivo: {summary.salesByMethod.efectivo.toFixed(2)}€</span>}
-                  {summary.salesByMethod.tarjeta > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Tarjeta: {summary.salesByMethod.tarjeta.toFixed(2)}€</span>}
+                  {summary.salesByMethod.efectivo > 0 && (
+                    <span className={`px-2 py-1 rounded-md font-semibold border tabular-nums ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} ${VERTIAL_CASH_TEXT}`}>
+                      Efectivo: {summary.salesByMethod.efectivo.toFixed(2)}€
+                    </span>
+                  )}
+                  {summary.salesByMethod.tarjeta > 0 && (
+                    <span className={`px-2 py-1 rounded-md font-semibold border tabular-nums ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} ${VERTIAL_CARD_TEXT}`}>
+                      Tarjeta: {summary.salesByMethod.tarjeta.toFixed(2)}€
+                    </span>
+                  )}
                   {summary.salesByMethod.bizum > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Bizum: {summary.salesByMethod.bizum.toFixed(2)}€</span>}
                   {summary.salesByMethod.online > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Online: {summary.salesByMethod.online.toFixed(2)}€</span>}
                   <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">{summary.totalTransactions} operaciones</span>
@@ -2107,7 +2095,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                                     {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
                                   </span>
                                   <span className="font-semibold text-gray-700 dark:text-gray-300">
-                                    {TPV_CASH_TX_LABELS[tx.type] || tx.type}
+                                    {cashMovementLabel(tx)}
                                   </span>
                                   {tx.description ? (
                                     <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
@@ -2211,58 +2199,52 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Notas (opcional)</label>
+            <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1">Notas</label>
             <textarea
-              rows={2}
-              className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm resize-none"
-              placeholder="Observaciones del cierre..."
+              rows={1}
+              className="w-full min-h-11 px-2.5 py-2 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-sm resize-none"
+              placeholder="Opcional…"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
 
           {showDeliveryClosingSlots ? (
-            <div className="rounded-2xl border border-zinc-800 dark:border-zinc-200 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 p-4 space-y-3">
+            <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-950 text-white dark:bg-white dark:text-slate-900 px-3 py-3 space-y-2 shadow-sm">
               <div className="flex items-end justify-between gap-3">
                 <div>
-                  <p className="text-sm font-bold uppercase tracking-wide">Total del día</p>
-                  <p className="text-[11px] opacity-70 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span>TPV + apps</span>
-                    <span className="inline-flex items-center gap-1 opacity-90">
+                  <QuietTip tip="Suma de todo el turno: TPV + lo hecho en apps (para el Excel).">
+                    <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Total del día</p>
+                  </QuietTip>
+                  <p className="mt-1 text-xs opacity-80 inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="inline-flex items-center gap-1">
                       <DeliveryFoodUnitIcon unit="pizza" className="w-3.5 h-3.5" muted />
-                      {closingFood.pizza}
+                      {closingFood.pizza} pizzas
                     </span>
-                    <span className="inline-flex items-center gap-1 opacity-90">
+                    <span className="inline-flex items-center gap-1">
                       <DeliveryFoodUnitIcon unit="burger" className="w-3.5 h-3.5" muted />
-                      {closingFood.burger}
+                      {closingFood.burger} burgers
                     </span>
-                    <span className="inline-flex items-center gap-1 opacity-90">
+                    <span className="inline-flex items-center gap-1">
                       <DeliveryFoodUnitIcon unit="taco" className="w-3.5 h-3.5" muted />
-                      {closingFood.taco}
+                      {closingFood.taco} tacos
                     </span>
                   </p>
                 </div>
-                <p className="text-3xl font-black tabular-nums shrink-0 tracking-tight">{dayMoneyTotal.toFixed(2)}€</p>
+                <p className="text-3xl sm:text-4xl font-black tabular-nums shrink-0 tracking-tight">{dayMoneyTotal.toFixed(2)}€</p>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded-xl bg-emerald-400/25 dark:bg-emerald-500/20 px-3 py-2.5 border border-emerald-300/40">
-                  <p className="text-[10px] font-bold uppercase tracking-wide opacity-80">Efectivo</p>
-                  <p className="text-xl font-black tabular-nums">{dayCashTotal.toFixed(2)}€</p>
-                  <p className="text-[10px] opacity-60">
-                    TPV {tpvCashSales.toFixed(2)} + apps {aggregatorCashTotal.toFixed(2)}
-                  </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className={`rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-3 py-2`}>
+                  <p className={`text-xs font-semibold ${VERTIAL_CASH_TEXT}`}>Efectivo</p>
+                  <p className={`text-xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{dayCashTotal.toFixed(2)}€</p>
                 </div>
-                <div className="rounded-xl bg-sky-400/25 dark:bg-sky-500/20 px-3 py-2.5 border border-sky-300/40">
-                  <p className="text-[10px] font-bold uppercase tracking-wide opacity-80">Tarjeta</p>
-                  <p className="text-xl font-black tabular-nums">{dayCardTotal.toFixed(2)}€</p>
-                  <p className="text-[10px] opacity-60">
-                    TPV {tpvCardSales.toFixed(2)} + apps {aggregatorCardTotal.toFixed(2)}
-                  </p>
+                <div className={`rounded-xl border ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} px-3 py-2`}>
+                  <p className={`text-xs font-semibold ${VERTIAL_CARD_TEXT}`}>Tarjeta</p>
+                  <p className={`text-xl font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>{dayCardTotal.toFixed(2)}€</p>
                 </div>
               </div>
               {(tpvBizumSales > 0 || tpvOnlineSales > 0 || tpvOtherSales > 0) ? (
-                <p className="text-[11px] opacity-75">
-                  Otros cobros TPV:{' '}
+                <p className="text-xs opacity-75">
                   {tpvBizumSales > 0 ? `Bizum ${tpvBizumSales.toFixed(2)}€ ` : ''}
                   {tpvOnlineSales > 0 ? `Online ${tpvOnlineSales.toFixed(2)}€ ` : ''}
                   {tpvOtherSales > 0 ? `Otros ${tpvOtherSales.toFixed(2)}€` : ''}
@@ -2273,23 +2255,25 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
         </div>
 
         {showDeliveryClosingSlots ? (
-          <div className="flex-shrink-0 px-4 py-2 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-900 text-white dark:bg-zinc-950 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="font-semibold uppercase tracking-wide text-zinc-300">Total en vivo</span>
-            <span className="tabular-nums font-semibold">
+          <div className="flex-shrink-0 px-3 py-2 border-t border-slate-200 dark:border-slate-800 bg-slate-950 text-white flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total en vivo</span>
+            <span className="tabular-nums text-lg font-black text-white">
               {dayMoneyTotal.toFixed(2)}€
-              <span className="ml-2 font-medium opacity-80">
-                Ef. {dayCashTotal.toFixed(2)} · Tarj. {dayCardTotal.toFixed(2)}
+              <span className="ml-2 text-sm font-semibold">
+                <span className="text-emerald-300">Efectivo {dayCashTotal.toFixed(2)}€</span>
+                <span className="mx-1.5 text-slate-500">·</span>
+                <span className="text-sky-300">Tarjeta {dayCardTotal.toFixed(2)}€</span>
               </span>
             </span>
           </div>
         ) : null}
 
-        <div className="flex-shrink-0 p-4 sm:p-6 border-t border-zinc-200 dark:border-zinc-700 flex flex-col sm:flex-row gap-2 sm:gap-3">
+        <div className="flex-shrink-0 p-3 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row gap-2">
           <button
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="px-4 py-3 border-2 border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-300 rounded-xl font-bold hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50"
+            className={`${VERTIAL_BTN_SECONDARY} w-full sm:w-auto`}
           >
             Cancelar
           </button>
@@ -2297,7 +2281,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             type="button"
             onClick={handleSaveForLater}
             disabled={busy}
-            className="px-4 py-3 border-2 border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 rounded-xl font-bold hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-50 inline-flex items-center justify-center gap-2"
+            className={`${VERTIAL_BTN_SECONDARY} w-full sm:w-auto`}
           >
             <Save className="w-4 h-4" />
             Guardar para luego
@@ -2311,7 +2295,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               taco: closingFood.taco,
               byChannel: closingFoodByChannel,
             })}
-            className="flex-1 py-3.5 bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/25 text-white rounded-xl font-bold text-sm transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 ring-2 ring-indigo-400/40 ring-offset-2 ring-offset-white dark:ring-offset-zinc-800"
+            className={`${VERTIAL_BTN_PRIMARY} flex-1 w-full`}
           >
             <Lock className="w-4 h-4" /> {busy ? 'Cerrando…' : 'Confirmar cierre de caja'}
           </button>
@@ -2735,6 +2719,13 @@ const TPV_CASH_TX_LABELS: Record<string, string> = {
   return: 'Devolución',
 };
 
+function cashMovementLabel(tx: { type: string; description?: string; workerName?: string }): string {
+  if (tx.type === 'cash_out' && /^pago trabajador/i.test(String(tx.description || ''))) {
+    return 'Pago trabajador';
+  }
+  return TPV_CASH_TX_LABELS[tx.type] || tx.type;
+}
+
 function isTpvCashMovementTx(type: string): boolean {
   return type === 'cash_in' || type === 'cash_out' || type === 'return';
 }
@@ -2773,7 +2764,7 @@ function RegisterCashOpsStrip({
               {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
             </span>
             <span className="font-semibold text-gray-700 dark:text-gray-300">
-              {TPV_CASH_TX_LABELS[tx.type] || tx.type}
+              {cashMovementLabel(tx)}
             </span>
             <span className={`font-bold ${tx.type === 'cash_in' ? 'text-green-600' : 'text-red-600'}`}>
               {tx.type === 'cash_in' ? '+' : '−'}
@@ -2920,56 +2911,89 @@ function RegisterStatusBar({
     },
   ];
 
+  const menuRowBase =
+    'group w-full flex items-center gap-3 min-h-[52px] px-3 rounded-xl text-left touch-manipulation transition-colors border border-transparent';
+  const menuRowDefault =
+    `${menuRowBase} bg-[var(--v-surface,#f5f7fb)] text-[var(--v-ink,#0b1220)] hover:bg-blue-50/70 hover:border-blue-100 dark:bg-slate-900/80 dark:text-slate-100 dark:hover:bg-blue-950/30 dark:hover:border-blue-900/50`;
+  const menuRowActive =
+    `${menuRowBase} bg-blue-50 border-blue-200 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40 dark:border-blue-800 dark:text-blue-300`;
+  const menuRowWarn =
+    `${menuRowBase} bg-amber-50/90 border-amber-200/80 text-amber-950 hover:bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900/50 dark:text-amber-100`;
+  const menuRowDanger =
+    `${menuRowBase} bg-rose-50 border-rose-200/80 text-[var(--v-rose,#e11d48)] hover:bg-rose-100/80 dark:bg-rose-950/35 dark:border-rose-900/50 dark:text-rose-200`;
+  const menuIconWell =
+    'shrink-0 flex h-10 w-10 items-center justify-center rounded-xl bg-white border border-slate-200/80 text-slate-600 shadow-sm dark:bg-slate-950 dark:border-slate-700 dark:text-slate-300 [&>svg]:h-5 [&>svg]:w-5';
+
+  // Overlay a la derecha del panel (no absolute encima): el diseño Vertial + hits correctos en los ítems.
   const menuPanel = menuOpen ? (
     <TpvGatePortal>
-      <div className="fixed inset-0 z-[120] flex" role="dialog" aria-modal="true" aria-label="Menú TPV">
-        <button
-          type="button"
-          className="absolute inset-0 bg-black/45 backdrop-blur-[1px]"
-          aria-label="Cerrar menú"
-          onClick={() => setMenuOpen(false)}
-        />
-        <aside className="relative z-10 flex h-full w-[min(20rem,88vw)] flex-col bg-white dark:bg-stone-900 shadow-2xl border-r border-stone-200 dark:border-stone-700 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] animate-in slide-in-from-left duration-200">
-          <div className="flex items-center justify-between gap-2 px-4 pb-3 border-b border-stone-200 dark:border-stone-700">
-            <div className="min-w-0">
-              <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Menú TPV</p>
-              <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
-                {storeLabel || 'Tienda'}
-                {terminalLabel ? ` · ${terminalLabel}` : ''}
-              </p>
+      <div
+        className="fixed inset-0 z-[120] flex vsaas-page"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Menú TPV"
+      >
+        <aside className="relative z-10 flex h-full w-[min(20.5rem,90vw)] shrink-0 flex-col bg-[var(--v-surface-elevated,#fff)] shadow-[var(--v-shadow)] border-r border-[var(--v-border)] dark:bg-[var(--v-surface-elevated)] pt-[max(0px,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <div className="vsaas-brand-bar rounded-none opacity-100" />
+          <div className="flex items-start justify-between gap-3 px-4 pt-3.5 pb-3 border-b border-[var(--v-border)]">
+            <div className="min-w-0 flex items-start gap-2.5">
+              <div className="mt-0.5 shrink-0 opacity-90">
+                <VertialLogo size="sm" />
+              </div>
+              <div className="min-w-0">
+                <p className="vsaas-title text-[15px]">Menú TPV</p>
+                <p className="vsaas-subtitle text-[11px] truncate mt-0.5">
+                  {storeLabel || 'Tienda'}
+                  {terminalLabel ? ` · ${terminalLabel}` : ''}
+                </p>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => setMenuOpen(false)}
-              className="shrink-0 inline-flex items-center justify-center min-h-[44px] min-w-[44px] rounded-xl border border-stone-200 dark:border-stone-600 text-stone-600 dark:text-stone-300 touch-manipulation"
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-11 !min-w-11 !px-0 shrink-0`}
               aria-label="Cerrar"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-4">
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-4 space-y-5">
             {quickActions && quickActions.length > 0 ? (
               <div>
-                <p className="px-1 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-stone-400">Pedidos</p>
-                <div className="space-y-1">
+                <p className="px-1 mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--v-muted)]">
+                  Pedidos
+                </p>
+                <div className="space-y-1.5">
                   {quickActions.map((action) => (
                     <button
                       key={action.id}
                       type="button"
                       onClick={() => runMenuAction(action.onClick)}
-                      className={`w-full flex items-center gap-3 min-h-[52px] px-3 rounded-xl text-left touch-manipulation transition-colors ${
+                      className={
                         action.active
-                          ? 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200'
+                          ? menuRowActive
                           : action.tone === 'amber'
-                            ? 'bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100'
-                            : 'bg-stone-50 text-stone-800 hover:bg-stone-100 dark:bg-stone-800/60 dark:text-stone-100 dark:hover:bg-stone-800'
-                      }`}
+                            ? menuRowWarn
+                            : menuRowDefault
+                      }
                     >
-                      <span className="[&>svg]:w-5 [&>svg]:h-5 shrink-0 opacity-90">{action.icon}</span>
+                      <span
+                        className={`${menuIconWell} ${
+                          action.active
+                            ? 'border-blue-200 text-[var(--v-blue,#2563eb)] dark:border-blue-800'
+                            : action.tone === 'amber'
+                              ? 'border-amber-200 text-amber-700 dark:border-amber-800 dark:text-amber-300'
+                              : ''
+                        }`}
+                      >
+                        {action.icon}
+                      </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-bold leading-tight">{action.label}</span>
+                        <span className="block text-sm font-bold leading-tight tracking-tight">{action.label}</span>
                         {action.title && action.title !== action.label ? (
-                          <span className="block text-[11px] opacity-70 mt-0.5 leading-snug">{action.title}</span>
+                          <span className="block text-[11px] font-medium text-[var(--v-muted)] mt-0.5 leading-snug">
+                            {action.title}
+                          </span>
                         ) : null}
                       </span>
                     </button>
@@ -2978,24 +3002,32 @@ function RegisterStatusBar({
               </div>
             ) : null}
             <div>
-              <p className="px-1 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-stone-400">Caja</p>
-              <div className="space-y-1">
+              <p className="px-1 mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--v-muted)]">
+                Caja
+              </p>
+              <div className="space-y-1.5">
                 {cajaMenuItems.map((item) => (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => runMenuAction(item.onClick)}
-                    className={`w-full flex items-center gap-3 min-h-[52px] px-3 rounded-xl text-left touch-manipulation transition-colors ${
-                      item.danger
-                        ? 'bg-red-50 text-red-800 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-950/60'
-                        : 'bg-stone-50 text-stone-800 hover:bg-stone-100 dark:bg-stone-800/60 dark:text-stone-100 dark:hover:bg-stone-800'
-                    }`}
+                    className={item.danger ? menuRowDanger : menuRowDefault}
                   >
-                    <span className="shrink-0 opacity-90">{item.icon}</span>
+                    <span
+                      className={`${menuIconWell} ${
+                        item.danger
+                          ? 'border-rose-200 text-[var(--v-rose,#e11d48)] dark:border-rose-800'
+                          : ''
+                      }`}
+                    >
+                      {item.icon}
+                    </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold leading-tight">{item.label}</span>
+                      <span className="block text-sm font-bold leading-tight tracking-tight">{item.label}</span>
                       {item.title && item.title !== item.label ? (
-                        <span className="block text-[11px] opacity-70 mt-0.5 leading-snug">{item.title}</span>
+                        <span className="block text-[11px] font-medium text-[var(--v-muted)] mt-0.5 leading-snug opacity-90">
+                          {item.title}
+                        </span>
                       ) : null}
                     </span>
                   </button>
@@ -3004,6 +3036,12 @@ function RegisterStatusBar({
             </div>
           </div>
         </aside>
+        <button
+          type="button"
+          className="min-w-0 flex-1 border-0 bg-[var(--v-ink,#0b1220)]/40 backdrop-blur-[2px] touch-manipulation"
+          aria-label="Cerrar menú"
+          onClick={() => setMenuOpen(false)}
+        />
       </div>
     </TpvGatePortal>
   ) : null;
@@ -4618,12 +4656,15 @@ export function TpvRegisterGate({
         const patch = applySessionTransactions(current, updatedTxs);
         const nextSession = { ...current, ...patch };
 
+        // Airbag: sin red o Couch caído → caja local siempre; sync después.
         if (!isBrowserOnline()) {
           enqueueTpvOfflineItem('register_tx', { userId: uid, session: nextSession, tx: fullTx });
           setSessions((prev) => prev.map((s) => (s._id === sessionId ? nextSession : s)));
-          const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
-          toast.info(`${label} guardado en cola local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`);
-          setShowCashOps(false);
+          if (isTpvCashMovementTx(fullTx.type)) {
+            const label = TPV_CASH_TX_LABELS[fullTx.type] || 'Movimiento';
+            toast.info(`${label} en modo local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`);
+            setShowCashOps(false);
+          }
           return;
         }
 
@@ -4655,7 +4696,15 @@ export function TpvRegisterGate({
             }
             continue;
           }
-          toast.error('Error al registrar operación. El pedido puede existir sin movimiento en caja — revisa el turno.');
+          // Couch/API caído con “online”: no romper TPV — queda en local y cola.
+          enqueueTpvOfflineItem('register_tx', { userId: uid, session: nextSession, tx: fullTx });
+          setSessions((prev) => prev.map((s) => (s._id === sessionId ? nextSession : s)));
+          if (isTpvCashMovementTx(fullTx.type)) {
+            toast.info(
+              `Servidor no disponible — movimiento en local. Efectivo esperado: ${calcTpvExpectedCash(nextSession).toFixed(2)}€`,
+            );
+            setShowCashOps(false);
+          }
         }
       }
     };
@@ -5365,6 +5414,8 @@ export function TpvRegisterGate({
         <TpvGatePortal>
           <TpvCashOpsModal
             registeredBy={activeSession.workerName}
+            workers={clockedInWorkers}
+            workersLoading={clockedInWorkersLoading}
             onClose={() => setShowCashOps(false)}
             onConfirm={async (tx) => { await addTransaction(tx); }}
           />

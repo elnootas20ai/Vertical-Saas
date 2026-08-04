@@ -11,7 +11,7 @@ describe('pushPermissionConsent', () => {
     window.localStorage.clear();
   });
 
-  it('unset por defecto → se muestra soft prompt', () => {
+  it('unset por defecto → hay que pedir permiso del sistema', () => {
     expect(readPushConsent('u1').decision).toBe('unset');
     expect(shouldShowPushSoftPrompt('u1')).toBe(true);
   });

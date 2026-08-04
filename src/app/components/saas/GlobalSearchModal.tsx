@@ -16,6 +16,7 @@ import { listDocumentsRequest, type DocumentRecord } from '../../lib/documentsAp
 import { listDeliveryOrdersRequest, type DeliveryOrder } from '../../lib/deliveryApi';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveRetailOpsHomePath } from '../../lib/retailOpsPaths';
+import { COMPRAVENTA_VENTAS_PATH } from '../../lib/compraventaPaths';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,13 @@ const QUICK_ACTIONS_DEFAULT = [
   { label: 'Ir a Pipeline', shortcut: 'G P', route: '/saas/pipeline', icon: <Sparkles className="w-4 h-4" /> },
 ];
 
+const QUICK_ACTIONS_COMPRAVENTA = [
+  { label: 'Ir a Vehículos', shortcut: 'G V', route: '/saas/vehicles', icon: <Car className="w-4 h-4" /> },
+  { label: 'Ir a Clientes', shortcut: 'G C', route: '/saas/clients', icon: <UserRound className="w-4 h-4" /> },
+  { label: 'Ir a Ventas', shortcut: 'G S', route: COMPRAVENTA_VENTAS_PATH, icon: <TrendingUp className="w-4 h-4" /> },
+  { label: 'Ir a Pipeline', shortcut: 'G P', route: '/saas/pipeline', icon: <Sparkles className="w-4 h-4" /> },
+];
+
 const QUICK_ACTIONS_RESTAURANT = [
   { label: 'Ir a Sala', shortcut: 'G S', route: '/saas/sala', icon: <UtensilsCrossed className="w-4 h-4" /> },
   { label: 'Ir a Caja', shortcut: 'G J', route: '/saas/caja', icon: <Banknote className="w-4 h-4" /> },
@@ -109,6 +117,7 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
   const vertical: BusinessType = (currentBusiness?.businessType as BusinessType) || 'carDealership';
   const isDelivery = vertical === 'delivery';
   const isRestaurantVertical = isRestaurantBusinessType(vertical);
+  const isCompraventa = vertical === 'carDealership';
   const [workerMode, setWorkerMode] = useState(false);
 
   const CATEGORY_LABEL: Record<SearchCategory, string> = {
@@ -128,7 +137,9 @@ export function GlobalSearchModal({ isOpen, onClose }: Props) {
       ? QUICK_ACTIONS_RESTAURANT
       : isDelivery
         ? QUICK_ACTIONS_DELIVERY
-        : QUICK_ACTIONS_DEFAULT;
+        : isCompraventa
+          ? QUICK_ACTIONS_COMPRAVENTA
+          : QUICK_ACTIONS_DEFAULT;
 
   const { leads, clients, vehicles, parkingZones, sales } = useApp();
   const { listUsers, user: authUser } = useAuth();

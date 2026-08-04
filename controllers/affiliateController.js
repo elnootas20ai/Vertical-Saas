@@ -196,7 +196,7 @@ async function enrichAffiliateWithAccountMeta(req, affiliate) {
 }
 
 function getAffiliateContactEmail() {
-  return getAffiliateAdminInbox() || 'hola@vertialapp.com';
+  return getAffiliateAdminInbox() || 'vertial.noreply@gmail.com';
 }
 
 function getPublicSiteUrl() {

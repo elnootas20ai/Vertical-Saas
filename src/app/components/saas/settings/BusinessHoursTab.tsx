@@ -125,6 +125,14 @@ export function BusinessHoursTab({ userId }: Props) {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+        <p className="font-semibold">Horario legacy (migración)</p>
+        <p className="mt-1 text-xs opacity-90">
+          El horario que manda en fichaje, plantillas y TPV es el del{' '}
+          <span className="font-semibold">centro de trabajo / tienda</span> (Ajustes → Centros → Horarios).
+          Este panel solo sirve como respaldo si una tienda aún no tiene horario propio.
+        </p>
+      </div>
       {/* Timezone */}
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center gap-2 mb-4">

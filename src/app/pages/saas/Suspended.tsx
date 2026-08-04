@@ -26,18 +26,18 @@ export function Suspended() {
           </div>
 
           <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-3">
-            Cuenta suspendida
+            Suscripción pendiente de pago
           </h1>
           <p className="text-lg text-gray-700 dark:text-gray-300 mb-6">
-            Tu suscripción ha sido suspendida debido a un problema con el pago.
+            Para seguir usando Vertial como empresa, completa el pago o avisa una transferencia.
+            Tus datos están seguros.
           </p>
 
-          <div className="p-4 bg-red-50 border-2 border-red-200 rounded-xl mb-8">
-            <p className="text-sm text-red-900">
-              <strong>¿Qué significa esto?</strong>
+          <div className="p-4 bg-amber-50 border-2 border-amber-200 rounded-xl mb-8">
+            <p className="text-sm text-amber-950">
+              <strong>No es un bloqueo de seguridad.</strong>
               <br />
-              No puedes acceder a las funcionalidades de Vertial hasta que resuelvas el problema de pago.
-              Tus datos están seguros y se mantendrán durante 30 días.
+              Solo hace falta reactivar la suscripción. Los trabajadores de tu equipo no se ven afectados por este aviso.
             </p>
           </div>
 

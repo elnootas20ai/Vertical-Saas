@@ -105,6 +105,7 @@ import { Parts } from './pages/saas/Parts';
 import { TechnicianView } from './pages/saas/TechnicianView';
 import { Commissions } from './pages/saas/Commissions';
 import { PayrollPage } from './pages/saas/PayrollPage';
+import { GestoriaHubPage } from './pages/saas/GestoriaHubPage';
 import { RedirectLegacyDelivery } from './components/saas/RedirectLegacyDelivery';
 import { RestaurantReservationsRouteEntry } from './verticals/restaurant/RestaurantReservationsRouteEntry';
 import { RestaurantWaitlistPage } from './verticals/restaurant/RestaurantWaitlistPage';
@@ -113,6 +114,7 @@ import { RestaurantReportsPage } from './verticals/restaurant/RestaurantReportsP
 import { RestaurantCajaRouteEntry } from './verticals/restaurant/RestaurantCajaRouteEntry';
 import { RestaurantCeoTpvPage } from './verticals/restaurant/RestaurantCeoTpvPage';
 import { RestaurantSalaRouteEntry } from './verticals/restaurant/RestaurantSalaRouteEntry';
+import { RestaurantOpsCenter } from './verticals/restaurant/RestaurantOpsCenter';
 import { RequireRestaurantVertical } from './components/saas/RequireRestaurantVertical';
 import { RequireSalaAccess } from './components/saas/RequireSalaAccess';
 import { DeliveryReparto } from './pages/saas/DeliveryReparto';
@@ -131,6 +133,7 @@ import { RequireTpvTabletEntry } from './components/saas/RequireTpvTabletEntry';
 import { RedirectLegacyDeliveryTpv } from './components/saas/RedirectLegacyDeliveryTpv';
 import { RequireBusinessOwner } from './components/saas/RequireBusinessOwner';
 import { RequireDeliveryVertical } from './components/saas/RequireDeliveryVertical';
+import { RequireCompraventaVertical } from './components/saas/RequireCompraventaVertical';
 import { RequireCleaningVertical } from './components/saas/RequireCleaningVertical';
 import { RequireTeamManager } from './components/saas/RequireTeamManager';
 import { RequireWebOrderingVertical } from './components/saas/RequireWebOrderingVertical';
@@ -180,6 +183,7 @@ import { Clockins } from './pages/saas/Clockins';
 import { Schedules } from './pages/saas/Schedules';
 import { Vacations } from './pages/saas/Vacations';
 import { SchedulesVacations } from './pages/saas/SchedulesVacations';
+import { HrRequestsPage } from './pages/saas/HrRequestsPage';
 import { Affiliates } from './pages/saas/Affiliates';
 import { SetupOnboarding } from './pages/saas/SetupOnboarding';
 
@@ -315,7 +319,12 @@ import { ButcherSales } from './pages/saas/ButcherSales';
 import { ButcherReports } from './pages/saas/ButcherReports';
 import { ButcherTraceability } from './pages/saas/ButcherTraceability';
 import { ButcherWaste } from './pages/saas/ButcherWaste';
+import { ButcherPurchasesPage } from './pages/saas/ButcherPurchasesPage';
+import { ButcherReparto } from './pages/saas/ButcherReparto';
+import { ButcherDespiece } from './pages/saas/ButcherDespiece';
+import { ButcherScaleSetup } from './pages/saas/ButcherScaleSetup';
 import { ButcherTpvPage } from './pages/saas/ButcherTpvPage';
+import { WorkerButcherReparto } from './pages/saas/WorkerButcherReparto';
 import { CompraventaCrm } from './pages/saas/vertical/compraventa/CompraventaCrm';
 import { CompraventaComprasPage } from './pages/saas/vertical/compraventa/CompraventaComprasPage';
 import { CompraventaVentasPage } from './pages/saas/vertical/compraventa/CompraventaVentasPage';
@@ -333,6 +342,7 @@ import {
   WorkerPayrollSetup,
   WorkerTasks,
   WorkerCalendar,
+  WorkerRequests,
   WorkerClock,
   WorkerChat,
   WorkerDocs,
@@ -576,7 +586,7 @@ export const router = createBrowserRouter([
           { path: 'operations/:id', element: <RequireWorkerPermission permission="vehicles"><OperationDetail /></RequireWorkerPermission> },
           { path: 'vehicles', element: <RequireWorkerPermission permission="vehicles"><Vehicles /></RequireWorkerPermission> },
           { path: 'vehicles/:id', element: <RequireWorkerPermission permission="vehicles"><VehicleDetail /></RequireWorkerPermission> },
-          { path: 'vertical/compraventa/publicacion-venta', Component: PublicacionVentaPage },
+          { path: 'vertical/compraventa/publicacion-venta', element: <RequireBusinessOwner><RequireCompraventaVertical><PublicacionVentaPage /></RequireCompraventaVertical></RequireBusinessOwner> },
           { path: 'locations', Component: Locations },
           { path: 'locations/:id', Component: LocationZone },
           { path: 'clients', element: <RequireWorkerPermission permission="clients"><ClientsPage /></RequireWorkerPermission> },
@@ -599,9 +609,10 @@ export const router = createBrowserRouter([
           { path: 'equipo', element: <Navigate to="/saas/team" replace /> },
           { path: 'equipo/:userId', Component: EquipoRedirect },
           { path: 'clockins', element: <RequireBusinessOwner><Clockins /></RequireBusinessOwner> },
+          { path: 'equipo/solicitudes', element: <RequireBusinessOwner><HrRequestsPage /></RequireBusinessOwner> },
           { path: 'equipo/horarios-vacaciones', element: <RequireBusinessOwner><SchedulesVacations /></RequireBusinessOwner> },
           { path: 'schedules', element: <Navigate to="/saas/equipo/horarios-vacaciones" replace /> },
-          { path: 'vacations', element: <Navigate to="/saas/equipo/horarios-vacaciones" replace /> },
+          { path: 'vacations', element: <Navigate to="/saas/equipo/solicitudes" replace /> },
           { path: 'affiliates', element: <RequireBusinessOwner><Affiliates /></RequireBusinessOwner> },
           { path: 'finance', element: <RequireBusinessOwner><Finance /></RequireBusinessOwner> },
           { path: 'verifactu', element: <RequireBusinessOwner><VerifactuPage /></RequireBusinessOwner> },
@@ -616,11 +627,14 @@ export const router = createBrowserRouter([
           { path: 'tech', element: <RequireWorkerPermission permission={['workshop', 'vehicles', 'fleet']}><TechnicianView /></RequireWorkerPermission> },
           { path: 'commissions', element: <RequireBusinessOwner><Commissions /></RequireBusinessOwner> },
           { path: 'payroll', element: <RequireTeamManager><PayrollPage /></RequireTeamManager> },
-          { path: 'sala/setup', element: <RequireSalaAccess><RestaurantSalaRouteEntry /></RequireSalaAccess> },
-          { path: 'sala', element: <RequireSalaAccess><RestaurantSalaRouteEntry /></RequireSalaAccess> },
-          { path: 'lista-espera', element: <RequireRestaurantVertical><RequireWorkerPermission permission="delivery"><RestaurantWaitlistPage /></RequireWorkerPermission></RequireRestaurantVertical> },
-          { path: 'cocina', element: <RequireRestaurantVertical><RequireWorkerPermission permission="delivery"><RestaurantKitchenRouteEntry /></RequireWorkerPermission></RequireRestaurantVertical> },
+          { path: 'gestoria', element: <RequireTeamManager><GestoriaHubPage /></RequireTeamManager> },
+          { path: 'restaurant-ops', element: <RequireBusinessOwner><RequireRestaurantVertical><RestaurantOpsCenter /></RequireRestaurantVertical></RequireBusinessOwner> },
+          { path: 'sala/setup', element: <RequireSalaAccess><RequireWorkerPermission permission={['sala', 'reservations']}><RestaurantSalaRouteEntry /></RequireWorkerPermission></RequireSalaAccess> },
+          { path: 'sala', element: <RequireSalaAccess><RequireWorkerPermission permission={['sala', 'reservations']}><RestaurantSalaRouteEntry /></RequireWorkerPermission></RequireSalaAccess> },
+          { path: 'lista-espera', element: <RequireRestaurantVertical><RequireWorkerPermission permission="sala"><RestaurantWaitlistPage /></RequireWorkerPermission></RequireRestaurantVertical> },
+          { path: 'cocina', element: <RequireWorkerPermission permission={['sala', 'delivery']}><RestaurantKitchenRouteEntry /></RequireWorkerPermission> },
           { path: 'vertical/restaurant/informes', element: <RequireBusinessOwner><RequireRestaurantVertical><RestaurantReportsPage /></RequireRestaurantVertical></RequireBusinessOwner> },
+          { path: 'vertical/restaurant/integraciones', element: <Navigate to="/saas/restaurant-ops" replace /> },
           { path: 'tpv/locales', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv', element: <RequireBusinessOwner><RedirectEventsFromRetailRoutes><TpvQuickBridgePage /></RedirectEventsFromRetailRoutes></RequireBusinessOwner> },
           { path: 'tpv-mode', element: <RedirectLegacyDeliveryTpv /> },
@@ -882,8 +896,8 @@ export const router = createBrowserRouter([
           { path: 'butcher-suppliers', element: <Navigate to="/saas/suppliers" replace /> },
           { path: 'butcher-traceability', element: <RequireBusinessOwner><ButcherTraceability /></RequireBusinessOwner> },
           { path: 'butcher-sales', element: <RequireBusinessOwner><ButcherSales /></RequireBusinessOwner> },
-          { path: 'butcher-purchases', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
-          { path: 'vertical/carniceria/compras', element: <Navigate to="/saas/suppliers/ordenes-compra" replace /> },
+          { path: 'butcher-purchases', element: <RequireWorkerPermission permission="butcher_purchases"><ButcherPurchasesPage /></RequireWorkerPermission> },
+          { path: 'vertical/carniceria/compras', element: <RequireWorkerPermission permission="butcher_purchases"><ButcherPurchasesPage /></RequireWorkerPermission> },
           { path: 'butcher-waste', element: <RequireWorkerPermission permission="butcher_waste"><ButcherWaste /></RequireWorkerPermission> },
           { path: 'butcher-workers', element: <Navigate to="/saas/team" replace /> },
           { path: 'vertical/carniceria/trabajadores', element: <Navigate to="/saas/team" replace /> },
@@ -893,24 +907,30 @@ export const router = createBrowserRouter([
           { path: 'vertical/carniceria/clientes-pedidos', element: <Navigate to="/saas/butcher-orders" replace /> },
           { path: 'vertical/carniceria/tpv', Component: ButcherTpvPage },
           { path: 'vertical/carniceria/informes', Component: ButcherReports },
+          { path: 'vertical/carniceria/reparto', element: <RequireBusinessOwner><ButcherReparto /></RequireBusinessOwner> },
+          { path: 'butcher-reparto', element: <RequireBusinessOwner><ButcherReparto /></RequireBusinessOwner> },
+          { path: 'vertical/carniceria/despiece', element: <RequireBusinessOwner><ButcherDespiece /></RequireBusinessOwner> },
+          { path: 'butcher-despiece', element: <RequireBusinessOwner><ButcherDespiece /></RequireBusinessOwner> },
+          { path: 'vertical/carniceria/basculas', element: <RequireBusinessOwner><ButcherScaleSetup /></RequireBusinessOwner> },
+          { path: 'butcher-basculas', element: <RequireBusinessOwner><ButcherScaleSetup /></RequireBusinessOwner> },
           { path: 'butcher-reports', Component: ButcherReports },
           { path: 'butcher-tpv', Component: ButcherTpvPage },
 
           // Compraventa (car dealership)
           { path: 'compraventa-hub', element: <Navigate to="/saas/vertical/compraventa" replace /> },
-          { path: 'vertical/compraventa', element: <RequireBusinessOwner><CompraventaHub /></RequireBusinessOwner> },
-          { path: 'vertical/compraventa/informes', element: <Navigate to="/saas/reports" replace /> },
-          { path: 'dealership-workers', element: <RequireBusinessOwner><DealershipWorkers /></RequireBusinessOwner> },
-          { path: 'vertical/compraventa/trabajadores', element: <Navigate to="/saas/dealership-workers" replace /> },
-          { path: 'vertical/compraventa/entrada-vehiculo', element: <RequireWorkerPermission permission="vehicles"><VehicleEntryPage /></RequireWorkerPermission> },
-          { path: 'vertical/compraventa/crm', element: <RequireWorkerPermission permission="clients"><CompraventaCrm /></RequireWorkerPermission> },
-          { path: 'vertical/compraventa/compras', element: <RequireBusinessOwner><CompraventaComprasPage /></RequireBusinessOwner> },
-          { path: 'vertical/compraventa/calculadora-fiscal', element: <RequireBusinessOwner><CompraventaFiscalCalculatorPage /></RequireBusinessOwner> },
-          { path: 'vertical/compraventa/ventas', element: <RequireWorkerPermission permission="sales"><CompraventaVentasPage /></RequireWorkerPermission> },
-          { path: 'vertical/compraventa/tasaciones', element: <RequireBusinessOwner><CompraventaTasacionesPage /></RequireBusinessOwner> },
-          { path: 'vertical/compraventa/gastos', element: <Navigate to="/saas/vertical/compraventa/gastos-preparacion" replace /> },
-          { path: 'vertical/compraventa/entregas', element: <RequireWorkerPermission permission="sales"><CompraventaEntregasPage /></RequireWorkerPermission> },
-          { path: 'vertical/compraventa/gastos-preparacion', element: <RequireBusinessOwner><PreparationExpenses /></RequireBusinessOwner> },
+          { path: 'vertical/compraventa', element: <RequireBusinessOwner><RequireCompraventaVertical><CompraventaHub /></RequireCompraventaVertical></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/informes', element: <RequireCompraventaVertical><Navigate to="/saas/reports" replace /></RequireCompraventaVertical> },
+          { path: 'dealership-workers', element: <RequireBusinessOwner><RequireCompraventaVertical><DealershipWorkers /></RequireCompraventaVertical></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/trabajadores', element: <RequireCompraventaVertical><Navigate to="/saas/dealership-workers" replace /></RequireCompraventaVertical> },
+          { path: 'vertical/compraventa/entrada-vehiculo', element: <RequireCompraventaVertical><RequireWorkerPermission permission="vehicles"><VehicleEntryPage /></RequireWorkerPermission></RequireCompraventaVertical> },
+          { path: 'vertical/compraventa/crm', element: <RequireCompraventaVertical><RequireWorkerPermission permission="clients"><CompraventaCrm /></RequireWorkerPermission></RequireCompraventaVertical> },
+          { path: 'vertical/compraventa/compras', element: <RequireBusinessOwner><RequireCompraventaVertical><CompraventaComprasPage /></RequireCompraventaVertical></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/calculadora-fiscal', element: <RequireBusinessOwner><RequireCompraventaVertical><CompraventaFiscalCalculatorPage /></RequireCompraventaVertical></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/ventas', element: <RequireCompraventaVertical><RequireWorkerPermission permission="sales"><CompraventaVentasPage /></RequireWorkerPermission></RequireCompraventaVertical> },
+          { path: 'vertical/compraventa/tasaciones', element: <RequireBusinessOwner><RequireCompraventaVertical><CompraventaTasacionesPage /></RequireCompraventaVertical></RequireBusinessOwner> },
+          { path: 'vertical/compraventa/gastos', element: <RequireCompraventaVertical><Navigate to="/saas/vertical/compraventa/gastos-preparacion" replace /></RequireCompraventaVertical> },
+          { path: 'vertical/compraventa/entregas', element: <RequireCompraventaVertical><RequireWorkerPermission permission="sales"><CompraventaEntregasPage /></RequireWorkerPermission></RequireCompraventaVertical> },
+          { path: 'vertical/compraventa/gastos-preparacion', element: <RequireBusinessOwner><RequireCompraventaVertical><PreparationExpenses /></RequireCompraventaVertical></RequireBusinessOwner> },
 
           { path: 'changelog', Component: ChangelogPage },
           { path: 'subscription', Component: SubscriptionPaymentPage },
@@ -932,6 +952,7 @@ export const router = createBrowserRouter([
           { path: 'worker/tasks', Component: WorkerTasks },
           { path: 'worker/stock-review', Component: WorkerStockReviewPage },
           { path: 'worker/calendar', Component: WorkerCalendar },
+          { path: 'worker/requests', Component: WorkerRequests },
           { path: 'worker/clock', Component: WorkerClock },
           { path: 'worker/chat', Component: WorkerChat },
           { path: 'worker/documents', Component: WorkerDocs },
@@ -943,6 +964,7 @@ export const router = createBrowserRouter([
           { path: 'worker/security', Component: WorkerSecurity },
           { path: 'worker/construction-report', Component: WorkerConstructionReport },
           { path: 'worker/butcher-orders', Component: ButcherWorkerOrders },
+          { path: 'worker/butcher-reparto', Component: WorkerButcherReparto },
           { path: 'worker/materials', element: <RequireCleaningVertical><WorkerMaterials /></RequireCleaningVertical> },
         ],
       },

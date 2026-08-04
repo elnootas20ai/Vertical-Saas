@@ -22,6 +22,8 @@ import { getApiBase } from '../../lib/apiBase';
 import { resolveClientLocationFields } from '../../lib/clientAddressUtils';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { getClientOrderHistoryRequest, type DeliveryOrder } from '../../lib/deliveryApi';
+import { listDiningOrdersRequest, type DiningOrder } from '../../lib/salaApi';
+import { diningOrdersToCrmDeliveryOrders } from '../../lib/restaurantCrmOrders';
 import { DeliveryClientResumen, DeliveryClientPedidosTab } from '../../components/saas/crm/ClientDeliveryDetail';
 import { ClientDetailPlanBanner, ClientDetailLockedPanel } from '../../components/saas/crm/ClientDetailPlanUpgrade';
 import { useClientDetailPlanAccess } from '../../hooks/useClientDetailPlanAccess';
@@ -308,6 +310,9 @@ export function ClientDetail() {
   const { currentBusiness } = useBusiness();
   const { user: authUser } = useAuth();
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
+  const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
+  /** CRM operativo (delivery o bar/restaurante): ficha con historial de pedidos/cuentas. */
+  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness;
   const clientPlan = useClientDetailPlanAccess();
   const [activeTab, setActiveTab] = useState('resumen');
   const [showCreateContractModal, setShowCreateContractModal] = useState(false);
@@ -408,7 +413,7 @@ export function ClientDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (!dataUserId || !id || isDeliveryBusiness) return;
+    if (!dataUserId || !id || isOpsCrmBusiness) return;
 
     const inContext = clients.some((item) => item.id === id);
     if (inContext) {
@@ -435,10 +440,10 @@ export function ClientDetail() {
     return () => {
       cancelled = true;
     };
-  }, [dataUserId, id, clients, isDeliveryBusiness]);
+  }, [dataUserId, id, clients, isOpsCrmBusiness]);
 
   useEffect(() => {
-    if (!dataUserId || !id || !isDeliveryBusiness) return;
+    if (!dataUserId || !id || !isOpsCrmBusiness) return;
 
     let cancelled = false;
     setLoadingClientRecord(true);
@@ -447,17 +452,32 @@ export function ClientDetail() {
     setLoadingPromotions(true);
     setLoadingActivities(true);
 
+    const historyPromise = isDeliveryBusiness
+      ? getClientOrderHistoryRequest(dataUserId, id)
+      : listDiningOrdersRequest(dataUserId);
+
     Promise.all([
       getClientDetailBundleRequest(dataUserId, id),
-      getClientOrderHistoryRequest(dataUserId, id),
+      historyPromise,
       fetchClientPromotions(dataUserId, id),
       fetchClientActivityBundle(dataUserId, id),
     ])
-      .then(([bundle, orders, promos, activityBundle]) => {
+      .then(([bundle, history, promos, activityBundle]) => {
         if (cancelled) return;
         if (bundle?.client) setFetchedClientRecord(bundle.client);
         if (bundle?.summary) setClientSummary(bundle.summary);
-        setDeliveryOrders(orders || []);
+        if (isDeliveryBusiness) {
+          setDeliveryOrders((history as DeliveryOrder[]) || []);
+        } else {
+          const phone = bundle?.client?.phone
+            || clients.find((c) => c.id === id)?.phone
+            || '';
+          setDeliveryOrders(diningOrdersToCrmDeliveryOrders(
+            (history as DiningOrder[]) || [],
+            id,
+            phone,
+          ));
+        }
         setClientPromotions(promos || []);
         setClientActivities(activityBundle.activities || []);
         setClientActivityKpis(activityBundle.kpis);
@@ -478,7 +498,7 @@ export function ClientDetail() {
     return () => {
       cancelled = true;
     };
-  }, [dataUserId, id, isDeliveryBusiness]);
+  }, [dataUserId, id, isOpsCrmBusiness, isDeliveryBusiness, clients]);
 
   useEffect(() => {
     listUsersRequest()
@@ -491,7 +511,7 @@ export function ClientDetail() {
   }, []);
 
   useEffect(() => {
-    if (!dataUserId || !id || isDeliveryBusiness) return;
+    if (!dataUserId || !id || isOpsCrmBusiness) return;
 
     const shouldLoadSummary = activeTab === 'resumen' && !clientSummary && !loadingSummary;
 
@@ -523,17 +543,17 @@ export function ClientDetail() {
       setLoadingQuotes(true);
       getClientQuotesRequest(dataUserId, id).then(setClientQuotes).finally(() => setLoadingQuotes(false));
     }
-  }, [activeTab, dataUserId, id, isDeliveryBusiness]);
+  }, [activeTab, dataUserId, id, isOpsCrmBusiness]);
 
   const client = useMemo<Client | null>(() => {
-    const found = (isDeliveryBusiness && fetchedClientRecord)
+    const found = (isOpsCrmBusiness && fetchedClientRecord)
       ? fetchedClientRecord
       : (clients.find((item) => item.id === id) ?? fetchedClientRecord);
     if (!found) {
       return null;
     }
     return mapStoredClientToDetail(found);
-  }, [clients, id, fetchedClientRecord, isDeliveryBusiness]);
+  }, [clients, id, fetchedClientRecord, isOpsCrmBusiness]);
 
   useEffect(() => {
     if (!client) {
@@ -739,7 +759,7 @@ export function ClientDetail() {
   }
 
   const tagSearch = newTag.toLowerCase().trim();
-  const tagSuggestionsSource = isDeliveryBusiness ? DELIVERY_CLIENT_TAGS : CLIENT_PREDEFINED_TAGS;
+  const tagSuggestionsSource = isOpsCrmBusiness ? DELIVERY_CLIENT_TAGS : CLIENT_PREDEFINED_TAGS;
   const clientTagSuggestions = tagSuggestionsSource.filter(
     (s) => !(ctxClient?.tags || []).includes(s) && (tagSearch === '' || s.toLowerCase().includes(tagSearch)),
   );
@@ -833,7 +853,7 @@ export function ClientDetail() {
   };
 
   const renderGdprTab = () => {
-    if (isDeliveryBusiness && !clientPlan.canViewRgpd) {
+    if (isOpsCrmBusiness && !clientPlan.canViewRgpd) {
       return <ClientDetailLockedPanel featureId="ficha_rgpd" planTier={clientPlan.planTier} />;
     }
 
@@ -1007,6 +1027,19 @@ export function ClientDetail() {
     navigate(`/saas/vertical/delivery/tpv?clientId=${encodeURIComponent(client.id)}`);
   };
 
+  const goToRestaurantTpv = () => {
+    if (!client) return;
+    navigate(`/saas/caja/tpv?clientId=${encodeURIComponent(client.id)}`);
+  };
+
+  const goToOpsTpv = () => {
+    if (isRestaurantBusiness) {
+      goToRestaurantTpv();
+      return;
+    }
+    goToDeliveryTpv();
+  };
+
   const deliveryTabFeature = (tabId: string): ClientDetailFeatureId | null => {
     switch (tabId) {
       case 'resumen': return 'ficha_resumen_kpis';
@@ -1026,7 +1059,7 @@ export function ClientDetail() {
   };
 
   const handleDetailTabChange = (tabId: string) => {
-    if (isDeliveryBusiness && !isDeliveryTabUnlocked(tabId)) {
+    if (isOpsCrmBusiness && !isDeliveryTabUnlocked(tabId)) {
       const feat = deliveryTabFeature(tabId);
       if (feat) {
         const entry = getClientDetailFeature(feat);
@@ -1040,11 +1073,11 @@ export function ClientDetail() {
     setActiveTab(tabId);
   };
 
-  const tabsConfig = isDeliveryBusiness ? [
+  const tabsConfig = isOpsCrmBusiness ? [
     { id: 'resumen', label: 'Resumen', icon: <BarChart3 className="w-4 h-4" /> },
     {
       id: 'pedidos',
-      label: 'Pedidos',
+      label: isRestaurantBusiness ? 'Cuentas' : 'Pedidos',
       icon: <ShoppingBag className="w-4 h-4" />,
       count: deliveryOrders.length || clientSummary?.deliveryOrders || 0,
     },
@@ -1069,7 +1102,7 @@ export function ClientDetail() {
     { id: 'gdpr', label: 'RGPD', icon: <Shield className="w-4 h-4" /> },
   ];
 
-  const detailSearchableTabs = isDeliveryBusiness
+  const detailSearchableTabs = isOpsCrmBusiness
     ? ['pedidos', 'promociones', 'actividad']
     : ['presupuestos', 'promociones', 'facturas', 'contactos', 'documents', 'actividad'];
 
@@ -1115,7 +1148,7 @@ export function ClientDetail() {
       address: editForm.address,
       city: editForm.city,
       postalCode: editForm.postalCode,
-      ...(!isDeliveryBusiness ? { responsible: editForm.responsible } : {}),
+      ...(!isOpsCrmBusiness ? { responsible: editForm.responsible } : {}),
       notes: editForm.notes,
       referralCode: editForm.referralCode,
       status: editForm.status,
@@ -1149,7 +1182,7 @@ export function ClientDetail() {
       title: computedTitle,
       description,
       date: interactionForm.date || new Date().toISOString(),
-      user: interactionForm.user.trim() || (isDeliveryBusiness ? (authUser?.fullName || 'Sistema') : client.responsible),
+      user: interactionForm.user.trim() || (isOpsCrmBusiness ? (authUser?.fullName || 'Sistema') : client.responsible),
     };
 
     await updateClient(client.id, {
@@ -1268,7 +1301,7 @@ export function ClientDetail() {
                 placeholder="Código postal"
                 className="w-full px-4 py-3 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-blue-500 focus:outline-none"
               />
-              {!isDeliveryBusiness && (
+              {!isOpsCrmBusiness && (
                 <select
                   value={editForm.responsible}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, responsible: e.target.value }))}
@@ -1459,8 +1492,8 @@ export function ClientDetail() {
 
       {/* Metadata */}
       <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-xl p-6">
-        <div className={`grid gap-4 ${isDeliveryBusiness ? 'grid-cols-1' : 'grid-cols-2'}`}>
-          {!isDeliveryBusiness && (
+        <div className={`grid gap-4 ${isOpsCrmBusiness ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          {!isOpsCrmBusiness && (
             <div>
               <label className="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">Responsable</label>
               <div className="text-gray-900 dark:text-gray-100 font-semibold">{client.responsible}</div>
@@ -1510,7 +1543,7 @@ export function ClientDetail() {
               <option value="email">Email</option>
               <option value="meeting">Reunión</option>
             </select>
-            {!isDeliveryBusiness && (
+            {!isOpsCrmBusiness && (
               <input
                 value={interactionForm.user}
                 onChange={(e) => {
@@ -1601,7 +1634,7 @@ export function ClientDetail() {
   // ─── RESUMEN TAB ──────────────────────────────────────────────────────────
 
   const renderResumenTab = () => {
-    if (isDeliveryBusiness) {
+    if (isOpsCrmBusiness) {
       const sourceClient = fetchedClientRecord ?? clients.find((item) => item.id === id);
       const loyalty = sourceClient?.loyalty;
       const activePromotionsCount = clientPromotions.filter((p) => p.estado === 'activa').length;
@@ -1629,13 +1662,14 @@ export function ClientDetail() {
             totalVisits: loyalty.totalVisits,
             enrolled: loyalty.enrolled,
           } : null}
-          onNewOrder={goToDeliveryTpv}
+          onNewOrder={goToOpsTpv}
           onGoToPedidos={() => handleDetailTabChange('pedidos')}
           onGoToPromociones={() => handleDetailTabChange('promociones')}
           analyticsUnlocked={clientPlan.canViewAnalytics}
           loyaltyUnlocked={clientPlan.canViewLoyalty}
           promosLinkUnlocked={clientPlan.canViewPromociones}
           maxRecentOrders={clientPlan.maxRecentOrders}
+          opsVariant={isRestaurantBusiness ? 'restaurant' : 'delivery'}
         />
       );
     }
@@ -2136,11 +2170,11 @@ export function ClientDetail() {
   };
 
   const renderPromocionesTab = () => {
-    if (isDeliveryBusiness && !clientPlan.canViewPromociones) {
+    if (isOpsCrmBusiness && !clientPlan.canViewPromociones) {
       return <ClientDetailLockedPanel featureId="ficha_promociones" planTier={clientPlan.planTier} />;
     }
 
-    const canManagePromos = !isDeliveryBusiness || clientPlan.canCreatePromociones;
+    const canManagePromos = !isOpsCrmBusiness || clientPlan.canCreatePromociones;
 
     return (
     <div className="space-y-4">
@@ -2371,7 +2405,7 @@ export function ClientDetail() {
   // ─── ACTIVIDAD TAB ────────────────────────────────────────────────────────
 
   const renderActividadTab = () => {
-    if (isDeliveryBusiness && !clientPlan.canViewActividad) {
+    if (isOpsCrmBusiness && !clientPlan.canViewActividad) {
       return <ClientDetailLockedPanel featureId="ficha_actividad" planTier={clientPlan.planTier} />;
     }
 
@@ -2389,7 +2423,7 @@ export function ClientDetail() {
     }
 
     const tipoConfig: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
-      pedido: { icon: isDeliveryBusiness ? <ShoppingBag className="w-4 h-4" /> : <Car className="w-4 h-4" />, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200' },
+      pedido: { icon: isOpsCrmBusiness ? <ShoppingBag className="w-4 h-4" /> : <Car className="w-4 h-4" />, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-200' },
       factura: { icon: <Receipt className="w-4 h-4" />, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
       nota: { icon: <MessageSquare className="w-4 h-4" />, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200' },
     };
@@ -2402,7 +2436,7 @@ export function ClientDetail() {
 
     return (
       <div className="space-y-4">
-        {isDeliveryBusiness && clientActivityKpis && (
+        {isOpsCrmBusiness && clientActivityKpis && (
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
               <p className="text-xs text-gray-500 dark:text-gray-400">Ingresos totales</p>
@@ -2866,7 +2900,7 @@ export function ClientDetail() {
           Volver a clientes
         </button>
 
-        {isDeliveryBusiness && clientPlan.lockedCount > 0 && (
+        {isOpsCrmBusiness && clientPlan.lockedCount > 0 && (
           <ClientDetailPlanBanner
             planLabel={clientPlan.planLabel}
             unlockedCount={clientPlan.unlockedCount}
@@ -2900,7 +2934,7 @@ export function ClientDetail() {
                 {(ctxClient?.tags || []).map((tag) => (
                   <span key={tag} className="flex items-center gap-1 px-2.5 py-1 bg-white/20 border border-white/30 rounded-full text-xs font-semibold text-white">
                     {tag}
-                    {(!isDeliveryBusiness || clientPlan.canUseTags) && (
+                    {(!isOpsCrmBusiness || clientPlan.canUseTags) && (
                       <button
                         onClick={() => void handleRemoveTag(tag)}
                         className="hover:text-red-200 transition-colors ml-0.5"
@@ -2910,7 +2944,7 @@ export function ClientDetail() {
                     )}
                   </span>
                 ))}
-                {(!isDeliveryBusiness || clientPlan.canUseTags) && (
+                {(!isOpsCrmBusiness || clientPlan.canUseTags) && (
                 <div className="relative">
                   <form
                     onSubmit={(e) => { e.preventDefault(); void handleAddTag(newTag); setShowTagSuggestions(false); }}
@@ -2959,15 +2993,15 @@ export function ClientDetail() {
               </div>
             </div>
             <div className="flex flex-col gap-2 flex-shrink-0">
-              {isDeliveryBusiness ? (
+              {isOpsCrmBusiness ? (
                 <>
                   <button
                     type="button"
-                    onClick={goToDeliveryTpv}
+                    onClick={goToOpsTpv}
                     className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2 text-sm shadow-md shadow-emerald-900/15"
                   >
                     <ShoppingBag className="w-4 h-4" />
-                    Nuevo pedido
+                    {isRestaurantBusiness ? 'Abrir TPV sala' : 'Nuevo pedido'}
                   </button>
                   <button
                     type="button"
@@ -3063,7 +3097,7 @@ export function ClientDetail() {
         </div>
 
         {/* Tabs */}
-        {isDeliveryBusiness ? (
+        {isOpsCrmBusiness ? (
           <div
             className="flex overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 [&::-webkit-scrollbar]:hidden"
             style={{ scrollbarWidth: 'none' }}
@@ -3114,7 +3148,7 @@ export function ClientDetail() {
           />
         )}
 
-        {(!isDeliveryBusiness || detailSearchableTabs.includes(activeTab)) && (
+        {(!isOpsCrmBusiness || detailSearchableTabs.includes(activeTab)) && (
         <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-3 shadow-sm md:px-4">
           <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
@@ -3163,16 +3197,17 @@ export function ClientDetail() {
 
         {/* Tab Content */}
         {activeTab === 'resumen' && renderResumenTab()}
-        {activeTab === 'pedidos' && isDeliveryBusiness && (
+        {activeTab === 'pedidos' && isOpsCrmBusiness && (
           isDeliveryTabUnlocked('pedidos') ? (
             <DeliveryClientPedidosTab
               orders={deliveryOrders}
               loading={loadingDeliveryOrders}
               search={detailListSearch}
-              onNewOrder={goToDeliveryTpv}
+              onNewOrder={goToOpsTpv}
               canExpandDetalle={clientPlan.canExpandPedidoDetalle}
               maxOrdersVisible={clientPlan.isBasicPlan ? clientPlan.maxOrdersVisible : undefined}
               totalOrdersCount={deliveryOrders.length}
+              opsVariant={isRestaurantBusiness ? 'restaurant' : 'delivery'}
             />
           ) : (
             <ClientDetailLockedPanel featureId="ficha_pedidos" planTier={clientPlan.planTier} />

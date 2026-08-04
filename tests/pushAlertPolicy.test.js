@@ -9,11 +9,22 @@ import {
   resolveRuleKey,
 } from '../services/pushAlertPolicy.js';
 
-test('whitelist móvil CEO es pequeña y centrada en dinero/caja', () => {
+test('whitelist móvil CEO es pequeña y centrada en dinero/caja/pack gerente', () => {
   assert.ok(ALL_ALERT_RULE_DEFINITIONS.length > 60);
   assert.equal(MOBILE_PUSH_RULE_IDS, CEO_MOBILE_PUSH_RULE_IDS);
   assert.ok(CEO_MOBILE_PUSH_RULE_IDS.size >= 12);
-  assert.ok(CEO_MOBILE_PUSH_RULE_IDS.size <= 24, `demasiadas reglas push CEO: ${CEO_MOBILE_PUSH_RULE_IDS.size}`);
+  assert.ok(CEO_MOBILE_PUSH_RULE_IDS.size <= 40, `demasiadas reglas push CEO: ${CEO_MOBILE_PUSH_RULE_IDS.size}`);
+});
+
+test('incluye alertas urgentes carnicería', () => {
+  for (const id of [
+    'butcher_register_pending',
+    'butcher_batch_expired',
+    'butcher_stock_critical',
+    'butcher_waste_high',
+  ]) {
+    assert.ok(CEO_MOBILE_PUSH_RULE_IDS.has(id), `falta ${id}`);
+  }
 });
 
 test('cada regla whitelist existe en el catálogo', () => {
@@ -23,7 +34,7 @@ test('cada regla whitelist existe en el catálogo', () => {
   }
 });
 
-test('incluye críticas y caja / impagos clave', () => {
+test('incluye críticas y caja / impagos / fichaje clave', () => {
   for (const id of [
     'delivery_cash_discrepancy',
     'delivery_cash_pending_close',
@@ -34,18 +45,20 @@ test('incluye críticas y caja / impagos clave', () => {
     'delivery_unpaid_order',
     'client_payment_overdue',
     'delivery_order_cancelled',
+    'worker_no_clockin',
   ]) {
     assert.ok(CEO_MOBILE_PUSH_RULE_IDS.has(id), `falta ${id}`);
   }
 });
 
-test('no incluye ruido operativo típico (pedidos/retrasos/stock)', () => {
+test('no incluye ruido operativo típico (pedidos/retrasos/stock/docs)', () => {
   for (const id of [
     'delivery_delayed_order',
     'delivery_product_low_stock',
     'lead_new',
     'sala_slow_kitchen_comanda',
     'worker_late_clockin',
+    'document_expired',
   ]) {
     assert.equal(isMobilePushWhitelisted(id, ''), false, `no debería ir al iPhone: ${id}`);
   }

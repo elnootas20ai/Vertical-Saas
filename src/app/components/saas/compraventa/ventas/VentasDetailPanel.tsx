@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { VehicleShellBlock } from '../../vehicles/VehicleShellBlock';
 import { VentasDetailActionBar, type VentaActionId } from './VentasDetailActionBar';
+import type { SaleHistoryEntry } from '../../../../lib/salesTypes';
 import {
   formatVentaDate,
   formatVentaPrice,
@@ -19,6 +20,7 @@ import {
 
 type VentasDetailPanelProps = {
   sale: VentaListItem | null;
+  history?: SaleHistoryEntry[];
   actionsDisabled?: boolean;
   onAction?: (actionId: VentaActionId) => void;
 };
@@ -66,24 +68,24 @@ function MetricCard({
   );
 }
 
-function SaleDetailContent({ sale }: { sale: VentaListItem }) {
+function SaleDetailContent({
+  sale,
+  history = [],
+}: {
+  sale: VentaListItem;
+  history?: SaleHistoryEntry[];
+}) {
   const profit = ventaEstimatedProfit(sale);
   const profitPositive = profit >= 0;
+  const timeline = [...history].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+  );
 
   return (
-    <div className="space-y-5">
-      <DetailSection title="Información">
+    <div className="space-y-4">
+      <DetailSection title="Condiciones">
         <div className="space-y-0">
-          <InfoRow label="Vehículo" value={sale.vehicleLabel || '—'} />
-          <InfoRow label="Cliente" value={sale.clientName || '—'} />
-          <InfoRow label="Estado" value={SALE_STATUS_TOKEN[sale.status].label} />
-          <InfoRow label="Fecha" value={formatVentaDate(sale.saleDate)} />
-          <InfoRow label="Precio de venta" value={formatVentaPrice(sale.salePrice)} />
-        </div>
-      </DetailSection>
-
-      <DetailSection title="Venta">
-        <div className="space-y-0">
+          <InfoRow label="Método de pago" value={sale.paymentMethod || '—'} />
           <InfoRow
             label="Reserva"
             value={
@@ -92,29 +94,17 @@ function SaleDetailContent({ sale }: { sale: VentaListItem }) {
                 : '—'
             }
           />
-          <InfoRow
-            label="Financiación"
-            value={sale.financing == null ? '—' : sale.financing ? 'Sí' : 'No'}
-          />
-          <InfoRow label="Forma de pago" value={sale.paymentMethod || '—'} />
+          <InfoRow label="Financiación" value={sale.financing ? 'Sí' : 'No'} />
+          <InfoRow label="Comercial" value={sale.sellerName || '—'} />
           <InfoRow label="Entrega prevista" value={formatVentaDate(sale.expectedDeliveryDate ?? '')} />
         </div>
       </DetailSection>
 
       <DetailSection title="Beneficio">
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            label="Precio compra"
-            value={formatVentaPrice(sale.purchasePrice ?? 0)}
-          />
-          <MetricCard
-            label="Gastos"
-            value={formatVentaPrice(sale.expenses ?? 0)}
-          />
-          <MetricCard
-            label="Precio venta"
-            value={formatVentaPrice(sale.salePrice)}
-          />
+          <MetricCard label="Precio compra" value={formatVentaPrice(sale.purchasePrice ?? 0)} />
+          <MetricCard label="Gastos" value={formatVentaPrice(sale.expenses ?? 0)} />
+          <MetricCard label="Precio venta" value={formatVentaPrice(sale.salePrice)} />
           <MetricCard
             label="Beneficio total"
             value={`${profitPositive ? '+' : ''}${formatVentaPrice(profit)}`}
@@ -128,19 +118,41 @@ function SaleDetailContent({ sale }: { sale: VentaListItem }) {
       </DetailSection>
 
       <DetailSection title="Historial">
-        <div className="flex min-h-[160px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/30 px-4 py-8 text-center dark:border-gray-700 dark:bg-gray-900/20">
-          <Clock className="mb-2 h-8 w-8 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Sin movimientos</p>
-          <p className="mt-1 max-w-xs text-xs text-gray-400">
-            Aquí aparecerá la línea temporal de la venta y sus acciones relacionadas.
-          </p>
-        </div>
+        {timeline.length === 0 ? (
+          <div className="flex min-h-[120px] flex-col items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/30 px-4 py-8 text-center dark:border-gray-700 dark:bg-gray-900/20">
+            <Clock className="mb-2 h-8 w-8 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Sin movimientos</p>
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {timeline.map((entry) => (
+              <li
+                key={entry.id}
+                className="relative border-l-2 border-gray-200 pl-4 dark:border-gray-700"
+              >
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{entry.title}</p>
+                {entry.description ? (
+                  <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{entry.description}</p>
+                ) : null}
+                <p className="mt-1 text-[11px] text-gray-400">
+                  {formatVentaDate(entry.date.slice(0, 10))}
+                  {entry.user ? ` · ${entry.user}` : ''}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </DetailSection>
     </div>
   );
 }
 
-export function VentasDetailPanel({ sale, actionsDisabled, onAction }: VentasDetailPanelProps) {
+export function VentasDetailPanel({
+  sale,
+  history = [],
+  actionsDisabled,
+  onAction,
+}: VentasDetailPanelProps) {
   if (!sale) {
     return (
       <section className="flex h-full min-h-0 flex-col items-center justify-center bg-gray-50/50 px-8 text-center dark:bg-gray-950/50">
@@ -199,7 +211,7 @@ export function VentasDetailPanel({ sale, actionsDisabled, onAction }: VentasDet
       <VentasDetailActionBar showActions disabled={actionsDisabled} onAction={onAction} />
 
       <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50/50 px-6 py-5 dark:bg-gray-950/50">
-        <SaleDetailContent sale={sale} />
+        <SaleDetailContent sale={sale} history={history} />
       </div>
     </section>
   );

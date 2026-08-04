@@ -1,4 +1,4 @@
-import React, { ReactNode, useState, useEffect, useCallback, useRef, useReducer } from 'react';
+import React, { ReactNode, useState, useEffect, useCallback, useMemo, useRef, useReducer } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -26,6 +26,8 @@ import { isWorkerAccount } from '../../lib/authApi';
 import { useBusiness } from '../../context/BusinessContext';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 import { resolveRetailOpsHomePath } from '../../lib/retailOpsPaths';
+import { salesListPathForBusiness } from '../../lib/compraventaPaths';
+import { sortByBusinessUsage } from '../../lib/businessUsageOrder';
 import { Mail, X, ArrowLeft } from 'lucide-react';
 import {
   dismissBannerForRestOfLocalDay,
@@ -163,7 +165,12 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
 
   const isDashboard = location.pathname === '/saas/dashboard';
-  const showBusinessCarousel = isDashboard && businesses.length > 1;
+  const showBusinessCarousel =
+    isDashboard && businesses.length > 1 && !isWorkerAccount(user);
+  const businessesByUsage = useMemo(
+    () => sortByBusinessUsage(businesses, user?.user_id),
+    [businesses, user?.user_id],
+  );
 
   const handleSwitchBusiness = useCallback((businessId: string) => {
     switchActiveBusiness(businessId);
@@ -233,7 +240,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
           'G+D': '/saas/dashboard',
           'G+V': '/saas/vehicles',
           'G+C': '/saas/clients',
-          'G+S': '/saas/sales',
+          'G+S': salesListPathForBusiness(currentBusiness?.businessType),
           'G+P': '/saas/pipeline',
           'G+F': '/saas/finance',
           'G+R': '/saas/reports',
@@ -271,7 +278,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('keydown', handler);
     };
-  }, [navigate]);
+  }, [navigate, currentBusiness?.businessType]);
 
   if (!auth || (auth.isInitializing && !user)) {
     return (
@@ -285,7 +292,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
   const desktopMargin = sidebarCollapsed ? 'md:ml-20' : 'md:ml-60';
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-[var(--v-surface,#f5f7fb)] dark:bg-slate-950">
       <Sidebar
         collapsed={sidebarCollapsed}
         mobileOpen={mobileSidebarOpen}
@@ -308,7 +315,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
         {showBusinessCarousel && (
           <div className="px-3 md:px-4 pt-3">
             <BusinessCarousel
-              businesses={businesses}
+              businesses={businessesByUsage}
               currentBusinessId={currentBusiness?.business_id}
               onSwitchBusiness={handleSwitchBusiness}
               showPortfolioTab={

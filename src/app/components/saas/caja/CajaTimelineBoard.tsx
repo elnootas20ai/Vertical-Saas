@@ -1,21 +1,28 @@
 /**
  * Core — panel Caja estilo timeline (diseño caja-timeline) con colores Vertial.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Download,
+  FileSpreadsheet,
+  Table2,
   X,
 } from 'lucide-react';
 import type { PointOfSale, TpvRegisterSession } from '../../../lib/deliveryApi';
+import type {
+  UrielCajaDownloadFormat,
+  UrielCajaHistoryRange,
+} from '../../../lib/cajaUrielClosingsExcelExport';
 import { calcTpvExpectedCash } from '../../../lib/tpvCajaMath';
 import {
   buildTpvRegisterSummaryForDay,
   isTpvRegisterSessionFromPriorCalendarDay,
   localCalendarDayKey,
-  sessionActiveOnCalendarDay,
+  sessionBelongsToCajaDay,
 } from '../../../lib/tpvCajaScope';
 import {
   buildCajaTimelineTracks,
@@ -62,7 +69,10 @@ export type CajaTimelineBoardProps = {
   onOnlyOpenNowChange: (v: boolean) => void;
   dayStats: { stores: number; turns: number; openNow: number; sales: number };
   excelClosedCount: number;
-  onExcelClick: () => void;
+  /** Un solo formato (p. ej. restaurant). Preferir onDownloadFormat en delivery. */
+  onExcelClick?: () => void;
+  /** Menú Descargar: Excel / Google Sheets / CSV (+ alcance historial). */
+  onDownloadFormat?: (format: UrielCajaDownloadFormat, range?: UrielCajaHistoryRange) => void;
   onBack: () => void;
   selectedSessionId: string | null;
   onSelectSession: (id: string | null) => void;
@@ -72,6 +82,8 @@ export type CajaTimelineBoardProps = {
   refreshing?: boolean;
   /** Extra actions next to Excel (restaurant: Sala / TPV) */
   headerExtra?: ReactNode;
+  /** Etiqueta de PDV en UI (delivery: tienda; restaurant: local). */
+  locationNoun?: { singular: string; plural: string; filterAll: string };
 };
 
 function addDaysIso(iso: string, delta: number): string {
@@ -102,6 +114,7 @@ export function CajaTimelineBoard({
   dayStats,
   excelClosedCount,
   onExcelClick,
+  onDownloadFormat,
   onBack,
   selectedSessionId,
   onSelectSession,
@@ -110,10 +123,27 @@ export function CajaTimelineBoard({
   onViewFullClosing,
   refreshing,
   headerExtra,
+  locationNoun = { singular: 'Tienda', plural: 'tiendas', filterAll: 'Todas las tiendas' },
 }: CajaTimelineBoardProps) {
   const todayStr = localCalendarDayKey();
+  const locSingular = locationNoun.singular;
+  const locPlural = locationNoun.plural;
+  const locFilterAll = locationNoun.filterAll;
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [confirmForce, setConfirmForce] = useState(false);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const downloadRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!downloadOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (downloadRef.current && !downloadRef.current.contains(e.target as Node)) {
+        setDownloadOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [downloadOpen]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
@@ -130,7 +160,7 @@ export function CajaTimelineBoard({
   const nowClock = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   const daySessions = useMemo(() => {
-    let list = sessions.filter((s) => sessionActiveOnCalendarDay(s, selectedDate));
+    let list = sessions.filter((s) => sessionBelongsToCajaDay(s, selectedDate));
     if (filterPdv) list = list.filter((s) => s.pointOfSaleId === filterPdv);
     if (onlyOpenNow) list = list.filter((s) => s.status === 'open');
     return list;
@@ -186,7 +216,7 @@ export function CajaTimelineBoard({
                 Caja
               </h1>
               <div className="flex flex-wrap gap-4 text-[13px] text-zinc-500 dark:text-zinc-400">
-                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.stores}</b> tiendas</span>
+                <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.stores}</b> {locPlural}</span>
                 <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.turns}</b> turnos</span>
                 <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{dayStats.openNow}</b> abiertas</span>
                 <span><b className="font-mono font-semibold text-[#030213] dark:text-zinc-100">{Math.round(dayStats.sales)}€</b> ventas</span>
@@ -196,16 +226,127 @@ export function CajaTimelineBoard({
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {headerExtra}
-            <button
-              type="button"
-              onClick={onExcelClick}
-              disabled={excelClosedCount === 0}
-              title="Descarga Excel del mes: hoja Modomio + hoja Black Burger (plantilla Uriel)"
-              className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Excel ({excelClosedCount})
-            </button>
+            {onDownloadFormat ? (
+              <div ref={downloadRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setDownloadOpen((v) => !v)}
+                  disabled={excelClosedCount === 0}
+                  title="Descargar Excel de ingresos (por defecto: todo el historial)"
+                  className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Descargar ({excelClosedCount})
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${downloadOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {downloadOpen && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setDownloadOpen(false)} />
+                    <div className="absolute right-0 top-full mt-2 w-[19rem] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-xl overflow-hidden z-20">
+                      <div className="px-3.5 py-2 border-b border-zinc-100 dark:border-zinc-800">
+                        <p className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                          Excel · alcance
+                        </p>
+                      </div>
+                      {([
+                        {
+                          id: 'excel' as const,
+                          range: 'all' as UrielCajaHistoryRange,
+                          label: 'Todo el historial',
+                          description: 'Todos los días con cierre + RESUMEN y COMPARATIVA (recomendado)',
+                          icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600" />,
+                        },
+                        {
+                          id: 'excel' as const,
+                          range: 'year' as UrielCajaHistoryRange,
+                          label: 'Este año',
+                          description: 'Día a día del año + totales',
+                          icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600/80" />,
+                        },
+                        {
+                          id: 'excel' as const,
+                          range: 'month' as UrielCajaHistoryRange,
+                          label: 'Este mes',
+                          description: 'Plantilla del mes (columna DIA)',
+                          icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600/60" />,
+                        },
+                      ]).map((opt) => (
+                        <button
+                          key={`excel-${opt.range}`}
+                          type="button"
+                          onClick={() => {
+                            setDownloadOpen(false);
+                            onDownloadFormat(opt.id, opt.range);
+                          }}
+                          className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5 border-b border-zinc-100 dark:border-zinc-800"
+                        >
+                          <div className="mt-0.5 shrink-0">{opt.icon}</div>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-[13px] text-[#030213] dark:text-zinc-100">
+                              {opt.label}
+                              {opt.range === 'all' ? (
+                                <span className="ml-1.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                                  por defecto
+                                </span>
+                              ) : null}
+                            </p>
+                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">{opt.description}</p>
+                          </div>
+                        </button>
+                      ))}
+                      <div className="px-3.5 py-2 border-b border-zinc-100 dark:border-zinc-800">
+                        <p className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+                          Otros formatos (historial completo)
+                        </p>
+                      </div>
+                      {([
+                        {
+                          id: 'google-sheets' as const,
+                          label: 'Google Sheets',
+                          description: 'Mismo .xlsx: súbelo a Drive y ábrelo con Hojas',
+                          icon: <Table2 className="w-4 h-4 text-green-600" />,
+                        },
+                        {
+                          id: 'csv' as const,
+                          label: 'CSV (ZIP)',
+                          description: 'Una hoja por archivo CSV, fácil de importar',
+                          icon: <Download className="w-4 h-4 text-sky-600" />,
+                        },
+                      ]).map((opt, i, arr) => (
+                        <div key={opt.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDownloadOpen(false);
+                              onDownloadFormat(opt.id, 'all');
+                            }}
+                            className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5"
+                          >
+                            <div className="mt-0.5 shrink-0">{opt.icon}</div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-[13px] text-[#030213] dark:text-zinc-100">{opt.label}</p>
+                              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">{opt.description}</p>
+                            </div>
+                          </button>
+                          {i < arr.length - 1 && <div className="border-t border-zinc-100 dark:border-zinc-800" />}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={onExcelClick}
+                disabled={excelClosedCount === 0 || !onExcelClick}
+                title="Descargar informe del mes"
+                className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Descargar ({excelClosedCount})
+              </button>
+            )}
           </div>
         </div>
 
@@ -355,7 +496,7 @@ export function CajaTimelineBoard({
             <div className="flex justify-between items-start flex-wrap gap-3 mb-3.5">
               <div>
                 <div className="text-[15px] font-semibold">
-                  {selected.pointOfSaleName || 'Tienda'}
+                  {selected.pointOfSaleName || locSingular}
                   <span className="text-zinc-400 font-normal">
                     {' '}· {selectedKind === 'live' ? 'en curso' : selectedKind === 'warn' ? 'arrastrada' : 'cerrada'}
                   </span>
@@ -479,9 +620,9 @@ export function CajaTimelineBoard({
                 onChange={(e) => onFilterPdvChange(e.target.value)}
                 className="border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 text-xs bg-white dark:bg-zinc-900 text-zinc-500"
               >
-                <option value="">Todas las tiendas</option>
+                <option value="">{locFilterAll}</option>
                 {pointsOfSale.map((p) => (
-                  <option key={p._id} value={p._id}>{p.name || p.code || 'Tienda'}</option>
+                  <option key={p._id} value={p._id}>{p.name || p.code || locSingular}</option>
                 ))}
               </select>
             )}
@@ -503,7 +644,7 @@ export function CajaTimelineBoard({
           <table className="w-full border-collapse min-w-[640px]">
             <thead>
               <tr>
-                {['Estado', 'Tienda', 'Empleado', 'Horario', 'Total', 'Efectivo', 'Diferencia'].map((h, i) => (
+                {['Estado', locSingular, 'Empleado', 'Horario', 'Total', 'Efectivo', 'Diferencia'].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left text-[10.5px] uppercase tracking-wide text-zinc-400 font-semibold px-3.5 py-2.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800/80 ${
@@ -561,7 +702,7 @@ export function CajaTimelineBoard({
                         </span>
                       </td>
                       <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800">
-                        {s.pointOfSaleName || 'Tienda'}
+                        {s.pointOfSaleName || locSingular}
                       </td>
                       <td className="px-3.5 py-2.5 text-[13px] border-b border-zinc-100 dark:border-zinc-800">
                         <div className="font-medium">{s.workerName}</div>

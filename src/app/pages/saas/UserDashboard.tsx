@@ -18,6 +18,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import {
+  isWorkerAccount,
   searchBusinessesRequest,
   createJoinRequestRequest,
   getMyJoinRequestsRequest,
@@ -25,7 +26,10 @@ import {
   type JoinRequest,
   type TeamInvitation,
 } from '../../lib/authApi';
-import { userOwnsAnyBusiness } from '../../lib/workerProfileCompletion';
+import {
+  resolveWorkerSessionEntryPath,
+  userOwnsAnyBusiness,
+} from '../../lib/workerProfileCompletion';
 
 const STATUS_LABELS: Record<string, { label: string; color: string; icon: typeof Clock }> = {
   pending: { label: 'Pendiente', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: Clock },
@@ -47,6 +51,15 @@ export function UserDashboard() {
   const [loadingInvitations, setLoadingInvitations] = useState(true);
   const [sendingTo, setSendingTo] = useState<string | null>(null);
   const [sentSuccess, setSentSuccess] = useState<string | null>(null);
+
+  const isWorker = isWorkerAccount(user);
+  const linkedWorker = isWorker && Boolean(String(user?.linkedBusinessId || '').trim());
+
+  // Trabajador ya vinculado → no este home de empresas; va a su backoffice.
+  useEffect(() => {
+    if (!user || !linkedWorker) return;
+    navigate(resolveWorkerSessionEntryPath(user), { replace: true });
+  }, [user, linkedWorker, navigate]);
 
   const ownsBusiness = userOwnsAnyBusiness(user?.user_id, businesses);
   const ownedBusinesses = useMemo(
@@ -147,6 +160,14 @@ export function UserDashboard() {
   const hasAnyPendingSidebar =
     pendingRequests.length > 0 || teamInvitations.length > 0;
 
+  if (linkedWorker) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center text-sm text-gray-500">
+        Abriendo tu espacio de trabajo…
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
@@ -182,9 +203,11 @@ export function UserDashboard() {
             Bienvenido, {user?.firstName || 'Usuario'}
           </h2>
           <p className="text-blue-100 text-sm max-w-lg">
-            {ownsBusiness
-              ? 'Tu cuenta personal y tu empresa están activas. Puedes entrar al back office o unirte a otra empresa como trabajador.'
-              : 'Tu cuenta personal está activa. Busca una empresa para unirte como miembro del equipo, o espera a que te inviten directamente.'}
+            {isWorker
+              ? 'Tu cuenta de trabajador está activa. Aquí solo ves invitaciones; no hay selector ni búsqueda de empresas.'
+              : ownsBusiness
+                ? 'Tu cuenta personal y tu empresa están activas. Puedes entrar al back office o unirte a otra empresa como trabajador.'
+                : 'Tu cuenta personal está activa. Busca una empresa para unirte como miembro del equipo, o espera a que te inviten directamente.'}
           </p>
           {ownsBusiness && activeOwnedBusiness && (
             <button
@@ -270,7 +293,8 @@ export function UserDashboard() {
               </div>
             )}
 
-            {/* Search businesses */}
+            {/* Search businesses — solo cuentas personales / dueños; nunca trabajadores */}
+            {!isWorker && (
             <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-6">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 bg-blue-50 dark:bg-blue-900/30 rounded-xl flex items-center justify-center">
@@ -380,6 +404,7 @@ export function UserDashboard() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Resolved requests */}
             {resolvedRequests.length > 0 && (

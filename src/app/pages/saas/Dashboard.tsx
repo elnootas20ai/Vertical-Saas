@@ -17,7 +17,22 @@ import { fetchAlertsSummary, type AlertsSummary } from '../../lib/clockinAlertsA
 import { fetchTeamDashboardSnapshot, type TeamDashboardSnapshot } from '../../lib/teamDashboardApi';
 import { TeamRrhhDashboardWidget } from '../../components/saas/TeamRrhhDashboardWidget';
 import { AlertSummaryWidget } from '../../components/saas/AlertSummaryWidget';
-import { listDeliveryOrdersRequest, filterDeliveryOrdersRequest, listTpvRegisterSessionsRequest, TPV_SESSION_SYNC_EVENT, type DeliveryOrder, type DeliveryOrderStatus } from '../../lib/deliveryApi';
+import {
+  WorkerPayMonthPanel,
+  buildWorkerPayMonthSummary,
+  DeliveryOpsInsightsPanel,
+  type WorkerPayMonthSummary,
+} from '../../verticals/delivery';
+import { countsTowardNewClientMetrics } from '../../lib/clientAcquisition';
+import {
+  listDeliveryOrdersRequest,
+  filterDeliveryOrdersRequest,
+  listTpvRegisterSessionsRequest,
+  listStaffConsumptionsRequest,
+  TPV_SESSION_SYNC_EVENT,
+  type DeliveryOrder,
+  type DeliveryOrderStatus,
+} from '../../lib/deliveryApi';
 import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
 import {
   BarChart, Bar, Cell, ResponsiveContainer, Tooltip,
@@ -101,7 +116,7 @@ interface WidgetConfig {
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: 'kpis_main',     label: 'KPIs principales',       visible: true },
-  { id: 'alertas',       label: 'Centro de alertas',      visible: true },
+  { id: 'alertas',       label: 'Alertas',                visible: true },
   { id: 'quick_access',  label: 'Accesos rápidos',        visible: true },
   { id: 'charts',        label: 'Gráficas principales',   visible: true },
   { id: 'operations',    label: 'Operativa del negocio',  visible: true },
@@ -438,7 +453,7 @@ function getQuickAccessItems(vertical: string): QuickAccessItem[] {
     { label: 'Calendario', icon: <Calendar className="w-5 h-5" />, route: '/saas/calendar', color: 'text-cyan-600', bg: 'bg-cyan-50 dark:bg-cyan-950/40' },
     { label: 'Fichajes', icon: <Clock className="w-5 h-5" />, route: '/saas/clockins', color: 'text-gray-600', bg: 'bg-gray-50 dark:bg-gray-800' },
     { label: 'Horarios', icon: <CalendarRange className="w-5 h-5" />, route: '/saas/equipo/horarios-vacaciones', color: 'text-orange-600', bg: 'bg-orange-50 dark:bg-orange-950/40' },
-    { label: 'Nóminas', icon: <Receipt className="w-5 h-5" />, route: '/saas/payroll', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
+    { label: 'Nóminas', icon: <Receipt className="w-5 h-5" />, route: '/saas/payroll?tab=nominas', color: 'text-violet-600', bg: 'bg-violet-50 dark:bg-violet-950/40' },
   ];
 
   const verticalLinks: Record<string, QuickAccessItem[]> = {
@@ -581,6 +596,11 @@ function DashboardPage() {
     return <CeoMobileHome />;
   }
 
+  /**
+   * DOS VISTAS en /saas/dashboard (nunca mezclar datos):
+   * 1) Visión general → TODAS las empresas (GeneralDashboard)
+   * 2) Empresa activa → solo esa (VerticalDashboard / UnifiedDashboard)
+   */
   if (isPortfolioView && portfolioPlan.canUsePortfolioView) {
     return <GeneralDashboard onSelectBusiness={selectBusinessFromPortfolio} />;
   }
@@ -694,11 +714,14 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     wcScopeIds: string[];
     /** Total de pedidos de la empresa (meta del filtro API). */
     ordersTotal: number;
+    /** Tiendas / PDV delivery para desglose de tiempos. */
+    stores: Array<{ id: string; name: string }>;
   } | null>(null);
   const [deliveryOpsPulses, setDeliveryOpsPulses] = useState<{
     pulses7d: StoreOpsPulse[];
     pulsesMonth: StoreOpsPulse[];
   } | null>(null);
+  const [workerPayMonth, setWorkerPayMonth] = useState<WorkerPayMonthSummary | null>(null);
 
   const isDeliveryVertical = vertical === 'delivery' || isDeliveryBusinessType(currentBusiness?.businessType);
   const isCompraventaVertical = vertical === 'carDealership';
@@ -709,6 +732,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       setDeliveryMetrics(null);
       setDeliveryScope(null);
       setDeliveryOpsPulses(null);
+      setWorkerPayMonth(null);
       return;
     }
     const dataUserId = resolveBusinessDataUserId(authUser, currentBusiness);
@@ -719,12 +743,19 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     const businessName = String(currentBusiness.name || 'Empresa');
     const todayKey = localCalendarDayKey();
     const monthKey = todayKey.slice(0, 7);
-    const monthStart = `${monthKey}-01T00:00:00.000Z`;
-    const lookbackMs = 45 * 24 * 60 * 60 * 1000;
-    const orderFetchFrom = new Date(new Date(monthStart).getTime() - lookbackMs).toISOString();
+    const yearKey = todayKey.slice(0, 4);
+    // Desde 1 ene del año anterior (marcas: vs día/mes/año ant. + YTD).
+    const prevYearKey = String(Number(yearKey) - 1);
+    const orderFetchFrom = `${prevYearKey}-01-01T00:00:00.000Z`;
     const monthEnd = `${todayKey}T23:59:59.999Z`;
     try {
-      const [{ pointsOfSale, workCenters }, orderResult, tpvSessions, ordersCountResult] = await Promise.all([
+      const [
+        { pointsOfSale, workCenters },
+        orderResult,
+        tpvSessions,
+        ordersCountResult,
+        staffConsumptionsResult,
+      ] = await Promise.all([
         loadDeliveryStores(authUser, currentBusiness).catch(() => ({
           dataUserId: '',
           workCenters: [],
@@ -733,7 +764,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
         filterDeliveryOrdersRequest(dataUserId, {
           dateFrom: orderFetchFrom,
           dateTo: monthEnd,
-          limit: 3000,
+          limit: 8000,
           ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
         }).catch(() => ({ orders: [], total: 0 })),
         listTpvRegisterSessionsRequest(dataUserId, {
@@ -744,6 +775,10 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           limit: 1,
           ...(scopeBusinessId ? { businessId: scopeBusinessId } : {}),
         }).catch(() => ({ orders: [], total: 0 })),
+        listStaffConsumptionsRequest(dataUserId, { month: monthKey }).catch(() => ({
+          items: [],
+          summary: { count: 0, total: 0, cashNowTotal: 0, payrollTotal: 0 },
+        })),
       ]);
       const activePdvIds = pointsOfSale.filter((p) => p.active !== false).map((p) => p._id);
       const orderPdvIds = [
@@ -794,6 +829,22 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           })
           .filter((p) => Boolean(p.pdvId));
 
+      const deliveryStores = pointsOfSale
+        .filter((p) => p.active !== false)
+        .map((p) => ({
+          id: String(p._id || '').trim(),
+          name: String(p.name || p._id || 'Tienda').trim(),
+        }))
+        .filter((s) => s.id);
+
+      setWorkerPayMonth(
+        buildWorkerPayMonthSummary(
+          tpvSessions || [],
+          monthKey,
+          staffConsumptionsResult.items || [],
+        ),
+      );
+
       if (pdvIds.length === 0 && wcScope.size === 0 && (orderResult.orders || []).length === 0) {
         setDeliveryMetrics(emptyPortfolioMetrics());
         setDeliveryOpsPulses({ pulses7d: [], pulsesMonth: [] });
@@ -803,6 +854,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           primaryPdvId: null,
           wcScopeIds: [...wcScope],
           ordersTotal: Number(ordersCountResult.total || orderResult.total || 0),
+          stores: deliveryStores,
         });
         return;
       }
@@ -840,11 +892,13 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
           Number(orderResult.total || 0),
           scopedForTotal.length,
         ),
+        stores: deliveryStores,
       });
     } catch {
       setDeliveryMetrics(null);
       setDeliveryScope(null);
       setDeliveryOpsPulses(null);
+      setWorkerPayMonth(null);
     }
   }, [isDeliveryVertical, authUser, currentBusiness]);
 
@@ -854,6 +908,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
 
   const [crmClientsCount, setCrmClientsCount] = useState<number | null>(null);
   const [crmNewClientsMonth, setCrmNewClientsMonth] = useState<number | null>(null);
+  const [crmNewClientsPrevMonth, setCrmNewClientsPrevMonth] = useState<number | null>(null);
+  const [crmNewClientsToday, setCrmNewClientsToday] = useState<number | null>(null);
+  const [crmNewClientsYesterday, setCrmNewClientsYesterday] = useState<number | null>(null);
   const [deliveryBrands, setDeliveryBrands] = useState<Brand[]>([]);
 
   useEffect(() => {
@@ -876,21 +933,45 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
     if (!financeUserId || !(isDeliveryVertical || isRestaurantVertical)) {
       setCrmClientsCount(null);
       setCrmNewClientsMonth(null);
+      setCrmNewClientsPrevMonth(null);
+      setCrmNewClientsToday(null);
+      setCrmNewClientsYesterday(null);
       return;
     }
     try {
-      const monthKey = localCalendarDayKey().slice(0, 7);
+      const todayKey = localCalendarDayKey();
+      const monthKey = todayKey.slice(0, 7);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayKey = localCalendarDayKey(yesterday);
       // Capado: no bajar los ~6k de Pau (saturaba API y dejaba el TPV ciego).
       const { totalClients, sample } = await fetchClientAcquisitionSample(financeUserId, {
         monthKey,
         businessId: businessId || undefined,
       });
       const metrics = computePortfolioClientMetrics(sample, monthKey);
+      let newToday = 0;
+      let newYesterday = 0;
+      for (const client of sample) {
+        if (!countsTowardNewClientMetrics(client)) continue;
+        const raw = client.createdAt;
+        const iso = raw instanceof Date ? raw.toISOString() : String(raw || '');
+        if (!iso) continue;
+        const day = localCalendarDayKey(new Date(iso));
+        if (day === todayKey) newToday += 1;
+        else if (day === yesterdayKey) newYesterday += 1;
+      }
       setCrmClientsCount(totalClients || sample.length);
       setCrmNewClientsMonth(metrics.newClientsMonth);
+      setCrmNewClientsPrevMonth(metrics.newClientsPrevMonth);
+      setCrmNewClientsToday(newToday);
+      setCrmNewClientsYesterday(newYesterday);
     } catch {
       setCrmClientsCount(null);
       setCrmNewClientsMonth(null);
+      setCrmNewClientsPrevMonth(null);
+      setCrmNewClientsToday(null);
+      setCrmNewClientsYesterday(null);
     }
   }, [financeUserId, businessId, isDeliveryVertical, isRestaurantVertical]);
 
@@ -1353,7 +1434,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       title={currentBusiness?.name || 'Dashboard'}
       subtitle={
         businesses.length > 1
-          ? `Dashboard de ${currentBusiness?.name || 'empresa'} · operativa y KPIs del mes`
+          ? `Solo esta empresa · operativa y KPIs`
           : 'Estado real de tu negocio'
       }
     >
@@ -1362,49 +1443,41 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
       )}
 
       <div className="flex flex-col gap-5">
-        {/* ── Status bar ── */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            {onBackToVertical && (
-              <button
-                type="button"
-                onClick={onBackToVertical}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                Vista vertical
-              </button>
-            )}
-            {authUser?.user_id && (
-              serverLoading ? (
-                <span className="flex items-center gap-1.5 text-[10px] text-gray-400 dark:text-gray-500">
-                  <RefreshCw className="w-3 h-3 animate-spin" /> Sincronizando...
-                </span>
-              ) : serverUpdatedAt ? (
-                <span className="flex items-center gap-1.5 text-[10px] text-emerald-600">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Tiempo real · {new Date(serverUpdatedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              ) : null
-            )}
-            {baseDataLoading && (
-              <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                Cargando modulos...
-              </span>
-            )}
-            <button onClick={handleRefresh} disabled={serverLoading}
-              className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-40">
-              <RefreshCw className={`w-3.5 h-3.5 ${serverLoading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
+        {/* Controles mínimos: sin franja vacía a ancho completo */}
+        <div className="flex items-center justify-end gap-1.5 -mt-1">
+          {onBackToVertical ? (
             <button
-              onClick={() => setShowPersonalize(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-gray-300 dark:hover:border-gray-600 transition-all"
+              type="button"
+              onClick={onBackToVertical}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
             >
-              <Settings2 className="w-3.5 h-3.5" /> Personalizar
+              <LayoutDashboard className="h-3.5 w-3.5" />
+              Vertical
             </button>
-          </div>
+          ) : null}
+          {authUser?.user_id && serverLoading ? (
+            <span className="text-[10px] text-gray-400">
+              <RefreshCw className="mr-1 inline h-3 w-3 animate-spin" />
+              Sync…
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={serverLoading}
+            className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 disabled:opacity-40 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+            title="Actualizar"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${serverLoading ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPersonalize(true)}
+            className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-800 dark:hover:text-gray-300"
+            title="Personalizar dashboard"
+          >
+            <Settings2 className="h-3.5 w-3.5" />
+          </button>
         </div>
 
         {isBasicPlan && (
@@ -1440,6 +1513,9 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             pulses7d={deliveryOpsPulses.pulses7d}
             pulsesMonth={deliveryOpsPulses.pulsesMonth}
             singleBusiness
+            businessId={businessId || undefined}
+            brands={deliveryBrands}
+            orders={scopedDeliveryOrders}
             refreshButton={
               <button
                 type="button"
@@ -1460,6 +1536,25 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
             brands={deliveryBrands}
             orders={scopedDeliveryOrders}
             loading={deliveryDataLoading}
+          />
+        ) : null}
+
+        {isDeliveryVertical ? (
+          <WorkerPayMonthPanel
+            summary={workerPayMonth}
+            loading={deliveryDataLoading && !workerPayMonth}
+          />
+        ) : null}
+
+        {isDeliveryVertical ? (
+          <DeliveryOpsInsightsPanel
+            orders={scopedDeliveryOrders}
+            stores={deliveryScope?.stores || []}
+            loading={deliveryDataLoading}
+            newClientsMonth={crmNewClientsMonth}
+            newClientsPrevMonth={crmNewClientsPrevMonth}
+            newClientsToday={crmNewClientsToday}
+            newClientsYesterday={crmNewClientsYesterday}
           />
         ) : null}
 
@@ -1631,7 +1726,7 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                     isDeliveryVertical
                       ? '/saas/delivery-ops'
                       : isRestaurantVertical
-                        ? '/saas/sala'
+                        ? '/saas/restaurant-ops'
                         : '/saas/catalog',
                   )}
                   loading={isDeliveryVertical ? deliveryDataLoading : serverLoading}
@@ -2207,7 +2302,8 @@ function UnifiedDashboard({ onBackToVertical }: { onBackToVertical?: () => void 
                 onOpenTeam={() => navigate('/saas/team')}
                 onOpenClockins={() => navigate('/saas/clockins')}
                 onOpenSchedules={() => navigate('/saas/equipo/horarios-vacaciones')}
-                onOpenPayroll={() => navigate('/saas/payroll')}
+                onOpenRequests={() => navigate('/saas/equipo/solicitudes')}
+                onOpenPayroll={() => navigate('/saas/payroll?tab=nominas')}
               />
             </DraggableWidget>
           </div>
@@ -2311,7 +2407,7 @@ function OperativeBlock({
       carDealership: { title: 'Stock vehículos', value: String(stockCount), sub: 'Disponibles', icon: <Car className="w-4 h-4" />, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600', route: '/saas/vehicles' },
       workshop: { title: 'Órdenes taller', value: '—', sub: 'Abiertas', icon: <Wrench className="w-4 h-4" />, bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-600', route: '/saas/workshop' },
       delivery: { title: 'Pedidos activos', value: String(pendingDeliveries || 0), sub: 'En curso', icon: <Truck className="w-4 h-4" />, bg: pendingDeliveries > 0 ? 'bg-cyan-50 dark:bg-cyan-950/30' : 'bg-gray-50 dark:bg-gray-800', text: pendingDeliveries > 0 ? 'text-cyan-600' : 'text-gray-500', route: '/saas/delivery-ops' },
-      restaurant: { title: 'Sala', value: '—', sub: 'Mesas y TPV', icon: <UtensilsCrossed className="w-4 h-4" />, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-600', route: '/saas/sala' },
+      restaurant: { title: 'Centro operativo', value: '—', sub: 'Sala, cocina y caja', icon: <UtensilsCrossed className="w-4 h-4" />, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-600', route: '/saas/restaurant-ops' },
       cleaning: { title: 'Servicios hoy', value: '—', sub: 'Programados', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/cleaning-hub' },
       gym: { title: 'Socios activos', value: '—', sub: 'Registrados', icon: <Users className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/gym-hub' },
       clinic: { title: 'Citas hoy', value: '—', sub: 'Programadas', icon: <CalendarCheck className="w-4 h-4" />, bg: 'bg-cyan-50 dark:bg-cyan-950/30', text: 'text-cyan-600', route: '/saas/clinic-appointments' },

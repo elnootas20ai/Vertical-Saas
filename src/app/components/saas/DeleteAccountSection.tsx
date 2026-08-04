@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { AlertTriangle, ExternalLink, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { deleteUserRequest } from '../../lib/authApi';
@@ -14,6 +15,7 @@ interface DeleteAccountSectionProps {
 }
 
 export function DeleteAccountSection({ compact = false }: DeleteAccountSectionProps) {
+  const { t } = useTranslation();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
@@ -22,7 +24,7 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
 
   const handleDelete = async () => {
     if (!user?.user_id) {
-      setError('No hay sesión activa.');
+      setError(t('worker.security.deleteAccountNoSession'));
       return;
     }
 
@@ -34,7 +36,7 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
       await logout();
       navigate(AUTH_PATHS.entry);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar la cuenta');
+      setError(err instanceof Error ? err.message : t('worker.security.deleteAccountError'));
     } finally {
       setLoading(false);
     }
@@ -52,11 +54,11 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
         if (!loading) setModalOpen(false);
       }}
       onConfirm={handleDelete}
-      title="Eliminar cuenta / Delete account"
-      description="Se eliminará tu cuenta de Vertial de forma permanente y perderás el acceso. This permanently deletes your Vertial account and signs you out."
+      title={t('worker.security.deleteAccount')}
+      description={t('worker.security.deleteAccountConfirmDesc')}
       itemName={CONFIRM_WORD}
-      confirmLabel={`Escribe ${CONFIRM_WORD} / Type ${CONFIRM_WORD}`}
-      destructiveLabel="Eliminar permanentemente"
+      confirmLabel={t('worker.security.deleteAccountTypeConfirm', { word: CONFIRM_WORD })}
+      destructiveLabel={t('worker.security.deleteAccountPermanent')}
       isDeleting={loading}
       caseInsensitive
     />
@@ -70,10 +72,10 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
         className="space-y-3 pt-2 border-t border-red-100 dark:border-red-900/40"
       >
         <p className="text-sm font-semibold text-red-600 dark:text-red-400">
-          Eliminar cuenta / Delete account
+          {t('worker.security.deleteAccount')}
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          Borra tu cuenta de Vertial de forma permanente desde la app. Permanently delete your account in-app.
+          {t('worker.security.deleteAccountDesc')}
         </p>
         {error && (
           <div className="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
@@ -88,7 +90,7 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
           className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold disabled:opacity-50"
         >
           <Trash2 className="w-4 h-4" />
-          Eliminar mi cuenta
+          {t('worker.security.deleteAccountButton')}
         </button>
         {modal}
       </div>
@@ -99,22 +101,21 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
     <div
       id="eliminar-cuenta"
       data-testid="delete-account-section"
-      className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-red-300 dark:border-red-800 p-6 scroll-mt-24"
+      className="bg-white dark:bg-gray-800 rounded-2xl border border-red-200 dark:border-red-900/50 p-6 scroll-mt-24"
     >
       <h3 className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 mb-1">
         <Trash2 className="w-5 h-5 text-red-500" />
-        Eliminar cuenta / Delete account
+        {t('worker.security.deleteAccount')}
       </h3>
       <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 leading-relaxed">
-        Borra tu cuenta de Vertial de forma permanente desde la app (requisito App Store). Según tu rol,
-        pueden conservarse datos legales o contables exigidos por normativa. Consulta la{' '}
+        {t('worker.security.deleteAccountLongDesc')}{' '}
         <a
           href={IOS_PRIVACY_POLICY_URL}
           target="_blank"
           rel="noopener noreferrer"
           className="font-semibold underline underline-offset-2"
         >
-          política de privacidad
+          {t('worker.security.privacyPolicy')}
         </a>
         .
       </p>
@@ -133,12 +134,12 @@ export function DeleteAccountSection({ compact = false }: DeleteAccountSectionPr
         className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
       >
         <Trash2 className="w-4 h-4" />
-        Eliminar mi cuenta permanentemente
+        {t('worker.security.deleteAccountButtonPermanent')}
       </button>
 
       <p className="mt-4 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
         <ExternalLink className="w-3 h-3" />
-        No hace falta email ni teléfono: el borrado se completa aquí en la app.
+        {t('worker.security.deleteAccountInAppNote')}
       </p>
 
       {modal}

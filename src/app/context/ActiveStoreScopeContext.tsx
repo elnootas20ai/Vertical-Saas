@@ -184,6 +184,7 @@ function resolveShouldLoadStores(
   hasDisplayedStores: boolean,
   accountBusinessCount?: number,
   pathname?: string,
+  force?: boolean,
 ): boolean {
   if (!biz) return false;
   const tabletBoundStore = Boolean(
@@ -192,7 +193,7 @@ function resolveShouldLoadStores(
   return shouldLoadRetailStoresForBusiness(
     buildRetailScopeCtx(biz, businesses, accountBusinessCount),
     bidAtStart,
-    { hasDisplayedStores, tabletBoundStore },
+    { hasDisplayedStores, tabletBoundStore, force: force === true },
   );
 }
 
@@ -446,6 +447,7 @@ function ActiveStoreScopeProviderImpl({
           hasDisplayedStoresRef.current,
           accountN,
           pathnameRef.current,
+          force,
         )
       ) {
         return;
@@ -661,38 +663,32 @@ function ActiveStoreScopeProviderImpl({
 
   useEffect(() => {
     if (!businessId || !dataUserId) return;
-    const raw = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    const raw = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
     const active = pointsOfSale.filter((p) => p.active !== false);
     const retail = retailWorkCenters.filter((wc) => !wc.deletedAt && wc.active !== false);
 
+    const writeIfChanged = (next: string | null, notify = false) => {
+      const value = String(next || '').trim();
+      if (!value || value === raw) return;
+      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, value);
+      if (notify) notifyDeliveryActiveStoreChanged();
+      bump();
+    };
+
     if (raw) {
       if (raw.startsWith('wc:')) {
-        const resolved = resolvePreferenceToPdvId(active, raw);
-        if (resolved && resolved !== raw) {
-          writeDeliveryOpsSelectedPdvId(businessId, dataUserId, resolved);
-          bump();
-        }
+        writeIfChanged(resolvePreferenceToPdvId(active, raw));
         return;
       }
 
       if (!active.some((p) => p._id === raw)) {
-        const fallback = pickDefaultActiveStorePreference(active, retail);
-        if (fallback) {
-          writeDeliveryOpsSelectedPdvId(businessId, dataUserId, fallback);
-          notifyDeliveryActiveStoreChanged();
-          bump();
-        }
+        writeIfChanged(pickDefaultActiveStorePreference(active, retail), true);
       }
       return;
     }
 
     if (active.length === 0 && retail.length === 0) return;
-    const defaultPref = pickDefaultActiveStorePreference(active, retail);
-    if (defaultPref) {
-      writeDeliveryOpsSelectedPdvId(businessId, dataUserId, defaultPref);
-      notifyDeliveryActiveStoreChanged();
-      bump();
-    }
+    writeIfChanged(pickDefaultActiveStorePreference(active, retail), true);
   }, [businessId, dataUserId, pointsOfSale, retailWorkCenters, bump]);
 
   const setActiveSalesPoint = useCallback(

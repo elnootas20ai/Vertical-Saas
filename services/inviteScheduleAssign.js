@@ -13,21 +13,28 @@ function getSchedulesDbName() {
   return `${prefix}-schedules`.toLowerCase().replace(/[^a-z0-9_$()+-]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+/** Lunes en calendario local (misma lógica que el front schedulesApi.getMonday). */
 function getMonday(date = new Date()) {
-  const d = new Date(date);
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dayNum = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dayNum}`;
 }
 
 function addDaysIso(isoDate, days) {
   const d = new Date(`${isoDate}T12:00:00`);
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dayNum = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dayNum}`;
 }
 
-function computeWeeklyHours(weekly) {
+export function computeWeeklyHours(weekly) {
   let total = 0;
   for (const day of WEEKDAYS) {
     const s = weekly?.[day];
@@ -41,6 +48,15 @@ function computeWeeklyHours(weekly) {
     total += Math.max(0, work - Math.max(0, brk));
   }
   return Math.round((total / 60) * 100) / 100;
+}
+
+/** Inferir jornada laboral a partir de horas semanales del horario. */
+export function inferWorkdayFromWeeklyHours(hours) {
+  const h = Number(hours) || 0;
+  if (h <= 0) return '';
+  if (h >= 35) return 'completa';
+  if (h >= 18) return 'media';
+  return 'parcial';
 }
 
 async function findExistingSchedule(req, db, bid, mid, weekStart) {
@@ -67,7 +83,46 @@ async function findExistingSchedule(req, db, bid, mid, weekStart) {
 }
 
 /**
- * @returns {Promise<{ applied: boolean, weeks?: number, reason?: string }>}
+ * Lee plantilla de turnos y devuelve horas/jornada (para la invitación, sin crear schedules).
+ * @returns {Promise<{ ok: boolean, weeklyHours?: number, workday?: string, weekly?: object, reason?: string }>}
+ */
+export async function getShiftTemplateMeta(req, businessId, templateId) {
+  const bid = String(businessId || '').trim();
+  const tid = String(templateId || '').trim();
+  if (!bid || !tid) return { ok: false, reason: 'missing' };
+
+  try {
+    const db = getSchedulesDbName();
+    await ensureDatabase(req, db);
+    let template = null;
+    try {
+      template = await getDocument(req, db, tid);
+    } catch {
+      template = null;
+    }
+    if (!template || template.type !== 'shift_template' || template.business_id !== bid || template.deletedAt) {
+      return { ok: false, reason: 'template_not_found' };
+    }
+    if (!template.weekly || typeof template.weekly !== 'object') {
+      return { ok: false, reason: 'template_invalid' };
+    }
+    const weeklyHours = Number(template.weeklyHours) > 0
+      ? Number(template.weeklyHours)
+      : computeWeeklyHours(template.weekly);
+    return {
+      ok: true,
+      weeklyHours,
+      workday: inferWorkdayFromWeeklyHours(weeklyHours),
+      weekly: template.weekly,
+    };
+  } catch (err) {
+    console.error('[AUTH] No se pudo leer plantilla de horario:', err?.message || err);
+    return { ok: false, reason: 'error' };
+  }
+}
+
+/**
+ * @returns {Promise<{ applied: boolean, weeks?: number, weeklyHours?: number, workday?: string, reason?: string }>}
  */
 export async function applyInviteScheduleTemplate(req, {
   businessId,
@@ -99,6 +154,8 @@ export async function applyInviteScheduleTemplate(req, {
       return { applied: false, reason: 'template_invalid' };
     }
 
+    const weeklyHours = computeWeeklyHours(template.weekly);
+    const workday = inferWorkdayFromWeeklyHours(weeklyHours);
     const now = new Date().toISOString();
     const wcId = String(workCenterId || '').trim();
     const baseMonday = getMonday();
@@ -123,7 +180,7 @@ export async function applyInviteScheduleTemplate(req, {
           }
           : {}),
         weekly: template.weekly,
-        weeklyHours: computeWeeklyHours(template.weekly),
+        weeklyHours,
         template_id: tid,
         createdAt: existing?.createdAt || now,
         updatedAt: now,
@@ -132,7 +189,12 @@ export async function applyInviteScheduleTemplate(req, {
       weeksApplied += 1;
     }
 
-    return { applied: weeksApplied > 0, weeks: weeksApplied };
+    return {
+      applied: weeksApplied > 0,
+      weeks: weeksApplied,
+      weeklyHours,
+      workday,
+    };
   } catch (err) {
     console.error('[AUTH] No se pudo asignar horario desde plantilla de invitación:', err?.message || err);
     return { applied: false, reason: 'error' };

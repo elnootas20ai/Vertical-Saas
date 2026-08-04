@@ -14,6 +14,9 @@ import {
   findLastClosedTpvSession,
   resolvePreviousCloseCashAmount,
   sessionActiveOnCalendarDay,
+  sessionBelongsToCajaDay,
+  sessionWorkDayKey,
+  buildTpvRegisterSummaryForDay,
   tpvSessionBelongsToBusiness,
 } from '../src/app/lib/tpvCajaScope.js';
 
@@ -218,6 +221,37 @@ describe('sessionActiveOnCalendarDay', () => {
   });
 });
 
+describe('sessionBelongsToCajaDay / cierre al día siguiente', () => {
+  it('caja cerrada al día siguiente solo cuenta en el día de apertura', () => {
+    const closed = {
+      openedAt: '2026-06-16T18:00:00.000+02:00',
+      closedAt: '2026-06-17T01:30:00.000+02:00',
+      status: 'closed',
+      transactions: [
+        { type: 'sale', amount: 40, date: '2026-06-16T20:00:00.000+02:00' },
+        { type: 'sale', amount: 10, date: '2026-06-17T00:45:00.000+02:00' },
+      ],
+    };
+    expect(sessionWorkDayKey(closed)).toBe('2026-06-16');
+    expect(sessionBelongsToCajaDay(closed, '2026-06-16')).toBe(true);
+    expect(sessionBelongsToCajaDay(closed, '2026-06-17')).toBe(false);
+    // Totales del turno completo en el día de apertura
+    const summary = buildTpvRegisterSummaryForDay(closed, '2026-06-16');
+    expect(summary.totalSales).toBe(50);
+  });
+
+  it('caja aún abierta sigue visible al día siguiente para poder cerrarla', () => {
+    const open = {
+      openedAt: '2026-06-16T18:00:00.000+02:00',
+      closedAt: '',
+      status: 'open',
+      transactions: [],
+    };
+    expect(sessionBelongsToCajaDay(open, '2026-06-16', new Date('2026-06-17T10:00:00+02:00'))).toBe(true);
+    expect(sessionBelongsToCajaDay(open, '2026-06-17', new Date('2026-06-17T10:00:00+02:00'))).toBe(true);
+  });
+});
+
 describe('orderInRegisterSession', () => {
   const session = {
     openedAt: '2026-06-16T20:00:00.000Z',
@@ -312,6 +346,13 @@ describe('tpvSessionBelongsToBusiness', () => {
     const pdvIds = new Set(['pdv-modomio']);
     expect(tpvSessionBelongsToBusiness({ business_id: 'biz-a', pointOfSaleId: 'pdv-modomio' }, 'biz-a', pdvIds)).toBe(true);
     expect(tpvSessionBelongsToBusiness({ business_id: 'biz-a', pointOfSaleId: 'pdv-modomio' }, 'biz-b', pdvIds)).toBe(false);
+    expect(
+      tpvSessionBelongsToBusiness(
+        { business_id: 'business:biz-a', pointOfSaleId: 'pdv-modomio' },
+        'biz-a',
+        pdvIds,
+      ),
+    ).toBe(true);
   });
 
   it('legacy session without business_id only if PDV belongs to company', () => {

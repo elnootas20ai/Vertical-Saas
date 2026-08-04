@@ -238,10 +238,17 @@ export function buildTicketDocument({
     });
   }
 
-  // Recogida: no imprimir calle del cliente. Domicilio: sí, un poco más marcada.
-  const customerAddress = isPickup
-    ? ''
-    : String(order.customerAddress || '').trim();
+  // Recogida (ticket cliente/reparto): no imprimir calle. Cocina: sí si hay dirección.
+  // Domicilio: dirección un poco más marcada.
+  const rawCustomerAddress = String(order.customerAddress || '').trim();
+  const customerAddress =
+    variant === 'kitchen'
+      ? rawCustomerAddress
+      : isPickup
+        ? ''
+        : rawCustomerAddress;
+
+  const fullCustomerName = String(order.customerName || '').trim() || '-';
 
   const shared = {
     variant,
@@ -253,7 +260,11 @@ export function buildTicketDocument({
     phone: business.phone || '',
     salesPointName: salesPointName || order.salesPointName || '',
     orderNumber: order.orderNumber || '',
-    customerName: ticketFirstName(order.customerName || '-'),
+    // Cocina: nombre completo; cliente/reparto: nombre corto.
+    customerName:
+      variant === 'kitchen'
+        ? fullCustomerName
+        : ticketFirstName(order.customerName || '-'),
     customerPhone: String(order.customerPhone || '').trim(),
     customerAddress,
     emphasizeCustomerAddress: Boolean(isHomeDelivery && customerAddress),

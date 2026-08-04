@@ -1,4 +1,6 @@
 import type { DiningOrder } from '../../lib/salaApi';
+import type { TpvRegisterSession, TpvRegisterTransaction } from '../../lib/deliveryApi';
+import { registerSessionOrderLoadBounds } from '../../lib/tpvCajaScope';
 
 export interface RestaurantReportTotals {
   totalSales: number;
@@ -40,6 +42,75 @@ export function filterBilledOrders(
     if (scope && order.businessId && order.businessId !== scope) return false;
     return true;
   });
+}
+
+type SessionTx = TpvRegisterTransaction & {
+  linkedDiningOrderId?: string;
+  tip?: number;
+};
+
+/** IDs de cuentas de mesa registradas en el turno (caja nativa sala). */
+export function diningOrderIdsFromRegisterSession(
+  session: Pick<TpvRegisterSession, 'transactions' | 'linkedOrderIds'> | null | undefined,
+): Set<string> {
+  const ids = new Set<string>();
+  if (!session) return ids;
+  for (const raw of session.linkedOrderIds || []) {
+    const id = String(raw || '').trim();
+    if (id) ids.add(id);
+  }
+  for (const tx of (session.transactions || []) as SessionTx[]) {
+    if (String(tx.type || '') !== 'sale') continue;
+    const linked = String(tx.linkedDiningOrderId || '').trim();
+    if (linked) {
+      ids.add(linked);
+      continue;
+    }
+    const channel = String(tx.channel || '').trim().toLowerCase();
+    const orderId = String(tx.orderId || '').trim();
+    if (channel === 'sala' && orderId) ids.add(orderId);
+  }
+  return ids;
+}
+
+/**
+ * Filtra cuentas cobradas del turno: prioriza IDs de caja;
+ * si no hay vínculos, usa el rango temporal de la sesión.
+ */
+export function filterOrdersForRegisterSession(
+  orders: DiningOrder[],
+  session: Pick<
+    TpvRegisterSession,
+    'openedAt' | 'closedAt' | 'status' | 'transactions' | 'linkedOrderIds'
+  > | null | undefined,
+): DiningOrder[] {
+  if (!session) return orders;
+  const ids = diningOrderIdsFromRegisterSession(session);
+  if (ids.size > 0) {
+    return (orders || []).filter((order) => ids.has(String(order._id || '').trim()));
+  }
+  const bounds = registerSessionOrderLoadBounds(session);
+  const fromMs = Date.parse(bounds.from);
+  const toMs = Date.parse(bounds.to);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return orders;
+  return (orders || []).filter((order) => {
+    const ts = Date.parse(String(order.paidAt || order.closedAt || order.createdAt || ''));
+    return Number.isFinite(ts) && ts >= fromMs && ts <= toMs;
+  });
+}
+
+export function formatRegisterSessionLabel(session: TpvRegisterSession): string {
+  const opened = session.openedAt
+    ? new Date(session.openedAt).toLocaleString('es-ES', {
+        day: '2-digit',
+        month: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '—';
+  const store = String(session.pointOfSaleName || session.pointOfSaleId || 'Caja').trim();
+  const state = session.status === 'open' ? 'abierta' : 'cerrada';
+  return `${store} · ${opened} (${state})`;
 }
 
 export function computeRestaurantTotals(orders: DiningOrder[]): RestaurantReportTotals {
@@ -112,4 +183,75 @@ export function computeSalesByZone(orders: DiningOrder[]): RestaurantZoneRow[] {
     byZone.set(zone, row);
   }
   return [...byZone.values()].sort((a, b) => b.sales - a.sales);
+}
+
+export interface RestaurantWaiterRow {
+  waiterId: string;
+  waiterName: string;
+  sales: number;
+  tickets: number;
+  tips: number;
+}
+
+/** Ventas atribuidas al camarero que cobra (paidBy) o, si no, quien abrió la cuenta. */
+export function computeSalesByWaiter(orders: DiningOrder[]): RestaurantWaiterRow[] {
+  const byWaiter = new Map<string, RestaurantWaiterRow>();
+  for (const order of orders) {
+    const payments = order.payments || [];
+    if (payments.length > 0) {
+      for (const p of payments) {
+        const waiterId = String(p.paidBy || order.createdBy || 'sin-asignar');
+        const waiterName = String(p.paidByName || order.createdByName || 'Sin asignar');
+        const row = byWaiter.get(waiterId) || {
+          waiterId,
+          waiterName,
+          sales: 0,
+          tickets: 0,
+          tips: 0,
+        };
+        row.sales += Number(p.amount || 0);
+        row.tips += Number(p.tip || 0);
+        row.tickets += 1;
+        byWaiter.set(waiterId, row);
+      }
+    } else {
+      const waiterId = String(order.createdBy || 'sin-asignar');
+      const waiterName = String(order.createdByName || 'Sin asignar');
+      const row = byWaiter.get(waiterId) || {
+        waiterId,
+        waiterName,
+        sales: 0,
+        tickets: 0,
+        tips: 0,
+      };
+      row.sales += Number(order.total || 0);
+      row.tickets += 1;
+      byWaiter.set(waiterId, row);
+    }
+  }
+  return [...byWaiter.values()].sort((a, b) => b.sales - a.sales);
+}
+
+/** Export CSV simple (UTF-8 BOM para Excel ES). */
+export function exportRestaurantReportCsv(params: {
+  filename: string;
+  headers: string[];
+  rows: Array<Array<string | number>>;
+}): void {
+  const escape = (v: string | number) => {
+    const s = String(v ?? '');
+    if (/[;"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lines = [
+    params.headers.map(escape).join(';'),
+    ...params.rows.map((r) => r.map(escape).join(';')),
+  ];
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = params.filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }

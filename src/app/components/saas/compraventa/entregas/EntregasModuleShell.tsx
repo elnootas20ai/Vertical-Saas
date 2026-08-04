@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from '../../../../context/AuthContext';
+import { downloadDeliveryActa } from '../../../../lib/deliveryActaPdfGenerator';
 import {
   filterSalesForWorker,
   isWorkerAccount,
@@ -20,6 +21,7 @@ import type { EntregaChecklistKey, EntregaListItem } from './entregasListData';
 
 export function EntregasModuleShell() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const userId = user?.user_id || user?.userId || user?._id || '';
   const userFullName = user?.fullName?.trim() || '';
@@ -69,6 +71,18 @@ export function EntregasModuleShell() {
     void loadEntregas();
   }, [loadEntregas]);
 
+  // Deep-link desde Ventas: ?saleId=
+  useEffect(() => {
+    const saleId = searchParams.get('saleId');
+    if (!saleId || entregas.length === 0) return;
+    if (entregas.some((e) => e.id === saleId)) {
+      setSelectedId(saleId);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('saleId');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, entregas]);
+
   const handleToggleChecklist = useCallback(
     async (key: EntregaChecklistKey, checked: boolean) => {
       if (!userId || !selectedRecord) return;
@@ -95,15 +109,38 @@ export function EntregasModuleShell() {
       }
 
       if (actionId === 'print') {
-        navigate(`/saas/documents?vehicleId=${encodeURIComponent(selectedRecord.vehicleId)}`);
+        try {
+          downloadDeliveryActa(selectedRecord);
+          toast.success('Acta de entrega descargada');
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'No se pudo generar el acta');
+        }
         return;
       }
 
       if (actionId === 'deliver') {
+        const checklist = selectedEntrega?.checklist || {};
+        const required: EntregaChecklistKey[] = [
+          'documentationReady',
+          'keysDelivered',
+          'clientSignature',
+        ];
+        const missing = required.filter((key) => !checklist[key]);
+        if (missing.length > 0) {
+          toast.error(
+            'Completa el checklist mínimo (documentación, llaves y firma) antes de marcar entregado',
+          );
+          return;
+        }
         setActionLoading(true);
         try {
           const saved = await markSaleDelivered(userId, selectedRecord);
           setSalesRecords((prev) => prev.map((s) => (s.id === saved.id ? saved : s)));
+          try {
+            downloadDeliveryActa(saved);
+          } catch {
+            /* acta opcional si falla PDF */
+          }
           toast.success('Entrega registrada — operación cerrada');
         } catch (error) {
           toast.error(error instanceof Error ? error.message : 'No se pudo marcar como entregado');
@@ -112,7 +149,7 @@ export function EntregasModuleShell() {
         }
       }
     },
-    [selectedRecord, userId, navigate],
+    [selectedRecord, selectedEntrega, userId, navigate],
   );
 
   return (

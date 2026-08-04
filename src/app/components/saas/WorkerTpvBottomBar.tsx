@@ -3,9 +3,10 @@ import { ClipboardCheck, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
+import { isWorkerAccount } from '../../lib/authApi';
 import { isTpvTabletBound, leaveTpvTabletSession } from '../../lib/tpvTabletSession';
 import { requestTpvStockReviewOpen } from '../../lib/tpvStockReview';
-import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
+import { resolveRetailOpsHomePath, resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 
 /** Barra inferior del TPV: revisión de stock + salir (tablet o modo CEO). */
 export function WorkerTpvBottomBar({
@@ -17,7 +18,7 @@ export function WorkerTpvBottomBar({
   onExitCeo?: () => void;
 } = {}) {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const { currentBusiness } = useBusiness();
   const { config } = useVerticalCatalog();
   const tabletBound = isTpvTabletBound();
@@ -28,6 +29,13 @@ export function WorkerTpvBottomBar({
   if (!showStock && !showExit) return null;
 
   const handleExitTablet = () => {
+    // Admin/empresa: no echar a la pantalla de código ni cerrar sesión.
+    if (!isWorkerAccount(user)) {
+      void leaveTpvTabletSession(logout, {
+        keepAuthAndGoTo: resolveRetailOpsHomePath(currentBusiness?.businessType),
+      });
+      return;
+    }
     void leaveTpvTabletSession(logout);
   };
 

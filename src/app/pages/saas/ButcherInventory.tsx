@@ -54,6 +54,7 @@ const EMPTY_FORM: StockEntryForm = {
   fechaEntrada: new Date().toISOString().slice(0, 10), fechaCaducidad: '', temperatura: 2,
 };
 
+/** @deprecated Prefer Compras + Trazabilidad (bt_lote). Ruta redirige a compras-stock. */
 export function ButcherInventory() {
   const { user } = useAuth();
   const api = useMemo(() => createVerticalApi<StockEntry>('butcher-ops', 'inventory'), []);

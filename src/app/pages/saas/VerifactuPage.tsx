@@ -125,11 +125,11 @@ export function VerifactuPage() {
   }
 
   return (
-    <Layout title="Verifactu" subtitle="Motor fiscal Fase 1 — registro inmutable (sin envío AEAT aún)">
+    <Layout title="Verifactu" subtitle="Facturación verificable — registro local + QR AEAT">
       <div className="space-y-6">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          <strong>Fase 1:</strong> se genera número, huella encadenada y QR de validación AEAT.
-          El envío automático a Hacienda (certificado) es la siguiente fase.
+          <strong>Estado:</strong> al cobrar en TPV o sala se emite el registro (número, huella, QR)
+          si Verifactu está activado. El envío automático a Hacienda (certificado) es la siguiente fase.
         </div>
 
         {error && (
@@ -159,7 +159,25 @@ export function VerifactuPage() {
                   checked={settings.enabled}
                   onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
                 />
-                Activar emisión Verifactu
+                Activar Verifactu
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm text-gray-700 dark:text-gray-200">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.autoIssueOnSale !== false}
+                  onChange={(e) => setSettings({ ...settings, autoIssueOnSale: e.target.checked })}
+                />
+                Emitir al cobrar (TPV / sala)
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={settings.pricesIncludeTax !== false}
+                  onChange={(e) => setSettings({ ...settings, pricesIncludeTax: e.target.checked })}
+                />
+                Precios con IVA incluido
               </label>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -177,6 +195,19 @@ export function VerifactuPage() {
                   value={settings.nextNumber}
                   readOnly
                   className="mt-1 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                />
+              </label>
+              <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                IVA por defecto (%)
+                <input
+                  type="number"
+                  min={0}
+                  max={30}
+                  value={settings.defaultTaxRate ?? 10}
+                  onChange={(e) =>
+                    setSettings({ ...settings, defaultTaxRate: Number(e.target.value) || 0 })
+                  }
+                  className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
                 />
               </label>
               <label className="text-xs font-semibold text-gray-600 dark:text-gray-300">
@@ -201,6 +232,7 @@ export function VerifactuPage() {
                   value={settings.issuerNif}
                   onChange={(e) => setSettings({ ...settings, issuerNif: e.target.value.toUpperCase() })}
                   className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
+                  placeholder="Obligatorio para emitir"
                 />
               </label>
               <label className="text-xs font-semibold text-gray-600 dark:text-gray-300 sm:col-span-2">
@@ -241,7 +273,9 @@ export function VerifactuPage() {
         </div>
 
         {!settings?.enabled && (
-          <p className="text-sm text-gray-500">Activa Verifactu arriba para poder emitir registros inmutables.</p>
+          <p className="text-sm text-gray-500">
+            Activa Verifactu y guarda el NIF/CIF para emitir al cobrar o a mano.
+          </p>
         )}
 
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
@@ -249,11 +283,12 @@ export function VerifactuPage() {
             <div className="py-14 text-center text-sm text-gray-400">Sin registros todavía</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px]">
+              <table className="w-full min-w-[800px]">
                 <thead>
                   <tr className="border-b border-gray-100 bg-gray-50/60 text-left text-xs font-semibold uppercase text-gray-400 dark:border-gray-700 dark:bg-gray-900/40">
                     <th className="px-4 py-2.5">Nº</th>
                     <th className="px-4 py-2.5">Fecha</th>
+                    <th className="px-4 py-2.5">Origen</th>
                     <th className="px-4 py-2.5">Cliente</th>
                     <th className="px-4 py-2.5 text-right">Total</th>
                     <th className="px-4 py-2.5">AEAT</th>
@@ -265,6 +300,15 @@ export function VerifactuPage() {
                     <tr key={r.id} className="text-sm">
                       <td className="px-4 py-2.5 font-semibold tabular-nums">{r.fullNumber}</td>
                       <td className="px-4 py-2.5 tabular-nums text-gray-600 dark:text-gray-300">{r.issueDate}</td>
+                      <td className="px-4 py-2.5 text-xs text-gray-500">
+                        {r.source?.kind === 'tpv_delivery'
+                          ? 'TPV'
+                          : r.source?.kind === 'tpv_sala'
+                            ? 'Sala'
+                            : r.source?.kind === 'manual'
+                              ? 'Manual'
+                              : (r.source?.kind || '—')}
+                      </td>
                       <td className="px-4 py-2.5">
                         <p className="font-medium text-gray-900 dark:text-white">{r.recipient.name}</p>
                         <p className="text-xs text-gray-400">{r.recipient.nif || '—'}</p>

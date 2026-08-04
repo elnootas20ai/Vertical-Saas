@@ -202,17 +202,36 @@ export function writeRetailScopeCacheForBusiness(
   const opts = cacheOptsFromCtx(ctx);
 
   if (kind === 'restaurant') {
-    const rows = buildDeliverySidebarStoreRows(
-      snapshot.retailWorkCenters,
+    const scopedPdvs = filterPointsOfSaleForWorkCenters(
       snapshot.allPointsOfSale,
+      snapshot.retailWorkCenters,
+      { businessId: bid },
     );
+    let rows = buildDeliverySidebarStoreRows(
+      snapshot.retailWorkCenters,
+      scopedPdvs,
+    );
+    const openable = rows.some((r) => r.pdvId && !r.needsPdv && !r.inactive);
+    if (!openable && scopedPdvs.length > 0) {
+      rows = scopedPdvs
+        .filter((p) => p.active !== false)
+        .map((pdv) => ({
+          rowId: pdv._id,
+          pdvId: pdv._id,
+          workCenterId: pdv.workCenterId,
+          title: String(pdv.name || '').trim() || 'Local',
+          code: pdv.code,
+          inactive: false,
+          needsPdv: false,
+        }));
+    }
     if (rows.length === 0) return;
     writeRestaurantRetailCache(
       bid,
       {
         rows,
         retailWorkCenters: snapshot.retailWorkCenters,
-        allPointsOfSale: snapshot.allPointsOfSale,
+        allPointsOfSale: scopedPdvs,
         savedAt: Date.now(),
       },
       ctx.business,
@@ -241,14 +260,15 @@ export function clearAllRetailScopeCaches(businessId?: string): void {
 export function shouldLoadRetailStoresForBusiness(
   ctx: RetailScopeContext,
   bidAtStart: string,
-  hints?: { hasDisplayedStores?: boolean; tabletBoundStore?: boolean },
+  hints?: { hasDisplayedStores?: boolean; tabletBoundStore?: boolean; force?: boolean },
 ): boolean {
   if (!ctx.business) return false;
   if (hints?.tabletBoundStore) return false;
   if (isCompraventaBusinessType(ctx.business.businessType)) return false;
   const kind = resolveRetailScopeKind(ctx.business.businessType);
   if (kind === 'restaurant') {
-    if (hints?.hasDisplayedStores) return false;
+    // force/refresh (p. ej. tras bootstrap TPV) siempre vuelve a pedir red.
+    if (hints?.force) return true;
     const bid = normalizeBusinessScopeId(ctx.business.business_id);
     const cached = readRestaurantRetailCache(bid, ctx.business, ctx.businesses);
     if (cached) {
@@ -256,10 +276,14 @@ export function shouldLoadRetailStoresForBusiness(
         (r) => r.pdvId && !r.needsPdv && !r.inactive,
       );
       const activePdvs = cached.allPointsOfSale.some((p) => p.active !== false);
+      // Solo omitir red si hay PDV usable. NO usar hasDisplayedStores:
+      // un centro sin PDV dejaba el TPV en «Crear primer local» para siempre.
       if (openableRows || activePdvs) return false;
     }
     return true;
   }
+
+  if (hints?.force) return true;
 
   return shouldUseDeliveryStores(
     { business: ctx.business as Business, businesses: ctx.businesses as Business[] },
@@ -301,6 +325,7 @@ export async function loadRetailStoresForBusiness(
       includeInactivePdvs: options?.includeInactivePdvs,
       tpvBootstrap,
       skipPdvMerge: loadOpts.skipPdvMerge,
+      knownBusinessIds: loadOpts.knownBusinessIds,
     });
   }
 
@@ -353,10 +378,26 @@ export function persistRetailScopeAfterStoreSave(
       ctx.business,
       ctx.businesses,
     );
-    const scopedPdvs = filterPointsOfSaleForWorkCenters(allPointsOfSale, scopedRetail);
-    const rows = buildDeliverySidebarStoreRows(scopedRetail, scopedPdvs);
+    const scopedPdvs = filterPointsOfSaleForWorkCenters(allPointsOfSale, scopedRetail, {
+      businessId: bid,
+    });
+    let rows = buildDeliverySidebarStoreRows(scopedRetail, scopedPdvs);
+    const openable = rows.some((r) => r.pdvId && !r.needsPdv && !r.inactive);
+    if (!openable && scopedPdvs.length > 0) {
+      rows = scopedPdvs
+        .filter((p) => p.active !== false)
+        .map((pdv) => ({
+          rowId: pdv._id,
+          pdvId: pdv._id,
+          workCenterId: pdv.workCenterId,
+          title: String(pdv.name || '').trim() || 'Local',
+          code: pdv.code,
+          inactive: false,
+          needsPdv: false,
+        }));
+    }
     if (rows.length === 0) {
-      clearRestaurantRetailCache(bid);
+      // No borrar caché buena: un save parcial no debe vaciar el TPV.
       return;
     }
     writeRestaurantRetailCache(

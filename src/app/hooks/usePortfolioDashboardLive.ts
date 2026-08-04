@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef } from 'react';
 import { useDeliveryOrdersLive } from './useDeliveryOrdersLive';
 
 /** Refresco en portfolio solo mientras el CEO está en Visión general (montado + pestaña visible). */
-const PORTFOLIO_POLL_MS = 90_000;
-const PORTFOLIO_DEBOUNCE_MS = 900;
+const PORTFOLIO_POLL_MS = 120_000;
+const PORTFOLIO_DEBOUNCE_MS = 1_200;
 
 export type PortfolioReloadOptions = {
   /** Sin spinner de carga completa (actualización en segundo plano). */

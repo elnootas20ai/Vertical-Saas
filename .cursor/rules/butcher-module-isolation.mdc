@@ -1,0 +1,31 @@
+---
+description: Aislamiento del módulo Carnicería — no mezclar con delivery/restaurant/compraventa
+alwaysApply: true
+---
+
+# Módulo Carnicería (butcherShop) — aislamiento obligatorio
+
+Uriel necesita que **carnicería sea un módulo independiente**. Al programar delivery, restaurante o compraventa, **no debe romperse carnicería** ni mezclarse lógica.
+
+## Fronteras
+
+| Capa | Dónde | Qué puede hacer |
+|------|--------|-----------------|
+| **Core** | `context/`, auth, billing, equipo genérico | Sin imports de pantallas Butcher* de negocio |
+| **Módulo Carnicería** | `verticals/butcher/`, `pages/saas/Butcher*`, `lib/butcher*` | Solo carnicería; **no** importar Delivery*/restaurant/compraventa de negocio |
+| **Retail compartido (legacy)** | `deliveryApi` (PDV/básculas), `vertialPrint`, `useScale` | Única excepción documentada; no añadir más acoplamiento |
+
+Registro: `src/app/verticals/registry.ts` (`butcher`)  
+API pública: `src/app/verticals/butcher/index.ts`
+
+## Reglas
+
+1. Código nuevo de carnicería → `verticals/butcher/` o `Butcher*` / `butcher*` existentes; exportar por barrel si es API pública del módulo.
+2. **No** poner `if (businessType === 'butcherShop')` en pantallas delivery/restaurant.
+3. **No** mover lógica FEFO/merma/TPV carnicería a `deliveryApi` salvo PDV/scale legacy.
+4. Tras imports cruzados → `npx vitest run tests/verticalModuleBoundaries.test.js`.
+
+## Fase producto
+
+- Catálogo canónico: `bt_catalog` + lotes `bt_lote` (FEFO).
+- `butcher_batch` es espejo legacy; Hub/merma/stock operan sobre `bt_lote`.

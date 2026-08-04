@@ -69,14 +69,27 @@ function dedupeRetailWorkCentersForBusiness(workCenters: WorkCenter[]): WorkCent
       byKey.set(key, wc);
       continue;
     }
-    const ta = new Date(prev.createdAt || 0).getTime();
-    const tb = new Date(wc.createdAt || 0).getTime();
-    if (tb < ta || (tb === ta && wc._id < prev._id)) {
-      byKey.set(key, wc);
-    }
+    // Preferir el doc con horario; si empatan, el más reciente (updatedAt).
+    // Antes se quedaba el createdAt más viejo y podía borrar la copia con openingHours.
+    byKey.set(key, preferRicherWorkCenterForDedupe(prev, wc));
   }
 
   return [...other, ...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+function wcHasHoursPayload(wc: WorkCenter): boolean {
+  const oh = wc.openingHours as { schedule?: unknown; monday?: unknown } | undefined;
+  return Boolean(oh && typeof oh === 'object' && (oh.schedule || oh.monday));
+}
+
+function preferRicherWorkCenterForDedupe(a: WorkCenter, b: WorkCenter): WorkCenter {
+  const aHours = wcHasHoursPayload(a);
+  const bHours = wcHasHoursPayload(b);
+  if (aHours !== bHours) return bHours ? b : a;
+  const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
+  const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
+  if (tb !== ta) return tb > ta ? b : a;
+  return String(b._id || '').localeCompare(String(a._id || '')) < 0 ? b : a;
 }
 
 function filterPointsOfSaleForWorkCenters(

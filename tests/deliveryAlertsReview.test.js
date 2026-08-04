@@ -28,11 +28,14 @@ describe('deliveryAlertsReview', () => {
     );
   });
 
-  it('classifies delivery review rules', () => {
+  it('classifies delivery review rules (pack compacto)', () => {
     assert.equal(isDeliveryReviewRule({ id: 'delivery_delayed_order' }), true);
-    assert.equal(isDeliveryReviewRule({ id: 'sala_incident' }), true);
     assert.equal(isDeliveryReviewRule({ id: 'worker_no_clockin' }), true);
+    assert.equal(isDeliveryReviewRule({ id: 'document_missing_required' }), true);
+    assert.equal(isDeliveryReviewRule({ id: 'sala_incident' }), false);
+    assert.equal(isDeliveryReviewRule({ id: 'delivery_product_out_of_stock' }), false);
     assert.equal(isDeliveryReviewRule({ id: 'stale_delivery' }), false);
     assert.equal(isDeliveryReviewRule({ id: 'cleaning_route' }), false);
   });
 });
+

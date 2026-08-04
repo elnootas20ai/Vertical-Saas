@@ -4,10 +4,6 @@ import { listDiningTablesRequest, type DiningTable } from '../../../lib/salaApi'
 import { findOpenDiningOrderForTable } from '../../../lib/restaurantDiningTpv';
 import { toastActionError } from '../../../lib/userFacingError';
 
-function formatEuro(n: number): string {
-  return `${n.toFixed(2).replace('.', ',')} €`;
-}
-
 type Props = {
   userId: string;
   currentTableId: string;
@@ -42,20 +38,19 @@ export function RestaurantChangeTableModal({ userId, currentTableId, onSelect, o
   const candidates = useMemo(
     () => tables
       .filter((t) => t._id !== currentTableId)
+      .filter((t) => t.status === 'available' || t.status === 'reserved')
       .sort((a, b) => a.number - b.number),
     [tables, currentTableId],
   );
 
   const handlePick = async (table: DiningTable) => {
     if (busyId) return;
+    if (!['available', 'reserved'].includes(table.status)) return;
     setBusyId(table._id);
     try {
       const open = await findOpenDiningOrderForTable(userId, table._id);
       if (open) {
         throw new Error(`Mesa ${table.number} ya tiene cuenta abierta`);
-      }
-      if (!['available', 'reserved'].includes(table.status)) {
-        throw new Error(`Mesa ${table.number} no está libre`);
       }
       onSelect(table);
     } catch (err: unknown) {
@@ -87,15 +82,14 @@ export function RestaurantChangeTableModal({ userId, currentTableId, onSelect, o
                   type="button"
                   disabled={Boolean(busyId)}
                   onClick={() => void handlePick(table)}
-                  className={`min-h-[56px] rounded-xl border-2 font-bold text-sm transition-colors touch-manipulation ${
-                    table.status === 'available'
-                      ? 'border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-200 hover:border-emerald-400'
-                      : 'border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200'
-                  } disabled:opacity-50`}
+                  className="min-h-[56px] rounded-xl border-2 border-emerald-200 bg-emerald-50 text-sm font-bold text-emerald-800 transition-colors touch-manipulation hover:border-emerald-400 disabled:opacity-50 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
                 >
                   {table.number}
                   {table.zone ? (
-                    <span className="block text-[10px] font-normal opacity-70 truncate px-1">{table.zone}</span>
+                    <span className="block truncate px-1 text-[10px] font-normal opacity-70">{table.zone}</span>
+                  ) : null}
+                  {table.status === 'reserved' ? (
+                    <span className="block text-[10px] font-normal text-amber-700 dark:text-amber-300">Reservada</span>
                   ) : null}
                 </button>
               ))}

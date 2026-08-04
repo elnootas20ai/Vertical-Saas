@@ -23,7 +23,9 @@ import { SetupProgressProvider } from '../context/SetupProgressContext';
 import { ScrapyardProvider } from '../context/ScrapyardContext';
 
 import { useAuth } from '../context/AuthContext';
+import { usePushDeepLinkNavigate } from '../hooks/usePushDeepLinkNavigate';
 import {
+  clearTpvTabletBinding,
   isTpvTabletAllowedPath,
   isTpvTabletSaasSession,
   isTpvTabletTerminalBound,
@@ -39,7 +41,9 @@ import {
   hasWorkerPayrollBypass,
   isWorkerUnlinkedAllowedPath,
   needsWorkerPayrollSetup,
+  resolveWorkerSessionEntryPath,
   workerNeedsBusinessLink,
+  WORKER_DEFAULT_LANDING_PATH,
   WORKER_IDENTITY_SETUP_PATH,
   WORKER_PAYROLL_SETUP_PATH,
   WORKER_UNLINKED_HOME_PATH,
@@ -97,6 +101,7 @@ function SaasContent() {
   const location = useLocation();
 
   const navigate = useNavigate();
+  usePushDeepLinkNavigate(isAuthenticated && !isInitializing);
   const tpvTabletSaasSession = isTpvTabletSaasSession(location.pathname);
   const tpvTabletLocked = isTpvTabletTerminalBound();
 
@@ -117,13 +122,18 @@ function SaasContent() {
 
   }, [isAuthenticated, isInitializing, navigate]);
 
-  // Código TPV activo → solo tienda/TPV. Nunca cuenta personal ni dashboard SaaS.
+  // Código TPV activo → solo tienda/TPV (trabajadores).
+  // Cuenta empresa/admin: no atrapar con un binding viejo de tablet (login SaaS normal).
   useEffect(() => {
-    if (isInitializing || !isAuthenticated) return;
+    if (isInitializing || !isAuthenticated || !user) return;
     if (!tpvTabletLocked) return;
+    if (!isWorkerAccount(user)) {
+      clearTpvTabletBinding();
+      return;
+    }
     if (isTpvTabletAllowedPath(location.pathname)) return;
     navigate(resolveTpvTabletWorkerPath(), { replace: true });
-  }, [isInitializing, isAuthenticated, tpvTabletLocked, location.pathname, navigate]);
+  }, [isInitializing, isAuthenticated, user, tpvTabletLocked, location.pathname, navigate]);
 
   useEffect(() => {
     if (!isAuthenticated || isInitializing) return;
@@ -212,6 +222,42 @@ function SaasContent() {
     unlinkedWorkerNeedsCompany,
     location.pathname,
     navigate,
+  ]);
+
+  // Trabajador: nunca Gate / dashboard / gestión de empresas → solo su backoffice.
+  useEffect(() => {
+    if (isInitializing || !isAuthenticated || !user) return;
+    if (!isWorkerAccount(user)) return;
+    if (tpvTabletSaasSession || location.pathname.startsWith('/saas/worker/tpv')) return;
+
+    const path = location.pathname;
+    const companyOnlyPaths = [
+      '/auth/gate',
+      '/saas/dashboard',
+      '/saas/user-dashboard',
+      '/saas/settings/empresas',
+      '/saas/alerts',
+    ];
+    const hitsCompanyHome =
+      companyOnlyPaths.some((p) => path === p || path.startsWith(`${p}/`))
+      || path === '/saas'
+      || path === '/saas/';
+
+    if (!hitsCompanyHome) return;
+
+    if (unlinkedWorkerNeedsCompany) {
+      navigate(WORKER_UNLINKED_HOME_PATH, { replace: true });
+      return;
+    }
+    navigate(resolveWorkerSessionEntryPath(user) || WORKER_DEFAULT_LANDING_PATH, { replace: true });
+  }, [
+    isInitializing,
+    isAuthenticated,
+    user,
+    location.pathname,
+    navigate,
+    unlinkedWorkerNeedsCompany,
+    tpvTabletSaasSession,
   ]);
 
   useEffect(() => {
@@ -369,14 +415,12 @@ function SaasContent() {
 
   useEffect(() => {
     if (!sessionSyncedWithServer) return;
+    // Trabajadores: nunca redirigir a pago/suspensión por billing.
     if (isWorkerAccount(user)) return;
     if (user?.subscription?.billingExempt || subscription.billingExempt) return;
     if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
     if (isBillingRecoveryPath(location.pathname)) return;
-    if (subscription.status === 'suspended') {
-      navigate('/saas/suspended', { replace: true });
-      return;
-    }
+    // Empresa: siempre opción de pago (también si está suspended), no candado ciego.
     navigate('/saas/subscription', { replace: true });
   }, [
     sessionSyncedWithServer,

@@ -109,6 +109,31 @@ pushRouter.post('/native-register', requirePushAuth, async (req, res) => {
     }
 
     await saveNativeToken(req, userId, { platform, token, bundleId });
+
+    // Token nativo = el usuario acept? avisos en este dispositivo ? persistir en cuenta.
+    try {
+      const { findAccountByUserId, saveAccount, normalizeNotificationPreferences } = await import('../services/couchdb.js');
+      const account = await findAccountByUserId(req, userId);
+      if (account) {
+        const prefs = normalizeNotificationPreferences(account.notificationPreferences);
+        if (prefs.pushConsent?.decision !== 'accepted') {
+          await saveAccount(req, {
+            ...account,
+            notificationPreferences: normalizeNotificationPreferences({
+              ...prefs,
+              pushConsent: {
+                decision: 'accepted',
+                decidedAt: new Date().toISOString(),
+              },
+            }),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+
     return res.status(201).json({
       ok: true,
       nativePushConfigured: isNativePushConfigured(),

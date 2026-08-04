@@ -21,7 +21,7 @@ interface Props {
   lang: string;
   alerts: ScheduleAlert[];
   onDateChange: (date: string) => void;
-  onGoToTab: (tab: string) => void;
+  onAlertAction: (alert: ScheduleAlert) => void;
 }
 
 function getTimeDiffMin(scheduled: string, actualIso: string): number {
@@ -38,7 +38,7 @@ export function SchedulesControlPanel({
   lang,
   alerts,
   onDateChange,
-  onGoToTab,
+  onAlertAction,
 }: Props) {
   const comparisonDay = useMemo(() => {
     const d = new Date(`${comparisonDate}T12:00:00`);
@@ -188,7 +188,7 @@ export function SchedulesControlPanel({
                   <p className="text-xs opacity-80 mt-0.5">{a.description}</p>
                 </div>
                 {a.date && <span className="text-xs tabular-nums opacity-70 shrink-0">{a.date}</span>}
-                <button type="button" onClick={() => onGoToTab(a.actionTab)} className="text-xs font-semibold underline shrink-0">
+                <button type="button" onClick={() => onAlertAction(a)} className="text-xs font-semibold underline shrink-0">
                   {a.actionLabel}
                 </button>
               </div>

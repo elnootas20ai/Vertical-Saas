@@ -77,7 +77,24 @@ export async function registerWaste(req, userId, wasteData) {
   const doc = buildButcherWasteDocument(userId, enrichedData);
   const db = getButcherDbName();
   await ensureDatabase(req, db);
-  let saved = await putDocument(req, db, doc);
+  let saved = await putDocument(req, db, doc._id, doc);
+  saved = { ...doc, _id: saved?.id || doc._id, _rev: saved?.rev || doc._rev };
+
+  // Baja FEFO (bt_lote) si viene lotId / batchId de ops
+  const opsLotId = String(wasteData.opsLotId || wasteData.lotId || '').trim()
+    || (String(wasteData.batchId || '').startsWith('btl-') ? String(wasteData.batchId) : '');
+  if (opsLotId) {
+    try {
+      const { applyLotWaste } = await import('./butcherStockPipeline.js');
+      await applyLotWaste(req, userId, {
+        lotId: opsLotId,
+        wasteKg,
+        markExpired: wasteType === 'caducado',
+      });
+    } catch (err) {
+      logger.warn({ tag: TAG, err: err?.message, opsLotId }, 'Error aplicando merma FEFO bt_lote');
+    }
+  }
 
   // Movimiento de stock (salida por merma)
   let stockMovementId = '';

@@ -5,6 +5,8 @@ import {
   filterRetailWorkCentersForScope,
   readRetailScopeCacheForBusiness,
   resolveRetailScopeKind,
+  shouldLoadRetailStoresForBusiness,
+  writeRetailScopeCacheForBusiness,
 } from '../src/app/verticals/retailScopeRegistry.ts';
 
 const DELIVERY_CACHE = 'vertial_delivery_stores_cache:v2:biz-bodegeta';
@@ -141,5 +143,71 @@ describe('retailScopeRegistry', () => {
       accountBusinessCount: 2,
     });
     expect(filtered.map((w) => w._id)).toEqual(['mine']);
+  });
+
+  it('restaurante sigue cargando si hasDisplayedStores pero no hay PDV usable', () => {
+    const ctx = { business: businesses[0], businesses };
+    expect(
+      shouldLoadRetailStoresForBusiness(ctx, 'biz-bodegeta', { hasDisplayedStores: true }),
+    ).toBe(true);
+  });
+
+  it('restaurante force=true recarga aunque la caché tenga PDV', () => {
+    writeRetailScopeCacheForBusiness(
+      'biz-bodegeta',
+      {
+        retailWorkCenters: [
+          wc({ _id: 'store-1', name: 'Bodegeta', businessId: 'biz-bodegeta' }),
+        ],
+        allPointsOfSale: [
+          {
+            _id: 'pdv-1',
+            name: 'Bodegeta',
+            code: 'BOD',
+            businessId: 'biz-bodegeta',
+            workCenterId: 'store-1',
+            active: true,
+            terminals: [],
+          },
+        ],
+      },
+      { business: businesses[0], businesses },
+    );
+    const ctx = { business: businesses[0], businesses };
+    expect(
+      shouldLoadRetailStoresForBusiness(ctx, 'biz-bodegeta', { hasDisplayedStores: true }),
+    ).toBe(false);
+    expect(
+      shouldLoadRetailStoresForBusiness(ctx, 'biz-bodegeta', {
+        hasDisplayedStores: true,
+        force: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('caché restaurante conserva PDV solo-sala (sin WC retail)', () => {
+    writeRetailScopeCacheForBusiness(
+      'biz-bodegeta',
+      {
+        retailWorkCenters: [],
+        allPointsOfSale: [
+          {
+            _id: 'pdv-sala',
+            name: 'Local bodegeta',
+            code: 'LOC',
+            businessId: 'biz-bodegeta',
+            workCenterId: 'wc-sala',
+            active: true,
+            terminals: [],
+          },
+        ],
+      },
+      { business: businesses[0], businesses },
+    );
+    const cached = readRetailScopeCacheForBusiness('biz-bodegeta', {
+      business: businesses[0],
+      businesses,
+    });
+    expect(cached?.allPointsOfSale.map((p) => p._id)).toEqual(['pdv-sala']);
   });
 });

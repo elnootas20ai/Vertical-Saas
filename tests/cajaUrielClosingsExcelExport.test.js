@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildUrielCajaComparativaSheetAoa,
+  buildUrielCajaClosingsWorkbook,
+  buildUrielCajaComparativaYearSheetAoa,
   buildUrielCajaMonthSheet,
   buildUrielCajaSheetAoa,
   brandMoneyShares,
@@ -89,10 +90,10 @@ describe('sessionToUrielAmounts', () => {
 });
 
 describe('brandMoneyShares / splitUrielAmountsByBrand', () => {
-  it('reparte € por familia; tacos no van con burger', () => {
+  it('reparte €: pizzas → MODOMIO; burgers+tacos → BLACK BURGER', () => {
     expect(brandMoneyShares(7, 2, 1)).toEqual({
       modomio: 0.7,
-      blackburger: 0.2,
+      blackburger: 0.3,
     });
     const full = sessionToUrielAmounts(closedSession({
       summary: {
@@ -105,11 +106,11 @@ describe('brandMoneyShares / splitUrielAmountsByBrand', () => {
     const modo = splitUrielAmountsByBrand(full, 'modomio');
     const bb = splitUrielAmountsByBrand(full, 'blackburger');
     expect(modo.efectivo).toBe(70);
-    expect(bb.efectivo).toBe(20);
+    expect(bb.efectivo).toBe(30);
     expect(modo.totalPizza).toBe(7);
     expect(modo.totalBurger).toBe(0);
     expect(bb.totalBurger).toBe(2);
-    expect(bb.totalTaco).toBe(0);
+    expect(bb.totalTaco).toBe(1);
     expect(bb.totalPizza).toBe(0);
   });
 });
@@ -176,8 +177,38 @@ describe('buildUrielCajaMonthSheet', () => {
     expect(sheet.monthTotalPizzas).toBe(5);
   });
 
-  it('AOA plantilla Uriel + COMPARATIVA con todas las hojas', () => {
-    const sheet = buildUrielCajaMonthSheet([
+  it('sin PDV suma todas las tiendas del mes', () => {
+    const sessions = [
+      closedSession({
+        _id: 'a',
+        openedAt: '2026-07-05T09:00:00',
+        summary: {
+          salesByMethod: { efectivo: 10, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 10,
+        },
+        productClosingCounts: { pizza: 1, burger: 0, taco: 0 },
+      }),
+      closedSession({
+        _id: 'b',
+        pointOfSaleId: 'pdv-b',
+        pointOfSaleName: 'Tienda B',
+        openedAt: '2026-07-05T12:00:00',
+        summary: {
+          salesByMethod: { efectivo: 20, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 20,
+        },
+        productClosingCounts: { pizza: 2, burger: 0, taco: 0 },
+      }),
+    ];
+    const all = buildUrielCajaMonthSheet(sessions, { yearMonth: '2026-07' });
+    expect(all.rows.find((r) => r.day === 5).efectivo).toBe(30);
+    expect(all.monthTotalPizzas).toBe(3);
+  });
+
+  it('AOA plantilla Uriel (foto) + COMPARATIVA por meses', () => {
+    const sessions = [
       closedSession({
         openedAt: '2026-07-01T10:00:00',
         summary: {
@@ -187,54 +218,230 @@ describe('buildUrielCajaMonthSheet', () => {
         },
         productClosingCounts: { pizza: 7, burger: 2, taco: 1 },
       }),
-    ], { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
+      closedSession({
+        _id: 's-aug',
+        openedAt: '2026-08-10T10:00:00',
+        closedAt: '2026-08-10T22:00:00',
+        summary: {
+          salesByMethod: { efectivo: 50, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 50,
+        },
+        productClosingCounts: { pizza: 5, burger: 0, taco: 0 },
+      }),
+    ];
+    const sheet = buildUrielCajaMonthSheet(sessions, { pointOfSaleId: 'pdv-a', yearMonth: '2026-07' });
 
     expect(URIEL_CAJA_MONEY_HEADERS).toEqual([
-      'DIA', 'EFECTIVO', 'VISA', 'B', 'JUST EAT', 'UBER', 'GLOVVO', 'APP', 'TOTAL',
+      'DIA', 'EFECTIVO', 'TPV', 'X', 'App', 'UBER', 'JUST EAT', 'GLOVO', 'TOTAL',
     ]);
-    expect(URIEL_MODOMIO_HEADERS).toContain('VISA');
-    expect(URIEL_MODOMIO_HEADERS).toContain('GLOVVO');
-    expect(URIEL_MODOMIO_HEADERS).not.toContain('TPV');
-    expect(URIEL_MODOMIO_HEADERS).not.toContain('X');
+    expect(URIEL_MODOMIO_HEADERS).toContain('TPV');
+    expect(URIEL_MODOMIO_HEADERS).toContain('X');
+    expect(URIEL_MODOMIO_HEADERS).toContain('GLOVO');
+    expect(URIEL_MODOMIO_HEADERS).not.toContain('VISA');
+    expect(URIEL_MODOMIO_HEADERS).not.toContain('GLOVVO');
 
     const modo = buildUrielCajaSheetAoa(sheet, 'modomio');
     expect(modo[0][0]).toContain('MODOMIO');
-    expect(modo[0][8]).toBe('TOTAL');
-    expect(modo[0][9]).toBe(70);
-    expect(modo[1][8]).toBe('TOTAL PIZZA');
-    expect(modo[1][9]).toBe(7);
-    expect(modo[3]).toEqual([...URIEL_MODOMIO_HEADERS]);
+    expect(modo[2]).toEqual([...URIEL_MODOMIO_HEADERS]);
     // Día 1 · 70 € pizzas; celdas a 0 en blanco
-    expect(modo[4]).toEqual([1, 70, '', '', '', '', '', '', 70, 7]);
+    expect(modo[3]).toEqual([1, 70, '', '', '', '', '', '', 70, 7]);
+    expect(modo[5]).toEqual(['TOTAL MES', 70, '', '', '', '', '', '', 70, 7]);
 
     const bb = buildUrielCajaSheetAoa(sheet, 'blackburger');
     expect(bb[0][0]).toContain('BLACK BURGER');
-    expect(bb[0][9]).toBe(20);
-    expect(bb[1][8]).toBe('TOTAL BURGUER');
-    expect(bb[1][9]).toBe(2);
-    expect(bb[3]).toEqual([...URIEL_BLACKBURGER_HEADERS]);
-    expect(bb[4]).toEqual([1, 20, '', '', '', '', '', '', 20, 2]);
+    expect(bb[2]).toEqual([...URIEL_BLACKBURGER_HEADERS]);
+    expect(bb[3]).toEqual([1, 30, '', '', '', '', '', '', 30, 2, 1]);
+    expect(bb[5]).toEqual(['TOTAL MES', 30, '', '', '', '', '', '', 30, 2, 1]);
 
-    const tacos = buildUrielCajaSheetAoa(sheet, 'tacos');
-    expect(tacos[0][0]).toContain('TACOS');
-    expect(tacos[0][9]).toBe(10);
-    expect(tacos[1][8]).toBe('TOTAL TACOS');
-    expect(tacos[1][9]).toBe(1);
-
-    const comp = buildUrielCajaComparativaSheetAoa(sheet, null);
-    expect(comp[0][0]).toContain('COMPARATIVA');
-    const headerRow = comp.find((r) => r[0] === 'DIA');
+    const comp = buildUrielCajaComparativaYearSheetAoa(sessions, {
+      pointOfSaleId: 'pdv-a',
+      year: 2026,
+      billingSheets: null,
+    });
+    expect(comp[0][0]).toContain('COMPARATIVA · 2026');
+    expect(comp[0][0]).not.toContain('TODAS LAS TIENDAS');
+    const headerRow = comp.find((r) => r[0] === 'MES');
     expect(headerRow).toEqual([
-      'DIA',
+      'MES',
       'MODOMIO TOTAL',
       'TOTAL PIZZA',
       'BLACK BURGER TOTAL',
       'TOTAL BURGUER',
-      'TACOS TOTAL',
       'TOTAL TACOS',
-      'TOTAL DÍA',
+      'TOTAL MES',
     ]);
-    const day1 = comp.find((r) => r[0] === 1);
-    expect(day1).toEqual([1, 70, 7, 20, 2, 10, 1, 100]);
+    const julio = comp.find((r) => r[0] === 'JULIO');
+    expect(julio).toEqual(['JULIO', 70, 7, 30, 2, 1, 100]);
+    const agosto = comp.find((r) => r[0] === 'AGOSTO');
+    expect(agosto).toEqual(['AGOSTO', 50, 5, '', '', '', 50]);
+    const yearTotal = comp.find((r) => r[0] === 'TOTAL AÑO');
+    expect(yearTotal).toEqual(['TOTAL AÑO', 120, 12, 30, 2, 1, 150]);
+  });
+
+  it('libro: marcas (todas tiendas) → tiendas → COMPARATIVA', () => {
+    const sessions = [
+      closedSession({
+        _id: 'tiana',
+        pointOfSaleId: 'pdv-tiana',
+        pointOfSaleName: 'Tiana',
+        openedAt: '2026-07-01T10:00:00',
+        summary: {
+          salesByMethod: { efectivo: 70, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 70,
+        },
+        productClosingCounts: { pizza: 7, burger: 0, taco: 0 },
+      }),
+      closedSession({
+        _id: 'badalona',
+        pointOfSaleId: 'pdv-bad',
+        pointOfSaleName: 'Badalona',
+        openedAt: '2026-07-01T11:00:00',
+        summary: {
+          salesByMethod: { efectivo: 30, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 30,
+        },
+        productClosingCounts: { pizza: 0, burger: 2, taco: 1 },
+      }),
+    ];
+    const built = buildUrielCajaClosingsWorkbook(sessions, {
+      yearMonth: '2026-07',
+      historyRange: 'all',
+      pointsOfSale: [
+        { id: 'pdv-tiana', name: 'Tiana' },
+        { id: 'pdv-bad', name: 'Badalona' },
+      ],
+    });
+    expect(built.historyRange).toBe('all');
+    expect(built.sheetNames[0]).toBe('MODOMIO');
+    expect(built.sheetNames[1]).toBe('BLACK BURGER');
+    expect(built.sheetNames).toContain('Tiana');
+    expect(built.sheetNames).toContain('Badalona');
+    expect(built.sheetNames).toContain('RESUMEN');
+    expect(built.sheetNames[built.sheetNames.length - 1]).toBe('COMPARATIVA');
+    expect(built.rows).toBe(1);
+
+    const modoTitle = String(built.workbook.Sheets.MODOMIO?.A1?.v || '');
+    expect(modoTitle).toContain('MODOMIO');
+    expect(modoTitle).toContain('HISTORIAL');
+    expect(modoTitle).toContain('TODAS LAS TIENDAS');
+    const storeTitle = String(built.workbook.Sheets.Tiana?.A1?.v || '');
+    expect(storeTitle).toContain('Tiana');
+    const resumenTitle = String(built.workbook.Sheets.RESUMEN?.A1?.v || '');
+    expect(resumenTitle).toContain('RESUMEN');
+    expect(resumenTitle).toContain('HISTORIAL');
+    const compTitle = String(built.workbook.Sheets.COMPARATIVA?.A1?.v || '');
+    expect(compTitle).toContain('TODAS LAS TIENDAS');
+  });
+
+  it('Excel no incluye tiendas de otra empresa aunque vengan en sessions', () => {
+    const sessions = [
+      closedSession({
+        _id: 'own',
+        pointOfSaleId: 'pdv-tiana',
+        pointOfSaleName: 'Tiana',
+        openedAt: '2026-07-01T10:00:00',
+        summary: {
+          salesByMethod: { efectivo: 70, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 70,
+        },
+        productClosingCounts: { pizza: 7, burger: 0, taco: 0 },
+      }),
+      closedSession({
+        _id: 'foreign',
+        pointOfSaleId: 'pdv-otra-empresa',
+        pointOfSaleName: 'Otra Empresa',
+        openedAt: '2026-07-01T11:00:00',
+        summary: {
+          salesByMethod: { efectivo: 999, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 999,
+        },
+        productClosingCounts: { pizza: 50, burger: 0, taco: 0 },
+      }),
+    ];
+    const built = buildUrielCajaClosingsWorkbook(sessions, {
+      yearMonth: '2026-07',
+      pointsOfSale: [{ id: 'pdv-tiana', name: 'Tiana' }],
+    });
+    expect(built.sheetNames).toContain('Tiana');
+    expect(built.sheetNames).not.toContain('Otra Empresa');
+    const modoTitle = String(built.workbook.Sheets.MODOMIO?.A1?.v || '');
+    expect(modoTitle).toContain('TODAS LAS TIENDAS');
+    // Marca solo suma la tienda de esta empresa (70), no 999
+    const totalCell = built.workbook.Sheets.MODOMIO?.I4?.v;
+    expect(Number(totalCell)).toBe(70);
+  });
+
+  it('si el mes elegido está vacío, usa el mes con cierres', () => {
+    const sessions = [
+      closedSession({
+        openedAt: '2026-07-15T10:00:00',
+        summary: {
+          salesByMethod: { efectivo: 40, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 40,
+        },
+        productClosingCounts: { pizza: 4, burger: 0, taco: 0 },
+      }),
+    ];
+    const built = buildUrielCajaClosingsWorkbook(sessions, {
+      yearMonth: '2026-08',
+      historyRange: 'all',
+      pointsOfSale: [{ id: 'pdv-a', name: 'Tienda A' }],
+    });
+    expect(built.yearMonth).toBe('2026-07');
+    expect(built.historyRange).toBe('all');
+    expect(built.rows).toBeGreaterThan(0);
+    const title = String(built.workbook.Sheets.MODOMIO?.A1?.v || '');
+    expect(title).toContain('HISTORIAL');
+  });
+
+  it('alcance mes usa columna DIA (plantilla foto)', () => {
+    const sessions = [
+      closedSession({
+        openedAt: '2026-07-01T10:00:00',
+        summary: {
+          salesByMethod: { efectivo: 40, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 40,
+        },
+        productClosingCounts: { pizza: 4, burger: 0, taco: 0 },
+      }),
+    ];
+    const built = buildUrielCajaClosingsWorkbook(sessions, {
+      yearMonth: '2026-07',
+      historyRange: 'month',
+      pointsOfSale: [{ id: 'pdv-a', name: 'Tienda A' }],
+    });
+    expect(built.historyRange).toBe('month');
+    const headerRow = built.workbook.Sheets.MODOMIO?.A3?.v;
+    expect(headerRow).toBe('DIA');
+  });
+
+  it('acepta sesión con workCenterId y la agrupa en el PDV', () => {
+    const sessions = [
+      closedSession({
+        pointOfSaleId: 'wc-tiana',
+        pointOfSaleName: 'Tiana WC',
+        openedAt: '2026-07-02T10:00:00',
+        summary: {
+          salesByMethod: { efectivo: 25, tarjeta: 0, bizum: 0, online: 0, otro: 0 },
+          salesByChannel: {},
+          totalSales: 25,
+        },
+        productClosingCounts: { pizza: 2, burger: 0, taco: 0 },
+      }),
+    ];
+    const built = buildUrielCajaClosingsWorkbook(sessions, {
+      yearMonth: '2026-07',
+      pointsOfSale: [{ id: 'pdv-tiana', name: 'Tiana', workCenterId: 'wc-tiana' }],
+    });
+    expect(built.sheetNames).toContain('Tiana');
+    expect(built.rows).toBe(1);
+    expect(Number(built.workbook.Sheets.MODOMIO?.I4?.v)).toBe(25);
   });
 });

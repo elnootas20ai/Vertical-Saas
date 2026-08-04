@@ -1,10 +1,13 @@
-import { useState } from 'react';
-import { Loader2, X, ArrowDownCircle, ArrowUpCircle, RotateCcw } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Loader2, X, ArrowDownCircle, ArrowUpCircle, RotateCcw, UserRound } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import type { TpvRegisterTransaction } from '../../lib/deliveryApi';
+import type { TpvClockedInWorker } from '../../lib/tpvClockedInWorkers';
 import { DecimalNumpadField } from './DecimalNumpadField';
 import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
+import { ClockedInWorkerBubbles } from './ClockedInWorkerBubbles';
 import { VERTIAL_BTN_PRIMARY } from '../../lib/vertialUiTokens';
+import { normalizeClockinUserId } from '../../lib/clockinUserId';
 
 const TPV_MODAL_Z = 'z-[100]';
 
@@ -12,6 +15,13 @@ type CashOpType = 'cash_in' | 'cash_out' | 'return';
 
 /** Atajos opcionales; el importe es libre (numpad / teclado). */
 const QUICK_AMOUNTS = [10, 20, 50, 100, 200] as const;
+
+const CASH_OUT_REASONS = [
+  { id: 'worker_pay', label: 'Pago trabajador' },
+  { id: 'other', label: 'Otro motivo' },
+] as const;
+
+type CashOutReasonId = (typeof CASH_OUT_REASONS)[number]['id'];
 
 const OP_CONFIG: Record<CashOpType, { label: string; icon: typeof ArrowUpCircle; color: string }> = {
   cash_in: {
@@ -40,32 +50,95 @@ export function TpvCashOpsModal({
   onClose,
   loading,
   registeredBy,
+  workers = [],
+  workersLoading = false,
 }: {
   onConfirm: (op: Omit<TpvRegisterTransaction, 'id' | 'date'>) => Promise<void>;
   onClose: () => void;
   loading?: boolean;
   registeredBy?: string;
+  /** Fichados en tienda — para «Pago trabajador». */
+  workers?: TpvClockedInWorker[];
+  workersLoading?: boolean;
 }) {
   useModalClose(!loading, onClose);
   const [opType, setOpType] = useState<CashOpType>('cash_in');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
+  const [outReason, setOutReason] = useState<CashOutReasonId>('other');
+  const [workerId, setWorkerId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const parsed = parseDecimalPadValue(amount);
   const cashAmount = Number.isFinite(parsed) ? roundCashAmount(parsed) : Number.NaN;
-  const valid = Number.isFinite(cashAmount) && cashAmount > 0 && description.trim().length >= 2;
+  const isWorkerPay = opType === 'cash_out' && outReason === 'worker_pay';
+
+  const selectedWorker = useMemo(() => {
+    if (!workerId) return null;
+    const id = normalizeClockinUserId(workerId);
+    return workers.find((w) => normalizeClockinUserId(w.id) === id) || null;
+  }, [workerId, workers]);
+
+  const validAmount = Number.isFinite(cashAmount) && cashAmount > 0;
+  const workerPayNameOk =
+    Boolean(selectedWorker) || (workers.length === 0 && description.trim().length >= 2);
+  const valid = isWorkerPay
+    ? validAmount && workerPayNameOk
+    : validAmount && description.trim().length >= 2;
+
+  const handleOpType = (key: CashOpType) => {
+    setOpType(key);
+    if (key !== 'cash_out') {
+      setOutReason('other');
+      setWorkerId(null);
+    }
+  };
+
+  const handleOutReason = (id: CashOutReasonId) => {
+    setOutReason(id);
+    if (id === 'worker_pay') {
+      setDescription('');
+      if (workers.length === 1) {
+        setWorkerId(workers[0].id);
+      }
+    } else {
+      setWorkerId(null);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!valid || submitting) return;
     setSubmitting(true);
     try {
+      const note = description.trim();
+      let finalDescription = note;
+      let txWorkerId: string | undefined;
+      let txWorkerName: string | undefined;
+
+      if (isWorkerPay) {
+        if (selectedWorker) {
+          txWorkerId = selectedWorker.id;
+          txWorkerName = selectedWorker.name;
+          finalDescription = note
+            ? `Pago trabajador · ${selectedWorker.name} · ${note}`
+            : `Pago trabajador · ${selectedWorker.name}`;
+        } else {
+          txWorkerName = note;
+          finalDescription = `Pago trabajador · ${note}`;
+        }
+      }
+
       await onConfirm({
         type: opType,
         paymentMethod: 'efectivo',
         amount: cashAmount,
-        description: description.trim(),
+        description: finalDescription,
         registeredBy: registeredBy || 'Tablet',
+        ...(txWorkerId
+          ? { workerId: txWorkerId, workerName: txWorkerName }
+          : txWorkerName
+            ? { workerName: txWorkerName }
+            : {}),
       });
       onClose();
     } finally {
@@ -78,7 +151,7 @@ export function TpvCashOpsModal({
   return (
     <div className={`fixed inset-0 ${TPV_MODAL_Z} flex items-center justify-center p-4`}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={busy ? undefined : onClose} />
-      <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md p-5">
+      <div className="relative bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-md p-5 max-h-[92vh] overflow-y-auto">
         <button
           type="button"
           onClick={onClose}
@@ -100,7 +173,7 @@ export function TpvCashOpsModal({
               <button
                 key={key}
                 type="button"
-                onClick={() => setOpType(key)}
+                onClick={() => handleOpType(key)}
                 disabled={busy}
                 className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 text-xs font-semibold transition-colors ${
                   selected
@@ -114,6 +187,70 @@ export function TpvCashOpsModal({
             );
           })}
         </div>
+
+        {opType === 'cash_out' ? (
+          <div className="mb-4">
+            <p className="text-xs font-semibold text-gray-500 mb-1.5">Tipo de salida</p>
+            <div className="flex flex-wrap gap-2">
+              {CASH_OUT_REASONS.map((r) => {
+                const selected = outReason === r.id;
+                return (
+                  <button
+                    key={r.id}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => handleOutReason(r.id)}
+                    className={`min-h-11 px-3 rounded-xl text-sm font-bold border transition-colors touch-manipulation ${
+                      selected
+                        ? r.id === 'worker_pay'
+                          ? 'border-blue-600 bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40 dark:border-blue-500'
+                          : 'border-stone-800 bg-stone-100 text-stone-900 dark:bg-stone-800 dark:text-stone-100 dark:border-stone-500'
+                        : 'border-stone-200 bg-white text-stone-700 hover:border-blue-300 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {isWorkerPay ? (
+          <div className="mb-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/25 p-3">
+            <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-blue-700 dark:text-blue-300 mb-2">
+              <UserRound className="w-3.5 h-3.5" />
+              ¿A quién se paga?
+            </div>
+            <ClockedInWorkerBubbles
+              workers={workers}
+              selectedId={workerId}
+              onSelect={setWorkerId}
+              loading={workersLoading}
+              label=""
+              emptyHint="Nadie fichado. Ficha al trabajador o escribe el nombre abajo en «nota»."
+            />
+            {workers.length === 0 && !workersLoading ? (
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Nombre del trabajador (obligatorio si nadie fichado)"
+                disabled={busy}
+                className="mt-2 w-full px-3 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-800 text-sm"
+              />
+            ) : (
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Nota opcional (anticipo, semana…)"
+                disabled={busy}
+                className="mt-2 w-full px-3 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-800 text-sm"
+              />
+            )}
+          </div>
+        ) : null}
 
         <label className="block text-xs font-semibold text-gray-500 mb-1">Importe (€)</label>
         <p className="text-[11px] text-stone-400 mb-1.5">Cualquier cantidad — o atajo:</p>
@@ -146,21 +283,34 @@ export function TpvCashOpsModal({
           inputClassName="w-full mb-3 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-lg font-semibold tabular-nums"
         />
 
-        <label className="block text-xs font-semibold text-gray-500 mb-1">
-          {opType === 'cash_out' ? 'Motivo de la salida' : opType === 'return' ? 'Motivo de la devolución' : 'Motivo'}
-        </label>
-        <input
-          type="text"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder={
-            opType === 'cash_out'
-              ? 'Ej. compra de hielo, pagar proveedor, cambio…'
-              : 'Ej. cambio de monedas, devolución pedido #123'
-          }
-          disabled={busy}
-          className="w-full mb-4 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
-        />
+        {!isWorkerPay ? (
+          <>
+            <label className="block text-xs font-semibold text-gray-500 mb-1">
+              {opType === 'cash_out' ? 'Motivo de la salida' : opType === 'return' ? 'Motivo de la devolución' : 'Motivo'}
+            </label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={
+                opType === 'cash_out'
+                  ? 'Ej. compra de hielo, pagar proveedor, cambio…'
+                  : 'Ej. cambio de monedas, devolución pedido #123'
+              }
+              disabled={busy}
+              className="w-full mb-4 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+            />
+          </>
+        ) : (
+          <div className="mb-4" />
+        )}
+
+        {/* Fallback: sin fichados, validar nombre en nota como «quién» */}
+        {isWorkerPay && workers.length === 0 && !selectedWorker ? (
+          <p className="mb-3 text-[11px] text-amber-700 dark:text-amber-300 font-medium">
+            Escribe el nombre del trabajador arriba para poder registrar el pago.
+          </p>
+        ) : null}
 
         <button
           type="button"
@@ -169,8 +319,10 @@ export function TpvCashOpsModal({
           className={`w-full ${VERTIAL_BTN_PRIMARY}`}
         >
           {busy ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
-          Registrar movimiento
-          {valid ? ` · ${cashAmount.toFixed(2)}€` : ''}
+          {isWorkerPay
+            ? `Registrar pago${selectedWorker ? ` · ${selectedWorker.name}` : ''}`
+            : 'Registrar movimiento'}
+          {validAmount ? ` · ${cashAmount.toFixed(2)}€` : ''}
         </button>
       </div>
     </div>

@@ -145,6 +145,23 @@ function parseDayKey(dayKey: string): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Día de trabajo del turno = día local de apertura (cierres a la madrugada / día siguiente). */
+export function sessionWorkDayKey(
+  session: Pick<TpvRegisterSession, 'openedAt' | 'closedAt'> | null | undefined,
+): string {
+  const opened = String(session?.openedAt || '').trim();
+  if (opened) {
+    const d = new Date(opened);
+    if (!Number.isNaN(d.getTime())) return localCalendarDayKey(d);
+  }
+  const closed = String(session?.closedAt || '').trim();
+  if (closed) {
+    const d = new Date(closed);
+    if (!Number.isNaN(d.getTime())) return localCalendarDayKey(d);
+  }
+  return '';
+}
+
 /** Turno activo en un día del calendario (desde apertura hasta cierre o hoy si sigue abierto). */
 export function sessionActiveOnCalendarDay(
   session: TpvRegisterSession,
@@ -158,6 +175,23 @@ export function sessionActiveOnCalendarDay(
   const closeKey = localCalendarDayKey(new Date(endIso));
   const target = parseDayKey(dayKey);
   return target >= parseDayKey(openKey) && target <= parseDayKey(closeKey);
+}
+
+/**
+ * Listado Caja por día:
+ * - Cerrada → solo el día que se abrió (aunque cierren al día siguiente).
+ * - Abierta → sigue visible en los días del turno (para poder cerrarla).
+ */
+export function sessionBelongsToCajaDay(
+  session: TpvRegisterSession,
+  dayKey: string,
+  now = new Date(),
+): boolean {
+  if (String(session.status || '').toLowerCase() === 'closed') {
+    const workDay = sessionWorkDayKey(session);
+    return Boolean(workDay) && workDay === dayKey;
+  }
+  return sessionActiveOnCalendarDay(session, dayKey, now);
 }
 
 /** Pedido dentro del turno de caja (desde apertura hasta cierre). Sin caja abierta → ninguno. */
@@ -256,6 +290,13 @@ export function buildTpvRegisterSummaryForDay(
   session: TpvRegisterSession,
   dayKey: string,
 ): TpvRegisterSummary {
+  // Cierre → totales del turno completo en el día de apertura (no partir por medianoche).
+  if (
+    String(session.status || '').toLowerCase() === 'closed'
+    && sessionWorkDayKey(session) === dayKey
+  ) {
+    return buildTpvRegisterSummary(session);
+  }
   return buildTpvRegisterSummary({
     ...session,
     transactions: filterSessionTransactionsForDay(session, dayKey),
@@ -296,7 +337,9 @@ export function normalizeTpvSessionBusinessId(
   session: Pick<{ business_id?: string; businessId?: string }, 'business_id' | 'businessId'> | null | undefined,
 ): string {
   if (!session) return '';
-  return String(session.business_id || session.businessId || '').trim();
+  return String(session.business_id || session.businessId || '')
+    .replace(/^business:/, '')
+    .trim();
 }
 
 /** Sesión de caja pertenece a la empresa activa (legacy: solo si el PDV es de esa empresa). */
@@ -305,7 +348,7 @@ export function tpvSessionBelongsToBusiness(
   businessId: string,
   scopedPdvIds?: Iterable<string>,
 ): boolean {
-  const bid = String(businessId || '').trim();
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
   if (!bid) return true;
   const sessionBid = normalizeTpvSessionBusinessId(session);
   if (sessionBid) return sessionBid === bid;

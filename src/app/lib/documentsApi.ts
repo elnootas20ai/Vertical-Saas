@@ -182,6 +182,51 @@ export async function createDocumentRequest(
   return { ...document, _rev: result.rev };
 }
 
+/**
+ * Crea documento vía controller (auto-link matrícula/VIN + subcategoría OCR).
+ * Preferir esto para OCR de compraventa.
+ */
+export async function createDocumentViaApi(
+  userId: string,
+  data: Partial<DocumentRecord> & { name: string },
+): Promise<DocumentRecord> {
+  const payload = await request<{ ok: boolean; document: DocumentRecord; error?: string }>(
+    `/api/documents/${encodeURIComponent(userId)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        document: {
+          ...data,
+          user_id: userId,
+        },
+      }),
+    },
+  );
+  if (!payload.document) {
+    throw new Error(payload.error || 'No se pudo crear el documento');
+  }
+  return payload.document;
+}
+
+/** Actualiza documento vía controller (p. ej. vincular vehículo tras OCR). */
+export async function updateDocumentViaApi(
+  userId: string,
+  documentId: string,
+  data: Partial<DocumentRecord>,
+): Promise<DocumentRecord> {
+  const payload = await request<{ ok: boolean; document: DocumentRecord; error?: string }>(
+    `/api/documents/${encodeURIComponent(userId)}/${encodeURIComponent(documentId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ document: data }),
+    },
+  );
+  if (!payload.document) {
+    throw new Error(payload.error || 'No se pudo actualizar el documento');
+  }
+  return payload.document;
+}
+
 export async function updateDocumentRequest(document: DocumentRecord): Promise<DocumentRecord> {
   await ensureDocumentsDatabase();
   const next = { ...document, updatedAt: new Date().toISOString() };

@@ -1,5 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
+import { I18N_LANG_STORAGE_KEY, LANDING_I18N } from './landingI18n';
 
 // ─── Traducciones ─────────────────────────────────────────────────────────────
 
@@ -11,8 +12,9 @@ const es = {
       alertas: 'Alertas',
       compraventaHub: 'Centro Operativo',
       compraventaVehiculos: 'Vehículos',
+      entradaVehiculo: 'Entrada vehículo',
       compraventaCompras: 'Compras',
-      compraventaFiscal: 'Calculadora fiscal',
+      compraventaFiscal: 'Simulación fiscal',
       compraventaVentas: 'Ventas',
       compraventaTasaciones: 'Tasaciones',
       compraventaGastos: 'Gastos',
@@ -57,12 +59,14 @@ const es = {
       docReparacionCv: 'Reparaciones',
       docClienteCv: 'Docs cliente',
       docAnexosCv: 'Anexos',
-      payroll: 'Nóminas y documentos',
+      payroll: 'Nóminas',
+      gestoria: 'Gestoría',
       tpv: 'TPV',
       tpvLocales: 'Locales',
       sala: 'Sala',
       delivery: 'Delivery',
       deliveryOps: 'Centro Operativo',
+      restaurantOps: 'Centro operativo',
       deliveryKitchen: 'Cocina',
       deliveryMontaje: 'Montaje',
       deliveryReparto: 'Reparto',
@@ -92,7 +96,8 @@ const es = {
       clockins: 'Fichajes',
       schedules: 'Horarios',
       vacations: 'Vacaciones',
-      'horarios-vacaciones': 'Horarios y Vacaciones',
+      hrRequests: 'Solicitudes RRHH',
+      'horarios-vacaciones': 'Horarios',
       catalog: 'Catálogo',
       articles: 'Inventario',
       brands: 'Marcas',
@@ -120,10 +125,12 @@ const es = {
       workerClaimCompany: 'Unirse a una empresa',
       workerInvitations: 'Mis invitaciones',
       workerCalendar: 'Calendario',
+      workerRequests: 'Solicitudes',
       workerClock: 'Fichaje',
       workerChat: 'Chats',
       workerDocs: 'Documentación',
       workerButcherOrders: 'Encargos carnicería',
+      workerButcherReparto: 'Mis repartos',
       workerMaterials: 'Materiales',
       workerOnboarding: 'Onboarding',
       workerProfile: 'Perfil',
@@ -272,6 +279,9 @@ const es = {
       tobaccoRegulatory: 'Normativa',
       butcherHub: 'Centro Operativo',
       butcherPurchases: 'Compras',
+      butcherDespiece: 'Despiece',
+      butcherReparto: 'Repartos',
+      butcherBasculas: 'Básculas',
       butcherClients: 'Clientes',
       butcherProducts: 'Productos y cortes',
       butcherOrders: 'Pedidos y encargos',
@@ -463,6 +473,16 @@ const es = {
         workerMain: 'Principal',
         workerUnlinked: 'Sin empresa',
         'worker-config': 'Configuración',
+      },
+      butcherTpv: {
+        title: 'TPV Carnicería',
+        selectPdv: 'Mostrador / PDV',
+        exportZ: 'Exportar cierre Z',
+        saleDone: 'Venta completada',
+        voided: 'Venta anulada',
+        close: 'Cerrar',
+        print: 'Imprimir',
+        void: 'Anular venta',
       },
     },
     // ── Auth ──────────────────────────────────────────────────────────────────
@@ -1890,12 +1910,24 @@ const es = {
         hoursAgo: 'Hace {{count}}h',
         daysAgo: 'Hace {{count}} días',
         privacy: 'Privacidad',
+        privacyPolicy: 'política de privacidad',
         downloadData: 'Descargar mis datos',
         downloadDataDesc: 'Obtén una copia de toda tu información personal',
         downloadingData: 'Descargando...',
         downloadDataSuccess: 'Tus datos se han descargado correctamente.',
-        deleteAccount: 'Solicitar eliminación de datos',
-        deleteAccountDesc: 'Derecho al olvido según RGPD',
+        deleteAccount: 'Eliminar cuenta',
+        deleteAccountDesc: 'Borra tu cuenta de Vertial de forma permanente desde la app.',
+        deleteAccountLongDesc:
+          'Borra tu cuenta de Vertial de forma permanente. Según tu rol, pueden conservarse datos legales o contables exigidos por normativa. Consulta la',
+        deleteAccountButton: 'Eliminar mi cuenta',
+        deleteAccountButtonPermanent: 'Eliminar mi cuenta permanentemente',
+        deleteAccountPermanent: 'Eliminar permanentemente',
+        deleteAccountConfirmDesc:
+          'Se eliminará tu cuenta de Vertial de forma permanente y perderás el acceso.',
+        deleteAccountTypeConfirm: 'Escribe {{word}} para confirmar',
+        deleteAccountInAppNote: 'El borrado se completa aquí en la app, sin contactar por email.',
+        deleteAccountNoSession: 'No hay sesión activa.',
+        deleteAccountError: 'No se pudo eliminar la cuenta',
       },
     },
   },
@@ -1909,11 +1941,12 @@ const en = {
       alertas: 'Alerts',
       compraventaVehiculos: 'Vehicles',
       compraventaCompras: 'Purchases',
-      compraventaFiscal: 'Tax calculator',
+      compraventaFiscal: 'Tax simulation',
       compraventaVentas: 'Sales',
       compraventaTasaciones: 'Appraisals',
       compraventaGastos: 'Expenses',
       compraventaEntregas: 'Deliveries',
+      publicacionVenta: 'Publication & sales',
       purchaseOrders: 'Purchase Orders',
       vehicles: 'Vehicles',
       reservations: 'Reservations',
@@ -1944,12 +1977,14 @@ const en = {
       tech: 'Technician',
       commissions: 'Commissions',
       dealershipWorkers: 'Sales performance',
-      payroll: 'Payroll & documents',
+      payroll: 'Payroll',
+      gestoria: 'Accounting desk',
       tpv: 'POS',
       tpvLocales: 'Floor plan',
       sala: 'Dining Room',
       delivery: 'Delivery',
       deliveryOps: 'Operations Center',
+      restaurantOps: 'Operations center',
       deliveryKitchen: 'Kitchen',
       deliveryMontaje: 'Assembly',
       deliveryReparto: 'Delivery',
@@ -1976,7 +2011,8 @@ const en = {
       clockins: 'Time Tracking',
       schedules: 'Schedules',
       vacations: 'Vacations',
-      'horarios-vacaciones': 'Schedules & Vacations',
+      hrRequests: 'Requests',
+      'horarios-vacaciones': 'Schedules',
       catalog: 'Catalog',
       articles: 'Articles',
       brands: 'Brands',
@@ -2002,10 +2038,12 @@ const en = {
       workerTasks: 'My Tasks',
       workerStockReview: 'Stock review',
       workerCalendar: 'Calendar',
+      workerRequests: 'Requests',
       workerClock: 'Clock In/Out',
       workerChat: 'Chats',
       workerDocs: 'Documents',
       workerButcherOrders: 'Butcher orders',
+      workerButcherReparto: 'My deliveries',
       workerOnboarding: 'Onboarding',
       workerProfile: 'Profile',
       workerContractInfo: 'Contract Info',
@@ -2154,6 +2192,9 @@ const en = {
       butcherHub: 'Operations Center',
       butcherClients: 'Clients',
       butcherPurchases: 'Purchases',
+      butcherDespiece: 'Cutting / Yield',
+      butcherReparto: 'Deliveries',
+      butcherBasculas: 'Scales',
       butcherProducts: 'Products & Cuts',
       butcherOrders: 'Orders',
       butcherInventory: 'Inventory',
@@ -2342,6 +2383,16 @@ const en = {
         salesPoints: 'Work Centers',
         workerMain: 'Main',
         'worker-config': 'Settings',
+      },
+      butcherTpv: {
+        title: 'Butcher POS',
+        selectPdv: 'Counter / POS',
+        exportZ: 'Export Z report',
+        saleDone: 'Sale completed',
+        voided: 'Sale voided',
+        close: 'Close',
+        print: 'Print',
+        void: 'Void sale',
       },
     },
     // ── Auth ──────────────────────────────────────────────────────────────────
@@ -3764,12 +3815,24 @@ const en = {
         hoursAgo: '{{count}}h ago',
         daysAgo: '{{count}} days ago',
         privacy: 'Privacy',
+        privacyPolicy: 'privacy policy',
         downloadData: 'Download my data',
         downloadDataDesc: 'Get a copy of all your personal information',
         downloadingData: 'Downloading...',
         downloadDataSuccess: 'Your data has been downloaded successfully.',
-        deleteAccount: 'Request data deletion',
-        deleteAccountDesc: 'Right to be forgotten (GDPR)',
+        deleteAccount: 'Delete account',
+        deleteAccountDesc: 'Permanently delete your Vertial account from the app.',
+        deleteAccountLongDesc:
+          'Permanently delete your Vertial account. Depending on your role, some legal or accounting data may be retained as required by law. See the',
+        deleteAccountButton: 'Delete my account',
+        deleteAccountButtonPermanent: 'Permanently delete my account',
+        deleteAccountPermanent: 'Delete permanently',
+        deleteAccountConfirmDesc:
+          'Your Vertial account will be permanently deleted and you will lose access.',
+        deleteAccountTypeConfirm: 'Type {{word}} to confirm',
+        deleteAccountInAppNote: 'Deletion completes in the app — no email or phone call needed.',
+        deleteAccountNoSession: 'No active session.',
+        deleteAccountError: 'Could not delete the account',
       },
     },
   },
@@ -3785,7 +3848,7 @@ const pt = {
       compraventaHub: 'Centro Operacional',
       compraventaVehiculos: 'Veículos',
       compraventaCompras: 'Compras',
-      compraventaFiscal: 'Calculadora fiscal',
+      compraventaFiscal: 'Simulação fiscal',
       compraventaVentas: 'Vendas',
       compraventaTasaciones: 'Avaliações',
       compraventaGastos: 'Despesas',
@@ -3824,6 +3887,7 @@ const pt = {
       sala: 'Sala',
       delivery: 'Entregas',
       deliveryOps: 'Centro Operacional',
+      restaurantOps: 'Centro operativo',
       deliveryKitchen: 'Cozinha',
       deliveryMontaje: 'Montagem',
       deliveryReparto: 'Entrega',
@@ -3850,7 +3914,8 @@ const pt = {
       clockins: 'Registos de Ponto',
       schedules: 'Horários',
       vacations: 'Férias',
-      'horarios-vacaciones': 'Horários e Férias',
+      hrRequests: 'Pedidos',
+      'horarios-vacaciones': 'Horários',
       catalog: 'Catálogo',
       articles: 'Artigos',
       brands: 'Marcas',
@@ -3875,6 +3940,7 @@ const pt = {
       workerTasks: 'Meu trabalho',
       workerStockReview: 'Revisão de stock',
       workerCalendar: 'Calendário',
+      workerRequests: 'Solicitações',
       workerClock: 'Ponto',
       workerChat: 'Chats',
       workerDocs: 'Documentação',
@@ -4027,6 +4093,9 @@ const pt = {
       butcherHub: 'Centro Operacional',
       butcherClients: 'Clientes',
       butcherPurchases: 'Compras',
+      butcherDespiece: 'Desmanchar',
+      butcherReparto: 'Entregas',
+      butcherBasculas: 'Balanças',
       butcherProducts: 'Produtos e cortes',
       butcherOrders: 'Encomendas',
       butcherInventory: 'Inventário',
@@ -4037,6 +4106,7 @@ const pt = {
       butcherWorkers: 'Funcionários',
       butcherWaste: 'Desperdício',
       butcherReports: 'Relatórios',
+      workerButcherReparto: 'As minhas entregas',
     },
     common: {
       save: 'Guardar',
@@ -5296,7 +5366,7 @@ const fr = {
       alertas: 'Alertes',
       compraventaVehiculos: 'Véhicules',
       compraventaCompras: 'Achats',
-      compraventaFiscal: 'Calculateur fiscal',
+      compraventaFiscal: 'Simulation fiscale',
       compraventaVentas: 'Ventes',
       compraventaTasaciones: 'Expertises',
       compraventaGastos: 'Dépenses',
@@ -5334,6 +5404,7 @@ const fr = {
       sala: 'Salle',
       delivery: 'Livraison',
       deliveryOps: 'Centre Opérationnel',
+      restaurantOps: 'Centre opérationnel',
       deliveryKitchen: 'Cuisine',
       deliveryMontaje: 'Montage',
       deliveryReparto: 'Livraison',
@@ -5360,7 +5431,8 @@ const fr = {
       clockins: 'Pointage',
       schedules: 'Horaires',
       vacations: 'Congés',
-      'horarios-vacaciones': 'Horaires et Congés',
+      hrRequests: 'Demandes',
+      'horarios-vacaciones': 'Horaires',
       catalog: 'Catalogue',
       articles: 'Articles',
       brands: 'Marques',
@@ -5385,6 +5457,7 @@ const fr = {
       workerTasks: 'Mon travail',
       workerStockReview: 'Révision de stock',
       workerCalendar: 'Calendrier',
+      workerRequests: 'Demandes',
       workerClock: 'Pointage',
       workerChat: 'Chats',
       workerDocs: 'Documentation',
@@ -5537,6 +5610,9 @@ const fr = {
       butcherHub: 'Centre Opérationnel',
       butcherClients: 'Clients',
       butcherPurchases: 'Achats',
+      butcherDespiece: 'Découpe / Rendement',
+      butcherReparto: 'Livraisons',
+      butcherBasculas: 'Balances',
       butcherProducts: 'Produits et découpes',
       butcherOrders: 'Commandes et réservations',
       butcherInventory: 'Inventaire',
@@ -5547,6 +5623,7 @@ const fr = {
       butcherWorkers: 'Employés',
       butcherWaste: 'Pertes',
       butcherReports: 'Rapports',
+      workerButcherReparto: 'Mes livraisons',
     },
     common: {
       save: 'Enregistrer',
@@ -6805,7 +6882,7 @@ const it = {
       compraventaHub: 'Centro Operativo',
       compraventaVehiculos: 'Veicoli',
       compraventaCompras: 'Acquisti',
-      compraventaFiscal: 'Calcolatrice fiscale',
+      compraventaFiscal: 'Simulazione fiscale',
       compraventaVentas: 'Vendite',
       compraventaTasaciones: 'Perizie',
       compraventaGastos: 'Spese',
@@ -6838,12 +6915,13 @@ const it = {
       parts: 'Ricambi',
       tech: 'Vista meccanico',
       commissions: 'Commissioni',
-      payroll: 'Buste paga e documenti',
+      payroll: 'Buste paga',
       tpv: 'POS',
       tpvLocales: 'Locali',
       sala: 'Sala',
       delivery: 'Consegna',
       deliveryOps: 'Centro Operativo',
+      restaurantOps: 'Centro operativo',
       deliveryKitchen: 'Cucina',
       deliveryMontaje: 'Montaggio',
       deliveryReparto: 'Consegna',
@@ -6870,6 +6948,8 @@ const it = {
       clockins: 'Presenze',
       schedules: 'Orari',
       vacations: 'Ferie',
+      hrRequests: 'Richieste',
+      'horarios-vacaciones': 'Orari',
       catalog: 'Catalogo',
       articles: 'Articoli',
       brands: 'Marchi',
@@ -6894,6 +6974,7 @@ const it = {
       workerTasks: 'Il mio lavoro',
       workerStockReview: 'Revisione stock',
       workerCalendar: 'Calendario',
+      workerRequests: 'Richieste',
       workerClock: 'Presenza',
       workerChat: 'Chat',
       workerDocs: 'Documentazione',
@@ -7046,6 +7127,9 @@ const it = {
       butcherHub: 'Centro Operativo',
       butcherClients: 'Clienti',
       butcherPurchases: 'Acquisti',
+      butcherDespiece: 'Disosso / Resa',
+      butcherReparto: 'Consegne',
+      butcherBasculas: 'Bilance',
       butcherProducts: 'Prodotti e tagli',
       butcherOrders: 'Ordini e prenotazioni',
       butcherInventory: 'Inventario',
@@ -7056,6 +7140,7 @@ const it = {
       butcherWorkers: 'Dipendenti',
       butcherWaste: 'Scarti',
       butcherReports: 'Report',
+      workerButcherReparto: 'Le mie consegne',
     },
     common: {
       save: 'Salva',
@@ -8308,11 +8393,27 @@ const it = {
 
 // ─── Inicialización ───────────────────────────────────────────────────────────
 
+Object.assign(es.translation, { landing: LANDING_I18N.es });
+Object.assign(en.translation, { landing: LANDING_I18N.en });
+Object.assign(pt.translation, { landing: LANDING_I18N.pt });
+Object.assign(fr.translation, { landing: LANDING_I18N.fr });
+Object.assign(it.translation, { landing: LANDING_I18N.it });
+
+function readStoredLanguage(): string {
+  try {
+    const stored = localStorage.getItem(I18N_LANG_STORAGE_KEY);
+    if (stored && ['es', 'en', 'pt', 'fr', 'it'].includes(stored)) return stored;
+  } catch {
+    /* noop */
+  }
+  return 'es';
+}
+
 i18n
   .use(initReactI18next)
   .init({
     resources: { es, en, pt, fr, it },
-    lng: 'es',
+    lng: typeof window !== 'undefined' ? readStoredLanguage() : 'es',
     fallbackLng: 'es',
     supportedLngs: ['es', 'en', 'pt', 'fr', 'it'],
     defaultNS: 'translation',
@@ -8320,5 +8421,16 @@ i18n
       escapeValue: false,
     },
   });
+
+i18n.on('languageChanged', (lng) => {
+  try {
+    localStorage.setItem(I18N_LANG_STORAGE_KEY, lng);
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = lng;
+    }
+  } catch {
+    /* noop */
+  }
+});
 
 export default i18n;

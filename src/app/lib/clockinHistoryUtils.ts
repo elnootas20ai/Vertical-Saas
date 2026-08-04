@@ -2,6 +2,9 @@ import type { ClockinRecord } from './clockinsApi';
 import { deriveEffectiveClockinStatus, isClockinPresent } from './clockinStatus';
 import { localCalendarDayKey } from './tpvCajaScope';
 
+/** Máx. sesiones de fichaje (entrada→salida) por día: jornada normal + partido / vuelta. */
+export const MAX_CLOCKIN_SESSIONS_PER_DAY = 3;
+
 export function todayDateStr(): string {
   return localCalendarDayKey();
 }

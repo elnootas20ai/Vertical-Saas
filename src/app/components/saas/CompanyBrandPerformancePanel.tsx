@@ -1,9 +1,10 @@
 /**
- * Dashboard empresa delivery: marcas seleccionables + €/uds de hoy
- * con las reglas de Facturación (sin hardcode Modomio/BB).
+ * Dashboard empresa delivery: marcas + €/uds/comida por periodo (día / mes / año)
+ * con comparativa vs periodo anterior. Reglas de Facturación (sin hardcode).
+ * Incluye todos los integradores (Glovo, Uber Eats, Just Eat, Flipdish, …).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Package, Store } from 'lucide-react';
+import { Package, Radio } from 'lucide-react';
 import type { Brand } from '../../lib/brandApi';
 import type { DeliveryOrder } from '../../lib/deliveryApi';
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
@@ -19,8 +20,189 @@ import {
 } from '../../../../shared/delivery/orderLineRevenueSplit.js';
 import { isBrandActive } from '../../lib/brandUtils';
 import { deliveryBrandLineKindLabel } from '../../lib/deliveryBrandLineKinds';
+import { AGGREGATOR_PLATFORMS } from '../../lib/deliveryIntegrationsUi';
+import { formatMoneyEs, formatNumberEs } from '../../lib/formatNumberEs';
 import { localCalendarDayKey } from '../../lib/tpvCajaScope';
-import { getDeliveryOrderDeliveredAtIso, isDeliveryOrderDelivered } from '../../lib/portfolioMetrics';
+import {
+  getDeliveryOrderDeliveredAtIso,
+  isDeliveryOrderDelivered,
+  listPrevMonthToDateDayKeys,
+  monthOverMonthPct,
+} from '../../lib/portfolioMetrics';
+import {
+  emptyFoodFamilyCounts,
+  foodFamilyCountsFromOrders,
+  foodFamilyCountsFromOrdersForBrand,
+  type FoodFamilyCounts,
+} from '../../lib/shiftFoodFamilyCounts';
+
+/** Canales propios (no agregador) que siempre listamos si hay ventas. */
+const OWN_CHANNEL_DEFS: Array<{ key: string; label: string; color: string }> = [
+  { key: 'tpv', label: 'TPV', color: '#2563EB' },
+  { key: 'app', label: 'App', color: '#4F46E5' },
+  { key: 'web', label: 'Web', color: '#0EA5E9' },
+  { key: 'phone', label: 'Teléfono', color: '#64748B' },
+  { key: 'direct', label: 'Directo', color: '#78716C' },
+];
+
+function normalizeOrderChannel(channel: string | undefined | null): string {
+  const ch = String(channel || '').toLowerCase().trim();
+  if (!ch) return 'tpv';
+  if (ch === 'uber' || ch === 'uber_eats' || ch === 'uber-eats') return 'ubereats';
+  if (ch === 'just_eat' || ch === 'just-eat') return 'justeat';
+  return ch;
+}
+
+function channelDisplayMeta(key: string): { label: string; color: string; isAggregator: boolean } {
+  const agg = AGGREGATOR_PLATFORMS.find((p) => p.channel === key);
+  if (agg) {
+    const colorMatch = agg.colorClass.match(/#[0-9A-Fa-f]{3,8}/);
+    const fallback: Record<string, string> = {
+      glovo: '#00A082',
+      ubereats: '#111111',
+      justeat: '#FF8000',
+      flipdish: '#E32B2B',
+    };
+    return {
+      label: agg.label,
+      color: colorMatch?.[0] || fallback[agg.channel] || '#2563EB',
+      isAggregator: true,
+    };
+  }
+  const own = OWN_CHANNEL_DEFS.find((c) => c.key === key);
+  if (own) return { ...own, isAggregator: false };
+  return {
+    label: key.charAt(0).toUpperCase() + key.slice(1),
+    color: '#9CA3AF',
+    isAggregator: false,
+  };
+}
+
+export type IntegratorPerfRow = {
+  key: string;
+  label: string;
+  color: string;
+  isAggregator: boolean;
+  revenue: number;
+  orderCount: number;
+  sharePercent: number;
+};
+
+/**
+ * Desglose por canal/integrador. Siempre incluye los 4 agregadores (aunque vayan a 0).
+ */
+function buildIntegratorRows(
+  orders: DeliveryOrder[],
+  opts?: {
+    brandId?: string;
+    rules?: BrandBillingSplitRules;
+  },
+): IntegratorPerfRow[] {
+  const revenue: Record<string, number> = {};
+  const orderHit: Record<string, number> = {};
+  let total = 0;
+
+  for (const order of orders) {
+    const rev = orderEuro(order);
+    if (rev <= 0) continue;
+
+    let slice = rev;
+    if (opts?.brandId && opts.rules) {
+      const attributed = attributeOrderRevenueByBrand(order, opts.rules);
+      const brandAmt = Number(attributed.byBrand[opts.brandId]) || 0;
+      if (brandAmt <= 0) continue;
+      const attributedSum =
+        Object.values(attributed.byBrand).reduce((s, n) => s + (Number(n) || 0), 0) +
+        (Number(attributed.unbranded) || 0);
+      const scale = attributedSum > 0 ? brandAmt / attributedSum : 0;
+      slice = Math.round(rev * scale * 100) / 100;
+      if (slice <= 0) continue;
+    }
+
+    const key = normalizeOrderChannel(order.channel);
+    revenue[key] = Math.round(((revenue[key] || 0) + slice) * 100) / 100;
+    orderHit[key] = (orderHit[key] || 0) + 1;
+    total += slice;
+  }
+
+  total = Math.round(total * 100) / 100;
+
+  const rows: IntegratorPerfRow[] = [];
+  const seen = new Set<string>();
+
+  for (const platform of AGGREGATOR_PLATFORMS) {
+    seen.add(platform.channel);
+    const meta = channelDisplayMeta(platform.channel);
+    const r = Math.round((revenue[platform.channel] || 0) * 100) / 100;
+    rows.push({
+      key: platform.channel,
+      label: meta.label,
+      color: meta.color,
+      isAggregator: true,
+      revenue: r,
+      orderCount: orderHit[platform.channel] || 0,
+      sharePercent: total > 0 ? Math.round((r / total) * 1000) / 10 : 0,
+    });
+  }
+
+  for (const own of OWN_CHANNEL_DEFS) {
+    if (seen.has(own.key)) continue;
+    const r = Math.round((revenue[own.key] || 0) * 100) / 100;
+    if (r <= 0) continue;
+    seen.add(own.key);
+    rows.push({
+      key: own.key,
+      label: own.label,
+      color: own.color,
+      isAggregator: false,
+      revenue: r,
+      orderCount: orderHit[own.key] || 0,
+      sharePercent: total > 0 ? Math.round((r / total) * 1000) / 10 : 0,
+    });
+  }
+
+  for (const key of Object.keys(revenue)) {
+    if (seen.has(key)) continue;
+    const r = Math.round((revenue[key] || 0) * 100) / 100;
+    if (r <= 0) continue;
+    const meta = channelDisplayMeta(key);
+    rows.push({
+      key,
+      label: meta.label,
+      color: meta.color,
+      isAggregator: meta.isAggregator,
+      revenue: r,
+      orderCount: orderHit[key] || 0,
+      sharePercent: total > 0 ? Math.round((r / total) * 1000) / 10 : 0,
+    });
+  }
+
+  // Agregadores primero (orden fijo), resto por €.
+  const aggregators = rows.filter((r) => r.isAggregator);
+  const others = rows
+    .filter((r) => !r.isAggregator)
+    .sort((a, b) => b.revenue - a.revenue || a.label.localeCompare(b.label, 'es'));
+  return [...aggregators, ...others];
+}
+
+function VsBadge({ pct }: { pct: number | null }) {
+  if (pct == null) return null;
+  const up = pct >= 0;
+  const label = `${up ? '+' : ''}${formatNumberEs(pct, { maxFraction: 1 })}%`;
+  return (
+    <span
+      className={`inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${
+        up
+          ? 'bg-[rgba(34,197,94,0.12)] text-[var(--v-green,#22c55e)]'
+          : 'bg-[rgba(225,29,72,0.1)] text-[var(--v-rose,#e11d48)]'
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+export type BrandPerfRange = 'day' | 'month' | 'year';
 
 function foldDay(iso: string | undefined): string {
   if (!iso) return '';
@@ -29,11 +211,50 @@ function foldDay(iso: string | undefined): string {
   return localCalendarDayKey(d);
 }
 
-function orderBelongsToDay(order: DeliveryOrder, dayKey: string): boolean {
+function orderDayKey(order: DeliveryOrder): string {
   const delivered = getDeliveryOrderDeliveredAtIso(order);
-  if (delivered && foldDay(delivered) === dayKey) return true;
-  if (isDeliveryOrderDelivered(order) && foldDay(String(order.updatedAt || '')) === dayKey) return true;
-  return foldDay(String(order.createdAt || '')) === dayKey;
+  if (delivered) {
+    const k = foldDay(delivered);
+    if (k) return k;
+  }
+  if (isDeliveryOrderDelivered(order)) {
+    const k = foldDay(String(order.updatedAt || ''));
+    if (k) return k;
+  }
+  return foldDay(String(order.createdAt || ''));
+}
+
+function addDaysToDayKey(dayKey: string, delta: number): string {
+  const [y, m, d] = dayKey.split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  return localCalendarDayKey(dt);
+}
+
+function orderInRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: string): boolean {
+  const day = orderDayKey(order);
+  if (!day) return false;
+  if (range === 'day') return day === todayKey;
+  if (range === 'month') {
+    const monthStart = `${todayKey.slice(0, 7)}-01`;
+    return day >= monthStart && day <= todayKey;
+  }
+  return day.slice(0, 4) === todayKey.slice(0, 4);
+}
+
+/** Periodo anterior comparable: ayer / mismos días mes ant. / mismo YTD año ant. */
+function orderInPrevRange(order: DeliveryOrder, range: BrandPerfRange, todayKey: string): boolean {
+  const day = orderDayKey(order);
+  if (!day) return false;
+  if (range === 'day') return day === addDaysToDayKey(todayKey, -1);
+  if (range === 'month') {
+    const prevKeys = listPrevMonthToDateDayKeys(todayKey);
+    return prevKeys.includes(day);
+  }
+  const prevYear = String(Number(todayKey.slice(0, 4)) - 1);
+  const ytdEnd = `${prevYear}${todayKey.slice(4)}`;
+  return day.slice(0, 4) === prevYear && day <= ytdEnd;
 }
 
 function orderEuro(order: DeliveryOrder): number {
@@ -41,10 +262,6 @@ function orderEuro(order: DeliveryOrder): number {
   if (Number.isFinite(t) && t > 0) return t;
   const items = Array.isArray(order.items) ? order.items : [];
   return items.reduce((s, it) => s + lineRevenueAmount(it), 0);
-}
-
-function fmtEuro(n: number): string {
-  return `${n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 }
 
 export type CompanyBrandDayRow = {
@@ -56,9 +273,10 @@ export type CompanyBrandDayRow = {
   units: number;
   orderCount: number;
   sharePercent: number;
+  food: FoodFamilyCounts;
 };
 
-function buildBrandDayRows(
+function buildBrandRows(
   orders: DeliveryOrder[],
   brands: Brand[],
   rules: BrandBillingSplitRules,
@@ -104,7 +322,7 @@ function buildBrandDayRows(
     rows.push({
       brandId: id,
       name: brand.name || id,
-      color: brand.primaryColor || '#6366F1',
+      color: brand.primaryColor || '#2563EB',
       lineLabel: brand.deliveryLineKind
         ? deliveryBrandLineKindLabel(brand.deliveryLineKind)
         : null,
@@ -112,10 +330,10 @@ function buildBrandDayRows(
       units: u,
       orderCount: orderHit[id] || 0,
       sharePercent: total > 0 ? Math.round((r / total) * 1000) / 10 : 0,
+      food: foodFamilyCountsFromOrdersForBrand(orders, id),
     });
   }
 
-  // Marcas con € aunque no estén en byId (ids huérfanos)
   for (const id of Object.keys(revenue)) {
     if (byId.has(id)) continue;
     const r = Math.round((revenue[id] || 0) * 100) / 100;
@@ -129,10 +347,135 @@ function buildBrandDayRows(
       units: Math.round((units[id] || 0) * 10) / 10,
       orderCount: orderHit[id] || 0,
       sharePercent: total > 0 ? Math.round((r / total) * 1000) / 10 : 0,
+      food: foodFamilyCountsFromOrdersForBrand(orders, id),
     });
   }
 
   return rows.sort((a, b) => b.revenue - a.revenue);
+}
+
+const RANGE_LABEL: Record<BrandPerfRange, string> = {
+  day: 'Día',
+  month: 'Mes',
+  year: 'Año',
+};
+
+const RANGE_SHARE_LABEL: Record<BrandPerfRange, string> = {
+  day: '% del día',
+  month: '% del mes',
+  year: '% del año',
+};
+
+const RANGE_VS_LABEL: Record<BrandPerfRange, string> = {
+  day: 'vs ayer',
+  month: 'vs mismos días mes ant.',
+  year: 'vs año ant.',
+};
+
+function foodLine(food: FoodFamilyCounts): string {
+  const parts: string[] = [];
+  if (food.pizza > 0) parts.push(`${formatNumberEs(food.pizza, { maxFraction: 0 })} pizzas`);
+  if (food.burger > 0) parts.push(`${formatNumberEs(food.burger, { maxFraction: 0 })} burgers`);
+  if (food.taco > 0) parts.push(`${formatNumberEs(food.taco, { maxFraction: 0 })} tacos`);
+  return parts.join(' · ');
+}
+
+function FoodFamilyStrip({
+  food,
+  prev,
+  vsLabel,
+}: {
+  food: FoodFamilyCounts;
+  prev: FoodFamilyCounts;
+  vsLabel: string;
+}) {
+  const items: Array<{ key: keyof FoodFamilyCounts; label: string; n: number; p: number }> = [
+    { key: 'pizza', label: 'Pizzas', n: food.pizza, p: prev.pizza },
+    { key: 'burger', label: 'Burgers', n: food.burger, p: prev.burger },
+    { key: 'taco', label: 'Tacos', n: food.taco, p: prev.taco },
+  ];
+  const visible = items.filter((i) => i.n > 0 || i.p > 0);
+  if (visible.length === 0) {
+    return (
+      <p className="text-[10px] text-gray-400">Sin comida en el periodo</p>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {visible.map((i) => (
+        <span key={i.key} className="inline-flex items-center gap-1 text-[11px]">
+          <span className="font-medium text-gray-500">{i.label}</span>
+          <span className="font-bold tabular-nums text-gray-900 dark:text-gray-100">
+            {formatNumberEs(i.n, { maxFraction: 0 })}
+          </span>
+          <VsBadge pct={monthOverMonthPct(i.n, i.p)} />
+        </span>
+      ))}
+      <span className="sr-only">{vsLabel}</span>
+    </div>
+  );
+}
+
+function IntegratorsBlock({
+  rows,
+  prevByKey,
+  vsLabel,
+  rangeLabel,
+  scopeLabel,
+}: {
+  rows: IntegratorPerfRow[];
+  prevByKey: Map<string, IntegratorPerfRow>;
+  vsLabel: string;
+  rangeLabel: string;
+  scopeLabel?: string;
+}) {
+  const withSales = rows.filter((r) => r.revenue > 0);
+  const shown = withSales.length > 0 ? withSales : rows.filter((r) => r.isAggregator).slice(0, 4);
+
+  return (
+    <div>
+      <p className="mb-1 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+        <Radio className="h-3 w-3" />
+        Integradores · {rangeLabel}
+        {scopeLabel ? ` · ${scopeLabel}` : ''}
+      </p>
+      {withSales.length === 0 ? (
+        <p className="text-[10px] text-gray-400">Sin ventas en integradores · {vsLabel}</p>
+      ) : (
+        <div className="divide-y divide-gray-100 dark:divide-gray-800">
+          {shown.map((row) => {
+            const prev = prevByKey.get(row.key);
+            const mom = monthOverMonthPct(row.revenue, prev?.revenue || 0);
+            return (
+              <div
+                key={row.key}
+                className="flex items-center justify-between gap-2 py-1"
+              >
+                <span className="min-w-0 flex items-center gap-1.5">
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: row.color }}
+                  />
+                  <span className="truncate text-[11px] font-semibold text-gray-800 dark:text-gray-100">
+                    {row.label}
+                  </span>
+                </span>
+                <span className="shrink-0 flex items-center gap-1.5 text-right">
+                  <span className="text-[11px] font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                    {formatMoneyEs(row.revenue)}
+                  </span>
+                  <VsBadge pct={mom} />
+                  <span className="text-[10px] tabular-nums text-gray-400">
+                    {formatNumberEs(row.sharePercent, { maxFraction: 0 })}%
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type Props = {
@@ -140,6 +483,8 @@ type Props = {
   brands: Brand[];
   orders: DeliveryOrder[];
   loading?: boolean;
+  /** Móvil: sin tablas anchas de canales, toggles táctiles. */
+  compact?: boolean;
 };
 
 export function CompanyBrandPerformancePanel({
@@ -147,11 +492,13 @@ export function CompanyBrandPerformancePanel({
   brands,
   orders,
   loading = false,
+  compact = false,
 }: Props) {
   const [rules, setRules] = useState<BrandBillingSplitRules>(() =>
     splitRulesFromBillingConfig(null),
   );
   const [selectedId, setSelectedId] = useState<string>('all');
+  const [range, setRange] = useState<BrandPerfRange>('month');
   const todayKey = localCalendarDayKey();
 
   useEffect(() => {
@@ -169,20 +516,36 @@ export function CompanyBrandPerformancePanel({
     };
   }, [businessId]);
 
-  const todayOrders = useMemo(
-    () =>
-      orders.filter(
-        (o) =>
-          !/cancel/.test(String(o.status || '').toLowerCase()) &&
-          orderBelongsToDay(o, todayKey),
-      ),
-    [orders, todayKey],
+  const activeOrders = useMemo(
+    () => orders.filter((o) => !/cancel/.test(String(o.status || '').toLowerCase())),
+    [orders],
+  );
+
+  const rangedOrders = useMemo(
+    () => activeOrders.filter((o) => orderInRange(o, range, todayKey)),
+    [activeOrders, range, todayKey],
+  );
+
+  const prevOrders = useMemo(
+    () => activeOrders.filter((o) => orderInPrevRange(o, range, todayKey)),
+    [activeOrders, range, todayKey],
   );
 
   const rows = useMemo(
-    () => buildBrandDayRows(todayOrders, brands, rules),
-    [todayOrders, brands, rules],
+    () => buildBrandRows(rangedOrders, brands, rules),
+    [rangedOrders, brands, rules],
   );
+
+  const prevRows = useMemo(
+    () => buildBrandRows(prevOrders, brands, rules),
+    [prevOrders, brands, rules],
+  );
+
+  const prevById = useMemo(() => {
+    const m = new Map<string, CompanyBrandDayRow>();
+    for (const r of prevRows) m.set(r.brandId, r);
+    return m;
+  }, [prevRows]);
 
   const selectable = useMemo(() => brandsForBilling(brands), [brands]);
 
@@ -197,33 +560,109 @@ export function CompanyBrandPerformancePanel({
     () => Math.round(rows.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
     [rows],
   );
+  const prevRevenue = useMemo(
+    () => Math.round(prevRows.reduce((s, r) => s + r.revenue, 0) * 100) / 100,
+    [prevRows],
+  );
+  const revenueMom = monthOverMonthPct(totalRevenue, prevRevenue);
+
+  const foodNow = useMemo(
+    () => foodFamilyCountsFromOrders(rangedOrders),
+    [rangedOrders],
+  );
+  const foodPrev = useMemo(
+    () => foodFamilyCountsFromOrders(prevOrders),
+    [prevOrders],
+  );
 
   const selected = selectedId === 'all' ? null : rows.find((r) => r.brandId === selectedId) || null;
+  const selectedPrev = selected ? prevById.get(selected.brandId) || null : null;
+
+  const integratorRows = useMemo(() => {
+    if (selectedId !== 'all') {
+      return buildIntegratorRows(rangedOrders, { brandId: selectedId, rules });
+    }
+    return buildIntegratorRows(rangedOrders);
+  }, [rangedOrders, selectedId, rules]);
+
+  const prevIntegratorRows = useMemo(() => {
+    if (selectedId !== 'all') {
+      return buildIntegratorRows(prevOrders, { brandId: selectedId, rules });
+    }
+    return buildIntegratorRows(prevOrders);
+  }, [prevOrders, selectedId, rules]);
+
+  const prevIntegratorByKey = useMemo(() => {
+    const m = new Map<string, IntegratorPerfRow>();
+    for (const r of prevIntegratorRows) m.set(r.key, r);
+    return m;
+  }, [prevIntegratorRows]);
 
   if (!loading && selectable.length === 0) return null;
 
+  const emptyLabel =
+    range === 'day'
+      ? 'Sin ventas de marca hoy'
+      : range === 'month'
+        ? 'Sin ventas de marca este mes'
+        : 'Sin ventas de marca este año';
+
+  const vsLabel = RANGE_VS_LABEL[range];
+  const selectedFood = selected?.food || emptyFoodFamilyCounts();
+  const selectedFoodPrev = selectedPrev?.food || emptyFoodFamilyCounts();
+
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-3.5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-xs font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
-            <Package className="h-3.5 w-3.5 text-amber-600" />
-            Marcas · hoy
+    <section className="rounded-xl border border-gray-200 bg-white p-2.5 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:p-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        <div className="min-w-0 flex items-center gap-2">
+          <Package className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
+          <p className="truncate text-xs font-bold text-gray-900 dark:text-gray-100">
+            Marcas · {RANGE_LABEL[range].toLowerCase()}
           </p>
-          <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-            Según Facturación (Empresa → Marca). Elige una marca para ver cómo va.
-          </p>
+          <span className="hidden text-[10px] text-gray-400 sm:inline">{vsLabel}</span>
         </div>
-        <p className="text-sm font-black tabular-nums text-gray-900 dark:text-gray-100">
-          {loading ? '…' : fmtEuro(totalRevenue)}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-600 dark:bg-gray-900/50">
+            {(['day', 'month', 'year'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRange(key)}
+                className={`rounded-md px-2 py-1 text-[10px] font-bold transition-colors ${
+                  compact ? 'min-h-9 px-2.5' : ''
+                } ${
+                  range === key
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                    : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+                }`}
+              >
+                {RANGE_LABEL[key]}
+              </button>
+            ))}
+          </div>
+          <span className="inline-flex items-center gap-1">
+            <span className="text-xs font-black tabular-nums text-gray-900 dark:text-gray-100">
+              {loading ? '…' : formatMoneyEs(totalRevenue)}
+            </span>
+            {!loading ? <VsBadge pct={revenueMom} /> : null}
+          </span>
+        </div>
       </div>
 
-      <div className="mt-2.5 flex flex-wrap gap-1.5">
+      {!loading ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Uds</span>
+          <FoodFamilyStrip food={foodNow} prev={foodPrev} vsLabel={vsLabel} />
+        </div>
+      ) : null}
+
+      <div className="mt-1.5 flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <button
           type="button"
           onClick={() => setSelectedId('all')}
-          className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+            compact ? 'min-h-9 px-2.5' : ''
+          } ${
             selectedId === 'all'
               ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
               : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300'
@@ -234,13 +673,15 @@ export function CompanyBrandPerformancePanel({
         {selectable.map((b) => {
           const id = String(b._id || b.id || '');
           const on = selectedId === id;
-          const color = b.primaryColor || '#6366F1';
+          const color = b.primaryColor || '#2563EB';
           return (
             <button
               key={id}
               type="button"
               onClick={() => setSelectedId(id)}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${
+                compact ? 'min-h-9 px-2.5' : ''
+              } ${
                 on ? 'text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300'
               }`}
               style={on ? { backgroundColor: color } : undefined}
@@ -252,88 +693,120 @@ export function CompanyBrandPerformancePanel({
       </div>
 
       {loading ? (
-        <p className="mt-3 text-xs text-gray-500">Cargando…</p>
+        <p className="mt-2 text-xs text-gray-500">Cargando…</p>
       ) : selectedId === 'all' ? (
-        <div className="mt-3 space-y-1.5">
-          {rows.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-gray-200 px-3 py-4 text-center text-xs text-gray-500 dark:border-gray-700">
-              Sin ventas de marca hoy
-            </p>
-          ) : (
-            rows.map((row) => (
-              <button
-                key={row.brandId}
-                type="button"
-                onClick={() => setSelectedId(row.brandId)}
-                className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50/80 px-2.5 py-2 text-left transition-colors hover:border-gray-300 dark:border-gray-800 dark:bg-gray-800/50 dark:hover:border-gray-600"
-              >
-                <span className="min-w-0 flex items-center gap-2">
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: row.color }}
-                  />
-                  <span className="truncate text-xs font-semibold text-gray-900 dark:text-gray-100">
-                    {row.name}
-                  </span>
-                  {row.lineLabel ? (
-                    <span className="truncate text-[10px] text-gray-400">{row.lineLabel}</span>
-                  ) : null}
-                </span>
-                <span className="shrink-0 text-right">
-                  <span className="block text-xs font-bold tabular-nums text-gray-900 dark:text-gray-100">
-                    {fmtEuro(row.revenue)}
-                  </span>
-                  <span className="text-[10px] text-gray-500">
-                    {row.sharePercent}% · {row.orderCount} ped. · {row.units} uds
-                  </span>
-                </span>
-              </button>
-            ))
-          )}
+        <div className="mt-2 space-y-2">
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {rows.length === 0 ? (
+              <p className="py-3 text-center text-[11px] text-gray-400">{emptyLabel}</p>
+            ) : (
+              rows.map((row) => {
+                const prev = prevById.get(row.brandId);
+                const mom = monthOverMonthPct(row.revenue, prev?.revenue || 0);
+                const foodTxt = foodLine(row.food);
+                return (
+                  <button
+                    key={row.brandId}
+                    type="button"
+                    onClick={() => setSelectedId(row.brandId)}
+                    className="flex w-full items-center justify-between gap-2 py-1.5 text-left transition-colors hover:bg-gray-50/80 dark:hover:bg-gray-800/40"
+                  >
+                    <span className="min-w-0 flex items-center gap-1.5">
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: row.color }}
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate text-[11px] font-semibold text-gray-900 dark:text-gray-100">
+                          {row.name}
+                          {row.lineLabel ? (
+                            <span className="ml-1 text-[9px] font-normal text-gray-400">
+                              {row.lineLabel}
+                            </span>
+                          ) : null}
+                        </span>
+                        {foodTxt ? (
+                          <span className="block truncate text-[9px] text-gray-400">{foodTxt}</span>
+                        ) : null}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span className="flex items-center justify-end gap-1">
+                        <span className="text-[11px] font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                          {formatMoneyEs(row.revenue)}
+                        </span>
+                        <VsBadge pct={mom} />
+                      </span>
+                      <span className="text-[9px] text-gray-400">
+                        {formatNumberEs(row.sharePercent, { maxFraction: 0 })}% ·{' '}
+                        {formatNumberEs(row.orderCount, { maxFraction: 0 })} ped.
+                      </span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          <IntegratorsBlock
+            rows={integratorRows}
+            prevByKey={prevIntegratorByKey}
+            vsLabel={vsLabel}
+            rangeLabel={RANGE_LABEL[range].toLowerCase()}
+          />
         </div>
       ) : selected ? (
-        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-800/40">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: selected.color }} />
+        <div className="mt-2 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0 flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: selected.color }} />
+              <p className="truncate text-xs font-bold text-gray-900 dark:text-gray-100">
                 {selected.name}
               </p>
-              {selected.lineLabel ? (
-                <p className="mt-0.5 text-[11px] text-gray-500">{selected.lineLabel}</p>
-              ) : null}
             </div>
-            <p className="text-lg font-black tabular-nums text-gray-900 dark:text-gray-100">
-              {fmtEuro(selected.revenue)}
-            </p>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-2">
-            <div className="rounded-lg bg-white px-2 py-2 dark:bg-gray-900/60">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">% del día</p>
-              <p className="mt-0.5 text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
-                {selected.sharePercent}%
+            <div className="flex shrink-0 items-center gap-1.5">
+              <p className="text-sm font-black tabular-nums text-gray-900 dark:text-gray-100">
+                {formatMoneyEs(selected.revenue)}
               </p>
-            </div>
-            <div className="rounded-lg bg-white px-2 py-2 dark:bg-gray-900/60">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Pedidos</p>
-              <p className="mt-0.5 text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
-                {selected.orderCount}
-              </p>
-            </div>
-            <div className="rounded-lg bg-white px-2 py-2 dark:bg-gray-900/60">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Unidades</p>
-              <p className="mt-0.5 text-sm font-bold tabular-nums text-gray-900 dark:text-gray-100">
-                {selected.units}
-              </p>
+              <VsBadge pct={monthOverMonthPct(selected.revenue, selectedPrev?.revenue || 0)} />
             </div>
           </div>
-          <p className="mt-2 text-[10px] text-gray-400 flex items-center gap-1">
-            <Store className="h-3 w-3" />
-            Reparto con reglas de Facturación · {todayKey}
-          </p>
+
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-gray-500">
+            <span>
+              {RANGE_SHARE_LABEL[range]}{' '}
+              <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+                {formatNumberEs(selected.sharePercent, { maxFraction: 0 })}%
+              </strong>
+            </span>
+            <span className="inline-flex items-center gap-1">
+              Ped.{' '}
+              <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+                {formatNumberEs(selected.orderCount, { maxFraction: 0 })}
+              </strong>
+              <VsBadge pct={monthOverMonthPct(selected.orderCount, selectedPrev?.orderCount || 0)} />
+            </span>
+            <span className="inline-flex items-center gap-1">
+              Uds{' '}
+              <strong className="tabular-nums text-gray-800 dark:text-gray-200">
+                {formatNumberEs(selected.units, { maxFraction: 1 })}
+              </strong>
+              <VsBadge pct={monthOverMonthPct(selected.units, selectedPrev?.units || 0)} />
+            </span>
+          </div>
+
+          <FoodFamilyStrip food={selectedFood} prev={selectedFoodPrev} vsLabel={vsLabel} />
+
+          <IntegratorsBlock
+            rows={integratorRows}
+            prevByKey={prevIntegratorByKey}
+            vsLabel={vsLabel}
+            rangeLabel={RANGE_LABEL[range].toLowerCase()}
+            scopeLabel={selected.name}
+          />
         </div>
       ) : (
-        <p className="mt-3 text-xs text-gray-500">Esta marca no tiene ventas hoy.</p>
+        <p className="mt-2 text-[11px] text-gray-500">Esta marca no tiene ventas en el periodo.</p>
       )}
     </section>
   );

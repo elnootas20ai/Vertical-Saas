@@ -19,6 +19,7 @@ import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { EmploymentSkill } from '../../../lib/authApi';
+import { formatDateEs } from '../../../lib/formatDateEs';
 
 const CONTRACT_LABELS: Record<string, string> = {
   indefinido: 'Indefinido',
@@ -106,7 +107,7 @@ export function WorkerPosition() {
                   <Calendar className="w-4 h-4" />
                   <span className="text-xs font-medium uppercase">{t('worker.position.startDate')}</span>
                 </div>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{employment.startDate}</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{formatDateEs(employment.startDate)}</p>
               </div>
             )}
             {employment?.salary && (

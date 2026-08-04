@@ -44,6 +44,13 @@ function fileBelongsToVertical(filePath, moduleDef) {
   if (moduleDef.id === 'compraventa' && r.startsWith('src/app/lib/compraventa')) {
     return true;
   }
+  if (moduleDef.id === 'butcher') {
+    const base = r.split('/').pop() || '';
+    if (r.startsWith('src/app/pages/saas/') && /^Butcher/i.test(base)) return true;
+    if (r.startsWith('src/app/pages/saas/worker/') && /Butcher/i.test(base)) return true;
+    if (r.startsWith('src/app/lib/butcher')) return true;
+    if (r.startsWith('src/app/pages/saas/dashboards/Butcher')) return true;
+  }
   return false;
 }
 
@@ -90,6 +97,15 @@ const COMPRAVENTA_ONLY_IMPORT_PATTERNS = [
   /\/verticals\/compraventa\//,
 ];
 
+const BUTCHER_ONLY_IMPORT_PATTERNS = [
+  /\/pages\/saas\/Butcher/,
+  /\/pages\/saas\/dashboards\/Butcher/,
+  /\/lib\/butcher/,
+  /\/verticals\/butcher\//,
+  /\/pages\/saas\/worker\/WorkerTpvButcherShop/,
+  /\/pages\/saas\/worker\/WorkerButcher/,
+];
+
 const IMPORT_RE =
   /\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
@@ -130,15 +146,17 @@ function scanCrossVerticalViolations(ownerModule, forbiddenPatterns, isLegacySha
 }
 
 describe('vertical module boundaries', () => {
-  it('registro delivery, restaurant y compraventa tienen ids distintos', async () => {
+  it('registro delivery, restaurant, compraventa y butcher tienen ids distintos', async () => {
     const { DELIVERY_MODULE } = await import('../src/app/verticals/delivery/module.ts');
     const { RESTAURANT_MODULE } = await import('../src/app/verticals/restaurant/module.ts');
     const { COMPRAVENTA_MODULE } = await import('../src/app/verticals/compraventa/module.ts');
+    const { BUTCHER_MODULE } = await import('../src/app/verticals/butcher/module.ts');
     expect(DELIVERY_MODULE.id).toBe('delivery');
     expect(RESTAURANT_MODULE.id).toBe('restaurant');
     expect(COMPRAVENTA_MODULE.id).toBe('compraventa');
-    expect(DELIVERY_MODULE.businessType).not.toBe(RESTAURANT_MODULE.businessType);
-    expect(DELIVERY_MODULE.businessType).not.toBe(COMPRAVENTA_MODULE.businessType);
+    expect(BUTCHER_MODULE.id).toBe('butcher');
+    expect(BUTCHER_MODULE.businessType).toBe('butcherShop');
+    expect(DELIVERY_MODULE.businessType).not.toBe(BUTCHER_MODULE.businessType);
   });
 
   it('compraventa no importa lógica de negocio delivery (solo legacy PDV permitido)', async () => {
@@ -199,6 +217,28 @@ describe('vertical module boundaries', () => {
     const violations = scanCrossVerticalViolations(
       DELIVERY_MODULE,
       RESTAURANT_ONLY_IMPORT_PATTERNS,
+      isLegacySharedCrossVerticalImport,
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('butcher no importa pantallas/lib de negocio delivery', async () => {
+    const { BUTCHER_MODULE } = await import('../src/app/verticals/butcher/module.ts');
+    const { isLegacySharedCrossVerticalImport } = await import('../src/app/verticals/registry.ts');
+    const violations = scanCrossVerticalViolations(
+      BUTCHER_MODULE,
+      DELIVERY_ONLY_IMPORT_PATTERNS,
+      isLegacySharedCrossVerticalImport,
+    );
+    expect(violations).toEqual([]);
+  });
+
+  it('delivery no importa pantallas/lib de negocio butcher', async () => {
+    const { DELIVERY_MODULE } = await import('../src/app/verticals/delivery/module.ts');
+    const { isLegacySharedCrossVerticalImport } = await import('../src/app/verticals/registry.ts');
+    const violations = scanCrossVerticalViolations(
+      DELIVERY_MODULE,
+      BUTCHER_ONLY_IMPORT_PATTERNS,
       isLegacySharedCrossVerticalImport,
     );
     expect(violations).toEqual([]);

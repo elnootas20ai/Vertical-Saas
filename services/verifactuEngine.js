@@ -138,6 +138,12 @@ export function defaultVerifactuSettings(businessId, business = {}) {
     environment: 'sandbox',
     series: 'A',
     nextNumber: 1,
+    /** Al cobrar en TPV/sala se emite registro automático (si enabled). */
+    autoIssueOnSale: true,
+    /** Precios de carta/ticket incluyen IVA. */
+    pricesIncludeTax: true,
+    /** IVA por defecto si el artículo no trae tipo (hostelería suele 10). */
+    defaultTaxRate: 10,
     issuerNif: normalizeNif(business.taxId || ''),
     issuerName: String(business.name || '').trim(),
     issuerAddress: String(business.address || '').trim(),
@@ -163,6 +169,9 @@ export function sanitizeVerifactuSettings(doc) {
     environment: doc.environment === 'production' ? 'production' : 'sandbox',
     series: String(doc.series || 'A'),
     nextNumber: Number(doc.nextNumber) || 1,
+    autoIssueOnSale: doc.autoIssueOnSale !== false,
+    pricesIncludeTax: doc.pricesIncludeTax !== false,
+    defaultTaxRate: Number.isFinite(Number(doc.defaultTaxRate)) ? Number(doc.defaultTaxRate) : 10,
     issuerNif: normalizeNif(doc.issuerNif),
     issuerName: String(doc.issuerName || ''),
     issuerAddress: String(doc.issuerAddress || ''),

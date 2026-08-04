@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 import { Check, ChevronLeft, X } from 'lucide-react';
 import { useModalClose } from '../../../hooks/useModalClose';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../../lib/vertialUiTokens';
 
 export type SettingsWizardStep = {
   id: string;
@@ -290,19 +291,11 @@ export function SettingsWizardFooter({
 }: SettingsWizardFooterProps) {
   return (
     <div className="flex flex-wrap gap-2">
-      <button
-        type="button"
-        onClick={onCancel}
-        className="rounded-xl border-2 border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-      >
+      <button type="button" onClick={onCancel} className={VERTIAL_BTN_SECONDARY}>
         Cancelar
       </button>
       {showBack && onBack ? (
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex items-center gap-1 rounded-xl border-2 border-gray-200 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300"
-        >
+        <button type="button" onClick={onBack} className={VERTIAL_BTN_SECONDARY}>
           <ChevronLeft className="h-4 w-4" />
           Atrás
         </button>
@@ -312,7 +305,7 @@ export function SettingsWizardFooter({
           type="button"
           onClick={onNext}
           disabled={disableNext}
-          className="min-w-[7rem] flex-1 rounded-xl border-2 border-gray-900 bg-gray-900 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-black disabled:opacity-50 dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+          className={`${VERTIAL_BTN_PRIMARY} min-w-[7rem] flex-1`}
         >
           {nextLabel}
         </button>
@@ -321,7 +314,7 @@ export function SettingsWizardFooter({
           type="button"
           onClick={onSave}
           disabled={saving || disableSave}
-          className="min-w-[7rem] flex-1 rounded-xl bg-gray-900 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-black disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+          className={`${VERTIAL_BTN_PRIMARY} min-w-[7rem] flex-1`}
         >
           {saving ? 'Guardando…' : saveLabel}
         </button>

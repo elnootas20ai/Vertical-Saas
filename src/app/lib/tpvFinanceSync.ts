@@ -1,6 +1,7 @@
 import { createFinanceMovementInCouch, listFinanceMovements } from './financeApi';
 import type { TpvRegisterSession } from './deliveryApi';
 import type { FinanceMovementScope } from './financeScope';
+import { sessionWorkDayKey } from './tpvCajaScope';
 
 function sessionRef(sessionId: string) {
   return `TPV-${sessionId}`;
@@ -33,7 +34,10 @@ export async function ensureTpvSessionIncome(
   const totalSales = Number(session.summary?.totalSales ?? 0);
   if (totalSales <= 0) return false;
 
-  const dateStr = (session.closedAt || new Date().toISOString()).slice(0, 10);
+  // Misma lógica que Caja/Excel: el ingreso cuenta en el día que se abrió el turno.
+  const dateStr =
+    sessionWorkDayKey(session)
+    || (session.closedAt || new Date().toISOString()).slice(0, 10);
   const pdvId = String(scope.pointOfSaleId || session.pointOfSaleId || '').trim();
 
   let alreadyFromOrders = 0;

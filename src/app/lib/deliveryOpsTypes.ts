@@ -10,6 +10,7 @@ export const GUIDED_ACTIVATION_BUSINESS_TYPES = [
   'gym',
   'workshop',
   'events',
+  'butcherShop',
 ] as const;
 
 export type DeliveryOpsBusinessType = (typeof DELIVERY_OPS_BUSINESS_TYPES)[number];
@@ -36,7 +37,7 @@ export function isEventsBusinessType(businessType?: string | null): boolean {
 /** Negocios con tienda / PDV / TPV en sidebar y ajustes. */
 export function isRetailStoreBusinessType(businessType?: string | null): boolean {
   const t = String(businessType || '').trim();
-  return isDeliveryOpsBusinessType(t) || t === 'restaurant' || t === 'carDealership';
+  return isDeliveryOpsBusinessType(t) || t === 'restaurant' || t === 'carDealership' || t === 'butcherShop';
 }
 
 export function getGuidedActivationChecklistTitle(businessType?: string | null): string {
@@ -47,6 +48,7 @@ export function getGuidedActivationChecklistTitle(businessType?: string | null):
   if (t === 'gym') return 'Alta gimnasio';
   if (t === 'workshop') return 'Alta taller';
   if (t === 'events') return 'Alta eventos';
+  if (t === 'butcherShop') return 'Alta carnicería';
   return 'Alta delivery';
 }
 
@@ -57,6 +59,7 @@ export function getGuidedActivationFirstStepId(businessType?: string | null): st
   if (t === 'gym') return 'gym_company';
   if (t === 'workshop') return 'workshop_company';
   if (t === 'events') return 'events_company';
+  if (t === 'butcherShop') return 'butcher_products';
   if (t === 'restaurant') return 'retail_store';
   if (isDeliveryOpsBusinessType(t)) return 'delivery_store';
   return undefined;

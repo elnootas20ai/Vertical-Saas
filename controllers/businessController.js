@@ -143,6 +143,12 @@ export async function updateBusiness(req, res) {
         }
         return business.restaurantFormat || null;
       })(),
+      ownDeliveryEnabled: updates.ownDeliveryEnabled !== undefined
+        ? Boolean(updates.ownDeliveryEnabled)
+        : Boolean(business.ownDeliveryEnabled),
+      butcherTargetMarginPct: updates.butcherTargetMarginPct !== undefined
+        ? Math.max(0, Math.min(90, Number(updates.butcherTargetMarginPct) || 30))
+        : Number(business.butcherTargetMarginPct ?? 30),
       name: updates.name !== undefined ? String(updates.name || '').trim() : business.name,
       legalName: updates.legalName !== undefined ? String(updates.legalName || '').trim() : business.legalName,
       taxId: updates.taxId !== undefined ? String(updates.taxId || '').trim() : business.taxId,

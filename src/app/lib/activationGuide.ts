@@ -126,6 +126,24 @@ export const ACTIVATION_FIELD_GUIDES: Record<string, ActivationFieldGuide> = {
     bannerTitle: 'Registra una venta',
     bannerDetail: 'Pulsa el botón de nueva venta / operación.',
   },
+  'vehicle-entry': {
+    fieldKey: 'vehicle-entry',
+    label: 'Entrada de vehículo',
+    bannerTitle: 'Da de alta un vehículo',
+    bannerDetail: 'Completa matrícula, marca, modelo y precio de compra.',
+  },
+  'vehicle-price': {
+    fieldKey: 'vehicle-price',
+    label: 'Precio de venta',
+    bannerTitle: 'Pon precio de venta',
+    bannerDetail: 'En la ficha del vehículo indica un precio de venta > 0 €.',
+  },
+  'compraventa-hub': {
+    fieldKey: 'compraventa-hub',
+    label: 'Centro operativo',
+    bannerTitle: 'Revisa el hub',
+    bannerDetail: 'KPIs, alertas y accesos a stock, ventas y finanzas.',
+  },
   'open-tpv': {
     fieldKey: 'open-tpv',
     label: 'Abrir TPV',
@@ -338,6 +356,27 @@ export const ACTIVATION_SUBSTEP_GUIDES: Record<string, ActivationSubStepGuide> =
     route: '/saas/sales',
     clickHint: 'Ventas → nueva operación',
   },
+  // Compraventa — stock / operativa
+  first_vehicle: {
+    fieldKey: 'vehicle-entry',
+    route: '/saas/vertical/compraventa/entrada-vehiculo',
+    clickHint: 'Entrada vehículo → dar de alta el primer coche en stock',
+  },
+  vehicle_price: {
+    fieldKey: 'vehicle-price',
+    route: '/saas/vehicles',
+    clickHint: 'Vehículos → ficha → precio de venta > 0 €',
+  },
+  pdv_active: {
+    fieldKey: 'create-store',
+    route: '/saas/settings/tienda',
+    clickHint: 'Ajustes → Tienda → expositor con PDV activo',
+  },
+  ops_ready: {
+    fieldKey: 'compraventa-hub',
+    route: '/saas/vertical/compraventa',
+    clickHint: 'Centro operativo compraventa → revisar KPIs y alertas',
+  },
   events_catalog_service: {
     fieldKey: 'events-service-add',
     route: '/saas/events-services',
@@ -384,6 +423,13 @@ export function getSubStepGuide(
   if (!base) return null;
   if (isRestaurantBusinessType(businessType)) {
     return RESTAURANT_ACTIVATION_SUBSTEP_GUIDES[subStepId] ?? base;
+  }
+  if (businessType === 'carDealership' && subStepId === 'first_sale') {
+    return {
+      ...base,
+      route: '/saas/vertical/compraventa/ventas',
+      clickHint: 'Ventas compraventa → nueva venta',
+    };
   }
   return base;
 }

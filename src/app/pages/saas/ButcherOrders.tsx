@@ -33,10 +33,12 @@ const ORDER_TYPE_CFG: Record<OrderType, { label: string; prefix: string; color: 
   special: { label: 'Encargo', prefix: 'ENC', color: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300' },
 };
 
-const STATUS_CFG: Record<OrderStatus, { label: string; dot: string; action?: string; next?: OrderStatus }> = {
+const STATUS_CFG: Record<OrderStatus, { label: string; dot: string; action?: string; next?: OrderStatus; deliveryNext?: OrderStatus; deliveryAction?: string }> = {
   pending:   { label: 'Pendiente',  dot: 'bg-amber-500',   action: 'Preparar',        next: 'preparing' },
   preparing: { label: 'Preparando', dot: 'bg-blue-500',    action: 'Marcar listo',     next: 'ready' },
-  ready:     { label: 'Listo',      dot: 'bg-emerald-500', action: 'Marcar recogido',  next: 'picked_up' },
+  ready:     { label: 'Listo',      dot: 'bg-emerald-500', action: 'Marcar recogido',  next: 'picked_up', deliveryAction: 'Salir a reparto', deliveryNext: 'out_for_delivery' },
+  out_for_delivery: { label: 'En reparto', dot: 'bg-violet-500', action: 'Marcar entregado', next: 'delivered' },
+  delivered: { label: 'Entregado',  dot: 'bg-gray-400' },
   picked_up: { label: 'Recogido',   dot: 'bg-gray-400' },
   cancelled: { label: 'Cancelado',  dot: 'bg-red-500' },
 };
@@ -51,6 +53,10 @@ const EMPTY_FORM = {
   items: [{ ...EMPTY_ITEM }] as OrderItem[],
   pickupDate: HOY,
   pickupTime: '',
+  fulfillmentMode: 'pickup' as 'pickup' | 'delivery',
+  deliveryAddress: '',
+  deliveryNotes: '',
+  cashOnDelivery: false,
   priority: 'normal',
   notes: '',
 };
@@ -103,7 +109,7 @@ export function ButcherOrders() {
     pending: orders.filter((o) => o.status === 'pending').length,
     preparing: orders.filter((o) => o.status === 'preparing').length,
     ready: orders.filter((o) => o.status === 'ready').length,
-    urgent: orders.filter((o) => o.priority === 'urgent' && o.status !== 'picked_up' && o.status !== 'cancelled').length,
+    urgent: orders.filter((o) => o.priority === 'urgent' && !['picked_up', 'delivered', 'cancelled'].includes(o.status)).length,
   }), [orders]);
 
   const openCreate = (type: OrderType = 'simple') => {
@@ -118,8 +124,22 @@ export function ButcherOrders() {
       orderType: o.orderType, clientId: o.clientId, clientName: o.clientName, clientPhone: o.clientPhone,
       items: o.items.length > 0 ? [...o.items] : [{ ...EMPTY_ITEM }],
       pickupDate: o.pickupDate, pickupTime: o.pickupTime, priority: o.priority, notes: o.notes,
+      fulfillmentMode: o.fulfillmentMode || 'pickup',
+      deliveryAddress: o.deliveryAddress || '',
+      deliveryNotes: o.deliveryNotes || '',
+      cashOnDelivery: Boolean(o.cashOnDelivery),
     });
     setShowModal(true);
+  };
+
+  const nextStatusFor = (o: ButcherOrder) => {
+    const cfg = STATUS_CFG[o.status];
+    if (!cfg) return null;
+    if (o.fulfillmentMode === 'delivery' && cfg.deliveryNext) {
+      return { status: cfg.deliveryNext, action: cfg.deliveryAction || cfg.action || 'Avanzar' };
+    }
+    if (cfg.next) return { status: cfg.next, action: cfg.action || 'Avanzar' };
+    return null;
   };
 
   const calcTotal = (items: OrderItem[]) => items.reduce((s, it) => s + (Number(it.quantity || 0) * Number(it.pricePerUnit || 0)), 0);
@@ -264,6 +284,9 @@ export function ButcherOrders() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono font-bold text-gray-900 dark:text-white text-sm">{o.orderNumber}</span>
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeCfg.color}`}>{typeCfg.label}</span>
+                        {o.fulfillmentMode === 'delivery' && (
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300">Reparto</span>
+                        )}
                         {o.priority === 'urgent' && <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">URGENTE</span>}
                       </div>
                       <div className="flex items-center gap-3 mt-1 text-sm text-gray-600 dark:text-gray-400">
@@ -273,6 +296,9 @@ export function ButcherOrders() {
                       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">
                         {o.items.map((it) => `${it.quantity}${it.unit} ${it.productName}`).join(', ')}
                       </p>
+                      {o.fulfillmentMode === 'delivery' && o.deliveryAddress && (
+                        <p className="text-xs text-violet-600 dark:text-violet-400 mt-1 truncate">{o.deliveryAddress}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
@@ -281,11 +307,15 @@ export function ButcherOrders() {
                       <span className="text-base font-bold text-gray-900 dark:text-white block">{o.total.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      {statusCfg.next && (
-                        <button type="button" onClick={() => handleStatusChange(o, statusCfg.next!)} className="px-3 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-xs font-semibold hover:opacity-90 transition">
-                          {statusCfg.action}
-                        </button>
-                      )}
+                      {(() => {
+                        const nxt = nextStatusFor(o);
+                        if (!nxt) return null;
+                        return (
+                          <button type="button" onClick={() => handleStatusChange(o, nxt.status)} className="px-3 py-1.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-xs font-semibold hover:opacity-90 transition">
+                            {nxt.action}
+                          </button>
+                        );
+                      })()}
                       <button type="button" onClick={() => openEdit(o)} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"><Edit2 className="w-4 h-4" /></button>
                       <button type="button" onClick={() => handleDelete(o._id)} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-gray-400 hover:text-red-600"><Trash2 className="w-4 h-4" /></button>
                     </div>
@@ -370,14 +400,66 @@ export function ButcherOrders() {
                 </p>
               </div>
 
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, fulfillmentMode: 'pickup' }))}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition ${form.fulfillmentMode === 'pickup' ? 'bg-gray-900 text-white dark:bg-white dark:text-gray-900' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}
+                >
+                  Recogida en tienda
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, fulfillmentMode: 'delivery' }))}
+                  className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold transition ${form.fulfillmentMode === 'delivery' ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}`}
+                >
+                  Reparto a domicilio
+                </button>
+              </div>
+
+              {form.fulfillmentMode === 'delivery' && (
+                <div className="space-y-3 p-3 rounded-xl border border-violet-200 dark:border-violet-800 bg-violet-50/50 dark:bg-violet-950/20">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Dirección de entrega</label>
+                    <input
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 text-gray-900 dark:text-white outline-none"
+                      value={form.deliveryAddress}
+                      onChange={(e) => setForm((f) => ({ ...f, deliveryAddress: e.target.value }))}
+                      placeholder="Calle, número, piso…"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Notas de reparto</label>
+                    <input
+                      className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 text-gray-900 dark:text-white outline-none"
+                      value={form.deliveryNotes}
+                      onChange={(e) => setForm((f) => ({ ...f, deliveryNotes: e.target.value }))}
+                      placeholder="Portero, franja horaria…"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={form.cashOnDelivery}
+                      onChange={(e) => setForm((f) => ({ ...f, cashOnDelivery: e.target.checked }))}
+                    />
+                    Cobro en ruta
+                  </label>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Fecha recogida</label>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                    {form.fulfillmentMode === 'delivery' ? 'Fecha entrega' : 'Fecha recogida'}
+                  </label>
                   <input type="date" className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 text-gray-900 dark:text-white outline-none"
                     value={form.pickupDate} onChange={(e) => setForm((f) => ({ ...f, pickupDate: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">Hora recogida</label>
+                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                    {form.fulfillmentMode === 'delivery' ? 'Hora entrega' : 'Hora recogida'}
+                  </label>
                   <input type="time" className="w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 text-gray-900 dark:text-white outline-none"
                     value={form.pickupTime} onChange={(e) => setForm((f) => ({ ...f, pickupTime: e.target.value }))} />
                 </div>

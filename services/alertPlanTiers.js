@@ -4,18 +4,21 @@
  */
 
 /**
- * Plan Básico — mínimo (casi no se vende).
- * Solo avisos informativos o de muy bajo nivel.
+ * Plan Básico — pack delivery compacto esencial (+ ids legacy del catálogo).
  */
 export const BASIC_ALERT_RULE_IDS = new Set([
+  'worker_no_clockin',
+  'document_missing_required',
+  'delivery_register_not_opened',
+  'delivery_cash_pending_close',
+  'delivery_delayed_order',
+  'delivery_unpaid_order',
+  'delivery_order_cancelled',
   'lead_new',
   'sale_cancelled',
   'payment_received',
-  'worker_no_clockin',
   'stock_low',
   'low_stock',
-  'delivery_no_address',
-  'delivery_register_not_opened',
 ]);
 
 /** Verticales y operaciones especializadas (no delivery puro). */
@@ -63,10 +66,7 @@ export const DELIVERY_PRO_ALERT_RULE_IDS = new Set([
   'worker_absent_pattern',
   'worker_overtime',
   'contract_expiring',
-  'document_expired',
-  'document_expiring',
-  'document_expiring_soon',
-  'document_missing_required',
+  // Docs caducidad del pack delivery → Normal (no Pro)
   'fleet_itv_expiring',
   'fleet_insurance_expiring',
   'itv_expired',
@@ -161,12 +161,12 @@ export function getVisiblePlanTiersForVertical() {
 export function alertTierDescription(tier, vertical = 'delivery') {
   if (isDeliveryVertical(vertical)) {
     if (tier === 'basic') {
-      return 'Plan de entrada con avisos mínimos: leads, ventas canceladas, stock bajo y recordatorios simples.';
+      return 'Pack compacto: fichaje, docs empresa, caja, pedido retrasado, sin cobrar y cancelado.';
     }
     if (tier === 'normal') {
-      return 'Plan recomendado para el gerente: caja, incidencias de pedidos, impagos, fichajes y operación del negocio.';
+      return 'Mismo pack + descuadre de caja, pedido muy retrasado y caducidad de documentos.';
     }
-    return 'El más completo: finanzas avanzadas, fiscal, proveedores, documentación, márgenes, canales y control inteligente.';
+    return 'En delivery el pack útil ya está en Básico/Normal. Pro no añade interruptores vacíos.';
   }
   if (tier === 'basic') {
     return 'Pedidos, caja, stock crítico, impagos y fichajes. Incluidas desde el plan Básico.';

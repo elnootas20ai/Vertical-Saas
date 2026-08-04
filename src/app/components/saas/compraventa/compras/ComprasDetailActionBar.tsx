@@ -1,8 +1,11 @@
-import { FileUp, Calculator, Pencil, Plus, Receipt, XCircle } from 'lucide-react';
+﻿import { FileUp, Calculator, CheckCircle2, Pencil, Plus, Receipt, ScanLine, XCircle } from 'lucide-react';
+import { VERTIAL_BTN_PRIMARY } from '../../../../lib/vertialUiTokens';
 
 const ACTIONS = [
-  { id: 'fiscal', label: 'Calculadora fiscal', icon: Calculator },
+  { id: 'fiscal', label: 'Simulación fiscal', icon: Calculator },
   { id: 'edit', label: 'Editar', icon: Pencil },
+  { id: 'ocr', label: 'Escanear OCR', icon: ScanLine },
+  { id: 'approve', label: 'Aprobar', icon: CheckCircle2 },
   { id: 'expense', label: 'Añadir gasto', icon: Receipt },
   { id: 'document', label: 'Adjuntar documento', icon: FileUp },
   { id: 'cancel', label: 'Cancelar compra', icon: XCircle, danger: true },
@@ -13,20 +16,24 @@ export type CompraActionId = (typeof ACTIONS)[number]['id'];
 type ComprasDetailActionBarProps = {
   showActions?: boolean;
   disabled?: boolean;
+  hiddenActions?: CompraActionId[];
   onAction?: (actionId: CompraActionId) => void;
 };
 
 export function ComprasDetailActionBar({
   showActions = false,
   disabled = false,
+  hiddenActions = [],
   onAction,
 }: ComprasDetailActionBarProps) {
   if (!showActions) return null;
 
+  const visible = ACTIONS.filter((action) => !hiddenActions.includes(action.id));
+
   return (
-    <div className="shrink-0 border-b border-gray-200/80 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-950">
+    <div className="shrink-0 border-b border-slate-200/80 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
       <div className="flex gap-2 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {ACTIONS.map((action) => {
+        {visible.map((action) => {
           const Icon = action.icon;
           return (
             <button
@@ -36,8 +43,8 @@ export function ComprasDetailActionBar({
               onClick={() => onAction?.(action.id)}
               className={`inline-flex shrink-0 items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                 action.danger
-                  ? 'border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
-                  : 'border border-gray-200/90 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
+                  ? 'border border-[rgba(225,29,72,0.2)] bg-[rgba(225,29,72,0.06)] text-[var(--v-rose,#e11d48)] hover:bg-[rgba(225,29,72,0.12)]'
+                  : 'border border-slate-200/90 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/60 hover:text-[var(--v-blue,#2563eb)] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-blue-950/40'
               }`}
             >
               <Icon className="h-4 w-4 shrink-0" />
@@ -61,7 +68,7 @@ export function ComprasNewPurchaseButton({ disabled = false, onClick }: ComprasN
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-gray-900 px-3.5 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900"
+      className={VERTIAL_BTN_PRIMARY}
     >
       <Plus className="h-4 w-4" />
       Nueva compra

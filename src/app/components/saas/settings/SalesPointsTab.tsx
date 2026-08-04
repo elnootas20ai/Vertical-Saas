@@ -59,12 +59,19 @@ import {
 } from '../../../lib/workCentersApi';
 import { ensureRentFinanceFromWorkCenter } from '../../../lib/rentFinanceSync';
 import {
+  createBlankBusinessHoursConfig,
   DEFAULT_BUSINESS_HOURS_CONFIG,
   getBusinessHoursIssue,
   hasValidBusinessHoursConfig,
   normalizeBusinessHoursConfig,
 } from '../../../lib/businessHoursUtils';
 import { getBusinessHours, type BusinessHoursConfig } from '../../../lib/settingsApi';
+import {
+  defaultWeekly,
+  listShiftTemplates,
+  saveShiftTemplate,
+  TEMPLATE_COLORS,
+} from '../../../lib/schedulesApi';
 import { BusinessHoursEditor } from './BusinessHoursEditor';
 import {
   buildPdvCodeFromParts,
@@ -192,7 +199,10 @@ interface WorkCenterModalProps {
   forcePointOfSale?: boolean;
   /** Paso de horario en wizard (tiendas delivery / retail). */
   includeOpeningHours?: boolean;
-  /** Migración: horario global legacy si la tienda aún no tiene `openingHours`. */
+  /**
+   * Migración: horario global legacy (`hours:{userId}`) solo si la tienda aún no tiene `openingHours`.
+   * Runtime (fichaje/TPV/plantillas) usa siempre `WorkCenter.openingHours`.
+   */
   legacyUserId?: string;
   /** Abrir el wizard directamente en el paso de horarios (checklist / deep link). */
   initialWizardStep?: 'horarios';
@@ -207,6 +217,8 @@ interface WorkCenterModalProps {
   editPdvCode?: string;
   /** Textos del wizard compacto: delivery, bar/restaurante o compraventa. */
   pdvWizardVariant?: PdvWizardVariant;
+  /** Empresa activa: re-siembra plantillas RRHH desde openingHours. */
+  schedulesBusinessId?: string;
 }
 
 function WorkCenterModal({
@@ -224,6 +236,7 @@ function WorkCenterModal({
   enablePdvCodeEdit = false,
   editPdvCode = '',
   pdvWizardVariant = 'delivery',
+  schedulesBusinessId = '',
 }: WorkCenterModalProps) {
   const navigate = useNavigate();
 
@@ -255,6 +268,9 @@ function WorkCenterModal({
   });
   const [saving, setSaving] = useState(false);
   const [openingHours, setOpeningHours] = useState<BusinessHoursConfig>(DEFAULT_BUSINESS_HOURS_CONFIG);
+  /** Crear PDV: hay que confirmar que se revisó el horario L–D. */
+  const [hoursConfirmed, setHoursConfirmed] = useState(false);
+  const [applyingTemplates, setApplyingTemplates] = useState(false);
   const [step, setStep] = useState<'general' | 'ubicacion' | 'propiedad' | 'horarios'>('general');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [pdvMoreOpen, setPdvMoreOpen] = useState<'general' | 'ubicacion' | 'contrato' | null>(null);
@@ -316,7 +332,15 @@ function WorkCenterModal({
     );
     setPdvCode(editPdvCode || '');
     setPdvCodeManual(Boolean(editPdvCode));
-    setOpeningHours(normalizeBusinessHoursConfig(editItem?.openingHours ?? DEFAULT_BUSINESS_HOURS_CONFIG));
+    setHoursConfirmed(false);
+    if (editItem?.openingHours) {
+      setOpeningHours(normalizeBusinessHoursConfig(editItem.openingHours));
+    } else if (includeOpeningHours && !editItem) {
+      // Crear PDV: horario en blanco → hay que poner bien cada día.
+      setOpeningHours(createBlankBusinessHoursConfig());
+    } else {
+      setOpeningHours(normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG));
+    }
     if (isOpen && initialWizardStep === 'horarios' && includeOpeningHours) {
       setStep('horarios');
     }
@@ -507,7 +531,13 @@ function WorkCenterModal({
     const validateHorarios = () => {
       if (!includeOpeningHours) return;
       const issue = getBusinessHoursIssue(openingHours);
-      if (issue) nextErr.horarios = issue;
+      if (issue) {
+        nextErr.horarios = issue;
+        return;
+      }
+      if (!editItem && !hoursConfirmed) {
+        nextErr.horarios = 'Confirma que has revisado el horario de cada día (L–D).';
+      }
     };
 
     let staffCount = Number(form.expectedStaffCount || 0);
@@ -632,12 +662,22 @@ function WorkCenterModal({
         notes: sanitizeRetailTextField(form.notes, PDV_RETAIL_LIMITS.notesMax) || undefined,
         active: editItem ? editItem.active !== false : defaultActiveOnCreate,
         openingHours: includeOpeningHours
-          ? normalizeBusinessHoursConfig(openingHours)
+          ? (() => {
+              const normalized = normalizeBusinessHoursConfig(openingHours);
+              // Defensa: nunca guardar días abiertos sin HH:mm (evita «sin definir» después).
+              const issue = getBusinessHoursIssue(normalized);
+              if (issue) throw new Error(issue);
+              return normalized;
+            })()
           : editItem?.openingHours,
       });
       onClose();
-    } catch {
-      // onSave already shows the specific error/toast.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg && !msg.includes('pro required') && !msg.includes('pdv')) {
+        toast.error(msg);
+      }
+      // onSave already shows the specific error/toast for API failures.
     } finally {
       setSaving(false);
     }
@@ -1539,6 +1579,11 @@ function WorkCenterModal({
 
           {step === 'horarios' && includeOpeningHours && (
             <div className="space-y-3 pb-2">
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                Obligatoria la configuración de <span className="font-semibold">cada día</span> (L–D).
+                Este horario es la <span className="font-semibold">base del local</span> (plantillas y estado abierto/cerrado).
+                El contrato del trabajador puede ser más largo; <span className="font-semibold">no limita el fichaje</span>.
+              </p>
               {fieldErrors.horarios ? (
                 <p className="text-xs text-red-600 dark:text-red-400 font-medium">{fieldErrors.horarios}</p>
               ) : null}
@@ -1546,12 +1591,87 @@ function WorkCenterModal({
                 config={openingHours}
                 onChange={(next) => {
                   setOpeningHours(next);
+                  setHoursConfirmed(false);
                   clearFieldError('horarios');
                 }}
                 storeLabel={storeHoursLabel}
                 wizard={simplifyPdvCreate}
                 compact={!simplifyPdvCreate}
               />
+              {schedulesBusinessId ? (
+                <button
+                  type="button"
+                  disabled={applyingTemplates || Boolean(getBusinessHoursIssue(openingHours))}
+                  onClick={() => {
+                    void (async () => {
+                      const issue = getBusinessHoursIssue(openingHours);
+                      if (issue) {
+                        toast.error(issue);
+                        return;
+                      }
+                      const ok = window.confirm(
+                        'Se actualizarán las plantillas de turno RRHH con este horario de tienda. Los turnos personales ya guardados no se tocan. ¿Continuar?',
+                      );
+                      if (!ok) return;
+                      setApplyingTemplates(true);
+                      try {
+                        const weekly = defaultWeekly(openingHours);
+                        const templates = await listShiftTemplates(schedulesBusinessId);
+                        if (templates.length === 0) {
+                          const label = String(form.name || 'tienda').trim() || 'tienda';
+                          await saveShiftTemplate(
+                            schedulesBusinessId,
+                            `Horario ${label}`,
+                            TEMPLATE_COLORS[0] || '#2563eb',
+                            weekly,
+                            null,
+                          );
+                          toast.success('Plantilla creada desde el horario de tienda');
+                        } else {
+                          for (const t of templates) {
+                            await saveShiftTemplate(
+                              schedulesBusinessId,
+                              t.name,
+                              t.color,
+                              weekly,
+                              t,
+                            );
+                          }
+                          toast.success(
+                            `${templates.length} plantilla${templates.length === 1 ? '' : 's'} actualizada${templates.length === 1 ? '' : 's'}`,
+                          );
+                        }
+                      } catch (err) {
+                        toast.error(
+                          err instanceof Error ? err.message : 'No se pudieron actualizar las plantillas',
+                        );
+                      } finally {
+                        setApplyingTemplates(false);
+                      }
+                    })();
+                  }}
+                  className="w-full rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-xs font-semibold text-violet-800 hover:bg-violet-100 disabled:opacity-50 dark:border-violet-900 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-950/60"
+                >
+                  {applyingTemplates ? 'Aplicando…' : 'Aplicar horario de tienda a plantillas RRHH'}
+                </button>
+              ) : null}
+              {!editItem ? (
+                <label className="flex items-start gap-2.5 rounded-xl border border-gray-200 bg-gray-50 px-3.5 py-3 dark:border-gray-700 dark:bg-gray-900/40 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    checked={hoursConfirmed}
+                    onChange={(e) => {
+                      setHoursConfirmed(e.target.checked);
+                      if (e.target.checked) clearFieldError('horarios');
+                    }}
+                  />
+                  <span className="text-xs text-gray-700 dark:text-gray-300">
+                    He revisado el horario de <span className="font-semibold">cada día</span> (lunes a domingo)
+                    y está correcto para este local.
+                  </span>
+                </label>
+              ) : null}
             </div>
           )}
       </div>
@@ -2819,11 +2939,18 @@ export function SalesPointsTab() {
           forceFirstCenterAsPdv || forceCreatePdv || (usesRetailPdvFlow && !editingItem)
         }
         includeOpeningHours={
-          (isDelivery || isRestaurant) &&
-          (forceFirstCenterAsPdv ||
-            forceCreatePdv ||
-            !editingItem ||
-            isRetailWorkCenterType(editingItem.centerType))
+          usesRetailPdvFlow
+            ? Boolean(
+                forceFirstCenterAsPdv
+                || forceCreatePdv
+                || !editingItem
+                || isRetailWorkCenterType(editingItem.centerType),
+              )
+            : (isDelivery || isRestaurant) &&
+              (forceFirstCenterAsPdv ||
+                forceCreatePdv ||
+                !editingItem ||
+                isRetailWorkCenterType(editingItem.centerType))
         }
         legacyUserId={dataUserId || undefined}
         initialWizardStep={openModalAtHorarios ? 'horarios' : undefined}
@@ -2833,6 +2960,7 @@ export function SalesPointsTab() {
         enablePdvCodeEdit={usesRetailPdvFlow}
         editPdvCode={editingPdvCode}
         pdvWizardVariant={pdvWizardVariant}
+        schedulesBusinessId={businessScopeId || undefined}
       />
 
       {showProAccessModal && !showModal && (

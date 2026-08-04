@@ -1,4 +1,4 @@
-import { findBusinessById, listBusinessesByUser } from './couchdb.js';
+import { findAccountByUserId, findBusinessById, listBusinessesByUser } from './couchdb.js';
 import { getAuthUserId, getMember } from './clockinsAccess.js';
 import { isManagerRole } from './managerRoles.js';
 
@@ -39,6 +39,15 @@ export async function assertBusinessTeamAccess(req, businessId) {
     return { ok: false, status: 404, error: 'Empresa no encontrada' };
   }
   if (!canAccessBusiness(business, userId)) {
+    try {
+      const account = await findAccountByUserId(req, userId);
+      const linked = normalizeBusinessId(account?.linkedBusinessId);
+      if (linked && linked === bid) {
+        return { ok: true, business, userId };
+      }
+    } catch {
+      /* ignore */
+    }
     return { ok: false, status: 403, error: 'No autorizado para esta empresa' };
   }
   return { ok: true, business, userId };

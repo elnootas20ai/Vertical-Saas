@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveRestaurantTableLiveInfo, openOrdersByTableId } from '../src/app/lib/restaurantTableDisplay.ts';
+import { resolveRestaurantTableLiveInfo, openOrdersByTableId, resolveTpvFloorVisualStatus } from '../src/app/lib/restaurantTableDisplay.ts';
 
 describe('resolveRestaurantTableLiveInfo', () => {
   it('shows cuenta abierta when open dining order exists', () => {
@@ -45,5 +45,33 @@ describe('openOrdersByTableId', () => {
     ]);
     expect(map.get('t1')?.total).toBe(20);
     expect(map.has('t2')).toBe(false);
+  });
+});
+
+describe('resolveTpvFloorVisualStatus', () => {
+  it('muestra Ocupada solo con pedido TPV (líneas o total)', () => {
+    expect(
+      resolveTpvFloorVisualStatus(
+        { status: 'occupied' },
+        { status: 'open', total: 12, comandas: [{ items: [{ quantity: 1 }] }] },
+      ),
+    ).toBe('occupied');
+    expect(
+      resolveTpvFloorVisualStatus(
+        { status: 'pending_payment' },
+        { status: 'pending_payment', total: 8, comandas: [] },
+      ),
+    ).toBe('pending_payment');
+  });
+
+  it('sin pedido TPV no marca Ocupada aunque la mesa esté sentada', () => {
+    expect(resolveTpvFloorVisualStatus({ status: 'occupied' }, null)).toBe('available');
+    expect(
+      resolveTpvFloorVisualStatus(
+        { status: 'occupied' },
+        { status: 'open', total: 0, comandas: [] },
+      ),
+    ).toBe('available');
+    expect(resolveTpvFloorVisualStatus({ status: 'reserved' }, null)).toBe('reserved');
   });
 });

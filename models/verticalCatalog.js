@@ -762,6 +762,42 @@ VERTICAL_CATALOG_CONFIGS.restaurant = {
   ...VERTICAL_CATALOG_CONFIGS.delivery,
 };
 
+VERTICAL_CATALOG_CONFIGS.butcherShop = {
+  itemLabel: 'Corte / producto',
+  itemLabelPlural: 'Cortes y productos',
+  categories: [
+    'vacuno', 'cerdo', 'pollo', 'cordero', 'elaborados',
+    'embutidos', 'casquería', 'otros',
+  ],
+  units: [
+    { value: 'kg', label: 'Kilogramo' },
+    { value: 'g', label: 'Gramo' },
+    { value: 'ud', label: 'Unidad' },
+    { value: 'pack', label: 'Pack' },
+  ],
+  fields: [
+    FIELD.name, FIELD.description, FIELD.category, FIELD.unit,
+    FIELD.unitPrice, FIELD.costPrice, FIELD.supplier,
+    FIELD.stockQuantity, FIELD.minStock,
+    FIELD.allergens,
+    FIELD.image, FIELD.notes, FIELD.webVisible, FIELD.available, FIELD.salesPoint,
+  ],
+  features: {
+    allergens: true,
+    stock: true,
+    supplier: true,
+    webStore: true,
+    salesPoints: true,
+  },
+  customFields: [
+    { key: 'pricePerKg', label: 'Precio €/kg', type: 'number', required: false },
+    { key: 'conservation', label: 'Conservación', type: 'select', required: false, options: ['refrigerado', 'congelado'] },
+    { key: 'origin', label: 'Origen', type: 'text', required: false },
+    { key: 'batchCode', label: 'Lote activo', type: 'text', required: false },
+    { key: 'expiryDate', label: 'Caducidad', type: 'date', required: false },
+  ],
+};
+
 // ─── API pública ─────────────────────────────────────────────────────────────
 
 /**

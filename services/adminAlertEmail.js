@@ -74,13 +74,25 @@ export function wrapAdminAlertHtml(subject, html, severity = 'info') {
 
 export function adminAlertSeverityForKey(key = '') {
   const k = String(key);
-  if (k.includes('recovered') || k.includes('recuperado')) return 'success';
-  if (k.startsWith('backup_stale') || k.startsWith('ram_') || k.startsWith('disk_')) return 'warning';
+  if (k.includes('recovered') || k.includes('recuperado') || k.startsWith('daily_ops_digest')) {
+    return 'success';
+  }
+  if (
+    k.startsWith('backup_stale')
+    || k.startsWith('ram_')
+    || k.startsWith('disk_')
+    || k.startsWith('trial_')
+    || k.startsWith('invite_email_fail')
+  ) {
+    return 'warning';
+  }
   if (
     k.includes('down')
     || k.includes('fail')
     || k.includes('spike')
     || k.startsWith('backup_failed')
+    || k.startsWith('payment_failed')
+    || k.startsWith('subscription_suspended')
   ) {
     return 'critical';
   }

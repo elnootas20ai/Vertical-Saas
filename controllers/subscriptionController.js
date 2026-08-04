@@ -21,6 +21,10 @@ import logger from '../services/logger.js';
 import { sanitizePaymentErrorForClient, PUBLIC_PAYMENT_UNAVAILABLE } from '../utils/paymentErrorMessages.js';
 import { sendAdminAlert } from '../services/adminAlerts.js';
 import {
+  notifyPaymentFailed,
+  notifySubscriptionSuspended,
+} from '../services/adminBusinessAlerts.js';
+import {
   sendPaymentSuccessNotification,
   sendPaymentFailedNotification,
   sendGracePeriodNotification,
@@ -388,6 +392,8 @@ export async function cancelUserSubscription(req, res) {
       metadata: { moneiSubscriptionId: moneiSubId },
     });
 
+    notifySubscriptionSuspended(updatedAccount, { source: 'cancel_api' });
+
     return res.json({ ok: true, subscription: updatedAccount.subscription });
   } catch (error) {
     logger.error(error, '[MONEI] Error cancelando suscripción');
@@ -547,10 +553,12 @@ export async function webhookSubscriptionStatus(req, res) {
         sendPaymentSuccessNotification(updatedAccount).catch(() => null);
       } else if (appStatus === 'payment_failed') {
         sendPaymentFailedNotification(updatedAccount).catch(() => null);
+        notifyPaymentFailed(updatedAccount, { source: 'subscription_webhook' });
       } else if (appStatus === 'grace_period') {
         sendGracePeriodNotification(updatedAccount).catch(() => null);
       } else if (appStatus === 'suspended') {
         sendSuspensionNotification(updatedAccount).catch(() => null);
+        notifySubscriptionSuspended(updatedAccount, { source: 'subscription_webhook' });
       }
     }
 
@@ -653,6 +661,7 @@ export async function webhookPaymentStatus(req, res) {
         logger.info({ paymentId, userId, addonId }, '[MONEI] Ampliación aplicada tras pago');
       } else if (paymentStatus === 'FAILED') {
         sendPaymentFailedNotification(account).catch(() => null);
+        notifyPaymentFailed(account, { source: 'addon_payment_webhook' });
       }
 
       return res.status(200).json({ ok: true });
@@ -715,6 +724,7 @@ export async function webhookPaymentStatus(req, res) {
         updatedAt: now.toISOString(),
       });
       sendPaymentFailedNotification(updatedAccount).catch(() => null);
+      notifyPaymentFailed(updatedAccount, { source: 'payment_webhook' });
       logger.warn({ paymentId, userId }, '[MONEI] Pago recurrente fallido');
     }
 

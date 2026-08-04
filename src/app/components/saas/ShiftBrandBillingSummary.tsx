@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Banknote, ChevronDown, ChevronUp, CreditCard, Tag } from 'lucide-react';
 import type { ShiftBrandRevenueRow } from '../../lib/registerShiftBrandBilling';
+import { VERTIAL_CASH_TEXT, VERTIAL_CARD_TEXT } from '../../lib/vertialUiTokens';
 
 function fmt(n: number): string {
   return n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -33,22 +34,21 @@ export function ShiftBrandBillingSummary({
 
   return (
     <div
-      className={`rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900 ${
-        compact ? 'p-2.5' : 'p-3'
+      className={`rounded-lg border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-900 ${
+        compact ? 'p-2' : 'p-3'
       }`}
     >
       <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+        <p className="text-xs font-semibold text-stone-500 dark:text-stone-400 flex items-center gap-1">
           <Tag className="h-3.5 w-3.5" />
           Totales por marca
         </p>
         {total > 0 ? (
-          <p className="text-xs font-black tabular-nums text-gray-900 dark:text-gray-100">
-            {fmt(total)} €
+          <p className="text-lg font-black tabular-nums text-stone-900 dark:text-stone-100">
+            {fmt(total)}€
           </p>
         ) : null}
       </div>
-      <p className="mt-0.5 text-[10px] text-gray-400">Efectivo y tarjeta por marca · toca para más detalle</p>
 
       <div className={`mt-2 ${compact ? 'space-y-1.5' : 'space-y-2'}`}>
         {rows.map((row) => {
@@ -58,65 +58,60 @@ export function ShiftBrandBillingSummary({
           return (
             <div
               key={row.brandId}
-              className="overflow-hidden rounded-lg border border-gray-100 bg-gray-50/80 dark:border-gray-800 dark:bg-gray-800/40"
+              className="overflow-hidden rounded-xl border border-slate-200 bg-stone-50/80 dark:border-slate-800 dark:bg-stone-900/40"
             >
               <button
                 type="button"
                 onClick={() => setOpenId(open ? null : row.brandId)}
-                className={`flex w-full items-start justify-between gap-2 px-2.5 py-2.5 text-left transition-all active:scale-[0.99] cursor-pointer ${
+                className={`flex w-full min-h-11 items-center justify-between gap-2 px-2.5 py-2 text-left touch-manipulation active:scale-[0.99] ${
                   open
-                    ? 'bg-indigo-600 text-white dark:bg-indigo-500'
-                    : 'hover:bg-indigo-50 dark:hover:bg-indigo-950/30'
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                    : 'hover:bg-blue-50/60 dark:hover:bg-blue-950/30'
                 }`}
               >
-                <div className="min-w-0 flex items-start gap-1.5">
-                  {open ? (
-                    <ChevronUp className="mt-0.5 h-3.5 w-3.5 shrink-0 text-white" />
-                  ) : (
-                    <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-500" />
-                  )}
-                  <div className="min-w-0">
-                    <p className={`truncate text-xs font-bold ${open ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
+                <div className="min-w-0 flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 flex-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {open ? (
+                      <ChevronUp className="h-4 w-4 shrink-0 text-white" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 shrink-0 text-stone-400" />
+                    )}
+                    <p className={`truncate text-sm font-bold ${open ? 'text-white' : 'text-stone-900 dark:text-stone-100'}`}>
                       {row.name}
                     </p>
-                    {!open ? (
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300/80 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-emerald-900 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-100">
-                          <Banknote className="h-3 w-3 shrink-0" />
-                          Efectivo {fmt(cash)} €
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded-md border border-sky-300/80 bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-sky-900 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-100">
-                          <CreditCard className="h-3 w-3 shrink-0" />
-                          Tarjeta {fmt(card)} €
-                        </span>
-                      </div>
-                    ) : null}
                   </div>
+                  {!open ? (
+                    <span className="text-xs font-semibold tabular-nums pl-5 sm:pl-0">
+                      <span className={VERTIAL_CASH_TEXT}>Efectivo {fmt(cash)}€</span>
+                      <span className="mx-1 text-stone-300">·</span>
+                      <span className={VERTIAL_CARD_TEXT}>Tarjeta {fmt(card)}€</span>
+                    </span>
+                  ) : null}
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className={`text-sm font-black tabular-nums ${open ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
-                    {fmt(row.revenue)} €
+                  <p className={`text-lg font-black tabular-nums ${open ? 'text-white' : 'text-stone-900 dark:text-stone-100'}`}>
+                    {fmt(row.revenue)}€
                   </p>
-                  <p className={`text-[10px] font-semibold ${open ? 'text-indigo-100' : 'text-gray-400'}`}>{row.sharePercent}%</p>
+                  <p className={`text-[11px] font-semibold ${open ? 'text-blue-100' : 'text-stone-400'}`}>{row.sharePercent}%</p>
                 </div>
               </button>
 
               {open ? (
-                <div className="space-y-1 border-t border-gray-100 px-2.5 py-2 dark:border-gray-800">
-                  <div className="flex justify-between gap-2 text-[11px]">
-                    <span className="inline-flex items-center gap-1 font-semibold text-emerald-800 dark:text-emerald-300">
-                      <Banknote className="h-3.5 w-3.5" /> Efectivo
+                <div className="space-y-1.5 border-t border-slate-100 px-2.5 py-2.5 dark:border-slate-800">
+                  <div className="flex justify-between gap-2 text-sm">
+                    <span className={`inline-flex items-center gap-1 font-semibold ${VERTIAL_CASH_TEXT}`}>
+                      <Banknote className="h-4 w-4" /> Efectivo
                     </span>
-                    <span className="tabular-nums font-black text-emerald-900 dark:text-emerald-100">
-                      {fmt(cash)} €
+                    <span className={`tabular-nums text-lg font-black ${VERTIAL_CASH_TEXT}`}>
+                      {fmt(cash)}€
                     </span>
                   </div>
-                  <div className="flex justify-between gap-2 text-[11px]">
-                    <span className="inline-flex items-center gap-1 font-semibold text-sky-800 dark:text-sky-300">
-                      <CreditCard className="h-3.5 w-3.5" /> Tarjeta
+                  <div className="flex justify-between gap-2 text-sm">
+                    <span className={`inline-flex items-center gap-1 font-semibold ${VERTIAL_CARD_TEXT}`}>
+                      <CreditCard className="h-4 w-4" /> Tarjeta
                     </span>
-                    <span className="tabular-nums font-black text-sky-900 dark:text-sky-100">
-                      {fmt(card)} €
+                    <span className={`tabular-nums text-lg font-black ${VERTIAL_CARD_TEXT}`}>
+                      {fmt(card)}€
                     </span>
                   </div>
                   <div className="flex justify-between gap-2 border-t border-dashed border-gray-200 pt-1.5 text-[11px] dark:border-gray-700">
@@ -163,10 +158,11 @@ export function ShiftBrandBillingSummary({
         ) : null}
       </div>
 
-      <p className="mt-2 text-[10px] leading-snug text-gray-400 dark:text-gray-500">
-        Efectivo/tarjeta siguen el cobro del pedido. Compartidos van a la marca dominante.
-        Reglas en Empresa → Marca → Facturación.
-      </p>
+      {!compact ? (
+        <p className="mt-2 text-[10px] leading-snug text-stone-400 dark:text-stone-500">
+          Efectivo/tarjeta siguen el cobro del pedido. Compartidos van a la marca dominante.
+        </p>
+      ) : null}
     </div>
   );
 }

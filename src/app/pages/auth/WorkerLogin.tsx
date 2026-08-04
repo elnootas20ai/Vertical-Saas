@@ -213,20 +213,20 @@ export function WorkerLogin() {
 
   return (
     <AccesoSplitLayout visualKey="register-user" scrollable>
-      <div className="flex min-h-dvh flex-col items-center justify-center p-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-6 lg:min-h-0 lg:flex-1 lg:px-8">
-      <div className="w-full max-w-md shrink-0 my-auto">
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-6 sm:p-8 shadow-sm">
-          <div className="text-center mb-6 sm:mb-8">
-            <div className="flex items-center justify-center mb-4 sm:mb-6">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
+      <div className="w-full max-w-md shrink-0">
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-4 pb-3.5 sm:p-6 sm:pb-5 shadow-sm">
+          <div className="text-center mb-4 sm:mb-5">
+            <div className="hidden sm:flex items-center justify-center mb-3">
               <VertialLogo size="lg" />
             </div>
-            <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+            <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-full flex items-center justify-center mx-auto mb-3 sm:mb-4">
               <Users className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
-            <span className="inline-block mb-3 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+            <span className="inline-block mb-2 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
               Acceso trabajador
             </span>
-            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
               Iniciar sesión
             </h1>
           </div>
@@ -333,11 +333,7 @@ export function WorkerLogin() {
                       </svg>
                       <span>{t('auth.googleLogin')}…</span>
                     </div>
-                  ) : !googleReady && googleTimedOut ? (
-                    <div className="min-h-[40px] w-full max-w-sm flex items-center justify-center rounded-lg border-2 border-amber-200 bg-amber-50 py-2 px-3 text-xs text-amber-800 text-center">
-                      Google no cargó a tiempo. Puedes usar email y contraseña.
-                    </div>
-                  ) : (
+                  ) : !googleReady && googleTimedOut ? null : (
                     <div ref={googleBtnRef} className="min-h-[40px] w-full max-w-sm flex justify-center" />
                   )}
                   {showAppleAuth ? (

@@ -231,12 +231,14 @@ export function DeliveryClientRowActions({
   onDelete,
   alwaysVisible = false,
   deleting = false,
+  newOrderTitle = 'Nuevo pedido',
 }: {
   onView: () => void;
   onNewOrder: () => void;
   onDelete?: () => void;
   alwaysVisible?: boolean;
   deleting?: boolean;
+  newOrderTitle?: string;
 }) {
   return (
     <div className={`flex items-center gap-1 ${alwaysVisible ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
@@ -244,7 +246,7 @@ export function DeliveryClientRowActions({
         type="button"
         onClick={(e) => { e.stopPropagation(); onNewOrder(); }}
         className="rounded-lg p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-        title="Nuevo pedido"
+        title={newOrderTitle}
       >
         <ShoppingBag className="h-4 w-4 text-emerald-600" />
       </button>

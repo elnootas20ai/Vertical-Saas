@@ -142,6 +142,10 @@ export function mergeEmploymentInfo(existing = {}, incoming = {}) {
     endDate: String(merged.endDate || '').trim(),
     contractType: String(merged.contractType || '').trim(),
     workday: String(merged.workday || '').trim(),
+    hoursPerWeek: (() => {
+      const n = Number(merged.hoursPerWeek);
+      return Number.isFinite(n) && n > 0 ? Math.min(60, Math.max(0.5, n)) : undefined;
+    })(),
     salary: String(merged.salary || '').trim(),
     bankAccount: String(merged.bankAccount || '').trim(),
     bankName: String(merged.bankName || '').trim(),
@@ -226,7 +230,7 @@ export function hasMinimumWorkerIdentity(account) {
 
 export function getWorkerPayrollMissingIds(account) {
   if (!account) return WORKER_PAYROLL_FIELD_DEFS.map((f) => f.id);
-  const completion = account.workerProfileCompletion || computeWorkerProfileCompletion(account);
+  const completion = computeWorkerProfileCompletion(account);
   const payrollIds = new Set(WORKER_PAYROLL_FIELD_DEFS.map((f) => f.id));
   return (completion.workerMissing || []).filter((id) => payrollIds.has(id));
 }
@@ -263,7 +267,7 @@ export function computeProfileCompletionAlerts(members) {
     if (member.status === 'inactive') continue;
     if (!isWorkerProfileSubject(member)) continue;
 
-    const completion = member.workerProfileCompletion || computeWorkerProfileCompletion(member);
+    const completion = computeWorkerProfileCompletion(member);
     if (completion.fullyCompleted) continue;
 
     const workerPending = !completion.workerCompleted;

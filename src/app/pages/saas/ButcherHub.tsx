@@ -12,9 +12,11 @@ import {
 } from '../../lib/butcherApi';
 import {
   getButcherWasteSummaryRequest,
+  createButcherWasteRequest,
   type WasteSummary,
 } from '../../lib/butcherWasteApi';
-import { createVerticalDashboardApi, type VerticalDashboardData } from '../../lib/verticalApiFactory';
+import { createVerticalDashboardApi, createVerticalApi, type VerticalDashboardData, type VerticalEntity } from '../../lib/verticalApiFactory';
+import { toast } from 'sonner';
 import {
   BarChart, Bar, Cell, ResponsiveContainer, Tooltip,
   AreaChart, Area, XAxis, CartesianGrid,
@@ -26,6 +28,7 @@ import {
   RefreshCw, ScanBarcode, Truck, ClipboardList, Receipt,
   Store, Users, Calendar, FileText, BarChart3, Boxes, Trash2,
   ChevronDown, Eye, Settings2, Shield, Zap, Timer, Euro, Loader2,
+  Percent, Scissors,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -40,6 +43,18 @@ interface ButcherAlert {
   message: string;
   route: string;
   timestamp: Date;
+}
+
+/** Lote FEFO canónico (`bt_lote`) para panel caducidad Hub */
+interface OpsLot extends VerticalEntity {
+  codigoLote?: string;
+  productoId?: string;
+  producto?: string;
+  fechaCaducidad?: string;
+  kgDisponibles?: number;
+  kgRecibidos?: number;
+  costePorKg?: number;
+  estado?: string;
 }
 
 interface WorkerPerf {
@@ -262,6 +277,10 @@ export function ButcherHub() {
   const [liveSalesStats, setLiveSalesStats] = useState<SalesStats | null>(null);
   const [liveClientCount, setLiveClientCount] = useState(0);
   const [liveWasteSummary, setLiveWasteSummary] = useState<WasteSummary | null>(null);
+  const [expiringBatches, setExpiringBatches] = useState<OpsLot[]>([]);
+  const [expiryBusy, setExpiryBusy] = useState<string | null>(null);
+  const catalogApi = useMemo(() => createVerticalApi<{ _id: string; nombre?: string; precioKg?: number }>('butcher-ops', 'catalog'), []);
+  const lotsApi = useMemo(() => createVerticalApi<OpsLot>('butcher-ops', 'traceability'), []);
 
   const loadDashData = useCallback(async (opts?: { silent?: boolean }) => {
     if (!authUserId) {
@@ -284,6 +303,29 @@ export function ButcherHub() {
     void loadDashData();
   }, [loadDashData]);
 
+  const loadExpiringBatches = useCallback(async () => {
+    if (!authUserId) return;
+    try {
+      const lots = await lotsApi.list(authUserId);
+      const now = Date.now();
+      const horizonMs = 3 * 86_400_000;
+      const list = lots.filter((b) => {
+        const estado = String(b.estado || 'activo').toLowerCase();
+        if (estado === 'bloqueado' || estado === 'caducado' || estado === 'agotado') return false;
+        if (!(Number(b.kgDisponibles || 0) > 0)) return false;
+        if (!b.fechaCaducidad) return false;
+        const exp = new Date(b.fechaCaducidad).getTime();
+        if (Number.isNaN(exp)) return false;
+        return exp <= now + horizonMs;
+      }).sort((a, b) =>
+        String(a.fechaCaducidad).localeCompare(String(b.fechaCaducidad)),
+      );
+      setExpiringBatches(list.slice(0, 12));
+    } catch {
+      setExpiringBatches([]);
+    }
+  }, [authUserId, lotsApi]);
+
   useEffect(() => {
     if (!userId) return;
     getButcherOrdersTodayRequest(userId).then((r) => { if (r.ok) setLiveOrders(r.orders || []); }).catch(() => {});
@@ -292,7 +334,65 @@ export function ButcherHub() {
     const today = new Date().toISOString().slice(0, 10);
     const monthStart = today.slice(0, 7) + '-01';
     getButcherWasteSummaryRequest(userId, monthStart, today).then((r) => { if (r.ok) setLiveWasteSummary(r.summary); }).catch(() => {});
-  }, [userId]);
+    void loadExpiringBatches();
+  }, [userId, loadExpiringBatches]);
+
+  const handleExpiryMarkdown = async (batch: OpsLot) => {
+    if (!authUserId) return;
+    setExpiryBusy(`${batch._id}:rebajar`);
+    try {
+      const catalog = await catalogApi.list(authUserId);
+      const match = catalog.find((p) =>
+        p._id === batch.productoId
+        || String(p.nombre || '').toLowerCase() === String(batch.producto || '').toLowerCase(),
+      );
+      if (!match) {
+        toast.error('No encontré el corte en el catálogo TPV');
+        return;
+      }
+      const next = Math.round(Number(match.precioKg || 0) * 0.8 * 100) / 100;
+      await catalogApi.update(authUserId, match._id, {
+        precioKg: next,
+        precioActualizado: true,
+      } as any);
+      toast.success(`Rebaja 20%: ${batch.producto || 'corte'} → ${next.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}/kg`);
+    } catch {
+      toast.error('No se pudo rebajar el precio');
+    } finally {
+      setExpiryBusy(null);
+    }
+  };
+
+  const handleExpiryWaste = async (batch: OpsLot) => {
+    if (!userId) return;
+    setExpiryBusy(`${batch._id}:merma`);
+    try {
+      const kg = Math.max(0.01, Number(batch.kgDisponibles || batch.kgRecibidos || 0));
+      const wr = await createButcherWasteRequest(userId, {
+        productId: batch.productoId,
+        productName: batch.producto,
+        catalogItemId: batch.productoId,
+        catalogItemName: batch.producto,
+        batchId: batch._id,
+        opsLotId: batch._id,
+        wasteKg: kg,
+        wasteType: 'caducado',
+        reason: `Caducidad lote ${batch.codigoLote || batch._id}`,
+        date: new Date().toISOString().slice(0, 10),
+        costPriceAtTime: Number(batch.costePorKg || 0),
+      } as any);
+      if (!wr.ok) {
+        toast.error(wr.error || 'No se pudo registrar merma');
+        return;
+      }
+      toast.success(`Merma registrada: ${kg.toLocaleString('es-ES')} kg`);
+      await loadExpiringBatches();
+    } catch {
+      toast.error('Error al registrar merma');
+    } finally {
+      setExpiryBusy(null);
+    }
+  };
 
   const wasteToday = useMemo(() => {
     if (!liveWasteSummary?.dailyTrend) return 0;
@@ -378,9 +478,10 @@ export function ButcherHub() {
     const workers = workersFromButcherActivity(recent, c.tickets ?? 0);
 
     const rev = liveSalesStats?.today.revenue ?? 0;
-    const ingresosEfectivo = rev * 0.45;
-    const ingresosTarjeta = rev * 0.40;
-    const ingresosBizum = rev > 0 ? rev - ingresosEfectivo - ingresosTarjeta : 0;
+    const byM = liveSalesStats?.byMethodToday;
+    const ingresosEfectivo = Number(byM?.cash || 0);
+    const ingresosTarjeta = Number(byM?.card || 0);
+    const ingresosBizum = Number(byM?.bizum || 0) + Number(byM?.mixed || 0);
 
     return {
       ventasHoy,
@@ -398,7 +499,7 @@ export function ButcherHub() {
       ingresosEfectivo,
       ingresosTarjeta,
       ingresosBizum,
-      lotesProximosCaducar: c.traceability ?? 0,
+      lotesProximosCaducar: expiringBatches.length || (c.traceability ?? 0),
       hourlySales,
       workers,
       alerts,
@@ -406,7 +507,7 @@ export function ButcherHub() {
       ultimasVentas,
       ultimosPedidos,
     };
-  }, [dashData, liveOrders, liveSalesStats, wasteToday, liveWastePct]);
+  }, [dashData, liveOrders, liveSalesStats, wasteToday, liveWastePct, expiringBatches.length]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -425,12 +526,13 @@ export function ButcherHub() {
             });
           })(),
         ]).catch(() => {});
+        await loadExpiringBatches();
       }
       setLastUpdate(new Date());
     } finally {
       setRefreshing(false);
     }
-  }, [loadDashData, userId]);
+  }, [loadDashData, userId, loadExpiringBatches]);
 
   const criticalAlerts = data.alerts.filter(a => a.severity === 'error').length;
   const warningAlerts = data.alerts.filter(a => a.severity === 'warning').length;
@@ -640,6 +742,79 @@ export function ButcherHub() {
             <QuickAccessBtn key={item.route} {...item} />
           ))}
         </div>
+
+        {/* ═══ CADUCIDAD → ACCIONES ═══ */}
+        {expiringBatches.length > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-2xl border-2 border-amber-200 dark:border-amber-800/60 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-amber-100 dark:border-amber-900/40">
+              <div className="flex items-center gap-2">
+                <Timer className="w-4 h-4 text-amber-600" />
+                <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Lotes por caducar</p>
+                <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-[10px] font-bold rounded-full">
+                  {expiringBatches.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/saas/butcher-traceability')}
+                className="text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:underline inline-flex items-center gap-1"
+              >
+                Trazabilidad <ArrowRight className="w-3 h-3" />
+              </button>
+            </div>
+            <div className="divide-y divide-amber-50 dark:divide-amber-900/30">
+              {expiringBatches.map((batch) => {
+                const days = Math.floor((new Date(String(batch.fechaCaducidad)).getTime() - Date.now()) / 86_400_000);
+                const expired = days < 0;
+                const busyRebajar = expiryBusy === `${batch._id}:rebajar`;
+                const busyMerma = expiryBusy === `${batch._id}:merma`;
+                return (
+                  <div key={batch._id} className="px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                        {batch.producto || 'Producto'} · {batch.codigoLote || batch._id.slice(-8)}
+                      </p>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Cad: {new Date(String(batch.fechaCaducidad)).toLocaleDateString('es-ES')} ·{' '}
+                        {expired ? `Caducado hace ${Math.abs(days)} d` : `En ${days} d`} ·{' '}
+                        {(batch.kgDisponibles || 0).toLocaleString('es-ES')} kg
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        disabled={!!expiryBusy}
+                        onClick={() => { void handleExpiryMarkdown(batch); }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 disabled:opacity-50"
+                      >
+                        {busyRebajar ? <Loader2 className="w-3 h-3 animate-spin" /> : <Percent className="w-3 h-3" />}
+                        Rebajar 20%
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!!expiryBusy}
+                        onClick={() => navigate(`/saas/vertical/carniceria/despiece?productId=${encodeURIComponent(batch.productoId || '')}&batchId=${encodeURIComponent(batch._id)}`)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800 disabled:opacity-50"
+                      >
+                        <Scissors className="w-3 h-3" />
+                        Elaborados
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!!expiryBusy}
+                        onClick={() => { void handleExpiryWaste(batch); }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 disabled:opacity-50"
+                      >
+                        {busyMerma ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                        Merma
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* ═══ ALERTAS INTELIGENTES ═══ */}
         {data.alerts.length > 0 && (

@@ -45,7 +45,7 @@ function getSupportMailto() {
     String(process.env.PUBLIC_SUPPORT_EMAIL || '').trim()
     || String(process.env.DEFAULT_CONTACT_EMAIL || '').trim();
   if (publicMail && publicMail.includes('@')) return publicMail;
-  return 'hola@vertialapp.com';
+  return process.env.EMAIL_FROM || process.env.SMTP_FROM || 'vertial.noreply@gmail.com';
 }
 
 /** Keys reales de Resend empiezan por re_; evita activar Resend con placeholders tipo CAMBIAR_… */
@@ -232,6 +232,62 @@ function escapeHtml(s) {
     .replaceAll('>', '&gt;');
 }
 
+/**
+ * Marca Vertial en email (landing actual): zinc oscuro + acento verde→teal→azul.
+ * CTA sólido azul (clientes de correo no pintan bien gradientes en botones).
+ */
+const EMAIL_BRAND = {
+  pageBg: '#f4f4f5',
+  cardBg: '#ffffff',
+  headerBg: '#09090b',
+  accentBar: 'linear-gradient(135deg,#22c55e 0%,#14b8a6 45%,#2563eb 100%)',
+  ctaBg: '#2563eb',
+  ctaHoverBorder: '#1d4ed8',
+  text: '#18181b',
+  muted: '#71717a',
+  softBg: '#eff6ff',
+  softBorder: '#bfdbfe',
+  softText: '#1e40af',
+  footerBg: '#fafafa',
+  border: '#e4e4e7',
+  footer: 'Vertial · Plataforma de gestión empresarial',
+};
+
+function emailCtaButton(href, label) {
+  return `<table cellpadding="0" cellspacing="0" role="presentation"><tr><td style="background:${EMAIL_BRAND.ctaBg};border-radius:12px;">
+            <a href="${href}"
+               style="display:inline-block;background:${EMAIL_BRAND.ctaBg};color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:12px;font-weight:700;font-size:15px;letter-spacing:0.2px;border:1px solid ${EMAIL_BRAND.ctaHoverBorder};">
+              <span style="color:#ffffff;">${label}</span>
+            </a>
+          </td></tr></table>`;
+}
+
+/** Envuelve el cuerpo HTML de un email de cuenta con cabecera/footer de marca. */
+function wrapAccountEmail({ bodyHtml, headerLabel = 'Vertial' }) {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:${EMAIL_BRAND.pageBg};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:${EMAIL_BRAND.pageBg};padding:40px 20px;">
+    <tr><td align="center">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:${EMAIL_BRAND.cardBg};border-radius:16px;overflow:hidden;border:1px solid ${EMAIL_BRAND.border};box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <tr><td style="background:${EMAIL_BRAND.headerBg};padding:28px 32px 20px;">
+          <span style="color:#fff;font-size:22px;font-weight:700;letter-spacing:-0.5px;">${escapeHtml(headerLabel)}</span>
+        </td></tr>
+        <tr><td style="height:4px;background:${EMAIL_BRAND.accentBar};font-size:0;line-height:0;">&nbsp;</td></tr>
+        <tr><td style="padding:32px;">
+          ${bodyHtml}
+        </td></tr>
+        <tr><td style="background:${EMAIL_BRAND.footerBg};padding:16px 32px;border-top:1px solid ${EMAIL_BRAND.border};">
+          <p style="margin:0;color:#a1a1aa;font-size:12px;">${EMAIL_BRAND.footer}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
 export function buildSetupWelcomeEmail({ firstName, companyName, planName, trialEndDate, businessType, modules, onboardingUrl }) {
   const appUrl = getAppBaseUrl();
   const setupUrl = onboardingUrl || `${appUrl}/saas/onboarding`;
@@ -252,46 +308,30 @@ export function buildSetupWelcomeEmail({ firstName, companyName, planName, trial
   return {
     to: null,
     subject: '\u00a1Bienvenido a Vertial! Tu prueba gratuita ha comenzado',
-    html: `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f3f4f6;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="padding:32px 16px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-        <tr><td style="background:linear-gradient(135deg,#f59e0b,#ea580c);padding:32px;text-align:center;">
-          <h1 style="margin:0;color:#fff;font-size:24px;">\u00a1Bienvenido a Vertial!</h1>
-          <p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">Tu prueba gratuita de 14 d\u00edas ha comenzado</p>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <p style="font-size:16px;color:#111;">Hola <strong>${firstName || 'usuario'}</strong>,</p>
-          <p style="font-size:14px;color:#444;line-height:1.6;">
-            Gracias por registrar <strong>${companyName || 'tu empresa'}</strong> en Vertial.
-            Tu prueba gratuita del plan <strong>${planName || 'Basic'}</strong> est\u00e1 activa hasta el <strong>${endDateStr}</strong>.
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 8px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">\u00a1Bienvenido a Vertial!</h2>
+          <p style="margin:0 0 20px;color:${EMAIL_BRAND.muted};font-size:14px;">Tu prueba gratuita de 14 d\u00edas ha comenzado</p>
+          <p style="font-size:16px;color:${EMAIL_BRAND.text};">Hola <strong>${escapeHtml(firstName || 'usuario')}</strong>,</p>
+          <p style="font-size:14px;color:#52525b;line-height:1.6;">
+            Gracias por registrar <strong>${escapeHtml(companyName || 'tu empresa')}</strong> en Vertial.
+            Tu prueba gratuita del plan <strong>${escapeHtml(planName || 'Basic')}</strong> est\u00e1 activa hasta el <strong>${escapeHtml(endDateStr)}</strong>.
           </p>
-          <table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;margin:16px 0;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;margin:16px 0;">
             <tr><td style="padding:16px;">
-              <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#92400e;">Tu configuraci\u00f3n</p>
-              <p style="margin:0;font-size:13px;color:#78350f;">Vertical: <strong>${verticalLabel}</strong></p>
-              ${activeModules.length > 0 ? `<p style="margin:4px 0 0;font-size:13px;color:#78350f;">M\u00f3dulos: <strong>${activeModules.join(', ')}</strong></p>` : ''}
+              <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:${EMAIL_BRAND.softText};">Tu configuraci\u00f3n</p>
+              <p style="margin:0;font-size:13px;color:#1e3a8a;">Vertical: <strong>${escapeHtml(verticalLabel)}</strong></p>
+              ${activeModules.length > 0 ? `<p style="margin:4px 0 0;font-size:13px;color:#1e3a8a;">M\u00f3dulos: <strong>${escapeHtml(activeModules.join(', '))}</strong></p>` : ''}
             </td></tr>
           </table>
-          <p style="font-size:14px;color:#444;line-height:1.6;">
+          <p style="font-size:14px;color:#52525b;line-height:1.6;">
             El siguiente paso es completar la configuraci\u00f3n de tu negocio: datos de empresa, equipo, sedes y m\u00e1s.
           </p>
-          <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
-            <tr><td style="background:#111;border-radius:10px;">
-              <a href="${setupUrl}" style="display:inline-block;padding:14px 32px;color:#fff;text-decoration:none;font-weight:600;font-size:14px;">Completar configuraci\u00f3n</a>
-            </td></tr>
-          </table>
-          <p style="font-size:13px;color:#888;line-height:1.5;">
-            No se te cobrar\u00e1 hasta el ${endDateStr}. Puedes cancelar en cualquier momento desde Ajustes &rarr; Suscripci\u00f3n.
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial &middot; Plataforma de gesti\u00f3n integral</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>`,
+          <div style="margin:24px 0;">${emailCtaButton(setupUrl, 'Completar configuraci\u00f3n')}</div>
+          <p style="font-size:13px;color:${EMAIL_BRAND.muted};line-height:1.5;">
+            No se te cobrar\u00e1 hasta el ${escapeHtml(endDateStr)}. Puedes cancelar en cualquier momento desde Ajustes &rarr; Suscripci\u00f3n.
+          </p>`,
+    }),
   };
 }
 
@@ -301,92 +341,54 @@ export function buildEmailVerificationEmail(email, token) {
 
   return {
     subject: 'Verifica tu email · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#FF5E00;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Confirma tu dirección de email</h2>
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Confirma tu dirección de email</h2>
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
             Gracias por registrarte. Para activar tu cuenta y acceder al panel, confirma que este email
             te pertenece haciendo clic en el botón de abajo.
           </p>
-          <table cellpadding="0" cellspacing="0"><tr><td style="background:#FF5E00;border-radius:8px;">
-            <a href="${verifyUrl}"
-               style="display:inline-block;background:#FF5E00;color:#ffffff;padding:16px 36px;text-decoration:none;border-radius:8px;font-weight:700;font-size:16px;letter-spacing:0.2px;border:1px solid #E55400;box-shadow:0 2px 0 #C24700;mso-padding-alt:0;">
-              <span style="color:#ffffff;">Verificar mi email →</span>
-            </a>
-          </td></tr></table>
-          <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">
+          ${emailCtaButton(verifyUrl, 'Verificar mi email →')}
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
             Este enlace expira en <strong>24 horas</strong>. Si no creaste esta cuenta, puedes ignorar este email.
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          </p>`,
+    }),
   };
 }
 
 // S-03: Email de notificación de bloqueo de cuenta
 export function buildAccountLockedEmail(email, lockUntil, ipAddress) {
   const lockDate = lockUntil ? new Date(lockUntil).toLocaleString('es-ES', { timeZone: 'Europe/Madrid' }) : 'unos minutos';
-  const ipInfo = ipAddress && ipAddress !== 'unknown' ? `<p style="color:#555;margin:0 0 8px;line-height:1.6;">IP detectada: <strong>${ipAddress}</strong></p>` : '';
+  const ipInfo = ipAddress && ipAddress !== 'unknown'
+    ? `<p style="color:#52525b;margin:0 0 8px;line-height:1.6;">IP detectada: <strong>${escapeHtml(ipAddress)}</strong></p>`
+    : '';
 
   return {
     subject: '⚠️ Cuenta bloqueada temporalmente · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#dc2626;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Alerta de Seguridad</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu cuenta ha sido bloqueada temporalmente</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
+    html: wrapAccountEmail({
+      headerLabel: 'Vertial · Alerta de seguridad',
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Tu cuenta ha sido bloqueada temporalmente</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
             Hemos detectado múltiples intentos de inicio de sesión fallidos en tu cuenta
-            <strong>${email}</strong>.
+            <strong>${escapeHtml(email)}</strong>.
           </p>
           ${ipInfo}
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
-            Por seguridad, el acceso ha sido bloqueado hasta: <strong>${lockDate}</strong>.
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
+            Por seguridad, el acceso ha sido bloqueado hasta: <strong>${escapeHtml(lockDate)}</strong>.
           </p>
-          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:16px;margin:0 0 24px;">
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:16px;margin:0 0 24px;">
             <p style="color:#b91c1c;margin:0;font-size:14px;line-height:1.5;">
               Si no fuiste tú quien intentó acceder, te recomendamos cambiar tu contraseña
               inmediatamente una vez que se levante el bloqueo.
             </p>
           </div>
-          <p style="color:#888;font-size:13px;margin:0;line-height:1.5;">
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:0;line-height:1.5;">
             Mientras tanto puedes entrar con un <strong>código por email</strong> desde la pantalla de acceso.
             Si necesitas ayuda, escribe a
-            <a href="mailto:hola@vertialapp.com" style="color:#111;font-weight:600;">hola@vertialapp.com</a>.
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+            <a href="mailto:vertial.noreply@gmail.com" style="color:${EMAIL_BRAND.ctaBg};font-weight:600;">vertial.noreply@gmail.com</a>.
+          </p>`,
+    }),
   };
 }
 
@@ -397,51 +399,28 @@ export function buildTrialExpiringEmail(email, name, daysLeft, billingUrl) {
 
   return {
     subject: `⏰ Tu prueba gratuita termina en ${dayText} · Vertial`,
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
-            <p style="margin:0;color:#92400e;font-size:13px;font-weight:600;">⏰ Tu prueba termina en ${dayText}</p>
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:12px 16px;margin-bottom:24px;">
+            <p style="margin:0;color:#92400e;font-size:13px;font-weight:600;">Tu prueba termina en ${escapeHtml(dayText)}</p>
           </div>
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Hola, ${displayName}</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Hola, ${escapeHtml(displayName)}</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
             Tu periodo de prueba gratuita de <strong>Vertial</strong> está a punto de finalizar.
             Para continuar usando todas las funcionalidades sin interrupciones, activa tu suscripción ahora.
           </p>
-          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:24px;">
-            <p style="margin:0 0 8px;color:#111;font-size:14px;font-weight:600;">¿Qué incluye la suscripción?</p>
-            <p style="margin:0 0 4px;color:#555;font-size:13px;">✓ Acceso completo a todos los módulos</p>
-            <p style="margin:0 0 4px;color:#555;font-size:13px;">✓ Soporte prioritario</p>
-            <p style="margin:0 0 4px;color:#555;font-size:13px;">✓ Actualizaciones automáticas</p>
-            <p style="margin:0;color:#555;font-size:13px;">✓ Hasta 20% de descuento con el plan anual</p>
+          <div style="background:${EMAIL_BRAND.footerBg};border:1px solid ${EMAIL_BRAND.border};border-radius:12px;padding:16px;margin-bottom:24px;">
+            <p style="margin:0 0 8px;color:${EMAIL_BRAND.text};font-size:14px;font-weight:600;">¿Qué incluye la suscripción?</p>
+            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">✓ Acceso completo a todos los módulos</p>
+            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">✓ Soporte prioritario</p>
+            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">✓ Actualizaciones automáticas</p>
+            <p style="margin:0;color:#52525b;font-size:13px;">✓ Hasta 20% de descuento con el plan anual</p>
           </div>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${billingUrl}"
-               style="display:inline-block;background:#000;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Activar suscripción
-            </a>
-          </td></tr></table>
-          <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">
+          ${emailCtaButton(billingUrl, 'Activar suscripción')}
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
             Si tienes alguna duda, responde a este email y te ayudaremos encantados.
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          </p>`,
+    }),
   };
 }
 
@@ -451,48 +430,26 @@ export function buildPaymentFailedEmail(email, name, billingUrl) {
 
   return {
     subject: '❌ Error en tu pago · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#dc2626;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Error de Pago</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">No hemos podido procesar tu pago</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Hola <strong>${displayName}</strong>, hemos intentado cobrar tu suscripción de <strong>Vertial</strong>
+    html: wrapAccountEmail({
+      headerLabel: 'Vertial · Error de pago',
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">No hemos podido procesar tu pago</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Hola <strong>${escapeHtml(displayName)}</strong>, hemos intentado cobrar tu suscripción de <strong>Vertial</strong>
             pero el pago no se pudo completar.
           </p>
-          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin-bottom:24px;">
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:16px;margin-bottom:24px;">
             <p style="margin:0;color:#b91c1c;font-size:14px;font-weight:600;">¿Qué puedes hacer?</p>
             <p style="margin:8px 0 4px;color:#7f1d1d;font-size:13px;">• Verifica que los datos de tu tarjeta son correctos</p>
             <p style="margin:0 0 4px;color:#7f1d1d;font-size:13px;">• Asegúrate de que tiene fondos suficientes</p>
             <p style="margin:0;color:#7f1d1d;font-size:13px;">• Actualiza tu método de pago desde el panel</p>
           </div>
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
             Tienes un <strong>periodo de gracia de 72 horas</strong> para actualizar tu método de pago
             antes de que tu cuenta quede suspendida.
           </p>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${billingUrl}"
-               style="display:inline-block;background:#dc2626;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Actualizar método de pago
-            </a>
-          </td></tr></table>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          ${emailCtaButton(billingUrl, 'Actualizar método de pago')}`,
+    }),
   };
 }
 
@@ -505,47 +462,25 @@ export function buildGracePeriodEmail(email, name, gracePeriodEndsAt, billingUrl
 
   return {
     subject: '⚠️ Periodo de gracia activado — actúa antes de que expire · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#ea580c;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Acción requerida</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu cuenta está en periodo de gracia</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Hola <strong>${displayName}</strong>, el último intento de cobro de tu suscripción de
+    html: wrapAccountEmail({
+      headerLabel: 'Vertial · Acción requerida',
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Tu cuenta está en periodo de gracia</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Hola <strong>${escapeHtml(displayName)}</strong>, el último intento de cobro de tu suscripción de
             <strong>Vertial</strong> falló y tu cuenta ha entrado en periodo de gracia.
           </p>
-          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:16px;margin-bottom:24px;">
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:#9a3412;font-size:14px;font-weight:600;">
-              ⚠️ Tienes hasta el ${endDate} para regularizar tu pago
+              Tienes hasta el ${escapeHtml(endDate)} para regularizar tu pago
             </p>
             <p style="margin:0;color:#7c2d12;font-size:13px;line-height:1.5;">
               Pasada esta fecha, tu cuenta quedará suspendida y no podrás acceder a ningún módulo.
               Tus datos se conservarán de forma segura.
             </p>
           </div>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${billingUrl}"
-               style="display:inline-block;background:#ea580c;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Regularizar pago ahora
-            </a>
-          </td></tr></table>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          ${emailCtaButton(billingUrl, 'Regularizar pago ahora')}`,
+    }),
   };
 }
 
@@ -555,48 +490,26 @@ export function buildSuspensionEmail(email, name, billingUrl) {
 
   return {
     subject: '🚫 Tu cuenta ha sido suspendida · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#1e293b;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Cuenta Suspendida</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu cuenta ha sido suspendida</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Hola <strong>${displayName}</strong>, lamentamos informarte que tu cuenta de
+    html: wrapAccountEmail({
+      headerLabel: 'Vertial · Cuenta suspendida',
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Tu cuenta ha sido suspendida</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Hola <strong>${escapeHtml(displayName)}</strong>, lamentamos informarte que tu cuenta de
             <strong>Vertial</strong> ha sido suspendida por falta de pago.
           </p>
-          <div style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:16px;margin-bottom:24px;">
-            <p style="margin:0 0 8px;color:#1e293b;font-size:14px;font-weight:600;">¿Qué significa esto?</p>
-            <p style="margin:0 0 4px;color:#475569;font-size:13px;">• No puedes acceder al panel de control</p>
-            <p style="margin:0 0 4px;color:#475569;font-size:13px;">• Tus datos están seguros y se conservan</p>
-            <p style="margin:0;color:#475569;font-size:13px;">• Puedes reactivar tu cuenta en cualquier momento</p>
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:16px;margin-bottom:24px;">
+            <p style="margin:0 0 8px;color:${EMAIL_BRAND.softText};font-size:14px;font-weight:600;">¿Qué significa esto?</p>
+            <p style="margin:0 0 4px;color:#1e3a8a;font-size:13px;">• No puedes acceder al panel de control</p>
+            <p style="margin:0 0 4px;color:#1e3a8a;font-size:13px;">• Tus datos están seguros y se conservan</p>
+            <p style="margin:0;color:#1e3a8a;font-size:13px;">• Puedes reactivar tu cuenta en cualquier momento</p>
           </div>
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
             Para reactivar tu cuenta, actualiza tu método de pago y realiza el pago pendiente.
             Tu cuenta quedará activa de inmediato.
           </p>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${billingUrl}"
-               style="display:inline-block;background:#000;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Reactivar mi cuenta
-            </a>
-          </td></tr></table>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          ${emailCtaButton(billingUrl, 'Reactivar mi cuenta')}`,
+    }),
   };
 }
 
@@ -614,9 +527,9 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
 
   const credentialsBlock = isExistingUser
     ? `
-          <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:20px;margin:0 0 20px;">
-            <p style="margin:0 0 4px;color:#065f46;font-size:14px;font-weight:700;">Ya tienes cuenta en Vertial</p>
-            <p style="margin:0;color:#047857;font-size:13px;">Acepta la invitación con tu cuenta actual (<strong>${email}</strong>) y este equipo se añadirá automáticamente. No tienes que crear ninguna contraseña nueva.</p>
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:8px;padding:20px;margin:0 0 20px;">
+            <p style="margin:0 0 4px;color:${EMAIL_BRAND.softText};font-size:14px;font-weight:700;">Ya tienes cuenta en Vertial</p>
+            <p style="margin:0;color:#1e3a8a;font-size:13px;">Acepta la invitación con tu cuenta actual (<strong>${email}</strong>) y este equipo se añadirá automáticamente. No tienes que crear ninguna contraseña nueva.</p>
           </div>`
     : `
           <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:20px;margin:0 0 20px;">
@@ -636,59 +549,36 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
 
   return {
     subject: subjectPrefix,
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Hola${name ? `, ${name}` : ''}!</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Hola${name ? `, ${escapeHtml(name)}` : ''}!</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
             ${inviterDisplay} te ha invitado a unirte al equipo${companyDisplay} en <strong>Vertial</strong>
-            con el rol de <strong>${role}</strong>.
+            con el rol de <strong>${escapeHtml(role)}</strong>.
           </p>
           ${companyName ? `
-          <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:16px;margin:0 0 16px;">
-            <p style="margin:0;color:#0369a1;font-size:14px;font-weight:600;">${companyName}</p>
-            <p style="margin:4px 0 0;color:#0c4a6e;font-size:13px;">Accederás directamente a esta empresa una vez aceptes la invitación.</p>
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:16px;margin:0 0 16px;">
+            <p style="margin:0;color:${EMAIL_BRAND.softText};font-size:14px;font-weight:600;">${escapeHtml(companyName)}</p>
+            <p style="margin:4px 0 0;color:#1e3a8a;font-size:13px;">Accederás directamente a esta empresa una vez aceptes la invitación.</p>
           </div>
           ` : ''}
           ${credentialsBlock}
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
             ${isExistingUser
               ? 'Haz clic en "Aceptar invitación" e inicia sesión con tu cuenta de Vertial para entrar en el nuevo equipo.'
               : 'Puedes acceder de dos formas: con el botón de abajo para aceptar la invitación, o directamente iniciando sesión con tus credenciales.'}
           </p>
-          <table cellpadding="0" cellspacing="0" style="margin:0 0 12px;"><tr><td>
-            <a href="${acceptUrl}"
-               style="display:inline-block;background:#000;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Aceptar invitación
-            </a>
-          </td></tr></table>
+          <div style="margin:0 0 12px;">${emailCtaButton(acceptUrl, 'Aceptar invitación')}</div>
           <table cellpadding="0" cellspacing="0"><tr><td>
             <a href="${loginUrl}"
-               style="display:inline-block;background:#fff;color:#000;padding:12px 24px;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;border:2px solid #e5e7eb;">
+               style="display:inline-block;background:#fff;color:${EMAIL_BRAND.text};padding:12px 24px;text-decoration:none;border-radius:12px;font-weight:600;font-size:14px;border:1px solid ${EMAIL_BRAND.border};">
               Ir a iniciar sesión
             </a>
           </td></tr></table>
-          <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
             El enlace de invitación expira en <strong>72 horas</strong>, pero puedes iniciar sesión con tus credenciales en cualquier momento.
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Software de gestión para negocios</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          </p>`,
+    }),
   };
 }
 
@@ -699,51 +589,28 @@ export function buildWelcomeTrialEmail(email, name, trialDays = 14) {
 
   return {
     subject: `Bienvenido a Vertial · ${trialDays} días gratis para ti`,
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <div style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:8px;padding:12px 16px;margin-bottom:24px;">
-            <p style="margin:0;color:#065f46;font-size:13px;font-weight:600;">🎉 ¡Tu cuenta está lista! Tienes ${trialDays} días de prueba gratuita.</p>
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:12px 16px;margin-bottom:24px;">
+            <p style="margin:0;color:${EMAIL_BRAND.softText};font-size:13px;font-weight:600;">Tu cuenta está lista · ${trialDays} días de prueba gratuita</p>
           </div>
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">¡Hola, ${displayName}!</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">¡Hola, ${escapeHtml(displayName)}!</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
             Bienvenido a <strong>Vertial</strong>. Tu cuenta ya está activa y tienes <strong>${trialDays} días gratis</strong>
             para explorar todas las funcionalidades de la plataforma.
           </p>
-          <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:24px;">
-            <p style="margin:0 0 8px;color:#111;font-size:14px;font-weight:600;">Primeros pasos recomendados:</p>
-            <p style="margin:0 0 4px;color:#555;font-size:13px;">1. Configura los datos de tu negocio</p>
-            <p style="margin:0 0 4px;color:#555;font-size:13px;">2. Sube tus clientes (puedes importar desde Excel)</p>
-            <p style="margin:0 0 4px;color:#555;font-size:13px;">3. Crea tu catálogo de productos/servicios</p>
-            <p style="margin:0;color:#555;font-size:13px;">4. Realiza tu primera operación</p>
+          <div style="background:${EMAIL_BRAND.footerBg};border:1px solid ${EMAIL_BRAND.border};border-radius:12px;padding:16px;margin-bottom:24px;">
+            <p style="margin:0 0 8px;color:${EMAIL_BRAND.text};font-size:14px;font-weight:600;">Primeros pasos recomendados:</p>
+            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">1. Configura los datos de tu negocio</p>
+            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">2. Sube tus clientes (puedes importar desde Excel)</p>
+            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">3. Crea tu catálogo de productos/servicios</p>
+            <p style="margin:0;color:#52525b;font-size:13px;">4. Realiza tu primera operación</p>
           </div>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${dashboardUrl}"
-               style="display:inline-block;background:#000;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Ir a mi panel
-            </a>
-          </td></tr></table>
-          <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">
+          ${emailCtaButton(dashboardUrl, 'Ir a mi panel')}
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
             Si tienes alguna duda, responde a este email y te ayudaremos encantados.
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          </p>`,
+    }),
   };
 }
 
@@ -754,45 +621,23 @@ export function buildPaymentSuccessEmail(email, name, planName, billingMode) {
   const modeLabel = billingMode === 'annual' ? 'anual' : 'mensual';
 
   return {
-    subject: '✅ Pago confirmado · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#16a34a;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Pago Confirmado</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">¡Gracias por tu pago, ${displayName}!</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Tu suscripción al plan <strong>${planName || 'Vertial'}</strong> (${modeLabel}) se ha activado correctamente.
+    subject: 'Pago confirmado · Vertial',
+    html: wrapAccountEmail({
+      headerLabel: 'Vertial · Pago confirmado',
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">¡Gracias por tu pago, ${escapeHtml(displayName)}!</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Tu suscripción al plan <strong>${escapeHtml(planName || 'Vertial')}</strong> (${modeLabel}) se ha activado correctamente.
             Ya tienes acceso completo a todas las funcionalidades.
           </p>
-          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin-bottom:24px;">
-            <p style="margin:0 0 8px;color:#166534;font-size:14px;font-weight:600;">✅ Tu suscripción está activa</p>
-            <p style="margin:0;color:#15803d;font-size:13px;">
-              Plan: ${planName || 'Vertial'} · Facturación: ${modeLabel}
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:16px;margin-bottom:24px;">
+            <p style="margin:0 0 8px;color:${EMAIL_BRAND.softText};font-size:14px;font-weight:600;">Tu suscripción está activa</p>
+            <p style="margin:0;color:#1e3a8a;font-size:13px;">
+              Plan: ${escapeHtml(planName || 'Vertial')} · Facturación: ${modeLabel}
             </p>
           </div>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${dashboardUrl}"
-               style="display:inline-block;background:#16a34a;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Ir a mi panel
-            </a>
-          </td></tr></table>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          ${emailCtaButton(dashboardUrl, 'Ir a mi panel')}`,
+    }),
   };
 }
 
@@ -801,47 +646,25 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
 
   return {
     subject: '⛔ Tu periodo de prueba ha finalizado · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#dc2626;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial · Prueba Finalizada</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu periodo de prueba ha terminado</h2>
-          <p style="color:#555;margin:0 0 16px;line-height:1.6;">
-            Hola <strong>${displayName}</strong>, tus <strong>14 días de prueba gratuita</strong> en
+    html: wrapAccountEmail({
+      headerLabel: 'Vertial · Prueba finalizada',
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Tu periodo de prueba ha terminado</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Hola <strong>${escapeHtml(displayName)}</strong>, tus <strong>14 días de prueba gratuita</strong> en
             <strong>Vertial</strong> han finalizado.
           </p>
-          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:16px;margin-bottom:24px;">
+          <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:#b91c1c;font-size:14px;font-weight:600;">¿Qué ocurre ahora?</p>
             <p style="margin:0 0 4px;color:#7f1d1d;font-size:13px;">• El acceso a la plataforma queda restringido</p>
             <p style="margin:0 0 4px;color:#7f1d1d;font-size:13px;">• Tus datos se conservan de forma segura</p>
             <p style="margin:0;color:#7f1d1d;font-size:13px;">• Puedes activar tu suscripción en cualquier momento</p>
           </div>
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
             Para seguir utilizando Vertial sin interrupciones, activa tu suscripción ahora.
           </p>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${billingUrl}"
-               style="display:inline-block;background:#dc2626;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Activar suscripción
-            </a>
-          </td></tr></table>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          ${emailCtaButton(billingUrl, 'Activar suscripción')}`,
+    }),
   };
 }
 
@@ -856,36 +679,20 @@ export function buildLoginCodeEmail(email, code) {
 
   return {
     subject: 'Código de acceso · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Tu código de acceso</h2>
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Tu código de acceso</h2>
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
             Usa este código para entrar a la cuenta <strong>${escapeHtml(email)}</strong>.
           </p>
-          <p style="margin:0 0 8px;font-size:32px;font-weight:bold;letter-spacing:8px;color:#111;text-align:center;">${escapeHtml(code)}</p>
-          <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;text-align:center;">
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:20px;margin:0 0 8px;">
+            <p style="margin:0;font-size:32px;font-weight:700;letter-spacing:8px;color:${EMAIL_BRAND.text};text-align:center;">${escapeHtml(code)}</p>
+          </div>
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;text-align:center;">
             Válido <strong>10 minutos</strong>. No compartas este código.
           </p>
-          ${supportBlock}
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Plataforma de gestión empresarial</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+          ${supportBlock}`,
+    }),
   };
 }
 
@@ -902,45 +709,22 @@ export function buildPasswordResetEmail(email, token) {
 
   return {
     subject: 'Recuperar contraseña · Vertial',
-    html: `
-<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 20px;">
-    <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
-        <tr><td style="background:#000;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;letter-spacing:-0.5px;">Vertial</span>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h2 style="margin:0 0 16px;color:#111;font-size:22px;">Recupera tu contraseña</h2>
-          <p style="color:#555;margin:0 0 24px;line-height:1.6;">
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Recupera tu contraseña</h2>
+          <p style="color:#52525b;margin:0 0 24px;line-height:1.6;">
             Hemos recibido una solicitud para restablecer la contraseña de la cuenta asociada a
-            <strong>${email}</strong>.
+            <strong>${escapeHtml(email)}</strong>.
           </p>
-          <table cellpadding="0" cellspacing="0"><tr><td>
-            <a href="${resetUrl}"
-               style="display:inline-block;background:#000;color:#fff;padding:14px 28px;text-decoration:none;border-radius:6px;font-weight:600;font-size:15px;">
-              Restablecer contraseña
-            </a>
-          </td></tr></table>
-          <p style="color:#888;font-size:13px;margin:24px 0 0;line-height:1.5;">
+          ${emailCtaButton(resetUrl, 'Restablecer contraseña')}
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
             Este enlace expira en <strong>1 hora</strong>. Si no solicitaste este cambio, puedes ignorar este email.
           </p>
           ${supportBlock}
-          <p style="color:#aaa;font-size:12px;margin:16px 0 0;">
+          <p style="color:#a1a1aa;font-size:12px;margin:16px 0 0;">
             O copia y pega esta URL en tu navegador:<br>
-            <span style="color:#555;word-break:break-all;">${resetUrl}</span>
-          </p>
-        </td></tr>
-        <tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb;">
-          <p style="margin:0;color:#aaa;font-size:12px;">Vertial · Sistema de gestión de concesionario</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`,
+            <span style="color:#52525b;word-break:break-all;">${resetUrl}</span>
+          </p>`,
+    }),
   };
 }

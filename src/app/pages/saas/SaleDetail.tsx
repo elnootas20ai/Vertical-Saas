@@ -6,7 +6,9 @@ import { Layout } from '../../components/saas/Layout';
 import { useModalClose } from '../../hooks/useModalClose';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness } from '../../context/BusinessContext';
 import { toast } from 'sonner';
+import { salesListPathForBusiness } from '../../lib/compraventaPaths';
 import { CloseSaleWizard } from '../../components/saas/CloseSaleWizard';
 import { useSalePermissions } from '../../hooks/useSalePermissions';
 import { syncVehicleWithSale } from '../../lib/vehicleSaleSync';
@@ -1988,6 +1990,8 @@ export function SaleDetail() {
   const { id } = useParams<{ id: string }>();
   const { createNotification } = useApp();
   const { user } = useAuth();
+  const { currentBusiness } = useBusiness();
+  const salesListPath = salesListPathForBusiness(currentBusiness?.businessType);
   const salePerms = useSalePermissions();
   const [activeTab, setActiveTab] = useState<TabId>('resumen');
   const [showStageModal, setShowStageModal] = useState(false);
@@ -2036,6 +2040,35 @@ export function SaleDetail() {
   useEffect(() => {
     saleRef.current = sale;
   }, [sale]);
+
+  // Deep-link desde módulo Ventas: Confirmar venta → abre el asistente de cierre.
+  useEffect(() => {
+    if (!sale || isLoading) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('close') !== '1') return;
+    if (sale.stage === 'sold' || sale.stage === 'delivered') return;
+    if (!salePerms.canClose) {
+      toast.error('No tienes permiso para cerrar ventas.');
+      return;
+    }
+    setShowCloseWizard(true);
+    params.delete('close');
+    const next = params.toString();
+    const path = `${window.location.pathname}${next ? `?${next}` : ''}`;
+    window.history.replaceState({}, '', path);
+  }, [sale, isLoading, salePerms.canClose]);
+
+  // Deep-link desde módulo Ventas: Editar → abre el modal de edición.
+  useEffect(() => {
+    if (!sale || isLoading) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('edit') !== '1') return;
+    setShowEditSaleModal(true);
+    params.delete('edit');
+    const next = params.toString();
+    const path = `${window.location.pathname}${next ? `?${next}` : ''}`;
+    window.history.replaceState({}, '', path);
+  }, [sale, isLoading]);
 
   const persistSale = useCallback(async (updater: (current: SaleData) => SaleData) => {
     const runUpdate = async () => {
@@ -2494,7 +2527,7 @@ export function SaleDetail() {
           <div className="text-5xl mb-4">⚠️</div>
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Venta no encontrada</h3>
           <p className="text-sm text-gray-400 dark:text-gray-500 mb-6">Esta operación no existe o fue eliminada.</p>
-          <button onClick={() => navigate('/saas/sales')}
+          <button onClick={() => navigate(salesListPath)}
             className="px-6 py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl text-sm font-medium transition-colors">
             Volver a ventas
           </button>
@@ -2514,7 +2547,7 @@ export function SaleDetail() {
       <div className="space-y-3 pb-10">
 
         {/* Back */}
-        <button onClick={() => navigate('/saas/sales')}
+        <button onClick={() => navigate(salesListPath)}
           className="flex items-center gap-1.5 text-sm text-gray-400 dark:text-gray-500 hover:text-gray-900 transition-colors">
           <ArrowLeft className="w-4 h-4" />
           {t('sales.title')}

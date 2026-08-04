@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import {
@@ -10,13 +10,8 @@ import {
   Info,
 } from 'lucide-react';
 import { Layout } from '../../../components/saas/Layout';
+import { useApp } from '../../../context/AppContext';
 import { useAuthOptional } from '../../../context/AuthContext';
-import {
-  listNotificationsRequest,
-  markAllNotificationsReadRequest,
-  markNotificationReadRequest,
-  type NotificationRecord,
-} from '../../../lib/notificationApi';
 
 function formatWhen(iso: string) {
   try {
@@ -36,49 +31,37 @@ export function WorkerNotifications() {
   const { t } = useTranslation();
   const user = useAuthOptional()?.user ?? null;
   const userId = user?.user_id || user?.id || '';
+  const { notifications, markNotificationAsRead, markAllNotificationsAsRead } = useApp();
 
-  const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [tab, setTab] = useState<'alertas' | 'todas'>('alertas');
   const [markingAll, setMarkingAll] = useState(false);
+  const [booting, setBooting] = useState(true);
 
   useEffect(() => {
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    listNotificationsRequest(userId)
-      .then((res) => {
-        const list = (res as { notifications?: NotificationRecord[] }).notifications || [];
-        setNotifications(list);
-      })
-      .catch((err: Error) => setError(err.message || 'No se pudieron cargar las notificaciones'))
-      .finally(() => setLoading(false));
+    // La lista vive en AppContext (misma que la campanita).
+    const tmr = window.setTimeout(() => setBooting(false), 200);
+    return () => window.clearTimeout(tmr);
   }, [userId]);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  const unread = useMemo(() => notifications.filter((n) => !n.read), [notifications]);
+  const unreadCount = unread.length;
+  const visible = tab === 'alertas' ? unread : notifications;
 
-  const handleMarkRead = async (notification: NotificationRecord) => {
-    if (!userId || notification.read) return;
-    try {
-      await markNotificationReadRequest(userId, notification.id, true);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notification.id ? { ...n, read: true } : n)),
-      );
-    } catch {
-      /* best-effort */
-    }
+  useEffect(() => {
+    if (unreadCount === 0) setTab('todas');
+  }, [unreadCount]);
+
+  const handleMarkRead = async (id: string) => {
+    await markNotificationAsRead(id, true);
+    setTab('todas');
   };
 
   const handleMarkAllRead = async () => {
-    if (!userId || unreadCount === 0) return;
+    if (unreadCount === 0) return;
     setMarkingAll(true);
     try {
-      await markAllNotificationsReadRequest(userId);
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Error al marcar como leídas');
+      await markAllNotificationsAsRead();
+      setTab('todas');
     } finally {
       setMarkingAll(false);
     }
@@ -90,8 +73,7 @@ export function WorkerNotifications() {
         <div className="rounded-2xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-5 py-4 flex items-start gap-3">
           <Info className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
           <p className="text-sm text-blue-800 dark:text-blue-200">
-            Aquí ves tus avisos in-app. También aparecen en el campanario de la barra superior.
-            Las preferencias de email y push por categoría llegarán en una próxima actualización.
+            Al abrir o limpiar un aviso, pasa a «Todas» y deja de contar en la campanita. No vuelve a salir el número.
           </p>
         </div>
 
@@ -109,9 +91,7 @@ export function WorkerNotifications() {
               )}
               <div>
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                  {unreadCount > 0
-                    ? `${unreadCount} sin leer`
-                    : 'Todo al día'}
+                  {unreadCount > 0 ? `${unreadCount} sin leer` : 'Todo al día'}
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {notifications.length} avisos en total
@@ -120,7 +100,8 @@ export function WorkerNotifications() {
             </div>
             {unreadCount > 0 && (
               <button
-                onClick={handleMarkAllRead}
+                type="button"
+                onClick={() => void handleMarkAllRead()}
                 disabled={markingAll}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50"
               >
@@ -129,28 +110,59 @@ export function WorkerNotifications() {
                 ) : (
                   <CheckCheck className="w-4 h-4" />
                 )}
-                Marcar todas leídas
+                Limpiar campanita
               </button>
             )}
           </div>
 
-          {loading ? (
+          <div className="flex gap-2 px-5 py-3 border-b border-gray-100 dark:border-gray-700">
+            <button
+              type="button"
+              onClick={() => setTab('alertas')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                tab === 'alertas'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+              }`}
+            >
+              Alertas ({unreadCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTab('todas')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                tab === 'todas'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+              }`}
+            >
+              Todas
+            </button>
+          </div>
+
+          {booting ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
             </div>
-          ) : error ? (
-            <div className="px-5 py-8 text-sm text-red-600 dark:text-red-400">{error}</div>
-          ) : notifications.length === 0 ? (
+          ) : visible.length === 0 ? (
             <div className="px-5 py-12 text-center text-sm text-gray-500 dark:text-gray-400">
-              No tienes notificaciones todavía.
+              {tab === 'alertas'
+                ? 'Sin alertas nuevas. Mira «Todas» para el historial.'
+                : 'No tienes notificaciones todavía.'}
             </div>
           ) : (
             <div className="divide-y divide-gray-100 dark:divide-gray-700">
-              {notifications.slice(0, 50).map((notification) => {
+              {visible.slice(0, 50).map((notification) => {
                 const content = (
                   <>
                     <div className="flex items-start justify-between gap-3">
-                      <p className={`text-sm font-medium ${notification.read ? 'text-gray-600 dark:text-gray-400' : 'text-gray-900 dark:text-white'}`}>
+                      <p
+                        className={`text-sm font-medium ${
+                          notification.read
+                            ? 'text-gray-600 dark:text-gray-400'
+                            : 'text-gray-900 dark:text-white'
+                        }`}
+                      >
                         {notification.title}
                       </p>
                       <span className="text-xs text-gray-400 shrink-0">
@@ -174,7 +186,7 @@ export function WorkerNotifications() {
                     <Link
                       key={notification.id}
                       to={notification.route}
-                      onClick={() => handleMarkRead(notification)}
+                      onClick={() => void handleMarkRead(notification.id)}
                       className={className}
                     >
                       {content}
@@ -190,7 +202,7 @@ export function WorkerNotifications() {
                   <button
                     key={notification.id}
                     type="button"
-                    onClick={() => handleMarkRead(notification)}
+                    onClick={() => void handleMarkRead(notification.id)}
                     className={`w-full text-left ${className}`}
                   >
                     {content}

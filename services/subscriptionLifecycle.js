@@ -14,6 +14,11 @@ import {
   buildPaymentSuccessEmail,
 } from './email.js';
 import logger from './logger.js';
+import {
+  notifyTrialExpiring,
+  notifyTrialExpired,
+  notifySubscriptionSuspended,
+} from './adminBusinessAlerts.js';
 
 const TRIAL_DAYS = 14;
 const GRACE_HOURS = 72;
@@ -212,6 +217,14 @@ export async function runSubscriptionLifecycle() {
           try { await emailFn(); } catch (e) {
             logger.error({ tag: 'LIFECYCLE', err: e?.message }, 'Email error in trial→expired');
           }
+          notifyTrialExpired({
+            ...account,
+            subscription: {
+              ...sub,
+              status: 'trial_expired',
+              gracePeriodEndsAt: sub.gracePeriodEndsAt || suspendAfter.toISOString(),
+            },
+          });
           continue;
         } else if (daysLeft <= 3) {
           newStatus = 'trial_expiring';
@@ -224,6 +237,7 @@ export async function runSubscriptionLifecycle() {
             );
             await sendEmail({ to: account.email, subject, html });
           };
+          notifyTrialExpiring(account, daysLeft);
         }
       } else if (status === 'trial_expiring' && trialEndsAt) {
         const daysLeft = daysBetween(now, trialEndsAt);
@@ -245,6 +259,14 @@ export async function runSubscriptionLifecycle() {
           } catch (e) {
             logger.error({ tag: 'LIFECYCLE', err: e?.message }, 'Email error in trial_expiring→expired');
           }
+          notifyTrialExpired({
+            ...account,
+            subscription: {
+              ...sub,
+              status: 'trial_expired',
+              gracePeriodEndsAt: sub.gracePeriodEndsAt || suspendAfter.toISOString(),
+            },
+          });
           continue;
         }
       } else if (status === 'trial_expired') {
@@ -296,7 +318,7 @@ export async function runSubscriptionLifecycle() {
       if (newStatus && newStatus !== status) {
         const updates = { status: newStatus };
 
-        await saveAccount(fakeReq, {
+        const saved = await saveAccount(fakeReq, {
           ...account,
           subscription: { ...sub, ...updates },
           updatedAt: now.toISOString(),
@@ -307,6 +329,12 @@ export async function runSubscriptionLifecycle() {
           try { await emailFn(); } catch (e) {
             logger.error({ tag: 'LIFECYCLE', err: e?.message, userId: account.user_id }, 'Email send error in lifecycle');
           }
+        }
+
+        if (newStatus === 'suspended') {
+          notifySubscriptionSuspended(saved || { ...account, subscription: { ...sub, ...updates } }, {
+            source: 'lifecycle',
+          });
         }
 
         logger.info(

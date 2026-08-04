@@ -25,3 +25,17 @@ export const VERTIAL_FOCUS_RING =
 /** Superficie de panel / modal */
 export const VERTIAL_SURFACE =
   'rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950';
+
+/** Cobros: mismo color siempre (efectivo / tarjeta) en todo el SaaS */
+export const VERTIAL_CASH_TEXT =
+  'text-emerald-700 dark:text-emerald-300';
+export const VERTIAL_CASH_BG =
+  'bg-emerald-50 dark:bg-emerald-950/30';
+export const VERTIAL_CASH_BORDER =
+  'border-emerald-200 dark:border-emerald-800';
+export const VERTIAL_CARD_TEXT =
+  'text-sky-700 dark:text-sky-300';
+export const VERTIAL_CARD_BG =
+  'bg-sky-50 dark:bg-sky-950/30';
+export const VERTIAL_CARD_BORDER =
+  'border-sky-200 dark:border-sky-800';

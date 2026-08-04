@@ -8,7 +8,7 @@ export function CompraventaFiscalCalculatorPage() {
   const acquisitionId = params.get('acquisitionId');
 
   return (
-    <Layout title="Calculadora fiscal" subtitle="Compraventa" noPadding>
+    <Layout title="Simulación fiscal" subtitle="Cálculo orientativo · Compraventa" noPadding>
       <div className="px-3 pb-4 pt-3 md:px-4 md:pb-5 md:pt-4">
         <FiscalCalculatorShell
           initialVehicleId={vehicleId}

@@ -1,5 +1,4 @@
-import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import {
   isRestaurantBusinessType,
@@ -10,26 +9,23 @@ import { AuthRouteLoading } from '../AuthRouteLoading';
 
 /**
  * Sala (mapa zonas/mesas): bar/restaurante y delivery.
- * Otras rutas restaurant (cocina sala, caja sala…) siguen con RequireRestaurantVertical.
+ * Nunca return null (pantalla en blanco).
  */
 export function RequireSalaAccess({ children }: { children: React.ReactNode }) {
   const businessCtx = useBusinessOptional();
-  const navigate = useNavigate();
   const businessType = businessCtx?.currentBusiness?.businessType;
-  const pending = !businessCtx?.businessesFetchSettled || Boolean(businessCtx?.isLoading);
+  // Solo esperar el primer fetch; no bloquear si isLoading parpadea al refrescar.
+  const pending = !businessCtx?.businessesFetchSettled;
   const allowed =
     isRestaurantBusinessType(businessType) || isStrictDeliveryBusinessType(businessType);
 
-  useEffect(() => {
-    if (pending) return;
-    if (!allowed) {
-      navigate(DELIVERY_OPS_HOME_PATH, { replace: true });
-    }
-  }, [allowed, pending, navigate]);
-
-  if (pending) {
+  if (!businessCtx || pending) {
     return <AuthRouteLoading label="Preparando sala…" />;
   }
-  if (!allowed) return null;
+
+  if (!allowed) {
+    return <Navigate to={DELIVERY_OPS_HOME_PATH} replace />;
+  }
+
   return <>{children}</>;
 }

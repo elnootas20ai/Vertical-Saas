@@ -4,6 +4,7 @@ import type { EventContractStage } from './eventsTypes';
 import { listConstructionProjects } from './constructionApi';
 import { listCleaningServicesRequest } from './cleaningApi';
 import { listReservations } from './restaurantReservationsApi';
+import { getButcherOrdersTodayRequest, getButcherSalesTodayRequest } from './butcherApi';
 import { localCalendarDayKey } from './tpvCajaScope';
 import type { BusinessType } from './businessApi';
 import i18n from './i18n';
@@ -216,10 +217,20 @@ export async function loadVerticalKpiSnapshot(
         };
       }
       case 'butcherShop': {
+        const [salesRes, ordersRes] = await Promise.all([
+          getButcherSalesTodayRequest(userId).catch(() => null),
+          getButcherOrdersTodayRequest(userId).catch(() => null),
+        ]);
+        const revenue = Number(salesRes?.stats?.totalRevenue ?? 0);
+        const tickets = Number(salesRes?.stats?.count ?? 0);
+        const pendingOrders = Array.isArray(ordersRes?.orders)
+          ? ordersRes.orders.filter((o) => !['picked_up', 'cancelled', 'delivered'].includes(String(o.status || ''))).length
+          : 0;
+        const fmt = revenue.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' });
         return {
-          label: 'Centro operativo',
-          value: '—',
-          sub: 'Carnicería',
+          label: 'Ventas hoy',
+          value: fmt,
+          sub: `${tickets} tickets · ${pendingOrders} encargos activos`,
           route: '/saas/butcher-hub',
         };
       }

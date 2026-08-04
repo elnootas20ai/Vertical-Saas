@@ -1753,9 +1753,15 @@ export function sanitizeNotification(notification) {
 export async function listNotificationsByUser(req, userId) {
   await ensureDatabase(req, NOTIFICATIONS_DB);
   const docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+  const uid = String(userId || '').trim();
 
   return docs
-    .filter((doc) => doc?.type === 'notification' && !doc?.deletedAt && doc?.user_id === userId)
+    .filter((doc) => {
+      if (doc?.type !== 'notification' || doc?.deletedAt) return false;
+      if (String(doc?.user_id || '') === uid) return true;
+      const assigned = Array.isArray(doc?.assignedTo?.userIds) ? doc.assignedTo.userIds : [];
+      return assigned.some((id) => String(id) === uid);
+    })
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
@@ -2246,7 +2252,17 @@ export function defaultNotificationPreferences() {
       onIdentityCompleted: true,
       onWorkerProfileCompleted: true,
     },
+    /** Permiso push del SO: 1 vez por cuenta. accepted se conserva entre updates. */
+    pushConsent: {
+      decision: 'unset',
+      decidedAt: null,
+    },
   };
+}
+
+function normalizePushConsentDecision(value) {
+  if (value === 'accepted' || value === 'declined') return value;
+  return 'unset';
 }
 
 export function normalizeNotificationPreferences(prefs) {
@@ -2254,6 +2270,10 @@ export function normalizeNotificationPreferences(prefs) {
   if (!prefs || typeof prefs !== 'object') return defaults;
   const clockin = prefs.clockin && typeof prefs.clockin === 'object' ? prefs.clockin : {};
   const team = prefs.team && typeof prefs.team === 'object' ? prefs.team : {};
+  const pushConsentRaw = prefs.pushConsent && typeof prefs.pushConsent === 'object'
+    ? prefs.pushConsent
+    : {};
+  const decision = normalizePushConsentDecision(pushConsentRaw.decision);
   return {
     clockin: {
       onEntry: clockin.onEntry !== undefined ? Boolean(clockin.onEntry) : defaults.clockin.onEntry,
@@ -2271,6 +2291,14 @@ export function normalizeNotificationPreferences(prefs) {
       onWorkerProfileCompleted: team.onWorkerProfileCompleted !== undefined
         ? Boolean(team.onWorkerProfileCompleted)
         : defaults.team.onWorkerProfileCompleted,
+    },
+    pushConsent: {
+      decision,
+      decidedAt: decision === 'unset'
+        ? null
+        : (typeof pushConsentRaw.decidedAt === 'string' && pushConsentRaw.decidedAt
+          ? pushConsentRaw.decidedAt
+          : defaults.pushConsent.decidedAt),
     },
   };
 }
@@ -7324,6 +7352,10 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
       data.aggregatorClosingCash
       || existing?.aggregatorClosingCash
       || undefined,
+    aggregatorClosingCard:
+      data.aggregatorClosingCard
+      || existing?.aggregatorClosingCard
+      || undefined,
     productClosingCounts: sanitizeProductClosingCounts(
       data.productClosingCounts ?? existing?.productClosingCounts,
     ),
@@ -7388,6 +7420,7 @@ export function sanitizeTpvRegisterSession(doc) {
     salesByChannel: doc.salesByChannel || {},
     aggregatorClosingTotals: doc.aggregatorClosingTotals || undefined,
     aggregatorClosingCash: doc.aggregatorClosingCash || undefined,
+    aggregatorClosingCard: doc.aggregatorClosingCard || undefined,
     productClosingCounts: sanitizeProductClosingCounts(doc.productClosingCounts),
     linkedOrderIds: Array.isArray(doc.linkedOrderIds) ? doc.linkedOrderIds : [],
 
@@ -7481,12 +7514,14 @@ export async function getNextDeliveryTicketNumber(req, userId) {
 
 /** Sesión de caja TPV abierta para un PDV (la más reciente si hubiera varias). */
 export function normalizeTpvSessionBusinessId(session) {
-  return String(session?.business_id || session?.businessId || '').trim();
+  return String(session?.business_id || session?.businessId || '')
+    .replace(/^business:/, '')
+    .trim();
 }
 
 /** Sesión pertenece a la empresa (legacy: solo si el PDV es de esa empresa). */
 export function tpvRegisterSessionBelongsToBusiness(session, businessId, scopedPdvIds) {
-  const bid = String(businessId || '').trim();
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
   if (!bid) return true;
   const sessionBid = normalizeTpvSessionBusinessId(session);
   if (sessionBid) return sessionBid === bid;

@@ -22,16 +22,14 @@ import {
 import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
-import {
-  workerNeedsBusinessLink,
-  WORKER_UNLINKED_HOME_PATH,
-} from '../../../lib/workerProfileCompletion';
+import { workerNeedsBusinessLink } from '../../../lib/workerProfileCompletion';
 import {
   type WorkerTask,
   type TaskPriority,
   type TaskStatus,
   listWorkerTasks,
   createWorkerTask,
+  ensureRoleOnboardingTasks,
   startTaskTimer,
   stopTaskTimer,
   completeTask,
@@ -41,6 +39,8 @@ import {
   getRemainingAutoStop,
   formatTaskTimer,
 } from '../../../lib/workerTasksApi';
+import { getRoleTaskBundle } from '../../../lib/roleTaskTemplates';
+import { getInviteRoleDisplayLabel } from '../../../lib/inviteFunctionRoles';
 import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
 import { WorkerStoreScheduleCard } from '../../../components/saas/worker/WorkerStoreScheduleCard';
 import { WorkerClockInCard } from '../../../components/saas/worker/WorkerClockInCard';
@@ -61,7 +61,19 @@ export function WorkerTasks() {
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
   const needsCompany = workerNeedsBusinessLink(user);
-  const { showStoreBlock, workCenter, storeLabel } = useWorkerAssignedStore();
+  const {
+    showStoreBlock,
+    workCenter,
+    storeLabel,
+    hasAssignment,
+    storeHoursToday,
+    personalShiftToday,
+    hasPersonalSchedule,
+    personalDayOff,
+    memberSchedule,
+    scheduleLoading,
+    storeResolving,
+  } = useWorkerAssignedStore();
 
   const [tasks, setTasks] = useState<WorkerTask[]>([]);
   const [filter, setFilter] = useState<'all' | TaskStatus>('all');
@@ -77,20 +89,30 @@ export function WorkerTasks() {
 
   const hasRunningTimer = tasks.some((t) => t.timerRunning);
 
+  const roleId = String(user?.role || '').trim();
+  const businessType = currentBusiness?.businessType;
+  const roleBundle = getRoleTaskBundle(roleId, businessType);
+
   const loadTasks = useCallback(async () => {
     if (!businessId || !memberId) {
       setLoading(false);
       return;
     }
     try {
-      const result = await listWorkerTasks(businessId, memberId);
-      setTasks(result);
+      // Invites antiguos: siembra tareas del rol si aún no existen.
+      const seeded = await ensureRoleOnboardingTasks(
+        businessId,
+        memberId,
+        roleId,
+        businessType,
+      );
+      setTasks(seeded.tasks.length ? seeded.tasks : await listWorkerTasks(businessId, memberId));
     } catch (e: any) {
       console.error('Error loading tasks:', e);
     } finally {
       setLoading(false);
     }
-  }, [businessId, memberId]);
+  }, [businessId, memberId, roleId, businessType]);
 
   useEffect(() => {
     loadTasks();
@@ -217,20 +239,20 @@ export function WorkerTasks() {
             <Building2 className="w-8 h-8 text-blue-600 dark:text-blue-400" />
           </div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-            {t('worker.tasks.needsCompanyTitle', 'Aún no tienes empresa asignada')}
+            {t('worker.tasks.needsCompanyTitle', 'Espera la invitación de tu gerente')}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mb-6">
             {t(
               'worker.tasks.needsCompanyBody',
-              'Para usar Mi trabajo necesitas unirte a una empresa. Busca la tuya o acepta una invitación de tu gerente.',
+              'Cuando te inviten al equipo, aquí verás tu trabajo, fichaje y documentos. Mientras tanto puedes revisar invitaciones o completar tu perfil.',
             )}
           </p>
           <button
             type="button"
-            onClick={() => navigate(WORKER_UNLINKED_HOME_PATH)}
+            onClick={() => navigate('/saas/invitations')}
             className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-colors"
           >
-            {t('nav.workerClaimCompany', 'Unirse a una empresa')}
+            {t('nav.workerInvitations', 'Mis invitaciones')}
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
@@ -253,7 +275,19 @@ export function WorkerTasks() {
       <div className="space-y-5">
         <div className="space-y-4">
           {showStoreBlock ? (
-            <WorkerStoreScheduleCard workCenter={workCenter} storeLabel={storeLabel} compact />
+            <WorkerStoreScheduleCard
+              workCenter={workCenter}
+              storeLabel={storeLabel}
+              hasAssignment={hasAssignment}
+              storeHoursToday={storeHoursToday}
+              personalShiftToday={personalShiftToday}
+              hasPersonalSchedule={hasPersonalSchedule}
+              personalDayOff={personalDayOff}
+              memberSchedule={memberSchedule}
+              scheduleLoading={scheduleLoading}
+              storeResolving={storeResolving}
+              compact
+            />
           ) : null}
           <WorkerClockInCard
             businessId={businessId}
@@ -262,6 +296,18 @@ export function WorkerTasks() {
             compact
           />
         </div>
+
+        {roleBundle ? (
+          <div className="rounded-2xl border border-blue-200 bg-blue-50/80 px-4 py-3 dark:border-blue-900 dark:bg-blue-950/30">
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
+              Tu función · {getInviteRoleDisplayLabel(roleId, businessType) || roleBundle.roleLabel}
+            </p>
+            <p className="mt-1 text-sm text-blue-900 dark:text-blue-100">{roleBundle.summary}</p>
+            <p className="mt-1 text-xs text-blue-700/80 dark:text-blue-200/70">
+              Las tareas de abajo son tu checklist del puesto. Márcalas conforme las hagas.
+            </p>
+          </div>
+        ) : null}
 
         {/* Total Time Today */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-5 text-white">
@@ -385,7 +431,11 @@ export function WorkerTasks() {
             <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
               <AlertCircle className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
               <p className="text-gray-500 dark:text-gray-400 font-medium">{t('worker.tasks.noTasks', 'Sin tareas')}</p>
-              <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">{t('worker.tasks.noTasksHint', 'Crea una nueva tarea para empezar')}</p>
+              <p className="text-gray-400 dark:text-gray-500 text-sm mt-1">
+                {roleBundle
+                  ? 'Recarga la página o vuelve a iniciar sesión.'
+                  : t('worker.tasks.noTasksHint', 'Crea una nueva tarea para empezar')}
+              </p>
             </div>
           ) : (
             filteredTasks.map((task) => {
@@ -421,9 +471,14 @@ export function WorkerTasks() {
                     <p className={`text-sm font-medium ${task.status === 'completed' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>
                       {task.title}
                     </p>
+                    {task.description ? (
+                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+                        {task.description}
+                      </p>
+                    ) : null}
 
                     {/* Timer display */}
-                    <div className="flex items-center gap-3 mt-2">
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
                       <span className={`inline-flex items-center gap-1.5 text-xs font-mono px-2.5 py-1 rounded-lg ${
                         task.timerRunning
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
@@ -440,6 +495,12 @@ export function WorkerTasks() {
                         {PRIORITY_CONFIG[task.priority].icon}
                         {t(`worker.tasks.priority_${task.priority}`, PRIORITY_CONFIG[task.priority].label)}
                       </span>
+
+                      {task.category === 'role_onboarding' || task.templateKey ? (
+                        <span className="inline-flex items-center text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">
+                          Del puesto
+                        </span>
+                      ) : null}
 
                       <span className="text-[10px] text-gray-400 flex items-center gap-1">
                         <Calendar className="w-3 h-3" />

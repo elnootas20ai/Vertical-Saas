@@ -419,7 +419,10 @@ export async function getButcherTiendas(req, res) {
     }
 
     for (const s of completed) {
-      const st = getStore(s.storeId || s.tiendaId);
+      const st = getStore(s.storeId || s.tiendaId || s.pointOfSaleId);
+      if (s.pointOfSaleName && st.nombre === (st.id === 'default' ? 'Tienda Principal' : st.id)) {
+        st.nombre = String(s.pointOfSaleName);
+      }
       st.ventas += Number(s.total || 0);
       st.tickets += 1;
       st.coste += (s.items || []).reduce((c, it) => {

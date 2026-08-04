@@ -5,12 +5,14 @@ import {
   Car, FileText, Camera, MapPin, Check, ChevronLeft, ChevronRight, Save, AlertTriangle,
   X, Upload, Trash2, Star, GripVertical, Fuel, Settings2, Gauge, DoorOpen,
   Palette, Hash, Calendar, DollarSign, User, Building2, Eye, ArrowLeft,
-  CircleAlert, CircleCheck, Info, Loader2,
+  CircleAlert, CircleCheck, Info, Loader2, ScanLine,
 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
+import { VehicleOcrCreateModal } from '../../components/saas/vehicles/VehicleOcrCreateModal';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { checkVehicleDuplicatesRequest, type DuplicateInfo } from '../../lib/vehicleApi';
+import { createDocumentViaApi, type CompraventaDocCategory } from '../../lib/documentsApi';
 import type { Vehicle } from '../../context/AppContext';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -817,6 +819,7 @@ export function VehicleEntryPage() {
   const [duplicates, setDuplicates] = useState<{ plate: DuplicateInfo | null; vin: DuplicateInfo | null }>({ plate: null, vin: null });
   const [saving, setSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [ocrOpen, setOcrOpen] = useState(false);
   const dupCheckTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // Duplicate check with debounce
@@ -896,6 +899,35 @@ export function VehicleEntryPage() {
 
       const result = await addVehicle(vehicle as Omit<Vehicle, 'id' | 'createdAt' | 'daysInStock'>);
       localStorage.removeItem(`vehicle-entry-draft:${authUser?.user_id}`);
+
+      if (result?.id && docs.length > 0 && authUser?.user_id) {
+        for (const doc of docs) {
+          try {
+            const subCategory = (['ficha_tecnica', 'permiso_circulacion', 'itv', 'seguro', 'factura_compra'].includes(doc.type)
+              ? doc.type
+              : doc.type === 'contrato_compraventa'
+                ? 'contrato_compra'
+                : 'otro') as CompraventaDocCategory;
+            await createDocumentViaApi(authUser.user_id, {
+              name: DOC_TYPES.find((d) => d.type === doc.type)?.label || doc.name,
+              docType: doc.type,
+              status: 'pending',
+              vehicleId: result.id,
+              vehicleName: `${state.brand} ${state.model}`.trim(),
+              registrationPlate: state.registrationPlate,
+              vin: state.vin || undefined,
+              docSubCategory: subCategory,
+              fileData: doc.dataUrl,
+              mimeType: doc.mimeType,
+              fileName: doc.name,
+              size: String(doc.size),
+            });
+          } catch {
+            /* no bloquear el alta si un doc falla */
+          }
+        }
+      }
+
       if (result?.id) {
         navigate(`/saas/vehicles/${result.id}`);
       } else {
@@ -942,10 +974,20 @@ export function VehicleEntryPage() {
               <p className="text-xs text-gray-400">Vehículos › Nueva entrada</p>
             </div>
           </div>
-          <button onClick={saveDraft}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition">
-            <Save className="w-3.5 h-3.5" />Guardar borrador
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOcrOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+            >
+              <ScanLine className="w-3.5 h-3.5" />
+              Alta con OCR
+            </button>
+            <button onClick={saveDraft}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition">
+              <Save className="w-3.5 h-3.5" />Guardar borrador
+            </button>
+          </div>
         </div>
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Stepper */}
@@ -1086,6 +1128,15 @@ export function VehicleEntryPage() {
           </div>
         </div>
       )}
+
+      <VehicleOcrCreateModal
+        open={ocrOpen}
+        onClose={() => setOcrOpen(false)}
+        onCreated={(vehicleId) => {
+          setOcrOpen(false);
+          navigate(`/saas/vehicles/${encodeURIComponent(vehicleId)}`);
+        }}
+      />
     </Layout>
   );
 }

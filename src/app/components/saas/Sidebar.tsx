@@ -93,7 +93,6 @@ import {
   MapPin,
   UtensilsCrossed,
   Sparkle,
-  Palette,
   History,
   Container,
   Cog,
@@ -113,6 +112,7 @@ import {
   Cigarette,
   Ticket,
   Beef,
+  Bike,
   AlertTriangle,
   ChefHat,
   Zap,
@@ -131,7 +131,7 @@ import {
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { useAuthOptional, type AuthContextType } from '../../context/AuthContext';
 import { isWorkerAccount } from '../../lib/authApi';
-import { canManageTeam } from '../../lib/teamManagerAccess';
+import { sortByBusinessUsage } from '../../lib/businessUsageOrder';
 import {
   workerNeedsBusinessLink,
   WORKER_UNLINKED_HOME_PATH,
@@ -155,7 +155,11 @@ import {
 import { listSalesPoints, type SalesPoint } from '../../lib/salesPointsApi';
 import { isCompraventaBusinessType, loadCompraventaStores, listCompraventaSidebarWorkCenters } from '../../lib/compraventaSetup';
 import { ActivationChecklist } from './ActivationChecklist';
+import { VertialLogo } from '../VertialLogo';
 import { useDeliveryActivationNav } from '../../hooks/useDeliveryActivationNav';
+import { useCompraventaActivationNav } from '../../hooks/useCompraventaActivationNav';
+import { getCompraventaSidebarItemLock } from '../../lib/compraventaActivationGates';
+import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
 import { useEventsActivationNav } from '../../hooks/useEventsActivationNav';
 import {
   isDeliveryOpsBusinessType,
@@ -166,7 +170,6 @@ import { useSidebarDeliveryStoreRows } from '../../hooks/useSidebarDeliveryStore
 import { useRestaurantStoreRows } from '../../hooks/useRestaurantStoreRows';
 import { useAlertCenterSummary } from '../../hooks/useAlertCenterSummary';
 import { useAlertCenterBusinessId } from '../../hooks/useAlertCenterBusinessId';
-import { getDeliverySidebarItemLock } from '../../lib/deliveryActivationGates';
 import { getEventsSidebarItemLock } from '../../lib/eventsActivationGates';
 import { isMenuItemVisibleForVertical } from '../../lib/verticalModuleVisibility';
 import { isSidebarItemUnlockedForPlan } from '../../lib/sidebarPlanCatalog';
@@ -176,9 +179,6 @@ import {
   resolveActiveOpsStoreRowId,
   resolveActiveWorkCenterRowId,
 } from '../../lib/activeStoreSidebarSelection';
-
-// Huella visual del calendario (fácil de revertir: poner a false).
-const CALENDAR_V2_VISUAL = true;
 
 interface SidebarItem {
   id: string;
@@ -216,7 +216,7 @@ function NavSectionShell({
 }) {
   return (
     <div
-      className={`mb-2 rounded-xl border border-gray-200/90 dark:border-gray-700/90 bg-gray-50/95 dark:bg-gray-800/55 ${
+      className={`mb-2 rounded-xl border border-slate-200/80 bg-slate-50/90 shadow-sm dark:border-slate-700/80 dark:bg-slate-800/40 ${
         narrow ? 'mx-0.5' : 'mx-2'
       }`}
     >
@@ -247,9 +247,11 @@ const menuItemDefs = [
   // ── Equipo ───────────────────────────────────────────────────────────────────
   { id: 'team',            navKey: 'team',           icon: <UsersRound className="w-5 h-5" />,    path: '/saas/team' },
   { id: 'clockins',        navKey: 'clockins',       icon: <Clock className="w-5 h-5" />,          path: '/saas/clockins' },
+  { id: 'hr-requests',     navKey: 'hrRequests',     icon: <ClipboardList className="w-5 h-5" />,  path: '/saas/equipo/solicitudes' },
   { id: 'horarios-vacaciones', navKey: 'horarios-vacaciones', icon: <CalendarRange className="w-5 h-5" />, path: '/saas/equipo/horarios-vacaciones' },
   { id: 'commissions',     navKey: 'commissions',    icon: <Award className="w-5 h-5" />,          path: '/saas/commissions', isNew: true },
-  { id: 'payroll',          navKey: 'payroll',         icon: <FileText className="w-5 h-5" />,       path: '/saas/payroll', isNew: true },
+  { id: 'payroll',          navKey: 'payroll',         icon: <FileText className="w-5 h-5" />,       path: '/saas/payroll?tab=nominas', isNew: true },
+  { id: 'gestoria',         navKey: 'gestoria',        icon: <Briefcase className="w-5 h-5" />,      path: '/saas/gestoria', isNew: true },
 
   // ── Catálogo y Proveedores ───────────────────────────────────────────────────
   { id: 'catalog',          navKey: 'catalog',         icon: <BookOpen className="w-5 h-5" />,    path: '/saas/catalog?tab=catalog' },
@@ -286,12 +288,14 @@ const menuItemDefs = [
   // ── Vertical: Comercial (concesionario) ──────────────────────────────────────
   { id: 'compraventa-hub',        navKey: 'compraventaHub',        icon: <LayoutDashboard className="w-5 h-5" />, path: '/saas/vertical/compraventa' },
   { id: 'compraventa-vehiculos',  navKey: 'compraventaVehiculos',  icon: <Car className="w-5 h-5" />,              path: '/saas/vehicles' },
+  { id: 'entrada-vehiculo',       navKey: 'entradaVehiculo',       icon: <CirclePlus className="w-5 h-5" />,       path: '/saas/vertical/compraventa/entrada-vehiculo' },
   { id: 'compraventa-compras',    navKey: 'compraventaCompras',    icon: <ShoppingCart className="w-5 h-5" />,       path: '/saas/vertical/compraventa/compras' },
   { id: 'compraventa-ventas',     navKey: 'compraventaVentas',     icon: <TrendingUp className="w-5 h-5" />,         path: '/saas/vertical/compraventa/ventas' },
   { id: 'compraventa-tasaciones', navKey: 'compraventaTasaciones', icon: <Scale className="w-5 h-5" />,              path: '/saas/vertical/compraventa/tasaciones' },
   { id: 'compraventa-entregas',   navKey: 'compraventaEntregas',   icon: <Truck className="w-5 h-5" />,              path: '/saas/vertical/compraventa/entregas' },
   { id: 'compraventa-crm',        navKey: 'compraventa-crm',       icon: <Kanban className="w-5 h-5" />,             path: '/saas/vertical/compraventa/crm' },
   { id: 'compraventa-fiscal',     navKey: 'compraventaFiscal',     icon: <Calculator className="w-5 h-5" />,         path: '/saas/vertical/compraventa/calculadora-fiscal' },
+  { id: 'publicacion-venta',      navKey: 'publicacionVenta',      icon: <Megaphone className="w-5 h-5" />,           path: '/saas/vertical/compraventa/publicacion-venta' },
   { id: 'dealership-workers',     navKey: 'dealershipWorkers',     icon: <BarChart3 className="w-5 h-5" />,          path: '/saas/dealership-workers' },
   { id: 'gastos-preparacion',     navKey: 'gastosPreparacion',     icon: <Receipt className="w-5 h-5" />,            path: '/saas/vertical/compraventa/gastos-preparacion' },
   { id: 'vehicles',     navKey: 'vehicles',     icon: <Car className="w-5 h-5" />,           path: '/saas/vehicles' },
@@ -306,6 +310,7 @@ const menuItemDefs = [
 
   // ── Vertical: Delivery ───────────────────────────────────────────────────────
   { id: 'delivery-ops',     navKey: 'deliveryOps',     icon: <Activity className="w-5 h-5" />, path: '/saas/delivery-ops' },
+  { id: 'restaurant-ops',   navKey: 'restaurantOps',   icon: <Activity className="w-5 h-5" />, path: '/saas/restaurant-ops' },
   { id: 'tpv',              navKey: 'tpv',             icon: <Receipt className="w-5 h-5" />,  path: '/saas/tpv' },
   { id: 'sala',             navKey: 'sala',             icon: <UtensilsCrossed className="w-5 h-5" />, path: '/saas/sala' },
   { id: 'cocina',           navKey: 'deliveryKitchen',  icon: <ChefHat className="w-5 h-5" />, path: '/saas/cocina' },
@@ -451,6 +456,10 @@ const menuItemDefs = [
   { id: 'butcher-sales',          navKey: 'butcherSales',         icon: <Receipt className="w-5 h-5" />,       path: '/saas/butcher-sales' },
   { id: 'butcher-tpv',            navKey: 'tpv',                  icon: <Monitor className="w-5 h-5" />,       path: '/saas/vertical/carniceria/tpv' },
   { id: 'butcher-products',      navKey: 'butcherProducts',      icon: <Beef className="w-5 h-5" />,          path: '/saas/butcher-products' },
+  { id: 'butcher-purchases',     navKey: 'butcherPurchases',     icon: <Truck className="w-5 h-5" />,         path: '/saas/vertical/carniceria/compras' },
+  { id: 'butcher-despiece',      navKey: 'butcherDespiece',      icon: <Scissors className="w-5 h-5" />,      path: '/saas/vertical/carniceria/despiece' },
+  { id: 'butcher-reparto',       navKey: 'butcherReparto',       icon: <Bike className="w-5 h-5" />,          path: '/saas/vertical/carniceria/reparto' },
+  { id: 'butcher-basculas',      navKey: 'butcherBasculas',      icon: <Scale className="w-5 h-5" />,         path: '/saas/vertical/carniceria/basculas' },
   { id: 'butcher-traceability',  navKey: 'butcherTraceability',  icon: <ScanBarcode className="w-5 h-5" />,   path: '/saas/butcher-traceability' },
   { id: 'butcher-waste',         navKey: 'butcherWaste',         icon: <Recycle className="w-5 h-5" />,       path: '/saas/butcher-waste' },
   { id: 'butcher-reports',       navKey: 'butcherReports',       icon: <BarChart3 className="w-5 h-5" />,     path: '/saas/vertical/carniceria/informes' },
@@ -467,10 +476,12 @@ const workerMenuItemDefs = [
   { id: 'worker-tasks',      navKey: 'workerTasks',      icon: <ClipboardList className="w-5 h-5" />,   path: '/saas/worker/tasks' },
   { id: 'worker-stock-review', navKey: 'workerStockReview', icon: <ClipboardCheck className="w-5 h-5" />, path: '/saas/worker/stock-review' },
   { id: 'worker-calendar',   navKey: 'workerCalendar',   icon: <CalendarDays className="w-5 h-5" />,    path: '/saas/worker/calendar' },
+  { id: 'worker-requests',   navKey: 'workerRequests',   icon: <Umbrella className="w-5 h-5" />,        path: '/saas/worker/requests' },
   { id: 'worker-clock',      navKey: 'workerClock',      icon: <Clock className="w-5 h-5" />,           path: '/saas/worker/clock' },
   { id: 'worker-chat',       navKey: 'workerChat',       icon: <MessageSquare className="w-5 h-5" />,   path: '/saas/worker/chat' },
   { id: 'worker-docs',       navKey: 'workerDocs',       icon: <FileText className="w-5 h-5" />,        path: '/saas/worker/documents' },
   { id: 'worker-butcher-orders', navKey: 'workerButcherOrders', icon: <ClipboardList className="w-5 h-5" />, path: '/saas/worker/butcher-orders', isNew: true },
+  { id: 'worker-butcher-reparto', navKey: 'workerButcherReparto', icon: <Bike className="w-5 h-5" />, path: '/saas/worker/butcher-reparto', isNew: true },
   { id: 'worker-materials', navKey: 'workerMaterials', icon: <Package className="w-5 h-5" />, path: '/saas/worker/materials' },
   { id: 'worker-onboarding', navKey: 'workerOnboarding', icon: <GraduationCap className="w-5 h-5" />,   path: '/saas/worker/onboarding', pro: true },
 
@@ -489,7 +500,7 @@ const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
   label: 'Principal',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['worker-tasks', 'worker-stock-review', 'worker-calendar', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
+  itemIds: ['worker-tasks', 'worker-stock-review', 'worker-calendar', 'worker-requests', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
 };
 
 const workerSidebarGroupDefs = [
@@ -498,11 +509,11 @@ const workerSidebarGroupDefs = [
 
 const sidebarGroupDefs = [
   { id: 'clientesCrm',      icon: <Contact2 className="w-4 h-4 shrink-0" />,      itemIds: ['quotes', 'promotions'] },
-  { id: 'equipo',           icon: <UsersRound className="w-4 h-4 shrink-0" />,    itemIds: ['team', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll'] },
+  { id: 'equipo',           icon: <UsersRound className="w-4 h-4 shrink-0" />,    itemIds: ['hr-requests', 'team', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria'] },
   { id: 'catalogProviders', icon: <Package className="w-4 h-4 shrink-0" />,       itemIds: ['catalog', 'catalog-stock', 'costing'] },
   { id: 'finanzas',         icon: <DollarSign className="w-4 h-4 shrink-0" />,    itemIds: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation', 'reports', 'sales-metrics'] },
   { id: 'documentacion',    icon: <FileText className="w-4 h-4 shrink-0" />,      itemIds: ['doc-society', 'doc-contracts', 'doc-licenses', 'doc-financial', 'doc-other'] },
-  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-fiscal'] },
+  { id: 'commercial',       icon: <Car className="w-4 h-4 shrink-0" />,           itemIds: ['compraventa-hub', 'compraventa-vehiculos', 'entrada-vehiculo', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-crm', 'compraventa-fiscal', 'publicacion-venta'] },
   { id: 'workshop',         icon: <Wrench className="w-4 h-4 shrink-0" />,        itemIds: ['workshop', 'parts', 'tech'] },
   { id: 'delivery',         icon: <Truck className="w-4 h-4 shrink-0" />,         itemIds: ['tpv-rapido', 'delivery-ops', 'sala', 'caja', 'web-config', 'delivery-integrations'] },
   { id: 'cleaning',         icon: <Droplets className="w-4 h-4 shrink-0" />,      itemIds: ['cleaning-hub', 'cleaning-contracts', 'cleaning-services', 'cleaning-workers', 'cleaning-routes', 'cleaning-clients', 'cleaning-execution', 'cleaning-checklist', 'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents', 'cleaning-billing', 'cleaning-materials', 'cleaning-reports'] },
@@ -523,7 +534,7 @@ const sidebarGroupDefs = [
   { id: 'carWash',          icon: <Droplets className="w-4 h-4 shrink-0" />,    itemIds: ['carwash-services', 'carwash-memberships'] },
   { id: 'vet',              icon: <PawPrint className="w-4 h-4 shrink-0" />,    itemIds: ['vet-patients', 'vet-history', 'vet-vaccinations'] },
   { id: 'tobaccoShop',      icon: <Cigarette className="w-4 h-4 shrink-0" />,  itemIds: ['tobacco-lottery', 'tobacco-regulatory'] },
-  { id: 'butcherShop',     icon: <Beef className="w-4 h-4 shrink-0" />,       itemIds: ['butcher-hub', 'butcher-clients', 'butcher-orders', 'butcher-sales', 'butcher-tpv', 'butcher-products', 'butcher-traceability', 'butcher-waste', 'butcher-reports'] },
+  { id: 'butcherShop',     icon: <Beef className="w-4 h-4 shrink-0" />,       itemIds: ['butcher-hub', 'butcher-clients', 'butcher-orders', 'butcher-sales', 'butcher-tpv', 'butcher-products', 'butcher-purchases', 'butcher-despiece', 'butcher-reparto', 'butcher-basculas', 'butcher-traceability', 'butcher-waste', 'butcher-reports'] },
 ] as const;
 
 const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
@@ -556,16 +567,37 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
 const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string, readonly string[]>>> = {
   carDealership: {
     clientesCrm: ['clients', 'quotes', 'promotions'],
-    equipo: ['team', 'dealership-workers', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll'],
+    equipo: ['hr-requests', 'team', 'dealership-workers', 'clockins', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria'],
     catalogProviders: ['suppliers'],
     finanzas: ['client-billing', 'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation', 'reports', 'sales-metrics', 'gastos-preparacion'],
     documentacion: ['doc-vehiculo', 'doc-contratos-cv', 'doc-facturas-cv', 'doc-itv-cv', 'doc-reparacion-cv', 'doc-cliente-cv', 'doc-anexos-cv'],
-    commercial: ['compraventa-vehiculos', 'compraventa-compras', 'compraventa-ventas', 'compraventa-tasaciones', 'compraventa-entregas', 'compraventa-fiscal'],
+    commercial: [
+      'compraventa-hub',
+      'compraventa-vehiculos',
+      'entrada-vehiculo',
+      'compraventa-compras',
+      'compraventa-ventas',
+      'compraventa-tasaciones',
+      'compraventa-entregas',
+      'compraventa-crm',
+      'compraventa-fiscal',
+      'publicacion-venta',
+    ],
   },
   restaurant: {
-    clientesCrm: ['clients'],
-    // TPV sala propio (/saas/caja/tpv) — no el TPV de Delivery.
-    delivery: ['sala', 'tpv-rapido', 'cocina', 'caja', 'reservas', 'lista-espera'],
+    clientesCrm: ['clients', 'promotions'],
+    equipo: ['hr-requests', 'team', 'clockins', 'horarios-vacaciones', 'payroll', 'gestoria'],
+    finanzas: ['finance', 'income-expenses', 'reports', 'client-billing', 'taxes', 'verifactu'],
+    // Hub propio + TPV sala (/saas/caja/tpv) — no DeliveryOps ni TPV delivery.
+    delivery: [
+      'restaurant-ops',
+      'sala',
+      'tpv-rapido',
+      'cocina',
+      'caja',
+      'reservas',
+      'lista-espera',
+    ],
   },
   events: {
     clientesCrm: ['clients'],
@@ -578,6 +610,7 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
 
 /** Rutas sidebar bar/restaurante (separadas de Delivery). */
 const RESTAURANT_SIDEBAR_PATH_OVERRIDES: Record<string, string> = {
+  'restaurant-ops': '/saas/restaurant-ops',
   caja: '/saas/caja',
   'tpv-rapido': '/saas/caja/tpv',
   reports: '/saas/vertical/restaurant/informes',
@@ -647,6 +680,10 @@ function SidebarInner({
   const location = useLocation();
   const { logout, user } = auth;
   const { businesses, businessesFetchSettled, currentBusiness } = useBusiness();
+  const businessesByUsage = useMemo(
+    () => sortByBusinessUsage(businesses, user?.user_id),
+    [businesses, user?.user_id],
+  );
   const switchActiveBusiness = useSwitchActiveBusiness();
   const accountBusinessCount = businessesFetchSettled ? businesses.length : undefined;
   const {
@@ -671,18 +708,14 @@ function SidebarInner({
   })();
 
   const isWorker = isWorkerAccount(user);
-  const isHrManager = canManageTeam(user, businesses);
-  /** Invitados con rol Gestor/Encargado/Admin ven backoffice RRHH (equipo + nóminas), no solo vista worker. */
-  const treatAsWorkerNav = isWorker && !isHrManager;
+  /** Trabajador = solo backoffice worker (sin selector de empresas ni menú gerente). */
+  const treatAsWorkerNav = isWorker;
   const alertCenterBusinessId = useAlertCenterBusinessId();
   const { unresolved: alertCenterUnresolved } = useAlertCenterSummary(
     !treatAsWorkerNav ? alertCenterBusinessId : undefined,
   );
   /** Trabajador con empresa asignada (invitación aceptada / miembro en el negocio). */
   const unlinkedWorkerNeedsCompany = workerNeedsBusinessLink(user);
-  const workerHasLinkedCompany = Boolean(
-    treatAsWorkerNav && String(user?.linkedBusinessId || '').trim() && currentBusiness?.business_id,
-  );
 
   const vertical: BusinessType | null = currentBusiness?.businessType
     ? (currentBusiness.businessType as BusinessType)
@@ -712,10 +745,7 @@ function SidebarInner({
   const [sidebarSearch, setSidebarSearch] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
-  // `workerMode` ya no es alternable por el usuario: lo derivamos de la cuenta.
-  // - Trabajador operativo → modo trabajador.
-  // - Gestor/Encargado/Admin invitado → backoffice RRHH (Equipo + Nóminas).
-  // - Owner → modo gerente.
+  // `workerMode` ya no es alternable: cuenta trabajador → siempre menú worker.
   const workerMode = treatAsWorkerNav;
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1030,6 +1060,7 @@ function SidebarInner({
   const navScrollMobileRef = useRef<HTMLElement>(null);
 
   const deliveryNav = useDeliveryActivationNav();
+  const compraventaNav = useCompraventaActivationNav();
   const eventsNav = useEventsActivationNav();
   const planTier = useEffectivePlanTier();
 
@@ -1050,6 +1081,17 @@ function SidebarInner({
           hasPricedService: eventsNav.hasPricedService,
           hasClient: eventsNav.hasClient,
           hasEvent: eventsNav.hasEvent,
+        });
+        resolved = !lock.disabled
+          ? base
+          : {
+              ...base,
+              disabled: true,
+              lockTitle: lock.title,
+            };
+      } else if (compraventaNav.isCompraventa && !item.disabled) {
+        const lock = getCompraventaSidebarItemLock(item.id, {
+          storeReady: compraventaNav.storeReady,
         });
         resolved = !lock.disabled
           ? base
@@ -1085,6 +1127,8 @@ function SidebarInner({
     deliveryNav.isDelivery,
     deliveryNav.pdvReady,
     deliveryNav.brandReady,
+    compraventaNav.isCompraventa,
+    compraventaNav.storeReady,
     eventsNav.isEvents,
     eventsNav.hasPricedService,
     eventsNav.hasClient,
@@ -1099,9 +1143,16 @@ function SidebarInner({
     if (g.id === 'catalogProviders' && !isDeliveryBusinessType(vertical)) {
       itemIds = itemIds.filter((id) => id !== 'costing');
     }
+    if (g.id === 'butcherShop' && vertical === 'butcherShop' && !currentBusiness?.ownDeliveryEnabled) {
+      itemIds = itemIds.filter((id) => id !== 'butcher-reparto');
+    }
     return {
       id: g.id,
-      icon: isCompraventaCommercial ? null : g.icon,
+      icon: isCompraventaCommercial
+        ? null
+        : g.id === 'delivery' && isRestaurantVertical
+          ? <UtensilsCrossed className="w-4 h-4 shrink-0" />
+          : g.icon,
       itemIds,
       label: g.id === 'equipo'
         ? 'RRHH'
@@ -1132,6 +1183,9 @@ function SidebarInner({
       ...WORKER_HOME_GROUP.itemIds,
       ...(vertical === 'cleaning' ? ['worker-materials' as const] : []),
       ...(vertical === 'butcherShop' ? ['worker-butcher-orders' as const] : []),
+      ...(vertical === 'butcherShop' && currentBusiness?.ownDeliveryEnabled
+        ? ['worker-butcher-reparto' as const]
+        : []),
     ],
   };
 
@@ -1178,7 +1232,7 @@ function SidebarInner({
             <p className="text-xs text-gray-500 dark:text-gray-400">{t('topbar.noCompanies')}</p>
           </div>
         ) : (
-          businesses.map((business) => {
+          businessesByUsage.map((business) => {
             const isActiveBiz = currentBusiness?.business_id === business.business_id;
             const bizInitials = business.name.slice(0, 2).toUpperCase();
             return (
@@ -1191,24 +1245,24 @@ function SidebarInner({
                   setShowCompanyDropdown(false);
                   if (changed) onMobileClose();
                 }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800 ${isActiveBiz ? 'bg-blue-50 dark:bg-blue-950' : ''}`}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-800 ${isActiveBiz ? 'bg-blue-50/80 dark:bg-blue-950/40' : ''}`}
               >
-                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-100 dark:bg-blue-900 overflow-hidden">
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 overflow-hidden">
                   {business.logo ? (
                     <img src={business.logo} alt={business.name} className="w-8 h-8 object-cover rounded-lg" />
                   ) : (
-                    <span className="text-xs font-bold text-blue-700 dark:text-blue-300">{bizInitials}</span>
+                    <span className="text-xs font-bold text-[var(--v-blue,#2563eb)] dark:text-blue-300">{bizInitials}</span>
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-semibold truncate ${isActiveBiz ? 'text-blue-700 dark:text-blue-300' : 'text-gray-900 dark:text-gray-100'}`}>
+                  <p className={`text-sm font-semibold truncate ${isActiveBiz ? 'text-[var(--v-blue,#2563eb)] dark:text-blue-300' : 'text-slate-900 dark:text-slate-100'}`}>
                     {business.name}
                   </p>
-                  {business.city && (
-                    <p className="text-[11px] text-gray-400 dark:text-gray-500 truncate">{business.city}</p>
-                  )}
+                  {business.city ? (
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">{business.city}</p>
+                  ) : null}
                 </div>
-                {isActiveBiz && <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />}
+                {isActiveBiz && <Check className="w-3.5 h-3.5 text-[var(--v-blue,#2563eb)] dark:text-blue-400 flex-shrink-0" />}
               </button>
             );
           })
@@ -1251,7 +1305,7 @@ function SidebarInner({
       if (rawId) {
         selectSidebarStore(rawId);
         if (usesOpsStoreSidebar) {
-          handleNavigate(isRestaurantVertical ? '/saas/sala' : '/saas/delivery-ops');
+          handleNavigate(isRestaurantVertical ? '/saas/restaurant-ops' : '/saas/delivery-ops');
           onMobileClose();
           return;
         }
@@ -1274,14 +1328,14 @@ function SidebarInner({
   // Items que SOLO pueden ver los dueños del negocio (owner/admin/manager).
   // Sirve tanto para el filtro de sidebar como para no colar nada admin en modo worker.
   const BUSINESS_OWNER_ONLY_IDS = new Set<string>([
-    'dashboard', 'alertas', 'reports', 'team', 'team-schedules', 'commissions', 'payroll',
+    'dashboard', 'alertas', 'reports', 'team', 'team-schedules', 'hr-requests', 'horarios-vacaciones', 'commissions', 'payroll', 'gestoria',
     'finance', 'income-expenses', 'ebitda', 'taxes', 'verifactu', 'bank-reconciliation',
     'client-billing', 'costing', 'billing',
     'suppliers', 'compras-stock',
     'configuracion', 'settings', 'admin', 'gdpr',
     'pipeline', 'sales-metrics', 'operations', 'affiliates',
     // 'delivery-clients' apunta a /saas/delivery-ops?panel=clients (también owner-only).
-    'delivery-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders', 'delivery-integrations',
+    'delivery-ops', 'restaurant-ops', 'delivery-clients', 'clockins', 'groups', 'web-config', 'web-orders', 'delivery-integrations',
     'cleaning-hub', 'cleaning-workers', 'cleaning-services', 'cleaning-routes',
     'cleaning-quality', 'cleaning-reviews', 'cleaning-incidents',
     'gym-classes', 'gym-memberships', 'gym-routines', 'gym-access',
@@ -1295,7 +1349,9 @@ function SidebarInner({
     'nightclub-events', 'nightclub-vip', 'nightclub-promoters', 'nightclub-artists',
     'salon-services', 'salon-loyalty',
     'butcher-hub', 'butcher-clients', 'butcher-orders', 'butcher-sales', 'butcher-tpv',
-    'butcher-products', 'butcher-traceability', 'butcher-reports',
+    'butcher-products', 'butcher-despiece', 'butcher-reparto', 'butcher-basculas',
+    'butcher-traceability', 'butcher-reports',
+    // butcher-purchases / butcher-waste: workers con permiso butcher_* (no owner-only)
     'tobacco-regulatory',
     'taxi-fleet', 'taxi-trips', 'taxi-shifts',
     'pharmacy-guard',
@@ -1316,8 +1372,7 @@ function SidebarInner({
     if (!user) {
       return true;
     }
-    // Worker operativo: nunca ver items admin-only.
-    // Gestor/Encargado invitado (isHrManager): sí ve Equipo + Nóminas (+ resto con permiso).
+    // Trabajador: nunca ver items admin-only / de empresa.
     if (treatAsWorkerNav && BUSINESS_OWNER_ONLY_IDS.has(item.id)) {
       return false;
     }
@@ -1325,7 +1380,7 @@ function SidebarInner({
       return false;
     }
     // Items siempre accesibles para el owner / gestor RRHH.
-    if (!treatAsWorkerNav && ['dashboard', 'settings', 'configuracion', 'chat', 'team', 'payroll'].includes(item.id)) {
+    if (!treatAsWorkerNav && ['dashboard', 'settings', 'configuracion', 'chat', 'team', 'payroll', 'gestoria', 'hr-requests', 'horarios-vacaciones', 'clockins'].includes(item.id)) {
       return true;
     }
     // Items operativos siempre visibles para todos (chat es transversal).
@@ -1342,7 +1397,7 @@ function SidebarInner({
       item.id === 'tpv-locales' ||
       item.id === 'caja' ||
       item.id === 'butcher-tpv';
-    const deliveryOperational =
+    const restaurantFloorOps =
       item.id === 'sala' || item.id === 'cocina' || item.id === 'reservas' || item.id === 'lista-espera';
     const permission = permissionMap[item.id]
       || (item.id === 'catalog-stock' ? permissionMap.catalog : undefined)
@@ -1350,15 +1405,25 @@ function SidebarInner({
       || (item.id === 'billing' ? permissionMap.finance : undefined)
       || (item.id === 'client-billing' ? permissionMap.finance : undefined)
       || (tpvLike ? (permissionMap.cash_register || permissionMap.sales) : undefined)
-      || (deliveryOperational ? permissionMap.delivery : undefined)
+      || (restaurantFloorOps && isRestaurantVertical
+        ? (item.id === 'reservas'
+          ? (permissionMap.reservations || permissionMap.sala)
+          : (permissionMap.sala || (item.id === 'sala' ? permissionMap.reservations : undefined)))
+        : undefined)
+      || (restaurantFloorOps && !isRestaurantVertical ? permissionMap.delivery : undefined)
       || (item.id.startsWith('doc-') ? permissionMap.documents : undefined)
       || (item.id === 'compraventa-vehiculos' ? permissionMap.vehicles : undefined)
+      || (item.id === 'entrada-vehiculo' ? permissionMap.vehicles : undefined)
+      || (item.id === 'compraventa-hub' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-ventas' ? permissionMap.sales : undefined)
       || (item.id === 'compraventa-compras' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-fiscal' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-tasaciones' ? permissionMap.vehicles : undefined)
       || (item.id === 'compraventa-entregas' ? permissionMap.sales : undefined)
       || (item.id === 'compraventa-crm' ? permissionMap.clients : undefined)
+      || (item.id === 'publicacion-venta' ? permissionMap.vehicles : undefined)
+      || (item.id === 'butcher-purchases' ? permissionMap.butcher_purchases : undefined)
+      || (item.id === 'butcher-waste' ? permissionMap.butcher_waste : undefined)
       || (['workshop', 'parts', 'tech'].includes(item.id) ? (permissionMap.workshop || permissionMap.vehicles) : undefined)
       || (item.id.startsWith('events-') ? permissionMap.sales : undefined);
     if (!permission) {
@@ -1375,6 +1440,8 @@ function SidebarInner({
     return (
     `${location.pathname}${location.search}` === item.path ||
     location.pathname === item.path ||
+    (item.id === 'hr-requests' && location.pathname.startsWith('/saas/equipo/solicitudes')) ||
+    (item.id === 'horarios-vacaciones' && location.pathname.startsWith('/saas/equipo/horarios-vacaciones')) ||
     (item.id === 'alertas' && location.pathname.startsWith('/saas/alerts')) ||
     (item.id === 'configuracion' && location.pathname.startsWith('/saas/configuracion')) ||
     (item.id === 'settings' && location.pathname.startsWith('/saas/settings')) ||
@@ -1391,10 +1458,12 @@ function SidebarInner({
     (item.id === 'compraventa-ventas' && location.pathname.startsWith('/saas/vertical/compraventa/ventas')) ||
     (item.id === 'compraventa-compras' && location.pathname.startsWith('/saas/vertical/compraventa/compras')) ||
     (item.id === 'compraventa-fiscal' && location.pathname.startsWith('/saas/vertical/compraventa/calculadora-fiscal')) ||
+    (item.id === 'publicacion-venta' && location.pathname.startsWith('/saas/vertical/compraventa/publicacion-venta')) ||
     (item.id === 'compraventa-tasaciones' && location.pathname.startsWith('/saas/vertical/compraventa/tasaciones')) ||
     (item.id === 'compraventa-entregas' && location.pathname.startsWith('/saas/vertical/compraventa/entregas')) ||
     (item.id === 'compraventa-crm' && location.pathname.startsWith('/saas/vertical/compraventa/crm')) ||
-    (item.id === 'compraventa-hub' && location.pathname.startsWith('/saas/vertical/compraventa') && !location.pathname.includes('/compras') && !location.pathname.includes('/calculadora-fiscal') && !location.pathname.includes('/ventas') && !location.pathname.includes('/tasaciones') && !location.pathname.includes('/entregas') && !location.pathname.includes('/crm') && !location.pathname.includes('/gastos')) ||
+    (item.id === 'entrada-vehiculo' && location.pathname.startsWith('/saas/vertical/compraventa/entrada-vehiculo')) ||
+    (item.id === 'compraventa-hub' && location.pathname.startsWith('/saas/vertical/compraventa') && !location.pathname.includes('/compras') && !location.pathname.includes('/calculadora-fiscal') && !location.pathname.includes('/ventas') && !location.pathname.includes('/tasaciones') && !location.pathname.includes('/entregas') && !location.pathname.includes('/crm') && !location.pathname.includes('/gastos') && !location.pathname.includes('/entrada-vehiculo') && !location.pathname.includes('/publicacion-venta')) ||
     (item.id === 'dealership-workers' && location.pathname.startsWith('/saas/dealership-workers')) ||
     (item.id === 'gastos-preparacion' && location.pathname.startsWith('/saas/vertical/compraventa/gastos-preparacion')) ||
     (item.id === 'doc-vehiculo' && location.pathname.startsWith('/saas/documents') && location.search.includes('tab=vehiculo')) ||
@@ -1415,6 +1484,7 @@ function SidebarInner({
     (item.id === 'delivery-ops'
       && location.pathname.startsWith('/saas/delivery-ops')
       && !['clients', 'promotions'].includes(new URLSearchParams(location.search).get('panel') || '')) ||
+    (item.id === 'restaurant-ops' && location.pathname.startsWith('/saas/restaurant-ops')) ||
     (item.id === 'promotions' && location.pathname.startsWith('/saas/promotions')) ||
     (item.id === 'caja' && (location.pathname.startsWith('/saas/caja') || location.pathname.startsWith('/saas/vertical/delivery/caja'))) ||
     (item.id === 'sala' && location.pathname.startsWith('/saas/sala')) ||
@@ -1424,7 +1494,9 @@ function SidebarInner({
     (item.id === 'lista-espera' && location.pathname.startsWith('/saas/lista-espera')) ||
     (item.id === 'web-orders' && location.pathname.startsWith('/saas/web-orders')) ||
     (item.id === 'web-config' && location.pathname.startsWith('/saas/web-config')) ||
-    (item.id === 'delivery-integrations' && location.pathname.startsWith('/saas/vertical/delivery/integraciones')) ||
+    (item.id === 'delivery-integrations'
+      && (location.pathname.startsWith('/saas/vertical/delivery/integraciones')
+        || location.pathname.startsWith('/saas/vertical/restaurant/integraciones'))) ||
     (item.id === 'cleaning-hub' && location.pathname.startsWith('/saas/cleaning-hub')) ||
     (item.id === 'cleaning-clients' && location.pathname.startsWith('/saas/vertical/limpieza/clientes')) ||
     (item.id === 'cleaning-workers' && location.pathname.startsWith('/saas/cleaning-workers')) ||
@@ -1450,6 +1522,7 @@ function SidebarInner({
     (item.id === 'bank-reconciliation' && location.pathname.startsWith('/saas/bank-reconciliation')) ||
     (item.id === 'promotions' && location.pathname.startsWith('/saas/promotions')) ||
     (item.id === 'payroll' && location.pathname.startsWith('/saas/payroll')) ||
+    (item.id === 'gestoria' && location.pathname.startsWith('/saas/gestoria')) ||
     (item.id.startsWith('worker-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('gym-') && location.pathname.startsWith(item.path)) ||
     (item.id.startsWith('clinic-') && location.pathname.startsWith(item.path)) ||
@@ -1616,8 +1689,6 @@ function SidebarInner({
   const bottomVisibleItems = visibleMenuItems.filter((item) => bottomItemIds.has(item.id));
 
   const workerById = new Map(workerMenuItems.map((item) => [item.id, item]));
-  const ADMIN_ONLY_GROUPS = new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion']);
-  const WORKER_HIDDEN_ITEM_IDS = BUSINESS_OWNER_ONLY_IDS;
   const WORKER_UNLINKED_CONFIG_ITEM_IDS = new Set(['worker-profile', 'worker-notifications', 'worker-security']);
   const workerUnlinkedMenuItems: SidebarItem[] = [
     {
@@ -1635,28 +1706,14 @@ function SidebarInner({
       label: t('nav.workerInvitations', 'Mis invitaciones'),
     },
   ];
-  const verticalGroupsForWorker = workerHasLinkedCompany
-    ? sidebarGroups
-        .filter((g) => allowedGroups.has(g.id) && !ADMIN_ONLY_GROUPS.has(g.id))
-        .map((group) => ({
-          ...group,
-          items: group.itemIds
-            .map((id) => visibleById.get(id))
-            .filter(
-              (item): item is SidebarItem =>
-                Boolean(item) &&
-                !WORKER_HIDDEN_ITEM_IDS.has(item.id) &&
-                !WORKER_SIDEBAR_HIDDEN_ITEM_IDS.has(item.id),
-            ),
-        }))
-        .filter((group) => group.items.length > 0)
-    : [];
+  // Solo menú worker (tareas, fichaje, docs…). Sin módulos de empresa en el lateral.
+  const verticalGroupsForWorker: Array<SidebarGroup & { items: SidebarItem[] }> = [];
   const workerGroupedItems = unlinkedWorkerNeedsCompany
     ? [
         {
           id: 'worker-unlinked-main',
-          label: t('sidebar.groups.workerUnlinked', 'Sin empresa'),
-          icon: <Building2 className="w-4 h-4 shrink-0" />,
+          label: t('sidebar.groups.workerAccess', 'Acceso'),
+          icon: <Mail className="w-4 h-4 shrink-0" />,
           itemIds: workerUnlinkedMenuItems.map((item) => item.id),
           items: workerUnlinkedMenuItems,
         },
@@ -1711,15 +1768,18 @@ function SidebarInner({
     const narrow = !isMobile && collapsed;
     return (
     <aside
-      className={`bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden ${
+      className={`vsaas-sidebar flex flex-col overflow-hidden ${
         isMobile
           ? 'w-72 h-full'
           : `fixed inset-y-0 left-0 z-40 h-svh max-h-svh safe-area-top transition-[width] duration-300 ${collapsed ? 'w-20' : 'w-60'}`
       }`}
     >
       {/* Company selector + Mode toggle */}
-      <div className="shrink-0 border-b border-gray-200 dark:border-gray-700">
-        {/* Company selector dropdown */}
+      <div className="shrink-0 border-b border-slate-200/80 dark:border-slate-800">
+        <div className="px-3 pt-2.5">
+          <div className="h-0.5 w-full rounded-full bg-[linear-gradient(135deg,#22c55e_0%,#14b8a6_52%,#2563eb_100%)] opacity-80" aria-hidden />
+        </div>
+        {/* Empresa (gerente) o cabecera fija (trabajador: sin selector de empresas) */}
         <div
           ref={selectorRef}
           className={`relative ${
@@ -1727,51 +1787,76 @@ function SidebarInner({
               ? 'px-1 pb-1'
               : isMobile
                 ? 'px-3 pb-1 pt-[max(0.5rem,env(safe-area-inset-top,0px))]'
-                : 'px-3 pb-1'
+                : 'px-3 pb-1 pt-1'
           }`}
         >
           <div className="flex items-center gap-1.5 min-w-0">
-            <button
-              type="button"
-              onClick={() => setShowCompanyDropdown((prev) => !prev)}
-              className={`flex items-center gap-2 rounded-lg transition-all text-sm ${
-                narrow ? 'justify-center p-2 flex-1 min-w-0' : isMobile ? 'px-2 py-1.5 flex-1 min-w-0' : 'px-3 py-2 flex-1 min-w-0'
-              } hover:bg-gray-100 dark:hover:bg-gray-800`}
-              title={narrow ? (currentBusiness?.name || t('topbar.myCompany')) : undefined}
-            >
-              <div className="w-7 h-7 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden">
-                {currentBusiness?.logo ? (
-                  <img
-                    src={currentBusiness.logo}
-                    alt={currentBusiness.name}
-                    className="w-7 h-7 rounded-lg object-cover"
-                  />
-                ) : (
-                  <span className="text-xs font-bold text-blue-700 dark:text-blue-300">
-                    {currentBusiness
-                      ? currentBusiness.name.slice(0, 2).toUpperCase()
-                      : (user?.firstName?.[0] || 'U').toUpperCase()}
+            {workerMode ? (
+              <div
+                className={`flex items-center gap-2 rounded-xl text-sm min-w-0 flex-1 ${
+                  narrow ? 'justify-center p-2' : isMobile ? 'px-2 py-1.5' : 'px-3 py-2'
+                }`}
+                title={narrow ? (user?.fullName || user?.firstName || 'Trabajador') : undefined}
+              >
+                <div className="w-8 h-8 bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  <span className="text-xs font-extrabold text-[var(--v-blue,#2563eb)]">
+                    {`${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase() || 'T'}
                   </span>
+                </div>
+                {(isMobile || !collapsed) && (
+                  <div className="min-w-0 flex-1 text-left">
+                    <p className="font-semibold text-slate-900 dark:text-slate-100 truncate tracking-tight">
+                      {user?.fullName || user?.firstName || t('sidebar.workerSpace', 'Mi espacio')}
+                    </p>
+                    <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 truncate">
+                      {t('sidebar.workerBackoffice', 'Backoffice trabajador')}
+                    </p>
+                  </div>
                 )}
               </div>
-              {(isMobile || !collapsed) && (
-                <>
-                  <span className="font-medium text-gray-900 dark:text-gray-100 flex-1 text-left truncate">
-                    {currentBusiness?.name
-                      || (unlinkedWorkerNeedsCompany
-                        ? t('topbar.noCompanyAssigned', 'Sin empresa asignada')
-                        : user?.companyName || user?.firstName || t('topbar.myCompany'))}
-                  </span>
-                  <ChevronDown className={`w-4 h-4 text-gray-400 shrink-0 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} />
-                </>
-              )}
-            </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowCompanyDropdown((prev) => !prev)}
+                className={`flex items-center gap-2 rounded-xl transition-all text-sm ${
+                  narrow ? 'justify-center p-2 flex-1 min-w-0' : isMobile ? 'px-2 py-1.5 flex-1 min-w-0' : 'px-3 py-2 flex-1 min-w-0'
+                } hover:bg-blue-50/80 dark:hover:bg-blue-950/40`}
+                title={narrow ? (currentBusiness?.name || t('topbar.myCompany')) : undefined}
+              >
+                <div className="w-8 h-8 bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  {currentBusiness?.logo ? (
+                    <img
+                      src={currentBusiness.logo}
+                      alt={currentBusiness.name}
+                      className="w-8 h-8 rounded-xl object-cover"
+                    />
+                  ) : (
+                    <span className="text-xs font-extrabold text-[var(--v-blue,#2563eb)]">
+                      {currentBusiness
+                        ? currentBusiness.name.slice(0, 2).toUpperCase()
+                        : (user?.firstName?.[0] || 'U').toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                {(isMobile || !collapsed) && (
+                  <>
+                    <span className="font-semibold text-slate-900 dark:text-slate-100 flex-1 text-left truncate tracking-tight">
+                      {currentBusiness?.name
+                        || user?.companyName
+                        || user?.firstName
+                        || t('topbar.myCompany')}
+                    </span>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 transition-transform ${showCompanyDropdown ? 'rotate-180' : ''}`} />
+                  </>
+                )}
+              </button>
+            )}
 
             {isMobile && (
               <button
                 type="button"
                 onClick={onMobileClose}
-                className="shrink-0 rounded-lg p-1.5 text-gray-600 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-700"
+                className="vsaas-icon-btn shrink-0"
                 aria-label={t('common.close', 'Cerrar')}
               >
                 <X className="h-5 w-5" />
@@ -1782,21 +1867,21 @@ function SidebarInner({
 
         {/* Sidebar search */}
         {(isMobile || !collapsed) && (
-          <div className="px-3 pb-2 pt-1">
+          <div className="px-3 pb-2.5 pt-1">
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 dark:text-gray-500" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
               <input
                 type="text"
                 value={sidebarSearch}
                 onChange={(e) => setSidebarSearch(e.target.value)}
                 placeholder={t('sidebar.searchMenu', 'Buscar menú...')}
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 transition-colors"
+                className="w-full pl-8 pr-3 py-2 text-xs font-medium rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-colors"
               />
               {sidebarSearch && (
                 <button
                   type="button"
                   onClick={() => setSidebarSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[var(--v-rose,#e11d48)]"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -1843,13 +1928,13 @@ function SidebarInner({
                           [group.id]: !prev[group.id],
                         }));
                       }}
-                      className={`w-full flex items-center gap-2 px-4 py-2 text-xs uppercase tracking-wide transition-colors rounded-t-xl ${
+                      className={`w-full flex items-center gap-2 px-4 py-2 text-[11px] uppercase tracking-[0.08em] transition-colors rounded-t-xl font-bold ${
                         groupHasActiveItem
-                          ? 'text-amber-700 dark:text-amber-300'
-                          : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                          ? 'text-[var(--v-blue,#2563eb)]'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                       }`}
                     >
-                      <span className="flex items-center gap-2 flex-1 min-w-0 text-left font-semibold">
+                      <span className="flex items-center gap-2 flex-1 min-w-0 text-left">
                         {group.icon}
                         {group.label}
                       </span>
@@ -1862,14 +1947,10 @@ function SidebarInner({
                   <div className={shouldShowChildren ? undefined : 'hidden'} aria-hidden={!shouldShowChildren}>
                     {sortedItems.map((item) => {
                       const isActive = isItemActive(item);
-                      const isCalendar = item.id === 'calendar';
-                      /** Marca visual en sidebar: zona Ops ya trabajada / hub principal */
-                      const isDeliveryOpsHub = item.id === 'delivery-ops';
                       const isSalesPointSubItem =
                         item.id.startsWith('sp-') || item.id === 'salesPoints-add';
                       const isInactiveStore = Boolean(item.inactive);
                       const itemDimmed = !dimmed && searchNorm && !itemMatchesSearch(item);
-                      const calendarV2 = CALENDAR_V2_VISUAL && isCalendar;
                       return (
                         <button
                           key={item.id}
@@ -1885,37 +1966,25 @@ function SidebarInner({
                                 : 'px-4'
                           } ${
                             isInactiveStore && !isActive
-                              ? 'text-gray-400 dark:text-gray-500 border-l-2 border-dashed border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800/40'
+                              ? 'text-slate-400 dark:text-slate-500 border-l-2 border-dashed border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800/40'
                               : isActive
-                              ? isDeliveryOpsHub
-                                ? 'bg-teal-50 dark:bg-teal-900/30 text-teal-900 dark:text-teal-100 border-l-2 border-teal-600'
-                                : (isCalendar
-                                  ? 'bg-violet-50 dark:bg-violet-900/25 text-violet-900 dark:text-violet-200 border-l-2 border-violet-600'
-                                  : isSalesPointSubItem
-                                    ? 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-200 border-l-2 border-amber-600'
-                                    : 'bg-amber-50 dark:bg-amber-900/25 text-amber-900 dark:text-amber-300 border-l-2 border-amber-600')
-                              : (calendarV2
-                                ? 'bg-violet-50/60 dark:bg-violet-900/10 text-gray-900 dark:text-gray-100 border-l-2 border-violet-300/70 dark:border-violet-700/40 hover:bg-violet-50 dark:hover:bg-violet-900/15'
-                                : isDeliveryOpsHub
-                                  ? 'text-gray-800 dark:text-gray-100 border-l-2 border-teal-400/55 dark:border-teal-500/45 bg-teal-50/45 dark:bg-teal-950/25 hover:bg-teal-50/80 dark:hover:bg-teal-950/35'
-                                  : isSalesPointSubItem
-                                    ? 'text-gray-500 dark:text-gray-400 hover:bg-white/60 dark:hover:bg-gray-700/40'
-                                    : 'text-gray-700 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-700/40')
+                              ? 'vsaas-nav-active'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-blue-50/50 dark:hover:bg-blue-950/20 border-l-2 border-transparent'
                           } ${item.disabled ? 'opacity-60 cursor-not-allowed hover:bg-transparent dark:hover:bg-transparent' : ''} ${
                             itemDimmed ? 'opacity-30' : ''
                           }`}
                           disabled={item.disabled}
                           title={
                             item.lockTitle ??
-                            (!isMobile && collapsed ? item.label : undefined)
+                            item.label
                           }
                         >
                           <span className={
                             isActive
-                              ? isDeliveryOpsHub
-                                ? 'text-teal-600 dark:text-teal-400'
-                                : (isCalendar ? 'text-violet-600 dark:text-violet-400' : 'text-amber-600')
-                              : (calendarV2 ? 'text-violet-600/80 dark:text-violet-400/90' : isDeliveryOpsHub ? 'text-teal-600 dark:text-teal-400' : isSalesPointSubItem ? 'text-gray-400 dark:text-gray-500' : 'text-gray-500 dark:text-gray-400')
+                              ? 'vsaas-nav-icon-active'
+                              : isSalesPointSubItem
+                                ? 'text-slate-400 dark:text-slate-500'
+                                : 'text-slate-500 dark:text-slate-400'
                           }>
                             {item.lockTitle ? <Lock className="w-5 h-5" /> : item.icon}
                           </span>
@@ -1928,10 +1997,10 @@ function SidebarInner({
                               }`}
                             >
                               <span
-                                className={`block truncate ${
+                                className={`block text-[13px] leading-snug ${
                                   isSalesPointSubItem
-                                    ? `text-[12px] ${isActive ? 'font-semibold' : 'font-medium'}`
-                                    : 'font-medium'
+                                    ? `${isActive ? 'font-semibold' : 'font-medium'} truncate`
+                                    : 'font-medium line-clamp-2 break-words'
                                 }`}
                               >
                                 {item.label}
@@ -1940,8 +2009,8 @@ function SidebarInner({
                                 <span
                                   className={`block truncate font-mono text-[10px] leading-none ${
                                     isActive
-                                      ? 'text-amber-700/90 dark:text-amber-300/90'
-                                      : 'text-gray-400 dark:text-gray-500'
+                                      ? 'text-blue-700/90 dark:text-blue-300/90'
+                                      : 'text-slate-400 dark:text-slate-500'
                                   }`}
                                 >
                                   {item.subLabel}
@@ -1970,8 +2039,8 @@ function SidebarInner({
                                   }}
                                   className={`inline-flex max-w-full items-center gap-1 rounded px-1 py-0.5 font-mono text-[10px] leading-none tracking-widest transition-colors ${
                                     isActive
-                                      ? 'bg-amber-100/80 text-amber-800 hover:bg-amber-200/80 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/60'
-                                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+                                      ? 'bg-blue-100/80 text-blue-800 hover:bg-blue-200/80 dark:bg-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/60'
+                                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
                                   }`}
                                 >
                                   <Copy className="h-2.5 w-2.5 shrink-0 opacity-70" />
@@ -1993,49 +2062,22 @@ function SidebarInner({
                               {t('sidebar.new')}
                             </span>
                           )}
-                          {(isMobile || !collapsed) && item.id === 'calendar' && (
-                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
-                              <CalendarDays className="w-2.5 h-2.5" />
-                              Agenda
-                            </span>
-                          )}
-                          {(isMobile || !collapsed) && item.id === 'calendar' && CALENDAR_V2_VISUAL && (
-                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-gradient-to-r from-violet-100 to-fuchsia-100 dark:from-violet-900/40 dark:to-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
-                              <Palette className="w-2.5 h-2.5" />
-                              V2
-                            </span>
-                          )}
-                          {(isMobile || !collapsed) && item.id === 'calendar' && workCentersSidebarCount > 1 && (
-                            <span className="flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
-                              <Store className="w-2.5 h-2.5" />
-                              PDV
-                            </span>
-                          )}
                           {(isMobile || !collapsed) && item.pro && (
-                            <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
+                            <span className="flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
                               <Sparkles className="w-2.5 h-2.5" />
                               {t('sidebar.pro')}
                             </span>
                           )}
                           {(isMobile || !collapsed) && item.upcoming && (
-                            <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
+                            <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px] font-bold rounded-full leading-none flex-shrink-0">
                               {t('sidebar.comingSoon')}
                             </span>
                           )}
                           {!isMobile && collapsed && item.isNew && !seenNewItems.has(item.id) && (
                             <span className="absolute right-1 top-1 w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
                           )}
-                          {!isMobile && collapsed && item.id === 'calendar' && (
-                            <span className="absolute right-1 top-1 w-2 h-2 bg-violet-500 rounded-full" />
-                          )}
-                          {!isMobile && collapsed && item.id === 'calendar' && CALENDAR_V2_VISUAL && (
-                            <span className="absolute left-1 top-1 w-1.5 h-1.5 bg-fuchsia-500 rounded-full" />
-                          )}
-                          {!isMobile && collapsed && item.id === 'calendar' && workCentersSidebarCount > 1 && (
-                            <span className="absolute right-1 top-1 w-2 h-2 bg-emerald-500 rounded-full" />
-                          )}
                           {!isMobile && collapsed && item.pro && (
-                            <span className="absolute right-1 top-1 w-2 h-2 bg-amber-400 rounded-full" />
+                            <span className="absolute right-1 top-1 w-2 h-2 bg-blue-500 rounded-full" />
                           )}
                         </button>
                       );
@@ -2173,7 +2215,7 @@ function SidebarInner({
               return (
                 <div
                   key={item.id}
-                  className={`rounded-xl border border-gray-200/90 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900 ${
+                  className={`rounded-xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900 ${
                     narrow ? 'mx-0.5' : 'mx-2'
                   }`}
                 >
@@ -2184,21 +2226,21 @@ function SidebarInner({
                       narrow ? 'justify-center px-0' : ''
                     } ${
                       isActive
-                        ? 'border-l-[3px] border-amber-600 bg-amber-50 text-amber-900 dark:bg-amber-900/25 dark:text-amber-200'
-                        : 'text-slate-600 hover:bg-slate-50 dark:text-gray-400 dark:hover:bg-gray-800/90'
+                        ? 'border-l-[3px] border-[var(--v-blue,#2563eb)] bg-blue-50 text-blue-900 dark:bg-blue-900/25 dark:text-blue-200'
+                        : 'text-slate-600 hover:bg-blue-50/50 dark:text-slate-400 dark:hover:bg-blue-950/20'
                     } ${item.disabled ? 'cursor-not-allowed opacity-60 hover:bg-transparent dark:hover:bg-transparent' : ''}`}
                     disabled={item.disabled}
                     title={narrow ? item.label : undefined}
                   >
                     <span
-                      className={`shrink-0 ${isActive ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-gray-400'}`}
+                      className={`shrink-0 ${isActive ? 'text-[var(--v-blue,#2563eb)]' : 'text-slate-500 dark:text-slate-400'}`}
                     >
                       {item.icon}
                     </span>
                     {(isMobile || !collapsed) && (
                       <span
                         className={`min-w-0 flex-1 text-xs font-semibold uppercase tracking-wide leading-snug ${
-                          isActive ? 'text-amber-900 dark:text-amber-200' : 'text-slate-600 dark:text-gray-400'
+                          isActive ? 'text-blue-900 dark:text-blue-200' : 'text-slate-600 dark:text-slate-400'
                         }`}
                       >
                         {item.label}
@@ -2215,23 +2257,15 @@ function SidebarInner({
       {!workerMode && <ActivationChecklist collapsed={!isMobile && collapsed} />}
 
       {/* User section */}
-      <div className="shrink-0 p-4 border-t border-gray-200 dark:border-gray-700">
-        {(isMobile || !collapsed) && import.meta.env.VITE_APP_VERSION ? (
-          <p
-            className="mb-2 text-center text-[10px] text-gray-400 dark:text-gray-600 tabular-nums"
-            title="Versión del build (package.json al compilar)"
-          >
-            v{import.meta.env.VITE_APP_VERSION}
-          </p>
-        ) : null}
+      <div className="shrink-0 p-4 border-t border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40">
         <div className="relative">
           {!isMobile && collapsed ? (
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+              className="w-full flex items-center justify-center p-2 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer transition-colors"
               title={t('sidebar.userMenu')}
             >
-              <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
+              <div className="w-10 h-10 bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-full flex items-center justify-center">
                 {user?.avatar ? (
                   <img
                     src={user.avatar}
@@ -2239,16 +2273,16 @@ function SidebarInner({
                     className="w-10 h-10 rounded-full object-cover"
                   />
                 ) : (
-                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{initials}</span>
+                  <span className="text-sm font-bold text-[var(--v-blue,#2563eb)]">{initials}</span>
                 )}
               </div>
             </button>
           ) : (
             <button
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+              className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-950/40 cursor-pointer transition-colors"
             >
-              <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 rounded-full flex items-center justify-center flex-shrink-0">
                 {user?.avatar ? (
                   <img
                     src={user.avatar}
@@ -2256,18 +2290,37 @@ function SidebarInner({
                     className="w-10 h-10 rounded-full object-cover"
                   />
                 ) : (
-                  <span className="text-sm font-semibold text-gray-700 dark:text-gray-300">{initials}</span>
+                  <span className="text-sm font-bold text-[var(--v-blue,#2563eb)]">{initials}</span>
                 )}
               </div>
               <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate tracking-tight">
                   {user?.fullName || t('topbar.user')}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                   {user?.role || user?.email || t('sidebar.noRole')}
                 </p>
               </div>
             </button>
+          )}
+
+          {/* Marca Vertial + versión — pie del sidebar (no en pantallas de módulo) */}
+          {(isMobile || !collapsed) ? (
+            <div className="mt-2 flex items-center justify-center gap-2 px-1">
+              <VertialLogo size="sm" className="opacity-75" />
+              {import.meta.env.VITE_APP_VERSION ? (
+                <p
+                  className="text-[10px] text-gray-400 dark:text-gray-600 tabular-nums"
+                  title="Versión del build (package.json al compilar)"
+                >
+                  v{import.meta.env.VITE_APP_VERSION}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-2 flex justify-center" title="Vertial">
+              <VertialLogo size="sm" className="opacity-75" />
+            </div>
           )}
 
           {showUserMenu && (
@@ -2310,6 +2363,10 @@ function SidebarInner({
               <button
                 onClick={() => {
                   setShowUserMenu(false);
+                  if (workerMode) {
+                    navigate('/saas/worker/tasks', { replace: true });
+                    return;
+                  }
                   if (businesses.length <= 1) {
                     navigate('/saas/dashboard', { replace: true });
                   } else {
@@ -2318,8 +2375,8 @@ function SidebarInner({
                 }}
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors text-left"
               >
-                <Home className="w-4 h-4 text-blue-500 dark:text-blue-400" />
-                <span className="text-sm text-blue-600 dark:text-blue-400">{t('sidebar.backToHome')}</span>
+                <Home className="w-4 h-4 text-[var(--v-blue,#2563eb)] dark:text-blue-400" />
+                <span className="text-sm text-[var(--v-blue,#2563eb)] dark:text-blue-400">{t('sidebar.backToHome')}</span>
               </button>
               <button
                 onClick={handleLogout}
@@ -2358,7 +2415,7 @@ function SidebarInner({
         </div>
       )}
 
-      {showCompanyDropdown && companyDropdownPanel && typeof document !== 'undefined'
+      {!workerMode && showCompanyDropdown && companyDropdownPanel && typeof document !== 'undefined'
         ? createPortal(companyDropdownPanel, document.body)
         : null}
 

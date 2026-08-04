@@ -21,6 +21,7 @@ import {
   fetchAlertSummary,
   updateAlertStatus,
   bulkUpdateAlertStatus,
+  resolveAllUnresolvedAlerts,
   deleteAlert as deleteAlertRequest,
   triggerAlertEngineCheck,
   normalizeAlertSummary,
@@ -35,6 +36,7 @@ import {
   type AlertSource,
   type ListAlertsFilters,
 } from '../../lib/alertCenterApi';
+import { resetAlertsToManagerFocus } from '../../lib/settingsApi';
 import {
   fetchDocumentAlertsAsRecords,
   mergeAlertLists,
@@ -50,7 +52,7 @@ import {
   Clock, X, Shield, TrendingUp, AlertTriangle,
   DollarSign, Package, Users, FileText, Wrench,
   ScanLine, Building2, Monitor, Bike, Activity,
-  Layers, Sparkles,
+  Layers,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getAlertResolveLabel, alertHasNavigateTarget, mapAlertsForBusinessVertical } from '../../lib/alertActions';
@@ -120,6 +122,7 @@ export default function AlertCenterPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showFilters, setShowFilters] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [managerResetBusy, setManagerResetBusy] = useState(false);
   const [activeDepartment, setActiveDepartment] = useState('all');
   const [includeDeleted, setIncludeDeleted] = useState(false);
   const [historyFrom, setHistoryFrom] = useState('');
@@ -275,6 +278,63 @@ export default function AlertCenterPage() {
     }
   }, [businessId, dataUserId, selectedIds, bulkBusy, loadData]);
 
+  const handleClearPending = useCallback(async () => {
+    if (!businessId || managerResetBusy) return;
+    setManagerResetBusy(true);
+    try {
+      const result = await resolveAllUnresolvedAlerts(businessId);
+      if (dataUserId) {
+        const docs = await fetchDocumentAlertsAsRecords(dataUserId, businessId).catch(() => []);
+        if (docs.length > 0) {
+          dismissDocumentAlerts(dataUserId, businessId, docs.map((d) => d.id));
+        }
+      }
+      toast.success(
+        result.updated > 0
+          ? `Bandeja limpia: ${result.updated} alertas resueltas`
+          : result.message || 'No había pendientes',
+      );
+      setSelectedIds(new Set());
+      await loadData({ silent: true });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo limpiar la bandeja');
+    } finally {
+      setManagerResetBusy(false);
+    }
+  }, [businessId, dataUserId, managerResetBusy, loadData]);
+
+  const handleManagerFocus = useCallback(async () => {
+    if (!settingsBusinessId || managerResetBusy) return;
+    const ok = window.confirm(
+      '¿Poner alertas en modo gerente?\n\n' +
+        '• Apaga el ruido (~200 reglas)\n' +
+        '• Deja solo caja, fichaje y lo esencial del negocio\n' +
+        '• También limpia la bandeja de pendientes\n\n' +
+        'Las solicitudes de RRHH (campanita personal) no se tocan.',
+    );
+    if (!ok) return;
+    setManagerResetBusy(true);
+    try {
+      const focus = await resetAlertsToManagerFocus(settingsBusinessId);
+      const cleared = await resolveAllUnresolvedAlerts(businessId);
+      if (dataUserId) {
+        const docs = await fetchDocumentAlertsAsRecords(dataUserId, businessId).catch(() => []);
+        if (docs.length > 0) {
+          dismissDocumentAlerts(dataUserId, businessId, docs.map((d) => d.id));
+        }
+      }
+      toast.success(
+        `${focus.message || 'Modo gerente activo'} · ${cleared.updated} pendientes cerrados`,
+      );
+      setSelectedIds(new Set());
+      await loadData({ silent: true });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo aplicar el modo gerente');
+    } finally {
+      setManagerResetBusy(false);
+    }
+  }, [settingsBusinessId, businessId, dataUserId, managerResetBusy, loadData]);
+
   const handleDelete = useCallback(async (alertId: string) => {
     if (isSyntheticDocumentAlert(alertId)) {
       if (dataUserId) dismissDocumentAlert(dataUserId, businessId, alertId);
@@ -365,15 +425,21 @@ export default function AlertCenterPage() {
     }
   }, [businessId, accountUserId, loadData]);
 
+  // Init department from ?department=
+  useEffect(() => {
+    const dept = searchParams.get('department');
+    if (dept) setActiveDepartment(dept);
+  }, [searchParams]);
+
   useEffect(() => {
     setPageTab(tabFromSearch(searchParams.get('tab')));
   }, [searchParams]);
 
   const layoutSubtitle = isSettings
-    ? 'Configura qué debe vigilar tu negocio de delivery'
+    ? 'Solo avisos importantes: caja, equipo y operación'
     : isHistory
-      ? 'Alertas resueltas y cerradas'
-      : 'Todo lo que requiere tu atención ahora mismo';
+      ? 'Alertas ya resueltas'
+      : 'Lo que necesita tu atención';
 
   const deptLabel = alertDepartments.find((d) => d.id === activeDepartment)?.label || 'Todas';
 
@@ -409,55 +475,58 @@ export default function AlertCenterPage() {
           )}
         </div>
 
-        {deliveryReviewPending && (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 dark:border-amber-800 dark:bg-amber-950/30 md:px-4">
+        {!isSettings && !isHistory && (
+          <div className="rounded-2xl border border-blue-200 bg-blue-50/80 px-3 py-3 dark:border-blue-800 dark:bg-blue-950/30 md:px-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
-                  Revisa qué alertas de Delivery quieres activar
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-blue-950 dark:text-blue-100">
+                  ¿Demasiadas alertas?
                 </p>
-                <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-300">
-                  El pack esencial ya está encendido. El resto espera tu decisión.
+                <p className="mt-0.5 text-xs text-blue-800 dark:text-blue-300">
+                  Un clic: solo caja y lo esencial. Limpia la bandeja. RRHH no se toca.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => switchPageTab('settings')}
-                  className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold text-white hover:bg-amber-700"
+                  disabled={managerResetBusy || !businessId}
+                  onClick={() => void handleClearPending()}
+                  className="rounded-xl border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:bg-blue-950 dark:text-blue-100"
                 >
-                  Ir a ajustes
+                  {managerResetBusy ? <RefreshCw className="inline h-3.5 w-3.5 animate-spin mr-1" /> : null}
+                  Limpiar bandeja
                 </button>
                 <button
                   type="button"
-                  onClick={() => void markDeliveryReviewed().then(() => toast.success('Revisión marcada como hecha'))}
-                  className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+                  disabled={managerResetBusy || !settingsBusinessId}
+                  onClick={() => void handleManagerFocus()}
+                  className="rounded-xl bg-[var(--v-blue,#2563eb)] px-3 py-2 text-xs font-bold text-white hover:bg-[#1d4ed8] disabled:opacity-50"
                 >
-                  Ya lo revisé
+                  Solo importantes
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* KPIs — solo bandeja e historial */}
+        {/* Una sola cifra — sin panel de 4 KPIs de colores */}
         {!isSettings && summary && (
-          <div className="grid grid-cols-4 gap-1.5 md:grid-cols-2 md:gap-3 lg:grid-cols-4">
-            {[
-              { label: 'Pend.', fullLabel: 'Pendientes', value: summary.unresolved ?? 0, icon: Bell, bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-400', border: 'border-amber-200 dark:border-amber-800' },
-              { label: 'Crít.', fullLabel: 'Críticas', value: summary.byPriority?.high ?? 0, icon: AlertTriangle, bg: 'bg-red-50 dark:bg-red-950/30', text: 'text-red-600 dark:text-red-400', border: 'border-red-200 dark:border-red-800' },
-              { label: 'Med.', fullLabel: 'Medias', value: summary.byPriority?.medium ?? 0, icon: Activity, bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-200 dark:border-blue-800' },
-              { label: 'Nuev.', fullLabel: 'Nuevas', value: summary.byStatus?.new ?? 0, icon: Sparkles, bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-200 dark:border-emerald-800' },
-            ].map((stat) => (
-              <div key={stat.fullLabel} className={`rounded-xl border p-2 md:rounded-2xl md:p-4 ${stat.bg} ${stat.border}`}>
-                <div className="mb-1 hidden items-center gap-2 md:mb-2 md:flex">
-                  <stat.icon className={`h-4 w-4 ${stat.text}`} />
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{stat.fullLabel}</p>
-                </div>
-                <p className={`text-lg font-black md:text-2xl ${stat.text}`}>{stat.value}</p>
-                <p className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 md:hidden">{stat.label}</p>
-              </div>
-            ))}
+          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200 bg-white px-4 py-3 dark:border-stone-800 dark:bg-stone-950">
+            <Bell className="h-4 w-4 text-stone-400 shrink-0" />
+            <p className="text-sm text-stone-700 dark:text-stone-200">
+              <span className="font-black tabular-nums text-stone-900 dark:text-stone-50">
+                {isHistory ? (summary.historyTotal ?? 0) : (summary.unresolved ?? 0)}
+              </span>
+              <span className="ml-1.5 text-stone-500">
+                {isHistory ? 'en historial' : 'pendientes'}
+              </span>
+            </p>
+            {!isHistory && (summary.byPriority?.high ?? 0) > 0 ? (
+              <span className="inline-flex items-center gap-1 rounded-lg bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                <AlertTriangle className="h-3 w-3" />
+                {summary.byPriority.high} urgentes
+              </span>
+            ) : null}
           </div>
         )}
 

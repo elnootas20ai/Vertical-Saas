@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Download,
   Eye,
@@ -19,7 +18,6 @@ import {
   X,
   File,
   Calendar,
-  Filter,
   Users,
   Clock,
   ArrowRight,
@@ -38,14 +36,24 @@ import {
   finalizePayrollDocumentUpload,
   payrollUploadSuccessMessage,
   PAYROLL_DOC_TYPE_LABELS,
+  formatPayrollPeriodLabel,
   type PayrollDocument,
   type PayrollDocumentType,
 } from '../../lib/payrollApi';
 import { toast } from 'sonner';
 import { SAAS__OcrScanModal } from '../../components/design-system/SAAS__OcrScanModal';
 import { PayrollBulkUploadModal } from '../../components/saas/PayrollBulkUploadModal';
-import { HrGestorChecklist } from '../../components/saas/HrGestorChecklist';
 import { LaborMonthClosePanel } from '../../components/saas/LaborMonthClosePanel';
+import { PayrollNominasPanel } from '../../components/saas/PayrollNominasPanel';
+import { formatDateEs } from '../../lib/formatDateEs';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
+
+type HubTab = 'nominas' | 'documentacion';
+
+function resolveHubTab(raw: string | null): HubTab {
+  if (raw === 'documentacion' || raw === 'docs' || raw === 'documents') return 'documentacion';
+  return 'nominas';
+}
 
 type DocFilter = 'all' | PayrollDocumentType;
 
@@ -65,11 +73,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' });
-  } catch {
-    return iso;
-  }
+  return formatDateEs(iso) || iso;
 }
 
 // ─── Upload Modal ──────────────────────────────────────────────────────────────
@@ -401,10 +405,23 @@ function PreviewModal({ doc, onClose }: { doc: PayrollDocument; onClose: () => v
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export function PayrollPage() {
-  const navigate = useNavigate();
-  const { t } = useTranslation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, listUsers } = useAuth();
   const { currentBusiness } = useBusiness();
+
+  const hubTab = resolveHubTab(searchParams.get('tab'));
+  const selectedWorkerId = searchParams.get('worker') || '';
+
+  const setHubTab = useCallback(
+    (tab: HubTab, extras?: { worker?: string; clearWorker?: boolean }) => {
+      const next = new URLSearchParams(searchParams);
+      next.set('tab', tab);
+      if (extras?.clearWorker) next.delete('worker');
+      if (extras?.worker) next.set('worker', extras.worker);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
 
   const { activeWorkCenters, hasWorkCenters } = useWorkCenters();
   const [documents, setDocuments] = useState<PayrollDocument[]>([]);
@@ -418,6 +435,12 @@ export function PayrollPage() {
   const [showOcr, setShowOcr] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<PayrollDocument | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (hubTab === 'documentacion' && selectedWorkerId) {
+      setFilterWorker(selectedWorkerId);
+    }
+  }, [hubTab, selectedWorkerId]);
 
   const loadData = useCallback(async () => {
     const businessId = currentBusiness?.business_id || '';
@@ -481,11 +504,15 @@ export function PayrollPage() {
 
   const uniqueWorkers = useMemo(() => {
     const seen = new Map<string, string>();
+    for (const m of members) {
+      if (m.status === 'inactive') continue;
+      if (m.user_id) seen.set(m.user_id, m.fullName || m.email || m.user_id);
+    }
     for (const d of documents) {
       if (!seen.has(d.worker_id)) seen.set(d.worker_id, d.worker_name);
     }
     return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
-  }, [documents]);
+  }, [documents, members]);
 
   async function handleDelete(doc: PayrollDocument) {
     if (!confirm(`¿Eliminar "${doc.name}"?`)) return;
@@ -522,273 +549,316 @@ export function PayrollPage() {
   }
 
   return (
-    <Layout title={t('nav.payroll')}>
+    <Layout title="Nóminas y documentación" subtitle="Equipo: pagos, pendientes y documentos laborales">
       <div className="max-w-7xl mx-auto space-y-6">
-        <HrGestorChecklist mode="hr" />
-
-        <LaborMonthClosePanel
-          business={currentBusiness}
-          authUser={user}
-          members={members}
-        />
-
-        {/* Stats cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
-              <FileText className="w-4 h-4" />
-              <span className="text-xs font-semibold uppercase tracking-wider">Total</span>
-            </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{documents.length}</p>
-          </div>
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
-              <Receipt className="w-4 h-4" />
-              <span className="text-xs font-semibold uppercase tracking-wider">Nóminas</span>
-            </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              {documents.filter((d) => d.documentType === 'nomina').length}
-            </p>
-          </div>
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
-              <ScrollText className="w-4 h-4" />
-              <span className="text-xs font-semibold uppercase tracking-wider">Contratos</span>
-            </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-              {documents.filter((d) => d.documentType === 'contrato').length}
-            </p>
-          </div>
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4">
-            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
-              <Users className="w-4 h-4" />
-              <span className="text-xs font-semibold uppercase tracking-wider">Trabajadores</span>
-            </div>
-            <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{uniqueWorkers.length}</p>
-          </div>
+        {/* Hub genérico: NÓMINAS | DOCUMENTACIÓN */}
+        <div className="flex gap-1 p-1 rounded-2xl bg-stone-100 dark:bg-stone-900 border border-stone-200 dark:border-stone-800 w-full sm:w-fit">
+          <button
+            type="button"
+            onClick={() => setHubTab('nominas')}
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+              hubTab === 'nominas'
+                ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-sm'
+                : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-300'
+            }`}
+          >
+            <Receipt className="w-4 h-4" />
+            Nóminas
+          </button>
+          <button
+            type="button"
+            onClick={() => setHubTab('documentacion')}
+            className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+              hubTab === 'documentacion'
+                ? 'bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 shadow-sm'
+                : 'text-stone-500 hover:text-stone-700 dark:hover:text-stone-300'
+            }`}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Documentación
+          </button>
         </div>
 
-        {/* ZIP upload info */}
-        <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
-          <strong className="text-gray-900 dark:text-gray-100">Nóminas del mes:</strong> sube un ZIP con un PDF por trabajador.
-          El sistema lo reparte a cada uno automáticamente. Contratos u otros documentos sueltos → perfil del trabajador en Equipo.
-        </div>
-
-        {/* Clockins summary link */}
-        <Link
-          to="/saas/clockins"
-          className="flex items-center justify-between p-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40">
-              <Clock className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">Resumen de fichajes para nómina</p>
-              <p className="text-xs text-blue-600 dark:text-blue-400">Consulta horas trabajadas, extras, retrasos y absentismo del equipo</p>
-            </div>
-          </div>
-          <ArrowRight className="w-5 h-5 text-blue-400 group-hover:translate-x-1 transition-transform" />
-        </Link>
-
-        {/* Filters row */}
-        <div className="flex flex-col sm:flex-row gap-3">
-          {/* Search */}
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nombre, trabajador o período..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
+        {hubTab === 'nominas' ? (
+          <>
+            <LaborMonthClosePanel
+              business={currentBusiness}
+              authUser={user}
+              members={members}
             />
-          </div>
-
-          {/* Worker filter */}
-          <div className="relative">
-            <select
-              value={filterWorker}
-              onChange={(e) => setFilterWorker(e.target.value)}
-              className="appearance-none pl-9 pr-8 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
+            <PayrollNominasPanel
+              members={members}
+              documents={documents}
+              loading={loading}
+              selectedWorkerId={selectedWorkerId}
+              onSelectWorker={(workerId) => setHubTab('nominas', { worker: workerId })}
+              onOpenDocuments={(workerId) => {
+                if (workerId) setFilterWorker(workerId);
+                setFilterType('all');
+                setHubTab('documentacion', workerId ? { worker: workerId } : undefined);
+              }}
+              onUploadPayslips={() => setShowBulkUpload(true)}
+            />
+            <Link
+              to="/saas/clockins"
+              className="flex items-center justify-between p-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors group"
             >
-              <option value="">Todos los trabajadores</option>
-              {uniqueWorkers.map((w) => (
-                <option key={w.id} value={w.id}>{w.name} ({workerCounts.get(w.id) || 0})</option>
-              ))}
-            </select>
-            <User className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          </div>
-          {hasWorkCenters && (
-            <select
-              value={filterWorkCenter}
-              onChange={(e) => setFilterWorkCenter(e.target.value)}
-              className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
-            >
-              <option value="all">Todos los centros</option>
-              {activeWorkCenters.map(wc => <option key={wc.id} value={wc.id}>{wc.name}</option>)}
-            </select>
-          )}
-          <button
-            onClick={() => setShowBulkUpload(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-gray-100 px-4 py-2.5 text-sm font-semibold text-white dark:text-gray-900 hover:bg-black dark:hover:bg-white transition-colors shadow-sm whitespace-nowrap"
-          >
-            <Files className="w-4 h-4" />
-            <span className="hidden sm:inline">Subir ZIP nóminas</span>
-          </button>
-          <button
-            onClick={() => setShowOcr(true)}
-            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 hover:bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors shadow-sm whitespace-nowrap"
-          >
-            <ScanLine className="w-4 h-4" />
-            <span className="hidden sm:inline">Escanear OCR</span>
-          </button>
-        </div>
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/40">
+                  <Clock className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">Resumen de fichajes para nómina</p>
+                  <p className="text-xs text-blue-600 dark:text-blue-400">Consulta horas trabajadas, extras, retrasos y absentismo del equipo</p>
+                </div>
+              </div>
+              <ArrowRight className="w-5 h-5 text-blue-400 group-hover:translate-x-1 transition-transform" />
+            </Link>
+          </>
+        ) : (
+          <>
+            {/* Stats cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 p-4">
+                <div className="flex items-center gap-2 text-stone-500 dark:text-stone-400 mb-1">
+                  <FileText className="w-4 h-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wider">Total</span>
+                </div>
+                <p className="text-2xl font-bold text-stone-900 dark:text-stone-100">{documents.length}</p>
+              </div>
+              <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 p-4">
+                <div className="flex items-center gap-2 text-stone-500 dark:text-stone-400 mb-1">
+                  <Receipt className="w-4 h-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wider">Nóminas</span>
+                </div>
+                <p className="text-2xl font-bold text-stone-900 dark:text-stone-100">
+                  {documents.filter((d) => d.documentType === 'nomina').length}
+                </p>
+              </div>
+              <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 p-4">
+                <div className="flex items-center gap-2 text-stone-500 dark:text-stone-400 mb-1">
+                  <ScrollText className="w-4 h-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wider">Contratos</span>
+                </div>
+                <p className="text-2xl font-bold text-stone-900 dark:text-stone-100">
+                  {documents.filter((d) => d.documentType === 'contrato').length}
+                </p>
+              </div>
+              <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 p-4">
+                <div className="flex items-center gap-2 text-stone-500 dark:text-stone-400 mb-1">
+                  <Users className="w-4 h-4" />
+                  <span className="text-xs font-semibold uppercase tracking-wider">Trabajadores</span>
+                </div>
+                <p className="text-2xl font-bold text-stone-900 dark:text-stone-100">{uniqueWorkers.length}</p>
+              </div>
+            </div>
 
-        {/* Type tabs */}
-        <div className="flex gap-1 flex-wrap">
-          {DOC_FILTERS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFilterType(f.id)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                filterType === f.id
-                  ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              {f.icon}
-              {f.label}
-            </button>
-          ))}
-        </div>
+            {/* ZIP upload info */}
+            <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/50 px-4 py-3 text-sm text-stone-600 dark:text-stone-400">
+              <strong className="text-stone-900 dark:text-stone-100">Nóminas del mes:</strong> sube un ZIP con un PDF por trabajador.
+              El sistema lo reparte a cada uno automáticamente. Contratos u otros documentos sueltos → perfil del trabajador en Equipo.
+            </div>
 
-        {/* Documents list */}
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
-          </div>
-        ) : filteredDocs.length === 0 ? (
-          <div className="rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 py-16 text-center">
-            <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-              {documents.length === 0 ? 'No hay documentos aún' : 'Sin resultados para los filtros aplicados'}
-            </p>
-            {documents.length === 0 && (
+            {/* Filters row */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              {/* Search */}
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar por nombre, trabajador o período..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
+                />
+              </div>
+
+              {/* Worker filter */}
+              <div className="relative">
+                <select
+                  value={filterWorker}
+                  onChange={(e) => setFilterWorker(e.target.value)}
+                  className="appearance-none pl-9 pr-8 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-sm text-stone-900 dark:text-stone-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
+                >
+                  <option value="">Todos los trabajadores</option>
+                  {uniqueWorkers.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name} ({workerCounts.get(w.id) || 0})</option>
+                  ))}
+                </select>
+                <User className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+              </div>
+              {hasWorkCenters && (
+                <select
+                  value={filterWorkCenter}
+                  onChange={(e) => setFilterWorkCenter(e.target.value)}
+                  className="px-3 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 text-sm text-stone-900 dark:text-stone-100 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40 transition-all"
+                >
+                  <option value="all">Todos los centros</option>
+                  {activeWorkCenters.map(wc => <option key={wc.id} value={wc.id}>{wc.name}</option>)}
+                </select>
+              )}
               <button
                 onClick={() => setShowBulkUpload(true)}
-                className="inline-flex items-center gap-2 mt-4 px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold hover:bg-black dark:hover:bg-white transition-colors"
+                className={VERTIAL_BTN_PRIMARY}
               >
-                <Upload className="w-4 h-4" />
-                Subir ZIP nóminas
+                <Files className="w-4 h-4" />
+                <span className="hidden sm:inline">Subir ZIP nóminas</span>
               </button>
-            )}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Documento</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Trabajador</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden sm:table-cell">Tipo</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden md:table-cell">Período</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider hidden lg:table-cell">Fecha</th>
-                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {filteredDocs.map((doc) => (
-                    <tr key={doc._id} className="hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
-                            {doc.documentType === 'nomina' ? <Receipt className="w-4 h-4 text-blue-600 dark:text-blue-400" /> :
-                             doc.documentType === 'contrato' ? <ScrollText className="w-4 h-4 text-amber-600 dark:text-amber-400" /> :
-                             <FileText className="w-4 h-4 text-gray-500 dark:text-gray-400" />}
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{doc.name}</p>
-                            {doc.fileName && (
-                              <p className="text-xs text-gray-400 truncate">{doc.fileName} {doc.size ? `· ${formatBytes(doc.size)}` : ''}</p>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => navigate(`/saas/team/${doc.worker_id}`)}
-                          className="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                        >
-                          <User className="w-3.5 h-3.5" />
-                          {doc.worker_name}
-                        </button>
-                      </td>
-                      <td className="px-4 py-3 hidden sm:table-cell">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-xs font-medium text-gray-600 dark:text-gray-400">
-                          {PAYROLL_DOC_TYPE_LABELS[doc.documentType] || doc.documentType}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400 hidden md:table-cell">
-                        {doc.period ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Calendar className="w-3.5 h-3.5" />
-                            {doc.period}
-                          </span>
-                        ) : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 hidden lg:table-cell">
-                        {formatDate(doc.createdAt)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          {doc.fileData && (
-                            <button
-                              onClick={() => setPreviewDoc(doc)}
-                              className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                              title="Ver"
-                            >
-                              <Eye className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                            </button>
-                          )}
-                          {doc.fileData && (
-                            <a
-                              href={doc.fileData}
-                              download={doc.fileName || doc.name}
-                              className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                              title="Descargar"
-                            >
-                              <Download className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                            </a>
-                          )}
-                          <button
-                            onClick={() => navigate(`/saas/team/${doc.worker_id}`)}
-                            className="rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                            title="Ir al perfil"
-                          >
-                            <User className="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(doc)}
-                            disabled={deleting === doc._id}
-                            className="rounded-lg p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                            title="Eliminar"
-                          >
-                            {deleting === doc._id ? (
-                              <Loader2 className="w-4 h-4 animate-spin text-red-400" />
-                            ) : (
-                              <Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />
-                            )}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <button
+                onClick={() => setShowOcr(true)}
+                className={VERTIAL_BTN_SECONDARY}
+              >
+                <ScanLine className="w-4 h-4" />
+                <span className="hidden sm:inline">Escanear OCR</span>
+              </button>
             </div>
-          </div>
+
+            {/* Type tabs */}
+            <div className="flex gap-1 flex-wrap">
+              {DOC_FILTERS.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setFilterType(f.id)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    filterType === f.id
+                      ? 'bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900'
+                      : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700'
+                  }`}
+                >
+                  {f.icon}
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Documents list */}
+            {loading ? (
+              <div className="flex items-center justify-center py-20">
+                <Loader2 className="w-6 h-6 animate-spin text-stone-400" />
+              </div>
+            ) : filteredDocs.length === 0 ? (
+              <div className="rounded-2xl border-2 border-dashed border-stone-200 dark:border-stone-700 py-16 text-center">
+                <FileText className="w-12 h-12 text-stone-300 dark:text-stone-600 mx-auto mb-3" />
+                <p className="text-sm font-medium text-stone-500 dark:text-stone-400">
+                  {documents.length === 0 ? 'No hay documentos aún' : 'Sin resultados para los filtros aplicados'}
+                </p>
+                {documents.length === 0 && (
+                  <button
+                    onClick={() => setShowBulkUpload(true)}
+                    className={`${VERTIAL_BTN_PRIMARY} mt-4`}
+                  >
+                    <Upload className="w-4 h-4" />
+                    Subir ZIP nóminas
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b border-stone-100 dark:border-stone-800 bg-stone-50 dark:bg-stone-800/50">
+                        <th className="px-4 py-3 text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider">Documento</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider">Trabajador</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider hidden sm:table-cell">Tipo</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider hidden md:table-cell">Período</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider hidden lg:table-cell">Fecha</th>
+                        <th className="px-4 py-3 text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wider text-right">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100 dark:divide-stone-800">
+                      {filteredDocs.map((doc) => (
+                        <tr key={doc._id} className="hover:bg-stone-50 dark:hover:bg-stone-800/40 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+                                {doc.documentType === 'nomina' ? <Receipt className="w-4 h-4 text-blue-600 dark:text-blue-400" /> :
+                                 doc.documentType === 'contrato' ? <ScrollText className="w-4 h-4 text-amber-600 dark:text-amber-400" /> :
+                                 <FileText className="w-4 h-4 text-stone-500 dark:text-stone-400" />}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-stone-900 dark:text-stone-100 truncate">{doc.name}</p>
+                                {doc.fileName && (
+                                  <p className="text-xs text-stone-400 truncate">{doc.fileName} {doc.size ? `· ${formatBytes(doc.size)}` : ''}</p>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => setHubTab('nominas', { worker: doc.worker_id })}
+                              className="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                            >
+                              <User className="w-3.5 h-3.5" />
+                              {doc.worker_name}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 hidden sm:table-cell">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-stone-100 dark:bg-stone-800 text-xs font-medium text-stone-600 dark:text-stone-400">
+                              {PAYROLL_DOC_TYPE_LABELS[doc.documentType] || doc.documentType}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-stone-600 dark:text-stone-400 hidden md:table-cell">
+                            {doc.period ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Calendar className="w-3.5 h-3.5" />
+                                {formatPayrollPeriodLabel(doc.period)}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-stone-500 dark:text-stone-400 hidden lg:table-cell">
+                            {formatDate(doc.createdAt)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-1">
+                              {doc.fileData && (
+                                <button
+                                  onClick={() => setPreviewDoc(doc)}
+                                  className="rounded-lg p-1.5 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+                                  title="Ver"
+                                >
+                                  <Eye className="w-4 h-4 text-stone-500 dark:text-stone-400" />
+                                </button>
+                              )}
+                              {doc.fileData && (
+                                <a
+                                  href={doc.fileData}
+                                  download={doc.fileName || doc.name}
+                                  className="rounded-lg p-1.5 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+                                  title="Descargar"
+                                >
+                                  <Download className="w-4 h-4 text-stone-500 dark:text-stone-400" />
+                                </a>
+                              )}
+                              <button
+                                onClick={() => setHubTab('nominas', { worker: doc.worker_id })}
+                                className="rounded-lg p-1.5 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+                                title="Ir al perfil de nómina"
+                              >
+                                <User className="w-4 h-4 text-stone-500 dark:text-stone-400" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(doc)}
+                                disabled={deleting === doc._id}
+                                className="rounded-lg p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                title="Eliminar"
+                              >
+                                {deleting === doc._id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin text-red-400" />
+                                ) : (
+                                  <Trash2 className="w-4 h-4 text-red-400 hover:text-red-600" />
+                                )}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 

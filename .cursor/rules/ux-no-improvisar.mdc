@@ -1,0 +1,34 @@
+---
+description: Vertial = un solo lenguaje UX; reutilizar patrones, no improvisar
+alwaysApply: true
+---
+
+# Vertial único — UX de uso
+
+**Objetivo:** un solo SaaS en forma de usar la app. Complementa las **leyes visuales** (`.cursor/rules/vertial-ui-leyes.mdc`: paleta, botones avance/retroceso, logo).
+
+## Método
+
+1. ¿Existe pantalla/modal/shell gemelo? → reutilizar.
+2. UI nueva solo si no hay patrón y Uriel lo pide; debe obedecer las leyes visuales.
+3. Verticales = contenido distinto, misma piel y mismos gestos.
+
+## Canónicos de layout
+
+| Flujo | Referencia |
+|-------|------------|
+| Lista + detalle compraventa | `CompraventaSplitModuleShell` |
+| Lista + detalle vehículos | `VehiclesModuleShell` |
+| OCR / cámara | `SAAS__OcrScanModal` + `ocrImagePrepare` |
+| Modales genéricos | `SAAS__*` · CTAs con `vertialUiTokens` |
+| Confirmación fuerte | `ConfirmDestroyModal` / dialogs del módulo |
+
+## Anti-patrones
+
+- Inventar layout o colores fuera de las leyes visuales
+- Sustituir un flujo que funciona por un hub vacío sin OK
+- Mezclar “pieles” entre verticales
+
+## Al terminar
+
+Qué patrón de uso + qué ley visual aplicaste, y cómo probarlo.

@@ -120,7 +120,7 @@ export function TpvSplitPaymentModal({
   };
 
   return (
-    <TpvModalRoot className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+    <TpvModalRoot className="fixed inset-0 z-[220] flex items-center justify-center p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0 cursor-default"

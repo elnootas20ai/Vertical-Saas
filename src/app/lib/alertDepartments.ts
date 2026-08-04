@@ -4,6 +4,8 @@
  */
 
 import type { AlertSource } from './alertCenterApi';
+import { isDeliveryCompactAlertRuleId } from './deliveryAlertsReview';
+import { ruleDepartment, type AlertRule } from './settingsApi';
 
 export interface BusinessAlertDepartment {
   id: string;
@@ -38,6 +40,53 @@ const DELIVERY_DEPARTMENTS: BusinessAlertDepartment[] = [
     icon: 'bike',
     gradient: 'from-red-500 to-orange-500',
     sources: ['delivery'],
+  },
+  {
+    id: 'rrhh',
+    label: 'RRHH',
+    icon: 'users',
+    gradient: 'from-indigo-500 to-blue-600',
+    sources: ['equipo', 'documentacion'],
+  },
+  {
+    id: 'catalogProviders',
+    label: 'Catálogo y proveedores',
+    icon: 'package',
+    gradient: 'from-emerald-500 to-teal-600',
+    sources: ['stock', 'finanzas'],
+  },
+  {
+    id: 'finanzas',
+    label: 'Finanzas',
+    icon: 'dollar',
+    gradient: 'from-emerald-600 to-green-700',
+    sources: ['finanzas', 'conciliacion', 'ocr'],
+  },
+  {
+    id: 'documentacion',
+    label: 'Documentación',
+    icon: 'file',
+    gradient: 'from-slate-500 to-gray-600',
+    sources: ['documentacion', 'equipo'],
+  },
+];
+
+/** Bar/restaurante: misma estructura, labels de sala (sin “Delivery”). */
+const RESTAURANT_DEPARTMENTS: BusinessAlertDepartment[] = [
+  ALL_DEPT,
+  {
+    id: 'pdvs',
+    label: 'Locales',
+    icon: 'store',
+    gradient: 'from-amber-500 to-orange-600',
+    sources: ['delivery', 'restaurant'],
+  },
+  {
+    id: 'delivery',
+    label: 'Sala y caja',
+    icon: 'utensils',
+    gradient: 'from-stone-600 to-stone-800',
+    sources: ['delivery', 'restaurant'],
   },
   {
     id: 'rrhh',
@@ -126,6 +175,9 @@ const DEPARTMENT_CATALOG: Record<string, BusinessAlertDepartment> = {
 };
 
 export function getAlertDepartmentsForVertical(vertical: string | null | undefined): BusinessAlertDepartment[] {
+  if (String(vertical || '').trim() === 'restaurant') {
+    return RESTAURANT_DEPARTMENTS;
+  }
   const ids = VERTICAL_DEPARTMENT_IDS[vertical || ''] || VERTICAL_DEPARTMENT_IDS.delivery;
   return [ALL_DEPT, ...ids.map((id) => DEPARTMENT_CATALOG[id]).filter(Boolean)];
 }
@@ -154,6 +206,28 @@ export function isRuleVisibleForVertical(
   return isDepartmentVisibleForVertical(deptId, vertical);
 }
 
-export function getDepartmentLabel(deptId: string): string {
+/**
+ * ¿Mostrar esta regla en ajustes del vertical?
+ * Delivery / restaurante: solo pack compacto (gerente), no 200 reglas.
+ */
+export function isAlertRuleListedForVertical(
+  rule: Pick<AlertRule, 'id' | 'department' | 'category'>,
+  vertical: string | null | undefined,
+): boolean {
+  if (!isRuleVisibleForVertical(ruleDepartment(rule), vertical)) return false;
+  const v = String(vertical || 'delivery').toLowerCase();
+  if (v === 'delivery' || v === 'restaurant' || !vertical) {
+    return isDeliveryCompactAlertRuleId(rule.id);
+  }
+  // Otras verticales: solo reglas enabled en config se listan vía panel;
+  // aquí aún filtramos por departamento visible.
+  return true;
+}
+
+export function getDepartmentLabel(deptId: string, vertical?: string | null): string {
+  if (String(vertical || '').trim() === 'restaurant') {
+    const fromRestaurant = RESTAURANT_DEPARTMENTS.find((d) => d.id === deptId);
+    if (fromRestaurant) return fromRestaurant.label;
+  }
   return DEPARTMENT_CATALOG[deptId]?.label || deptId;
 }

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { createPortal } from 'react-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
+  Armchair,
   Bell,
   Loader2,
   Phone,
@@ -14,6 +17,20 @@ import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
+import { resolveBusinessScopeId } from '../../lib/deliverySetup';
+import {
+  changeTableStatusRequest,
+  emitSalaStaffAlertRequest,
+  listDiningTablesRequest,
+  type DiningTable,
+} from '../../lib/salaApi';
+import { ensureOpenDiningOrder } from '../../lib/restaurantDiningTpv';
+import { tableStatusOnOpen } from '../../lib/restaurantTableStatus';
+import { writeSalaTpvOpenTable } from '../../lib/salaTpvLaunch';
+import {
+  formatDiningTablePickerLabel,
+  sortDiningTablesForPicker,
+} from '../../lib/restaurantTableSelectUi';
 import {
   countWaiting,
   createWaitlistEntry,
@@ -22,6 +39,10 @@ import {
   sortWaitlistQueue,
   updateWaitlistStatus,
 } from '../../lib/restaurantWaitlistApi';
+import {
+  RestaurantTabletBottomNav,
+  shouldShowRestaurantTabletNav,
+} from './RestaurantTabletBottomNav';
 import {
   EMPTY_WAITLIST_FORM,
   WAITLIST_STATUS_CFG,
@@ -32,14 +53,23 @@ import {
   type WaitlistFormData,
 } from '../../lib/restaurantWaitlistTypes';
 
+function normalizeBusinessId(value: string | null | undefined): string {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
 export function RestaurantWaitlistPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const dataUserId = useMemo(
     () => resolveBusinessDataUserId(user, currentBusiness),
     [user, currentBusiness],
   );
-  const businessId = currentBusiness?.business_id || '';
+  const businessId = resolveBusinessScopeId(currentBusiness) || currentBusiness?.business_id || '';
+  const showTabletNav = shouldShowRestaurantTabletNav({ pathname: location.pathname });
+  const actorName =
+    String((user as { fullName?: string } | null)?.fullName || user?.name || user?.email || 'Sala').trim();
 
   const [entries, setEntries] = useState<RestaurantWaitlistEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +77,10 @@ export function RestaurantWaitlistPage() {
   const [form, setForm] = useState<WaitlistFormData>(EMPTY_WAITLIST_FORM);
   const [now, setNow] = useState(() => Date.now());
   const [showDone, setShowDone] = useState(false);
+  const [seatEntry, setSeatEntry] = useState<RestaurantWaitlistEntry | null>(null);
+  const [tables, setTables] = useState<DiningTable[]>([]);
+  const [tablesLoading, setTablesLoading] = useState(false);
+  const [seatingTableId, setSeatingTableId] = useState('');
 
   const load = useCallback(async () => {
     if (!dataUserId) {
@@ -93,6 +127,75 @@ export function RestaurantWaitlistPage() {
   );
   const counts = useMemo(() => countWaiting(entries), [entries]);
 
+  const openSeatPicker = async (entry: RestaurantWaitlistEntry) => {
+    if (!dataUserId) return;
+    setSeatEntry(entry);
+    setTablesLoading(true);
+    try {
+      const listed = await listDiningTablesRequest(dataUserId);
+      const scoped = (listed || []).filter((t) => {
+        if (t.active === false || t.status === 'hidden') return false;
+        const bid = normalizeBusinessId(t.businessId);
+        return !bid || bid === normalizeBusinessId(businessId);
+      });
+      setTables(scoped);
+    } catch {
+      setTables([]);
+      toast.error('No se pudieron cargar las mesas');
+    } finally {
+      setTablesLoading(false);
+    }
+  };
+
+  const seatCandidates = useMemo(() => {
+    if (!seatEntry) return [];
+    const party = partySizeNumber(seatEntry.partySize);
+    return sortDiningTablesForPicker(
+      tables.filter((t) => {
+        if (t.status !== 'available' && t.status !== 'unavailable') return false;
+        const capacity = Number(t.capacity) || 0;
+        return capacity <= 0 || capacity >= party;
+      }),
+    );
+  }, [seatEntry, tables]);
+
+  const confirmSeatAtTable = async (table: DiningTable) => {
+    if (!dataUserId || !businessId || !seatEntry) return;
+    const tableId = String(table._id || table.id || '').trim();
+    if (!tableId) return;
+    setSeatingTableId(tableId);
+    setSaving(true);
+    try {
+      const guests = partySizeNumber(seatEntry.partySize);
+      const order = await ensureOpenDiningOrder({
+        userId: dataUserId,
+        businessId,
+        tableId,
+        tableNumber: table.number,
+        tableName: table.name || `Mesa ${table.number}`,
+        guests,
+        createdBy: dataUserId,
+        createdByName: actorName,
+        zone: table.zone || seatEntry.zone || '',
+      });
+      await changeTableStatusRequest(dataUserId, tableId, tableStatusOnOpen(table.status), {
+        currentGuests: guests,
+        occupiedBy: seatEntry.guestName,
+      });
+      const updated = await updateWaitlistStatus(dataUserId, seatEntry._id, 'seated');
+      setEntries((prev) => prev.map((x) => (x._id === seatEntry._id ? { ...x, ...updated } : x)));
+      writeSalaTpvOpenTable({ tableId, orderId: order._id });
+      setSeatEntry(null);
+      toast.success(`${seatEntry.guestName} sentado · Abriendo TPV`);
+      navigate(`/saas/caja/tpv?mesa=${encodeURIComponent(tableId)}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo sentar');
+    } finally {
+      setSeatingTableId('');
+      setSaving(false);
+    }
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!dataUserId) return;
@@ -114,18 +217,26 @@ export function RestaurantWaitlistPage() {
     }
   };
 
-  const setStatus = async (entry: RestaurantWaitlistEntry, status: 'notified' | 'seated' | 'cancelled') => {
+  const setStatus = async (entry: RestaurantWaitlistEntry, status: 'notified' | 'cancelled') => {
     if (!dataUserId) return;
     try {
       const updated = await updateWaitlistStatus(dataUserId, entry._id, status);
       setEntries((prev) => prev.map((x) => (x._id === entry._id ? { ...x, ...updated } : x)));
-      const msg =
-        status === 'notified'
-          ? `${entry.guestName} avisado`
-          : status === 'seated'
-            ? `${entry.guestName} sentado`
-            : `${entry.guestName} cancelado`;
-      toast.success(msg);
+      toast.success(status === 'notified' ? `${entry.guestName} avisado` : `${entry.guestName} cancelado`);
+      if (status === 'notified') {
+        void emitSalaStaffAlertRequest(dataUserId, {
+          title: 'Lista de espera',
+          message: `${entry.guestName}${partySizeNumber(entry.partySize) ? ` · ${partySizeNumber(entry.partySize)}p` : ''} avisado`,
+          category: 'sala_waitlist_notified',
+          route: '/saas/lista-espera',
+          entityId: entry._id,
+          entityType: 'waitlist',
+          businessId,
+          dedupKey: `sala_waitlist_notified-${entry._id}`,
+        }).catch(() => {
+          /* alerta best-effort */
+        });
+      }
     } catch {
       toast.error('No se pudo actualizar');
     }
@@ -143,9 +254,8 @@ export function RestaurantWaitlistPage() {
   };
 
   return (
-    <Layout title="Lista de espera" subtitle="Cola en vivo del local">
-      <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
-        {/* Contador */}
+    <Layout title="Lista de espera" subtitle="Cola en vivo · sentar abre el TPV de la mesa">
+      <div className={`mx-auto max-w-3xl space-y-5 p-4 sm:p-6 ${showTabletNav ? 'pb-20' : ''}`}>
         <div className="rounded-2xl border border-stone-200 bg-stone-900 px-5 py-5 text-stone-50 dark:border-stone-700 dark:bg-stone-950">
           <p className="text-xs font-medium uppercase tracking-wide text-stone-400">Esperando ahora</p>
           <div className="mt-2 flex flex-wrap items-end gap-6">
@@ -164,7 +274,6 @@ export function RestaurantWaitlistPage() {
           </div>
         </div>
 
-        {/* Alta rápida */}
         <form
           onSubmit={onSubmit}
           className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900"
@@ -246,7 +355,6 @@ export function RestaurantWaitlistPage() {
           </button>
         </form>
 
-        {/* Cola */}
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-stone-900 dark:text-stone-50">Cola</h2>
@@ -319,11 +427,12 @@ export function RestaurantWaitlistPage() {
                         )}
                         <button
                           type="button"
-                          onClick={() => void setStatus(entry, 'seated')}
-                          className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200"
+                          disabled={saving}
+                          onClick={() => void openSeatPicker(entry)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                         >
                           <UserCheck className="h-3.5 w-3.5" />
-                          Sentar
+                          Sentar en mesa
                         </button>
                         <button
                           type="button"
@@ -350,7 +459,6 @@ export function RestaurantWaitlistPage() {
           </ul>
         </section>
 
-        {/* Historial reciente */}
         {doneList.length > 0 && (
           <section className="space-y-2">
             <button
@@ -379,6 +487,69 @@ export function RestaurantWaitlistPage() {
           </section>
         )}
       </div>
+
+      {seatEntry
+        && createPortal(
+          <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/50 p-3 sm:items-center">
+            <div className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-stone-900 sm:p-5">
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-base font-semibold text-stone-900 dark:text-stone-50">
+                    Sentar · {seatEntry.guestName}
+                  </h3>
+                  <p className="text-xs text-stone-500">
+                    {partySizeNumber(seatEntry.partySize)} pers. · elige mesa libre y abre TPV
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSeatEntry(null)}
+                  className="rounded-lg p-1.5 text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              {tablesLoading ? (
+                <div className="flex items-center justify-center gap-2 py-10 text-stone-500">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Cargando mesas…</span>
+                </div>
+              ) : seatCandidates.length === 0 ? (
+                <p className="py-6 text-center text-sm text-stone-500">
+                  No hay mesas libres compatibles ahora.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {seatCandidates.map((t) => {
+                    const tid = String(t._id || t.id || '');
+                    const busy = seatingTableId === tid;
+                    return (
+                      <button
+                        key={tid}
+                        type="button"
+                        disabled={saving || busy}
+                        onClick={() => void confirmSeatAtTable(t)}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl border border-stone-200 px-3 py-2.5 text-left text-sm hover:bg-stone-50 disabled:opacity-50 dark:border-stone-700 dark:hover:bg-stone-800"
+                      >
+                        <span className="inline-flex items-center gap-2 font-semibold text-stone-900 dark:text-stone-50">
+                          <Armchair className="h-4 w-4 text-emerald-600" />
+                          {formatDiningTablePickerLabel(t)}
+                        </span>
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin text-stone-400" /> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
+      {showTabletNav ? (
+        <div className="fixed inset-x-0 bottom-0 z-40">
+          <RestaurantTabletBottomNav active="espera" />
+        </div>
+      ) : null}
     </Layout>
   );
 }

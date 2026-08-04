@@ -20,6 +20,7 @@ export function useWorkCenters() {
   const { currentBusiness, businesses } = useBusiness();
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const businessId = currentBusiness?.business_id;
+  const businessType = currentBusiness?.businessType;
   const cacheId = buildCacheKey(dataUserId, businessId);
 
   const [workCenters, setWorkCenters] = useState<WorkCenter[]>(
@@ -27,6 +28,12 @@ export function useWorkCenters() {
   );
   const [loading, setLoading] = useState(!cachedCenters || cacheKey !== cacheId);
   const mounted = useRef(true);
+  const userRef = useRef(user);
+  const businessRef = useRef(currentBusiness);
+  const businessesRef = useRef(businesses);
+  userRef.current = user;
+  businessRef.current = currentBusiness;
+  businessesRef.current = businesses;
 
   useEffect(() => {
     mounted.current = true;
@@ -41,39 +48,64 @@ export function useWorkCenters() {
       setLoading(false);
       return;
     }
-    if (cacheKey === cacheId && cachedCenters) {
-      setWorkCenters(cachedCenters);
-      setLoading(false);
-      return;
-    }
 
-    async function load() {
-      setLoading(true);
+    let cancelled = false;
+
+    async function load(force = false) {
+      if (!force && cacheKey === cacheId && cachedCenters) {
+        if (!cancelled) {
+          setWorkCenters(cachedCenters);
+          setLoading(false);
+        }
+        return;
+      }
+      if (!cancelled) setLoading(true);
       try {
+        if (force) {
+          cachedCenters = null;
+          cacheKey = null;
+          pendingPromise = null;
+          pendingPromiseKey = null;
+        }
         if (pendingPromiseKey !== cacheId || !pendingPromise) {
           pendingPromiseKey = cacheId;
-          pendingPromise = isDeliveryOpsBusinessType(currentBusiness?.businessType)
-            ? loadInviteWorkCenters(user, currentBusiness, {
-                allBusinesses: businesses,
-                accountBusinessCount: businesses.length,
+          const biz = businessRef.current;
+          const authUser = userRef.current;
+          const allBiz = businessesRef.current;
+          pendingPromise = isDeliveryOpsBusinessType(biz?.businessType)
+            ? loadInviteWorkCenters(authUser, biz, {
+                allBusinesses: allBiz,
+                accountBusinessCount: allBiz.length,
               })
-            : listWorkCentersForDelivery(dataUserId, currentBusiness);
+            : listWorkCentersForDelivery(dataUserId, biz);
         }
         const result = await pendingPromise;
         cachedCenters = result;
         cacheKey = cacheId;
-        if (mounted.current) setWorkCenters(result);
+        if (!cancelled && mounted.current) setWorkCenters(result);
       } catch {
-        if (mounted.current) setWorkCenters([]);
+        if (!cancelled && mounted.current) setWorkCenters([]);
       } finally {
         pendingPromise = null;
         pendingPromiseKey = null;
-        if (mounted.current) setLoading(false);
+        if (!cancelled && mounted.current) setLoading(false);
       }
     }
 
-    void load();
-  }, [dataUserId, cacheId, currentBusiness, businesses, user]);
+    void load(false);
+
+    const onChanged = () => {
+      void load(true);
+    };
+    window.addEventListener('work-centers:changed', onChanged);
+
+    // Solo ids/tipo estables: `user` / `currentBusiness` / `businesses` cambian de
+    // referencia a menudo y dejaban «Mi tienda» / fichar en bucle de Cargando…
+    return () => {
+      cancelled = true;
+      window.removeEventListener('work-centers:changed', onChanged);
+    };
+  }, [dataUserId, cacheId, businessType]);
 
   const activeWorkCenters = workCenters.filter((wc) => wc.active);
 

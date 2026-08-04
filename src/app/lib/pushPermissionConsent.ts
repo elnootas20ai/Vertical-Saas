@@ -1,10 +1,17 @@
 /**
- * Consentimiento de push — una decisión profesional, sin spamear.
+ * Consentimiento de notificaciones del sistema (1 vez por cuenta).
  *
- * - unset: aún no eligió → se muestra el aviso in-app
- * - accepted: activó avisos → no volver a preguntar
- * - declined: dijo que no (o el sistema denegó) → no volver a preguntar
+ * - unset: aún no se pidió el permiso del SO
+ * - accepted: concedió → se guarda en cuenta forever (updates no vuelven a preguntar)
+ * - declined: denegó → no volver a pedir
+ *
+ * Caché local + sync a notificationPreferences.pushConsent en la cuenta.
  */
+
+import {
+  getNotificationPreferencesRequest,
+  updateNotificationPreferencesRequest,
+} from './authApi';
 
 export type PushConsentDecision = 'unset' | 'accepted' | 'declined';
 
@@ -43,32 +50,114 @@ export function readPushConsent(userId: string | null | undefined): PushConsentR
   }
 }
 
-export function writePushConsent(
-  userId: string | null | undefined,
+function writeLocal(
+  userId: string,
   decision: Exclude<PushConsentDecision, 'unset'>,
-): void {
-  const id = String(userId || '').trim();
-  if (!id || typeof window === 'undefined') return;
+): PushConsentRecord {
   const record: PushConsentRecord = {
     v: 1,
     decision,
     updatedAt: new Date().toISOString(),
   };
   try {
-    window.localStorage.setItem(storageKey(id), JSON.stringify(record));
+    window.localStorage.setItem(storageKey(userId), JSON.stringify(record));
   } catch {
     /* private mode */
   }
   try {
     window.dispatchEvent(
-      new CustomEvent('vertial:push-consent-changed', { detail: { userId: id, decision } }),
+      new CustomEvent('vertial:push-consent-changed', {
+        detail: { userId, decision },
+      }),
     );
   } catch {
     /* ignore */
   }
+  return record;
 }
 
-/** ¿Hay que mostrar el aviso in-app? Solo si aún no decidió. */
+/**
+ * Guarda decisión. Si ya hay «accepted», no baja a declined salvo force.
+ * Persiste en local + cuenta (best-effort).
+ */
+export function writePushConsent(
+  userId: string | null | undefined,
+  decision: Exclude<PushConsentDecision, 'unset'>,
+  options: { force?: boolean; syncRemote?: boolean } = {},
+): void {
+  const id = String(userId || '').trim();
+  if (!id || typeof window === 'undefined') return;
+
+  const current = readPushConsent(id);
+  if (current.decision === 'accepted' && decision === 'declined' && !options.force) {
+    return;
+  }
+
+  const record = writeLocal(id, decision);
+  if (options.syncRemote === false) return;
+
+  void updateNotificationPreferencesRequest({
+    pushConsent: {
+      decision,
+      decidedAt: record.updatedAt,
+      ...(options.force ? { force: true } : {}),
+    },
+  }).catch(() => {
+    /* red: queda en local; se reintenta en hydrate */
+  });
+}
+
+/** ¿Hay que pedir el permiso del sistema? Solo si aún no decidió. */
 export function shouldShowPushSoftPrompt(userId: string | null | undefined): boolean {
   return readPushConsent(userId).decision === 'unset';
+}
+
+/**
+ * Une local + cuenta. «accepted» gana siempre.
+ * Devuelve la decisión efectiva tras sync.
+ */
+export async function hydratePushConsentFromAccount(
+  userId: string | null | undefined,
+): Promise<PushConsentDecision> {
+  const id = String(userId || '').trim();
+  if (!id) return 'unset';
+
+  const local = readPushConsent(id).decision;
+
+  try {
+    const prefs = await getNotificationPreferencesRequest();
+    const remote = (prefs.pushConsent?.decision || 'unset') as PushConsentDecision;
+
+    if (local === 'accepted' || remote === 'accepted') {
+      if (local !== 'accepted') writeLocal(id, 'accepted');
+      if (remote !== 'accepted') {
+        void updateNotificationPreferencesRequest({
+          pushConsent: {
+            decision: 'accepted',
+            decidedAt: new Date().toISOString(),
+          },
+        }).catch(() => {});
+      }
+      return 'accepted';
+    }
+
+    if (remote === 'declined') {
+      if (local !== 'declined') writeLocal(id, 'declined');
+      return 'declined';
+    }
+
+    if (local === 'declined') {
+      void updateNotificationPreferencesRequest({
+        pushConsent: {
+          decision: 'declined',
+          decidedAt: new Date().toISOString(),
+        },
+      }).catch(() => {});
+      return 'declined';
+    }
+
+    return 'unset';
+  } catch {
+    return local;
+  }
 }

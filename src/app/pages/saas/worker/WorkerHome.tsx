@@ -1,4 +1,3 @@
-import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -44,18 +43,8 @@ import { Layout } from '../../../components/saas/Layout';
 import { useAuth } from '../../../context/AuthContext';
 import { useBusiness } from '../../../context/BusinessContext';
 import type { BusinessType } from '../../../lib/businessApi';
-import {
-  type ClockinRecord,
-  type GeoLocation,
-  getTodayClockin,
-  clockIn,
-  clockOut,
-  startBreak,
-  endBreak,
-  formatMinutes,
-} from '../../../lib/clockinsApi';
-import { useGeolocation, isMobileDevice } from '../../../hooks/useGeolocation';
 import { useWorkerAssignedStore } from '../../../hooks/useWorkerAssignedStore';
+import { useWorkerClockIn, formatClockTimer } from '../../../hooks/useWorkerClockIn';
 import { AUTH_PATHS } from '../../../lib/authEntryPaths';
 
 interface QuickAction {
@@ -64,26 +53,6 @@ interface QuickAction {
   icon: React.ReactNode;
   path: string;
   color: string;
-}
-
-function computeLiveSeconds(record: ClockinRecord | null): number {
-  if (!record || record.status === 'completed') return 0;
-  const entries = record.entries;
-  const clockInEntry = entries.find((e) => e.type === 'clock_in');
-  if (!clockInEntry) return 0;
-  const now = Date.now();
-  const totalMs = now - new Date(clockInEntry.time).getTime();
-  let breakMs = 0;
-  let breakStart: number | null = null;
-  for (const e of entries) {
-    if (e.type === 'break_start') breakStart = new Date(e.time).getTime();
-    if (e.type === 'break_end' && breakStart !== null) {
-      breakMs += new Date(e.time).getTime() - breakStart;
-      breakStart = null;
-    }
-  }
-  if (breakStart !== null) breakMs += now - breakStart;
-  return Math.max(0, Math.floor((totalMs - breakMs) / 1000));
 }
 
 const TPV_VERTICAL_CONFIG: Partial<Record<BusinessType, { label: string; description: string; icon: React.ReactNode; gradient: string; path?: string }>> = {
@@ -102,7 +71,7 @@ const TPV_VERTICAL_CONFIG: Partial<Record<BusinessType, { label: string; descrip
   vet:           { label: 'Mi Puesto - Veterinario', description: 'Consultas, pacientes y vacunaciones',               icon: <PawPrint className="w-6 h-6" />,       gradient: 'from-lime-500 to-green-700' },
   lawyer:        { label: 'Mi Puesto - Despacho',    description: 'Expedientes, agenda y tiempo facturable',           icon: <Scale className="w-6 h-6" />,          gradient: 'from-slate-500 to-gray-700' },
   tobaccoShop:   { label: 'Mi Puesto - Estanco',     description: 'Caja rápida, lotería e inventario',                 icon: <Cigarette className="w-6 h-6" />,      gradient: 'from-yellow-600 to-amber-800' },
-  butcherShop:   { label: 'Mi Puesto - Carnicería',  description: 'Mostrador, pedidos, peso y cobro rápido',            icon: <Beef className="w-6 h-6" />,           gradient: 'from-red-600 to-rose-800' },
+  butcherShop:   { label: 'Mi Puesto - Carnicería',  description: 'Mostrador, pedidos, peso y cobro rápido',            icon: <Beef className="w-6 h-6" />,           gradient: 'from-red-600 to-rose-800', path: '/saas/worker/tpv' },
   academy:       { label: 'Mi Puesto - Academia',    description: 'Clases del día, asistencia y alumnos',              icon: <GraduationCap className="w-6 h-6" />,  gradient: 'from-indigo-500 to-blue-700' },
   gym:           { label: 'Mi Puesto - Gimnasio',    description: 'Socios, clases y control de accesos',               icon: <Dumbbell className="w-6 h-6" />,       gradient: 'from-red-500 to-rose-700' },
   clinic:        { label: 'Mi Puesto - Clínica',     description: 'Consultas, pacientes e historial médico',           icon: <Stethoscope className="w-6 h-6" />,    gradient: 'from-sky-500 to-blue-600' },
@@ -122,107 +91,45 @@ export function WorkerHome() {
   const businessId = currentBusiness?.business_id || user?.linkedBusinessId || '';
   const memberId = user?.user_id || '';
   const memberName = user?.fullName || '';
-  const { canClockInEntry, loading: storeLoading } = useWorkerAssignedStore();
+  const {
+    canClockInEntry,
+    storeClosedForClockIn,
+    storeHoursToday,
+    hasAssignment,
+    assignedPdvId,
+    storeLabel,
+    loading: storeLoading,
+  } = useWorkerAssignedStore();
 
-  const [record, setRecord] = useState<ClockinRecord | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState(false);
-  const [error, setError] = useState('');
-  const [, setTick] = useState(0);
+  const storeContext = assignedPdvId
+    ? { sales_point_id: assignedPdvId, sales_point_name: storeLabel || undefined }
+    : undefined;
 
-  const isMobile = isMobileDevice();
-  const { location: geoLocation, status: geoStatus, requestLocationForClock } = useGeolocation();
-
-  const getGeoForAction = useCallback(async (): Promise<GeoLocation | undefined> => {
-    const loc = await requestLocationForClock();
-    return loc || undefined;
-  }, [requestLocationForClock]);
-
-  const isClockedIn = record?.status === 'active' || record?.status === 'break';
-  const isOnBreak = record?.status === 'break';
-  const isCompleted = record?.status === 'completed';
-  const elapsedSeconds = computeLiveSeconds(record);
+  const {
+    record,
+    loading,
+    acting,
+    error,
+    info,
+    isClockedIn,
+    isOnBreak,
+    elapsedSeconds,
+    todaySessionCount,
+    maxSessionsPerDay,
+    maxSessionsReached,
+    canStartNewSession,
+    geoLocation,
+    geoStatus,
+    handleClockIn,
+    handleClockOut,
+    handleBreakToggle,
+  } = useWorkerClockIn(businessId, memberId, memberName, storeContext);
 
   const clockInTime = (() => {
-    if (!record) return null;
+    if (!record || !isClockedIn) return null;
     const entry = record.entries.find((e) => e.type === 'clock_in');
     return entry ? new Date(entry.time) : null;
   })();
-
-  useEffect(() => {
-    if (!businessId || !memberId) { setLoading(false); return; }
-    (async () => {
-      try {
-        const today = await getTodayClockin(businessId, memberId);
-        setRecord(today);
-      } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : 'Error cargando fichaje');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [businessId, memberId]);
-
-  useEffect(() => {
-    if (!isClockedIn) return;
-    const interval = setInterval(() => setTick((v) => v + 1), 1000);
-    return () => clearInterval(interval);
-  }, [isClockedIn]);
-
-  const handleClockIn = async () => {
-    if (acting || !businessId || !memberId || !canClockInEntry) return;
-    setActing(true);
-    setError('');
-    try {
-      const geo = await getGeoForAction();
-      const rec = await clockIn(businessId, memberId, memberName, {
-        geo,
-        device_type: isMobile ? 'mobile' : 'desktop',
-      });
-      setRecord(rec);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al fichar entrada');
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const handleClockOut = async () => {
-    if (acting || !record) return;
-    setActing(true);
-    setError('');
-    try {
-      const geo = await getGeoForAction();
-      const rec = await clockOut(record, geo);
-      setRecord(rec);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al fichar salida');
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const handleBreakToggle = async () => {
-    if (acting || !record) return;
-    setActing(true);
-    setError('');
-    try {
-      const geo = await getGeoForAction();
-      const rec = isOnBreak ? await endBreak(record, geo) : await startBreak(record, geo);
-      setRecord(rec);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Error al gestionar descanso');
-    } finally {
-      setActing(false);
-    }
-  };
-
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
 
   const now = new Date();
   const greeting = now.getHours() < 12
@@ -260,6 +167,11 @@ export function WorkerHome() {
             {error}
           </div>
         )}
+        {info && (
+          <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3 text-sm text-blue-800 dark:text-blue-200">
+            {info}
+          </div>
+        )}
 
         <div className={`relative overflow-hidden rounded-2xl p-6 text-white transition-all duration-500 ${
           loading
@@ -268,7 +180,7 @@ export function WorkerHome() {
               ? isOnBreak
                 ? 'bg-gradient-to-br from-amber-500 to-orange-600'
                 : 'bg-gradient-to-br from-emerald-500 to-emerald-700'
-              : isCompleted
+              : todaySessionCount > 0
                 ? 'bg-gradient-to-br from-blue-600 to-indigo-700'
                 : 'bg-gradient-to-br from-gray-700 to-gray-900 dark:from-gray-600 dark:to-gray-800'
         }`}>
@@ -284,16 +196,18 @@ export function WorkerHome() {
                     ? isOnBreak
                       ? t('worker.clock.onBreak', 'En descanso')
                       : t('worker.home.workingNow')
-                    : isCompleted
-                      ? t('worker.clock.completedToday', 'Jornada completada hoy')
-                      : t('worker.home.notClockedIn')}
+                    : maxSessionsReached
+                      ? `Máximo ${maxSessionsPerDay} fichajes hoy`
+                      : todaySessionCount > 0
+                        ? `Turno cerrado · ${todaySessionCount}/${maxSessionsPerDay}`
+                        : t('worker.home.notClockedIn')}
               </p>
               <div className="flex items-baseline gap-3">
                 <span className="text-4xl font-bold tracking-tight font-mono">
-                  {loading ? '--:--:--' : isCompleted ? formatMinutes(record!.totalMinutes) : formatTime(elapsedSeconds)}
+                  {loading ? '--:--:--' : formatClockTimer(elapsedSeconds)}
                 </span>
               </div>
-              {clockInTime && !isCompleted && (
+              {clockInTime && (
                 <p className="text-white/60 text-sm mt-1">
                   {t('worker.home.since')} {clockInTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
@@ -314,19 +228,33 @@ export function WorkerHome() {
 
             {!loading && (
               <div className="flex flex-col items-stretch sm:items-end gap-2">
-                {!isClockedIn && !isCompleted && (
+                {!isClockedIn && (
                   <>
                     <button
-                      onClick={handleClockIn}
-                      disabled={acting || storeLoading || !canClockInEntry}
+                      onClick={() => void handleClockIn()}
+                      disabled={acting || storeLoading || !canClockInEntry || !canStartNewSession}
                       className="flex items-center gap-3 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 bg-white text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {acting || storeLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-                      {t('worker.home.clockIn')}
+                      {todaySessionCount > 0 ? 'Fichar otra vez' : t('worker.home.clockIn')}
                     </button>
                     {!storeLoading && !canClockInEntry ? (
                       <p className="text-white/70 text-xs max-w-[220px] sm:text-right">
-                        Sin tienda o local asignado. Pide a tu gerente que te asigne uno en Equipo.
+                        {!hasAssignment
+                          ? 'Sin tienda o local asignado.'
+                          : 'No se puede fichar en este momento.'}
+                      </p>
+                    ) : null}
+                    {!storeLoading && canClockInEntry && maxSessionsReached ? (
+                      <p className="text-white/80 text-xs max-w-[220px] sm:text-right">
+                        Máximo {maxSessionsPerDay} fichajes al día.
+                      </p>
+                    ) : null}
+                    {!storeLoading && canClockInEntry && storeClosedForClockIn && canStartNewSession ? (
+                      <p className="text-white/80 text-xs max-w-[220px] sm:text-right">
+                        {storeHoursToday.status === 'outside_hours'
+                          ? `Fuera de horario (${storeHoursToday.from} – ${storeHoursToday.to}). Puedes fichar.`
+                          : 'Tienda cerrada hoy. Puedes fichar igual.'}
                       </p>
                     ) : null}
                   </>
@@ -335,7 +263,7 @@ export function WorkerHome() {
                 {isClockedIn && (
                   <>
                     <button
-                      onClick={handleBreakToggle}
+                      onClick={() => void handleBreakToggle()}
                       disabled={acting}
                       className={`flex items-center gap-2 px-4 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 disabled:opacity-50 ${
                         isOnBreak
@@ -347,7 +275,7 @@ export function WorkerHome() {
                       {isOnBreak ? t('worker.clock.endBreak', 'Fin descanso') : t('worker.clock.startBreak', 'Descanso')}
                     </button>
                     <button
-                      onClick={handleClockOut}
+                      onClick={() => void handleClockOut()}
                       disabled={acting}
                       className="flex items-center gap-3 px-6 py-3 rounded-xl font-semibold text-sm transition-all shadow-lg hover:shadow-xl active:scale-95 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
                     >

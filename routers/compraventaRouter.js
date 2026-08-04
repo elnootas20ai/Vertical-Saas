@@ -313,7 +313,7 @@ compraventaRouter.get('/:userId', async (req, res) => {
         message: `Reserva de ${s.clientName || 'cliente'} sin contrato generado`,
         entityType: 'sale',
         entityId: s._id,
-        route: `/saas/sales/${s._id}`,
+        route: `/saas/vertical/compraventa/ventas?saleId=${encodeURIComponent(s._id)}`,
       });
     });
 
@@ -328,7 +328,7 @@ compraventaRouter.get('/:userId', async (req, res) => {
           message: `${v.brand || ''} ${v.model || ''} (${v.registrationPlate || ''}) en preparación sin gastos registrados`,
           entityType: 'vehicle',
           entityId: v._id,
-          route: `/saas/vehicles/${v._id}`,
+          route: `/saas/vertical/compraventa/gastos-preparacion?vehicleId=${encodeURIComponent(v._id)}`,
         });
       }
     });
@@ -345,7 +345,7 @@ compraventaRouter.get('/:userId', async (req, res) => {
           message: `Venta a ${s.clientName || 'cliente'}: pago incompleto (${Math.round(paid).toLocaleString('es-ES')}€ / ${Math.round(total).toLocaleString('es-ES')}€)`,
           entityType: 'sale',
           entityId: s._id,
-          route: `/saas/sales/${s._id}`,
+          route: `/saas/vertical/compraventa/ventas?saleId=${encodeURIComponent(s._id)}`,
         });
       }
     });
@@ -376,7 +376,7 @@ compraventaRouter.get('/:userId', async (req, res) => {
         descripcion: `Entrega retrasada: ${s.clientName || 'cliente'}`,
         fecha: s.expectedDelivery || '',
         asignadoA: s.responsible || '',
-        route: `/saas/sales/${s._id}`,
+        route: `/saas/vertical/compraventa/entregas?saleId=${encodeURIComponent(s._id)}`,
       });
     });
 
@@ -387,7 +387,7 @@ compraventaRouter.get('/:userId', async (req, res) => {
         descripcion: `Entrega hoy: ${s.clientName || 'cliente'}`,
         fecha: todayStr,
         asignadoA: s.responsible || '',
-        route: `/saas/sales/${s._id}`,
+        route: `/saas/vertical/compraventa/entregas?saleId=${encodeURIComponent(s._id)}`,
       });
     });
 

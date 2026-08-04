@@ -19,7 +19,7 @@ import {
 import { RuleThresholdQuickEdit } from '../../lib/alertRuleThresholdFields';
 import { useAlertDepartments } from '../../hooks/useAlertDepartments';
 import { useEffectivePlanTier } from '../../hooks/useEffectivePlanTier';
-import { getDepartmentLabel, isRuleVisibleForVertical } from '../../lib/alertDepartments';
+import { getDepartmentLabel, isAlertRuleListedForVertical } from '../../lib/alertDepartments';
 import { PLAN_TIER_LABELS, type SubscriptionPlanTier } from '../../lib/pointOfSaleLimits';
 import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
@@ -272,7 +272,7 @@ export function AlertCenterSettingsPanel({
 
   const businessRules = useMemo(() => {
     if (!config) return [];
-    return config.rules.filter((r) => isRuleVisibleForVertical(ruleDepartment(r), vertical));
+    return config.rules.filter((r) => isAlertRuleListedForVertical(r, vertical));
   }, [config, vertical]);
 
   const rulesByPlanTier = useMemo(() => {
@@ -524,20 +524,11 @@ export function AlertCenterSettingsPanel({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
-                Revisa tus alertas de Delivery
+                Confirma tus alertas
               </p>
               <p className="mt-1 text-xs text-amber-800/90 dark:text-amber-300/90">
-                Ya tienes activas las esenciales (caja, pedidos críticos, fichaje).
-                {deliveryPendingCount > 0
-                  ? ` Hay ${deliveryPendingCount} avisos más apagados: actívalos si los necesitas.`
-                  : ' Confirma que la configuración te encaja.'}
+                Pack esencial (caja, pedidos, fichaje). Activa o apaga abajo y pulsa listo.
               </p>
-              {deliverySplit && (
-                <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-400">
-                  Pack esencial: {deliverySplit.recommended.filter((r) => r.enabled).length}/
-                  {deliverySplit.recommended.length} activos
-                </p>
-              )}
             </div>
             <button
               type="button"
@@ -550,34 +541,25 @@ export function AlertCenterSettingsPanel({
           </div>
         </div>
       )}
-      {deptFilterBar}
-      {tierOverview}
+      {!featured && (
+        <>
+          {deptFilterBar}
+          {tierOverview}
+        </>
+      )}
     </div>
   );
 
   const featuredTopBar = (
-    <div className="shrink-0 border-b border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/50 sm:px-5">
+    <div className="shrink-0 border-b border-stone-200 bg-stone-50/80 px-4 py-3 dark:border-stone-800 dark:bg-stone-900/50 sm:px-5">
       <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-        <div className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 ${
-          userPlanTier === 'pro'
-            ? 'border-violet-200/80 bg-gradient-to-r from-violet-50/80 to-amber-50/40 dark:border-violet-800/50 dark:from-violet-950/30 dark:to-amber-950/15'
-            : 'border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-950'
-        }`}>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Plan</span>
-          {userPlanTier === 'pro' ? (
-            <ProPlanBadge size="md" />
-          ) : (
-            <span className="text-sm font-black text-zinc-900 dark:text-white">{PLAN_TIER_LABELS[userPlanTier]}</span>
-          )}
-        </div>
         <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 dark:bg-emerald-950/30">
           <span className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-300">{totalEnabled}</span>
           <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600/80">Activas</span>
         </div>
-        <div className="inline-flex items-center gap-2 rounded-xl bg-zinc-100 px-3 py-2 dark:bg-zinc-800">
-          <span className="text-lg font-black tabular-nums text-zinc-800 dark:text-zinc-100">{totalRules}</span>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Disponibles</span>
-        </div>
+        <p className="text-xs text-stone-500 dark:text-stone-400">
+          {totalRules} avisos del pack gerente
+        </p>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -585,31 +567,37 @@ export function AlertCenterSettingsPanel({
             className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
               config.global.muteAll
                 ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300'
-                : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200'
+                : 'border-stone-200 bg-white text-stone-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-200'
             }`}
           >
             {config.global.muteAll ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5 text-emerald-500" />}
-            Silenciar todas
-          </button>
-          <button
-            type="button"
-            onClick={() => updateGlobal({ quietHoursEnabled: !config.global.quietHoursEnabled })}
-            className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold transition ${
-              config.global.quietHoursEnabled
-                ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-950/30 dark:text-indigo-300'
-                : 'border-gray-200 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200'
-            }`}
-          >
-            <Moon className="h-3.5 w-3.5" />
-            No molestar
-            {config.global.quietHoursEnabled && (
-              <span className="text-[10px] font-medium tabular-nums opacity-80">
-                {config.global.quietHoursFrom}–{config.global.quietHoursTo}
-              </span>
-            )}
+            Silenciar
           </button>
         </div>
       </div>
+    </div>
+  );
+
+  const flatManagerRulesList = (
+    <div className="space-y-1.5">
+      {filteredRules.length === 0 ? (
+        <p className="py-8 text-center text-sm text-stone-500">No hay avisos en este pack</p>
+      ) : (
+        filteredRules.map((rule) => (
+          <RuleToggleRow
+            key={rule.id}
+            rule={rule}
+            featured={featured}
+            planTier={inferRulePlanTier(rule)}
+            locked={!isRuleEditable(rule)}
+            delivery={config.operational!.delivery}
+            cashRegister={config.operational!.cashRegister}
+            onOperationalChange={updateOperational}
+            onChange={(v) => updateRule(rule.id, v)}
+            disabled={config.global.muteAll || !isRuleEditable(rule)}
+          />
+        ))
+      )}
     </div>
   );
 
@@ -736,49 +724,36 @@ export function AlertCenterSettingsPanel({
   })();
 
   const saveBar = (
-    <div className={`shrink-0 space-y-2 ${featured ? 'sticky bottom-0 z-10 -mx-1 rounded-2xl border border-zinc-200 bg-white/95 p-4 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95' : 'p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'}`}>
+    <div className={`shrink-0 space-y-2 ${featured ? 'sticky bottom-0 z-10 -mx-1 rounded-2xl border border-stone-200 bg-white/95 p-4 backdrop-blur dark:border-stone-800 dark:bg-stone-950/95' : 'p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900'}`}>
       <button
         type="button"
         onClick={() => void handleSave()}
         disabled={saving}
-        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gray-900 hover:bg-black dark:bg-gray-100 dark:hover:bg-white dark:text-gray-900 text-white text-sm font-bold transition disabled:opacity-50"
+        className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white text-sm font-bold transition disabled:opacity-50"
       >
         {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-        Guardar cambios (interruptores y tiempos)
+        Guardar
       </button>
-      {onOpenAdvanced && (
-        <button
-          type="button"
-          onClick={onOpenAdvanced}
-          className="w-full flex items-center justify-center gap-2 text-xs font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200 py-1"
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          Canales, urgencia y destinatarios →
-        </button>
-      )}
     </div>
   );
 
   if (featured) {
     return (
-      <div className="flex min-h-[640px] flex-col rounded-2xl border border-zinc-200/90 bg-white dark:border-zinc-800 dark:bg-zinc-950 overflow-hidden">
+      <div className="flex flex-col rounded-2xl border border-stone-200/90 bg-white dark:border-stone-800 dark:bg-stone-950 overflow-hidden">
         {featuredTopBar}
         <div className="flex flex-1 min-h-0 flex-col p-4 sm:p-5">
           {filtersAndTiersHeader}
-          <div className="relative mt-4 shrink-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <div className="relative mt-3 shrink-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar por nombre, descripción o categoría…"
-              className="w-full pl-10 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+              placeholder="Buscar aviso…"
+              className="w-full pl-10 pr-3 py-2.5 text-sm rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-900 dark:text-white"
             />
           </div>
-          <p className="mt-2 shrink-0 text-xs text-gray-500">
-            {enabledInView} de {filteredRules.length} activas en esta vista
-          </p>
-          <div className="mt-3 flex-1 min-h-[420px] overflow-y-auto pr-1">{activeTierPanel}</div>
+          <div className="mt-3 max-h-[min(28rem,55vh)] overflow-y-auto pr-1">{flatManagerRulesList}</div>
           <div className="mt-4 shrink-0">{saveBar}</div>
         </div>
       </div>
@@ -936,7 +911,7 @@ function RuleToggleRow({
   }) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const deptLabel = getDepartmentLabel(ruleDepartment(rule));
+  const deptLabel = getDepartmentLabel(ruleDepartment(rule), vertical);
   const isActive = rule.enabled && !disabled && !locked;
 
   return (

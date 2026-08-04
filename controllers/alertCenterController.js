@@ -289,6 +289,73 @@ export async function bulkUpdateAlertStatus(req, res) {
   }
 }
 
+/**
+ * Resuelve todas las alertas pendientes del negocio (bandeja limpia).
+ * No toca notificaciones RRHH personales ni reglas de settings.
+ */
+export async function resolveAllUnresolvedAlerts(req, res) {
+  try {
+    const { businessId } = req.params;
+    if (!businessId) {
+      return res.status(400).json({ ok: false, error: 'Falta businessId' });
+    }
+
+    const listed = await listAlertsByBusiness(req, businessId, {
+      status: 'new,seen',
+      limit: 100,
+      page: 1,
+    });
+
+    // Paginación: hasta 500 pendientes por clic (5 páginas).
+    const ids = [...listed.items.map((d) => d._id || d.id).filter(Boolean)];
+    let page = 2;
+    while (page <= listed.pages && page <= 5 && ids.length < 500) {
+      const more = await listAlertsByBusiness(req, businessId, {
+        status: 'new,seen',
+        limit: 100,
+        page,
+      });
+      for (const d of more.items) {
+        const id = d._id || d.id;
+        if (id) ids.push(id);
+      }
+      page += 1;
+    }
+
+    if (ids.length === 0) {
+      return res.json({ ok: true, updated: 0, errors: 0, message: 'No había alertas pendientes' });
+    }
+
+    const now = new Date().toISOString();
+    const userId = req.authUser?.userId || null;
+
+    const outcomes = await mapPool(ids, 10, async (id) => {
+      try {
+        const updated = await updateAlertDocWithRetry(
+          req,
+          id,
+          (doc) => mutateAlertStatus(doc, { status: 'resolved', userId, now }),
+          businessId,
+        );
+        return updated ? 'updated' : 'error';
+      } catch {
+        return 'error';
+      }
+    });
+
+    return res.json({
+      ok: true,
+      updated: outcomes.filter((o) => o === 'updated').length,
+      errors: outcomes.filter((o) => o !== 'updated').length,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error limpiando pendientes',
+    });
+  }
+}
+
 // ─── PUT /api/alerts/:businessId/:alertId/assign ─────────────────────────────
 
 export async function assignAlert(req, res) {
