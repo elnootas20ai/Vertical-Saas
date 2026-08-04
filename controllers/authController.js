@@ -2326,7 +2326,9 @@ export async function acceptInvitation(req, res) {
       position: inviteEmployment.position || invitation.role || '',
       contractType: inviteEmployment.contractType || '',
       salary: inviteEmployment.salary || '',
-      salesPointId: inviteEmployment.salesPointId || '',
+      // Tienda de la invitación (workCenterId → salesPointId). No pisar con vacío.
+      salesPointId:
+        String(inviteEmployment.salesPointId || account.employment?.salesPointId || '').trim(),
       workday: inviteEmployment.workday || 'completa',
       payPeriodsPerYear: inviteEmployment.payPeriodsPerYear,
       startDate:
@@ -3597,6 +3599,11 @@ export async function acceptInvite(req, res) {
       })();
       updatedAccountDoc.employment = mergeEmploymentInfo(account.employment, {
         ...inviteEmployment,
+        salesPointId: String(
+          inviteEmployment.salesPointId
+          || account.employment?.salesPointId
+          || '',
+        ).trim(),
         startDate:
           String(inviteEmployment.startDate || account.employment?.startDate || '').trim()
           || acceptDay,

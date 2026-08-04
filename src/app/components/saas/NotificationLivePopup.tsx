@@ -8,38 +8,81 @@ type Props = {
 };
 
 const BANNER_MS = 8_000;
+const MIN_GAP_MS = 4_000;
 
 function resolveRoute(n: AppNotification): string {
   if (n.route?.startsWith('/saas/')) return n.route;
   return '';
 }
 
-/** Banner corto arriba cuando llega un aviso en vivo. */
+/** Banner corto arriba cuando llega un aviso en vivo (máx. 1 cada unos segundos). */
 export function NotificationLivePopup({ onOpenInbox }: Props) {
   const navigate = useNavigate();
   const { markNotificationAsRead } = useApp();
   const [banner, setBanner] = useState<AppNotification | null>(null);
   const shownIdsRef = useRef(new Set<string>());
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastShownAtRef = useRef(0);
+  const pendingRef = useRef<AppNotification | null>(null);
 
   useEffect(() => {
-    const onArrive = (ev: Event) => {
-      const n = (ev as CustomEvent<AppNotification>).detail;
-      if (!n?.id || !n.title) return;
-      if (shownIdsRef.current.has(n.id)) return;
-      shownIdsRef.current.add(n.id);
-      if (shownIdsRef.current.size > 80) {
-        shownIdsRef.current = new Set([...shownIdsRef.current].slice(-40));
-      }
-
+    const showOne = (n: AppNotification) => {
       setBanner(n);
+      lastShownAtRef.current = Date.now();
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       hideTimerRef.current = setTimeout(() => setBanner(null), BANNER_MS);
     };
 
+    const onArrive = (ev: Event) => {
+      const n = (ev as CustomEvent<AppNotification>).detail;
+      if (!n?.id || !n.title) return;
+      // Alertas positivas (caja OK, etc.): solo campana Positivas, sin banner de problema.
+      const meta = (n as AppNotification & {
+        metadata?: Record<string, unknown>;
+        kind?: string;
+        polarity?: string;
+        excludeFromAlertCenter?: boolean;
+      });
+      if (
+        meta.excludeFromAlertCenter
+        || meta.polarity === 'positive'
+        || meta.kind === 'activity'
+        || meta.kind === 'positive'
+        || meta.metadata?.polarity === 'positive'
+        || meta.metadata?.kind === 'activity'
+        || meta.metadata?.kind === 'positive'
+        || meta.metadata?.excludeFromAlertCenter === true
+      ) {
+        return;
+      }
+      if (shownIdsRef.current.has(n.id)) return;
+      shownIdsRef.current.add(n.id);
+      // No recortar agresivo: si no, el motor reabre popups de alertas ya vistas.
+      if (shownIdsRef.current.size > 500) {
+        shownIdsRef.current = new Set([...shownIdsRef.current].slice(-300));
+      }
+
+      const elapsed = Date.now() - lastShownAtRef.current;
+      if (lastShownAtRef.current > 0 && elapsed < MIN_GAP_MS) {
+        pendingRef.current = n;
+        return;
+      }
+      pendingRef.current = null;
+      showOne(n);
+    };
+
+    const drainId = window.setInterval(() => {
+      const pending = pendingRef.current;
+      if (!pending) return;
+      if (Date.now() - lastShownAtRef.current < MIN_GAP_MS) return;
+      pendingRef.current = null;
+      showOne(pending);
+    }, 1_500);
+
     window.addEventListener('vertial:notification', onArrive);
     return () => {
       window.removeEventListener('vertial:notification', onArrive);
+      window.clearInterval(drainId);
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     };
   }, []);

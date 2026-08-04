@@ -1747,6 +1747,18 @@ export function sanitizeNotification(notification) {
     createdAt: String(notification.createdAt || new Date().toISOString()),
     updatedAt: String(notification.updatedAt || notification.createdAt || new Date().toISOString()),
     deletedAt: notification.deletedAt || null,
+    kind: notification.kind || notification.metadata?.kind || null,
+    polarity: notification.polarity || notification.metadata?.polarity || null,
+    excludeFromAlertCenter: Boolean(
+      notification.excludeFromAlertCenter
+      || notification.metadata?.excludeFromAlertCenter
+      || notification.kind === 'activity'
+      || notification.kind === 'positive'
+      || notification.metadata?.kind === 'activity'
+      || notification.metadata?.kind === 'positive'
+      || notification.polarity === 'positive'
+      || notification.metadata?.polarity === 'positive',
+    ),
   };
 }
 
@@ -12910,6 +12922,16 @@ function normalizeNotificationStatus(doc) {
 function filterAlertsForScope(docs, scopeId, filters = {}) {
   const includeDeleted = filters.includeDeleted === true || filters.includeDeleted === 'true';
   let items = docs.filter((d) => notificationMatchesScope(d, scopeId, { includeDeleted }));
+
+  // Alertas positivas (fue bien) no entran en el Centro de problemas.
+  items = items.filter((d) => {
+    if (d?.polarity === 'positive' || d?.metadata?.polarity === 'positive') return false;
+    if (d?.excludeFromAlertCenter === true) return false;
+    if (d?.kind === 'activity' || d?.kind === 'positive') return false;
+    if (d?.metadata?.excludeFromAlertCenter === true) return false;
+    if (d?.metadata?.kind === 'activity' || d?.metadata?.kind === 'positive') return false;
+    return true;
+  });
 
   if (filters.historyOnly === true || filters.historyOnly === 'true') {
     items = items.filter((d) => d.deletedAt || normalizeNotificationStatus(d) === 'resolved');

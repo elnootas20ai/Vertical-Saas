@@ -35,7 +35,17 @@ interface Props {
   onClose: () => void;
 }
 
-type InboxTab = 'equipo' | 'negocio';
+type InboxTab = 'positivas' | 'negativas';
+
+function isPositiveAlert(n: AppNotification): boolean {
+  if (n.polarity === 'positive') return true;
+  if (n.excludeFromAlertCenter) return true;
+  if (n.kind === 'activity' || n.kind === 'positive') return true;
+  if (n.metadata?.polarity === 'positive') return true;
+  if (n.metadata?.excludeFromAlertCenter === true) return true;
+  if (n.metadata?.kind === 'activity' || n.metadata?.kind === 'positive') return true;
+  return false;
+}
 
 function isRrhhPersonal(n: AppNotification): boolean {
   const title = String(n.title || '');
@@ -52,17 +62,20 @@ function isRrhhPersonal(n: AppNotification): boolean {
   );
 }
 
-function personalKind(n: AppNotification): { label: string; Icon: LucideIcon } {
+function alertKind(n: AppNotification): { label: string; Icon: LucideIcon; tone: 'positive' | 'neutral' | 'negative' } {
+  if (isPositiveAlert(n)) {
+    return { label: 'Positiva', Icon: CheckCircle, tone: 'positive' };
+  }
   if (/urgente/i.test(n.title || '') || n.level === 'alert') {
-    return { label: 'Urgente', Icon: AlertTriangle };
+    return { label: 'Negativa', Icon: AlertTriangle, tone: 'negative' };
   }
   if (isRrhhPersonal(n) && /fich/i.test(n.title || '')) {
-    return { label: 'Fichaje', Icon: Clock };
+    return { label: 'Fichaje', Icon: Clock, tone: 'neutral' };
   }
   if (isRrhhPersonal(n)) {
-    return { label: 'Equipo', Icon: CalendarDays };
+    return { label: 'Equipo', Icon: CalendarDays, tone: 'neutral' };
   }
-  return { label: 'Aviso', Icon: Bell };
+  return { label: 'Alerta', Icon: Bell, tone: 'neutral' };
 }
 
 function resolvePersonalRoute(n: { route?: string; entityType?: string; entityId?: string }): string {
@@ -154,7 +167,7 @@ function WorkerInbox({ isOpen, onClose }: Props) {
 
   return (
     <DrawerChrome
-      title="Avisos"
+      title="Alertas"
       subtitle={unread.length > 0 ? `${unread.length} sin leer` : 'Todo al día'}
       onClose={onClose}
       footer={
@@ -175,8 +188,14 @@ function WorkerInbox({ isOpen, onClose }: Props) {
       ) : (
         <ul className="divide-y divide-stone-100 dark:divide-stone-900">
           {list.map((n) => {
-            const kind = personalKind(n);
+            const kind = alertKind(n);
             const Icon = kind.Icon;
+            const iconWrap =
+              kind.tone === 'positive'
+                ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                : kind.tone === 'negative'
+                  ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+                  : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300';
             return (
               <li key={n.id}>
                 <button
@@ -186,7 +205,7 @@ function WorkerInbox({ isOpen, onClose }: Props) {
                     n.read ? 'opacity-60' : ''
                   }`}
                 >
-                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+                  <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconWrap}`}>
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -230,7 +249,7 @@ function ManagerInbox({
   });
   const businessType = currentBusiness?.businessType;
 
-  const [tab, setTab] = useState<InboxTab>('equipo');
+  const [tab, setTab] = useState<InboxTab>('positivas');
   const [alerts, setAlerts] = useState<AlertRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -238,11 +257,13 @@ function ManagerInbox({
   const autoTabRef = useRef(false);
   useModalClose(isOpen, onClose);
 
-  const teamList = notifications.filter((n) => isRrhhPersonal(n) || !n.read).slice(0, 40);
-  const teamUnread = notifications.filter((n) => !n.read).length;
-  const negocioCount = summary?.unresolved ?? 0;
+  const positiveList = notifications
+    .filter((n) => isPositiveAlert(n) || isRrhhPersonal(n) || !n.read)
+    .slice(0, 40);
+  const positiveUnreadCount = notifications.filter((n) => !n.read).length;
+  const negativeCount = summary?.unresolved ?? 0;
 
-  const loadNegocio = useCallback(async () => {
+  const loadNegativas = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     try {
@@ -271,21 +292,21 @@ function ManagerInbox({
       return;
     }
     if (autoTabRef.current) return;
-    if (teamUnread > 0) {
-      setTab('equipo');
+    if (negativeCount > 0) {
+      setTab('negativas');
       autoTabRef.current = true;
       return;
     }
-    if (negocioCount > 0) {
-      setTab('negocio');
+    if (positiveUnreadCount > 0) {
+      setTab('positivas');
       autoTabRef.current = true;
     }
-  }, [isOpen, teamUnread, negocioCount]);
+  }, [isOpen, positiveUnreadCount, negativeCount]);
 
   useEffect(() => {
-    if (!isOpen || tab !== 'negocio') return;
-    void loadNegocio();
-  }, [isOpen, tab, loadNegocio]);
+    if (!isOpen || tab !== 'negativas') return;
+    void loadNegativas();
+  }, [isOpen, tab, loadNegativas]);
 
   const openPersonal = async (n: AppNotification) => {
     await markNotificationAsRead(n.id, true);
@@ -337,7 +358,7 @@ function ManagerInbox({
     }
   };
 
-  const clearNegocio = async () => {
+  const clearNegativas = async () => {
     if (!businessId || busy) return;
     setBusy(true);
     try {
@@ -348,7 +369,7 @@ function ManagerInbox({
       await resolveAllUnresolvedAlerts(businessId);
       setAlerts([]);
       await reloadSummary();
-      toast.success('Bandeja de negocio limpia');
+      toast.success('Alertas negativas limpias');
     } catch {
       toast.error('No se pudo limpiar');
     } finally {
@@ -359,28 +380,28 @@ function ManagerInbox({
   if (!isOpen) return null;
 
   const subtitle =
-    tab === 'equipo'
-      ? teamUnread > 0
-        ? `${teamUnread} sin leer`
-        : 'Solicitudes y fichajes'
-      : negocioCount > 0
-        ? `${negocioCount} pendientes`
-        : 'Caja y operación';
+    tab === 'positivas'
+      ? positiveUnreadCount > 0
+        ? `${positiveUnreadCount} sin leer`
+        : 'Lo que salió bien'
+      : negativeCount > 0
+        ? `${negativeCount} pendientes`
+        : 'Problemas a revisar';
 
-  const showTeamClear = tab === 'equipo' && teamUnread > 0;
-  const showBizClear = tab === 'negocio' && (alerts.length > 0 || negocioCount > 0);
-  const showBizOpen = tab === 'negocio';
-  const hasFooter = showTeamClear || showBizClear || showBizOpen;
+  const showPositiveClear = tab === 'positivas' && positiveUnreadCount > 0;
+  const showNegativeClear = tab === 'negativas' && (alerts.length > 0 || negativeCount > 0);
+  const showNegativeOpen = tab === 'negativas';
+  const hasFooter = showPositiveClear || showNegativeClear || showNegativeOpen;
 
   return (
     <DrawerChrome
-      title="Avisos"
+      title="Alertas"
       subtitle={subtitle}
       onClose={onClose}
       footer={
         hasFooter ? (
           <>
-            {showTeamClear ? (
+            {showPositiveClear ? (
               <button
                 type="button"
                 onClick={() => void markAllNotificationsAsRead()}
@@ -390,18 +411,18 @@ function ManagerInbox({
                 Marcar todo leído
               </button>
             ) : null}
-            {showBizClear ? (
+            {showNegativeClear ? (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => void clearNegocio()}
+                onClick={() => void clearNegativas()}
                 className={`w-full ${VERTIAL_BTN_SECONDARY}`}
               >
                 {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                Limpiar pendientes
+                Limpiar negativas
               </button>
             ) : null}
-            {showBizOpen ? (
+            {showNegativeOpen ? (
               <button
                 type="button"
                 onClick={() => {
@@ -414,7 +435,7 @@ function ManagerInbox({
                 <ArrowRight className="h-4 w-4" />
               </button>
             ) : null}
-            {showBizOpen ? (
+            {showNegativeOpen ? (
               <button
                 type="button"
                 onClick={() => {
@@ -434,8 +455,8 @@ function ManagerInbox({
       <div className="sticky top-0 z-10 flex gap-1 border-b border-stone-200 bg-white px-3 py-2 dark:border-stone-800 dark:bg-stone-950">
         {(
           [
-            { id: 'equipo' as const, label: 'Equipo', count: teamUnread },
-            { id: 'negocio' as const, label: 'Negocio', count: negocioCount },
+            { id: 'positivas' as const, label: 'Positivas', count: positiveUnreadCount },
+            { id: 'negativas' as const, label: 'Negativas', count: negativeCount },
           ] as const
         ).map((t) => {
           const active = tab === t.id;
@@ -445,8 +466,7 @@ function ManagerInbox({
               type="button"
               onClick={() => setTab(t.id)}
               className={`flex-1 min-h-10 rounded-xl text-sm font-bold transition-colors ${
-                active
-                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                active ? (t.id === 'positivas' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white')
                   : 'bg-stone-100 text-stone-600 hover:bg-stone-200 dark:bg-stone-900 dark:text-stone-300'
               }`}
             >
@@ -461,17 +481,23 @@ function ManagerInbox({
         })}
       </div>
 
-      {tab === 'equipo' ? (
-        teamList.length === 0 ? (
+      {tab === 'positivas' ? (
+        positiveList.length === 0 ? (
           <EmptyState
-            title="Nada del equipo"
-            hint="Solicitudes, vacaciones y fichajes aparecen aquí."
+            title="Sin alertas positivas"
+            hint="Aquí van avisos OK (caja cerrada, etc.), solicitudes y fichajes. Las alertas de problema están en Negocio."
           />
         ) : (
           <ul className="divide-y divide-stone-100 dark:divide-stone-900">
-            {teamList.map((n) => {
-              const kind = personalKind(n);
+            {positiveList.map((n) => {
+              const kind = alertKind(n);
               const Icon = kind.Icon;
+              const iconWrap =
+                kind.tone === 'positive'
+                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                  : kind.tone === 'negative'
+                    ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+                    : 'bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40';
               return (
                 <li key={n.id}>
                   <button
@@ -481,7 +507,7 @@ function ManagerInbox({
                       n.read ? 'opacity-55' : ''
                     }`}
                   >
-                    <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[var(--v-blue,#2563eb)] dark:bg-blue-950/40">
+                    <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${iconWrap}`}>
                       <Icon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0 flex-1">
@@ -513,8 +539,8 @@ function ManagerInbox({
         </div>
       ) : alerts.length === 0 ? (
         <EmptyState
-          title="Negocio al día"
-          hint="Descuadres de caja, pedidos críticos y avisos del local salen aquí."
+          title="Sin alertas negativas"
+          hint="Aquí solo problemas: descuadres, impagos, caja sin cerrar, pedidos críticos."
         />
       ) : (
         <ul className="divide-y divide-stone-100 dark:divide-stone-900">

@@ -1,6 +1,11 @@
 /**
  * Catálogo único de planes Vertial (precios, límites, bullets).
  * Onboarding, Ajustes → Mi plan y entitlements deben alinearse aquí.
+ *
+ * Alertas (regla comercial):
+ * - Básico → alertas positivas (lo que salió bien)
+ * - Pro → alertas negativas (avisan de cosas malas: caja, dinero, operación)
+ * - Mediano → puente (positivas + pack operativo básico)
  */
 
 export type VertialPlanId = 'basic' | 'normal' | 'pro';
@@ -45,6 +50,7 @@ export const VERTIAL_PLANS: VertialPlanDefinition[] = [
       'CRM básico (solo clientes)',
       'Calendario y chat de equipo',
       'Dashboard operativo',
+      'Alertas positivas (lo que salió bien)',
     ],
   },
   {
@@ -65,7 +71,7 @@ export const VERTIAL_PLANS: VertialPlanDefinition[] = [
       'RRHH (equipo, horarios, comisiones, nóminas)',
       'Escandallo / costing',
       'Finanzas básicas',
-      'Alertas básicas',
+      'Alertas positivas + pack operativo básico',
     ],
   },
   {
@@ -87,6 +93,7 @@ export const VERTIAL_PLANS: VertialPlanDefinition[] = [
       'Finanzas avanzadas y conciliación bancaria',
       'Integraciones web, API y webhooks',
       'Multi-empresa / multi-PDV',
+      'Alertas negativas (avisan de problemas: caja, dinero, operación)',
       'Soporte prioritario',
     ],
   },

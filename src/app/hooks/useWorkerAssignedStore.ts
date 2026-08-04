@@ -13,6 +13,7 @@ import {
   resolveWorkerWorkCenter,
 } from '../lib/workerStoreHours';
 import { hasOpeningHoursPayload } from '../lib/businessHoursUtils';
+import { resolveEffectiveSalesPointRef } from '../lib/workerStoreAssignment';
 import {
   getSchedule,
   getScheduleForDate,
@@ -53,7 +54,7 @@ function stubAssignedWorkCenter(ref: string, name: string): WorkCenter {
 }
 
 export function useWorkerAssignedStore() {
-  const { user } = useAuth();
+  const { user, refreshCurrentUser } = useAuth();
   const { currentBusiness, businesses } = useBusiness();
   const {
     retailWorkCenters: scopeCenters,
@@ -68,28 +69,84 @@ export function useWorkerAssignedStore() {
     businesses,
   });
   const isDelivery = isDeliveryBusinessType(resolvedType);
-  const salesPointRef = String(user?.employment?.salesPointId || '').trim();
 
   const pool = useMemo(
     () => mergeWorkCenterPools(scopeCenters, workCenters, activeWorkCenters),
     [scopeCenters, workCenters, activeWorkCenters],
   );
 
-  const resolvedFromPool = useMemo(() => {
-    if (!salesPointRef) return null;
-    const scoped = filterStoresForWorkerAssignment(allPointsOfSale, pool, salesPointRef);
-    return scoped.workCenters[0] || resolveWorkerWorkCenter(pool, salesPointRef);
-  }, [allPointsOfSale, pool, salesPointRef]);
-
   const [fetchedWorkCenter, setFetchedWorkCenter] = useState<WorkCenter | null>(null);
   const [fetchingAssigned, setFetchingAssigned] = useState(false);
   const [memberSchedule, setMemberSchedule] = useState<ScheduleTemplate | null>(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [profileRefreshing, setProfileRefreshing] = useState(true);
 
   const businessId = String(
     currentBusiness?.business_id || user?.linkedBusinessId || '',
   ).trim();
   const memberId = String(user?.user_id || user?.id || '').trim();
+
+  // El gerente puede asignar la tienda después del login: re-sincronizar employment.
+  useEffect(() => {
+    let cancelled = false;
+    setProfileRefreshing(true);
+    void refreshCurrentUser()
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setProfileRefreshing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshCurrentUser, memberId]);
+
+  // Turno personal (plantilla de la invitación / Horarios) — independiente del horario de tienda.
+  useEffect(() => {
+    if (!businessId || !memberId) {
+      setMemberSchedule(null);
+      setScheduleLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setScheduleLoading(true);
+    void getSchedule(businessId, memberId)
+      .then((sched) => {
+        if (!cancelled) setMemberSchedule(sched);
+      })
+      .catch(() => {
+        if (!cancelled) setMemberSchedule(null);
+      })
+      .finally(() => {
+        if (!cancelled) setScheduleLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, memberId]);
+
+  const salesPointRef = useMemo(
+    () =>
+      resolveEffectiveSalesPointRef({
+        employmentSalesPointId: user?.employment?.salesPointId,
+        scheduleWorkCenterId: memberSchedule?.work_center_id,
+        workCenters: pool,
+        pointsOfSale: allPointsOfSale,
+      }),
+    [
+      user?.employment?.salesPointId,
+      memberSchedule?.work_center_id,
+      pool,
+      allPointsOfSale,
+    ],
+  );
+
+  const explicitAssignment = Boolean(String(user?.employment?.salesPointId || '').trim());
+
+  const resolvedFromPool = useMemo(() => {
+    if (!salesPointRef) return null;
+    const scoped = filterStoresForWorkerAssignment(allPointsOfSale, pool, salesPointRef);
+    return scoped.workCenters[0] || resolveWorkerWorkCenter(pool, salesPointRef);
+  }, [allPointsOfSale, pool, salesPointRef]);
 
   useEffect(() => {
     if (!salesPointRef) {
@@ -120,32 +177,12 @@ export function useWorkerAssignedStore() {
     };
   }, [salesPointRef, resolvedFromPool]);
 
-  // Turno personal (plantilla de la invitación / Horarios) — independiente del horario de tienda.
-  useEffect(() => {
-    if (!businessId || !memberId) {
-      setMemberSchedule(null);
-      setScheduleLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setScheduleLoading(true);
-    void getSchedule(businessId, memberId)
-      .then((sched) => {
-        if (!cancelled) setMemberSchedule(sched);
-      })
-      .catch(() => {
-        if (!cancelled) setMemberSchedule(null);
-      })
-      .finally(() => {
-        if (!cancelled) setScheduleLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [businessId, memberId]);
-
   return useMemo(() => {
-    const listsLoading = scopeLoading || wcLoading;
+    const employmentRef = String(user?.employment?.salesPointId || '').trim();
+    const waitingForAssignmentHints =
+      profileRefreshing
+      || (!employmentRef && scheduleLoading);
+    const listsLoading = scopeLoading || wcLoading || waitingForAssignmentHints;
     const storeResolving =
       Boolean(salesPointRef)
       && !resolvedFromPool
@@ -210,8 +247,8 @@ export function useWorkerAssignedStore() {
     const personalDayOff = Boolean(memberSchedule) && !personalShiftToday;
 
     /**
-     * Fichar con tienda asignada. El horario de apertura no bloquea
-     * (contrato/trabajo fuera de franja permitido).
+     * Fichar con tienda asignada (employment, horario o única tienda del negocio).
+     * El horario de apertura no bloquea (contrato/trabajo fuera de franja permitido).
      */
     const canClockInEntry = !loading && hasAssignment;
 
@@ -225,6 +262,8 @@ export function useWorkerAssignedStore() {
       storeLabel,
       assignedPdvId,
       hasAssignment,
+      /** true solo si viene de Equipo (employment.salesPointId), no de inferencia. */
+      explicitAssignment,
       canClockInEntry,
       storeHoursToday: hoursToday,
       /** @deprecated alias: ya no bloquea fichaje; solo indica tienda cerrada/fuera de franja. */
@@ -241,6 +280,8 @@ export function useWorkerAssignedStore() {
     isDelivery,
     scopeLoading,
     wcLoading,
+    profileRefreshing,
+    scheduleLoading,
     fetchingAssigned,
     pool,
     allPointsOfSale,
@@ -249,6 +290,7 @@ export function useWorkerAssignedStore() {
     fetchedWorkCenter,
     displayLabelForActive,
     memberSchedule,
-    scheduleLoading,
+    explicitAssignment,
+    user?.employment?.salesPointId,
   ]);
 }

@@ -21,7 +21,7 @@ const EXTRA_CEO_PUSH = [
   'payment_overdue',
   'negative_cash_flow',
   'tax_deadline_overdue',
-  'delivery_register_closed_ok',
+  // Cierre OK no es alerta urgente: solo descuadre / caja pendiente.
   'register_high_return',
   'delivery_driver_mismatch',
   'butcher_register_pending',

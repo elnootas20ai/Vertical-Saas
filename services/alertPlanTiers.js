@@ -1,6 +1,10 @@
 /**
  * Clasificación de alertas por plan comercial: Básico · Normal · Pro
- * Una sola fuente de verdad para el catálogo y la UI.
+ *
+ * Regla de producto (precios Vertial / planCatalog):
+ * - Básico → alertas POSITIVAS (lo que salió bien)
+ * - Pro → alertas NEGATIVAS (avisan de cosas malas: caja, dinero, operación)
+ * - Normal → puente operativo entre ambos
  */
 
 /**
@@ -161,18 +165,18 @@ export function getVisiblePlanTiersForVertical() {
 export function alertTierDescription(tier, vertical = 'delivery') {
   if (isDeliveryVertical(vertical)) {
     if (tier === 'basic') {
-      return 'Pack compacto: fichaje, docs empresa, caja, pedido retrasado, sin cobrar y cancelado.';
+      return 'Plan Básico: alertas positivas (lo que salió bien) + pack compacto esencial.';
     }
     if (tier === 'normal') {
-      return 'Mismo pack + descuadre de caja, pedido muy retrasado y caducidad de documentos.';
+      return 'Plan Mediano: positivas + operación (descuadre, muy retrasado, docs).';
     }
-    return 'En delivery el pack útil ya está en Básico/Normal. Pro no añade interruptores vacíos.';
+    return 'Plan Pro: alertas negativas — avisan de problemas (dinero, caja, operación avanzada).';
   }
   if (tier === 'basic') {
-    return 'Pedidos, caja, stock crítico, impagos y fichajes. Incluidas desde el plan Básico.';
+    return 'Plan Básico: alertas positivas + avisos esenciales de pedidos/caja/fichajes.';
   }
   if (tier === 'normal') {
-    return 'Delivery avanzado, finanzas, RRHH, documentación, compras y catálogo. Plan Normal.';
+    return 'Plan Mediano: delivery avanzado, finanzas, RRHH y documentación.';
   }
-  return 'Otras verticales del software y alertas de sistema. Plan Pro.';
+  return 'Plan Pro: alertas negativas de verticales y sistema (avisan de cosas malas).';
 }

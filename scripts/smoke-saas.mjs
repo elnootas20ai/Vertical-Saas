@@ -16,6 +16,7 @@
  *   VERIFY_API_BASE / SMOKE_API_BASE  (default http://127.0.0.1:3001)
  *   SMOKE_SAAS_MIN_STORES=1           exige ≥N tiendas en cada negocio delivery
  *   SMOKE_SAAS_SKIP_FINANCE=1         omitir GET /api/finance/:userId
+ *   SMOKE_ALLOW_ADMIN_OTP_LOGIN=1     permite login admin remoto (dispara OTP Gmail)
  */
 import dotenv from 'dotenv';
 import path from 'node:path';
@@ -29,6 +30,7 @@ import {
   normalizeTenantUserId,
   resolveBusinessDataUserId,
 } from './lib/saasSmokeHelpers.mjs';
+import { assertSafeSaasLogin } from './lib/prodAdminLoginGuard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -86,6 +88,13 @@ async function main() {
     process.exit(1);
   }
 
+  const loginGuard = assertSafeSaasLogin({ apiBase: BASE, email: EMAIL });
+  if (loginGuard.blocked) {
+    fail('login', loginGuard.reason);
+    summarize(false);
+    process.exit(1);
+  }
+
   // ── Health ────────────────────────────────────────────────────────────────
   const health = await api('/health');
   if (!health.data?.ok) {
@@ -100,6 +109,14 @@ async function main() {
     method: 'POST',
     body: { email: EMAIL, password: PASSWORD },
   });
+  if (login.data?.requiresLoginCode) {
+    fail(
+      'login',
+      'La cuenta pide OTP por email: este smoke NO debe usarse con admin en remoto (ya puede haber salido un correo).',
+    );
+    summarize(false);
+    process.exit(1);
+  }
   const token = login.data?.accessToken;
   const user = login.data?.user;
   if (!token || !user?.user_id) {

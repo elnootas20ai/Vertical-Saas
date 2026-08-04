@@ -38,7 +38,6 @@ test('incluye críticas y caja / impagos / fichaje clave', () => {
   for (const id of [
     'delivery_cash_discrepancy',
     'delivery_cash_pending_close',
-    'delivery_register_closed_ok',
     'delivery_register_closed_discrepancy',
     'delivery_order_very_delayed',
     'payment_overdue',
@@ -49,6 +48,11 @@ test('incluye críticas y caja / impagos / fichaje clave', () => {
   ]) {
     assert.ok(CEO_MOBILE_PUSH_RULE_IDS.has(id), `falta ${id}`);
   }
+  assert.equal(
+    CEO_MOBILE_PUSH_RULE_IDS.has('delivery_register_closed_ok'),
+    false,
+    'cierre OK no debe ser push urgente',
+  );
 });
 
 test('no incluye ruido operativo típico (pedidos/retrasos/stock/docs)', () => {

@@ -1125,11 +1125,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser((prev) => {
         const prevSub = JSON.stringify(prev?.subscription ?? null);
         const nextSub = JSON.stringify(next.subscription ?? null);
+        const prevSalesPoint = String(prev?.employment?.salesPointId || '').trim();
+        const nextSalesPoint = String(next.employment?.salesPointId || '').trim();
+        const prevLinked = String(prev?.linkedBusinessId || '').trim();
+        const nextLinked = String(next.linkedBusinessId || '').trim();
         if (
           prev?.user_id === next.user_id &&
           prev.emailVerified === next.emailVerified &&
           prev.updatedAt === next.updatedAt &&
-          prevSub === nextSub
+          prevSub === nextSub &&
+          prevSalesPoint === nextSalesPoint &&
+          prevLinked === nextLinked
         ) {
           return prev;
         }

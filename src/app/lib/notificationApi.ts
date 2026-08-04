@@ -18,6 +18,10 @@ export interface NotificationRecord {
   read: boolean;
   createdAt: string;
   updatedAt?: string;
+  /** Aviso de actividad (“fue bien”) — campana, no Centro de Alertas */
+  kind?: string | null;
+  polarity?: string | null;
+  excludeFromAlertCenter?: boolean;
 }
 
 interface NotificationEnvelope {

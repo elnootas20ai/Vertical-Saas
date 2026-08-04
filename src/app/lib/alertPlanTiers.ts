@@ -124,20 +124,20 @@ export function canAccessAlertTier(userTier: SubscriptionPlanTier, ruleTier: Ale
 export function alertTierDescription(tier: AlertPlanTier, vertical?: string | null): string {
   if (isDeliveryVertical(vertical)) {
     if (tier === 'basic') {
-      return 'Pack compacto: fichaje, docs empresa, caja, pedido retrasado, sin cobrar y cancelado.';
+      return 'Plan Básico: alertas positivas (lo que salió bien) + pack compacto esencial.';
     }
     if (tier === 'normal') {
-      return 'Mismo pack + descuadre de caja, pedido muy retrasado y caducidad de documentos.';
+      return 'Plan Mediano: positivas + operación (descuadre, muy retrasado, docs).';
     }
-    return 'En delivery el pack útil ya está en Básico/Normal. Pro no añade interruptores vacíos.';
+    return 'Plan Pro: alertas negativas — avisan de problemas (dinero, caja, operación avanzada).';
   }
   if (tier === 'basic') {
-    return 'Pedidos, caja, stock crítico, impagos y fichajes. Incluidas desde el plan Básico.';
+    return 'Plan Básico: alertas positivas + avisos esenciales de pedidos/caja/fichajes.';
   }
   if (tier === 'normal') {
-    return 'Delivery avanzado, finanzas, RRHH, documentación, compras y catálogo. Plan Normal.';
+    return 'Plan Mediano: delivery avanzado, finanzas, RRHH y documentación.';
   }
-  return 'Otras verticales del software (limpieza, construcción, desguace, etc.) y alertas de sistema. Plan Pro.';
+  return 'Plan Pro: alertas negativas de verticales y sistema (avisan de cosas malas).';
 }
 
 export function alertTierExamples(tier: AlertPlanTier, vertical?: string | null): string {

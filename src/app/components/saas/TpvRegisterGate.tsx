@@ -78,6 +78,7 @@ import {
   filterStoresForWorkerAssignment,
   isInvitedWorkerUser,
 } from '../../lib/pdvScope';
+import { resolveEffectiveSalesPointRef } from '../../lib/workerStoreAssignment';
 import { readDeliveryOpsSelectedPdvId, writeDeliveryOpsSelectedPdvId, resolvePreferenceToPdvId, pickDefaultActivePdvId, DELIVERY_ACTIVE_STORE_CHANGED } from '../../lib/deliveryOpsPdvSelection';
 import { resolveBusinessScopeId, repairMissingRetailDeliveryPdvs } from '../../lib/deliverySetup';
 import {
@@ -3651,10 +3652,15 @@ export function TpvRegisterGate({
 
   const workerAssignedPdvId = useMemo(() => {
     if (!isWorkerUser) return null;
+    const salesPointRef = resolveEffectiveSalesPointRef({
+      employmentSalesPointId: user?.employment?.salesPointId,
+      workCenters,
+      pointsOfSale,
+    });
     return filterStoresForWorkerAssignment(
       pointsOfSale,
       workCenters,
-      user?.employment?.salesPointId,
+      salesPointRef,
     ).assignedPdvId;
   }, [isWorkerUser, pointsOfSale, workCenters, user?.employment?.salesPointId]);
 
@@ -4261,10 +4267,15 @@ export function TpvRegisterGate({
           );
 
           if (workerUser) {
+            const salesPointRef = resolveEffectiveSalesPointRef({
+              employmentSalesPointId: authUser?.employment?.salesPointId,
+              workCenters: scopedWorkCenters,
+              pointsOfSale: scopedPdvs,
+            });
             const scoped = filterStoresForWorkerAssignment(
               scopedPdvs,
               scopedWorkCenters,
-              authUser?.employment?.salesPointId,
+              salesPointRef,
             );
             scopedPdvs = scoped.pointsOfSale;
             scopedWorkCenters = scoped.workCenters;
@@ -5241,7 +5252,11 @@ export function TpvRegisterGate({
   }
 
   if (!isTpvRegisterSessionOpen(activeSession)) {
-    if (isWorkerUser && !isTabletSession && !loading && !user?.employment?.salesPointId?.trim()) {
+    if (isWorkerUser && !isTabletSession && !loading && !resolveEffectiveSalesPointRef({
+      employmentSalesPointId: user?.employment?.salesPointId,
+      workCenters,
+      pointsOfSale,
+    })) {
       return wrapShell(
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">
@@ -5264,7 +5279,11 @@ export function TpvRegisterGate({
       );
     }
 
-    if (isWorkerUser && !isTabletSession && !loading && user?.employment?.salesPointId?.trim() && pointsOfSale.length === 0) {
+    if (isWorkerUser && !isTabletSession && !loading && resolveEffectiveSalesPointRef({
+      employmentSalesPointId: user?.employment?.salesPointId,
+      workCenters,
+      pointsOfSale,
+    }) && pointsOfSale.length === 0) {
       return wrapShell(
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 text-center">

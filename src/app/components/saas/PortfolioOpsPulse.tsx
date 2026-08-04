@@ -7,6 +7,7 @@ import {
   ArrowDown,
   ArrowUp,
   BarChart3,
+  ChevronRight,
   MapPin,
   Minus,
   TrendingUp,
@@ -102,7 +103,7 @@ function MixLine({
   kebab: number;
 }) {
   return (
-    <span className="inline-block whitespace-nowrap text-[10px] font-semibold text-gray-600 dark:text-gray-300 tabular-nums">
+    <span className="text-[10px] font-semibold tabular-nums text-gray-600 dark:text-gray-300">
       {formatNumberEs(pizza, { maxFraction: 0 })}🍕 · {formatNumberEs(burger, { maxFraction: 0 })}🍔 ·{' '}
       {formatNumberEs(taco, { maxFraction: 0 })}🌮
       {kebab > 0 ? ` · ${formatNumberEs(kebab, { maxFraction: 0 })}🥙` : ''}
@@ -110,15 +111,15 @@ function MixLine({
   );
 }
 
+function MoneyCell({ n }: { n: number }) {
+  if (!n) return <span className="text-gray-300 dark:text-gray-600">—</span>;
+  return <span className="tabular-nums">{fmtEuro(n)}</span>;
+}
+
 function dayRowStickyBg(isBest: boolean, isWorst: boolean): string {
   if (isBest) return 'bg-emerald-50 dark:bg-emerald-950';
   if (isWorst) return 'bg-rose-50 dark:bg-rose-950';
   return 'bg-white dark:bg-gray-800';
-}
-
-function MoneyCell({ n }: { n: number }) {
-  if (!n) return <span className="text-gray-300 dark:text-gray-600">—</span>;
-  return <span className="tabular-nums">{fmtEuro(n)}</span>;
 }
 
 function ChannelMixStrip({ channels }: { channels: OpsExcelChannels }) {
@@ -391,7 +392,7 @@ export function PortfolioOpsPulse({
         )}
       </div>
 
-      {/* Canales: strip siempre; tabla solo desktop */}
+      {/* Canales */}
       <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-2.5 py-2 dark:border-gray-700 dark:bg-gray-900/30 sm:px-3 sm:py-2.5">
         <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
           <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Canales</p>
@@ -401,7 +402,7 @@ export function PortfolioOpsPulse({
         </div>
         <ChannelMixStrip channels={groupChannels} />
         {!compact ? (
-          <div className="mt-2.5 hidden overflow-x-auto overscroll-x-contain lg:block">
+          <div className="mt-2.5 overflow-x-auto">
             <table className="w-full min-w-[560px] text-[11px]">
               <thead>
                 <tr className="text-[9px] uppercase tracking-wide text-gray-400">
@@ -430,9 +431,14 @@ export function PortfolioOpsPulse({
         ) : null}
       </div>
 
-      {/* Ranking: cards en móvil/tablet; tabla en lg */}
-      <div className="space-y-1.5 lg:hidden">
-        <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Tiendas</p>
+      {/* Ranking: cards solo móvil; tabla completa en escritorio */}
+      <div className={`space-y-1.5 ${compact ? '' : 'lg:hidden'}`}>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">Tiendas</p>
+          <p className="text-[9px] font-semibold text-[var(--v-blue,#2563eb)]">
+            Pulsa una tienda →
+          </p>
+        </div>
         {pulses.map((p, idx) => {
           const key = `${p.businessId}:${p.storeId}`;
           const active = selected && `${selected.businessId}:${selected.storeId}` === key;
@@ -441,38 +447,40 @@ export function PortfolioOpsPulse({
               key={key}
               type="button"
               onClick={() => setSelectedKey(key)}
-              className={`flex w-full items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
-                compact ? 'min-h-11' : ''
-              } ${
+              title="Ver detalle de esta tienda"
+              className={`flex w-full min-h-11 items-center justify-between gap-2 rounded-xl border px-2.5 py-2 text-left transition-colors ${
                 active
-                  ? 'border-[rgba(37,99,235,0.35)] bg-[rgba(37,99,235,0.06)] dark:border-blue-800 dark:bg-blue-950/30'
-                  : 'border-gray-100 bg-gray-50/70 dark:border-gray-800 dark:bg-gray-900/30'
+                  ? 'border-[var(--v-blue,#2563eb)] bg-[rgba(37,99,235,0.08)] ring-1 ring-[rgba(37,99,235,0.25)] dark:border-blue-500 dark:bg-blue-950/40'
+                  : 'border-gray-100 bg-gray-50/70 hover:border-[rgba(37,99,235,0.35)] dark:border-gray-800 dark:bg-gray-900/30'
               }`}
             >
               <span className="min-w-0 flex items-center gap-1.5">
-                <span className="w-4 shrink-0 text-[10px] font-black text-gray-400">
-                  {idx + 1}
-                </span>
-                <MapPin className="h-3 w-3 shrink-0 text-[var(--v-blue,#2563eb)]" />
+                <span className="w-4 shrink-0 text-[10px] font-black text-gray-400">{idx + 1}</span>
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
                 <span className="min-w-0">
                   <span className="block truncate text-[11px] font-bold text-gray-900 dark:text-gray-100">
                     {p.storeName}
+                    {active ? (
+                      <span className="ml-1 text-[9px] font-bold text-[var(--v-blue,#2563eb)]">
+                        · detalle
+                      </span>
+                    ) : null}
                   </span>
                   <span className="block truncate text-[9px] text-gray-400">
                     <MixLine pizza={p.pizza} burger={p.burger} taco={p.taco} kebab={p.kebab} />
                   </span>
                 </span>
               </span>
-              <span className="shrink-0 text-right">
-                <span className="block text-[11px] font-black tabular-nums text-gray-900 dark:text-gray-100">
-                  {fmtEuro(p.revenuePeriod)}
-                </span>
-                <span className="inline-flex items-center justify-end gap-1">
-                  <span className="text-[9px] text-gray-400">
-                    {formatNumberEs(p.sharePercent, { maxFraction: 0 })}%
+              <span className="flex shrink-0 items-center gap-1">
+                <span className="text-right">
+                  <span className="block text-[11px] font-black tabular-nums">
+                    {fmtEuro(p.revenuePeriod)}
                   </span>
                   <DeltaBadge pct={p.revenueMomPct} />
                 </span>
+                <ChevronRight
+                  className={`h-4 w-4 ${active ? 'text-[var(--v-blue,#2563eb)]' : 'text-gray-300'}`}
+                />
               </span>
             </button>
           );
@@ -480,106 +488,129 @@ export function PortfolioOpsPulse({
       </div>
 
       {!compact ? (
-        <div className="hidden overflow-x-auto rounded-xl border border-gray-100 overscroll-x-contain dark:border-gray-700 lg:block [-webkit-overflow-scrolling:touch]">
-          <table className="w-full min-w-[980px] text-sm">
-            <thead>
-              <tr className="bg-gray-50 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:bg-gray-900/40">
-                <th className="px-3 py-2">#</th>
-                <th className="px-3 py-2">Tienda</th>
-                {EXCEL_COLS.map((c) => (
-                  <th key={c.key} className="px-2 py-2 text-right">
-                    {c.label}
-                  </th>
-                ))}
-                <th className="px-2 py-2 text-right">Total</th>
-                <th className="px-2 py-2 text-right">%</th>
-                <th className="px-2 py-2 text-right">Ped.</th>
-                <th className="px-2 py-2">Mix</th>
-                <th className="px-2 py-2 text-right">Hoy</th>
-                <th className="px-2 py-2 text-right">Δ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pulses.map((p, idx) => {
-                const key = `${p.businessId}:${p.storeId}`;
-                const active = selected && `${selected.businessId}:${selected.storeId}` === key;
-                const ch = p.channels || emptyOpsExcelChannels();
-                return (
-                  <tr
-                    key={key}
-                    onClick={() => setSelectedKey(key)}
-                    className={`cursor-pointer border-t border-gray-100 transition-colors dark:border-gray-700/80 ${
-                      active
-                        ? 'bg-[rgba(37,99,235,0.06)] dark:bg-blue-950/30'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-900/30'
-                    }`}
-                  >
-                    <td className="px-3 py-2.5 text-xs font-black text-gray-400">{idx + 1}</td>
-                    <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-1.5">
-                        <MapPin className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
-                        <div>
-                          <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
-                            {p.storeName}
-                          </p>
-                          {!singleBusiness && (
-                            <p className="text-[10px] text-gray-400">{p.businessName}</p>
-                          )}
+        <div className="hidden rounded-xl border border-gray-100 dark:border-gray-700 lg:block">
+          <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gray-50 px-3 py-1.5 dark:border-gray-700 dark:bg-gray-900/40">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Tiendas</p>
+            <p className="text-[10px] font-semibold text-[var(--v-blue,#2563eb)]">
+              Pulsa una tienda para ver el detalle ↓
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm">
+              <thead>
+                <tr className="bg-gray-50/80 text-left text-[10px] font-bold uppercase tracking-wide text-gray-400 dark:bg-gray-900/30">
+                  <th className="px-3 py-2">#</th>
+                  <th className="px-3 py-2">Tienda</th>
+                  {EXCEL_COLS.map((c) => (
+                    <th key={c.key} className="px-2 py-2 text-right">
+                      {c.label}
+                    </th>
+                  ))}
+                  <th className="px-2 py-2 text-right">Total</th>
+                  <th className="px-2 py-2 text-right">%</th>
+                  <th className="px-2 py-2 text-right">Ped.</th>
+                  <th className="px-2 py-2">Mix</th>
+                  <th className="px-2 py-2 text-right">Hoy</th>
+                  <th className="px-2 py-2 text-right">Δ</th>
+                  <th className="w-8 px-2 py-2" aria-hidden />
+                </tr>
+              </thead>
+              <tbody>
+                {pulses.map((p, idx) => {
+                  const key = `${p.businessId}:${p.storeId}`;
+                  const active = selected && `${selected.businessId}:${selected.storeId}` === key;
+                  const ch = p.channels || emptyOpsExcelChannels();
+                  return (
+                    <tr
+                      key={key}
+                      onClick={() => setSelectedKey(key)}
+                      title="Ver detalle de esta tienda"
+                      className={`cursor-pointer border-t border-gray-100 transition-colors dark:border-gray-700/80 ${
+                        active
+                          ? 'border-l-4 border-l-[var(--v-blue,#2563eb)] bg-[rgba(37,99,235,0.08)] dark:bg-blue-950/40'
+                          : 'border-l-4 border-l-transparent hover:bg-[rgba(37,99,235,0.04)] dark:hover:bg-gray-900/40'
+                      }`}
+                    >
+                      <td className="px-3 py-2.5 text-xs font-black text-gray-400">{idx + 1}</td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <MapPin className="h-3.5 w-3.5 shrink-0 text-[var(--v-blue,#2563eb)]" />
+                          <div>
+                            <p className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                              {p.storeName}
+                              {active ? (
+                                <span className="ml-1.5 rounded bg-[rgba(37,99,235,0.12)] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--v-blue,#2563eb)]">
+                                  Detalle
+                                </span>
+                              ) : null}
+                            </p>
+                            {!singleBusiness && (
+                              <p className="text-[10px] text-gray-400">{p.businessName}</p>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    {EXCEL_COLS.map((c) => (
-                      <td key={c.key} className="px-2 py-2.5 text-right text-xs">
-                        <MoneyCell n={Number(ch[c.key]) || 0} />
                       </td>
-                    ))}
-                    <td className="px-2 py-2.5 text-right text-xs font-black tabular-nums">
-                      {fmtEuro(p.revenuePeriod)}
-                    </td>
-                    <td className="px-2 py-2.5 text-right text-xs tabular-nums text-gray-600">
-                      {formatNumberEs(p.sharePercent, { maxFraction: 1 })}%
-                    </td>
-                    <td className="px-2 py-2.5 text-right text-xs tabular-nums">
-                      {formatNumberEs(p.ordersPeriod, { maxFraction: 0 })}
-                    </td>
-                    <td className="px-2 py-2.5">
-                      <MixLine pizza={p.pizza} burger={p.burger} taco={p.taco} kebab={p.kebab} />
-                    </td>
-                    <td className="px-2 py-2.5 text-right text-xs font-semibold tabular-nums">
-                      {fmtEuro(p.revenueToday)}
-                    </td>
-                    <td className="px-2 py-2.5 text-right">
-                      <DeltaBadge pct={p.revenueMomPct} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      {EXCEL_COLS.map((c) => (
+                        <td key={c.key} className="px-2 py-2.5 text-right text-xs">
+                          <MoneyCell n={Number(ch[c.key]) || 0} />
+                        </td>
+                      ))}
+                      <td className="px-2 py-2.5 text-right text-xs font-black tabular-nums">
+                        {fmtEuro(p.revenuePeriod)}
+                      </td>
+                      <td className="px-2 py-2.5 text-right text-xs tabular-nums text-gray-600">
+                        {formatNumberEs(p.sharePercent, { maxFraction: 1 })}%
+                      </td>
+                      <td className="px-2 py-2.5 text-right text-xs tabular-nums">
+                        {formatNumberEs(p.ordersPeriod, { maxFraction: 0 })}
+                      </td>
+                      <td className="px-2 py-2.5">
+                        <MixLine pizza={p.pizza} burger={p.burger} taco={p.taco} kebab={p.kebab} />
+                      </td>
+                      <td className="px-2 py-2.5 text-right text-xs font-semibold tabular-nums">
+                        {fmtEuro(p.revenueToday)}
+                      </td>
+                      <td className="px-2 py-2.5 text-right">
+                        <DeltaBadge pct={p.revenueMomPct} />
+                      </td>
+                      <td className="px-2 py-2.5 text-right">
+                        <ChevronRight
+                          className={`inline h-4 w-4 ${
+                            active ? 'text-[var(--v-blue,#2563eb)]' : 'text-gray-300'
+                          }`}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
       {/* Detalle tienda */}
       {selected ? (
         compact ? (
-          <StoreDayCompact
+          <DayGlanceList
             store={selected}
             bestDayKey={bestDayKey}
             worstDayKey={worstDayKey}
+            compact
           />
         ) : (
-          <div className="grid gap-3 lg:grid-cols-5 lg:gap-4">
+          <div className="grid gap-4 lg:grid-cols-5">
             <div className="rounded-xl border border-gray-100 p-3 dark:border-gray-700 lg:col-span-2">
               <div className="mb-2 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-black text-gray-900 dark:text-gray-100">
                     {selected.storeName}
                   </p>
-                  <p className="text-[10px] text-gray-400">€ / día</p>
+                  <p className="text-[10px] text-gray-400">€ / día · tienda seleccionada</p>
                 </div>
                 <TrendingUp className="h-4 w-4 text-[var(--v-blue,#2563eb)]" />
               </div>
-              <div className="h-36 sm:h-40">
+              <div className="h-40">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
@@ -598,22 +629,25 @@ export function PortfolioOpsPulse({
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-xl border border-gray-100 dark:border-gray-700 lg:col-span-3">
+            <div className="min-w-0 overflow-hidden rounded-xl border border-gray-100 dark:border-gray-700 lg:col-span-3">
               <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
                   Día a día · {selected.storeName}
                 </p>
-                <p className="shrink-0 text-[9px] text-gray-400 lg:hidden">Desliza →</p>
               </div>
-              {/* Móvil/tablet: filas simples */}
+              {/* Móvil: lista completa (sin acortar datos) */}
               <div className="divide-y divide-gray-100 dark:divide-gray-800 lg:hidden">
                 {selected.days.map((d) => {
                   const isBest = d.dayKey === bestDayKey;
                   const isWorst = d.dayKey === worstDayKey;
+                  const ch = d.channels || emptyOpsExcelChannels();
+                  const channelBits = EXCEL_COLS
+                    .map((c) => ({ label: c.label, n: Number(ch[c.key]) || 0 }))
+                    .filter((c) => c.n > 0);
                   return (
                     <div
                       key={d.dayKey}
-                      className={`flex items-center justify-between gap-2 px-2.5 py-1.5 ${
+                      className={`px-2.5 py-2 ${
                         isBest
                           ? 'bg-emerald-50/50 dark:bg-emerald-950/20'
                           : isWorst
@@ -621,23 +655,41 @@ export function PortfolioOpsPulse({
                             : ''
                       }`}
                     >
-                      <div className="min-w-0">
-                        <p className="truncate text-[11px] font-semibold text-gray-900 dark:text-gray-100">
-                          {d.weekdayLabel}{' '}
-                          <span className="font-normal text-gray-400">{d.label}</span>
-                        </p>
-                        <MixLine pizza={d.pizza} burger={d.burger} taco={d.taco} kebab={d.kebab} />
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100">
+                            {d.weekdayLabel}{' '}
+                            <span className="font-normal text-gray-400">{d.label}</span>
+                          </p>
+                          <MixLine pizza={d.pizza} burger={d.burger} taco={d.taco} kebab={d.kebab} />
+                          <p className="mt-0.5 text-[9px] text-gray-400">
+                            {formatNumberEs(d.orders, { maxFraction: 0 })} ped.
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-[11px] font-black tabular-nums">{fmtEuro(d.revenue)}</p>
+                          <DeltaBadge pct={d.revenueDeltaPct} />
+                        </div>
                       </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-[11px] font-black tabular-nums">{fmtEuro(d.revenue)}</p>
-                        <DeltaBadge pct={d.revenueDeltaPct} />
-                      </div>
+                      {channelBits.length > 0 ? (
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {channelBits.map((c) => (
+                            <span
+                              key={c.label}
+                              className="rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-gray-700 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-200 dark:ring-gray-700"
+                            >
+                              {c.label}{' '}
+                              <span className="font-black tabular-nums">{fmtEuro(c.n)}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
               </div>
-              {/* Desktop: tabla canales */}
-              <div className="hidden max-h-72 overflow-x-auto overflow-y-auto overscroll-x-contain lg:block [-webkit-overflow-scrolling:touch]">
+              {/* Escritorio: tabla completa como antes */}
+              <div className="hidden max-h-80 overflow-auto lg:block">
                 <table className="w-full min-w-[780px] text-[11px]">
                   <thead className="sticky top-0 z-20 bg-white dark:bg-gray-800">
                     <tr className="text-[9px] uppercase tracking-wide text-gray-400">
@@ -651,12 +703,8 @@ export function PortfolioOpsPulse({
                       ))}
                       <th className="px-1.5 py-1.5 text-right font-semibold">Total</th>
                       <th className="px-1.5 py-1.5 text-right font-semibold">Ped.</th>
-                      <th className="sticky right-12 z-30 min-w-[7rem] bg-white px-2 py-1.5 text-left font-semibold shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)] dark:bg-gray-800">
-                        Mix
-                      </th>
-                      <th className="sticky right-0 z-30 w-12 min-w-12 bg-white px-1.5 py-1.5 text-right font-semibold dark:bg-gray-800">
-                        Δ
-                      </th>
+                      <th className="px-2 py-1.5 text-left font-semibold">Mix</th>
+                      <th className="px-2 py-1.5 pr-3 text-right font-semibold">Δ</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -695,9 +743,7 @@ export function PortfolioOpsPulse({
                           <td className="px-1.5 py-1.5 text-right tabular-nums text-gray-500">
                             {formatNumberEs(d.orders, { maxFraction: 0 })}
                           </td>
-                          <td
-                            className={`sticky right-12 z-10 min-w-[7rem] whitespace-nowrap px-2 py-1.5 shadow-[-6px_0_8px_-6px_rgba(0,0,0,0.12)] ${stickyBg}`}
-                          >
+                          <td className="whitespace-nowrap px-2 py-1.5">
                             <MixLine
                               pizza={d.pizza}
                               burger={d.burger}
@@ -705,9 +751,7 @@ export function PortfolioOpsPulse({
                               kebab={d.kebab}
                             />
                           </td>
-                          <td
-                            className={`sticky right-0 z-10 w-12 min-w-12 px-1.5 py-1.5 text-right ${stickyBg}`}
-                          >
+                          <td className="px-2 py-1.5 pr-3 text-right">
                             <DeltaBadge pct={d.revenueDeltaPct} />
                           </td>
                         </tr>
@@ -758,52 +802,112 @@ function HeaderStat({
   );
 }
 
-function StoreDayCompact({
+function DayGlanceList({
   store,
   bestDayKey,
   worstDayKey,
+  compact = false,
 }: {
   store: StoreOpsPulse;
   bestDayKey: string | null;
   worstDayKey: string | null;
+  compact?: boolean;
 }) {
-  const recent = store.days.slice(-7);
+  const [openDay, setOpenDay] = useState<string | null>(null);
+  const days = compact ? store.days.slice(-7) : store.days;
+
   return (
-    <div className="rounded-xl border border-gray-100 px-2.5 py-2 dark:border-gray-700">
-      <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">
-        {store.storeName} · últimos días
-      </p>
-      <div className="divide-y divide-gray-100 dark:divide-gray-800">
-        {recent.map((d) => {
+    <div className="rounded-xl border border-gray-100 dark:border-gray-700">
+      <div className="border-b border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
+          Día a día · {store.storeName}
+          {compact ? ' · últimos 7' : ''}
+        </p>
+        <p className="mt-0.5 text-[9px] text-gray-400">
+          Pulsa un día para ver canales
+        </p>
+      </div>
+      <div className="max-h-80 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
+        {days.map((d) => {
           const isBest = d.dayKey === bestDayKey;
           const isWorst = d.dayKey === worstDayKey;
+          const open = openDay === d.dayKey;
+          const ch = d.channels || emptyOpsExcelChannels();
+          const channelBits = EXCEL_COLS
+            .map((c) => ({ label: c.label, n: Number(ch[c.key]) || 0 }))
+            .filter((c) => c.n > 0);
+
           return (
             <div
               key={d.dayKey}
-              className={`flex items-center justify-between gap-2 py-1.5 ${
+              className={
                 isBest
-                  ? 'bg-emerald-50/40 dark:bg-emerald-950/15'
+                  ? 'bg-emerald-50/50 dark:bg-emerald-950/20'
                   : isWorst
-                    ? 'bg-rose-50/30 dark:bg-rose-950/15'
+                    ? 'bg-rose-50/40 dark:bg-rose-950/20'
                     : ''
-              }`}
+              }
             >
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold text-gray-900 dark:text-gray-100">
-                  {d.label}
-                  {isBest ? (
-                    <span className="ml-1 text-[9px] font-bold text-emerald-600">mejor</span>
-                  ) : null}
-                  {isWorst ? (
-                    <span className="ml-1 text-[9px] font-bold text-rose-600">flojo</span>
-                  ) : null}
-                </p>
-                <MixLine pizza={d.pizza} burger={d.burger} taco={d.taco} kebab={d.kebab} />
-              </div>
-              <div className="shrink-0 text-right">
-                <p className="text-[11px] font-black tabular-nums">{fmtEuro(d.revenue)}</p>
-                <DeltaBadge pct={d.revenueDeltaPct} />
-              </div>
+              <button
+                type="button"
+                onClick={() => setOpenDay(open ? null : d.dayKey)}
+                className={`flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left ${
+                  compact ? 'min-h-11' : 'min-h-10'
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="flex flex-wrap items-center gap-1">
+                    <span className="text-[11px] font-semibold text-gray-900 dark:text-gray-100">
+                      {d.label}
+                    </span>
+                    <span className="text-[9px] text-gray-400">{d.weekdayLabel}</span>
+                    {isBest ? (
+                      <span className="text-[9px] font-bold text-emerald-600">mejor</span>
+                    ) : null}
+                    {isWorst ? (
+                      <span className="text-[9px] font-bold text-rose-600">flojo</span>
+                    ) : null}
+                  </span>
+                  <span className="mt-0.5 block">
+                    <MixLine pizza={d.pizza} burger={d.burger} taco={d.taco} kebab={d.kebab} />
+                    <span className="ml-1.5 text-[9px] text-gray-400">
+                      · {formatNumberEs(d.orders, { maxFraction: 0 })} ped.
+                    </span>
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="text-right">
+                    <span className="block text-[11px] font-black tabular-nums text-gray-900 dark:text-gray-100">
+                      {fmtEuro(d.revenue)}
+                    </span>
+                    <DeltaBadge pct={d.revenueDeltaPct} />
+                  </span>
+                  <ChevronRight
+                    className={`h-3.5 w-3.5 text-gray-300 transition-transform ${
+                      open ? 'rotate-90 text-[var(--v-blue,#2563eb)]' : ''
+                    }`}
+                  />
+                </span>
+              </button>
+              {open ? (
+                <div className="border-t border-gray-100/80 px-2.5 pb-2 pt-1 dark:border-gray-800">
+                  {channelBits.length === 0 ? (
+                    <p className="text-[10px] text-gray-400">Sin desglose de canales</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {channelBits.map((c) => (
+                        <span
+                          key={c.label}
+                          className="rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-gray-700 ring-1 ring-gray-200 dark:bg-gray-900 dark:text-gray-200 dark:ring-gray-700"
+                        >
+                          {c.label}{' '}
+                          <span className="tabular-nums font-black">{fmtEuro(c.n)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -845,7 +949,7 @@ function PdvVersus({
         Comparativa · {a.storeName} vs {b.storeName}
       </p>
 
-      <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+      <div className="grid grid-cols-3 gap-2 text-[11px] sm:max-w-none">
         <div className="rounded-lg bg-white/70 px-2 py-1.5 dark:bg-gray-900/40">
           <p className="text-[9px] text-gray-500">€</p>
           <p className="font-black tabular-nums text-gray-900 dark:text-gray-100">

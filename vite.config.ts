@@ -59,12 +59,8 @@ export default defineConfig(({ mode }) => {
           '**/.plugin-data/**',
         ],
       },
-      allowedHosts: [
-        'localhost',
-        'api.vertialapp.com',
-        'vertialapp.com',
-        'www.vertialapp.com',
-      ],
+      // true = permite acceso por IP LAN (otro portátil en la misma WiFi)
+      allowedHosts: true,
       proxy: {
         '/api': {
           target: apiTarget,

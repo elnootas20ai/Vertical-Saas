@@ -11,19 +11,8 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
-import {
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-  ZAxis,
-  ReferenceLine,
-} from 'recharts';
 import { formatMoneyEs, formatNumberEs } from '../../../../lib/formatNumberEs';
+import { formatMomLabel } from './ceoPortfolioMath';
 import { SOURCE_LABELS } from '../../../../lib/alertCenterApi';
 import { BUSINESS_TYPE_LABELS } from '../../BusinessCarousel';
 import type { BusinessType } from '../../../../lib/businessApi';
@@ -391,6 +380,7 @@ function TrendBadge({ trend }: { trend: 'up' | 'down' | 'flat' | 'unknown' }) {
 
 /* ── Mapa riesgo × tamaño ──────────────────────────────────────────── */
 
+/** Lista clara de prioridad (sustituye el scatter ilegible). */
 export function CeoRiskSizeMap({
   visions,
   onOpen,
@@ -400,102 +390,119 @@ export function CeoRiskSizeMap({
   onOpen: (businessId: string) => void;
   compact?: boolean;
 }) {
-  const data = visions.map((v) => ({
-    x: Math.max(0, v.income),
-    y: v.risk,
-    z: Math.max(40, v.staffing * 8 + 40),
-    name: v.name,
-    id: v.businessId,
-    fill: v.brandColor,
-    health: v.health,
-  }));
-  const maxX = Math.max(...data.map((d) => d.x), 1);
-  const midX = maxX / 2;
+  const ranked = useMemo(
+    () =>
+      [...visions].sort((a, b) => {
+        if (b.risk !== a.risk) return b.risk - a.risk;
+        return (b.income || 0) - (a.income || 0);
+      }),
+    [visions],
+  );
 
   return (
     <section className="overflow-hidden rounded-2xl border border-stone-200/80 bg-white dark:border-stone-800 dark:bg-stone-950">
       {compact ? null : (
         <div className="border-b border-stone-100 px-4 py-3.5 sm:px-5 dark:border-stone-800">
-          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">Tendencia</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">Salud</p>
           <h2 className="mt-0.5 text-base font-bold text-stone-900 dark:text-white">
-            Mapa de riesgo y tamaño
+            A quién mirar primero
           </h2>
           <p className="text-[11px] text-stone-500">
-            X = ingresos · Y = riesgo · cuadrante crítico: grande y en problemas
+            Ordenado por riesgo · toca una empresa para abrir
           </p>
         </div>
       )}
-      <div className={`px-2 py-3 sm:px-4 ${compact ? 'h-[240px]' : 'h-[280px] sm:h-[320px]'}`}>
-        {data.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-xs text-stone-400">Sin empresas</div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <ScatterChart margin={{ top: 12, right: 16, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,113,108,0.2)" />
-              <XAxis
-                type="number"
-                dataKey="x"
-                name="Ingresos"
-                tick={{ fontSize: 10, fill: '#78716c' }}
-                tickFormatter={(v) =>
-                  Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : String(v)
-                }
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                type="number"
-                dataKey="y"
-                name="Riesgo"
-                domain={[0, 100]}
-                tick={{ fontSize: 10, fill: '#78716c' }}
-                axisLine={false}
-                tickLine={false}
-                width={36}
-              />
-              <ZAxis type="number" dataKey="z" range={[60, 220]} />
-              <ReferenceLine y={50} stroke="#d6d3d1" strokeDasharray="4 4" />
-              <ReferenceLine x={midX} stroke="#d6d3d1" strokeDasharray="4 4" />
-              <Tooltip
-                cursor={{ strokeDasharray: '3 3' }}
-                formatter={(value: number, name: string) => {
-                  if (name === 'Ingresos') return [formatMoneyEs(value), name];
-                  if (name === 'Riesgo') return [`${value}/100`, name];
-                  return [value, name];
-                }}
-                labelFormatter={(_, p) => p?.[0]?.payload?.name || ''}
-                contentStyle={{ borderRadius: 12, border: '1px solid #e7e5e4', fontSize: 12 }}
-              />
-              <Scatter
-                data={data}
-                cursor="pointer"
-                onClick={(point) => {
-                  const payload = (point as { payload?: { id?: string }; id?: string }) || {};
-                  const id = payload.payload?.id || payload.id;
-                  if (id) onOpen(id);
-                }}
-              >
-                {data.map((d) => (
-                  <Cell
-                    key={d.id}
-                    fill={d.fill}
-                    fillOpacity={d.health === 'critical' ? 0.95 : 0.75}
-                    cursor="pointer"
+      {ranked.length === 0 ? (
+        <div className="px-4 py-8 text-center text-xs text-stone-400">Sin empresas</div>
+      ) : (
+        <ul className="divide-y divide-stone-100 dark:divide-stone-800">
+          {ranked.map((v, i) => {
+            const why = riskWhyPlain(v);
+            const momLabel = formatMomLabel(v.mom);
+            const barCls =
+              v.health === 'critical'
+                ? 'bg-rose-500'
+                : v.health === 'attention'
+                  ? 'bg-amber-500'
+                  : 'bg-emerald-500';
+            return (
+              <li key={v.businessId}>
+                <button
+                  type="button"
+                  onClick={() => onOpen(v.businessId)}
+                  className="flex w-full items-start gap-3 px-3 py-3 text-left hover:bg-stone-50/90 sm:px-4 dark:hover:bg-stone-900/50"
+                >
+                  <span className="mt-0.5 w-5 shrink-0 text-[11px] font-bold tabular-nums text-stone-300">
+                    {i + 1}
+                  </span>
+                  <span
+                    className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: v.brandColor }}
                   />
-                ))}
-              </Scatter>
-            </ScatterChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-      <div className="flex flex-wrap gap-3 border-t border-stone-100 px-4 py-2.5 text-[10px] text-stone-500 sm:px-5 dark:border-stone-800">
-        <span>↙ Pequeño / estable</span>
-        <span>↘ Grande / estable</span>
-        <span>↖ Pequeño / riesgo</span>
-        <span className="font-bold text-rose-600 dark:text-rose-400">↗ Grande y en problemas</span>
-      </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-[13px] font-bold text-stone-900 dark:text-white">
+                        {v.name}
+                      </p>
+                      <HealthBadge tone={v.health} />
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-stone-500">
+                      Mes {formatMoneyEs(v.income)}
+                      {momLabel ? ` · vs tramo ${momLabel}` : ''}
+                      {v.alertsUnresolved > 0
+                        ? ` · ${v.alertsUnresolved} alerta${v.alertsUnresolved !== 1 ? 's' : ''}`
+                        : ''}
+                    </p>
+                    <p className="mt-1 text-[11px] font-medium text-stone-600 dark:text-stone-300">
+                      {why}
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800">
+                        <div
+                          className={`h-full rounded-full ${barCls}`}
+                          style={{ width: `${Math.max(4, Math.min(100, v.risk))}%` }}
+                        />
+                      </div>
+                      <span className="shrink-0 text-[10px] font-bold tabular-nums text-stone-500">
+                        riesgo {v.risk}/100
+                      </span>
+                    </div>
+                  </div>
+                  <ArrowRight className="mt-1 h-4 w-4 shrink-0 text-stone-300" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!compact ? (
+        <p className="border-t border-stone-100 px-4 py-2.5 text-[10px] text-stone-400 dark:border-stone-800">
+          El riesgo sube con alertas críticas, caídas de facturación y pendiente alto.
+        </p>
+      ) : (
+        <p className="border-t border-stone-100 px-3 py-2 text-[10px] text-stone-400 sm:px-4 dark:border-stone-800">
+          Primero las de arriba · riesgo = alertas + caída + pendiente
+        </p>
+      )}
     </section>
   );
+}
+
+function riskWhyPlain(v: CeoCompanyVision): string {
+  const parts: string[] = [];
+  if (v.alertsHigh > 0) {
+    parts.push(
+      `${v.alertsHigh} alerta${v.alertsHigh !== 1 ? 's' : ''} crítica${v.alertsHigh !== 1 ? 's' : ''}`,
+    );
+  } else if (v.alertsUnresolved > 0) {
+    parts.push(`${v.alertsUnresolved} alerta${v.alertsUnresolved !== 1 ? 's' : ''} abiertas`);
+  }
+  if (v.mom != null && v.mom <= -15) parts.push('facturación bajando fuerte');
+  else if (v.mom != null && v.mom < 0) parts.push('facturación bajando');
+  if (v.income > 0 && v.pending / v.income > 0.1) parts.push('mucho pendiente de cobro');
+  if (v.health === 'stable' && parts.length === 0) return 'Sin focos graves ahora';
+  if (parts.length === 0) return 'Revisar alertas y ritmo del mes';
+  return parts.join(' · ');
 }
 
 /* ── Líneas por empresa (tabla desktop · filas apiladas móvil) ───────── */

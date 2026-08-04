@@ -1,11 +1,13 @@
 /**
- * Avisos al CEO/gerentes al cerrar caja TPV (OK o con descuadre) → in-app + push.
+ * Cierre de caja TPV:
+ * - Con descuadre → alerta (Centro + push)
+ * - Sin descuadre → notificación de actividad (campana), no alerta
  */
 import {
   findBusinessById,
   findAccountByUserId,
 } from './couchdb.js';
-import { emitGlobalAlert } from './alertEmitter.js';
+import { emitGlobalAlert, emitPositiveAlert } from './alertEmitter.js';
 import logger from './logger.js';
 
 const DELIVERY_CAJA_ROUTE = '/saas/vertical/delivery/caja';
@@ -16,7 +18,7 @@ function isManagerRole(role) {
 }
 
 /**
- * Destinatarios: dueño + admins/gerentes (no el que cierra, si es distinto).
+ * Destinatarios: dueño + admins/gerentes.
  */
 export function resolveTpvCloseNotificationRecipients(business, closerUserId) {
   const recipients = new Set();
@@ -28,11 +30,7 @@ export function resolveTpvCloseNotificationRecipients(business, closerUserId) {
     if (!uid) continue;
     if (isManagerRole(m.role)) recipients.add(uid);
   }
-  // El que cierra también puede ser CEO; no lo excluimos: debe enterarse en otros dispositivos.
-  // Si solo hay un destinatario y es el closer, igual notificamos (su iPhone).
-  if (closer && recipients.size > 1) {
-    // keep closer if owner; still notify everyone including closer when they are manager
-  }
+  if (closer && recipients.size === 0) recipients.add(closer);
   return Array.from(recipients);
 }
 
@@ -45,9 +43,9 @@ function formatDiff(diff) {
 /**
  * @param {object} params
  * @param {object} params.req
- * @param {string} params.dataUserId — dueño de datos (account)
- * @param {string} params.actorUserId — quien cerró
- * @param {object} params.session — sesión TPV ya cerrada
+ * @param {string} params.dataUserId
+ * @param {string} params.actorUserId
+ * @param {object} params.session
  */
 export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, session }) {
   try {
@@ -71,27 +69,48 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
     const worker = String(session.workerName || 'Equipo').trim();
     const diff = Math.round((Number(session.difference) || 0) * 100) / 100;
     const hasDiscrepancy = Math.abs(diff) >= 0.01;
-    const ruleId = hasDiscrepancy
-      ? 'delivery_register_closed_discrepancy'
-      : 'delivery_register_closed_ok';
-    const title = hasDiscrepancy
-      ? `Caja cerrada con descuadre · ${formatDiff(diff)}`
-      : 'Caja cerrada correctamente';
-    const message = hasDiscrepancy
-      ? `${worker} cerró ${store}. Diferencia: ${formatDiff(diff)}.`
-      : `${worker} cerró ${store} sin descuadre.`;
 
-    // emitGlobalAlert resuelve recipients por business; fuerza push a dueño.
+    if (!hasDiscrepancy) {
+      const recipients = resolveTpvCloseNotificationRecipients(business, actorUserId);
+      const list = recipients.length
+        ? recipients
+        : [String(business?.owner_user_id || dataUserId || '').trim()].filter(Boolean);
+      if (list.length === 0) return;
+
+      await emitPositiveAlert({
+        userIds: list,
+        businessId,
+        category: 'tpv_register_closed_ok',
+        source: 'delivery',
+        title: 'Caja cerrada correctamente',
+        message: `${worker} cerró ${store} sin descuadre.`,
+        entityId: session._id,
+        entityType: 'tpv_register_session',
+        route: DELIVERY_CAJA_ROUTE,
+        dedupKey: `tpv-close-ok-${session._id}`,
+        metadata: {
+          difference: 0,
+          pointOfSaleId: session.pointOfSaleId,
+          pointOfSaleName: session.pointOfSaleName,
+          terminalName: session.terminalName,
+          workerName: session.workerName,
+          actorUserId,
+          closedAt: session.closedAt,
+        },
+      });
+      return;
+    }
+
     await emitGlobalAlert({
       businessId: businessId || undefined,
       userId: business?.owner_user_id || dataUserId,
       source: 'delivery',
-      ruleId,
-      category: ruleId,
-      priority: hasDiscrepancy ? 'critical' : 'medium',
-      level: hasDiscrepancy ? 'warning' : 'info',
-      title,
-      message,
+      ruleId: 'delivery_register_closed_discrepancy',
+      category: 'delivery_register_closed_discrepancy',
+      priority: 'critical',
+      level: 'warning',
+      title: `Caja cerrada con descuadre · ${formatDiff(diff)}`,
+      message: `${worker} cerró ${store}. Diferencia: ${formatDiff(diff)}.`,
       entityId: session._id,
       entityType: 'tpv_register_session',
       route: DELIVERY_CAJA_ROUTE,

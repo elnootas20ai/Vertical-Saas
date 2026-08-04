@@ -79,9 +79,18 @@ run(
   ],
 );
 
+// No login admin (OTP Gmail). Solo diag con cuenta no-admin, o SMOKE_ALLOW_ADMIN_OTP_LOGIN=1.
 const hasSaasCreds = Boolean(process.env.SAAS_LOGIN_EMAIL && process.env.SAAS_LOGIN_PASSWORD);
-if (hasSaasCreds) {
-  run('diag-tpv-catalog (producción)', 'node', ['scripts/diag-tpv-catalog.mjs']);
+const email = String(process.env.SAAS_LOGIN_EMAIL || '').trim().toLowerCase();
+const allowAdminOtp = process.env.SMOKE_ALLOW_ADMIN_OTP_LOGIN === '1';
+const isAdminEmail = email === 'uriel@admin.com';
+if (hasSaasCreds && (!isAdminEmail || allowAdminOtp)) {
+  run('diag-tpv-catalog', 'node', ['scripts/diag-tpv-catalog.mjs']);
+} else if (isAdminEmail && !allowAdminOtp) {
+  console.log(
+    '[deploy:all] Omitiendo diag-tpv-catalog (cuenta admin → OTP Gmail). ' +
+      'Usa cuenta de prueba o SMOKE_ALLOW_ADMIN_OTP_LOGIN=1 solo a propósito.',
+  );
 } else {
   console.log(
     '[deploy:all] Omitiendo diag-tpv-catalog (faltan SAAS_LOGIN_EMAIL / SAAS_LOGIN_PASSWORD en .env)',

@@ -1,10 +1,11 @@
 /**
- * Alert Emitter — Servicio universal de emisión de alertas globales.
+ * Alert Emitter — emisión de alertas Vertial.
  *
- * Cualquier módulo puede importar `emitGlobalAlert()` para emitir alertas
- * que respetan la config del negocio (canales, roles, quietHours, mute).
- *
- * También exporta helpers compartidos para los motores de alertas verticales.
+ * Todo son alertas. Hay dos polaridades:
+ * - `emitPositiveAlert()` / `emitActivityNotification()` → POSITIVA (fue bien / info OK).
+ *   Solo campana. No Centro de Alertas, no push urgente, no banner de problema.
+ * - `emitGlobalAlert()` → NEGATIVA (problema / acción requerida).
+ *   Centro de Alertas + push si aplica.
  */
 
 import {
@@ -39,6 +40,22 @@ import { isCeoUrgentMobilePushRule } from './pushAlertPolicy.js';
 
 export const fakeReq = { headers: {} };
 const SETTINGS_DB = 'settings';
+
+/** ¿Alerta POSITIVA (fue bien)? No debe ir al Centro de Alertas de problemas. */
+export function isPositiveAlertDoc(doc) {
+  if (!doc || typeof doc !== 'object') return false;
+  if (doc.polarity === 'positive' || doc.metadata?.polarity === 'positive') return true;
+  if (doc.excludeFromAlertCenter === true) return true;
+  if (doc.kind === 'activity' || doc.kind === 'positive') return true;
+  if (doc.metadata?.excludeFromAlertCenter === true) return true;
+  if (doc.metadata?.kind === 'activity' || doc.metadata?.kind === 'positive') return true;
+  return false;
+}
+
+/** @deprecated Usar isPositiveAlertDoc */
+export function isActivityNotificationDoc(doc) {
+  return isPositiveAlertDoc(doc);
+}
 
 const PLAN_TIER_RANK = { basic: 0, normal: 1, pro: 2 };
 
@@ -290,7 +307,10 @@ export async function emitGlobalAlert({
       entityId,
       entityType,
       route,
-      metadata,
+      metadata: {
+        ...(metadata && typeof metadata === 'object' ? metadata : {}),
+        polarity: 'negative',
+      },
       priority: resolvedPriority,
       status: 'new',
       businessId,
@@ -298,6 +318,8 @@ export async function emitGlobalAlert({
       channels,
       assignedTo: { userIds: recipientUserIds, roles: [] },
     });
+    notifBase.polarity = 'negative';
+    notifBase.kind = 'negative';
 
     if (dedupKey) {
       const existing = await findOpenAlertDoc(category, dedupKey);
@@ -313,12 +335,10 @@ export async function emitGlobalAlert({
           updatedAt: now,
           channels,
         };
-        const saved = await saveNotification(fakeReq, refreshed);
-        const sanitized = sanitizeNotification(saved);
-        for (const uid of recipientUserIds) {
-          broadcastToUser(uid, 'notification', sanitized);
-        }
-        return sanitized;
+        // Solo persistir el refresh. NO reenviar SSE/popup: si no, cada ciclo
+        // del motor (cientos de alertas abiertas) dispara el banner de arriba.
+        await saveNotification(fakeReq, refreshed);
+        return sanitizeNotification(refreshed);
       }
       if (!force && await hasLegacyDatedAlertToday(category, dedupKey)) return null;
       notifBase._id = buildStableAlertId(category, dedupKey);
@@ -386,4 +406,105 @@ export async function emitGlobalAlert({
     logger.warn({ tag: 'ALERT_EMITTER', err: err?.message }, 'Error emitiendo alerta global');
     return null;
   }
+}
+
+/**
+ * Alerta POSITIVA (“fue bien” / info OK).
+ * Solo campana. No Centro de problemas, no push urgente, no banner rojo.
+ *
+ * Usar para: caja cerrada OK, tarea hecha, sync correcto, etc.
+ * NO usar para: descuadres, impagos, stock crítico, retrasos graves → emitGlobalAlert.
+ *
+ * @returns {Promise<object[]>} alertas positivas sanitizadas
+ */
+export async function emitPositiveAlert({
+  userIds = [],
+  userId = '',
+  businessId = '',
+  category = 'positive',
+  source = 'sistema',
+  title,
+  message,
+  entityId = '',
+  entityType = '',
+  route = '',
+  metadata = {},
+  dedupKey = '',
+} = {}) {
+  const recipients = Array.from(
+    new Set(
+      [...(Array.isArray(userIds) ? userIds : []), userId]
+        .map((id) => String(id || '').trim())
+        .filter(Boolean),
+    ),
+  );
+  if (!recipients.length || !String(title || '').trim()) return [];
+
+  const resolvedSource = normalizeSource(source || deriveSourceFromCategory(category));
+  const now = new Date().toISOString();
+  const created = [];
+
+  for (const uid of recipients) {
+    try {
+      const docId = dedupKey
+        ? `notification:positive:${String(dedupKey).trim()}:${uid}`
+        : undefined;
+
+      if (docId) {
+        const existing = await getDocument(fakeReq, NOTIFICATIONS_DB, docId).catch(() => null);
+        if (existing?._rev) continue;
+      }
+
+      const base = buildNotificationDocument({
+        userId: uid,
+        level: 'success',
+        category: String(category || 'positive').trim() || 'positive',
+        title,
+        message,
+        entityId,
+        entityType,
+        route,
+        priority: 'low',
+        status: 'new',
+        businessId: String(businessId || '').trim(),
+        source: resolvedSource,
+        channels: ['inApp'],
+        metadata: {
+          ...(metadata && typeof metadata === 'object' ? metadata : {}),
+          kind: 'positive',
+          polarity: 'positive',
+          excludeFromAlertCenter: true,
+        },
+      });
+
+      const doc = {
+        ...base,
+        ...(docId ? { _id: docId } : {}),
+        kind: 'positive',
+        polarity: 'positive',
+        excludeFromAlertCenter: true,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const saved = await saveNotification(fakeReq, doc);
+      const sanitized = sanitizeNotification(saved);
+      if (sanitized) {
+        broadcastToUser(uid, 'notification', sanitized);
+        created.push(sanitized);
+      }
+    } catch (err) {
+      logger.warn(
+        { tag: 'POSITIVE_ALERT', err: err?.message, userId: uid },
+        'Error emitiendo alerta positiva',
+      );
+    }
+  }
+
+  return created;
+}
+
+/** @deprecated Usar emitPositiveAlert — mismo contrato (alerta positiva). */
+export async function emitActivityNotification(params) {
+  return emitPositiveAlert(params);
 }

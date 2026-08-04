@@ -2,11 +2,15 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertSafeSaasLogin } from './lib/prodAdminLoginGuard.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 dotenv.config({ path: path.join(root, '.env') });
+dotenv.config({ path: path.join(root, '.env.development') });
 
-const BASE = String(process.env.VERIFY_API_BASE || 'https://vertialapp.com').replace(/\/+$/, '');
+const BASE = String(process.env.VERIFY_API_BASE || 'http://127.0.0.1:3001').replace(/\/+$/, '');
+const EMAIL = String(process.env.SAAS_LOGIN_EMAIL || '').trim().toLowerCase();
+const PASSWORD = String(process.env.SAAS_LOGIN_PASSWORD || '').trim();
 
 function scopeFilter(items, businessId, brands, accountBusinessCount, activeBusinessType) {
   const brandIds = new Set(brands.map((b) => String(b._id || '').trim()).filter(Boolean));
@@ -44,10 +48,27 @@ async function api(route, { token, method = 'GET', body } = {}) {
   return { status: res.status, data };
 }
 
+if (!EMAIL || !PASSWORD) {
+  console.error('[diag-tpv-catalog] Faltan SAAS_LOGIN_EMAIL / SAAS_LOGIN_PASSWORD');
+  process.exit(1);
+}
+
+const loginGuard = assertSafeSaasLogin({ apiBase: BASE, email: EMAIL });
+if (loginGuard.blocked) {
+  console.error(`[diag-tpv-catalog] ${loginGuard.reason}`);
+  process.exit(1);
+}
+
 const loginRes = await api('/api/auth/login', {
   method: 'POST',
-  body: { email: process.env.SAAS_LOGIN_EMAIL, password: process.env.SAAS_LOGIN_PASSWORD },
+  body: { email: EMAIL, password: PASSWORD },
 });
+if (loginRes.data?.requiresLoginCode) {
+  console.error(
+    '[diag-tpv-catalog] Login pide OTP por email — abortado (no usar admin remoto).',
+  );
+  process.exit(1);
+}
 const token = loginRes.data?.accessToken;
 const userId = loginRes.data?.user?.user_id;
 if (!token || !userId) {

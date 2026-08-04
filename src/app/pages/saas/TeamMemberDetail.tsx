@@ -15,6 +15,7 @@ import {
   Coffee,
   DollarSign,
   Download,
+  Copy,
   Edit2,
   Eye,
   File,
@@ -71,6 +72,11 @@ import {
   computeDayHours,
   computeDayWorkMinutes,
   inferWorkdayFromWeeklyHours,
+  firstEnabledShift,
+  applyShiftTimesToEnabledDays,
+  applyShiftTimesToLaborDays,
+  defaultTenMinuteBreak,
+  breakEndFromStart,
 } from '../../lib/schedulesApi';
 import type { ScheduleTemplate, DayShift, Weekday } from '../../lib/schedulesApi';
 import { ScheduleTimeField } from '../../components/saas/ScheduleTimeField';
@@ -529,6 +535,16 @@ export function TeamMemberDetail() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [editWeekly, setEditWeekly] = useState<Record<Weekday, DayShift>>(() => defaultWeekly());
+  /** Franja rápida para unificar varios días (mismo patrón que horario de tienda). */
+  const [quickShift, setQuickShift] = useState<Pick<DayShift, 'start' | 'end' | 'breakStart' | 'breakEnd'>>(() => {
+    const br = defaultTenMinuteBreak('09:00', '17:00');
+    return {
+      start: '09:00',
+      end: '17:00',
+      breakStart: br.breakStart,
+      breakEnd: br.breakEnd,
+    };
+  });
   const [savingSchedule, setSavingSchedule] = useState(false);
 
   // Vacations
@@ -655,12 +671,74 @@ export function TeamMemberDetail() {
   }, [businessId, userId]);
 
   const startEditSchedule = () => {
-    setEditWeekly(schedule?.weekly || defaultWeekly());
+    const weekly = schedule?.weekly || defaultWeekly();
+    setEditWeekly(weekly);
+    const seed = firstEnabledShift(weekly);
+    const looksLikeNoBreak =
+      !seed.breakStart
+      || !seed.breakEnd
+      || seed.breakStart === seed.breakEnd
+      || (seed.breakStart === '00:00' && seed.breakEnd === '00:00');
+    const br = looksLikeNoBreak
+      ? defaultTenMinuteBreak(seed.start, seed.end)
+      : { breakStart: seed.breakStart, breakEnd: seed.breakEnd };
+    setQuickShift({
+      start: seed.start,
+      end: seed.end,
+      breakStart: br.breakStart,
+      breakEnd: br.breakEnd,
+    });
     setEditingSchedule(true);
   };
 
   const updateEditDay = (day: Weekday, field: keyof DayShift, value: string | boolean) => {
-    setEditWeekly((prev) => ({ ...prev, [day]: { ...prev[day], [field]: value } }));
+    setEditWeekly((prev) => {
+      const current = prev[day];
+      const nextDay: DayShift = { ...current, [field]: value };
+      if (field === 'breakStart') {
+        nextDay.breakEnd = breakEndFromStart(String(value));
+      } else if (field === 'enabled' && value === true) {
+        const br = defaultTenMinuteBreak(nextDay.start, nextDay.end);
+        nextDay.breakStart = br.breakStart;
+        nextDay.breakEnd = br.breakEnd;
+      }
+      return { ...prev, [day]: nextDay };
+    });
+  };
+
+  const updateQuickShift = (
+    field: 'start' | 'end' | 'breakStart' | 'breakEnd',
+    value: string,
+  ) => {
+    setQuickShift((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === 'start' || field === 'end') {
+        const br = defaultTenMinuteBreak(
+          field === 'start' ? value : next.start,
+          field === 'end' ? value : next.end,
+        );
+        next.breakStart = br.breakStart;
+        next.breakEnd = br.breakEnd;
+      } else if (field === 'breakStart') {
+        next.breakEnd = breakEndFromStart(value);
+      }
+      return next;
+    });
+  };
+
+  const applyQuickToEnabledDays = () => {
+    const enabledCount = WEEKDAYS.filter((d) => editWeekly[d]?.enabled).length;
+    if (enabledCount === 0) {
+      toast.error('Marca al menos un día como laborable');
+      return;
+    }
+    setEditWeekly((prev) => applyShiftTimesToEnabledDays(prev, quickShift));
+    toast.success(`Horario copiado a ${enabledCount} día${enabledCount === 1 ? '' : 's'} activo${enabledCount === 1 ? '' : 's'}`);
+  };
+
+  const applyQuickToLaborDays = () => {
+    setEditWeekly((prev) => applyShiftTimesToLaborDays(prev, quickShift));
+    toast.success('Lunes a viernes con el mismo horario');
   };
 
   const handleSaveSchedule = async () => {
@@ -1667,6 +1745,58 @@ export function TeamMemberDetail() {
                     Horas en formato 24 h (ej. salida 17:00 = 5 de la tarde)
                   </span>
                 </div>
+
+                <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 dark:border-stone-600 dark:bg-stone-900/50">
+                  <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">Unificar horario</p>
+                  <p className="mt-0.5 text-xs leading-relaxed text-stone-500 dark:text-stone-400">
+                    Pon la franja una vez y cópiala a varios días de golpe.
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-end gap-2">
+                    <ScheduleTimeField
+                      compact
+                      label="Entrada"
+                      value={quickShift.start}
+                      onChange={(v) => updateQuickShift('start', v)}
+                    />
+                    <ScheduleTimeField
+                      compact
+                      label="Salida"
+                      value={quickShift.end}
+                      onChange={(v) => updateQuickShift('end', v)}
+                    />
+                    <span className="mx-1 hidden text-xs text-stone-300 sm:inline">|</span>
+                    <ScheduleTimeField
+                      compact
+                      label="Ini. pausa"
+                      value={quickShift.breakStart}
+                      onChange={(v) => updateQuickShift('breakStart', v)}
+                    />
+                    <ScheduleTimeField
+                      compact
+                      label="Fin pausa"
+                      value={quickShift.breakEnd}
+                      onChange={(v) => updateQuickShift('breakEnd', v)}
+                    />
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={applyQuickToEnabledDays}
+                      className="inline-flex items-center gap-2 rounded-xl bg-[#2563EB] px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copiar a días activos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={applyQuickToLaborDays}
+                      className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-900 dark:text-stone-200"
+                    >
+                      Lun–Vie iguales
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   {WEEKDAYS.map((day) => {
                     const shift = editWeekly[day];

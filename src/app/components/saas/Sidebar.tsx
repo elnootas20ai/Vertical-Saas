@@ -494,13 +494,13 @@ const workerMenuItemDefs = [
 ] as const;
 
 /** Ítems del menú trabajador que no van en sidebar (acceso operativo vía landing / código tienda). */
-const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv', 'tpv-rapido', 'caja']);
+const WORKER_SIDEBAR_HIDDEN_ITEM_IDS = new Set(['worker-tpv', 'worker-stock-review', 'worker-onboarding', 'tpv-rapido', 'caja']);
 
 const WORKER_HOME_GROUP: SidebarGroup = {
   id: 'worker-main',
   label: 'Principal',
   icon: <House className="w-4 h-4 shrink-0" />,
-  itemIds: ['worker-tasks', 'worker-stock-review', 'worker-calendar', 'worker-requests', 'worker-clock', 'worker-chat', 'worker-docs', 'worker-onboarding'],
+  itemIds: ['worker-tasks', 'worker-calendar', 'worker-requests', 'worker-clock', 'worker-chat', 'worker-docs'],
 };
 
 const workerSidebarGroupDefs = [

@@ -596,6 +596,10 @@ export interface AppNotification {
   read: boolean;
   createdAt: string;
   updatedAt?: string;
+  /** Aviso de actividad (“fue bien”) — campana, no Centro de Alertas */
+  kind?: string | null;
+  polarity?: string | null;
+  excludeFromAlertCenter?: boolean;
 }
 
 export type SubscriptionStatus =
@@ -2517,16 +2521,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!n?.id) return;
     setNotifications((prev) => {
       if (prev.some((x) => x.id === n.id)) return prev;
+      // Solo avisar a UI (banner / Clockins) cuando es aviso NUEVO, no en refrescos.
+      queueMicrotask(() => {
+        try {
+          window.dispatchEvent(new CustomEvent('vertial:notification', { detail: n }));
+        } catch {
+          // Silenciado: dispatchEvent no debe romper el flujo de SSE.
+        }
+      });
       return capNotifications([deserializeNotification(n), ...prev]);
     });
-    // Evento DOM para que cualquier pantalla pueda reaccionar al SSE sin tener
-    // que enchufarse al provider. Se usa, por ejemplo, en Clockins para
-    // refrescar el resumen diario en vivo cuando un trabajador ficha.
-    try {
-      window.dispatchEvent(new CustomEvent('vertial:notification', { detail: n }));
-    } catch {
-      // Silenciado: dispatchEvent no debe romper el flujo de SSE.
-    }
   }, []);
 
   const handleVehicleUpdated = useCallback((data: unknown) => {

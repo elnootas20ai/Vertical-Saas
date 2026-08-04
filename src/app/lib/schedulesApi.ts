@@ -115,7 +115,107 @@ export function getMonday(date: Date = new Date()): string {
 }
 
 export function emptyShift(): DayShift {
-  return { enabled: false, start: '09:00', end: '17:00', breakStart: '13:00', breakEnd: '14:00' };
+  const breakTimes = defaultTenMinuteBreak('09:00', '17:00');
+  return { enabled: false, start: '09:00', end: '17:00', ...breakTimes };
+}
+
+/** Pausa laboral por defecto: 10 minutos. */
+export const DEFAULT_BREAK_MINUTES = 10;
+
+function minutesToHhMm(totalMinutes: number): string {
+  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** Suma minutos a una hora HH:mm (ciclo 24 h). */
+export function addScheduleMinutes(value: string, deltaMinutes: number, fallback = '13:00'): string {
+  const base = scheduleTimeToMinutes(value);
+  if (base < 0) return fallback;
+  return minutesToHhMm(base + deltaMinutes);
+}
+
+/**
+ * Fin de pausa = inicio + 10 min (predeterminado del producto).
+ */
+export function breakEndFromStart(breakStart: string, fallbackStart = '13:00'): string {
+  const start = normalizeScheduleTimeValue(breakStart, fallbackStart) || fallbackStart;
+  return addScheduleMinutes(start, DEFAULT_BREAK_MINUTES, start);
+}
+
+/**
+ * Pausa de 10 min cerca del centro del turno (o 13:00–13:10 si el turno es corto).
+ */
+export function defaultTenMinuteBreak(
+  start = '09:00',
+  end = '17:00',
+): Pick<DayShift, 'breakStart' | 'breakEnd'> {
+  const startMin = scheduleTimeToMinutes(start);
+  let endMin = scheduleTimeToMinutes(end);
+  if (startMin < 0 || endMin < 0) {
+    return { breakStart: '13:00', breakEnd: '13:10' };
+  }
+  if (endMin <= startMin) endMin += 24 * 60;
+  const workLen = endMin - startMin;
+  if (workLen <= DEFAULT_BREAK_MINUTES + 10) {
+    // Turno muy corto: pausa justo después de entrar (+10 min), 10 min de duración.
+    const breakStart = minutesToHhMm(startMin + Math.min(10, Math.max(0, workLen - DEFAULT_BREAK_MINUTES)));
+    return { breakStart, breakEnd: breakEndFromStart(breakStart) };
+  }
+  const mid = startMin + Math.floor(workLen / 2);
+  const breakStart = minutesToHhMm(mid);
+  return { breakStart, breakEnd: breakEndFromStart(breakStart) };
+}
+
+const LABOR_WEEKDAYS: Weekday[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+
+/** Primer día marcado (o lunes) para sembrar la franja rápida. */
+export function firstEnabledShift(
+  weekly: Record<Weekday, DayShift>,
+): DayShift {
+  for (const day of WEEKDAYS) {
+    if (weekly[day]?.enabled) return { ...weekly[day] };
+  }
+  return { ...weekly.monday };
+}
+
+/** Copia entrada/salida/pausa a todos los días ya marcados como laborables. */
+export function applyShiftTimesToEnabledDays(
+  weekly: Record<Weekday, DayShift>,
+  times: Pick<DayShift, 'start' | 'end' | 'breakStart' | 'breakEnd'>,
+): Record<Weekday, DayShift> {
+  const next = { ...weekly };
+  for (const day of WEEKDAYS) {
+    if (!next[day]?.enabled) continue;
+    next[day] = {
+      ...next[day],
+      start: times.start,
+      end: times.end,
+      breakStart: times.breakStart,
+      breakEnd: times.breakEnd,
+    };
+  }
+  return next;
+}
+
+/** Activa Lun–Vie con la misma franja; sábado/domingo no se tocan. */
+export function applyShiftTimesToLaborDays(
+  weekly: Record<Weekday, DayShift>,
+  times: Pick<DayShift, 'start' | 'end' | 'breakStart' | 'breakEnd'>,
+): Record<Weekday, DayShift> {
+  const next = { ...weekly };
+  for (const day of LABOR_WEEKDAYS) {
+    next[day] = {
+      ...next[day],
+      enabled: true,
+      start: times.start,
+      end: times.end,
+      breakStart: times.breakStart,
+      breakEnd: times.breakEnd,
+    };
+  }
+  return next;
 }
 
 /**

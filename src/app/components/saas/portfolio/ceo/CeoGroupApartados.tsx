@@ -357,7 +357,8 @@ export function CeoGroupApartados({
         <div className="flex flex-wrap items-end justify-between gap-2 px-0.5">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">5 · Salud</p>
-            <h2 className="text-sm font-bold text-stone-900 dark:text-white">Riesgo × tamaño</h2>
+            <h2 className="text-sm font-bold text-stone-900 dark:text-white">A quién mirar primero</h2>
+            <p className="text-[11px] text-stone-500">Lista por riesgo · en castellano, sin gráfica rara</p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold">
             <span className="rounded-lg bg-rose-50 px-2 py-0.5 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
