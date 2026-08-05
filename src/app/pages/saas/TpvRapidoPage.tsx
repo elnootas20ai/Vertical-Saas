@@ -15,6 +15,7 @@ import { useClientPhoneSearch, clearClientPhoneSearchCache } from '../../hooks/u
 import {
   filterDeliveryOrdersRequest,
   createDeliveryOrderWithCajaStatus,
+  updateDeliveryOrderRequest,
   getDeliveryConfigRequest,
   type CatalogItem,
   type DeliveryOrder,
@@ -160,6 +161,11 @@ import {
   writeDeliveryOpsSelectedPdvId,
 } from '../../lib/deliveryOpsPdvSelection';
 import { notifyDeliveryOpsLive } from '../../lib/deliveryOpsLive';
+import {
+  isDeliveryOrderEditableOnTpvBoard,
+  seedTpvCartFromDeliveryOrder,
+} from '../../lib/tpvEditDeliveryOrder';
+import { orderAlreadyCobrado } from '../../lib/tpvCajaScope';
 import { normalizeClockinUserId } from '../../lib/clockinUserId';
 import {
   ArrowLeft,
@@ -849,6 +855,9 @@ export type TpvRapidoOrderFlowProps = {
   registerOverride?: TpvRegisterContextType;
   /** Desde el plano: abrir carta o ir directo a cobro. */
   restaurantOpenIntent?: 'order' | 'pay';
+  /** Pedido en montaje/reparto (domicilio o recogida) a editar. */
+  editingDeliveryOrder?: DeliveryOrder | null;
+  onEditingDeliveryOrderSaved?: (order: DeliveryOrder) => void;
 };
 
 export function TpvRapidoOrderFlow({
@@ -864,6 +873,8 @@ export function TpvRapidoOrderFlow({
   restaurantPermissions,
   registerOverride,
   restaurantOpenIntent = 'order',
+  editingDeliveryOrder = null,
+  onEditingDeliveryOrderSaved,
 }: TpvRapidoOrderFlowProps = {}) {
   useTpvOrderFlowChrome(true);
   const orderFlowChrome = useTpvOrderFlowActive();
@@ -1473,6 +1484,78 @@ export function TpvRapidoOrderFlow({
     return m;
   }, [catalog]);
 
+  const isEditingDeliveryOrder = Boolean(
+    editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder),
+  );
+  const editHydratedRef = useRef<string | null>(null);
+
+  // Hidratar carrito al editar (domicilio o recogida; montaje o reparto).
+  useEffect(() => {
+    if (!editingDeliveryOrder || !isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) return;
+    if (!userId) return;
+    if (editHydratedRef.current === editingDeliveryOrder._id) return;
+    if (loadingCatalog) return;
+    editHydratedRef.current = editingDeliveryOrder._id;
+
+    const order = editingDeliveryOrder;
+    const seeds = seedTpvCartFromDeliveryOrder(order, catalogById, userId);
+    setCart(
+      seeds.map((s) => ({
+        lineId: s.lineId,
+        catalogItem: s.catalogItem,
+        quantity: s.quantity,
+        customization: s.customization,
+      })),
+    );
+    setOrderNotes(String(order.notes || '').trim());
+    setWaiveDeliveryFee(!(Number(order.deliveryFee) > 0));
+    const dtype = (order.deliveryType === 'recogida' ? 'recogida' : 'domicilio') as DeliveryType;
+    setDeliveryType(dtype);
+    setSelectedAddressId(order.deliveryAddressId || null);
+    const pay = normalizeTpvPaymentMethod(order.paymentMethod);
+    if (pay) setPaymentMethod(pay);
+    setCurrentStep('products');
+    setCompletedSteps(new Set(['client', 'delivery']));
+    setProductPickerReset((n) => n + 1);
+
+    const clientId = String(order.clientId || '').trim();
+    if (clientId && !isTpvSyntheticClientId(clientId)) {
+      void getClientDetailRequest(userId, clientId)
+        .then((c) => {
+          if (c) selectClient(c);
+        })
+        .catch(() => {
+          selectClient(
+            buildDeliveryQuickAttentionClient(
+              userId,
+              writeBusinessId || businessId || '',
+              order.customerName || 'Cliente',
+              order.customerPhone || '',
+              '+34',
+            ),
+          );
+        });
+    } else {
+      selectClient(
+        buildDeliveryQuickAttentionClient(
+          userId,
+          writeBusinessId || businessId || '',
+          order.customerName || 'Cliente',
+          order.customerPhone || '',
+          '+34',
+        ),
+      );
+    }
+  }, [
+    editingDeliveryOrder,
+    userId,
+    catalogById,
+    loadingCatalog,
+    selectClient,
+    writeBusinessId,
+    businessId,
+  ]);
+
   const hasPricedProducts = useMemo(
     () => catalog.some((item) => Number(item.unitPrice || 0) > 0),
     [catalog],
@@ -1782,13 +1865,17 @@ export function TpvRapidoOrderFlow({
     cart.length > 0 &&
     (isRestaurantMode || deliveryType !== 'domicilio' || !!selectedAddressId);
 
-  const canSubmit = orderReady && !!paymentMethod;
+  /** Domicilio: hay que anotar efectivo/tarjeta. Recogida: sin pago aquí (cobra al Entregar). */
+  const paymentRequiredToSubmit = deliveryType === 'domicilio';
+  const canSubmit = orderReady && (!paymentRequiredToSubmit || !!paymentMethod);
   const isProductsFocus = currentStep === 'products' && isStepReachable('products');
 
   const deliveryStepReady =
     deliveryType === 'recogida'
     || (deliveryType === 'domicilio' && !!selectedAddressId);
-  const deliveryCanContinue = deliveryStepReady && !!paymentMethod;
+  const deliveryCanContinue =
+    deliveryType === 'recogida'
+    || (deliveryType === 'domicilio' && !!selectedAddressId && !!paymentMethod);
 
   const choosePaymentMethod = useCallback((key: PaymentMethod) => {
     setPaymentMethod(key);
@@ -2504,7 +2591,9 @@ export function TpvRapidoOrderFlow({
       }
       const parts = splitParts ?? pendingSplitParts;
       const method = methodOverride || paymentMethod || (parts?.length ? 'mixto' : null);
-      if (!method) return;
+      // Recogida: sin método en creación (cobra al Entregar). Domicilio: método obligatorio.
+      if (deliveryType === 'domicilio' && !method) return;
+      if (!method && deliveryType !== 'recogida' && deliveryType !== 'domicilio') return;
 
       const incompleteHalfHalf = cart.find(
         (ci) =>
@@ -2522,11 +2611,12 @@ export function TpvRapidoOrderFlow({
         return;
       }
 
-      // Domicilio: no cobrar al crear → montaje/reparto «No pagado» (Pagar / Entregar luego).
-      // Recogida (también en tablet): cobrar ya → status entregado y sale en Historial abajo.
+      // Domicilio: anota cómo pagará, cobra al entregar.
+      // Recogida: sin pago al crear → cobra al Entregar en montaje.
       // Pago dividido: crear pendiente y registrar tramos después.
       const collectOnDelivery =
         deliveryType === 'domicilio'
+        || deliveryType === 'recogida'
         || (Boolean(parts?.length) && method === 'mixto');
 
       setSubmitting(true);
@@ -2566,13 +2656,8 @@ export function TpvRapidoOrderFlow({
         const takerId = effectiveOrderTakerId;
         const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
 
-        // Tablet recogida cobrada al crear → entregado (Historial). Domicilio tablet → listo.
-        const submitStatus: DeliveryOrderStatus =
-          tabletMode && deliveryType === 'recogida' && !collectOnDelivery
-            ? 'entregado'
-            : tabletMode
-              ? 'listo'
-              : status;
+        // Tablet: domicilio y recogida entran en montaje (`listo`). Recogida cobrada ≠ entregado.
+        const submitStatus: DeliveryOrderStatus = tabletMode ? 'listo' : status;
         const now = new Date().toISOString();
 
         const tableNote = restaurantTable
@@ -2643,13 +2728,18 @@ export function TpvRapidoOrderFlow({
           ]
             .filter(Boolean)
             .join(' · '),
-          paymentMethod: method === 'mixto' ? 'mixto' : normalizeTpvPaymentMethod(method),
-          paymentStatus: collectOnDelivery ? 'pending' : 'paid',
-          paidAmount: collectOnDelivery ? 0 : payableTotal,
-          paidAt: collectOnDelivery ? '' : now,
-          paymentCollected: !collectOnDelivery,
-          paymentCollectedAt: collectOnDelivery ? '' : now,
-          paymentCollectedBy: collectOnDelivery ? '' : takerName,
+          ...(method
+            ? {
+                paymentMethod:
+                  method === 'mixto' ? 'mixto' : normalizeTpvPaymentMethod(method),
+              }
+            : {}),
+          paymentStatus: collectOnDelivery || !method ? 'pending' : 'paid',
+          paidAmount: collectOnDelivery || !method ? 0 : payableTotal,
+          paidAt: collectOnDelivery || !method ? '' : now,
+          paymentCollected: !collectOnDelivery && !!method,
+          paymentCollectedAt: collectOnDelivery || !method ? '' : now,
+          paymentCollectedBy: collectOnDelivery || !method ? '' : takerName,
           ...(cashReceived != null && cashChange != null && !collectOnDelivery
             ? { amountReceived: cashReceived, changeGiven: cashChange }
             : {}),
@@ -2781,6 +2871,104 @@ export function TpvRapidoOrderFlow({
     },
     [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven],
   );
+
+  const handleSaveEditedDeliveryOrder = useCallback(async () => {
+    if (!editingDeliveryOrder || !isEditingDeliveryOrder || cart.length === 0 || !userId) return;
+    setSubmitting(true);
+    actionBusyRef.current = true;
+    try {
+      const items: DeliveryOrderItem[] = cart.map((ci) => {
+        const unitPrice = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+        return {
+          id: ci.lineId,
+          name: ci.catalogItem.name,
+          quantity: ci.quantity,
+          unitPrice,
+          total: cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization),
+          notes: ci.customization.notes?.trim() || undefined,
+          catalogItemId: ci.catalogItem._id,
+          category: ci.catalogItem.category,
+          brandIds: Array.isArray(ci.catalogItem.brandIds) ? ci.catalogItem.brandIds : [],
+          extras: buildOrderExtras(ci.customization),
+          ingredients: buildOrderIngredients(
+            ci.catalogItem,
+            ci.customization,
+            tpvCategoryTemplates,
+            storeIngredients,
+            tpvBrandIngredientSelection,
+            brands,
+            catalog,
+          ),
+        };
+      });
+
+      const itemsSubtotal = items.reduce((s, i) => s + (Number(i.total) || 0), 0);
+      const wasPaid = orderAlreadyCobrado(editingDeliveryOrder);
+      const nextTotal = +payableTotal.toFixed(2);
+      const now = new Date().toISOString();
+
+      const updated = await updateDeliveryOrderRequest(userId, {
+        ...editingDeliveryOrder,
+        items,
+        itemsSubtotal: +itemsSubtotal.toFixed(2),
+        totalAmount: nextTotal,
+        ...(discountAmount > 0 ? { discountAmount } : { discountAmount: 0 }),
+        deliveryFee: deliveryFeeAmount > 0 ? deliveryFeeAmount : 0,
+        notes: orderNotes.trim() || editingDeliveryOrder.notes || '',
+        deliveryType: editingDeliveryOrder.deliveryType || deliveryType || 'domicilio',
+        status: editingDeliveryOrder.status || 'listo',
+        updatedAt: now,
+        ...(wasPaid
+          ? {}
+          : {
+              paidAmount: 0,
+              paymentStatus: 'pending' as const,
+              paymentCollected: false,
+            }),
+      } as DeliveryOrder);
+
+      notifyDeliveryOpsLive({
+        reason: 'order_updated',
+        businessId: updated.business_id || writeBusinessId || businessId,
+      });
+
+      if (wasPaid && Math.abs(Number(editingDeliveryOrder.totalAmount || 0) - nextTotal) > 0.02) {
+        toast.success(`Pedido #${updated.orderNumber} actualizado`, {
+          description: 'El total cambió; revisa el cobro si hace falta',
+        });
+      } else {
+        toast.success(`Pedido #${updated.orderNumber} actualizado`);
+      }
+
+      onEditingDeliveryOrderSaved?.(updated);
+      goBack();
+    } catch (err: unknown) {
+      showTpvError(err, 'editar_pedido', 'No se pudo guardar el pedido');
+    } finally {
+      setSubmitting(false);
+      actionBusyRef.current = false;
+    }
+  }, [
+    editingDeliveryOrder,
+    isEditingDeliveryOrder,
+    cart,
+    userId,
+    payableTotal,
+    discountAmount,
+    deliveryFeeAmount,
+    orderNotes,
+    deliveryType,
+    tpvCategoryTemplates,
+    storeIngredients,
+    tpvBrandIngredientSelection,
+    brands,
+    catalog,
+    writeBusinessId,
+    businessId,
+    onEditingDeliveryOrderSaved,
+    goBack,
+    showTpvError,
+  ]);
 
   const accountDue = useMemo(
     () => (restaurantDiningOrder ? diningOrderDueAmount(restaurantDiningOrder) : 0),
@@ -4114,6 +4302,10 @@ export function TpvRapidoOrderFlow({
   })();
 
   const footerPrimaryLabel = (() => {
+    if (isEditingDeliveryOrder) {
+      if (submitting) return 'Guardando...';
+      return 'Guardar en el pedido';
+    }
     if (isRestaurantMode) {
       if (currentStep === 'products' && orderReady) return 'Continuar al pago';
       if (submitting) return 'Cobrando...';
@@ -4127,21 +4319,21 @@ export function TpvRapidoOrderFlow({
     if (currentStep === 'delivery') {
       if (!deliveryType) return 'Elige tipo de entrega';
       if (deliveryType === 'domicilio' && !selectedAddressId) return 'Selecciona dirección';
-      if (!paymentMethod) return 'Elige forma de pago';
+      if (deliveryType === 'domicilio' && !paymentMethod) return 'Elige forma de pago';
       return 'Continuar a la carta';
     }
     if (currentStep === 'products' && orderReady) {
       if (submitting) return 'Enviando...';
-      if (deliveryType === 'domicilio' || tabletMode) return 'Enviar pedido';
-      return 'Cobrar y enviar';
+      return 'Enviar pedido';
     }
     if (currentStep === 'products') return 'Añade productos';
-    if (currentStep === 'payment' && (deliveryType === 'domicilio' || tabletMode)) return 'Enviar pedido';
+    if (currentStep === 'payment') return 'Enviar pedido';
     if (submitting) return 'Enviando...';
-    return 'Cobrar y enviar';
+    return 'Enviar pedido';
   })();
 
   const footerPrimaryDisabled = (() => {
+    if (isEditingDeliveryOrder) return cart.length === 0 || submitting;
     if (currentStep === 'client' && showCreateForm) return creatingClient;
     if (currentStep === 'client' && selectedClient) return false;
     if (currentStep === 'delivery') return !deliveryCanContinue;
@@ -4154,6 +4346,10 @@ export function TpvRapidoOrderFlow({
   })();
 
   const handleFooterPrimary = () => {
+    if (isEditingDeliveryOrder) {
+      void handleSaveEditedDeliveryOrder();
+      return;
+    }
     if (currentStep === 'client' && showCreateForm) {
       void handleCreateClient();
       return;
@@ -4171,7 +4367,7 @@ export function TpvRapidoOrderFlow({
         completeStep('products');
         return;
       }
-      if (!paymentMethod) {
+      if (!paymentMethod && deliveryType === 'domicilio') {
         setCurrentStep('delivery');
         toast.error('Elige cómo va a pagar en la pestaña de entrega');
         return;
@@ -4553,7 +4749,7 @@ export function TpvRapidoOrderFlow({
 
         {/* ═══════════════ STEP 2: DELIVERY TYPE + PAGO ═══════════════ */}
         {currentStep === 'delivery' && isStepReachable('delivery') ? (
-          <StepContainer step={2} title="Entrega y pago" visible>
+          <StepContainer step={2} title="Entrega" visible>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
@@ -4561,6 +4757,9 @@ export function TpvRapidoOrderFlow({
                   setDeliveryType('recogida');
                   setSelectedAddressId(null);
                   setAddressWarning(false);
+                  setPaymentMethod(null);
+                  setPendingSplitParts(null);
+                  setCashGiven('');
                 }}
                 className={`flex flex-col items-center gap-3 p-6 min-h-[88px] rounded-2xl border-2 transition-all touch-manipulation ${
                   deliveryType === 'recogida'
@@ -4789,14 +4988,15 @@ export function TpvRapidoOrderFlow({
               </div>
             )}
 
-            {deliveryType && (deliveryType === 'recogida' || selectedAddressId) && (
+            {deliveryType === 'domicilio' && selectedAddressId ? (
               <div className="mt-5 space-y-2">
-                <p className={LABEL_CLASS}>Cómo va a pagar</p>
-                {deliveryType === 'domicilio' && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1 mb-1">
-                    El cobro se confirma al entregar; si cambia, lo marcas entonces.
-                  </p>
-                )}
+                <p className={LABEL_CLASS}>
+                  Cómo va a pagar
+                  <span className="ml-1 font-normal text-red-500">*</span>
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 -mt-1 mb-1">
+                  Obligatorio. El cobro se confirma al entregar.
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   {([
                     { key: 'efectivo' as const, label: 'Efectivo', icon: Banknote },
@@ -4821,7 +5021,7 @@ export function TpvRapidoOrderFlow({
                   <button
                     type="button"
                     onClick={() => {
-                      if (deliveryType === 'domicilio' || tabletMode) {
+                      if (tabletMode) {
                         choosePaymentMethod('mixto');
                         return;
                       }
@@ -4902,7 +5102,13 @@ export function TpvRapidoOrderFlow({
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
+
+            {deliveryType === 'recogida' ? (
+              <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+                Sin cobro ahora: se cobra al entregar en montaje.
+              </p>
+            ) : null}
 
             {deliveryCanContinue && (
               <div className="flex justify-end mt-4">
