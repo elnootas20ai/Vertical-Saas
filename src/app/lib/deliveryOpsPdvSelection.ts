@@ -170,7 +170,8 @@ export function deliveryOrderMatchesPdvFilter(
   }
   if (orderPdv === filterId) return true;
   const wcId = String(options?.pdvWorkCenterId || '').trim();
-  if (wcId && orderPdv === wcId) return true;
+  // Empleo/tablet puede filtrar por wc-… mientras el pedido guarda pdv-…
+  if (wcId && (orderPdv === wcId || filterId === wcId)) return true;
   return false;
 }
 

@@ -205,7 +205,8 @@ export function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName, pdvWor
   }
   if (oid === filterId) return true;
   const wcId = String(pdvWorkCenterId || '').trim();
-  if (wcId && oid === wcId) return true;
+  // Pedido con PDV id y filtro/empleo con centro de trabajo (wc-…), o al revés.
+  if (wcId && (oid === wcId || filterId === wcId)) return true;
   return false;
 }
 
@@ -1635,8 +1636,13 @@ export async function filterDeliveryOrders(req, res) {
     //   historial completo): limitamos a la jornada actual salvo que el caller
     //   sea operativo de cocina/reparto (que necesita ver pedidos del día).
     if (req.callerIsWorker) {
-      const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
-      if (workerSalesPoint) salesPointId = workerSalesPoint;
+      const workerRef = String(req.callerAccount?.employment?.salesPointId || '').trim();
+      if (workerRef) {
+        // Empleo suele guardar el centro (wc-…); los pedidos llevan el PDV (pdv-…).
+        // Sin resolver, el filtro deja el tablero vacío (caso Pol / Badalona).
+        const pdvsForWorker = await listScopedPointsOfSaleForUser(req, userId);
+        salesPointId = resolvePdvIdFromRef(pdvsForWorker, workerRef) || workerRef;
+      }
       if (!dateFrom) dateFrom = new Date().toISOString().slice(0, 10);
     }
     if (businessFilter) {
@@ -1649,8 +1655,10 @@ export async function filterDeliveryOrders(req, res) {
     if (salesPointId) {
       const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
-      const pdv = String(salesPointId).trim();
-      const pdvDoc = (pdvs || []).find((p) => p && p._id === pdv);
+      const pdv = resolvePdvIdFromRef(pdvs, String(salesPointId).trim()) || String(salesPointId).trim();
+      const pdvDoc =
+        (pdvs || []).find((p) => p && p._id === pdv) ||
+        (pdvs || []).find((p) => String(p?.workCenterId || '').trim() === String(salesPointId).trim());
       const pdvName = String(pdvDoc?.name || '').trim();
       const pdvWorkCenterId = String(pdvDoc?.workCenterId || '').trim();
       orders = orders.filter((o) =>
