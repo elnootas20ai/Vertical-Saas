@@ -916,9 +916,36 @@ async function resolveMemberStoreAssignment(req, business, memberUserId) {
   };
 }
 
-/** Tienda = etiqueta informativa. Nunca bloquea fichaje (entrada/salida/TPV). */
-async function assertMemberCanClockAtStore(_req, _res, _business, _memberUserId, _pdvId, _workCenterId) {
-  return true;
+/** Tienda = scope real. Bloquea fichar en un PDV si el empleo es de otra tienda. */
+async function assertMemberCanClockAtStore(req, res, business, memberUserId, pdvId, workCenterId) {
+  const uid = normalizeClockinUserId(memberUserId);
+  const pdv = String(pdvId || '').trim();
+  if (!uid || !pdv) return true;
+
+  const member = getMember(business, uid);
+  let account = null;
+  try {
+    account = await findAccountByUserId(req, uid);
+  } catch {
+    account = null;
+  }
+  const assignmentRef = memberEmploymentSalesPointRef(member, account);
+  const role = String(member?.role || account?.role || '').trim();
+  const ok = isMemberAssignedToSalesPoint(
+    business,
+    uid,
+    pdv,
+    workCenterId,
+    assignmentRef,
+    role,
+  );
+  if (ok) return true;
+  res.status(403).json({
+    ok: false,
+    error: 'Este trabajador está asignado a otra tienda. No puede fichar aquí.',
+    code: 'STORE_NOT_ASSIGNED',
+  });
+  return false;
 }
 
 /** Miembro del negocio o cuenta con linkedBusinessId (invitado aún no en members). */

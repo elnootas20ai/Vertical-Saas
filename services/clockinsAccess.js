@@ -167,8 +167,8 @@ export function isMemberAssignedToSalesPoint(
   const role = String(memberRole || '').trim();
   const ref = String(assignmentRef || '').trim();
   if (isManagerRole(role) && !ref) return true;
-  // Sin tienda en Equipo: PDV es etiqueta (fichar igual).
-  if (!ref) return true;
+  // Sin tienda en Equipo: no entra en el fichaje de un PDV concreto (TPV por tienda).
+  if (!ref) return false;
 
   const wc = String(workCenterId || '').trim();
   if (
@@ -180,8 +180,6 @@ export function isMemberAssignedToSalesPoint(
   ) {
     return true;
   }
-  // Invitación guarda workCenterId como salesPointId; el cliente puede mandar el PDV del mismo local.
-  if (wc && (ref === wc || ref === `wc:${wc}`)) return true;
   return false;
 }
 
@@ -198,16 +196,30 @@ export function memberEmploymentSalesPointRef(member, account) {
 export function salesPointRefsSameStore(existingSp, newSp, workCenterId) {
   const a = String(existingSp || '').trim();
   const b = String(newSp || '').trim();
-  if (!a || !b) return true;
+  // Sin ambos ids no se puede afirmar que sea el mismo local.
+  if (!a || !b) return false;
   if (a === b) return true;
   if (a === `wc:${b}` || b === `wc:${a}`) return true;
+
   const wc = String(workCenterId || '').trim();
   if (!wc) return false;
   const wcAliases = new Set([wc, `wc:${wc}`]);
-  if (wcAliases.has(a) && wcAliases.has(b)) return true;
-  // Fichaje antiguo con id de centro + tablet con PDV del mismo centro (o al revés).
-  if (wcAliases.has(a) && b && !wcAliases.has(b)) return true;
-  if (wcAliases.has(b) && a && !wcAliases.has(a)) return true;
+  const aIsThisWc = wcAliases.has(a);
+  const bIsThisWc = wcAliases.has(b);
+  if (aIsThisWc && bIsThisWc) return true;
+
+  // Un centro de OTRA tienda nunca es el mismo local (Bug: Pol/Badalona en tablet Tiana).
+  const looksLikeWc = (id) => {
+    const s = String(id || '').trim();
+    return s.startsWith('wc-') || s.startsWith('wc:');
+  };
+  if ((looksLikeWc(a) && !aIsThisWc) || (looksLikeWc(b) && !bIsThisWc)) {
+    return false;
+  }
+
+  // Mismo local: centro de esta tienda ↔ PDV de esta tienda.
+  if (aIsThisWc && b) return true;
+  if (bIsThisWc && a) return true;
   return false;
 }
 
