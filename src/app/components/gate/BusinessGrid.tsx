@@ -47,6 +47,7 @@ const BUSINESS_TYPE_LABELS: Record<string, string> = {
   vet: 'Veterinario',
   tobaccoShop: 'Estanco',
   butcherShop: 'Carnicería',
+  iceCreamShop: 'Heladería',
 };
 
 const BUSINESS_TYPE_COLORS: Record<string, string> = {
@@ -72,6 +73,7 @@ const BUSINESS_TYPE_COLORS: Record<string, string> = {
   vet: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
   tobaccoShop: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
   butcherShop: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+  iceCreamShop: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
 };
 
 type SortKey = 'created' | 'name' | 'employees' | 'profit' | 'alerts' | 'recent';

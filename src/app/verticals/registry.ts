@@ -2,6 +2,7 @@ import type { BusinessType } from '../lib/businessApi';
 import { BUTCHER_MODULE } from './butcher/module';
 import { COMPRAVENTA_MODULE } from './compraventa/module';
 import { DELIVERY_MODULE } from './delivery/module';
+import { HELADERIA_MODULE } from './heladeria/module';
 import { RESTAURANT_MODULE } from './restaurant/module';
 import type { VerticalModuleDefinition, VerticalModuleId } from './types';
 
@@ -12,6 +13,7 @@ export const VERTICAL_MODULES: Record<VerticalModuleId, VerticalModuleDefinition
   restaurant: RESTAURANT_MODULE,
   compraventa: COMPRAVENTA_MODULE,
   butcher: BUTCHER_MODULE,
+  heladeria: HELADERIA_MODULE,
 };
 
 const BY_BUSINESS_TYPE = new Map<BusinessType, VerticalModuleDefinition>();

@@ -20,6 +20,12 @@ export const PLAN_ADDON_CATALOG = {
     monthlyPrice: 8900,
     annualPrice: 85440,
   },
+  extra_worker: {
+    id: 'extra_worker',
+    name: 'Trabajador extra',
+    monthlyPrice: 500,
+    annualPrice: 4800,
+  },
 };
 
 export function getPlanAddon(addonId) {

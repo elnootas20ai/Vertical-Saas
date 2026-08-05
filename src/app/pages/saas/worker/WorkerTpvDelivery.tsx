@@ -1880,6 +1880,14 @@ export function WorkerTpvDelivery({
       if (!deliveryCompleteOrder) return;
       const fresh = orders.find((o) => o._id === deliveryCompleteOrder._id) || deliveryCompleteOrder;
       if (paymentPromptPurpose === 'pagado') {
+        // Recogida: «Pagar» = entregar → debe bajar al Historial (no quedarse en Montaje).
+        if (
+          fresh.deliveryType === 'recogida'
+          && tabletNextStatus(fresh) === 'entregado'
+        ) {
+          void advanceOrder(fresh, method, cash);
+          return;
+        }
         void markOrderPaid(fresh, method, cash);
         return;
       }

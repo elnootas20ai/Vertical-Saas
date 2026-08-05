@@ -288,10 +288,38 @@ function wrapAccountEmail({ bodyHtml, headerLabel = 'Vertial' }) {
 </html>`;
 }
 
-export function buildSetupWelcomeEmail({ firstName, companyName, planName, trialEndDate, businessType, modules, onboardingUrl }) {
+/** Etiqueta comercial del plan (Básico / Mediano / Pro). */
+export function formatVertialPlanLabel(planName, planId = '') {
+  const id = String(planId || '').toLowerCase();
+  const name = String(planName || '').toLowerCase();
+  if (id === 'pro' || name.includes('pro')) return 'Pro';
+  if (id === 'normal' || name.includes('normal') || name.includes('mediano')) return 'Mediano';
+  if (id === 'basic' || name.includes('basic') || name.includes('básico') || name.includes('basico')) {
+    return 'Básico';
+  }
+  const trimmed = String(planName || '').trim();
+  return trimmed || 'Básico';
+}
+
+export function buildSetupWelcomeEmail({
+  firstName,
+  companyName,
+  planName,
+  planId = '',
+  businessType,
+  modules,
+  onboardingUrl,
+  billingMode = '',
+}) {
   const appUrl = getAppBaseUrl();
   const setupUrl = onboardingUrl || `${appUrl}/saas/onboarding`;
-  const endDateStr = trialEndDate ? new Date(trialEndDate).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }) : '14 d\u00edas';
+  const planLabel = formatVertialPlanLabel(planName, planId);
+  const billingLabel =
+    String(billingMode || '').toLowerCase() === 'annual'
+      ? 'facturación anual'
+      : String(billingMode || '').toLowerCase() === 'monthly'
+        ? 'facturación mensual'
+        : '';
   const activeModules = Object.entries(modules || {}).filter(([, v]) => v).map(([k]) => {
     const names = { inventory: 'Stock', sales: 'Ventas', crm: 'CRM', documentation: 'Documentos', analytics: 'Analytics', workshop: 'Taller' };
     return names[k] || k;
@@ -307,20 +335,21 @@ export function buildSetupWelcomeEmail({ firstName, companyName, planName, trial
 
   return {
     to: null,
-    subject: '\u00a1Bienvenido a Vertial! Tu prueba gratuita ha comenzado',
+    subject: `\u00a1Bienvenido a Vertial! · Plan ${planLabel}`,
     html: wrapAccountEmail({
       bodyHtml: `
           <h2 style="margin:0 0 8px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">\u00a1Bienvenido a Vertial!</h2>
-          <p style="margin:0 0 20px;color:${EMAIL_BRAND.muted};font-size:14px;">Tu prueba gratuita de 14 d\u00edas ha comenzado</p>
+          <p style="margin:0 0 20px;color:${EMAIL_BRAND.muted};font-size:14px;">Tu cuenta de empresa ya est\u00e1 lista</p>
           <p style="font-size:16px;color:${EMAIL_BRAND.text};">Hola <strong>${escapeHtml(firstName || 'usuario')}</strong>,</p>
           <p style="font-size:14px;color:#52525b;line-height:1.6;">
             Gracias por registrar <strong>${escapeHtml(companyName || 'tu empresa')}</strong> en Vertial.
-            Tu prueba gratuita del plan <strong>${escapeHtml(planName || 'Basic')}</strong> est\u00e1 activa hasta el <strong>${escapeHtml(endDateStr)}</strong>.
+            Tu suscripci\u00f3n del plan <strong>${escapeHtml(planLabel)}</strong>${billingLabel ? ` (${escapeHtml(billingLabel)})` : ''} ya est\u00e1 activa.
           </p>
           <table width="100%" cellpadding="0" cellspacing="0" style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;margin:16px 0;">
             <tr><td style="padding:16px;">
               <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:${EMAIL_BRAND.softText};">Tu configuraci\u00f3n</p>
-              <p style="margin:0;font-size:13px;color:#1e3a8a;">Vertical: <strong>${escapeHtml(verticalLabel)}</strong></p>
+              <p style="margin:0;font-size:13px;color:#1e3a8a;">Plan: <strong>${escapeHtml(planLabel)}</strong></p>
+              <p style="margin:4px 0 0;font-size:13px;color:#1e3a8a;">Vertical: <strong>${escapeHtml(verticalLabel)}</strong></p>
               ${activeModules.length > 0 ? `<p style="margin:4px 0 0;font-size:13px;color:#1e3a8a;">M\u00f3dulos: <strong>${escapeHtml(activeModules.join(', '))}</strong></p>` : ''}
             </td></tr>
           </table>
@@ -329,7 +358,7 @@ export function buildSetupWelcomeEmail({ firstName, companyName, planName, trial
           </p>
           <div style="margin:24px 0;">${emailCtaButton(setupUrl, 'Completar configuraci\u00f3n')}</div>
           <p style="font-size:13px;color:${EMAIL_BRAND.muted};line-height:1.5;">
-            No se te cobrar\u00e1 hasta el ${escapeHtml(endDateStr)}. Puedes cancelar en cualquier momento desde Ajustes &rarr; Suscripci\u00f3n.
+            Puedes gestionar el plan y la facturaci\u00f3n en cualquier momento desde Ajustes &rarr; Mi plan.
           </p>`,
     }),
   };
@@ -582,33 +611,102 @@ export function buildInvitationEmail({ name, email, inviteToken, temporaryPasswo
   };
 }
 
-export function buildWelcomeTrialEmail(email, name, trialDays = 14) {
+/**
+ * Bienvenida cuenta empresa (suscripción activa).
+ * @param {string} email
+ * @param {string} name
+ * @param {{ planName?: string, planId?: string, companyName?: string, billingMode?: string }} [opts]
+ */
+export function buildCompanyWelcomeEmail(email, name, opts = {}) {
   const baseUrl = getAppBaseUrl();
   const dashboardUrl = `${baseUrl}/saas/dashboard`;
   const displayName = name ? name.split(' ')[0] : 'Usuario';
+  const planLabel = formatVertialPlanLabel(opts.planName, opts.planId);
+  const companyName = String(opts.companyName || '').trim();
+  const billingLabel =
+    String(opts.billingMode || '').toLowerCase() === 'annual'
+      ? 'anual'
+      : String(opts.billingMode || '').toLowerCase() === 'monthly'
+        ? 'mensual'
+        : '';
 
   return {
-    subject: `Bienvenido a Vertial · ${trialDays} días gratis para ti`,
+    subject: `Bienvenido a Vertial · Plan ${planLabel}`,
     html: wrapAccountEmail({
       bodyHtml: `
           <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:12px 16px;margin-bottom:24px;">
-            <p style="margin:0;color:${EMAIL_BRAND.softText};font-size:13px;font-weight:600;">Tu cuenta está lista · ${trialDays} días de prueba gratuita</p>
+            <p style="margin:0;color:${EMAIL_BRAND.softText};font-size:13px;font-weight:600;">Tu cuenta está lista · Plan ${escapeHtml(planLabel)}${billingLabel ? ` · ${escapeHtml(billingLabel)}` : ''}</p>
           </div>
           <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">¡Hola, ${escapeHtml(displayName)}!</h2>
           <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
-            Bienvenido a <strong>Vertial</strong>. Tu cuenta ya está activa y tienes <strong>${trialDays} días gratis</strong>
-            para explorar todas las funcionalidades de la plataforma.
+            Bienvenido a <strong>Vertial</strong>${companyName ? `. Tu empresa <strong>${escapeHtml(companyName)}</strong> ya está activa` : '. Tu cuenta ya está activa'}
+            con el plan <strong>${escapeHtml(planLabel)}</strong>.
           </p>
           <div style="background:${EMAIL_BRAND.footerBg};border:1px solid ${EMAIL_BRAND.border};border-radius:12px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:${EMAIL_BRAND.text};font-size:14px;font-weight:600;">Primeros pasos recomendados:</p>
             <p style="margin:0 0 4px;color:#52525b;font-size:13px;">1. Configura los datos de tu negocio</p>
-            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">2. Sube tus clientes (puedes importar desde Excel)</p>
+            <p style="margin:0 0 4px;color:#52525b;font-size:13px;">2. Invita a tu equipo desde Equipo</p>
             <p style="margin:0 0 4px;color:#52525b;font-size:13px;">3. Crea tu catálogo de productos/servicios</p>
             <p style="margin:0;color:#52525b;font-size:13px;">4. Realiza tu primera operación</p>
           </div>
           ${emailCtaButton(dashboardUrl, 'Ir a mi panel')}
           <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
             Si tienes alguna duda, responde a este email y te ayudaremos encantados.
+          </p>`,
+    }),
+  };
+}
+
+/** @deprecated Usar buildCompanyWelcomeEmail — se mantiene por compatibilidad. */
+export function buildWelcomeTrialEmail(email, name, planOrTrialDays = 'Básico') {
+  // Antes el 3er arg era trialDays (número). Ahora acepta planName o { planName }.
+  if (planOrTrialDays && typeof planOrTrialDays === 'object') {
+    return buildCompanyWelcomeEmail(email, name, planOrTrialDays);
+  }
+  if (typeof planOrTrialDays === 'number') {
+    return buildCompanyWelcomeEmail(email, name, { planName: 'Básico' });
+  }
+  return buildCompanyWelcomeEmail(email, name, { planName: String(planOrTrialDays || 'Básico') });
+}
+
+/**
+ * Bienvenida al trabajador cuando queda enlazado a una empresa.
+ */
+export function buildWorkerWelcomeEmail({
+  name = '',
+  companyName = '',
+  storeName = '',
+  role = '',
+  scheduleLabel = '',
+}) {
+  const baseUrl = getAppBaseUrl();
+  const loginUrl = `${baseUrl}/auth/worker-login`;
+  const displayName = name ? String(name).trim().split(/\s+/)[0] : '';
+  const company = String(companyName || '').trim() || 'tu empresa';
+  const store = String(storeName || '').trim();
+  const roleLabel = String(role || '').trim();
+  const schedule = String(scheduleLabel || '').trim();
+
+  return {
+    subject: `Bienvenido a Vertial · Ya formas parte de ${company}`,
+    html: wrapAccountEmail({
+      bodyHtml: `
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">¡Bienvenido a Vertial${displayName ? `, ${escapeHtml(displayName)}` : ''}!</h2>
+          <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
+            Ya eres trabajador de <strong>${escapeHtml(company)}</strong> en Vertial.
+            Desde tu cuenta de empleado puedes fichar, ver tus tareas y consultar tu horario.
+          </p>
+          <div style="background:${EMAIL_BRAND.softBg};border:1px solid ${EMAIL_BRAND.softBorder};border-radius:12px;padding:16px;margin:0 0 24px;">
+            <p style="margin:0 0 8px;color:${EMAIL_BRAND.softText};font-size:13px;font-weight:600;">Tu acceso</p>
+            <p style="margin:0 0 4px;color:#1e3a8a;font-size:13px;">Empresa: <strong>${escapeHtml(company)}</strong></p>
+            ${store ? `<p style="margin:0 0 4px;color:#1e3a8a;font-size:13px;">Tienda: <strong>${escapeHtml(store)}</strong></p>` : ''}
+            ${roleLabel ? `<p style="margin:0 0 4px;color:#1e3a8a;font-size:13px;">Rol: <strong>${escapeHtml(roleLabel)}</strong></p>` : ''}
+            ${schedule ? `<p style="margin:0;color:#1e3a8a;font-size:13px;">Horario: <strong>${escapeHtml(schedule)}</strong></p>` : ''}
+          </div>
+          ${emailCtaButton(loginUrl, 'Entrar como trabajador')}
+          <p style="color:${EMAIL_BRAND.muted};font-size:13px;margin:24px 0 0;line-height:1.5;">
+            Entra con <strong>Acceso empleado</strong> usando el email con el que te registraste.
+            Si tienes dudas, habla con tu responsable o responde a este correo.
           </p>`,
     }),
   };

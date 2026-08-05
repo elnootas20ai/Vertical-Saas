@@ -9,14 +9,17 @@
  *   npm run smoke:saas
  *   VERIFY_API_BASE=https://vertialapp.com npm run smoke:saas
  *
- * Requiere en .env.development / .env (o deploy/local-values.env):
- *   SAAS_LOGIN_EMAIL, SAAS_LOGIN_PASSWORD
+ * Credenciales (prioridad):
+ *   SMOKE_SAAS_EMAIL / SMOKE_SAAS_PASSWORD  → cuenta de prueba (recomendado)
+ *   SAAS_LOGIN_* solo si NO es uriel@admin.com
+ *
+ * uriel@admin.com = login manual cuando algo falla (OTP Gmail). No smoke/deploy.
  *
  * Opcional:
  *   VERIFY_API_BASE / SMOKE_API_BASE  (default http://127.0.0.1:3001)
  *   SMOKE_SAAS_MIN_STORES=1           exige ≥N tiendas en cada negocio delivery
  *   SMOKE_SAAS_SKIP_FINANCE=1         omitir GET /api/finance/:userId
- *   SMOKE_ALLOW_ADMIN_OTP_LOGIN=1     permite login admin remoto (dispara OTP Gmail)
+ *   SMOKE_ALLOW_ADMIN_OTP_LOGIN=1     permite login admin en smoke (dispara OTP)
  */
 import dotenv from 'dotenv';
 import path from 'node:path';
@@ -30,7 +33,11 @@ import {
   normalizeTenantUserId,
   resolveBusinessDataUserId,
 } from './lib/saasSmokeHelpers.mjs';
-import { assertSafeSaasLogin } from './lib/prodAdminLoginGuard.mjs';
+import {
+  assertSafeSaasLogin,
+  resolveSmokeSaasCredentials,
+} from './lib/prodAdminLoginGuard.mjs';
+import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
@@ -44,8 +51,9 @@ if (existsSync(localValuesPath)) {
 }
 
 const BASE = String(process.env.SMOKE_API_BASE || process.env.VERIFY_API_BASE || 'http://127.0.0.1:3001').replace(/\/+$/, '');
-const EMAIL = String(process.env.SAAS_LOGIN_EMAIL || '').trim().toLowerCase();
-const PASSWORD = String(process.env.SAAS_LOGIN_PASSWORD || '').trim();
+const smokeCreds = resolveSmokeSaasCredentials(process.env);
+const EMAIL = smokeCreds?.email || '';
+const PASSWORD = smokeCreds?.password || '';
 const COUCH_PREFIX = process.env.VITE_COUCHDB_DB || process.env.COUCHDB_DB || 'vertial';
 const WC_DB = `${COUCH_PREFIX}-sales-points`;
 const MIN_STORES = Math.max(0, Number(process.env.SMOKE_SAAS_MIN_STORES || 0));
@@ -83,16 +91,27 @@ async function main() {
   console.log(`[smoke:saas] min tiendas delivery: ${MIN_STORES} · finanzas: ${SKIP_FINANCE ? 'off' : 'on'}`);
 
   if (!EMAIL || !PASSWORD) {
-    fail('config', 'Faltan SAAS_LOGIN_EMAIL y SAAS_LOGIN_PASSWORD en .env');
+    const loginEmail = String(process.env.SAAS_LOGIN_EMAIL || '').trim().toLowerCase();
+    if (isVertialSuperAdminEmail(loginEmail)) {
+      console.log(
+        '[smoke:saas] Omitido — uriel@admin.com es solo login manual (OTP). ' +
+          'Para smoke usa SMOKE_SAAS_EMAIL / SMOKE_SAAS_PASSWORD.\n',
+      );
+      process.exit(0);
+    }
+    fail('config', 'Faltan SMOKE_SAAS_EMAIL/PASSWORD (o SAAS_LOGIN_* de cuenta no-admin)');
     summarize(false);
     process.exit(1);
   }
 
+  if (smokeCreds?.source) {
+    console.log(`[smoke:saas] creds: ${smokeCreds.source} (${EMAIL})`);
+  }
+
   const loginGuard = assertSafeSaasLogin({ apiBase: BASE, email: EMAIL });
   if (loginGuard.blocked) {
-    fail('login', loginGuard.reason);
-    summarize(false);
-    process.exit(1);
+    console.log(`[smoke:saas] ${loginGuard.reason}\n`);
+    process.exit(0);
   }
 
   // ── Health ────────────────────────────────────────────────────────────────

@@ -108,6 +108,7 @@ import {
   buildGracePeriodEmail,
   buildSuspensionEmail,
   buildSetupWelcomeEmail,
+  buildWorkerWelcomeEmail,
 } from '../services/email.js';
 import { sendWelcomeEmail } from '../services/subscriptionLifecycle.js';
 import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
@@ -127,6 +128,7 @@ import {
   provisionBusinessFromOnboarding,
   resolveBusinessNameFromOnboarding,
 } from '../shared/billing/onboardingBusiness.js';
+import { evaluateWorkerSeatCapacity } from '../services/workerSeatLimits.js';
 
 function badRequest(res, error) {
   return res.status(400).json({ ok: false, error });
@@ -169,6 +171,69 @@ function maskEmailForHint(email) {
   const domain = e.slice(at + 1);
   const visible = user.slice(0, Math.min(2, user.length));
   return `${visible}***@${domain}`;
+}
+
+/**
+ * Correo de bienvenida al trabajador al quedar enlazado a una empresa.
+ * No bloquea el alta si el email falla.
+ */
+async function sendWorkerLinkedWelcomeEmail(req, {
+  account,
+  companyName = '',
+  storeName = '',
+  storeId = '',
+  role = '',
+  scheduleLabel = '',
+}) {
+  const to = String(account?.email || '').trim().toLowerCase();
+  if (!to || !to.includes('@')) return false;
+  if (account?.workerWelcomeEmailSentAt) return false;
+
+  let resolvedStore = String(storeName || '').trim();
+  const salesPointId = String(storeId || account?.employment?.salesPointId || '').trim();
+  if (!resolvedStore && salesPointId && req) {
+    try {
+      const wc = await findWorkCenterById(req, salesPointId);
+      resolvedStore = String(wc?.name || '').trim();
+    } catch {
+      /* noop */
+    }
+  }
+
+  const schedule =
+    String(scheduleLabel || account?.employment?.schedule || '').trim()
+    || (
+      account?.employment?.hoursPerWeek
+        ? `${account.employment.hoursPerWeek} h/sem`
+        : ''
+    );
+
+  try {
+    const { subject, html } = buildWorkerWelcomeEmail({
+      name: account.fullName || account.firstName || '',
+      companyName: companyName || account.companyName || '',
+      storeName: resolvedStore,
+      role: role || account.role || '',
+      scheduleLabel: schedule,
+    });
+    await sendEmail({ to, subject, html });
+    try {
+      const fresh = await findAccountByUserId(req, account.user_id);
+      if (fresh) {
+        await saveAccount(req, {
+          ...fresh,
+          workerWelcomeEmailSentAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    } catch {
+      /* noop: el correo ya salió */
+    }
+    return true;
+  } catch (err) {
+    console.error('[AUTH] Error enviando bienvenida trabajador:', err?.message || err);
+    return false;
+  }
 }
 
 /**
@@ -1314,6 +1379,10 @@ export async function updateProfile(req, res) {
           const extraBiz = Math.floor(Number(subscription.extraBusinessSlots) || 0);
           merged.extraBusinessSlots = Math.max(0, Math.min(99, extraBiz));
         }
+        if (Object.prototype.hasOwnProperty.call(subscription, 'extraWorkerSlots')) {
+          const extraWorkers = Math.floor(Number(subscription.extraWorkerSlots) || 0);
+          merged.extraWorkerSlots = Math.max(0, Math.min(999, extraWorkers));
+        }
         if (Object.prototype.hasOwnProperty.call(subscription, 'adminProAccess')) {
           merged.adminProAccess = Boolean(subscription.adminProAccess);
         }
@@ -1337,6 +1406,7 @@ export async function updateProfile(req, res) {
         merged.extraPointOfSaleSlots = account.subscription?.extraPointOfSaleSlots ?? 0;
         merged.extraCommercialBrandSlots = account.subscription?.extraCommercialBrandSlots ?? 0;
         merged.extraBusinessSlots = account.subscription?.extraBusinessSlots ?? 0;
+        merged.extraWorkerSlots = account.subscription?.extraWorkerSlots ?? 0;
         merged.adminProAccess = Boolean(account.subscription?.adminProAccess);
         merged.billingExempt = Boolean(account.subscription?.billingExempt);
       }
@@ -1866,6 +1936,29 @@ export async function inviteUser(req, res) {
     let existingInvitation = null;
     if (business?.business_id) {
       existingInvitation = await findPendingInvitationForEmailAndBusiness(req, normalizedEmail, business.business_id);
+    }
+
+    // Cupo de trabajadores: miembros (sin dueño) + invitaciones pending.
+    // Reenviar/actualizar invitación pendiente no gasta plaza extra.
+    if (business && !existingInvitation) {
+      const alreadyMember = Array.isArray(business.members)
+        && existingAccount
+        && business.members.some((m) => m.user_id === existingAccount.user_id);
+      if (!alreadyMember) {
+        const seatCheck = await evaluateWorkerSeatCapacity(req, business, { seatsNeeded: 1 });
+        if (!seatCheck.ok) {
+          return res.status(403).json({
+            ok: false,
+            code: seatCheck.code || 'WORKER_SEAT_LIMIT',
+            error: seatCheck.error,
+            workerSeats: {
+              used: seatCheck.used,
+              limit: seatCheck.limit,
+              remaining: seatCheck.remaining,
+            },
+          });
+        }
+      }
     }
 
     const invitationDoc = existingInvitation
@@ -2488,6 +2581,14 @@ export async function acceptInvitation(req, res) {
         scheduleApplied,
         roleTasksCreated,
       },
+    });
+
+    void sendWorkerLinkedWelcomeEmail(req, {
+      account: accountAfterSchedule,
+      companyName: business.name || invitation.businessName || '',
+      storeId: String(accountAfterSchedule.employment?.salesPointId || invitation.employment?.salesPointId || '').trim(),
+      role: invitation.role || accountAfterSchedule.role || '',
+      scheduleLabel: String(accountAfterSchedule.employment?.schedule || '').trim(),
     });
 
     return res.json({
@@ -3477,12 +3578,12 @@ export async function saveOnboarding(req, res) {
 
     if (wasIncomplete && Boolean(onboardingCompleted)) {
       const onb = savedAccount.onboardingData || {};
-      const trial = onb.trial || {};
       const emailData = buildSetupWelcomeEmail({
         firstName: savedAccount.firstName,
         companyName: savedAccount.companyName,
-        planName: savedAccount.subscription?.planName || 'Basic',
-        trialEndDate: trial.endDate || savedAccount.subscription?.trialEndsAt || null,
+        planName: savedAccount.subscription?.planName || 'Básico',
+        planId: savedAccount.subscription?.selectedPlanId || '',
+        billingMode: savedAccount.subscription?.billingMode || '',
         businessType: onb.businessType || '',
         modules: onb.requestedModules || {},
       });
@@ -3804,6 +3905,20 @@ export async function acceptInvite(req, res) {
       },
     });
 
+    if (isTeamInvite && inviteBusinessId) {
+      void sendWorkerLinkedWelcomeEmail(req, {
+        account: accountForTokens,
+        companyName: inviteBusinessName || savedBusiness?.name || '',
+        storeId: String(
+          accountForTokens.employment?.salesPointId
+          || inviteEmployment?.salesPointId
+          || '',
+        ).trim(),
+        role: inviteRole || accountForTokens.role || '',
+        scheduleLabel: String(accountForTokens.employment?.schedule || '').trim(),
+      });
+    }
+
     const redirectTo = isTeamInvite
       ? resolveRedirectAfterInvitationAccept(accountForTokens)
       : '/auth/onboarding/business-type';
@@ -4000,6 +4115,46 @@ export async function getBusinessJoinRequests(req, res) {
   }
 }
 
+export async function getWorkerSeatStatus(req, res) {
+  try {
+    const businessId = String(req.params.businessId || req.query.businessId || '').trim();
+    if (!businessId) return badRequest(res, 'businessId obligatorio');
+
+    const actorUserId = String(req.authUser?.userId || '').trim();
+    const business = await findBusinessById(req, businessId);
+    if (!business) {
+      return res.status(404).json({ ok: false, error: 'Empresa no encontrada' });
+    }
+    if (actorUserId) {
+      const isMember = Array.isArray(business.members)
+        && business.members.some((m) => m.user_id === actorUserId);
+      const isOwner = business.owner_user_id === actorUserId;
+      if (!isMember && !isOwner && !canManageBusinessTeam(business, actorUserId)) {
+        return res.status(403).json({ ok: false, error: 'Sin acceso a esta empresa' });
+      }
+    }
+
+    const seat = await evaluateWorkerSeatCapacity(req, business, { seatsNeeded: 1 });
+    return res.json({
+      ok: true,
+      workerSeats: {
+        used: seat.used,
+        limit: seat.limit,
+        remaining: seat.remaining,
+        membersUsed: seat.membersUsed,
+        pendingInvites: seat.pendingInvites,
+        canInvite: seat.ok,
+        planTier: seat.planTier,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Error al cargar cupo de trabajadores',
+    });
+  }
+}
+
 export async function reviewJoinRequest(req, res) {
   try {
     const userId = req.authUser?.userId;
@@ -4017,6 +4172,32 @@ export async function reviewJoinRequest(req, res) {
       return res.status(409).json({ ok: false, error: 'Esta solicitud ya fue procesada' });
     }
 
+    let applicant = null;
+    let business = null;
+    if (action === 'accepted') {
+      applicant = await findAccountByUserId(req, joinRequest.user_id);
+      business = await findBusinessById(req, joinRequest.business_id);
+      if (applicant && business) {
+        const members = Array.isArray(business.members) ? business.members : [];
+        const alreadyMember = members.some((m) => m.user_id === applicant.user_id);
+        if (!alreadyMember) {
+          const seatCheck = await evaluateWorkerSeatCapacity(req, business, { seatsNeeded: 1 });
+          if (!seatCheck.ok) {
+            return res.status(403).json({
+              ok: false,
+              code: seatCheck.code || 'WORKER_SEAT_LIMIT',
+              error: seatCheck.error,
+              workerSeats: {
+                used: seatCheck.used,
+                limit: seatCheck.limit,
+                remaining: seatCheck.remaining,
+              },
+            });
+          }
+        }
+      }
+    }
+
     const now = new Date().toISOString();
     const updated = {
       ...joinRequest,
@@ -4027,37 +4208,42 @@ export async function reviewJoinRequest(req, res) {
     };
     const saved = await saveJoinRequest(req, updated);
 
-    if (action === 'accepted') {
-      const applicant = await findAccountByUserId(req, joinRequest.user_id);
-      const business = await findBusinessById(req, joinRequest.business_id);
+    if (action === 'accepted' && applicant && business) {
+      const members = Array.isArray(business.members) ? business.members : [];
+      const alreadyMember = members.some((m) => m.user_id === applicant.user_id);
 
-      if (applicant && business) {
-        const members = Array.isArray(business.members) ? business.members : [];
-        const alreadyMember = members.some((m) => m.user_id === applicant.user_id);
-
-        if (!alreadyMember) {
-          const newMember = {
-            user_id: applicant.user_id,
-            fullName: applicant.fullName,
-            email: applicant.email,
-            role: 'Usuario',
-            permissions: normalizePermissionMatrix(undefined, 'Usuario'),
-            joinedAt: now,
-          };
-          await saveBusiness(req, {
-            ...business,
-            members: [...members, newMember],
-            updatedAt: now,
-          });
-        }
-
-        await saveAccount(req, {
-          ...applicant,
-          linkedBusinessId: business.business_id,
-          companyName: business.name || applicant.companyName,
+      if (!alreadyMember) {
+        const newMember = {
+          user_id: applicant.user_id,
+          fullName: applicant.fullName,
+          email: applicant.email,
+          role: 'Usuario',
+          permissions: normalizePermissionMatrix(undefined, 'Usuario'),
+          joinedAt: now,
+        };
+        await saveBusiness(req, {
+          ...business,
+          members: [...members, newMember],
           updatedAt: now,
         });
       }
+
+      await saveAccount(req, {
+        ...applicant,
+        linkedBusinessId: business.business_id,
+        companyName: business.name || applicant.companyName,
+        updatedAt: now,
+      });
+
+      void sendWorkerLinkedWelcomeEmail(req, {
+        account: {
+          ...applicant,
+          linkedBusinessId: business.business_id,
+          companyName: business.name || applicant.companyName,
+        },
+        companyName: business.name || '',
+        role: 'Usuario',
+      });
     }
 
     const reviewer = await findAccountByUserId(req, userId);

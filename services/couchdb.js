@@ -7373,6 +7373,14 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
       data.aggregatorClosingCard
       || existing?.aggregatorClosingCard
       || undefined,
+    aggregatorClosingBrandTotals:
+      data.aggregatorClosingBrandTotals
+      || existing?.aggregatorClosingBrandTotals
+      || undefined,
+    brandBillingRulesSnapshot:
+      data.brandBillingRulesSnapshot
+      || existing?.brandBillingRulesSnapshot
+      || undefined,
     productClosingCounts: sanitizeProductClosingCounts(
       data.productClosingCounts ?? existing?.productClosingCounts,
     ),
@@ -7438,6 +7446,8 @@ export function sanitizeTpvRegisterSession(doc) {
     aggregatorClosingTotals: doc.aggregatorClosingTotals || undefined,
     aggregatorClosingCash: doc.aggregatorClosingCash || undefined,
     aggregatorClosingCard: doc.aggregatorClosingCard || undefined,
+    aggregatorClosingBrandTotals: doc.aggregatorClosingBrandTotals || undefined,
+    brandBillingRulesSnapshot: doc.brandBillingRulesSnapshot || undefined,
     productClosingCounts: sanitizeProductClosingCounts(doc.productClosingCounts),
     linkedOrderIds: Array.isArray(doc.linkedOrderIds) ? doc.linkedOrderIds : [],
 
@@ -10483,6 +10493,31 @@ export function sanitizeCatalogItemForTpv(doc) {
     createdAt: doc.createdAt || new Date().toISOString(),
     updatedAt: doc.updatedAt || doc.createdAt || new Date().toISOString(),
     deletedAt: doc.deletedAt || null,
+  };
+}
+
+/**
+ * Catálogo mínimo para panel Ingredientes: badges inventario + productos relacionados.
+ * Sin imágenes ni campos pesados (payload mucho más pequeño que sanitizeCatalogItem).
+ */
+export function sanitizeCatalogItemForIngredients(doc) {
+  if (!doc) return null;
+  const rawCf = doc.customFields && typeof doc.customFields === 'object' ? doc.customFields : {};
+  const customFields = {};
+  if (typeof rawCf.ingredients === 'string' && rawCf.ingredients.trim()) {
+    customFields.ingredients = rawCf.ingredients.trim();
+  }
+  return {
+    _id: doc._id,
+    id: doc._id,
+    type: 'catalog_item',
+    name: doc.name || '',
+    module: doc.module || 'catalog',
+    stockCategory: doc.stockCategory || 'other',
+    brandIds: Array.isArray(doc.brandIds) ? doc.brandIds : [],
+    active: doc.active !== undefined ? Boolean(doc.active) : true,
+    supplierName: String(doc.supplierName || ''),
+    customFields,
   };
 }
 

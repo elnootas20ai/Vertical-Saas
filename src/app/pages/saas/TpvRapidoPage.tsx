@@ -58,6 +58,7 @@ import {
   buildOrderIngredients,
   cartLineTotal,
   cartLineUnitPrice,
+  cartLineExtrasUnitPrice,
   customizationSignature,
   isCustomizableCatalogItem,
   isTpvHalfHalfCatalogItem,
@@ -1539,12 +1540,18 @@ export function TpvRapidoOrderFlow({
   );
 
   const autoPromoCalc = useMemo(() => {
-    const lines = cart.map((ci) => ({
-      productId: ci.catalogItem._id,
-      name: ci.catalogItem.name || '',
-      unitPrice: cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization),
-      quantity: ci.quantity,
-    }));
+    const lines = cart.map((ci) => {
+      const base = Number(ci.catalogItem.unitPrice || 0);
+      const extras = cartLineExtrasUnitPrice(ci.customization);
+      return {
+        productId: ci.catalogItem._id,
+        name: ci.catalogItem.name || '',
+        baseUnitPrice: base,
+        extrasUnitPrice: extras,
+        unitPrice: cartLineUnitPrice(base, ci.customization),
+        quantity: ci.quantity,
+      };
+    });
     const salesPointId = String(register?.session?.pointOfSaleId || '').trim();
     return computeFixedUnitPriceDiscount(
       lines,
@@ -2486,12 +2493,11 @@ export function TpvRapidoOrderFlow({
         return;
       }
 
-      // Domicilio o tablet: no cobrar al crear → en montaje/reparto sale «No pagado»
-      // y se cobra con el botón Pagar del detalle (efectivo/tarjeta + calculadora).
-      // Pago dividido en recogida desktop: crear pendiente y registrar tramos después.
+      // Domicilio: no cobrar al crear → montaje/reparto «No pagado» (Pagar / Entregar luego).
+      // Recogida (también en tablet): cobrar ya → status entregado y sale en Historial abajo.
+      // Pago dividido: crear pendiente y registrar tramos después.
       const collectOnDelivery =
         deliveryType === 'domicilio'
-        || tabletMode
         || (Boolean(parts?.length) && method === 'mixto');
 
       setSubmitting(true);
@@ -2531,7 +2537,13 @@ export function TpvRapidoOrderFlow({
         const takerId = effectiveOrderTakerId;
         const takerName = selectedOrderTaker?.name || user?.fullName || 'TPV';
 
-        const submitStatus: DeliveryOrderStatus = tabletMode ? 'listo' : status;
+        // Tablet recogida cobrada al crear → entregado (Historial). Domicilio tablet → listo.
+        const submitStatus: DeliveryOrderStatus =
+          tabletMode && deliveryType === 'recogida' && !collectOnDelivery
+            ? 'entregado'
+            : tabletMode
+              ? 'listo'
+              : status;
         const now = new Date().toISOString();
 
         const tableNote = restaurantTable
@@ -2574,7 +2586,17 @@ export function TpvRapidoOrderFlow({
           deliveryType,
           channel: 'tpv',
           status: submitStatus,
-          ...(tabletMode ? { assemblyStartedAt: now, kitchenCompletedAt: now } : {}),
+          ...(submitStatus === 'entregado'
+            ? {
+                assemblyStartedAt: now,
+                assemblyCompletedAt: now,
+                kitchenCompletedAt: now,
+                departedAt: now,
+                deliveredAt: now,
+              }
+            : tabletMode
+              ? { assemblyStartedAt: now, kitchenCompletedAt: now }
+              : {}),
           salesPointId: pdvId,
           salesPointName: pdvName,
           business_id: writeBusinessId || tpvCatalogBusinessId || businessId || '',

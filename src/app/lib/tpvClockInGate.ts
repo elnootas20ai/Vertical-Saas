@@ -69,11 +69,18 @@ export function evaluateTpvClockInGate(params: {
     return { allowed: true, reason: 'ok' };
   }
 
-  const takerId = selectedOrderTakerId || activeWorkers[0]?.id || null;
-  if (takerId && isVacationBlocked(takerId)) {
+  // Vacaciones del seleccionado: bloquear (el gerente debe elegir a otra persona).
+  if (selectedOrderTakerId && isVacationBlocked(selectedOrderTakerId)) {
     return { allowed: false, reason: 'vacation_blocked' };
   }
+
+  // Si el seleccionado no está activo (descanso / desfichado), caer al primer fichado activo.
+  // Sin esto el CEO delivery queda bloqueado tras abrir caja con un taker obsoleto.
+  let takerId = selectedOrderTakerId || null;
   if (!takerId || !activeWorkers.some((w) => clockinIdsMatch(w.id, takerId))) {
+    takerId = activeWorkers[0]?.id || null;
+  }
+  if (!takerId) {
     return { allowed: false, reason: 'taker_not_active' };
   }
 

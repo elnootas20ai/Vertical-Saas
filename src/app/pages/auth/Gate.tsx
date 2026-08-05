@@ -65,6 +65,7 @@ const BUSINESS_TYPE_OPTIONS: Array<{ value: BusinessType; label: string }> = [
   { value: 'vet', label: 'Veterinario' },
   { value: 'tobaccoShop', label: 'Estanco' },
   { value: 'butcherShop', label: 'Carniceria' },
+  { value: 'iceCreamShop', label: 'Heladeria' },
 ];
 
 const GATE_CREATE_BUSINESS_FORM_ID = 'gate-create-business-modal-form';

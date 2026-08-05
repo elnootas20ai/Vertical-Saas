@@ -75,6 +75,22 @@ describe('orderOnCompletedTpvHistoryBoard', () => {
       session,
     )).toBe(false);
   });
+
+  it('listo (montaje) no cuenta en Historial aunque cocina haya marcado listo', () => {
+    const session = {
+      openedAt: '2026-08-05T16:07:34.183Z',
+      closedAt: '',
+      status: 'open',
+    };
+    expect(orderOnCompletedTpvHistoryBoard(
+      {
+        createdAt: '2026-08-05T16:08:28.100Z',
+        status: 'listo',
+        kitchenCompletedAt: '2026-08-05T16:08:27.574Z',
+      },
+      session,
+    )).toBe(false);
+  });
 });
 
 describe('cancelledOrderHistoryLabel', () => {

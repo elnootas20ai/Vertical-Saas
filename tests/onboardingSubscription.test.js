@@ -26,6 +26,7 @@ describe('onboarding subscription provisioning', () => {
     expect(sub.extraPointOfSaleSlots).toBe(1);
     expect(sub.extraCommercialBrandSlots).toBe(0);
     expect(sub.extraBusinessSlots).toBe(0);
+    expect(sub.extraWorkerSlots).toBe(0); // Pro incluye 12; userCount 5
     expect(sub.paymentProvider).toBe('bank_transfer');
   });
 
@@ -51,6 +52,27 @@ describe('onboarding subscription provisioning', () => {
     expect(extras.extraPointOfSaleSlots).toBe(2);
     expect(extras.extraBusinessSlots).toBe(3);
     expect(extras.extraCommercialBrandSlots).toBe(1);
+    expect(extras.extraWorkerSlots).toBe(0);
+  });
+
+  it('añade trabajadores extra al contratar 15 en plan Pro', () => {
+    const extras = computeOnboardingExtraSlots('pro', {
+      userCount: 15,
+      locationCount: 1,
+      businessCount: 1,
+      commercialBrandCount: 0,
+    });
+    expect(extras.extraWorkerSlots).toBe(3); // 15 - 12
+  });
+
+  it('añade trabajadores extra al contratar 20 en plan Pro', () => {
+    const extras = computeOnboardingExtraSlots('pro', {
+      userCount: 20,
+      locationCount: 2,
+      businessCount: 1,
+      commercialBrandCount: 0,
+    });
+    expect(extras.extraWorkerSlots).toBe(8); // 20 - 12
   });
 
   it('sube a PRO si piden basic con marcas extra en onboarding', () => {

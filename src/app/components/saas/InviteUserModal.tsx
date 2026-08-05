@@ -4,7 +4,7 @@ import {
   X, Mail, User, Shield, ChevronDown, Wrench, Star, Check, CheckCircle2,
   ArrowLeft, ArrowRight, Loader2, Briefcase,
   Building2, MapPin, ClipboardList, UserCheck, FileWarning,
-  DollarSign, Clock,
+  DollarSign, Clock, AlertTriangle,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { InviteLookupResult, RoleDefinition } from '../../lib/authApi';
@@ -27,7 +27,8 @@ import {
 } from '../../lib/laborCost';
 import { listShiftTemplates, type ShiftTemplate } from '../../lib/schedulesApi';
 import { getRoleTaskBundle } from '../../lib/roleTaskTemplates';
-// --- Types ---
+import { workerSeatBillingWarning } from '../../lib/workerSeatLimits';
+import { VertialBillingUpgradeLink } from './VertialBillingUpgradeLink';
 
 interface InviteResult {
   isExistingUser?: boolean;
@@ -63,6 +64,13 @@ interface InviteUserModalProps {
   workCenters?: { id: string; name: string; active?: boolean; businessId?: string }[];
   businesses?: Business[];
   currentBusinessId?: string;
+  /** Cupo de trabajadores (para avisar si al pasarse sube la facturación). */
+  workerSeats?: {
+    used: number;
+    limit: number;
+    remaining: number;
+    canInvite: boolean;
+  } | null;
 }
 
 type EmailStatus =
@@ -481,7 +489,7 @@ function StepIndicator({ current, total }: { current: number; total: number }) {
 
 // --- Main Modal ---
 
-export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workCenters, businesses, currentBusinessId }: InviteUserModalProps) {
+export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workCenters, businesses, currentBusinessId, workerSeats }: InviteUserModalProps) {
   useModalClose(true, onClose);
   const { t } = useTranslation();
   const { currentBusiness: ctxBusiness } = useBusiness();
@@ -720,6 +728,14 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
   }
 
   async function handleSubmit() {
+    if (workerSeats && workerSeats.canInvite === false) {
+      const warn = workerSeatBillingWarning(workerSeats);
+      setSubmitError(
+        warn?.body
+        || 'Cupo completo: invitar a alguien más sube la facturación. Amplía el cupo en Mi plan.',
+      );
+      return;
+    }
     const errs = validateStep2();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
@@ -760,6 +776,11 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
       setIsSubmitting(false);
     }
   }
+
+  const seatBillingWarn = useMemo(
+    () => workerSeatBillingWarning(workerSeats || null),
+    [workerSeats],
+  );
 
   const selectedRoleConfig = role
     ? getRoleConfig(
@@ -930,6 +951,36 @@ export function InviteUserModal({ onClose, onInvite, onLookupEmail, roles, workC
                 </button>
               </div>
             </div>
+
+            {seatBillingWarn && (
+              <div
+                className={`mx-6 mt-4 rounded-xl border px-3.5 py-3 flex gap-2.5 flex-shrink-0 ${
+                  seatBillingWarn.tone === 'block'
+                    ? 'border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/40'
+                    : seatBillingWarn.tone === 'warn'
+                      ? 'border-amber-200 bg-amber-50/80 dark:border-amber-800 dark:bg-amber-950/30'
+                      : 'border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30'
+                }`}
+              >
+                <AlertTriangle
+                  className={`w-4 h-4 shrink-0 mt-0.5 ${
+                    seatBillingWarn.tone === 'info' ? 'text-blue-600' : 'text-amber-600'
+                  }`}
+                />
+                <div className="min-w-0 text-sm">
+                  <p className="font-semibold text-gray-900 dark:text-gray-100">{seatBillingWarn.title}</p>
+                  <p className="mt-0.5 text-gray-600 dark:text-gray-300 leading-snug">{seatBillingWarn.body}</p>
+                  {seatBillingWarn.tone === 'block' && (
+                    <VertialBillingUpgradeLink
+                      to="/saas/settings/facturacion"
+                      className="mt-2 inline-flex text-sm font-semibold text-blue-600 hover:underline"
+                    >
+                      Ir a Mi plan / facturación
+                    </VertialBillingUpgradeLink>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Body */}
             <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">

@@ -1428,7 +1428,8 @@ async function ensurePdvHasTabletCode(userId: string, pdv: PointOfSale): Promise
 
 /**
  * Código tablet TPV + terminal activo por defecto en cada PDV.
- * Sin terminal activo el CEO no puede abrir caja en web (solo tablet inventa uno).
+ * El CEO web (delivery) también usa terminal sintético de respaldo en OpeningScreen;
+ * igual conviene persistir TPV-1 para impresora / sesiones reales.
  */
 export async function ensureTabletCodesForPointsOfSale(
   userId: string,

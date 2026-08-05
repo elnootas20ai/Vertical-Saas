@@ -19,6 +19,7 @@ import {
   pointOfSaleDisplayLabel,
   buildDeliverySidebarStoreRows,
   ensureDeliveryPdvForWorkCenter,
+  ensureTabletCodesForPointsOfSale,
   type DeliverySidebarStoreRow,
   TPV_SESSION_SYNC_EVENT,
   type TpvRegisterSession,
@@ -521,8 +522,9 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
   const hasWorkers = workerOptions.length > 0;
   const hasResolvedPdv = Boolean(selectedPdv) || (isTabletMode && Boolean(restrictedToPdvId));
-  // Bar/restaurante y tablet: si no hay terminal configurado, se usa uno sintético al abrir.
-  const allowSyntheticTerminal = isTabletMode || restaurantOpening;
+  // Tablet, bar/restaurante y CEO web (delivery): sin terminal activo se usa uno sintético al abrir.
+  // ActiveStoreScope no asegura terminales; sin esto el CEO delivery queda semanas sin poder abrir caja.
+  const allowSyntheticTerminal = isTabletMode || restaurantOpening || isManagerView;
   const selectedWorkerVacationMsg = selectedWorkerId
     ? vacationBlockedById[selectedWorkerId] || vacationBlockedById[String(selectedWorkerId).trim()]
     : '';
@@ -1192,7 +1194,7 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
               </div>
             )}
 
-            {selectedPdvId && !selectedTerminalId && (
+            {selectedPdvId && !selectedTerminalId && !allowSyntheticTerminal && (
               <div className="lg:hidden flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold">
                 <ChevronDown className="w-4 h-4 shrink-0 animate-bounce" aria-hidden />
                 Siguiente: elige un terminal más abajo
@@ -4483,21 +4485,23 @@ export function TpvRegisterGate({
         } else {
           const bizList = businessesRef.current;
           const knownBusinessIds = bizList.map((b) => b.business_id).filter(Boolean);
-          const isRestaurant = isRestaurantBusinessType(biz?.businessType);
+          const cachedPdvs = pointsOfSaleRef.current;
+          const cachedMissingTerminal = cachedPdvs.some(
+            (p) =>
+              p.active !== false
+              && !(Array.isArray(p.terminals) && p.terminals.some((t) => t.active !== false)),
+          );
+          // Si el scope ya pintó tiendas sin terminal, hay que recargar con ensureTabletCodes.
+          const needFreshStores = !hasDisplayedStoresRef.current || cachedMissingTerminal;
           [sessData, storeState] = await Promise.all([
             listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined }),
-            hasDisplayedStoresRef.current
-              ? Promise.resolve({
-                  dataUserId: uid,
-                  workCenters: workCentersRef.current,
-                  pointsOfSale: pointsOfSaleRef.current,
-                })
-              : (async () => {
+            needFreshStores
+              ? (async () => {
                   let state = await loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
                     ...loadOpts,
                     knownBusinessIds,
-                    // Restaurante/bar: asegurar PDV + terminal al abrir TPV (sin esto la caja no abre).
-                    tpvBootstrap: isRestaurant,
+                    // Delivery y restaurante: PDV + terminal al abrir TPV (CEO web no inventaba terminal).
+                    tpvBootstrap: true,
                   });
                   if (state.dataUserId) {
                     state = {
@@ -4511,6 +4515,20 @@ export function TpvRegisterGate({
                     };
                   }
                   return state;
+                })()
+              : (async () => {
+                  // Caché con terminales: aún así reafirmar códigos/terminal por si el doc quedó a medias.
+                  let pdvs = cachedPdvs;
+                  try {
+                    pdvs = await ensureTabletCodesForPointsOfSale(uid, pdvs);
+                  } catch {
+                    /* conservar caché */
+                  }
+                  return {
+                    dataUserId: uid,
+                    workCenters: workCentersRef.current,
+                    pointsOfSale: pdvs,
+                  };
                 })(),
           ]);
         }

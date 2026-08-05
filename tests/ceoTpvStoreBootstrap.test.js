@@ -28,10 +28,25 @@ describe('needsCeoTpvStoreBootstrap', () => {
     expect(
       needsCeoTpvStoreBootstrap(
         [{ _id: 'wc-1', name: 'Bar', centerType: 'punto_de_venta', active: true }],
-        [{ _id: 'pdv-1', workCenterId: 'wc-1', active: true }],
+        [{
+          _id: 'pdv-1',
+          workCenterId: 'wc-1',
+          active: true,
+          terminals: [{ id: 't1', name: 'TPV-1', active: true }],
+        }],
         [{ rowId: 'wc-1', pdvId: 'pdv-1', needsPdv: false, inactive: false }],
       ),
     ).toBe(false);
+  });
+
+  it('pide bootstrap si hay PDV abrible pero sin terminal activo', () => {
+    expect(
+      needsCeoTpvStoreBootstrap(
+        [{ _id: 'wc-1', name: 'Delivery', centerType: 'punto_de_venta', active: true }],
+        [{ _id: 'pdv-1', workCenterId: 'wc-1', active: true, terminals: [] }],
+        [{ rowId: 'wc-1', pdvId: 'pdv-1', needsPdv: false, inactive: false }],
+      ),
+    ).toBe(true);
   });
 });
 

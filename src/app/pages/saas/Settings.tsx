@@ -73,6 +73,7 @@ import {
   Globe,
   Cigarette,
   Beef,
+  IceCream,
   Layers,
   UtensilsCrossed,
 } from 'lucide-react';
@@ -1478,7 +1479,7 @@ function TabBilling() {
 const BUSINESS_INPUT_CLASS =
   'w-full rounded-xl border-2 border-gray-200 dark:border-gray-700 px-4 py-3 text-sm text-gray-900 dark:text-gray-100 outline-none transition-colors focus:border-blue-500 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100 dark:focus:border-blue-400';
 
-const ENABLED_BUSINESS_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'restaurant', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop']);
+const ENABLED_BUSINESS_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'restaurant', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop', 'iceCreamShop']);
 
 const ALL_BUSINESS_TYPES: { value: string; label: string; description: string; icon: React.ReactNode; keywords: string; disabled?: boolean }[] = [
   { value: 'events',        label: 'Eventos',               description: 'Organización de eventos',        icon: <PartyPopper className="w-6 h-6" />,    keywords: 'boda fiesta conferencia feria organización catering' },
@@ -1504,6 +1505,7 @@ const ALL_BUSINESS_TYPES: { value: string; label: string; description: string; i
   { value: 'vet',           label: 'Veterinario',           description: 'Clínica veterinaria',            icon: <PawPrint className="w-6 h-6" />,       keywords: 'veterinario animal mascota perro gato clínica vacuna' },
   { value: 'tobaccoShop',  label: 'Estanco',               description: 'Expendeduría de tabaco',         icon: <Cigarette className="w-6 h-6" />,      keywords: 'estanco tabaco lotería sellos expendeduría timbre' },
   { value: 'butcherShop', label: 'Carnicería',            description: 'Carnicería y charcutería',       icon: <Beef className="w-6 h-6" />,           keywords: 'carnicería carne charcutería embutido vacuno cerdo pollo' },
+  { value: 'iceCreamShop', label: 'Heladería',            description: 'Heladería y gelatería',          icon: <IceCream className="w-6 h-6" />,       keywords: 'heladería helado gelato sabores cucurucho tarrina' },
 ];
 
 function BusinessFormModal({

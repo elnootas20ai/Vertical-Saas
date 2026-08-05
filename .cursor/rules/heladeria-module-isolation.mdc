@@ -1,0 +1,20 @@
+---
+description: Aislamiento del módulo Heladería — no mezclar con delivery u otros verticales
+alwaysApply: false
+---
+
+# Módulo Heladería — aislamiento
+
+## Frontera
+
+- Código: `src/app/verticals/heladeria/`
+- Registro: `HELADERIA_MODULE` en `src/app/verticals/registry.ts`
+- `businessType`: `iceCreamShop`
+- Rutas: `/saas/heladeria-*` y `/saas/vertical/heladeria/*`
+
+## Reglas
+
+1. **No** importar pantallas/lib de negocio delivery, restaurant, butcher ni compraventa.
+2. TPV Heladería es **independiente** (`HeladeriaTpvPage`) — no reutilizar `TpvRapidoPage` ni Worker TPV delivery.
+3. Código nuevo → dentro de `verticals/heladeria/` y exportar por `index.ts`.
+4. Tras cambios de imports entre verticales → `npx vitest run tests/verticalModuleBoundaries.test.js`.

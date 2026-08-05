@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -54,6 +54,7 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
+  ArrowLeft,
   ChevronUp,
   HandshakeIcon,
   CheckCircle2,
@@ -81,8 +82,10 @@ import {
   getEffectiveCommercialBrandLimit,
   INCLUDED_BUSINESSES,
 } from '../../lib/tenantEntitlements';
+import { getBaseWorkerSeatLimit } from '../../lib/workerSeatLimits';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { isBlockingSubscriptionStatus } from '../../lib/billingRecovery';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 import type { AuthUser } from '../../lib/authApi';
 import {
   getCompanyVerificationSnapshot,
@@ -281,13 +284,72 @@ function getClientHealthBadge(account: AuthUser) {
   return computeClientHealthFromLogin(account.lastLoginAt, account.createdAt);
 }
 
+/** Control ± de cupos extra (mismo gesto en PDV, marcas, empresas, trabajadores). */
+function AdminExtraSlotControl({
+  label,
+  value,
+  min = 0,
+  max,
+  stepLabel,
+  help,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  max: number;
+  stepLabel: string;
+  help: ReactNode;
+  onChange: (next: number) => void;
+}) {
+  const safe = Math.max(min, Math.min(max, Math.floor(Number(value) || 0)));
+  return (
+    <div className="rounded-xl border border-violet-200/80 dark:border-violet-800 bg-white/70 dark:bg-gray-900/40 p-3 space-y-2">
+      <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">{label}</label>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(min, safe - 1))}
+          disabled={safe <= min}
+          className="min-h-11 min-w-11 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-lg font-bold text-violet-800 dark:text-violet-200 hover:bg-violet-50 disabled:opacity-40"
+          title={`Bajar 1 ${stepLabel}`}
+          aria-label={`Bajar ${label}`}
+        >
+          −
+        </button>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={safe}
+          onChange={(e) => onChange(Math.max(min, Math.min(max, Math.floor(Number(e.target.value) || 0))))}
+          className="flex-1 min-h-11 px-3 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-center text-base font-bold text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(max, safe + 1))}
+          disabled={safe >= max}
+          className="min-h-11 min-w-11 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-lg font-bold text-violet-800 dark:text-violet-200 hover:bg-violet-50 disabled:opacity-40"
+          title={`Subir 1 ${stepLabel}`}
+          aria-label={`Subir ${label}`}
+        >
+          +
+        </button>
+      </div>
+      <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed">{help}</p>
+    </div>
+  );
+}
+
 interface EditModalProps {
   account: AuthUser;
   onClose: () => void;
   onSaved: (updated: AuthUser) => void;
+  /** modal = popup (legacy); page = ficha completa tipo CRM delivery */
+  layout?: 'modal' | 'page';
 }
 
-function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
+export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }: EditModalProps) {
   const { updateUser, resetUserPassword, user: adminUser } = useAuth();
   const adminLabel = adminUser?.email || adminUser?.fullName || 'admin';
   const [modalTab, setModalTab] = useState<'manage' | 'usage'>('manage');
@@ -308,6 +370,9 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   );
   const [extraBusinessSlots, setExtraBusinessSlots] = useState(
     String((account.subscription as { extraBusinessSlots?: number } | undefined)?.extraBusinessSlots ?? 0),
+  );
+  const [extraWorkerSlots, setExtraWorkerSlots] = useState(
+    String(account.subscription?.extraWorkerSlots ?? 0),
   );
   const [adminProAccess, setAdminProAccess] = useState(
     Boolean(account.subscription?.adminProAccess),
@@ -333,6 +398,29 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const [reactivateResult, setReactivateResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [clearingMonei, setClearingMonei] = useState(false);
   const [clearMoneiResult, setClearMoneiResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  // Al abrir otro cliente, cargar su ficha (no pisar ediciones a medias del mismo).
+  useEffect(() => {
+    const plan = initialPlanFromSubscription(account.subscription);
+    setCompanyName(account.companyName || '');
+    setEmail(account.email || '');
+    setPlanName(plan.name);
+    setSelectedPlanId(plan.id);
+    setSubscriptionStatus(account.subscription?.status || 'pending_payment');
+    setExtraPointOfSaleSlots(String(account.subscription?.extraPointOfSaleSlots ?? 0));
+    setExtraCommercialBrandSlots(String(account.subscription?.extraCommercialBrandSlots ?? 0));
+    setExtraBusinessSlots(
+      String((account.subscription as { extraBusinessSlots?: number } | undefined)?.extraBusinessSlots ?? 0),
+    );
+    setExtraWorkerSlots(String(account.subscription?.extraWorkerSlots ?? 0));
+    setAdminProAccess(Boolean(account.subscription?.adminProAccess));
+    setBillingExempt(Boolean((account.subscription as { billingExempt?: boolean } | undefined)?.billingExempt));
+    setIsBlocked(account.status === 'inactive');
+    setModalTab('manage');
+    setGeneratedPassword(null);
+    setSaveError('');
+    setSaveSuccess(false);
+  }, [account.user_id]);
 
   const accountNeedsAccessRestore =
     isBlockingSubscriptionStatus(subscriptionStatus) ||
@@ -447,6 +535,7 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
           Math.min(99, Math.floor(Number(extraCommercialBrandSlots) || 0)),
         ),
         extraBusinessSlots: Math.max(0, Math.min(99, Math.floor(Number(extraBusinessSlots) || 0))),
+        extraWorkerSlots: Math.max(0, Math.min(999, Math.floor(Number(extraWorkerSlots) || 0))),
         adminProAccess,
         billingExempt: effectiveBillingExempt,
       },
@@ -548,14 +637,44 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
   const baseBusinessLimit = INCLUDED_BUSINESSES[planTier];
   const extraBusiness = Math.max(0, Math.min(99, Math.floor(Number(extraBusinessSlots) || 0)));
   const totalBusinessLimit = baseBusinessLimit + extraBusiness;
+  const baseWorkerLimit = getBaseWorkerSeatLimit(planTier);
+  const extraWorkers = Math.max(0, Math.min(999, Math.floor(Number(extraWorkerSlots) || 0)));
+  const totalWorkerLimit = baseWorkerLimit + extraWorkers;
+
+  const isPage = layout === 'page';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+    <div
+      className={
+        isPage
+          ? 'space-y-4 pb-24'
+          : 'fixed inset-0 z-50 flex items-center justify-center p-4'
+      }
+    >
+      {!isPage && (
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      )}
+      <div
+        className={
+          isPage
+            ? 'relative bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm w-full'
+            : 'relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto'
+        }
+      >
         <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-800 rounded-t-2xl px-6 py-4 z-10">
           <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {isPage && (
+              <button
+                type="button"
+                onClick={onClose}
+                className={`${VERTIAL_BTN_SECONDARY} shrink-0 px-3`}
+                title="Volver a clientes"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Volver</span>
+              </button>
+            )}
             <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 overflow-hidden flex items-center justify-center shrink-0">
               {account.avatar ? (
                 <img src={account.avatar} alt={account.fullName} className="w-full h-full object-cover" />
@@ -563,18 +682,20 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                 <span className="font-bold text-gray-600 dark:text-gray-400 text-sm">{initials(account)}</span>
               )}
             </div>
-            <div>
-              <p className="font-bold text-gray-900 dark:text-gray-100 leading-tight">{account.fullName}</p>
+            <div className="min-w-0">
+              <p className="font-bold text-gray-900 dark:text-gray-100 leading-tight truncate">{account.fullName}</p>
               {account.companyName ? (
-                <p className="text-sm text-gray-600 dark:text-gray-300">{account.companyName}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300 truncate">{account.companyName}</p>
               ) : null}
-              <p className="text-xs text-gray-400 dark:text-gray-500">{account.email}</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 font-mono">{account.user_id}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{account.email}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate">{account.user_id}</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400">
-            <X className="w-5 h-5" />
-          </button>
+          {!isPage && (
+            <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400" title="Cerrar">
+              <X className="w-5 h-5" />
+            </button>
+          )}
           </div>
           <div className="mt-4 flex gap-2">
             <button
@@ -608,6 +729,17 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
           </div>
         ) : (
         <div className="p-6 space-y-5">
+          {isPage && (
+            <p className="text-sm text-stone-500 dark:text-stone-400">
+              Misma ficha de siempre: verificación, plan, cupos ±, contraseña, acceso como cliente, reactivar y meses gratis.
+            </p>
+          )}
+
+          {isPage && (
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight">
+              Verificación y estado
+            </h3>
+          )}
           <AdminCompanyVerificationPanel
             account={account}
             adminLabel={adminLabel}
@@ -629,6 +761,12 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               {isBlocked ? 'Desbloquear' : 'Bloquear'}
             </button>
           </div>
+
+          {isPage && (
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
+              Datos, plan y suscripción
+            </h3>
+          )}
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Email</label>
@@ -722,6 +860,11 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
             </div>
           </div>
 
+          {isPage && (
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
+              Cupos extras (subir / bajar)
+            </h3>
+          )}
           <div className="rounded-2xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4 space-y-3">
             <p className="text-xs font-semibold text-violet-800 dark:text-violet-200 uppercase tracking-wider">
               Ventajas sin cobro (superadmin)
@@ -758,118 +901,67 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
                 </span>
               </span>
             </label>
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">
-                  PDV extra (además del plan)
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setExtraPointOfSaleSlots(String(Math.max(0, extraPdv - 1)))}
-                    disabled={extraPdv <= 0}
-                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
-                  >
-                    −1
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setExtraPointOfSaleSlots(String(Math.min(99, extraPdv + 1)))}
-                    disabled={extraPdv >= 99}
-                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
-                  >
-                    +1 PDV
-                  </button>
-                </div>
-              </div>
-              <input
-                type="number"
-                min={0}
+            <div className={`grid gap-3 ${isPage ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
+              <AdminExtraSlotControl
+                label="PDV extra (además del plan)"
+                value={extraPdv}
                 max={99}
-                value={extraPointOfSaleSlots}
-                onChange={(e) => setExtraPointOfSaleSlots(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+                stepLabel="PDV"
+                onChange={(n) => setExtraPointOfSaleSlots(String(n))}
+                help={
+                  <>
+                    Cupo total permitido: <strong>{totalPdvLimit}</strong> PDV ({basePdvLimit} del plan + {extraPdv} extra).
+                    Referencia comercial: {formatAddonPriceShort('extra_pdv')} por cada PDV de pago.
+                  </>
+                }
               />
-              <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
-                Cupo total permitido: <strong>{totalPdvLimit}</strong> PDV ({basePdvLimit} del plan + {extraPdv} extra).
-                Referencia comercial: {formatAddonPriceShort('extra_pdv')} por cada PDV de pago.
-              </p>
-            </div>
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">
-                  Marcas comerciales extra (además del plan)
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setExtraCommercialBrandSlots(String(Math.max(0, extraBrands - 1)))}
-                    disabled={extraBrands <= 0}
-                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
-                  >
-                    −1
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setExtraCommercialBrandSlots(String(Math.min(99, extraBrands + 1)))}
-                    disabled={extraBrands >= 99}
-                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
-                  >
-                    +1 marca
-                  </button>
-                </div>
-              </div>
-              <input
-                type="number"
-                min={0}
+              <AdminExtraSlotControl
+                label="Marcas comerciales extra"
+                value={extraBrands}
                 max={99}
-                value={extraCommercialBrandSlots}
-                onChange={(e) => setExtraCommercialBrandSlots(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+                stepLabel="marca"
+                onChange={(n) => setExtraCommercialBrandSlots(String(n))}
+                help={
+                  <>
+                    Cupo total: <strong>{totalBrandLimit}</strong> líneas comerciales ({baseBrandLimit} del plan + {extraBrands}{' '}
+                    extra). Referencia comercial: {formatAddonPriceShort('extra_brand')} por cada marca de pago.
+                  </>
+                }
               />
-              <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
-                Cupo total: <strong>{totalBrandLimit}</strong> líneas comerciales ({baseBrandLimit} del plan + {extraBrands}{' '}
-                extra). Referencia comercial: {formatAddonPriceShort('extra_brand')} por cada marca de pago.
-              </p>
-            </div>
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">
-                  Empresas extra (además del plan)
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setExtraBusinessSlots(String(Math.max(0, extraBusiness - 1)))}
-                    disabled={extraBusiness <= 0}
-                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
-                  >
-                    −1
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setExtraBusinessSlots(String(Math.min(99, extraBusiness + 1)))}
-                    disabled={extraBusiness >= 99}
-                    className="rounded-lg border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-40 dark:border-violet-700 dark:text-violet-200"
-                  >
-                    +1 empresa
-                  </button>
-                </div>
-              </div>
-              <input
-                type="number"
-                min={0}
+              <AdminExtraSlotControl
+                label="Empresas extra"
+                value={extraBusiness}
                 max={99}
-                value={extraBusinessSlots}
-                onChange={(e) => setExtraBusinessSlots(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+                stepLabel="empresa"
+                onChange={(n) => setExtraBusinessSlots(String(n))}
+                help={
+                  <>
+                    Cupo total: <strong>{totalBusinessLimit}</strong> empresas ({baseBusinessLimit} del plan + {extraBusiness}{' '}
+                    extra). Referencia comercial: {formatAddonPriceShort('extra_business')} por cada empresa de pago.
+                  </>
+                }
               />
-              <p className="mt-1.5 text-xs text-violet-700 dark:text-violet-300">
-                Cupo total: <strong>{totalBusinessLimit}</strong> empresas ({baseBusinessLimit} del plan + {extraBusiness}{' '}
-                extra). Referencia comercial: {formatAddonPriceShort('extra_business')} por cada empresa de pago.
-              </p>
+              <AdminExtraSlotControl
+                label="Trabajadores extra"
+                value={extraWorkers}
+                max={999}
+                stepLabel="trabajador"
+                onChange={(n) => setExtraWorkerSlots(String(n))}
+                help={
+                  <>
+                    Cupo total: <strong>{totalWorkerLimit}</strong> trabajadores ({baseWorkerLimit} del plan + {extraWorkers}{' '}
+                    extra). Ej.: Pro 12 + 3 extra = 15; +8 extra = 20. Referencia: {formatAddonPriceShort('extra_worker')}.
+                  </>
+                }
+              />
             </div>
           </div>
+
+          {isPage && (
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
+              Acceso (contraseña, enlace, impersonar)
+            </h3>
+          )}
           <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4 space-y-3">
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Contraseña</p>
             <div className="flex items-center gap-2">
@@ -920,6 +1012,11 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
             </div>
           )}
 
+          {isPage && (accountNeedsAccessRestore || subscriptionStatus === 'suspended') && (
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
+              Activar / restaurar acceso
+            </h3>
+          )}
           {(accountNeedsAccessRestore || subscriptionStatus === 'suspended') && (
             <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 space-y-3">
               <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 uppercase tracking-wider">
@@ -977,6 +1074,11 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
             </div>
           )}
 
+          {isPage && (
+            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
+              Regalar meses gratis
+            </h3>
+          )}
           <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3">
             <div className="flex items-center gap-2">
               <CalendarDays className="w-4 h-4 text-amber-600 dark:text-amber-400" />
@@ -1042,14 +1144,37 @@ function EditClientModal({ account, onClose, onSaved }: EditModalProps) {
               <p className="text-sm text-green-700">Cambios guardados correctamente</p>
             </div>
           )}
-          <button onClick={() => void handleSave()} disabled={saving}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gray-900 hover:bg-gray-700 text-white text-sm font-bold transition-colors disabled:opacity-50">
-            <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
-            {saving ? 'Guardando...' : 'Guardar cambios'}
-          </button>
+          {!isPage && (
+            <button onClick={() => void handleSave()} disabled={saving}
+              className={`${VERTIAL_BTN_PRIMARY} w-full`}>
+              <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
+              {saving ? 'Guardando...' : 'Guardar cambios'}
+            </button>
+          )}
         </div>
         )}
       </div>
+
+      {isPage && modalTab === 'manage' && (
+        <div className="fixed bottom-0 inset-x-0 z-20 border-t border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-950/95 backdrop-blur-sm px-4 py-3 safe-area-pb">
+          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
+            <button type="button" onClick={onClose} className={VERTIAL_BTN_SECONDARY}>
+              <ArrowLeft className="w-4 h-4" />
+              Volver a clientes
+            </button>
+            <button type="button" onClick={() => void handleSave()} disabled={saving} className={VERTIAL_BTN_PRIMARY}>
+              <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
+              {saving ? 'Guardando...' : 'Guardar cambios'}
+            </button>
+          </div>
+          {(saveError || saveSuccess) && (
+            <div className="max-w-4xl mx-auto mt-2 text-xs">
+              {saveError ? <p className="text-red-600">{saveError}</p> : null}
+              {saveSuccess ? <p className="text-green-700">Cambios guardados correctamente</p> : null}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1209,13 +1334,9 @@ function getTrialInfo(account: AuthUser): {
 }
 
 function ClientsTab({
-  selectedAccount,
   onSelectAccount,
-  accountSaveCallbackRef,
 }: {
-  selectedAccount: AuthUser | null;
-  onSelectAccount: (a: AuthUser | null) => void;
-  accountSaveCallbackRef: React.MutableRefObject<((u: AuthUser) => void) | null>;
+  onSelectAccount: (a: AuthUser) => void;
 }) {
   const { listUsers } = useAuth();
   const [accounts, setAccounts] = useState<AuthUser[]>([]);
@@ -1231,13 +1352,6 @@ function ClientsTab({
   const [filterCard, setFilterCard] = useState<'' | 'yes' | 'no'>('');
   const [filterVerification, setFilterVerification] = useState<'' | 'pending'>('');
   const [showFilters, setShowFilters] = useState(false);
-
-  useEffect(() => {
-    accountSaveCallbackRef.current = (updated: AuthUser) => {
-      setAccounts((prev) => prev.map((a) => (a.user_id === updated.user_id ? updated : a)));
-    };
-    return () => { accountSaveCallbackRef.current = null; };
-  }, [accountSaveCallbackRef]);
 
   const loadAccounts = async () => {
     try {
@@ -3670,22 +3784,25 @@ function AffiliateRequestsTab({ userId }: { userId: string }) {
 
 export function AdminPanel() {
   const { user, listUsers } = useAuth();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabId>('clients');
-  const [selectedAccount, setSelectedAccount] = useState<AuthUser | null>(null);
   const [auditUsers, setAuditUsers] = useState<AuthUser[]>([]);
   const [paymentSentBadge, setPaymentSentBadge] = useState(0);
-  const accountSaveCallbackRef = useRef<((u: AuthUser) => void) | null>(null);
 
-  useModalClose(!!selectedAccount, () => setSelectedAccount(null));
+  const openClientDetail = useCallback((account: AuthUser) => {
+    const id = String(account.user_id || '').trim();
+    if (!id) return;
+    navigate(`/saas/admin/clients/${encodeURIComponent(id)}`);
+  }, [navigate]);
 
   const usersMap = useMemo(() => new Map(auditUsers.map((u) => [u.user_id, u])), [auditUsers]);
   const adminUserId = user?.id || user?.user_id || '';
 
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (tab === 'affiliate_requests' && TABS.some((t) => t.id === tab)) {
-      setActiveTab('affiliate_requests');
+    if (tab && TABS.some((t) => t.id === tab)) {
+      setActiveTab(tab as TabId);
     }
   }, [searchParams]);
 
@@ -3703,19 +3820,13 @@ export function AdminPanel() {
         if (!cancelled) setPaymentSentBadge(0);
       });
     return () => { cancelled = true; };
-  }, [listUsers, activeTab, selectedAccount]);
+  }, [listUsers, activeTab]);
 
   useEffect(() => {
     if (activeTab === 'audit') {
       listUsers().then(setAuditUsers).catch(() => setAuditUsers([]));
     }
   }, [activeTab, listUsers]);
-
-  const handleAccountSaved = useCallback((updated: AuthUser) => {
-    setSelectedAccount(updated);
-    setAuditUsers((prev) => prev.map((u) => (u.user_id === updated.user_id ? updated : u)));
-    accountSaveCallbackRef.current?.(updated);
-  }, []);
 
   if (!isVertialSuperAdminEmail(user?.email)) {
     return (
@@ -3762,11 +3873,7 @@ export function AdminPanel() {
 
         {/* Contenido del tab activo */}
         {activeTab === 'clients' && (
-          <ClientsTab
-            selectedAccount={selectedAccount}
-            onSelectAccount={setSelectedAccount}
-            accountSaveCallbackRef={accountSaveCallbackRef}
-          />
+          <ClientsTab onSelectAccount={openClientDetail} />
         )}
         {activeTab === 'printers' && <StorePrintersManager variant="admin" />}
         {activeTab === 'web' && <AdminWebAnalyticsTab />}
@@ -3779,7 +3886,7 @@ export function AdminPanel() {
         {activeTab === 'audit' && (
           <AuditTab
             usersMap={usersMap}
-            onViewUser={(u) => setSelectedAccount(u)}
+            onViewUser={openClientDetail}
           />
         )}
         {activeTab === 'incidents' && (
@@ -3791,13 +3898,6 @@ export function AdminPanel() {
           </div>
         )}
       </div>
-      {selectedAccount && (
-        <EditClientModal
-          account={selectedAccount}
-          onClose={() => setSelectedAccount(null)}
-          onSaved={handleAccountSaved}
-        />
-      )}
     </Layout>
   );
 }

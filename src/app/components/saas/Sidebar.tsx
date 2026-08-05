@@ -113,6 +113,7 @@ import {
   Ticket,
   Beef,
   Bike,
+  IceCream,
   AlertTriangle,
   ChefHat,
   Zap,
@@ -465,6 +466,13 @@ const menuItemDefs = [
   { id: 'butcher-waste',         navKey: 'butcherWaste',         icon: <Recycle className="w-5 h-5" />,       path: '/saas/butcher-waste' },
   { id: 'butcher-reports',       navKey: 'butcherReports',       icon: <BarChart3 className="w-5 h-5" />,     path: '/saas/vertical/carniceria/informes' },
 
+  // ── Vertical: Heladería ────────────────────────────────────────────────────
+  { id: 'heladeria-tpv',            navKey: 'heladeriaTpv',            icon: <Monitor className="w-5 h-5" />,         path: '/saas/vertical/heladeria/tpv' },
+  { id: 'heladeria-ops',            navKey: 'heladeriaOps',            icon: <Activity className="w-5 h-5" />,        path: '/saas/heladeria-ops' },
+  { id: 'heladeria-caja',           navKey: 'heladeriaCaja',           icon: <Banknote className="w-5 h-5" />,        path: '/saas/vertical/heladeria/caja' },
+  { id: 'heladeria-encargos',       navKey: 'heladeriaEncargos',       icon: <ClipboardList className="w-5 h-5" />,   path: '/saas/heladeria-encargos' },
+  { id: 'heladeria-integraciones',  navKey: 'heladeriaIntegraciones',  icon: <Plug className="w-5 h-5" />,            path: '/saas/heladeria-integraciones' },
+
   // ── Bottom ───────────────────────────────────────────────────────────────────
   { id: 'configuracion', navKey: 'configuracion', icon: <Cog className="w-5 h-5" />, path: '/saas/configuracion' },
   { id: 'settings', navKey: 'settings', icon: <Settings className="w-5 h-5" />, path: '/saas/settings' },
@@ -536,6 +544,7 @@ const sidebarGroupDefs = [
   { id: 'vet',              icon: <PawPrint className="w-4 h-4 shrink-0" />,    itemIds: ['vet-patients', 'vet-history', 'vet-vaccinations'] },
   { id: 'tobaccoShop',      icon: <Cigarette className="w-4 h-4 shrink-0" />,  itemIds: ['tobacco-lottery', 'tobacco-regulatory'] },
   { id: 'butcherShop',     icon: <Beef className="w-4 h-4 shrink-0" />,       itemIds: ['butcher-hub', 'butcher-clients', 'butcher-orders', 'butcher-sales', 'butcher-tpv', 'butcher-products', 'butcher-purchases', 'butcher-despiece', 'butcher-reparto', 'butcher-basculas', 'butcher-traceability', 'butcher-waste', 'butcher-reports'] },
+  { id: 'iceCreamShop',    icon: <IceCream className="w-4 h-4 shrink-0" />,   itemIds: ['heladeria-tpv', 'heladeria-ops', 'heladeria-caja', 'heladeria-encargos', 'heladeria-integraciones'] },
 ] as const;
 
 const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
@@ -562,6 +571,7 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
   vet:           new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'vet']),
   tobaccoShop:   new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'tobaccoShop']),
   butcherShop:   new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'butcherShop']),
+  iceCreamShop:  new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'iceCreamShop']),
 };
 
 /** Items de menú por grupo, sustituyen los defaults del grupo para un vertical concreto. */
@@ -648,6 +658,7 @@ const VERTICAL_BOTTOM_ITEMS: Record<BusinessType, Set<string>> = {
   vet:           new Set(['configuracion', 'settings']),
   tobaccoShop:   new Set(['configuracion', 'settings']),
   butcherShop:   new Set(['configuracion', 'settings']),
+  iceCreamShop:  new Set(['configuracion', 'settings']),
 };
 
 interface SidebarProps {

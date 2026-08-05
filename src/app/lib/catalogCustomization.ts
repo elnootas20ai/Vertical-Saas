@@ -1949,13 +1949,17 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-export function cartLineUnitPrice(baseUnitPrice: number, customization: CartLineCustomization): number {
+export function cartLineExtrasUnitPrice(customization: CartLineCustomization): number {
   const lineExtras = customization.addedSupplements.reduce((sum, s) => sum + Number(s.price || 0), 0);
   const comboExtras = (customization.comboSelections ?? []).reduce((sum, ref) => {
     const unitExtras = (ref.addedSupplements ?? []).reduce((s, x) => s + Number(x.price || 0), 0);
     return sum + unitExtras * Math.max(1, Number(ref.quantity) || 1);
   }, 0);
-  return round2(Number(baseUnitPrice || 0) + lineExtras + comboExtras);
+  return round2(lineExtras + comboExtras);
+}
+
+export function cartLineUnitPrice(baseUnitPrice: number, customization: CartLineCustomization): number {
+  return round2(Number(baseUnitPrice || 0) + cartLineExtrasUnitPrice(customization));
 }
 
 export function cartLineTotal(

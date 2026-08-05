@@ -56,6 +56,7 @@ import { Invitations } from './pages/saas/Invitations';
 import { Finance } from './pages/saas/Finance';
 import { VerifactuPage } from './pages/saas/VerifactuPage';
 import { AdminPanel } from './pages/saas/AdminPanel';
+import { AdminClientDetail } from './pages/saas/AdminClientDetail';
 import { Settings } from './pages/saas/Settings';
 import { ConfiguracionGeneral } from './pages/saas/ConfiguracionGeneral';
 import { Billing } from './pages/saas/Billing';
@@ -325,6 +326,13 @@ import { ButcherDespiece } from './pages/saas/ButcherDespiece';
 import { ButcherScaleSetup } from './pages/saas/ButcherScaleSetup';
 import { ButcherTpvPage } from './pages/saas/ButcherTpvPage';
 import { WorkerButcherReparto } from './pages/saas/WorkerButcherReparto';
+import {
+  HeladeriaOpsPage,
+  HeladeriaTpvPage,
+  HeladeriaCajaPage,
+  HeladeriaEncargosPage,
+  HeladeriaIntegracionesPage,
+} from './verticals/heladeria';
 import { CompraventaCrm } from './pages/saas/vertical/compraventa/CompraventaCrm';
 import { CompraventaComprasPage } from './pages/saas/vertical/compraventa/CompraventaComprasPage';
 import { CompraventaVentasPage } from './pages/saas/vertical/compraventa/CompraventaVentasPage';
@@ -686,6 +694,7 @@ export const router = createBrowserRouter([
           { path: 'delivery-crm/worker', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'configuracion', element: <RequireBusinessOwner><ConfiguracionGeneral /></RequireBusinessOwner> },
           { path: 'admin', element: <RequireBusinessOwner><RequireSuperAdmin><AdminPanel /></RequireSuperAdmin></RequireBusinessOwner> },
+          { path: 'admin/clients/:userId', element: <RequireBusinessOwner><RequireSuperAdmin><AdminClientDetail /></RequireSuperAdmin></RequireBusinessOwner> },
           { path: 'gdpr', element: <RequireBusinessOwner><GdprPanel /></RequireBusinessOwner> },
           { path: 'settings', element: <RequireBusinessOwner><Settings /></RequireBusinessOwner> },
           { path: 'settings/horarios', element: <Navigate to="/saas/settings/tienda?action=horarios" replace /> },
@@ -917,6 +926,18 @@ export const router = createBrowserRouter([
           { path: 'butcher-basculas', element: <RequireBusinessOwner><ButcherScaleSetup /></RequireBusinessOwner> },
           { path: 'butcher-reports', Component: ButcherReports },
           { path: 'butcher-tpv', Component: ButcherTpvPage },
+
+          // Heladería (ice cream shop)
+          { path: 'vertical/heladeria', element: <Navigate to="/saas/heladeria-ops" replace /> },
+          { path: 'heladeria-ops', element: <RequireBusinessOwner><HeladeriaOpsPage /></RequireBusinessOwner> },
+          { path: 'heladeria-encargos', element: <RequireBusinessOwner><HeladeriaEncargosPage /></RequireBusinessOwner> },
+          { path: 'heladeria-integraciones', element: <RequireBusinessOwner><HeladeriaIntegracionesPage /></RequireBusinessOwner> },
+          { path: 'heladeria-caja', element: <RequireBusinessOwner><HeladeriaCajaPage /></RequireBusinessOwner> },
+          { path: 'heladeria-tpv', element: <RequireBusinessOwner><HeladeriaTpvPage /></RequireBusinessOwner> },
+          { path: 'vertical/heladeria/tpv', element: <RequireBusinessOwner><HeladeriaTpvPage /></RequireBusinessOwner> },
+          { path: 'vertical/heladeria/caja', element: <RequireBusinessOwner><HeladeriaCajaPage /></RequireBusinessOwner> },
+          { path: 'vertical/heladeria/encargos', element: <Navigate to="/saas/heladeria-encargos" replace /> },
+          { path: 'vertical/heladeria/integraciones', element: <Navigate to="/saas/heladeria-integraciones" replace /> },
 
           // Compraventa (car dealership)
           { path: 'compraventa-hub', element: <Navigate to="/saas/vertical/compraventa" replace /> },

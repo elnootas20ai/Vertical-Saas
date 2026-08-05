@@ -1,21 +1,44 @@
 /**
- * Envía un correo de bienvenida de prueba (misma plantilla que buildWelcomeTrialEmail).
- * Uso: node scripts/send-test-welcome-email.mjs [email]
- * Requiere .env / .env.development con SMTP o Resend configurado (mismo criterio que el backend).
+ * Envía bienvenida empresa (plan) o trabajador.
+ * Uso:
+ *   node scripts/send-test-welcome-email.mjs [email] [nombre]
+ *   node scripts/send-test-welcome-email.mjs --worker [email] [nombre] [empresa] [tienda] [horario]
  */
 import '../config/env.js';
-import { sendEmail, buildWelcomeTrialEmail } from '../services/email.js';
+import {
+  sendEmail,
+  buildCompanyWelcomeEmail,
+  buildWorkerWelcomeEmail,
+} from '../services/email.js';
 
-const to = String(process.argv[2] || 'elnootas2.0@gmail.com').trim();
-const displayName = String(process.argv[3] || 'Uriel elnot').trim();
+const args = process.argv.slice(2);
+const isWorker = args[0] === '--worker';
+const rest = isWorker ? args.slice(1) : args;
 
-const { subject, html } = buildWelcomeTrialEmail(to, displayName, 14);
-
-await sendEmail({
-  to,
-  subject: `[Prueba] ${subject}`,
-  html,
-  requireDelivery: true,
-});
-
-console.log(`OK: enviado a ${to}`);
+if (isWorker) {
+  const to = String(rest[0] || 'elnootas2.0@gmail.com').trim();
+  const displayName = String(rest[1] || 'Pol').trim();
+  const companyName = String(rest[2] || 'hoypecamos').trim();
+  const storeName = String(rest[3] || 'BADALONA').trim();
+  const scheduleLabel = String(rest[4] || '19:00–23:30').trim();
+  const { subject, html } = buildWorkerWelcomeEmail({
+    name: displayName,
+    companyName,
+    storeName,
+    role: 'Usuario',
+    scheduleLabel,
+  });
+  await sendEmail({ to, subject: `[Prueba] ${subject}`, html, requireDelivery: true });
+  console.log(`OK trabajador: enviado a ${to}`);
+} else {
+  const to = String(rest[0] || 'elnootas2.0@gmail.com').trim();
+  const displayName = String(rest[1] || 'Uriel').trim();
+  const planName = String(rest[2] || 'Pro').trim();
+  const { subject, html } = buildCompanyWelcomeEmail(to, displayName, {
+    planName,
+    companyName: 'Vertial',
+    billingMode: 'monthly',
+  });
+  await sendEmail({ to, subject: `[Prueba] ${subject}`, html, requireDelivery: true });
+  console.log(`OK empresa: enviado a ${to}`);
+}

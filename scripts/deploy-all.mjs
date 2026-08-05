@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 import dotenv from 'dotenv';
 import { REPO_ROOT } from './deploy-env.mjs';
+import { resolveSmokeSaasCredentials } from './lib/prodAdminLoginGuard.mjs';
 
 dotenv.config({ path: `${REPO_ROOT}/.env` });
 
@@ -79,21 +80,16 @@ run(
   ],
 );
 
-// No login admin (OTP Gmail). Solo diag con cuenta no-admin, o SMOKE_ALLOW_ADMIN_OTP_LOGIN=1.
-const hasSaasCreds = Boolean(process.env.SAAS_LOGIN_EMAIL && process.env.SAAS_LOGIN_PASSWORD);
-const email = String(process.env.SAAS_LOGIN_EMAIL || '').trim().toLowerCase();
-const allowAdminOtp = process.env.SMOKE_ALLOW_ADMIN_OTP_LOGIN === '1';
-const isAdminEmail = email === 'uriel@admin.com';
-if (hasSaasCreds && (!isAdminEmail || allowAdminOtp)) {
+// Admin (uriel@admin.com) = login manual. Diag solo con SMOKE_SAAS_* o SAAS_LOGIN no-admin.
+const smokeCreds = resolveSmokeSaasCredentials(process.env);
+if (smokeCreds) {
+  process.env.SAAS_LOGIN_EMAIL = smokeCreds.email;
+  process.env.SAAS_LOGIN_PASSWORD = smokeCreds.password;
   run('diag-tpv-catalog', 'node', ['scripts/diag-tpv-catalog.mjs']);
-} else if (isAdminEmail && !allowAdminOtp) {
-  console.log(
-    '[deploy:all] Omitiendo diag-tpv-catalog (cuenta admin → OTP Gmail). ' +
-      'Usa cuenta de prueba o SMOKE_ALLOW_ADMIN_OTP_LOGIN=1 solo a propósito.',
-  );
 } else {
   console.log(
-    '[deploy:all] Omitiendo diag-tpv-catalog (faltan SAAS_LOGIN_EMAIL / SAAS_LOGIN_PASSWORD en .env)',
+    '[deploy:all] Omitiendo diag-tpv-catalog (sin cuenta de prueba). ' +
+      'uriel@admin.com no se usa en deploy; opcional: SMOKE_SAAS_EMAIL / SMOKE_SAAS_PASSWORD.',
   );
 }
 

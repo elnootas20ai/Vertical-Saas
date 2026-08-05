@@ -28,7 +28,7 @@ import type { RestaurantFormat } from '../verticals/restaurant/restaurantFormat'
 
 export type { RestaurantFormat };
 
-export type BusinessType = 'events' | 'carDealership' | 'workshop' | 'delivery' | 'restaurant' | 'cleaning' | 'hairSalon' | 'gym' | 'clinic' | 'hotel' | 'construction' | 'academy' | 'realEstate' | 'lawyer' | 'nightclub' | 'scrapyard' | 'spareParts' | 'taxi' | 'pharmacy' | 'carWash' | 'vet' | 'tobaccoShop' | 'butcherShop';
+export type BusinessType = 'events' | 'carDealership' | 'workshop' | 'delivery' | 'restaurant' | 'cleaning' | 'hairSalon' | 'gym' | 'clinic' | 'hotel' | 'construction' | 'academy' | 'realEstate' | 'lawyer' | 'nightclub' | 'scrapyard' | 'spareParts' | 'taxi' | 'pharmacy' | 'carWash' | 'vet' | 'tobaccoShop' | 'butcherShop' | 'iceCreamShop';
 
 export type ImportItemStatus = 'pending' | 'completed' | 'skipped';
 

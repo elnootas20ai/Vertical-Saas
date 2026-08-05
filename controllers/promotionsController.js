@@ -63,6 +63,10 @@ function sanitizePromotion(doc) {
     salesPointIds: Array.isArray(doc.salesPointIds)
       ? [...new Set(doc.salesPointIds.map((id) => String(id || '').trim()).filter(Boolean))]
       : [],
+    discountTarget: doc.discountTarget === 'product' || doc.discountTarget === 'order'
+      ? doc.discountTarget
+      : (String(doc.promoType || doc.typeKey || '') === 'fixed_unit_price' ? 'product' : 'order'),
+    extrasMode: doc.extrasMode === 'include_in_fixed' ? 'include_in_fixed' : 'on_top',
   };
 }
 
@@ -95,6 +99,16 @@ function buildPromotionDocument(userId, data, existing = null) {
   } else if (promoType === 'fixed_unit_price') {
     applyMode = 'auto';
   }
+  const discountTargetRaw = data.discountTarget !== undefined
+    ? data.discountTarget
+    : existing?.discountTarget;
+  const discountTarget = discountTargetRaw === 'product' || discountTargetRaw === 'order'
+    ? discountTargetRaw
+    : (promoType === 'fixed_unit_price' ? 'product' : 'order');
+  const extrasModeRaw = data.extrasMode !== undefined
+    ? data.extrasMode
+    : existing?.extrasMode;
+  const extrasMode = extrasModeRaw === 'include_in_fixed' ? 'include_in_fixed' : 'on_top';
   return {
     ...(existing || {}),
     _id: id,
@@ -122,6 +136,8 @@ function buildPromotionDocument(userId, data, existing = null) {
       ? Number(fixedUnitPriceRaw)
       : (promoType === 'fixed_unit_price' ? Number(data.discountValue ?? existing?.discountValue ?? 0) : undefined),
     applyMode,
+    discountTarget,
+    extrasMode,
     createdAt: existing?.createdAt || data.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     deletedAt: existing?.deletedAt || null,

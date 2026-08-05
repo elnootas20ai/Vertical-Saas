@@ -156,6 +156,7 @@ const VERTICAL_LABELS: Record<BusinessType, string> = {
   vet: 'Veterinaria',
   tobaccoShop: 'Estanco',
   butcherShop: 'Carnicería',
+  iceCreamShop: 'Heladería',
 };
 
 // ─── Config status helpers ─────────────────────────────────────────────────────

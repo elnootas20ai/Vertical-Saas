@@ -61,6 +61,13 @@ import { toast } from 'sonner';
 import { InviteUserModal, type InviteUserPayload } from '../../components/saas/InviteUserModal';
 import { loadInviteWorkCenters } from '../../lib/inviteWorkCenters';
 import type { WorkCenter } from '../../lib/workCentersApi';
+import {
+  getWorkerSeatStatusRequest,
+  workerSeatBillingWarning,
+  type WorkerSeatStatus,
+} from '../../lib/workerSeatLimits';
+import { VertialBillingUpgradeLink } from '../../components/saas/VertialBillingUpgradeLink';
+import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { AddButtonDropdown } from '../../components/saas/AddButtonDropdown';
 import { GenericImportModal, type ImportFieldDef } from '../../components/saas/GenericImportModal';
 import { OrgChartModal } from '../../components/saas/OrgChartModal';
@@ -2833,6 +2840,8 @@ export function Team() {
     return 'members';
   });
   const [showInvite, setShowInvite] = useState(false);
+  const [showSeatBillingWarn, setShowSeatBillingWarn] = useState(false);
+  const [workerSeats, setWorkerSeats] = useState<WorkerSeatStatus | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showOrgChart, setShowOrgChart] = useState(false);
   const [workCentersData, setWorkCentersData] = useState<WorkCenter[]>([]);
@@ -2840,10 +2849,14 @@ export function Team() {
 
   useEffect(() => {
     if (activationFocus === 'team-invite') {
-      setShowInvite(true);
+      if (workerSeats && !workerSeats.canInvite) {
+        setShowSeatBillingWarn(true);
+      } else {
+        setShowInvite(true);
+      }
       clearActivationFocus();
     }
-  }, [activationFocus, clearActivationFocus]);
+  }, [activationFocus, clearActivationFocus, workerSeats]);
 
   const TEAM_IMPORT_FIELDS: ImportFieldDef[] = [
     { key: 'name', label: 'Nombre', required: true, example: 'María López' },
@@ -2895,12 +2908,22 @@ export function Team() {
     setPendingInvitations(list);
   };
 
+  const loadWorkerSeats = async () => {
+    if (!currentBusiness?.business_id) {
+      setWorkerSeats(null);
+      return;
+    }
+    const seats = await getWorkerSeatStatusRequest(currentBusiness.business_id);
+    setWorkerSeats(seats);
+  };
+
   const accountUserId = user?.user_id || user?.id || '';
 
   useEffect(() => {
     if (!currentBusiness?.business_id) return;
     void loadDirectory();
     void loadPendingInvitations();
+    void loadWorkerSeats();
     if (accountUserId) {
       loadInviteWorkCenters(user, currentBusiness)
         .then(setWorkCentersData)
@@ -3082,7 +3105,12 @@ export function Team() {
       scheduleTemplateId,
     });
     if (!result.success) {
-      throw new Error(result.error || 'No se pudo invitar al usuario.');
+      const errText = result.error || 'No se pudo invitar al usuario.';
+      if (/cupo|facturaci[oó]n|WORKER_SEAT|trabajador extra/i.test(errText)) {
+        setShowSeatBillingWarn(true);
+        void loadWorkerSeats();
+      }
+      throw new Error(errText);
     }
 
     const isExistingUser = Boolean(result.isExistingUser);
@@ -3097,6 +3125,7 @@ export function Team() {
     });
     await loadDirectory(null);
     await loadPendingInvitations();
+    await loadWorkerSeats();
     window.dispatchEvent(new CustomEvent('vertial:invitations:refresh'));
 
     return {
@@ -3215,7 +3244,12 @@ export function Team() {
             </div>
             <div>
               <p className="font-bold text-gray-900 dark:text-gray-100">{orderedMembers.length} {t('team.members')}</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500">{totalActive} {t('team.active')} · {totalPending} {t('team.pending')}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">
+                {totalActive} {t('team.active')} · {totalPending} {t('team.pending')}
+                {workerSeats
+                  ? ` · Cupo trabajadores ${workerSeats.used}/${workerSeats.limit}`
+                  : ''}
+              </p>
             </div>
           </div>
 
@@ -3227,8 +3261,19 @@ export function Team() {
             <ActivationFieldWrap fieldKey="team-invite" activeKey={activationFocus}>
               <button
                 type="button"
-                onClick={() => setShowInvite(true)}
+                onClick={() => {
+                  if (workerSeats && !workerSeats.canInvite) {
+                    setShowSeatBillingWarn(true);
+                    return;
+                  }
+                  setShowInvite(true);
+                }}
                 className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                title={
+                  workerSeats && !workerSeats.canInvite
+                    ? `Cupo completo (${workerSeats.used}/${workerSeats.limit}) · subir facturación`
+                    : undefined
+                }
               >
                 <UserPlus className="w-4 h-4" />
                 {t('team.inviteUser')}
@@ -3805,11 +3850,49 @@ export function Team() {
           roles={roles}
           businesses={businesses}
           currentBusinessId={currentBusiness?.business_id}
+          workerSeats={workerSeats}
           onInvite={async (payload) => {
             return await handleInvite(payload);
           }}
           onLookupEmail={lookupInviteEmail}
         />
+      )}
+
+      {showSeatBillingWarn && workerSeats && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowSeatBillingWarn(false)} />
+          <div className="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-xl p-6">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-50 dark:bg-amber-950/40">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-bold text-gray-900 dark:text-gray-100">
+                  {workerSeatBillingWarning(workerSeats)?.title || 'Cupo completo'}
+                </h3>
+                <p className="mt-2 text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+                  {workerSeatBillingWarning(workerSeats)?.body
+                    || `Llevas ${workerSeats.used}/${workerSeats.limit} plazas. Si invitas a alguien más, te sube la facturación (${formatAddonPriceShort('extra_worker')} por trabajador).`}
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setShowSeatBillingWarn(false)}
+                className="rounded-xl border border-gray-200 dark:border-gray-600 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200"
+              >
+                Entendido
+              </button>
+              <VertialBillingUpgradeLink
+                to="/saas/settings/facturacion"
+                className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Ir a Mi plan
+              </VertialBillingUpgradeLink>
+            </div>
+          </div>
+        </div>
       )}
 
       <CreateRoleModal

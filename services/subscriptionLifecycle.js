@@ -5,7 +5,7 @@ import {
 } from './couchdb.js';
 import {
   sendEmail,
-  buildWelcomeTrialEmail,
+  buildCompanyWelcomeEmail,
   buildTrialExpiringEmail,
   buildTrialExpiredEmail,
   buildPaymentFailedEmail,
@@ -20,7 +20,6 @@ import {
   notifySubscriptionSuspended,
 } from './adminBusinessAlerts.js';
 
-const TRIAL_DAYS = 14;
 const GRACE_HOURS = 72;
 const APP_URL = (process.env.APP_URL || 'http://localhost:3005').replace(/\/+$/, '');
 const BILLING_URL = `${APP_URL}/saas/settings/facturacion`;
@@ -66,19 +65,24 @@ function daysBetween(dateA, dateB) {
 }
 
 /**
- * Sends a welcome / trial-started email for a new company account.
+ * Sends a welcome email for a new company account (plan / suscripción).
  * Call this from the registration flow after creating the account.
  */
 export async function sendWelcomeEmail(account) {
   try {
-    const { subject, html } = buildWelcomeTrialEmail(
+    const { subject, html } = buildCompanyWelcomeEmail(
       account.email,
       account.fullName || account.firstName || '',
-      TRIAL_DAYS,
+      {
+        planName: account.subscription?.planName || account.subscription?.selectedPlanId || 'Básico',
+        planId: account.subscription?.selectedPlanId || '',
+        companyName: account.companyName || '',
+        billingMode: account.subscription?.billingMode || '',
+      },
     );
     const sent = await sendSubscriptionLifecycleOutbound(account.email, account.user_id, () =>
       sendEmail({ to: account.email, subject, html }));
-    if (sent) logger.info({ tag: 'LIFECYCLE', userId: account.user_id }, 'Welcome trial email sent');
+    if (sent) logger.info({ tag: 'LIFECYCLE', userId: account.user_id }, 'Welcome company email sent');
   } catch (err) {
     logger.error({ tag: 'LIFECYCLE', err: err?.message, userId: account.user_id }, 'Failed to send welcome email');
   }

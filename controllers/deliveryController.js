@@ -7,6 +7,7 @@ import {
   buildCatalogItemDocument,
   sanitizeCatalogItem,
   sanitizeCatalogItemForTpv,
+  sanitizeCatalogItemForIngredients,
   listCatalogItemsByUser,
   resolveStaffUnitPrice,
   buildSupplierDocument,
@@ -1737,7 +1738,12 @@ export async function listCatalogItems(req, res) {
         return doc.itemType === 'product' || doc.itemType === 'combo';
       });
     }
-    const sanitizer = view === 'tpv' ? sanitizeCatalogItemForTpv : sanitizeCatalogItem;
+    const sanitizer =
+      view === 'tpv'
+        ? sanitizeCatalogItemForTpv
+        : view === 'ingredients'
+          ? sanitizeCatalogItemForIngredients
+          : sanitizeCatalogItem;
     return res.json({ ok: true, items: items.map(sanitizer).filter(Boolean) });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar artículos' });

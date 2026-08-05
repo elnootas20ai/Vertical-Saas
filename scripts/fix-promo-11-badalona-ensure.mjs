@@ -75,6 +75,8 @@ const next = {
     productIds: Array.isArray(base.productMatch?.productIds) ? base.productMatch.productIds : [],
     nameIncludes: NAME_INCLUDES,
   },
+  discountTarget: 'product',
+  extrasMode: 'on_top',
   startDate: base.startDate || '2026-01-01T00:00:00.000Z',
   endDate: base.endDate || '2030-12-31T23:59:59.000Z',
   updatedAt: now,

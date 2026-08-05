@@ -8,9 +8,11 @@ import {
   INCLUDED_COMMERCIAL_BRANDS,
   PLAN_TIER_LABELS,
   POINT_OF_SALE_LIMITS,
+  WORKER_SEAT_LIMITS,
   clampExtraBusinessSlots,
   clampExtraCommercialBrandSlots,
   clampExtraPointOfSaleSlots,
+  clampExtraWorkerSlots,
   resolvePlanTier,
 } from './entitlements.js';
 import { clampOnboardingPlanId } from './onboardingPlanRecommendation.js';
@@ -34,6 +36,7 @@ export function computeOnboardingExtraSlots(planTier, metrics) {
   const maxPdv = POINT_OF_SALE_LIMITS[tier] ?? POINT_OF_SALE_LIMITS.basic;
   const maxBiz = INCLUDED_BUSINESSES[tier] ?? INCLUDED_BUSINESSES.basic;
   const maxBrands = INCLUDED_COMMERCIAL_BRANDS[tier] ?? 0;
+  const maxWorkers = WORKER_SEAT_LIMITS[tier] ?? WORKER_SEAT_LIMITS.basic;
 
   return {
     extraPointOfSaleSlots: clampExtraPointOfSaleSlots(Math.max(0, m.locationCount - maxPdv)),
@@ -41,6 +44,8 @@ export function computeOnboardingExtraSlots(planTier, metrics) {
     extraCommercialBrandSlots: clampExtraCommercialBrandSlots(
       Math.max(0, m.commercialBrandCount - maxBrands),
     ),
+    // userCount del onboarding = trabajadores contratados (ej. 15 o 20).
+    extraWorkerSlots: clampExtraWorkerSlots(Math.max(0, m.userCount - maxWorkers)),
   };
 }
 
@@ -109,6 +114,7 @@ export function buildSubscriptionFromOnboarding(onboardingData, existingSubscrip
     extraPointOfSaleSlots: extras.extraPointOfSaleSlots,
     extraBusinessSlots: extras.extraBusinessSlots,
     extraCommercialBrandSlots: extras.extraCommercialBrandSlots,
+    extraWorkerSlots: extras.extraWorkerSlots,
     trialEndsAt: resolveTrialEndsAt(onboardingData, prev) || prev.trialEndsAt || '',
     currentPeriodStart: prev.currentPeriodStart || '',
     onboardingProvisionedAt: now,

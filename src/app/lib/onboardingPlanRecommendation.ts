@@ -45,8 +45,6 @@ export interface NeedsOptionDefinition {
   description: string;
 }
 
-const EXTRA_USER_MONTHLY = 5;
-
 function addonUnitMonthlyPrice(baseEur: number, billingMode: 'monthly' | 'annual'): number {
   if (billingMode === 'monthly') return baseEur;
   return Math.round(baseEur * (1 - PLAN_ADDON_ANNUAL_DISCOUNT));
@@ -462,9 +460,7 @@ export function calculateOnboardingPricing(params: {
   const pdvUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_pdv'), billingMode);
   const brandUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_brand'), billingMode);
   const businessUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_business'), billingMode);
-  const userUnit = billingMode === 'annual'
-    ? Math.round(EXTRA_USER_MONTHLY * (1 - PLAN_ADDON_ANNUAL_DISCOUNT))
-    : EXTRA_USER_MONTHLY;
+  const userUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_worker'), billingMode);
 
   const extraUsersCost = extraUsers * userUnit;
   const extraPdvCost = extraPdv * pdvUnit;

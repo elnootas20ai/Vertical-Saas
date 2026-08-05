@@ -42,6 +42,9 @@ import {
   type AppliedPromo,
   type PromoApplyMode,
   type PromoWeekday,
+  type PromoDiscountTarget,
+  type PromoExtrasMode,
+  resolvePromoDiscountTarget,
 } from '../../lib/promoCodes';
 import { listPromotionsRequest, syncPromotionsRequest } from '../../lib/promotionsApi';
 
@@ -74,6 +77,8 @@ interface Promotion {
   fixedUnitPrice?: number;
   applyMode?: PromoApplyMode;
   salesPointIds?: string[];
+  discountTarget?: PromoDiscountTarget;
+  extrasMode?: PromoExtrasMode;
 }
 
 const WEEKDAY_OPTIONS: { value: PromoWeekday; label: string }[] = [
@@ -108,6 +113,8 @@ function toStoredPromotion(p: Promotion): StoredPromotion {
     fixedUnitPrice: p.fixedUnitPrice,
     applyMode: p.applyMode,
     salesPointIds: Array.isArray(p.salesPointIds) ? p.salesPointIds : [],
+    discountTarget: resolvePromoDiscountTarget(p),
+    extrasMode: p.extrasMode === 'include_in_fixed' ? 'include_in_fixed' : 'on_top',
   };
 }
 
@@ -134,6 +141,8 @@ function fromStoredPromotion(p: StoredPromotion): Promotion {
     fixedUnitPrice: p.fixedUnitPrice != null ? Number(p.fixedUnitPrice) : undefined,
     applyMode: p.applyMode || (p.type === 'fixed_unit_price' ? 'auto' : undefined),
     salesPointIds: Array.isArray(p.salesPointIds) ? p.salesPointIds : [],
+    discountTarget: resolvePromoDiscountTarget(p),
+    extrasMode: p.extrasMode === 'include_in_fixed' ? 'include_in_fixed' : 'on_top',
   };
 }
 
@@ -495,6 +504,8 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
     productNamesText: '',
     fixedUnitPrice: 11,
     applyAuto: true,
+    discountTarget: 'order' as PromoDiscountTarget,
+    extrasMode: 'on_top' as PromoExtrasMode,
   });
 
   function resetForm() {
@@ -503,6 +514,7 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       startDate: defaultStartDate(), endDate: defaultEndDate(), permanent: false,
       maxUses: '', targetAudience: 'all',
       weekdays: [], productNamesText: '', fixedUnitPrice: 11, applyAuto: true,
+      discountTarget: 'order', extrasMode: 'on_top',
     });
     setEditingId(null);
   }
@@ -598,6 +610,8 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
         applyMode: form.type === 'fixed_unit_price'
           ? (form.applyAuto ? 'auto' : 'manual_code')
           : undefined,
+        discountTarget: form.type === 'fixed_unit_price' ? 'product' : (form.discountTarget || 'order'),
+        extrasMode: form.type === 'fixed_unit_price' ? form.extrasMode : undefined,
       };
       setPromotions((prev) => [newPromo, ...prev]);
       showToast(asDraft ? 'Promoción guardada como borrador' : 'Promoción creada correctamente');
@@ -658,6 +672,8 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                 applyMode: form.type === 'fixed_unit_price'
                   ? (form.applyAuto ? 'auto' : 'manual_code')
                   : undefined,
+                discountTarget: form.type === 'fixed_unit_price' ? 'product' : (form.discountTarget || 'order'),
+                extrasMode: form.type === 'fixed_unit_price' ? form.extrasMode : undefined,
               }
             : p,
         ),
@@ -688,6 +704,8 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
       productNamesText: (promo.productNameIncludes || []).join(', '),
       fixedUnitPrice: promo.fixedUnitPrice ?? promo.discountValue ?? 11,
       applyAuto: (promo.applyMode || 'auto') !== 'manual_code',
+      discountTarget: resolvePromoDiscountTarget(promo),
+      extrasMode: promo.extrasMode === 'include_in_fixed' ? 'include_in_fixed' : 'on_top',
     });
     setEditingId(promo.id);
     setActiveView('create');
@@ -994,20 +1012,69 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
             </button>
 
             {/* Step 1 - Type selection */}
+            {/* Step 1 - Scope + type */}
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-slate-200 dark:border-gray-700 p-6">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-xs flex items-center justify-center font-bold">1</span>
+                ¿Sobre qué aplica el descuento?
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({
+                    ...f,
+                    discountTarget: 'order',
+                    type: f.type === 'fixed_unit_price' ? 'fixed' : f.type,
+                  }))}
+                  className={`rounded-xl border-2 p-4 text-left transition-all ${
+                    form.discountTarget === 'order' && form.type !== 'fixed_unit_price'
+                      ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
+                      : 'border-slate-200 dark:border-gray-700'
+                  }`}
+                >
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Total del pedido</p>
+                  <p className="mt-1 text-[11px] text-slate-500">Descuento € o % sobre todo el ticket.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({
+                    ...f,
+                    discountTarget: 'product',
+                    type: 'fixed_unit_price',
+                  }))}
+                  className={`rounded-xl border-2 p-4 text-left transition-all ${
+                    form.discountTarget === 'product' || form.type === 'fixed_unit_price'
+                      ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
+                      : 'border-slate-200 dark:border-gray-700'
+                  }`}
+                >
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Productos concretos (varios)</p>
+                  <p className="mt-1 text-[11px] text-slate-500">Ej. varias pizzas a 11€ cada una. Los extras se definen abajo.</p>
+                </button>
+              </div>
+
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
                 Tipo de promoción
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
-                {(Object.entries(TYPE_CONFIG) as [PromoType, typeof TYPE_CONFIG[PromoType]][]).map(([key, cfg]) => {
+                {(Object.entries(TYPE_CONFIG) as [PromoType, typeof TYPE_CONFIG[PromoType]][])
+                  .filter(([key]) => (
+                    form.discountTarget === 'product'
+                      ? key === 'fixed_unit_price'
+                      : key !== 'fixed_unit_price'
+                  ))
+                  .map(([key, cfg]) => {
                   const Icon = cfg.icon;
                   const isSelected = form.type === key;
                   return (
                     <button
                       key={key}
                       type="button"
-                      onClick={() => setForm((f) => ({ ...f, type: key }))}
+                      onClick={() => setForm((f) => ({
+                        ...f,
+                        type: key,
+                        discountTarget: key === 'fixed_unit_price' ? 'product' : 'order',
+                      }))}
                       className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all text-center ${
                         isSelected
                           ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-500 shadow-sm'
@@ -1106,6 +1173,37 @@ export function PromotionsPage({ embedDeliveryOps }: PromotionsPageProps = {}) {
                       <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                         El TPV busca estos textos dentro del nombre del producto (sin importar mayúsculas).
                       </p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
+                        Extras / suplementos
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, extrasMode: 'on_top' }))}
+                          className={`rounded-xl border-2 p-3 text-left ${
+                            form.extrasMode === 'on_top'
+                              ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
+                              : 'border-slate-200 dark:border-gray-700'
+                          }`}
+                        >
+                          <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">Sumar extras encima</p>
+                          <p className="mt-0.5 text-[11px] text-slate-500">Pizza a 11€ + extras (recomendado).</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, extrasMode: 'include_in_fixed' }))}
+                          className={`rounded-xl border-2 p-3 text-left ${
+                            form.extrasMode === 'include_in_fixed'
+                              ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20'
+                              : 'border-slate-200 dark:border-gray-700'
+                          }`}
+                        >
+                          <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">Incluir extras en el fijo</p>
+                          <p className="mt-0.5 text-[11px] text-slate-500">Todo a 11€ (los extras no se cobran aparte).</p>
+                        </button>
+                      </div>
                     </div>
                     <div className="md:col-span-2">
                       <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">

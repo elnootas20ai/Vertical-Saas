@@ -82,6 +82,41 @@ describe('promo fixed_unit_price', () => {
     expect(applied.map((p) => p.id)).toEqual(['promo-pizzas-11']);
   });
 
+  it('extras encima del fijo (on_top): base 14 + extra 2 → descuenta solo 3€, extras se cobran', () => {
+    const { discount } = computeFixedUnitPriceDiscount(
+      [{
+        name: 'Margarita',
+        unitPrice: 16,
+        baseUnitPrice: 14,
+        extrasUnitPrice: 2,
+        quantity: 1,
+      }],
+      [pizzaPromo],
+      mondayAtNoon(),
+    );
+    // Solo (14-11)=3; el cliente paga 11+2=13
+    expect(discount).toBeCloseTo(3);
+  });
+
+  it('extras dentro del fijo (include_in_fixed): base 14 + extra 2 → descuenta 5€ a 11€ total', () => {
+    const includeExtras: StoredPromotion = {
+      ...pizzaPromo,
+      extrasMode: 'include_in_fixed',
+    };
+    const { discount } = computeFixedUnitPriceDiscount(
+      [{
+        name: 'Margarita',
+        unitPrice: 16,
+        baseUnitPrice: 14,
+        extrasUnitPrice: 2,
+        quantity: 1,
+      }],
+      [includeExtras],
+      mondayAtNoon(),
+    );
+    expect(discount).toBeCloseTo(5);
+  });
+
   it('respeta salesPointIds: solo tiendas listadas', () => {
     const scoped = { ...pizzaPromo, salesPointIds: ['pdv-badalona'] };
     expect(listAutoFixedUnitPricePromotions([scoped], mondayAtNoon(), { salesPointId: 'pdv-tiana' })).toEqual([]);

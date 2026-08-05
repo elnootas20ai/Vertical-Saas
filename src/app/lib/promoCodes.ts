@@ -3,6 +3,14 @@ export type PromoType = 'percentage' | 'fixed' | '2x1' | 'gift' | 'code' | 'fixe
 /** ISO weekday: 1=Lunes … 7=Domingo */
 export type PromoWeekday = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 export type PromoApplyMode = 'manual_code' | 'auto';
+/** Ámbito del descuento: todo el pedido vs producto(s) concreto(s). */
+export type PromoDiscountTarget = 'order' | 'product';
+/**
+ * Precio fijo producto:
+ * - `on_top` = el fijo aplica al producto base; extras se suman aparte (pizza 11€ + extras).
+ * - `include_in_fixed` = el fijo incluye extras (todo a 11€).
+ */
+export type PromoExtrasMode = 'on_top' | 'include_in_fixed';
 
 export interface PromoProductMatch {
   productIds?: string[];
@@ -37,6 +45,10 @@ export interface StoredPromotion {
    * Vacío/undefined = todas las tiendas de la cuenta.
    */
   salesPointIds?: string[];
+  /** Regla: descuento sobre el total del pedido o sobre 1 producto (matching). */
+  discountTarget?: PromoDiscountTarget;
+  /** Solo `fixed_unit_price`: extras encima del fijo o dentro del fijo. */
+  extrasMode?: PromoExtrasMode;
 }
 
 export type AppliedPromo = {
@@ -50,7 +62,12 @@ export type AppliedPromo = {
 export type PromoCartLine = {
   productId?: string;
   name?: string;
+  /** Precio unitario completo (base + extras). Usado si no hay baseUnitPrice. */
   unitPrice: number;
+  /** Precio catálogo sin extras. */
+  baseUnitPrice?: number;
+  /** Suma de extras / suplementos por unidad. */
+  extrasUnitPrice?: number;
   quantity: number;
 };
 
@@ -277,8 +294,11 @@ export function listAutoFixedUnitPricePromotions(
 }
 
 /**
- * Descuento = suma de (precio línea − precio fijo) × qty cuando el producto matchea
- * y el precio de catálogo es mayor que el fijo.
+ * Descuento = suma de (precio base − precio fijo) × qty cuando el producto matchea
+ * y el precio base es mayor que el fijo.
+ *
+ * Por defecto (`extrasMode: on_top` o vacío): los extras NO entran en el fijo
+ * (pizza a 11€ + extras aparte). Con `include_in_fixed`, el fijo incluye extras.
  */
 export function computeFixedUnitPriceDiscount(
   lines: PromoCartLine[],
@@ -296,15 +316,39 @@ export function computeFixedUnitPriceDiscount(
 
   for (const line of lines) {
     const qty = Math.max(0, Number(line.quantity || 0));
-    const unit = Number(line.unitPrice || 0);
-    if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(unit) || unit <= 0) continue;
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    const fullUnit = Number(line.unitPrice || 0);
+    const baseUnit = Number(
+      line.baseUnitPrice != null && Number.isFinite(Number(line.baseUnitPrice))
+        ? line.baseUnitPrice
+        : fullUnit,
+    );
+    const extrasUnit = Number(
+      line.extrasUnitPrice != null && Number.isFinite(Number(line.extrasUnitPrice))
+        ? line.extrasUnitPrice
+        : Math.max(0, fullUnit - baseUnit),
+    );
 
     for (const promo of active) {
       if (!matchPromoProduct(promo.productMatch, line)) continue;
       const fixed = Number(promo.fixedUnitPrice ?? promo.discountValue ?? 0);
       if (!Number.isFinite(fixed) || fixed < 0) continue;
-      if (unit <= fixed) continue;
-      discount += (unit - fixed) * qty;
+
+      const extrasMode: PromoExtrasMode =
+        promo.extrasMode === 'include_in_fixed' ? 'include_in_fixed' : 'on_top';
+
+      if (extrasMode === 'include_in_fixed') {
+        const unit = Number.isFinite(fullUnit) && fullUnit > 0
+          ? fullUnit
+          : baseUnit + extrasUnit;
+        if (!Number.isFinite(unit) || unit <= 0 || unit <= fixed) continue;
+        discount += (unit - fixed) * qty;
+      } else {
+        // on_top: solo baja el producto base a `fixed`; extras se cobran enteros.
+        if (!Number.isFinite(baseUnit) || baseUnit <= 0 || baseUnit <= fixed) continue;
+        discount += (baseUnit - fixed) * qty;
+      }
       matchedLineCount += 1;
       used.add(promo.id);
       break; // una promo por línea
@@ -312,10 +356,18 @@ export function computeFixedUnitPriceDiscount(
   }
 
   return {
-    discount: Math.max(0, discount),
+    discount: Math.max(0, Math.round(discount * 100) / 100),
     applied: active.filter((p) => used.has(p.id)),
     matchedLineCount,
   };
+}
+
+/** Inferencia de ámbito según tipo (para promos antiguas sin discountTarget). */
+export function resolvePromoDiscountTarget(
+  p: Pick<StoredPromotion, 'type' | 'discountTarget'>,
+): PromoDiscountTarget {
+  if (p.discountTarget === 'order' || p.discountTarget === 'product') return p.discountTarget;
+  return p.type === 'fixed_unit_price' ? 'product' : 'order';
 }
 
 type ClientPromoMap = Record<string, AppliedPromo>;

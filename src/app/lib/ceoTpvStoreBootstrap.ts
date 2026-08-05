@@ -60,7 +60,11 @@ export async function bootstrapCeoTpvStores(
   return state;
 }
 
-/** ¿Hace falta reparar/enlazar PDV antes de mostrar el selector del gerente? */
+function pdvHasActiveTerminal(pdv: PointOfSale): boolean {
+  return Array.isArray(pdv.terminals) && pdv.terminals.some((t) => t.active !== false);
+}
+
+/** ¿Hace falta reparar/enlazar PDV (o terminal) antes de mostrar el selector del gerente? */
 export function needsCeoTpvStoreBootstrap(
   retailWorkCenters: WorkCenter[],
   pointsOfSale: PointOfSale[],
@@ -68,6 +72,8 @@ export function needsCeoTpvStoreBootstrap(
 ): boolean {
   const activePdvs = pointsOfSale.filter((p) => p.active !== false);
   const openable = storeRows.filter((r) => r.pdvId && !r.needsPdv && !r.inactive);
-  if (openable.length > 0) return false;
-  return activePdvs.length === 0 || retailWorkCenters.length > 0;
+  const pdvMissingTerminal = activePdvs.some((p) => !pdvHasActiveTerminal(p));
+  // Hay tienda abrible pero sin terminal → hay que generar TPV-1 (ensureTabletCodes).
+  if (openable.length > 0 && !pdvMissingTerminal) return false;
+  return activePdvs.length === 0 || retailWorkCenters.length > 0 || pdvMissingTerminal;
 }

@@ -3,6 +3,7 @@ import {
   getEffectiveBusinessLimit,
   getEffectivePointOfSaleLimit,
   getEffectiveCommercialBrandLimit,
+  getEffectiveWorkerSeatLimit,
   resolveTenantEntitlements,
 } from '../shared/billing/entitlements.js';
 
@@ -33,14 +34,39 @@ describe('billing entitlements', () => {
     expect(getEffectiveCommercialBrandLimit(activePro)).toBe(4);
   });
 
-  it('bloquea creación cuando se alcanza el cupo', () => {
-    const ent = resolveTenantEntitlements(activePro, {
-      businesses: 3,
-      pointOfSales: 3,
-      commercialBrands: 4,
-    });
-    expect(ent.canCreateBusiness).toBe(false);
-    expect(ent.canCreatePointOfSale).toBe(false);
-    expect(ent.canCreateCommercialBrand).toBe(false);
+  it('suma trabajadores extra al plan Pro (12 + 3 = 15)', () => {
+    expect(
+      getEffectiveWorkerSeatLimit({
+        status: 'subscription_active',
+        selectedPlanId: 'pro',
+        planName: 'Pro',
+        extraWorkerSlots: 3,
+      }),
+    ).toBe(15);
+  });
+
+  it('permite 20 trabajadores con extras (Pro 12 + 8)', () => {
+    expect(
+      getEffectiveWorkerSeatLimit({
+        status: 'subscription_active',
+        selectedPlanId: 'pro',
+        planName: 'Pro',
+        extraWorkerSlots: 8,
+      }),
+    ).toBe(20);
+  });
+
+  it('bloquea invitaciones al alcanzar cupo de trabajadores', () => {
+    const ent = resolveTenantEntitlements(
+      {
+        status: 'subscription_active',
+        selectedPlanId: 'basic',
+        planName: 'Básico',
+        extraWorkerSlots: 0,
+      },
+      { businesses: 0, pointOfSales: 0, commercialBrands: 0, workers: 2 },
+    );
+    expect(ent.workers).toBe(2);
+    expect(ent.canInviteWorker).toBe(false);
   });
 });

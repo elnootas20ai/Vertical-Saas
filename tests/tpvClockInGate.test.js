@@ -86,4 +86,16 @@ describe('evaluateTpvClockInGate', () => {
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe('vacation_blocked');
   });
+
+  it('falls back to first active when selected taker is stale', () => {
+    const r = evaluateTpvClockInGate({
+      loading: false,
+      clockedInWorkers: [{ id: 'opener', name: 'CEO', status: 'active' }],
+      selectedOrderTakerId: 'gone-worker',
+      currentUserId: 'mgr',
+      isWorkerUser: false,
+    });
+    expect(r.allowed).toBe(true);
+    expect(r.reason).toBe('ok');
+  });
 });

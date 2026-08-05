@@ -2,7 +2,7 @@
  * Ampliaciones de suscripción Vertial (add-ons mensuales).
  * Fuente única para UI, gates de upgrade y referencia de facturación.
  */
-export type PlanAddonId = 'extra_pdv' | 'extra_brand' | 'extra_business';
+export type PlanAddonId = 'extra_pdv' | 'extra_brand' | 'extra_business' | 'extra_worker';
 
 export type PlanAddonDefinition = {
   id: PlanAddonId;
@@ -40,6 +40,14 @@ export const PLAN_ADDON_CATALOG: Record<PlanAddonId, PlanAddonDefinition> = {
     description: 'Segundo negocio o vertical en la misma cuenta, con datos aislados.',
     monthlyPriceEur: 89,
     requiresProPlan: true,
+  },
+  extra_worker: {
+    id: 'extra_worker',
+    name: 'Trabajador extra',
+    shortLabel: '+1 trabajador',
+    description: 'Plaza adicional de trabajador (invitación / acceso empleado).',
+    monthlyPriceEur: 5,
+    requiresProPlan: false,
   },
 };
 

@@ -33,6 +33,7 @@ export const BUSINESS_TYPE_LABELS: Record<string, string> = {
   vet: 'Veterinario',
   tobaccoShop: 'Estanco',
   butcherShop: 'Carnicería',
+  iceCreamShop: 'Heladería',
 };
 
 export const BUSINESS_TYPE_COLORS: Record<string, string> = {
@@ -59,6 +60,7 @@ export const BUSINESS_TYPE_COLORS: Record<string, string> = {
   vet: 'bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300',
   tobaccoShop: 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300',
   butcherShop: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',
+  iceCreamShop: 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300',
 };
 
 interface BusinessCarouselProps {

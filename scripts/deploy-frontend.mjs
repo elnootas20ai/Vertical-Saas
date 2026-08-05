@@ -21,6 +21,7 @@ import {
   loadLocalValues,
   mergedEnvForChild,
 } from './deploy-env.mjs';
+import { resolveSmokeSaasCredentials } from './lib/prodAdminLoginGuard.mjs';
 
 const MIN_MAIN_BUNDLE_BYTES = 500_000;
 
@@ -109,15 +110,14 @@ if (!user || !host) {
 
 const buildEnv = mergedEnvForChild(process.env, values);
 
-const hasSmokeCreds = Boolean(
-  String(buildEnv.SAAS_LOGIN_EMAIL || '').trim() &&
-    String(buildEnv.SAAS_LOGIN_PASSWORD || '').trim(),
-);
+// uriel@admin.com / SAAS_LOGIN admin → nunca smoke; solo login manual.
+const smokeCreds = resolveSmokeSaasCredentials(buildEnv);
+const hasSmokeCreds = Boolean(smokeCreds?.email && smokeCreds?.password);
 
 console.log(
   hasSmokeCreds
-    ? '[deploy:frontend] npm run check:saas (build + smoke contra API)'
-    : '[deploy:frontend] npm run build (sin SAAS_LOGIN_* — smoke omitido)',
+    ? `[deploy:frontend] npm run check:saas (build + smoke ${smokeCreds.source})`
+    : '[deploy:frontend] npm run build (smoke omitido — admin no cuenta; usa SMOKE_SAAS_* si quieres smoke)',
 );
 const buildArgs = hasSmokeCreds ? ['run', 'check:saas'] : ['run', 'build'];
 const build = spawnSync('npm', buildArgs, {

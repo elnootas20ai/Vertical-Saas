@@ -20,6 +20,13 @@ export const INCLUDED_COMMERCIAL_BRANDS = {
   pro: 2,
 };
 
+/** Trabajadores incluidos por plan (sin contar al dueño). Alineado con planCatalog.maxUsers. */
+export const WORKER_SEAT_LIMITS = {
+  basic: 2,
+  normal: 6,
+  pro: 12,
+};
+
 export const PLAN_TIER_LABELS = {
   basic: 'Básico',
   normal: 'Normal',
@@ -61,8 +68,17 @@ export function clampExtraBusinessSlots(value) {
   return Math.max(0, Math.min(99, n));
 }
 
+export function clampExtraWorkerSlots(value) {
+  const n = Math.floor(Number(value) || 0);
+  return Math.max(0, Math.min(999, n));
+}
+
 export function getBasePointOfSaleLimit(planTier) {
   return POINT_OF_SALE_LIMITS[planTier] || POINT_OF_SALE_LIMITS.basic;
+}
+
+export function getBaseWorkerSeatLimit(planTier) {
+  return WORKER_SEAT_LIMITS[planTier] || WORKER_SEAT_LIMITS.basic;
 }
 
 export function getEffectivePointOfSaleLimit(subscription) {
@@ -87,6 +103,23 @@ export function getEffectiveCommercialBrandLimit(subscription) {
   return (INCLUDED_COMMERCIAL_BRANDS[tier] || 0) + extra;
 }
 
+/**
+ * Cupo de trabajadores = plan + extras contratados/admin.
+ * billingExempt → sin tope práctico.
+ */
+export function getEffectiveWorkerSeatLimit(subscription) {
+  if (subscription && subscription.billingExempt) {
+    return 999;
+  }
+  const status = String(subField(subscription, 'status', ''));
+  if (!subscription || !ACTIVE_SUBSCRIPTION_STATUSES.has(status)) {
+    return WORKER_SEAT_LIMITS.basic;
+  }
+  const tier = resolvePlanTier(subField(subscription, 'selectedPlanId'), subField(subscription, 'planName'));
+  const extra = clampExtraWorkerSlots(subField(subscription, 'extraWorkerSlots', 0));
+  return getBaseWorkerSeatLimit(tier) + extra;
+}
+
 export function subscriptionHasAdminProAccess(subscription) {
   return Boolean(subscription && subscription.adminProAccess);
 }
@@ -106,7 +139,8 @@ export function resolveTenantEntitlements(subscription, counts) {
   const businessLimit = getEffectiveBusinessLimit(subscription);
   const pdvLimit = getEffectivePointOfSaleLimit(subscription);
   const brandLimit = getEffectiveCommercialBrandLimit(subscription);
-  const safeCounts = counts || { businesses: 0, pointOfSales: 0, commercialBrands: 0 };
+  const workerLimit = getEffectiveWorkerSeatLimit(subscription);
+  const safeCounts = counts || { businesses: 0, pointOfSales: 0, commercialBrands: 0, workers: 0 };
 
   return {
     planTier,
@@ -115,8 +149,10 @@ export function resolveTenantEntitlements(subscription, counts) {
     businesses: businessLimit,
     pointOfSales: pdvLimit,
     commercialBrands: brandLimit,
+    workers: workerLimit,
     canCreateBusiness: safeCounts.businesses < businessLimit,
     canCreatePointOfSale: safeCounts.pointOfSales < pdvLimit,
     canCreateCommercialBrand: safeCounts.commercialBrands < brandLimit,
+    canInviteWorker: (safeCounts.workers || 0) < workerLimit,
   };
 }

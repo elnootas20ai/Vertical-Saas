@@ -232,6 +232,8 @@ export interface BillingSubscription {
   extraCommercialBrandSlots?: number;
   /** Empresas extra contratadas o concedidas por admin. */
   extraBusinessSlots?: number;
+  /** Trabajadores extra (además del maxUsers del plan). */
+  extraWorkerSlots?: number;
   /** PRO manual sin pasarela (solo superadmin). */
   adminProAccess?: boolean;
   /** Exento de suspensión automática por MONEI/cron. */

@@ -95,15 +95,16 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   if [ "$CODE" = "200" ]; then break; fi
 done
 
-if [ -f .env ] && grep -qE '^SAAS_LOGIN_EMAIL=.+' .env && grep -qE '^SAAS_LOGIN_PASSWORD=.+' .env; then
-  echo "[deploy:backend] smoke:saas (post-deploy)..."
+# Smoke post-deploy: cuenta de prueba (SMOKE_SAAS_*). uriel@admin.com = solo login manual.
+if [ -f .env ]; then
   set -a && . ./.env && set +a
   export VERIFY_API_BASE="\${VERIFY_API_BASE:-http://127.0.0.1:3000}"
+  echo "[deploy:backend] smoke:saas (post-deploy; admin no cuenta)..."
   if ! node scripts/smoke-saas.mjs; then
-    echo "[deploy:backend] WARNING: smoke:saas falló — backend ya está live (/live OK). Revisa Couch/tiendas si hace falta."
+    echo "[deploy:backend] WARNING: smoke:saas falló — backend ya está live (/live OK)."
   fi
 else
-  echo "[deploy:backend] smoke:saas omitido (SAAS_LOGIN_* no configurado en .env del VPS)"
+  echo "[deploy:backend] smoke:saas omitido (sin .env en VPS)"
 fi
 `;
 

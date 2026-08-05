@@ -6,6 +6,7 @@ import {
   deleteUser,
   exportMyData,
   getBusinessJoinRequests,
+  getWorkerSeatStatus,
   getBillingCard,
   getMyJoinRequests,
   getNotificationPreferences,
@@ -162,6 +163,7 @@ authRouter.post('/invitations/:invitationId/reject', requireAuth, validateParams
 authRouter.post('/invitations/:invitationId/resend', requireAuthAndEmailVerified, validateParams(invitationIdParamSchema), resendInvitation);
 authRouter.delete('/invitations/:invitationId', requireAuthAndEmailVerified, validateParams(invitationIdParamSchema), revokeInvitation);
 authRouter.get('/businesses/:businessId/invitations', requireAuthAndEmailVerified, validateParams(businessIdParamSchema), listBusinessInvitations);
+authRouter.get('/businesses/:businessId/worker-seats', requireAuthAndEmailVerified, validateParams(businessIdParamSchema), getWorkerSeatStatus);
 
 // Preferencias personales de notificación (silenciar categorías concretas)
 authRouter.get('/preferences', requireAuth, getNotificationPreferences);

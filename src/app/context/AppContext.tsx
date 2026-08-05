@@ -629,6 +629,8 @@ export interface Subscription {
   extraCommercialBrandSlots?: number;
   /** Empresas extra contratadas o concedidas por admin. */
   extraBusinessSlots?: number;
+  /** Trabajadores extra (además del cupo del plan). */
+  extraWorkerSlots?: number;
   /** Funciones PRO activadas manualmente por superadmin. */
   adminProAccess?: boolean;
   /** Exento de suspensión automática (MONEI/cron). Cuentas manuales como clientes sin pasarela. */
@@ -1123,6 +1125,7 @@ function deserializeSubscription(
     extraPointOfSaleSlots: subscription.extraPointOfSaleSlots,
     extraCommercialBrandSlots: subscription.extraCommercialBrandSlots,
     extraBusinessSlots: subscription.extraBusinessSlots,
+    extraWorkerSlots: subscription.extraWorkerSlots,
     adminProAccess: Boolean(subscription.adminProAccess),
     billingExempt: Boolean(subscription.billingExempt),
     moneiSubscriptionId: subscription.moneiSubscriptionId,

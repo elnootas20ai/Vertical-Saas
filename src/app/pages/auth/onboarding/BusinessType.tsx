@@ -4,7 +4,7 @@ import {
   Car, Wrench, Truck, SprayCan, Dumbbell, Stethoscope,
   Hotel, HardHat, GraduationCap, Building2, Scale, Music,
   PartyPopper, Scissors, Container, Cog, CarTaxiFront,
-  Pill, Droplets, PawPrint, Cigarette, Beef, UtensilsCrossed,
+  Pill, Droplets, PawPrint, Cigarette, Beef, UtensilsCrossed, IceCream,
 } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
 import { ACCESO__SelectableCard } from '../../../components/design-system/ACCESO__SelectableCard';
@@ -17,7 +17,7 @@ import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 
 const STEP_INDEX = 0;
 
-const ENABLED_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'restaurant', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop']);
+const ENABLED_TYPES = new Set(['events', 'carDealership', 'workshop', 'delivery', 'restaurant', 'cleaning', 'hairSalon', 'tobaccoShop', 'scrapyard', 'gym', 'clinic', 'hotel', 'construction', 'academy', 'realEstate', 'lawyer', 'nightclub', 'spareParts', 'taxi', 'pharmacy', 'carWash', 'vet', 'butcherShop', 'iceCreamShop']);
 
 const BUSINESS_TYPES = [
   { id: 'events',        icon: PartyPopper,   title: 'Eventos',              description: 'Eventos' },
@@ -43,6 +43,7 @@ const BUSINESS_TYPES = [
   { id: 'vet',           icon: PawPrint,      title: 'Veterinario',          description: 'Veterinaria' },
   { id: 'tobaccoShop',   icon: Cigarette,     title: 'Estanco',              description: 'Estanco' },
   { id: 'butcherShop',   icon: Beef,          title: 'Carnicería',           description: 'Carnicería' },
+  { id: 'iceCreamShop',  icon: IceCream,      title: 'Heladería',            description: 'Heladería y gelatería' },
 ] as const;
 
 export function BusinessType() {
