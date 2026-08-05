@@ -2090,6 +2090,38 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           {/* Delivery paso 3 — Arqueo + totales tienda / marcas / día */}
           {showDeliveryClosingSlots && closingStep === 3 ? (
             <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto overscroll-contain">
+              {/* Total unidades arriba del paso 3 (TPV + apps de steps 1–2) */}
+              <div className="shrink-0 rounded-xl border-2 border-stone-800 bg-stone-950 text-white px-2 py-2 space-y-1">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-stone-300 px-0.5">
+                  Total unidades · todo el cierre
+                </p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {([
+                    { key: 'pizza' as const, label: 'Pizzas' },
+                    { key: 'burger' as const, label: 'Burgers' },
+                    { key: 'taco' as const, label: 'Tacos' },
+                  ]).map((u) => (
+                    <div
+                      key={u.key}
+                      className="rounded-lg border border-stone-600 bg-stone-900 px-1.5 py-1.5 text-center"
+                    >
+                      <p className="text-[10px] font-semibold text-stone-400 inline-flex items-center justify-center gap-0.5 w-full">
+                        <DeliveryFoodUnitIcon unit={u.key} className="w-3.5 h-3.5" />
+                        {u.label}
+                      </p>
+                      <p className="text-2xl font-black tabular-nums text-white leading-tight">
+                        {closingFood[u.key]}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-stone-400 tabular-nums px-0.5">
+                  TPV {tpvClosingFood.pizza}P/{tpvClosingFood.burger}B/{tpvClosingFood.taco}T
+                  {' · '}
+                  Apps {appsFoodTotals.pizza}P/{appsFoodTotals.burger}B/{appsFoodTotals.taco}T
+                </p>
+              </div>
+
               <div className="shrink-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 space-y-1">
                 <label className={`block rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-2 py-1 cursor-text`}>
                   <span className={`text-[10px] font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
@@ -2658,17 +2690,32 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
         </div>
 
         {showDeliveryClosingSlots && closingStep === 3 ? (
-          <div className="flex-shrink-0 px-2.5 py-1.5 border-t border-slate-200 dark:border-slate-800 bg-slate-950 text-white space-y-0.5">
+          <div className="flex-shrink-0 border-t-2 border-stone-800 bg-stone-950 text-white px-2.5 py-2 space-y-1.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                Total unidades
+              <span className="text-[10px] font-bold uppercase tracking-wide text-stone-300">
+                Total del día · pizzas / burgers / tacos
               </span>
-              <span className="text-xs font-black tabular-nums text-white">
-                {closingFood.pizza} pizzas · {closingFood.burger} burgers · {closingFood.taco} tacos
-              </span>
+              <span className="text-[10px] font-semibold text-stone-400">TPV + apps</span>
             </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            <div className="grid grid-cols-3 gap-1.5">
+              {([
+                { key: 'pizza' as const, label: 'Pizzas' },
+                { key: 'burger' as const, label: 'Burgers' },
+                { key: 'taco' as const, label: 'Tacos' },
+              ]).map((u) => (
+                <div
+                  key={u.key}
+                  className="rounded-lg border border-stone-600 bg-stone-900 px-1.5 py-1.5 text-center"
+                >
+                  <p className="text-[10px] font-semibold text-stone-400">{u.label}</p>
+                  <p className="text-2xl font-black tabular-nums text-white leading-tight">
+                    {closingFood[u.key]}
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-stone-700">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
                 € día
               </span>
               <span className="tabular-nums text-sm font-black text-white">
