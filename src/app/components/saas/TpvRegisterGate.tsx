@@ -14,6 +14,7 @@ import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import {
   listTpvRegisterSessionsRequest,
   createTpvRegisterSessionRequest,
+  reopenTpvRegisterSessionRequest,
   TpvRegisterSessionConflictError,
   updateTpvRegisterSessionRequest,
   pointOfSaleDisplayLabel,
@@ -41,6 +42,8 @@ import {
   pickNewestOpenRegisterSessionForStore,
   resolveActiveTpvRegisterSession,
   findLastClosedTpvSession,
+  findReopenableClosedTpvSession,
+  calendarDayMadrid,
   resolvePreviousCloseCashAmount,
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
@@ -157,7 +160,7 @@ import {
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
   ChevronUp, ChevronLeft, ChevronRight, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
   MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
-  MoreVertical, Save,
+  MoreVertical, Save, RotateCcw,
 } from 'lucide-react';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
@@ -388,8 +391,10 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false }: {
+function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false }: {
   onOpen: (data: OpeningData) => void;
+  /** Reabrir turno cerrado hoy/ayer por error (conserva ventas). */
+  onReopenClosed?: (session: TpvRegisterSession) => void | Promise<void>;
   loading: boolean;
   pointsOfSale: PointOfSale[];
   workCenters: WorkCenter[];
@@ -496,6 +501,40 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
       return '';
     }
   }, [registerSessions, selectedPdv, restrictedToPdvId, selectedTerminal, isTabletMode, pointsOfSale]);
+
+  const reopenableSession = useMemo(() => {
+    if (!onReopenClosed) return null;
+    const pdvId = selectedPdv?._id || restrictedToPdvId || '';
+    const terminalId = selectedTerminal?.id || (isTabletMode ? `tablet-${pdvId || 'default'}` : '');
+    return findReopenableClosedTpvSession(registerSessions, pdvId, terminalId, pointsOfSale);
+  }, [
+    onReopenClosed,
+    registerSessions,
+    selectedPdv,
+    restrictedToPdvId,
+    selectedTerminal,
+    isTabletMode,
+    pointsOfSale,
+  ]);
+
+  const reopenableDayLabel = useMemo(() => {
+    if (!reopenableSession) return '';
+    const closedDay = calendarDayMadrid(reopenableSession.closedAt || reopenableSession.openedAt);
+    const today = calendarDayMadrid(new Date());
+    if (closedDay && closedDay === today) return 'hoy';
+    return 'ayer';
+  }, [reopenableSession]);
+
+  const [reopening, setReopening] = useState(false);
+  const handleReopenClick = async () => {
+    if (!reopenableSession || !onReopenClosed || reopening || parentLoading) return;
+    setReopening(true);
+    try {
+      await onReopenClosed(reopenableSession);
+    } finally {
+      setReopening(false);
+    }
+  };
 
   const didPrefillFromPreviousCloseRef = useRef(false);
   useEffect(() => {
@@ -947,6 +986,25 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
         >
           {isTabletMode && tabletStep === 1 && (
             <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
+              {reopenableSession && (
+                <div className="p-3 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40">
+                  <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
+                    ¿Cerraste la caja de {reopenableDayLabel} por error?
+                  </p>
+                  <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
+                    Reabre el mismo turno y conservas las ventas. No hace falta abrir una caja nueva.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleReopenClick()}
+                    disabled={reopening || parentLoading}
+                    className="mt-2 w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
+                  >
+                    {reopening ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                    Reabrir caja de {reopenableDayLabel}
+                  </button>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
                   <User className="w-3 h-3 inline mr-1" />
@@ -1015,6 +1073,22 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
 
           {isTabletMode && tabletStep === 2 && (
             <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 flex flex-col">
+              {reopenableSession && (
+                <div className="mb-3 p-3 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40">
+                  <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
+                    ¿Cerraste la caja de {reopenableDayLabel} por error?
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleReopenClick()}
+                    disabled={reopening || parentLoading}
+                    className="mt-2 w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
+                  >
+                    {reopening ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                    Reabrir caja de {reopenableDayLabel}
+                  </button>
+                </div>
+              )}
               <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
                 <div className="min-w-0">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Abre la caja</p>
@@ -1265,7 +1339,26 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                 </span>
               )}
             </div>
-            {previousCloseCash != null && (
+            {reopenableSession && (
+              <div className="mb-3 p-3 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40">
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
+                  ¿Cerraste la caja de {reopenableDayLabel} por error?
+                </p>
+                <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
+                  Reabre el mismo turno y conservas las ventas ({reopenableSession.pointOfSaleName || 'tienda'}).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleReopenClick()}
+                  disabled={reopening || parentLoading}
+                  className="mt-2 w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
+                >
+                  {reopening ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                  Reabrir caja de {reopenableDayLabel}
+                </button>
+              </div>
+            )}
+            {previousCloseCash != null && !reopenableSession && (
               <div className="mb-3 p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
                 <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200 mb-1">
                   Efectivo al cerrar{previousCloseLabel ? ` (${previousCloseLabel})` : ''}
@@ -1277,6 +1370,23 @@ function OpeningScreen({ onOpen, loading: parentLoading, pointsOfSale, workCente
                   type="button"
                   onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
                   className="mt-2 w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
+                >
+                  Usar como fondo inicial
+                </button>
+              </div>
+            )}
+            {previousCloseCash != null && reopenableSession && (
+              <div className="mb-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+                <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
+                  O abrir caja nueva con fondo{previousCloseLabel ? ` (${previousCloseLabel})` : ''}
+                </p>
+                <p className="text-base font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  {previousCloseCash.toFixed(2)}€
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
+                  className="mt-2 w-full py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-xs font-bold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   Usar como fondo inicial
                 </button>
@@ -1557,11 +1667,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const handleSaveForLater = useCallback(() => {
     if (busy) return;
     persistDraft();
-    toast.success('Cierre guardado. Puedes seguir luego desde Cerrar caja.');
+    toast.success('Cierre guardado para luego. Sigue cuando quieras desde Cerrar caja.');
     onCancel();
   }, [busy, persistDraft, onCancel]);
 
-  // Auto-guarda mientras rellenan (por si cierran con Atrás / Cancelar).
+  // Auto-guarda mientras rellenan (por si cierran con la X / salen del modal).
   useEffect(() => {
     if (!sessionId) return;
     const timer = window.setTimeout(() => {
@@ -1777,9 +1887,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
             <button
               type="button"
-              onClick={onCancel}
+              onClick={handleSaveForLater}
+              disabled={busy}
               className={`${VERTIAL_BTN_SECONDARY} !min-h-9 !min-w-9 !px-0 shrink-0`}
-              aria-label="Cerrar"
+              aria-label="Guardar para luego y cerrar"
+              title="Guardar para luego"
             >
               <X className="w-4 h-4" />
             </button>
@@ -2517,7 +2629,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           </div>
         ) : null}
 
-        <div className="flex-shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-slate-200 dark:border-slate-800">
+        <div className="flex-shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-slate-200 dark:border-slate-800 space-y-1.5">
           <div className="flex gap-1.5">
             {closingStep > 1 ? (
               <button
@@ -2529,17 +2641,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 <ChevronLeft className="w-4 h-4" />
                 Atrás
               </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSaveForLater}
-                disabled={busy}
-                className={`${VERTIAL_BTN_SECONDARY} !min-h-11 min-w-[5.5rem] !text-xs`}
-              >
-                <Save className="w-3.5 h-3.5" />
-                Guardar
-              </button>
-            )}
+            ) : null}
             {closingStep < closingMaxStep ? (
               <button
                 type="button"
@@ -2571,6 +2673,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               </button>
             )}
           </div>
+          <button
+            type="button"
+            onClick={handleSaveForLater}
+            disabled={busy}
+            className={`${VERTIAL_BTN_SECONDARY} !min-h-11 w-full !text-xs`}
+          >
+            <Save className="w-3.5 h-3.5" />
+            Guardar para luego
+          </button>
         </div>
       </div>
     </div>
@@ -4677,6 +4788,45 @@ export function TpvRegisterGate({
     return () => window.clearTimeout(timer);
   }, [loading, activeSession?._id, activeSession?.status]);
 
+  const handleReopenClosed = async (closedSession: TpvRegisterSession) => {
+    if (!dataUserId || !closedSession?._id) return;
+    if (openingInFlightRef.current) return;
+    openingInFlightRef.current = true;
+    try {
+      const reopened = await reopenTpvRegisterSessionRequest(
+        dataUserId,
+        closedSession,
+        'Cierre accidental',
+      );
+      const storeId = String(reopened.pointOfSaleId || '').trim();
+      // Enganchar ya: si no, el gate vuelve a «Abrir caja» aunque status=open.
+      stickyOpenSessionRef.current = reopened;
+      if (storeId) {
+        if (!isWorkerUser) {
+          const bid = resolveBusinessScopeId(currentBusiness);
+          if (bid && dataUserId) writeDeliveryOpsSelectedPdvId(bid, dataUserId, storeId);
+          setManagerPdvPickId(storeId);
+          skipManagerAutoPdvRef.current = false;
+        }
+      }
+      setSessions((prev) => {
+        const exists = prev.some((s) => s._id === reopened._id);
+        if (exists) return prev.map((s) => (s._id === reopened._id ? reopened : s));
+        return [reopened, ...prev];
+      });
+      setPostCloseSession(null);
+      setPostCloseAggregatorRows([]);
+      window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: reopened }));
+      toast.success(
+        `Caja reabierta: ${reopened.pointOfSaleName || 'tienda'}${reopened.terminalName ? ` / ${reopened.terminalName}` : ''}`,
+      );
+    } catch (err) {
+      toast.error(toUserFacingMessage(extractErrorMessage(err) || 'No se pudo reabrir la caja'));
+    } finally {
+      openingInFlightRef.current = false;
+    }
+  };
+
   const handleOpen = async (data: OpeningData) => {
     if (!dataUserId) return;
     if (openingInFlightRef.current) return;
@@ -5584,22 +5734,32 @@ export function TpvRegisterGate({
               />
             )}
           </div>
-          <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
+          <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-3">
             <button
-              onClick={() => {
-                setPostCloseSession(null);
-                setPostCloseAggregatorRows([]);
-              }}
-              className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              type="button"
+              onClick={() => void handleReopenClosed(postCloseSession)}
+              className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold transition-colors flex items-center justify-center gap-2"
             >
-              Abrir otra caja
+              <RotateCcw className="w-4 h-4" />
+              Reabrir esta caja
             </button>
-            <button
-              onClick={leavePostCloseScreen}
-              className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
-            >
-              {isTabletSession ? 'Salir al código' : 'Volver'}
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={() => {
+                  setPostCloseSession(null);
+                  setPostCloseAggregatorRows([]);
+                }}
+                className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Abrir otra caja
+              </button>
+              <button
+                onClick={leavePostCloseScreen}
+                className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
+              >
+                {isTabletSession ? 'Salir al código' : 'Volver'}
+              </button>
+            </div>
           </div>
         </div>
       </div>,
@@ -5674,6 +5834,7 @@ export function TpvRegisterGate({
     const openingScreen = (
       <OpeningScreen
         onOpen={handleOpen}
+        onReopenClosed={handleReopenClosed}
         loading={loading}
         pointsOfSale={pointsOfSale}
         workCenters={workCenters}
