@@ -42,6 +42,7 @@ import {
   orderOnCompletedTpvHistoryBoard,
   orderOnOpenTpvOpsBoard,
 } from '../../../lib/tpvCajaScope';
+import { isDeliveryOrderEditableOnTpvBoard } from '../../../lib/tpvEditDeliveryOrder';
 import { foldTpvSearchText } from '../../../lib/tpvCatalogNavigation';
 import {
   formatElapsedMinutes,
@@ -220,58 +221,6 @@ function orderPaymentBoardBadge(order: DeliveryOrder): {
   };
 }
 
-function PaymentMethodBoardChip({
-  method,
-  statusLabel,
-  paid,
-}: {
-  method: DeliveryPaymentMethod;
-  statusLabel: string;
-  paid: boolean;
-}) {
-  const methodLabel = PAYMENT_LABELS[method];
-  const Icon = method === 'tarjeta' ? CreditCard : method === 'bizum' ? Smartphone : method === 'otro' ? Wallet : Banknote;
-
-  const methodStyles: Record<DeliveryPaymentMethod, { chip: string; icon: string }> = {
-    efectivo: {
-      chip: paid
-        ? 'bg-amber-100 text-amber-950 border-amber-400 dark:bg-amber-950/50 dark:text-amber-100 dark:border-amber-600'
-        : 'bg-amber-50 text-amber-900 border-amber-300 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700',
-      icon: paid ? 'text-amber-700 dark:text-amber-300' : 'text-amber-600 dark:text-amber-400',
-    },
-    tarjeta: {
-      chip: paid
-        ? 'bg-sky-100 text-sky-950 border-sky-400 dark:bg-sky-950/50 dark:text-sky-100 dark:border-sky-600'
-        : 'bg-sky-50 text-sky-900 border-sky-300 dark:bg-sky-950/30 dark:text-sky-200 dark:border-sky-700',
-      icon: paid ? 'text-sky-700 dark:text-sky-300' : 'text-sky-600 dark:text-sky-400',
-    },
-    bizum: {
-      chip: paid
-        ? 'bg-violet-100 text-violet-950 border-violet-400 dark:bg-violet-950/50 dark:text-violet-100 dark:border-violet-600'
-        : 'bg-violet-50 text-violet-900 border-violet-300 dark:bg-violet-950/30 dark:text-violet-200 dark:border-violet-700',
-      icon: paid ? 'text-violet-700 dark:text-violet-300' : 'text-violet-600 dark:text-violet-400',
-    },
-    otro: {
-      chip: paid
-        ? 'bg-gray-200 text-gray-950 border-gray-400 dark:bg-gray-800 dark:text-gray-100 dark:border-gray-600'
-        : 'bg-gray-100 text-gray-900 border-gray-300 dark:bg-gray-900/30 dark:text-gray-200 dark:border-gray-700',
-      icon: paid ? 'text-gray-700 dark:text-gray-300' : 'text-gray-600 dark:text-gray-400',
-    },
-  };
-
-  const style = methodStyles[method];
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border-2 text-xs font-bold leading-none ${style.chip}`}
-    >
-      <Icon className={`w-4 h-4 shrink-0 ${style.icon}`} />
-      <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">{statusLabel}</span>
-      <span className="text-sm font-extrabold">{methodLabel}</span>
-    </span>
-  );
-}
-
 const STATUS_CONFIG: Record<DeliveryOrderStatus, { label: string; color: string; bg: string; Icon: LucideIcon }> = {
   nuevo:      { label: 'Nuevo',      color: 'text-amber-700',   bg: 'bg-amber-50 border-amber-200',   Icon: Clock },
   cocina:     { label: 'En cocina',  color: 'text-orange-700',  bg: 'bg-orange-50 border-orange-200', Icon: ChefHat },
@@ -401,6 +350,7 @@ function OrderCard({
   onAdvance,
   onSelect,
   onDelete,
+  onEdit,
   advancing,
   readOnly = false,
   compact = false,
@@ -410,6 +360,7 @@ function OrderCard({
   onAdvance: (o: DeliveryOrder) => void;
   onSelect: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
+  onEdit?: (o: DeliveryOrder) => void;
   advancing: boolean;
   readOnly?: boolean;
   compact?: boolean;
@@ -426,6 +377,7 @@ function OrderCard({
   const itemPreview = orderItemsBoardSummary(order);
   const paymentBadge = orderPaymentBoardBadge(order);
   const isPaid = orderAlreadyCobrado(order);
+  const canEdit = Boolean(onEdit) && !readOnly && isDeliveryOrderEditableOnTpvBoard(order);
   const timerTitle =
     order.deliveryType === 'recogida'
       ? 'Tiempo en montaje (hasta entregar en tienda)'
@@ -493,6 +445,31 @@ function OrderCard({
                 No pagado
               </span>
             ) : null}
+            {paymentBadge ? (
+              <span
+                className={`inline-flex items-center gap-0.5 px-1.5 py-px rounded font-bold border ${
+                  paymentBadge.method === 'tarjeta'
+                    ? 'bg-sky-100 text-sky-950 border-sky-400 dark:bg-sky-950/50 dark:text-sky-100 dark:border-sky-600'
+                    : paymentBadge.method === 'bizum'
+                      ? 'bg-violet-100 text-violet-950 border-violet-400 dark:bg-violet-950/50 dark:text-violet-100 dark:border-violet-600'
+                      : 'bg-amber-100 text-amber-950 border-amber-400 dark:bg-amber-950/50 dark:text-amber-100 dark:border-amber-600'
+                } ${compact ? 'text-[9px]' : 'text-[9px]'}`}
+                title={
+                  paymentBadge.paid
+                    ? `Cobrado en ${PAYMENT_LABELS[paymentBadge.method]}`
+                    : `Cliente: ${PAYMENT_LABELS[paymentBadge.method]}`
+                }
+              >
+                {paymentBadge.method === 'tarjeta' ? (
+                  <CreditCard className="w-3 h-3 shrink-0" />
+                ) : paymentBadge.method === 'bizum' ? (
+                  <Smartphone className="w-3 h-3 shrink-0" />
+                ) : (
+                  <Banknote className="w-3 h-3 shrink-0" />
+                )}
+                {PAYMENT_LABELS[paymentBadge.method]}
+              </span>
+            ) : null}
             <OrderChannelBadge channel={order.channel} compact={compact} />
             {isUrgent && (
               <span className={`px-1 py-px bg-red-100 text-red-700 font-bold rounded ${compact ? 'text-[9px]' : 'text-[9px]'}`}>!</span>
@@ -544,40 +521,48 @@ function OrderCard({
               </>
             )}
           </div>
-          {paymentBadge && !compact && !isPaid && (
-            <div className="mt-1.5">
-              <PaymentMethodBoardChip
-                method={paymentBadge.method}
-                statusLabel={paymentBadge.statusLabel}
-                paid={paymentBadge.paid}
-              />
-            </div>
-          )}
         </button>
 
-        {/* Acción principal */}
-        {!readOnly && nextLabel && (
-          <button
-            type="button"
-            onClick={() => onAdvance(order)}
-            disabled={advancing}
-            title={nextLabel}
-            className={`shrink-0 self-center flex flex-col items-center justify-center rounded-lg bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
-              compact
-                ? 'min-w-[3.25rem] min-h-[2.75rem] px-1.5 py-1 gap-0.5 text-[10px]'
-                : 'min-w-[3.5rem] min-h-[44px] px-2 py-2 gap-0.5 rounded-lg text-[10px]'
-            }`}
-          >
-            {advancing ? (
-              <Loader2 className={compact ? 'w-4 h-4 animate-spin' : 'w-4 h-4 animate-spin'} />
-            ) : (
-              <>
-                <ArrowRight className={compact ? 'w-4 h-4' : 'w-4 h-4'} />
-                <span className="leading-tight text-center">{nextLabel}</span>
-              </>
-            )}
-          </button>
-        )}
+        {/* + editar productos · acción principal */}
+        <div className={`shrink-0 self-center flex items-center ${compact ? 'gap-1' : 'gap-1.5'}`}>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => onEdit?.(order)}
+              disabled={advancing}
+              title="Añadir o quitar productos"
+              className={`flex items-center justify-center rounded-lg border-2 border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] font-bold hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 disabled:opacity-50 touch-manipulation ${
+                compact
+                  ? 'min-w-[2.5rem] min-h-[2.75rem] px-1'
+                  : 'min-w-[2.75rem] min-h-[44px] px-1.5'
+              }`}
+            >
+              <Plus className={compact ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} />
+            </button>
+          )}
+          {!readOnly && nextLabel && (
+            <button
+              type="button"
+              onClick={() => onAdvance(order)}
+              disabled={advancing}
+              title={nextLabel}
+              className={`flex flex-col items-center justify-center rounded-lg bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
+                compact
+                  ? 'min-w-[3.25rem] min-h-[2.75rem] px-1.5 py-1 gap-0.5 text-[10px]'
+                  : 'min-w-[3.5rem] min-h-[44px] px-2 py-2 gap-0.5 rounded-lg text-[10px]'
+              }`}
+            >
+              {advancing ? (
+                <Loader2 className={compact ? 'w-4 h-4 animate-spin' : 'w-4 h-4 animate-spin'} />
+              ) : (
+                <>
+                  <ArrowRight className={compact ? 'w-4 h-4' : 'w-4 h-4'} />
+                  <span className="leading-tight text-center">{nextLabel}</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -595,6 +580,7 @@ function OrderLane({
   onAdvance,
   onSelect,
   onDelete,
+  onEdit,
   advancingIds,
   readOnly = false,
   compact = false,
@@ -611,6 +597,7 @@ function OrderLane({
   onAdvance: (o: DeliveryOrder) => void;
   onSelect: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
+  onEdit?: (o: DeliveryOrder) => void;
   advancingIds: ReadonlySet<string>;
   readOnly?: boolean;
   compact?: boolean;
@@ -647,6 +634,7 @@ function OrderLane({
               onAdvance={onAdvance}
               onSelect={onSelect}
               onDelete={onDelete}
+              onEdit={onEdit}
               advancing={advancingIds.has(order._id)}
               readOnly={readOnly}
               compact={compact}
@@ -1026,6 +1014,7 @@ function OrderDetail({
   onClose,
   onAdvance,
   onDelete,
+  onEdit,
   onCorrectPayment,
   onMarkPaid,
   advancing,
@@ -1037,6 +1026,7 @@ function OrderDetail({
   onClose: () => void;
   onAdvance: (o: DeliveryOrder) => void;
   onDelete: (o: DeliveryOrder) => void;
+  onEdit?: (o: DeliveryOrder) => void;
   onCorrectPayment?: (o: DeliveryOrder, method: DeliveryPaymentMethod) => void;
   onMarkPaid?: (o: DeliveryOrder) => void;
   advancing: boolean;
@@ -1065,6 +1055,7 @@ function OrderDetail({
   const phaseTimer = getTpvPhaseTimer(order, nowMs);
   const isPaid = orderAlreadyCobrado(order);
   const canMarkPaid = Boolean(onMarkPaid) && !isPaid && !isCancelledDeliveryOrder(order);
+  const canEdit = Boolean(onEdit) && isDeliveryOrderEditableOnTpvBoard(order);
 
   return (
     <div className={`fixed inset-0 z-50 flex items-end sm:items-center justify-center ${compact ? 'p-0 sm:p-2' : 'p-4 sm:p-6'}`}>
@@ -1258,6 +1249,20 @@ function OrderDetail({
         </div>
 
         <div className={`shrink-0 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex gap-2 ${compact ? 'px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]' : 'px-4 py-3 rounded-b-2xl'}`}>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => onEdit?.(order)}
+              disabled={advancing || markingPaid}
+              title="Añadir o quitar productos"
+              className={`flex items-center justify-center gap-1 rounded-lg border-2 border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] font-bold hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 disabled:opacity-50 touch-manipulation shrink-0 ${
+                compact ? 'px-2.5 py-2 text-sm' : 'px-3 py-3 rounded-xl text-sm'
+              }`}
+            >
+              <Plus className={compact ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} />
+              {!compact && 'Más'}
+            </button>
+          )}
           {nextLabel && (
             <button
               type="button"
@@ -1277,13 +1282,13 @@ function OrderDetail({
             disabled={advancing || markingPaid}
             aria-label="Eliminar pedido"
             className={`flex items-center justify-center rounded-lg border-2 border-red-300 dark:border-red-900/60 text-red-600 dark:text-red-400 font-semibold hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 touch-manipulation ${
-              nextLabel
+              nextLabel || canEdit
                 ? compact ? 'px-2.5 py-2 shrink-0' : 'px-4 py-3 shrink-0 rounded-xl'
                 : compact ? 'flex-1 py-2 text-sm' : 'flex-1 py-3 text-base rounded-xl'
             }`}
           >
             <Trash2 className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
-            {!nextLabel && !compact && 'Eliminar pedido'}
+            {!nextLabel && !canEdit && !compact && 'Eliminar pedido'}
           </button>
         </div>
       </div>
@@ -1312,6 +1317,7 @@ export function WorkerTpvDelivery({
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [view, setView] = useState<'board' | 'new-order' | 'staff-consumption'>('board');
+  const [editingOrder, setEditingOrder] = useState<DeliveryOrder | null>(null);
   const [fulfillmentFilter, setFulfillmentFilter] = useState<FulfillmentFilter>('all');
   const [search, setSearch] = useState('');
   const [advancingIds, setAdvancingIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -2029,9 +2035,21 @@ export function WorkerTpvDelivery({
   );
 
   const backToBoard = useCallback(() => {
+    setEditingOrder(null);
     setView('board');
     void loadOrders({ silent: true });
   }, [loadOrders]);
+
+  const startEditOrder = useCallback((order: DeliveryOrder) => {
+    setSelectedOrder(null);
+    setEditingOrder(order);
+    setView('new-order');
+  }, []);
+
+  const startNewOrder = useCallback(() => {
+    setEditingOrder(null);
+    setView('new-order');
+  }, []);
 
   const exitTabletTpv = useCallback(() => {
     void leaveTpvTabletSession(logout);
@@ -2234,6 +2252,11 @@ export function WorkerTpvDelivery({
       <TpvRapidoOrderFlow
         tabletMode
         onBack={backToBoard}
+        editingDeliveryOrder={editingOrder}
+        onEditingDeliveryOrderSaved={() => {
+          setEditingOrder(null);
+          void loadOrders({ silent: true });
+        }}
       />
     );
   }
@@ -2248,7 +2271,7 @@ export function WorkerTpvDelivery({
             <div className="flex items-stretch gap-1.5 min-w-0">
               <button
                 type="button"
-                onClick={() => setView('new-order')}
+                onClick={startNewOrder}
                 title="Nuevo pedido"
                 className="flex items-center justify-center gap-1 min-h-[40px] shrink-0 px-3 rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-xs shadow-sm shadow-blue-900/20 transition-colors touch-manipulation"
               >
@@ -2356,7 +2379,7 @@ export function WorkerTpvDelivery({
             <div className={`grid gap-2 mb-3 ${staffConsumptionEnabled ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
               <button
                 type="button"
-                onClick={() => setView('new-order')}
+                onClick={startNewOrder}
                 className="w-full flex items-center justify-center gap-2.5 min-h-[48px] py-3.5 rounded-2xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold text-sm sm:text-base shadow-lg shadow-blue-900/25"
               >
                 <Plus className="w-5 h-5" strokeWidth={2.5} />
@@ -2448,6 +2471,7 @@ export function WorkerTpvDelivery({
               onAdvance={advanceOrder}
               onSelect={setSelectedOrder}
               onDelete={requestDeleteOrder}
+              onEdit={startEditOrder}
               advancingIds={advancingIds}
               compact={isTabletUi}
               nowMs={nowMs}
@@ -2464,6 +2488,7 @@ export function WorkerTpvDelivery({
               onAdvance={advanceOrder}
               onSelect={setSelectedOrder}
               onDelete={requestDeleteOrder}
+              onEdit={startEditOrder}
               advancingIds={advancingIds}
               compact={isTabletUi}
               nowMs={nowMs}
@@ -2587,6 +2612,7 @@ export function WorkerTpvDelivery({
           onClose={() => setSelectedOrder(null)}
           onAdvance={advanceOrder}
           onDelete={requestDeleteOrder}
+          onEdit={startEditOrder}
           onCorrectPayment={handleCorrectPayment}
           onMarkPaid={requestMarkPaid}
           advancing={advancingIds.has(selectedOrder._id)}
