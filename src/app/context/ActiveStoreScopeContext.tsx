@@ -450,6 +450,8 @@ function ActiveStoreScopeProviderImpl({
           force,
         )
       ) {
+        // Sin fetch: no dejar el spinner eterno (TPV delivery CEO se quedaba en «Tarda más…»).
+        setInitialLoading(false);
         return;
       }
 

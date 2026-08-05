@@ -335,7 +335,11 @@ export async function loadRetailStoresForBusiness(
 
   if (kind === 'strict') {
     const retail = filterRetailWorkCentersForScope(state.workCenters, ctx);
-    const pointsOfSale = filterPointsOfSaleForWorkCenters(state.pointsOfSale, retail);
+    const bid = normalizeBusinessScopeId(business.business_id);
+    // businessId obligatorio: sin retail no vaciar PDVs de la empresa.
+    const pointsOfSale = filterPointsOfSaleForWorkCenters(state.pointsOfSale, retail, {
+      businessId: bid,
+    });
     return { ...state, workCenters: retail, pointsOfSale };
   }
 

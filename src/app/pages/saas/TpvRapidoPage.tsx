@@ -21,6 +21,7 @@ import {
   type DeliveryOrderItem,
   type DeliveryOrderStatus,
   type DeliveryType,
+  type PointOfSale,
   type TpvPaymentMethod,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
@@ -417,22 +418,32 @@ function TpvRapidoCeoBoard() {
   const [selectedPdvId, setSelectedPdvId] = useState<string | null>(null);
   const [forceStorePicker, setForceStorePicker] = useState(false);
   const [ceoBootstrapLoading, setCeoBootstrapLoading] = useState(false);
+  const [ceoBootstrapSettled, setCeoBootstrapSettled] = useState(false);
   const ceoBootstrapDoneRef = useRef(false);
   const ceoBootstrapInflightRef = useRef(false);
   const [stockOpen, setStockOpen] = useState(() => consumeTpvStockReviewLaunch());
   const lastSyncedStorePdvRef = useRef<string | null>(null);
+  /** PDVs recuperados por bootstrap aunque ActiveStoreScope aún esté vacío. */
+  const [bootstrapPdvs, setBootstrapPdvs] = useState<PointOfSale[]>([]);
 
   useEffect(() => {
     ceoBootstrapDoneRef.current = false;
     ceoBootstrapInflightRef.current = false;
+    setCeoBootstrapSettled(false);
+    setBootstrapPdvs([]);
   }, [businessId]);
 
   const storeRows = useMemo(
     () =>
-      buildCeoTpvStoreRows(retailWorkCenters, pointsOfSale, businessId, {
-        accountBusinessCount: businesses.length,
-      }),
-    [retailWorkCenters, pointsOfSale, businessId, businesses.length],
+      buildCeoTpvStoreRows(
+        retailWorkCenters,
+        pointsOfSale.length > 0 ? pointsOfSale : bootstrapPdvs,
+        businessId,
+        {
+          accountBusinessCount: businesses.length,
+        },
+      ),
+    [retailWorkCenters, pointsOfSale, bootstrapPdvs, businessId, businesses.length],
   );
 
   const shouldBootstrapCeoStores = useMemo(() => {
@@ -442,6 +453,7 @@ function TpvRapidoCeoBoard() {
     if (!isDeliveryOpsBusinessType(currentBusiness.businessType)) {
       return false;
     }
+    if (ceoBootstrapDoneRef.current) return false;
     return needsCeoTpvStoreBootstrap(retailWorkCenters, pointsOfSale, storeRows);
   }, [
     businessesFetchSettled,
@@ -455,50 +467,71 @@ function TpvRapidoCeoBoard() {
   ]);
 
   useEffect(() => {
-    if (!shouldBootstrapCeoStores || ceoBootstrapDoneRef.current || ceoBootstrapInflightRef.current) {
+    if (ceoBootstrapDoneRef.current) {
+      setCeoBootstrapSettled((prev) => (prev ? prev : true));
       return;
     }
+    if (!shouldBootstrapCeoStores) {
+      setCeoBootstrapSettled((prev) => (prev ? prev : true));
+      return;
+    }
+    if (ceoBootstrapInflightRef.current) return;
     if (!user || !currentBusiness) return;
 
-    let cancelled = false;
+    const bizIdAtStart = resolveBusinessScopeId(currentBusiness);
+    const accountN = businesses.length;
+    // Snapshot estable: no cancelar el bootstrap por identidad nueva del array `businesses`.
+    const businessesSnap = businesses;
     ceoBootstrapInflightRef.current = true;
     setCeoBootstrapLoading(true);
+    setCeoBootstrapSettled(false);
 
     void (async () => {
       try {
-        await bootstrapCeoTpvStores(user, currentBusiness, businesses, {
-          accountBusinessCount: businesses.length,
+        const state = await bootstrapCeoTpvStores(user, currentBusiness, businessesSnap, {
+          accountBusinessCount: accountN,
         });
-        if (cancelled) return;
+        if (resolveBusinessScopeId(currentBusiness) !== bizIdAtStart) return;
         ceoBootstrapDoneRef.current = true;
+        const recovered = (state.pointsOfSale || []).filter((p) => p.active !== false);
+        if (recovered.length > 0) {
+          setBootstrapPdvs(recovered);
+          if (recovered.length === 1) {
+            const onlyId = recovered[0]._id;
+            setSelectedPdvId((prev) => prev || onlyId);
+            if (businessId && dataUserId) {
+              writeDeliveryOpsSelectedPdvId(businessId, dataUserId, onlyId);
+            }
+          }
+        }
         window.dispatchEvent(new Event('work-centers:changed'));
         await refreshStores();
       } catch {
-        /* conservar selector manual / reintento */
+        ceoBootstrapDoneRef.current = true;
       } finally {
         ceoBootstrapInflightRef.current = false;
-        if (!cancelled) setCeoBootstrapLoading(false);
+        setCeoBootstrapLoading(false);
+        setCeoBootstrapSettled(true);
       }
     })();
-
-    return () => {
-      cancelled = true;
-      ceoBootstrapInflightRef.current = false;
-    };
   }, [
     shouldBootstrapCeoStores,
     user,
     currentBusiness,
     businesses,
+    businesses.length,
+    businessId,
+    dataUserId,
     refreshStores,
   ]);
 
   const effectiveStoresLoading = storesLoading || ceoBootstrapLoading;
 
-  const activePdvs = useMemo(
-    () => pointsOfSale.filter((p) => p.active !== false),
-    [pointsOfSale],
-  );
+  const activePdvs = useMemo(() => {
+    const fromScope = pointsOfSale.filter((p) => p.active !== false);
+    if (fromScope.length > 0) return fromScope;
+    return bootstrapPdvs.filter((p) => p.active !== false);
+  }, [pointsOfSale, bootstrapPdvs]);
 
   const resolvedInitialPdvId = useMemo(() => {
     if (forceStorePicker || !businessId || !dataUserId || activePdvs.length === 0) return null;
@@ -510,17 +543,15 @@ function TpvRapidoCeoBoard() {
 
   const [pdvWaitTimedOut, setPdvWaitTimedOut] = useState(false);
 
-  // Mientras no haya PDV, seguir en “cargando” si aún puede llegar la lista
-  // (loading del scope, bootstrap CEO, o empresa aún resolviendo). Si no,
-  // un frame vacío muestra «sin tiendas» y al F5 ya están → confunde.
+  // Solo esperar mientras hay carga real. `shouldBootstrapCeoStores` solo no debe
+  // dejar el TPV colgado en «Tarda más…» para siempre (PDV ya existía en Couch).
   const awaitingPdvResolution =
     !forceStorePicker
     && !effectivePdvId
     && activePdvs.length === 0
     && (
       effectiveStoresLoading
-      || ceoBootstrapLoading
-      || shouldBootstrapCeoStores
+      || (shouldBootstrapCeoStores && !ceoBootstrapSettled)
       || !businessesFetchSettled
       || !businessId
       || !dataUserId
@@ -535,6 +566,7 @@ function TpvRapidoCeoBoard() {
     && Boolean(businessId)
     && Boolean(dataUserId)
     && activePdvs.length === 0
+    && ceoBootstrapSettled
     && !shouldBootstrapCeoStores
     && pdvWaitTimedOut;
 
@@ -546,6 +578,21 @@ function TpvRapidoCeoBoard() {
     const timer = window.setTimeout(() => setPdvWaitTimedOut(true), 5000);
     return () => window.clearTimeout(timer);
   }, [awaitingPdvResolution]);
+
+  // Tras timeout: entrar con la tienda guardada o abrir el selector (no pantalla muerta).
+  useEffect(() => {
+    if (!pdvWaitTimedOut || forceStorePicker || effectivePdvId) return;
+    if (!businessId || !dataUserId) {
+      setForceStorePicker(true);
+      return;
+    }
+    const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
+    if (saved) {
+      setSelectedPdvId(saved);
+      return;
+    }
+    setForceStorePicker(true);
+  }, [pdvWaitTimedOut, forceStorePicker, effectivePdvId, businessId, dataUserId]);
 
   useEffect(() => {
     lastSyncedStorePdvRef.current = null;
@@ -695,32 +742,14 @@ function TpvRapidoCeoBoard() {
     );
   }
 
+  // Timeout: el effect de recuperación ya elige tienda guardada o abre el picker.
+  // No mostrar pantalla muerta «Tarda más…» (bloqueaba el TPV delivery CEO semanas).
   if (awaitingPdvResolution && pdvWaitTimedOut) {
     return (
       <div className="flex h-[100svh] min-h-[100svh] items-center justify-center bg-gray-50 dark:bg-gray-950">
         <div className="text-center px-6">
-          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-2">
-            Tarda más de lo habitual en conectar
-          </p>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-            Puedes elegir la tienda manualmente o volver al puente de acceso rápido.
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => setForceStorePicker(true)}
-              className="rounded-xl bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] px-4 py-2.5 text-sm font-semibold text-white"
-            >
-              Elegir tienda
-            </button>
-            <button
-              type="button"
-              onClick={() => navigate('/saas/tpv')}
-              className="rounded-xl border border-gray-300 dark:border-gray-600 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200"
-            >
-              Puente TPV
-            </button>
-          </div>
+          <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-gray-400" />
+          <p className="text-sm text-gray-500 dark:text-gray-400">Preparando tienda…</p>
         </div>
       </div>
     );
