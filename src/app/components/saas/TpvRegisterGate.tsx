@@ -4466,76 +4466,20 @@ export function TpvRegisterGate({
         const tabletPdvId = String(tabletBindingRef.current?.pdvId || '').trim();
         const tabletFastPath = isTabletSessionRef.current && Boolean(tabletPdvId);
 
-        let sessData: TpvRegisterSession[];
-        let storeState: Awaited<ReturnType<typeof loadRetailStoresForBusiness>>;
-
-        if (tabletFastPath) {
-          if (!hasDisplayedStoresRef.current) {
-            const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
-            setPointsOfSale(stubPdvs);
-            setWorkCenters([]);
-            hasDisplayedStoresRef.current = stubPdvs.length > 0;
-          }
-          sessData = await listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined });
-          storeState = {
-            dataUserId: uid,
-            workCenters: [],
-            pointsOfSale: [],
-          };
-        } else {
-          const bizList = businessesRef.current;
-          const knownBusinessIds = bizList.map((b) => b.business_id).filter(Boolean);
-          const cachedPdvs = pointsOfSaleRef.current;
-          const cachedMissingTerminal = cachedPdvs.some(
-            (p) =>
-              p.active !== false
-              && !(Array.isArray(p.terminals) && p.terminals.some((t) => t.active !== false)),
-          );
-          // Si el scope ya pintó tiendas sin terminal, hay que recargar con ensureTabletCodes.
-          const needFreshStores = !hasDisplayedStoresRef.current || cachedMissingTerminal;
-          [sessData, storeState] = await Promise.all([
-            listTpvRegisterSessionsRequest(uid, { businessId: bidAtStart || undefined }),
-            needFreshStores
-              ? (async () => {
-                  let state = await loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
-                    ...loadOpts,
-                    knownBusinessIds,
-                    // Delivery y restaurante: PDV + terminal al abrir TPV (CEO web no inventaba terminal).
-                    tpvBootstrap: true,
-                  });
-                  if (state.dataUserId) {
-                    state = {
-                      ...state,
-                      pointsOfSale: await repairMissingRetailDeliveryPdvs(
-                        state.dataUserId,
-                        state.workCenters,
-                        state.pointsOfSale,
-                        biz ?? null,
-                      ),
-                    };
-                  }
-                  return state;
-                })()
-              : (async () => {
-                  // Caché con terminales: aún así reafirmar códigos/terminal por si el doc quedó a medias.
-                  let pdvs = cachedPdvs;
-                  try {
-                    pdvs = await ensureTabletCodesForPointsOfSale(uid, pdvs);
-                  } catch {
-                    /* conservar caché */
-                  }
-                  return {
-                    dataUserId: uid,
-                    workCenters: workCentersRef.current,
-                    pointsOfSale: pdvs,
-                  };
-                })(),
-          ]);
+        if (tabletFastPath && !hasDisplayedStoresRef.current) {
+          const stubPdvs = mergeTabletBindingPdv([], tabletBindingRef.current);
+          setPointsOfSale(stubPdvs);
+          setWorkCenters([]);
+          hasDisplayedStoresRef.current = stubPdvs.length > 0;
         }
+
+        // 1) Sesiones primero (crítico para recuperar caja abierta). No esperar tiendas.
+        const sessData = await listTpvRegisterSessionsRequest(uid, {
+          businessId: bidAtStart || undefined,
+        });
 
         if (seq !== loadSeqRef.current) return;
         if (!isTabletSessionRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
-
         if (
           !shouldApplyTpvRegisterLoadResult({
             isTabletSession: isTabletSessionRef.current,
@@ -4557,51 +4501,114 @@ export function TpvRegisterGate({
             ),
           );
         } else {
-          let scopedPdvs = storeState.pointsOfSale.filter((p) => p.active !== false);
-          let scopedWorkCenters = storeState.workCenters.filter(
-            (wc) =>
-              wc.active !== false &&
-              !wc.deletedAt &&
-              (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
-          );
-
-          if (workerUser) {
-            const salesPointRef = resolveEffectiveSalesPointRef({
-              employmentSalesPointId: authUser?.employment?.salesPointId,
-              workCenters: scopedWorkCenters,
-              pointsOfSale: scopedPdvs,
-            });
-            const scoped = filterStoresForWorkerAssignment(
-              scopedPdvs,
-              scopedWorkCenters,
-              salesPointRef,
-            );
-            scopedPdvs = scoped.pointsOfSale;
-            scopedWorkCenters = scoped.workCenters;
-          }
-
-          if (scopedPdvs.length > 0 || scopedWorkCenters.length > 0) {
-            setWorkCenters(scopedWorkCenters);
-            setPointsOfSale(
-              mergeTabletBindingPdv(scopedPdvs, isTabletSessionRef.current ? tabletBindingRef.current : null),
-            );
-            writeRetailScopeCacheForBusiness(
-              bidAtStart,
-              {
-                retailWorkCenters: scopedWorkCenters,
-                allPointsOfSale: scopedPdvs,
-              },
-              buildRetailScopeCtx(),
-            );
-            hasDisplayedStoresRef.current = true;
-          }
           setSessions((prev) =>
             mergeTpvRegisterSessionsPreservingOpen(
               prev,
-              sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs, bidAtStart)),
+              sessData.filter((s) =>
+                shouldKeepTpvSessionInList(s, pointsOfSaleRef.current, bidAtStart),
+              ),
             ),
           );
         }
+
+        // UI libre: si hay sesión open, el gate entra; si no, OpeningScreen.
+        if (seq === loadSeqRef.current) setLoading(false);
+
+        // 2) Tiendas / códigos tablet en segundo plano (no bloquean «Recuperando caja…»).
+        if (tabletFastPath) return;
+
+        const bizList = businessesRef.current;
+        const knownBusinessIds = bizList.map((b) => b.business_id).filter(Boolean);
+        const cachedPdvs = pointsOfSaleRef.current;
+        const cachedMissingTerminal = cachedPdvs.some(
+          (p) =>
+            p.active !== false
+            && !(Array.isArray(p.terminals) && p.terminals.some((t) => t.active !== false)),
+        );
+        const needFreshStores = !hasDisplayedStoresRef.current || cachedMissingTerminal;
+
+        let storeState: Awaited<ReturnType<typeof loadRetailStoresForBusiness>>;
+        if (needFreshStores) {
+          let state = await loadRetailStoresForBusiness(authUser, biz ?? null, bizList, {
+            ...loadOpts,
+            knownBusinessIds,
+            tpvBootstrap: true,
+          });
+          if (state.dataUserId) {
+            state = {
+              ...state,
+              pointsOfSale: await repairMissingRetailDeliveryPdvs(
+                state.dataUserId,
+                state.workCenters,
+                state.pointsOfSale,
+                biz ?? null,
+              ),
+            };
+          }
+          storeState = state;
+        } else {
+          let pdvs = cachedPdvs;
+          try {
+            pdvs = await ensureTabletCodesForPointsOfSale(uid, pdvs);
+          } catch {
+            /* conservar caché */
+          }
+          storeState = {
+            dataUserId: uid,
+            workCenters: workCentersRef.current,
+            pointsOfSale: pdvs,
+          };
+        }
+
+        if (seq !== loadSeqRef.current) return;
+        if (!isTabletSessionRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
+
+        let scopedPdvs = storeState.pointsOfSale.filter((p) => p.active !== false);
+        let scopedWorkCenters = storeState.workCenters.filter(
+          (wc) =>
+            wc.active !== false &&
+            !wc.deletedAt &&
+            (wc.centerType === 'punto_de_venta' || wc.centerType === 'almacen'),
+        );
+
+        if (workerUser) {
+          const salesPointRef = resolveEffectiveSalesPointRef({
+            employmentSalesPointId: authUser?.employment?.salesPointId,
+            workCenters: scopedWorkCenters,
+            pointsOfSale: scopedPdvs,
+          });
+          const scoped = filterStoresForWorkerAssignment(
+            scopedPdvs,
+            scopedWorkCenters,
+            salesPointRef,
+          );
+          scopedPdvs = scoped.pointsOfSale;
+          scopedWorkCenters = scoped.workCenters;
+        }
+
+        if (scopedPdvs.length > 0 || scopedWorkCenters.length > 0) {
+          setWorkCenters(scopedWorkCenters);
+          setPointsOfSale(
+            mergeTabletBindingPdv(scopedPdvs, isTabletSessionRef.current ? tabletBindingRef.current : null),
+          );
+          writeRetailScopeCacheForBusiness(
+            bidAtStart,
+            {
+              retailWorkCenters: scopedWorkCenters,
+              allPointsOfSale: scopedPdvs,
+            },
+            buildRetailScopeCtx(),
+          );
+          hasDisplayedStoresRef.current = true;
+        }
+
+        // Re-filtrar sesiones con PDVs frescos (misma lista, scope más preciso).
+        setSessions((prev) =>
+          mergeTpvRegisterSessionsPreservingOpen(
+            prev,
+            sessData.filter((s) => shouldKeepTpvSessionInList(s, scopedPdvs, bidAtStart)),
+          ),
+        );
       } catch {
         if (
           seq === loadSeqRef.current

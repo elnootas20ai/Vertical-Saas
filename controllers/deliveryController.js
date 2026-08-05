@@ -45,6 +45,7 @@ import {
   findActivePointOfSaleForWorkCenter,
   findOrphanPointOfSaleByName,
   filterTpvRegisterSessionsForBusiness,
+  normalizeTpvSessionBusinessId,
   tpvRegisterSessionBelongsToBusiness,
   generateTerminalCode,
   findPointOfSaleByTerminalCode,
@@ -2985,9 +2986,16 @@ export async function listTpvRegisterSessions(req, res) {
     }
     const businessFilter = String(req.query.businessId || req.query.business_id || '').trim();
     if (businessFilter) {
-      const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
-      const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
-      sessions = filterTpvRegisterSessionsForBusiness(sessions, businessFilter, scopedPdvIds);
+      // Si todas las sesiones ya llevan business_id, no hace falta otro _all_docs de PDVs.
+      const bid = businessFilter.replace(/^business:/, '').trim();
+      const allTagged = sessions.every((s) => Boolean(normalizeTpvSessionBusinessId(s)));
+      if (allTagged) {
+        sessions = sessions.filter((s) => normalizeTpvSessionBusinessId(s) === bid);
+      } else {
+        const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
+        const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
+        sessions = filterTpvRegisterSessionsForBusiness(sessions, businessFilter, scopedPdvIds);
+      }
     }
     return res.json({ ok: true, sessions: sessions.map(sanitizeTpvRegisterSession) });
   } catch (error) {
@@ -3028,9 +3036,15 @@ export async function listCajaBootstrap(req, res) {
 
     const businessFilter = String(req.query.businessId || req.query.business_id || '').trim();
     if (businessFilter) {
-      const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
-      const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
-      tpvSessions = filterTpvRegisterSessionsForBusiness(tpvSessions, businessFilter, scopedPdvIds);
+      const bid = businessFilter.replace(/^business:/, '').trim();
+      const allTagged = tpvSessions.every((s) => Boolean(normalizeTpvSessionBusinessId(s)));
+      if (allTagged) {
+        tpvSessions = tpvSessions.filter((s) => normalizeTpvSessionBusinessId(s) === bid);
+      } else {
+        const scopedPdvs = await listScopedPointsOfSaleForBusiness(req, userId, businessFilter);
+        const scopedPdvIds = new Set(scopedPdvs.map((p) => p._id));
+        tpvSessions = filterTpvRegisterSessionsForBusiness(tpvSessions, businessFilter, scopedPdvIds);
+      }
     }
 
     return res.json({
@@ -4270,14 +4284,21 @@ export async function getOpsCenter(req, res) {
     const revenue = revenueOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
     const avgTicket = revenueOrders.length > 0 ? revenue / revenueOrders.length : 0;
 
+    // Prep/montaje: el TPV suele saltar cocina → usar assemblyStartedAt o createdAt.
     const prepTimes = delivered
-      .map(o => o.kitchenStartedAt && o.assemblyCompletedAt ? (new Date(o.assemblyCompletedAt) - new Date(o.kitchenStartedAt)) / 60000 : null)
-      .filter(Boolean);
+      .map((o) => {
+        const start = o.kitchenStartedAt || o.assemblyStartedAt || o.createdAt;
+        const end = o.assemblyCompletedAt || (o.status === 'entregado' ? o.deliveredAt : null);
+        if (!start || !end) return null;
+        const mins = (new Date(end) - new Date(start)) / 60000;
+        return Number.isFinite(mins) && mins >= 0 ? mins : null;
+      })
+      .filter((t) => t != null);
     const avgPrepTime = prepTimes.length > 0 ? prepTimes.reduce((a, b) => a + b, 0) / prepTimes.length : 0;
 
     const deliveryTimes = delivered
       .map(o => o.createdAt && o.deliveredAt ? (new Date(o.deliveredAt) - new Date(o.createdAt)) / 60000 : null)
-      .filter(Boolean);
+      .filter((t) => t != null && t > 0);
     const avgDeliveryTime = deliveryTimes.length > 0 ? deliveryTimes.reduce((a, b) => a + b, 0) / deliveryTimes.length : 0;
     const businessOp = businessIdQuery
       ? await getBusinessAlertsOperational(req, businessIdQuery)

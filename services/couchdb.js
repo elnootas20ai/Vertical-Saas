@@ -288,6 +288,15 @@ const clientDocumentsByUser = new Map();
 /** Generación por titular: si sube durante un _find, no se escribe esa carga en caché. */
 const clientDocumentsGeneration = new Map();
 const clientsUserIndexReady = new Set();
+const deliveryTypeUserIndexReady = new Set();
+
+/** Índice type+user_id en delivery (sesiones caja / PDV) — evita _all_docs del DB entero. */
+async function ensureDeliveryTypeUserIndex(req, dbName) {
+  if (deliveryTypeUserIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-type-user_id`).catch(() => null);
+  deliveryTypeUserIndexReady.add(dbName);
+}
 const clientDocumentsInflight = new Map();
 
 function bumpClientDocumentsGeneration(uid) {
@@ -7462,9 +7471,38 @@ export function sanitizeTpvRegisterSession(doc) {
 }
 
 export async function listTpvRegisterSessionsByUser(req, userId) {
-  const docs = await getDeliveryDatabaseDocumentsInflight(req);
+  const uid = String(userId || '').trim();
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  await ensureDeliveryTypeUserIndex(req, db);
+
+  let docs;
+  try {
+    docs = uid
+      ? await findDocuments(
+          req,
+          db,
+          { type: 'tpv_register_session', user_id: uid },
+          { pageSize: 500, maxDocs: 5_000 },
+        )
+      : await findDocuments(
+          req,
+          db,
+          { type: 'tpv_register_session' },
+          { pageSize: 500, maxDocs: 5_000 },
+        );
+  } catch {
+    const all = await getDeliveryDatabaseDocumentsInflight(req);
+    docs = all.filter(
+      (doc) => doc?.type === 'tpv_register_session' && (!uid || doc?.user_id === uid),
+    );
+  }
+
   return docs
-    .filter((doc) => doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter(
+      (doc) =>
+        doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+    )
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
