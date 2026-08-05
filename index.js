@@ -265,18 +265,19 @@ app.param('dbName', (req, _res, next, value) => {
   next();
 });
 
-/** MONEI webhooks: body en bruto para validar MONEI-Signature (HMAC-SHA256). */
-const MONEI_WEBHOOK_PREFIXES = [
+/** Body en bruto para validar firmas HMAC (MONEI + Uber Eats webhooks). */
+const RAW_BODY_WEBHOOK_PREFIXES = [
   '/api/subscriptions/webhook',
   '/api/v2/subscriptions/webhook',
   '/api/monei-connect/webhook',
+  '/api/delivery-webhooks/ubereats',
 ];
-function isMoneiWebhookRequest(req) {
-  return req.method === 'POST' && MONEI_WEBHOOK_PREFIXES.some((p) => req.path.startsWith(p));
+function isRawBodyWebhookRequest(req) {
+  return req.method === 'POST' && RAW_BODY_WEBHOOK_PREFIXES.some((p) => req.path.startsWith(p));
 }
 
 app.use((req, res, next) => {
-  if (!isMoneiWebhookRequest(req)) return next();
+  if (!isRawBodyWebhookRequest(req)) return next();
   express.raw({ type: 'application/json', limit: '1mb' })(req, res, (err) => {
     if (err) return next(err);
     req.rawBody = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : '';
@@ -290,7 +291,7 @@ app.use((req, res, next) => {
 });
 
 app.use((req, res, next) => {
-  if (isMoneiWebhookRequest(req)) return next();
+  if (isRawBodyWebhookRequest(req)) return next();
   express.json({ limit: '50mb' })(req, res, next);
 });
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));

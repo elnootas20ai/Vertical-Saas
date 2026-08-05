@@ -7,12 +7,16 @@ import {
   sanitizeDeliveryOrder,
   putDocument,
   listDeliveryOrdersByUser,
-  findAccountByUserId,
-  logAccountActivity,
-  getCouchConfig,
-  buildCouchAuthHeader,
+  getWebConfigByBusinessId,
+  findDocuments,
 } from '../services/couchdb.js';
 import { broadcastToUser, broadcastToBusiness } from '../services/sseService.js';
+import {
+  fetchUberOrderDetails,
+  parseUberWebhookEvent,
+  verifyUberWebhookSignature,
+} from '../services/uberEatsWebhook.js';
+import { isUberEatsConfigured } from '../services/uberEatsOAuth.js';
 import logger from '../services/logger.js';
 
 const webhookRouter = Router();
@@ -20,23 +24,34 @@ const webhookRouter = Router();
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 async function getIntegrationConfig(req, businessId) {
-  const db = getWebDbName();
-  await ensureDatabase(req, db);
   try {
-    const { default: nano } = await import('nano');
-    const cfg = getCouchConfig(null);
-    if (!cfg.baseUrl) return {};
-    const auth = buildCouchAuthHeader(null);
-    const couch = nano({
-      url: cfg.baseUrl,
-      ...(auth ? { headers: { Authorization: auth } } : {}),
-    });
-    const dbConn = couch.db.use(db);
-    const doc = await dbConn.get(`web_config:${businessId}`);
+    const doc = await getWebConfigByBusinessId(req, businessId);
     return doc?.integrations || {};
   } catch {
     return {};
   }
+}
+
+/** Negocio Vertial con Uber OAuth (opcionalmente filtrado por store_id Uber). */
+async function findUberOauthBusiness(req, storeId = '') {
+  const db = getWebDbName();
+  await ensureDatabase(req, db);
+  let docs = [];
+  try {
+    docs = await findDocuments(req, db, { type: 'web_config' }, { limit: 200 });
+  } catch {
+    docs = [];
+  }
+  const withOauth = (docs || []).filter((d) => {
+    const uber = d?.integrations?.uber;
+    return Boolean(uber?.oauth || uber?.accessToken) && !d.deletedAt;
+  });
+  if (!withOauth.length) return null;
+  if (storeId) {
+    const match = withOauth.find((d) => String(d.integrations?.uber?.storeId || '') === storeId);
+    if (match) return match;
+  }
+  return withOauth[0];
 }
 
 function validateWebhookToken(integrations, platform, providedToken) {
@@ -194,10 +209,162 @@ async function handlePlatformWebhook(platform, req, res) {
   }
 }
 
+/**
+ * Webhook primario Uber Eats Marketplace (una sola URL en el portal).
+ * Contrato Uber: HTTP 200 + body vacío. Firma: X-Uber-Signature (HMAC-SHA256).
+ */
+async function handleUberPrimaryWebhook(req, res) {
+  const rawBody = typeof req.rawBody === 'string' ? req.rawBody : JSON.stringify(req.body || {});
+  const signature = req.headers['x-uber-signature'] || req.headers['X-Uber-Signature'];
+
+  // Si viene firma, validarla. Sin firma (probe del portal) aceptamos si Uber está configurado.
+  if (signature) {
+    if (!verifyUberWebhookSignature(rawBody, signature)) {
+      logger.warn({ hasSecret: isUberEatsConfigured() }, 'Uber webhook: firma inválida');
+      return res.status(401).end();
+    }
+  } else if (!isUberEatsConfigured()) {
+    return res.status(503).end();
+  }
+
+  const event = parseUberWebhookEvent(req.body || {});
+  // ACK inmediato (Uber reintenta si no hay 200 vacío)
+  res.status(200).end();
+
+  setImmediate(() => {
+    void (async () => {
+      try {
+        logger.info(
+          {
+            eventType: event.eventType,
+            eventId: event.eventId,
+            orderId: event.orderId,
+            storeId: event.storeId,
+          },
+          'Uber webhook recibido',
+        );
+
+        if (event.eventType === 'store.provisioned' && event.storeId) {
+          const cfg = await findUberOauthBusiness(req);
+          if (cfg?.business_id) {
+            const current = await getWebConfigByBusinessId(req, cfg.business_id);
+            const prevUber = current?.integrations?.uber || {};
+            const next = {
+              ...(current?.integrations || {}),
+              uber: { ...prevUber, storeId: event.storeId, enabled: true },
+            };
+            const { buildWebConfigDocument } = await import('../services/couchdb.js');
+            const doc = buildWebConfigDocument(cfg.business_id, { integrations: next }, current);
+            await putDocument(req, getWebDbName(), doc._id, doc);
+            logger.info({ businessId: cfg.business_id, storeId: event.storeId }, 'Uber store.provisioned guardado');
+          }
+          return;
+        }
+
+        if (event.eventType !== 'orders.notification' && event.eventType !== 'orders.scheduled.notification') {
+          return;
+        }
+
+        const cfg = await findUberOauthBusiness(req, event.storeId);
+        if (!cfg?.business_id) {
+          logger.warn({ storeId: event.storeId }, 'Uber webhook: no hay negocio OAuth conectado');
+          return;
+        }
+        const bearer = String(cfg.integrations?.uber?.accessToken || '').trim();
+        if (!bearer) {
+          logger.warn({ businessId: cfg.business_id }, 'Uber webhook: sin accessToken OAuth (¿faltan scopes eats.order?)');
+          return;
+        }
+
+        let orderPayload;
+        try {
+          orderPayload = await fetchUberOrderDetails({
+            accessToken: bearer,
+            resourceHref: event.resourceHref,
+            orderId: event.orderId,
+          });
+        } catch (err) {
+          logger.error({ err: err.message, orderId: event.orderId }, 'Uber webhook: no se pudo GET order');
+          return;
+        }
+
+        const businessId = cfg.business_id;
+        const orderData = mapUberEatsToOrder({ ...orderPayload, id: orderPayload.id || event.orderId });
+        if (!orderData.externalOrderId) orderData.externalOrderId = event.orderId;
+
+        if (orderData.externalOrderId) {
+          const isDup = await checkDuplicateExternalOrder(req, businessId, orderData.externalOrderId);
+          if (isDup) {
+            logger.info({ orderId: orderData.externalOrderId }, 'Uber webhook: pedido ya existía');
+            return;
+          }
+        }
+
+        const db = getDeliveryDbName();
+        await ensureDatabase(req, db);
+        const doc = buildDeliveryOrderDocument(businessId, orderData);
+        const saved = await putDocument(req, db, doc._id, doc);
+        const sanitized = sanitizeDeliveryOrder({ ...doc, _rev: saved.rev });
+        broadcastToUser(businessId, 'delivery_order_created', sanitized);
+        try {
+          broadcastToBusiness(businessId, 'delivery:order_created', { order: sanitized, userId: businessId });
+        } catch { /* ignore */ }
+        logger.info(
+          { businessId, orderId: doc._id, externalOrderId: orderData.externalOrderId },
+          'Uber webhook: pedido creado en Vertial',
+        );
+      } catch (error) {
+        logger.error({ error: error?.message || String(error) }, 'Uber webhook: error post-ACK');
+      }
+    })();
+  });
+}
+
+/**
+ * Token endpoint mínimo si el portal Uber exige auth "oAuth" hacia Vertial.
+ * Client credentials = UBER_EATS_CLIENT_ID / UBER_EATS_CLIENT_SECRET del .env.
+ */
+webhookRouter.post('/ubereats/token', (req, res) => {
+  const id = String(process.env.UBER_EATS_CLIENT_ID || '').trim();
+  const secret = String(process.env.UBER_EATS_CLIENT_SECRET || '').trim();
+  const body = req.body || {};
+  const grant = String(body.grant_type || req.query.grant_type || 'client_credentials');
+  let clientId = String(body.client_id || '').trim();
+  let clientSecret = String(body.client_secret || '').trim();
+  const auth = String(req.headers.authorization || '');
+  if (auth.startsWith('Basic ')) {
+    try {
+      const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
+      const idx = decoded.indexOf(':');
+      if (idx >= 0) {
+        clientId = decoded.slice(0, idx);
+        clientSecret = decoded.slice(idx + 1);
+      }
+    } catch { /* ignore */ }
+  }
+  if (!id || !secret || clientId !== id || clientSecret !== secret || grant !== 'client_credentials') {
+    return res.status(401).json({ error: 'invalid_client' });
+  }
+  const token = Buffer.from(`uber-wh:${Date.now()}:${cryptoRandom()}`).toString('base64url');
+  return res.json({
+    access_token: token,
+    token_type: 'Bearer',
+    expires_in: 3600,
+  });
+});
+
+function cryptoRandom() {
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 webhookRouter.post('/glovo/:businessId', (req, res) => handlePlatformWebhook('glovo', req, res));
 webhookRouter.post('/justeat/:businessId', (req, res) => handlePlatformWebhook('justeat', req, res));
+// Primario Uber (sin businessId) ANTES de /:businessId
+webhookRouter.post('/ubereats', (req, res) => {
+  void handleUberPrimaryWebhook(req, res);
+});
 webhookRouter.post('/ubereats/:businessId', (req, res) => handlePlatformWebhook('ubereats', req, res));
 webhookRouter.post('/flipdish/:businessId', (req, res) => handlePlatformWebhook('flipdish', req, res));
 
