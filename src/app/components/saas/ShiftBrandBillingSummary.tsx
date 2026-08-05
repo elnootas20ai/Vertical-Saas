@@ -16,6 +16,8 @@ type Props = {
   total?: number;
   loading?: boolean;
   compact?: boolean;
+  /** Cierre en pasos: filas planas, sin expandir, mínima altura. */
+  dense?: boolean;
 };
 
 export function ShiftBrandBillingSummary({
@@ -24,6 +26,7 @@ export function ShiftBrandBillingSummary({
   total = 0,
   loading = false,
   compact = false,
+  dense = false,
 }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -31,6 +34,52 @@ export function ShiftBrandBillingSummary({
     return <p className="text-[11px] text-gray-500">Calculando marcas…</p>;
   }
   if (rows.length === 0 && unbranded <= 0) return null;
+
+  if (dense) {
+    return (
+      <div className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 dark:border-stone-700 dark:bg-stone-900">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500 flex items-center gap-1">
+            <Tag className="h-3 w-3" />
+            Marcas
+          </p>
+          {total > 0 ? (
+            <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-100">{fmt(total)}€</p>
+          ) : null}
+        </div>
+        <div className="space-y-0.5">
+          {rows.map((row) => {
+            const cash = Number(row.revenueEfectivo) || 0;
+            const card = Number(row.revenueTarjeta) || 0;
+            return (
+              <div
+                key={row.brandId}
+                className="flex items-center justify-between gap-2 rounded-lg bg-stone-50 px-2 py-1 dark:bg-stone-800/60"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-bold text-stone-900 dark:text-stone-100">{row.name}</p>
+                  <p className="text-[10px] font-semibold tabular-nums">
+                    <span className={VERTIAL_CASH_TEXT}>Efectivo {fmt(cash)}€</span>
+                    <span className="mx-1 text-stone-300">·</span>
+                    <span className={VERTIAL_CARD_TEXT}>Tarjeta {fmt(card)}€</span>
+                  </p>
+                </div>
+                <p className="shrink-0 text-sm font-black tabular-nums text-stone-900 dark:text-stone-100">
+                  {fmt(row.revenue)}€
+                </p>
+              </div>
+            );
+          })}
+          {unbranded > 0 ? (
+            <div className="flex justify-between px-1 text-[10px] text-stone-500">
+              <span>Sin marca</span>
+              <span className="tabular-nums font-semibold">{fmt(unbranded)}€</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

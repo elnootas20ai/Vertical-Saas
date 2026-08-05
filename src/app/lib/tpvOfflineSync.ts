@@ -6,8 +6,8 @@ import {
   updateTpvRegisterSessionRequest,
   type DeliveryOrder,
   type TpvRegisterSession,
-  type TpvRegisterTransaction,
 } from './deliveryApi';
+import { createButcherSaleRequest, type ButcherSale } from './butcherApi';
 import {
   isBrowserOnline,
   listTpvOfflineQueue,
@@ -15,6 +15,7 @@ import {
   type TpvOfflineQueueItem,
 } from './tpvTabletOffline';
 import { mergeTpvRegisterTransactions } from './tpvLocalCajaSale';
+import { isDiningOfflineType, syncDiningOfflineItem } from './restaurantTpvOfflineSync';
 
 export type TpvOfflineSyncResult = {
   synced: number;
@@ -24,8 +25,19 @@ export type TpvOfflineSyncResult = {
 
 function queuePriority(type: string): number {
   if (type === 'order_create' || type === 'order_update' || type === 'order_cancel') return 0;
+  if (type === 'butcher_sale') return 0;
   if (type === 'register_tx' || type === 'sale') return 1;
+  if (type === 'register_close') return 3;
   return 2;
+}
+
+function preferClosedStatus(
+  remote: TpvRegisterSession,
+  local: TpvRegisterSession,
+): TpvRegisterSession['status'] {
+  // Nunca reabrir una caja ya cerrada en servidor por un register_tx residual.
+  if (remote.status === 'closed' || local.status === 'closed') return 'closed';
+  return local.status || remote.status || 'open';
 }
 
 async function syncRegisterSession(
@@ -49,9 +61,36 @@ async function syncRegisterSession(
       salesByChannel[t.channel] = (salesByChannel[t.channel] || 0) + Number(t.amount || 0);
     }
   }
+  const status = preferClosedStatus(remote, localSession);
+  const closedFields =
+    status === 'closed'
+      ? {
+          closedAt: localSession.closedAt || remote.closedAt,
+          closedBy: localSession.closedBy || remote.closedBy,
+          closingCashCount: localSession.closingCashCount ?? remote.closingCashCount,
+          finalCashAmount: localSession.finalCashAmount ?? remote.finalCashAmount,
+          expectedCash: localSession.expectedCash ?? remote.expectedCash,
+          difference: localSession.difference ?? remote.difference,
+          closingNotes: localSession.closingNotes ?? remote.closingNotes,
+          closingValidationStatus:
+            localSession.closingValidationStatus || remote.closingValidationStatus,
+          aggregatorClosingTotals:
+            localSession.aggregatorClosingTotals ?? remote.aggregatorClosingTotals,
+          aggregatorClosingCash:
+            localSession.aggregatorClosingCash ?? remote.aggregatorClosingCash,
+          aggregatorClosingCard:
+            localSession.aggregatorClosingCard ?? remote.aggregatorClosingCard,
+          aggregatorClosingBrandTotals:
+            localSession.aggregatorClosingBrandTotals ?? remote.aggregatorClosingBrandTotals,
+          productClosingCounts:
+            localSession.productClosingCounts ?? remote.productClosingCounts,
+        }
+      : {};
   await updateTpvRegisterSessionRequest(userId, {
     ...remote,
     ...localSession,
+    ...closedFields,
+    status,
     _rev: remote._rev,
     transactions: mergedTxs,
     linkedOrderIds,
@@ -98,12 +137,30 @@ async function syncItem(item: TpvOfflineQueueItem): Promise<boolean> {
     }
   }
 
-  if (item.type === 'register_tx' || item.type === 'sale') {
+  if (item.type === 'register_tx' || item.type === 'sale' || item.type === 'register_close') {
     const userId = String(p.userId || '').trim();
     const session = p.session as TpvRegisterSession | undefined;
     if (!userId || !session?._id) return false;
     await syncRegisterSession(userId, session);
     return true;
+  }
+
+  if (item.type === 'butcher_sale') {
+    const userId = String(p.userId || '').trim();
+    const sale = p.sale as Partial<ButcherSale> | undefined;
+    if (!userId || !sale || !Array.isArray(sale.items) || sale.items.length === 0) {
+      return false;
+    }
+    const res = await createButcherSaleRequest(userId, sale);
+    if (res?.ok) return true;
+    const err = String((res as { error?: string })?.error || '');
+    // Idempotencia blanda: si ya existe ticket, no bloquear la cola.
+    if (/duplicad|already exists|ya existe/i.test(err)) return true;
+    return false;
+  }
+
+  if (isDiningOfflineType(item.type)) {
+    return syncDiningOfflineItem(item);
   }
 
   return false;

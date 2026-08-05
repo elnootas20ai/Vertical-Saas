@@ -232,20 +232,23 @@ export function CajaTimelineBoard({
                   type="button"
                   onClick={() => setDownloadOpen((v) => !v)}
                   disabled={excelClosedCount === 0}
-                  title="Descargar Excel de ingresos (por defecto: todo el historial)"
+                  title="Descargar Excel de Facturación (por defecto: todo el historial)"
                   className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  Descargar ({excelClosedCount})
+                  Facturación ({excelClosedCount})
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${downloadOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {downloadOpen && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setDownloadOpen(false)} />
                     <div className="absolute right-0 top-full mt-2 w-[19rem] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-xl overflow-hidden z-20">
-                      <div className="px-3.5 py-2 border-b border-zinc-100 dark:border-zinc-800">
+                      <div className="px-3.5 py-2 border-b border-zinc-100 dark:border-zinc-800 space-y-1">
                         <p className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
-                          Excel · alcance
+                          Facturación · Excel
+                        </p>
+                        <p className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-snug">
+                          € por marca = ratio pizzas/burgers/tacos. Bebidas y postres no son unidades; van en el dinero total.
                         </p>
                       </div>
                       {([

@@ -25,7 +25,6 @@ import { ScrapyardProvider } from '../context/ScrapyardContext';
 import { useAuth } from '../context/AuthContext';
 import { usePushDeepLinkNavigate } from '../hooks/usePushDeepLinkNavigate';
 import {
-  clearTpvTabletBinding,
   isTpvTabletAllowedPath,
   isTpvTabletSaasSession,
   isTpvTabletTerminalBound,
@@ -122,17 +121,12 @@ function SaasContent() {
 
   }, [isAuthenticated, isInitializing, navigate]);
 
-  // Código TPV activo → solo tienda/TPV.
-  // Cuenta empresa/admin: no atrapar con binding viejo fuera del flujo tablet;
-  // si está en TPV/login código, no borrar (dueño abriendo caja con código).
+  // Código TPV activo → solo tienda/TPV (también cuenta empresa/admin).
+  // Entrada por código es independiente del CEO: no limpiar binding para “soltar”
+  // al dashboard; salir = leaveTpvTabletSession → pantalla de código.
   useEffect(() => {
     if (isInitializing || !isAuthenticated || !user) return;
     if (!tpvTabletLocked) return;
-    if (!isWorkerAccount(user)) {
-      if (isTpvTabletAllowedPath(location.pathname)) return;
-      clearTpvTabletBinding();
-      return;
-    }
     if (isTpvTabletAllowedPath(location.pathname)) return;
     navigate(resolveTpvTabletWorkerPath(), { replace: true });
   }, [isInitializing, isAuthenticated, user, tpvTabletLocked, location.pathname, navigate]);

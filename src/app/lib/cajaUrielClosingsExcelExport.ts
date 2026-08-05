@@ -1645,7 +1645,7 @@ export function buildUrielCajaClosingsWorkbook(
     : historyRange === 'year'
       ? `ano-${yearMonth.slice(0, 4)}`
       : yearMonth;
-  const baseName = String(opts.fileName || `ingresos-completo-${rangeSlug}`)
+  const baseName = String(opts.fileName || `facturacion-caja-${rangeSlug}`)
     .replace(/\.xlsx$/i, '')
     .replace(/\.zip$/i, '');
 

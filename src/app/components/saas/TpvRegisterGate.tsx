@@ -32,7 +32,9 @@ import {
 } from '../../lib/deliveryApi';
 import { calcTpvExpectedCash, buildTpvRegisterSummary, calcTpvShiftCollectionsTotal, countNetSaleOperations, sumCashReturns, sumCashStaffConsumption } from '../../lib/tpvCajaMath';
 import { formatMoneyAsYouType } from '../../lib/workCenterMoneyInput';
+import { formatMoneyEs, formatDecimalEs } from '../../lib/formatNumberEs';
 import { consumeSalaTpvLaunch } from '../../lib/salaTpvLaunch';
+import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import {
   mergeTpvRegisterSessionsPreservingOpen,
   pickNewestOpenRegisterSessionForStore,
@@ -42,7 +44,7 @@ import {
   tpvSessionBelongsToBusiness,
   tpvSessionMatchesStoreRef,
 } from '../../lib/tpvCajaScope';
-import { fetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
+import { fetchShiftOrdersForSession, prefetchShiftOrdersForSession } from '../../lib/registerShiftOrders';
 import {
   buildAggregatorCashRows,
   getClosingAggregatorPlatforms,
@@ -63,17 +65,15 @@ import {
 } from '../../lib/registerShiftSalesBreakdown';
 import { AggregatorClosingEditor, type AggregatorClosingSnapshot, type ManualLinesByChannel } from './AggregatorClosingEditor';
 import { DeliveryFoodUnitIcon } from './delivery/DeliveryFoodUnitIcon';
-import { RegisterShiftSalesBreakdown } from './RegisterShiftSalesBreakdown';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
-import { QuietTip } from './QuietTip';
 import {
   buildShiftAppsBrandTotals,
   buildShiftBrandRevenue,
-  getOrderBrandShares,
 } from '../../lib/registerShiftBrandBilling';
 import { listBrandsRequest } from '../../lib/brandApi';
-import { buildBrandLabelsMap } from '../../lib/brandLabels';
+import { buildBrandLabelsMap, brandIdAliases, displayBrandName } from '../../lib/brandLabels';
+
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import {
   splitRulesFromBillingConfig,
@@ -149,9 +149,9 @@ import {
 import type { WorkCenter } from '../../lib/workCentersApi';
 import { listUsersRequest, type AuthUser } from '../../lib/authApi';
 import {
-  Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, User, Monitor,
+  Lock, Unlock, Banknote, CreditCard, Phone as PhoneIcon, Wifi, WifiOff, User, Monitor,
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
-  ChevronUp, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
+  ChevronUp, ChevronLeft, ChevronRight, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
   MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
   MoreVertical, Save,
 } from 'lucide-react';
@@ -1431,6 +1431,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     notes: string,
     aggregatorRows: AggregatorCashRow[],
     productClosingCounts: NonNullable<TpvRegisterSession['productClosingCounts']>,
+    brandTotalsByChannel?: Record<string, Record<string, number>>,
   ) => void;
   onCancel: () => void;
   restaurantWarnings?: string[];
@@ -1466,16 +1467,47 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   );
   const [draftRestored] = useState(() => Boolean(savedDraft));
   const [showExtraDetail, setShowExtraDetail] = useState(false);
-  const [showDayOrders, setShowDayOrders] = useState(true);
+  const [showDayOrders, setShowDayOrders] = useState(false);
+  /** Delivery: TPV / Apps / Arqueo. Restaurant: Arqueo / Confirmar. */
+  const [closingStep, setClosingStep] = useState(1);
+  const closingMaxStep = showDeliveryClosingSlots ? 3 : 2;
+  const closingStepLabels = showDeliveryClosingSlots
+    ? (['TPV tienda', 'Apps', 'Arqueo'] as const)
+    : (['Arqueo', 'Confirmar'] as const);
+  const bodyScrollRef = useRef<HTMLDivElement | null>(null);
+  const [browserOnline, setBrowserOnline] = useState(() => isBrowserOnline());
   const [brandLabels, setBrandLabels] = useState<Record<string, string>>({});
+  /** Marcas creadas del negocio (nombres reales, p. ej. Pau Royo). */
+  const [businessBrands, setBusinessBrands] = useState<Array<{ brandId: string; name: string; active: boolean }>>([]);
   const [billingRules, setBillingRules] = useState<BrandBillingSplitRules>(() =>
     splitRulesFromBillingConfig(null),
   );
+
+  useEffect(() => {
+    const sync = () => setBrowserOnline(isBrowserOnline());
+    window.addEventListener('online', sync);
+    window.addEventListener('offline', sync);
+    return () => {
+      window.removeEventListener('online', sync);
+      window.removeEventListener('offline', sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    setShowDayOrders(false);
+    setShowExtraDetail(false);
+    const el = bodyScrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [closingStep]);
+
+  const goClosingStep = useCallback((next: number) => {
+    setClosingStep(Math.min(closingMaxStep, Math.max(1, next)));
+  }, [closingMaxStep]);
   const countedTotal = calcDenominationTotal(counts);
   const expectedTpv = calcTpvExpectedCash(session);
   const summary = buildTpvRegisterSummary(session);
-  const cashStaffConsumption = sumCashStaffConsumption(session);
   const cashReturnsTotal = sumCashReturns(session);
+  const cashStaffConsumption = sumCashStaffConsumption(session);
   const closingPlatforms = useMemo(() => getClosingAggregatorPlatforms(), []);
   const aggregatorRows = useMemo(
     () => buildAggregatorCashRows(closingPlatforms, session, shiftOrders),
@@ -1490,17 +1522,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     const scoped = filterOrdersForRegisterSession(session, shiftOrders);
     return buildShiftSalesBreakdown(scoped);
   }, [session, shiftOrders]);
-
-  const orderBrandSharesById = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof getOrderBrandShares>>();
-    const scoped = filterOrdersForRegisterSession(session, shiftOrders);
-    for (const order of scoped) {
-      const id = String(order._id || order.id || '').trim();
-      if (!id) continue;
-      map.set(id, getOrderBrandShares(order, brandLabels, billingRules));
-    }
-    return map;
-  }, [session, shiftOrders, brandLabels, billingRules]);
 
   const handleAppsSnapshotChange = useCallback((snap: AggregatorClosingSnapshot) => {
     setAppsSnapshot(snap);
@@ -1571,14 +1592,14 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const diff = countedTotal - expected;
   const tpvCashSales = Math.round((Number(summary.salesByMethod.efectivo) || 0) * 100) / 100;
   const tpvCardSales = Math.round((Number(summary.salesByMethod.tarjeta) || 0) * 100) / 100;
-  const tpvBizumSales = Math.round((Number(summary.salesByMethod.bizum) || 0) * 100) / 100;
-  const tpvOnlineSales = Math.round((Number(summary.salesByMethod.online) || 0) * 100) / 100;
-  const tpvOtherSales = Math.round((Number(summary.salesByMethod.otro) || 0) * 100) / 100;
   const tpvAllSales = Math.round((Number(summary.totalSales) || 0) * 100) / 100;
+  const integratorsTotal = Math.round(
+    (appsSnapshot?.appTotal
+      ?? finalAggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0)) * 100,
+  ) / 100;
   const dayCashTotal = Math.round((tpvCashSales + aggregatorCashTotal) * 100) / 100;
   const dayCardTotal = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
-  const appsMoneyTotal = Math.round((aggregatorCashTotal + aggregatorCardTotal) * 100) / 100;
-  const dayMoneyTotal = Math.round((tpvAllSales + appsMoneyTotal) * 100) / 100;
+  const dayMoneyTotal = Math.round((tpvAllSales + integratorsTotal) * 100) / 100;
   const cashSlotDisplay = cashSlotFocused
     ? cashSlot
     : countedTotal > 0
@@ -1651,11 +1672,27 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       .then(([brands, billingConfig]) => {
         if (cancelled) return;
         setBrandLabels(buildBrandLabelsMap(brands));
+        setBusinessBrands(
+          (brands || [])
+            .filter((b) => b && !b.deletedAt)
+            .map((b) => {
+              // Preferir `id` de negocio (el que va en pedidos); `_id` Couch como respaldo.
+              const brandId = String(b.id || b._id || '').trim();
+              const name = String(b.name || '').trim() || brandId;
+              return {
+                brandId,
+                name,
+                active: b.active !== false,
+              };
+            })
+            .filter((b) => b.brandId && b.name),
+        );
         setBillingRules(splitRulesFromBillingConfig(billingConfig));
       })
       .catch(() => {
         if (!cancelled) {
           setBrandLabels({});
+          setBusinessBrands([]);
           setBillingRules(splitRulesFromBillingConfig(null));
         }
       });
@@ -1674,78 +1711,189 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     [session, shiftOrders, brandLabels, billingRules],
   );
 
+  /**
+   * Todas las marcas creadas del negocio para el cierre (nombres reales).
+   * Si hay 1, 2, 3, 4 o 5 → salen todas. Empareja IDs con alias (brand- / brand:).
+   */
+  const closingBrands = useMemo(() => {
+    type Cand = { brandId: string; name: string; score: number; active: boolean };
+    const byId = new Map<string, Cand>();
+    const aliasToCanonical = new Map<string, string>();
+
+    const registerAliases = (canonicalId: string) => {
+      for (const a of brandIdAliases(canonicalId)) {
+        aliasToCanonical.set(a, canonicalId);
+      }
+    };
+
+    const resolveCanonical = (brandId: string): string => {
+      const id = String(brandId || '').trim();
+      if (!id) return '';
+      return aliasToCanonical.get(id) || id;
+    };
+
+    const upsert = (brandId: string, name: string, score: number, active = true) => {
+      const raw = String(brandId || '').trim();
+      if (!raw) return;
+      const id = resolveCanonical(raw) || raw;
+      registerAliases(id);
+      for (const a of brandIdAliases(raw)) aliasToCanonical.set(a, id);
+      const label = String(name || '').trim() || displayBrandName(id, brandLabels) || id;
+      const prev = byId.get(id);
+      if (!prev) {
+        byId.set(id, { brandId: id, name: label, score, active });
+        return;
+      }
+      byId.set(id, {
+        brandId: id,
+        name: label !== id && label ? label : prev.name,
+        score: Math.max(prev.score, score),
+        active: prev.active || active,
+      });
+    };
+
+    // 1) Catálogo del negocio
+    for (const b of businessBrands) {
+      upsert(b.brandId, b.name, b.active ? 10 : 5, b.active);
+    }
+
+    // 2) Con ventas en el turno
+    for (const row of brandBilling.rows) {
+      const canon = resolveCanonical(row.brandId) || row.brandId;
+      const fromBiz = businessBrands.find(
+        (b) => resolveCanonical(b.brandId) === canon || brandIdAliases(b.brandId).includes(row.brandId),
+      );
+      upsert(
+        row.brandId,
+        fromBiz?.name || displayBrandName(row.brandId, brandLabels) || String(row.name || '').trim() || row.brandId,
+        1000 + (Number(row.revenue) || 0),
+        true,
+      );
+    }
+    for (const row of appsBrandBilling.rows) {
+      const canon = resolveCanonical(row.brandId) || row.brandId;
+      const fromBiz = businessBrands.find(
+        (b) => resolveCanonical(b.brandId) === canon || brandIdAliases(b.brandId).includes(row.brandId),
+      );
+      upsert(
+        row.brandId,
+        fromBiz?.name || displayBrandName(row.brandId, brandLabels) || String(row.name || '').trim() || row.brandId,
+        1000 + (Number(row.revenue) || 0),
+        true,
+      );
+    }
+
+    // 3) Fallback labels si el catálogo aún no cargó
+    if (byId.size === 0) {
+      const byName = new Map<string, { brandId: string; name: string }>();
+      for (const [id, name] of Object.entries(brandLabels)) {
+        const n = String(name || '').trim();
+        if (!n) continue;
+        const key = n.toLowerCase();
+        if (byName.has(key)) continue;
+        byName.set(key, { brandId: String(id || '').trim(), name: n });
+      }
+      return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    }
+
+    const ranked = [...byId.values()].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.active !== b.active) return a.active ? -1 : 1;
+      return a.name.localeCompare(b.name, 'es');
+    });
+
+    const seenNames = new Set<string>();
+    const out: Array<{ brandId: string; name: string }> = [];
+    for (const r of ranked) {
+      const key = r.name.toLowerCase();
+      if (seenNames.has(key)) continue;
+      seenNames.add(key);
+      out.push({ brandId: r.brandId, name: r.name });
+    }
+    return out;
+  }, [businessBrands, brandBilling.rows, appsBrandBilling.rows, brandLabels]);
+
   return (
-    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4`}>
-      <div className="bg-white dark:bg-stone-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col min-h-0" style={{ maxHeight: '96vh' }}>
-        <div className="flex-shrink-0 px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-stretch sm:items-center justify-center p-0 sm:p-3`}>
+      <div
+        className="bg-white dark:bg-stone-900 sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl flex flex-col min-h-0 h-[100dvh] sm:h-auto sm:max-h-[min(96dvh,920px)]"
+      >
+        <div className="flex-shrink-0 px-2.5 pt-[max(0.5rem,env(safe-area-inset-top))] pb-1.5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">
-                <Lock className="w-5 h-5 text-stone-500 shrink-0" /> Cierre de caja
+              <h2 className="text-sm font-bold text-stone-900 dark:text-stone-100 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-stone-500 shrink-0" /> Cierre
+                <span className="font-semibold text-stone-400">
+                  {closingStep}/{closingMaxStep}
+                </span>
+                <span className="text-stone-500 font-medium truncate">
+                  · {closingStepLabels[closingStep - 1]}
+                </span>
               </h2>
-              <p className="text-xs text-stone-500 dark:text-stone-400 truncate mt-0.5">
-                {session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName} · {session.workerName}
+              <p className="text-[10px] text-stone-500 dark:text-stone-400 truncate">
+                {session.pointOfSaleName ? `${session.pointOfSaleName} · ` : ''}{session.terminalName}
+                {!browserOnline ? ' · Sin red' : ''}
+                {draftRestored ? ' · Borrador' : ''}
               </p>
             </div>
             <button
               type="button"
               onClick={onCancel}
-              className={`${VERTIAL_BTN_SECONDARY} !min-h-11 !min-w-11 !px-0 shrink-0`}
+              className={`${VERTIAL_BTN_SECONDARY} !min-h-9 !min-w-9 !px-0 shrink-0`}
               aria-label="Cerrar"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
-          {draftRestored ? (
-            <p className="mt-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-              Borrador recuperado
-            </p>
-          ) : null}
+          <div className="mt-1 flex gap-1" aria-hidden>
+            {Array.from({ length: closingMaxStep }, (_, i) => i + 1).map((n) => (
+              <div
+                key={n}
+                className={`h-0.5 flex-1 rounded-full ${
+                  n <= closingStep
+                    ? 'bg-[var(--v-blue,#2563eb)]'
+                    : 'bg-stone-200 dark:bg-stone-700'
+                }`}
+              />
+            ))}
+          </div>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2.5 space-y-2.5">
-          {restaurantWarnings.length > 0 ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2.5 py-2 space-y-0.5">
-              <p className="text-xs font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Sala con actividad pendiente
+        <div
+          ref={bodyScrollRef}
+          className="flex-1 min-h-0 overflow-hidden px-2 py-1.5 flex flex-col"
+        >
+          {restaurantWarnings.length > 0 && closingStep === 1 ? (
+            <div className="shrink-0 mb-1 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-2 py-1">
+              <p className="text-[10px] font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 shrink-0" /> Sala pendiente
               </p>
-              <ul className="text-[11px] text-amber-800 dark:text-amber-200 list-disc pl-4 space-y-0.5">
-                {restaurantWarnings.map((w) => (
-                  <li key={w}>{w}</li>
-                ))}
-              </ul>
             </div>
           ) : null}
 
-          {/* 1) Totales TPV */}
-          {showDeliveryClosingSlots ? (
-            <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-3 space-y-3 shadow-sm">
-              <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">1. Totales TPV</p>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-3 py-2.5`}>
-                  <QuietTip tip="Dinero cobrado en efectivo en el TPV de tienda (pedidos propios).">
-                    <p className={`text-xs font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
-                      <Banknote className="w-3.5 h-3.5" /> Efectivo
-                    </p>
-                  </QuietTip>
-                  <p className={`mt-0.5 text-2xl sm:text-3xl font-black tabular-nums tracking-tight ${VERTIAL_CASH_TEXT}`}>
+          {/* Delivery paso 1 — TPV tienda (cabe en viewport) */}
+          {showDeliveryClosingSlots && closingStep === 1 ? (
+            <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-hidden">
+              <div className="shrink-0 grid grid-cols-2 gap-1.5">
+                <div className={`rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-2 py-1`}>
+                  <p className={`text-[10px] font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
+                    <Banknote className="w-3 h-3" /> Efectivo
+                  </p>
+                  <p className={`text-lg font-black tabular-nums tracking-tight ${VERTIAL_CASH_TEXT}`}>
                     {summary.salesByMethod.efectivo.toFixed(2)}€
                   </p>
                 </div>
-                <div className={`rounded-xl border ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} px-3 py-2.5`}>
-                  <QuietTip tip="Dinero cobrado con tarjeta en el TPV de tienda.">
-                    <p className={`text-xs font-semibold flex items-center gap-1 ${VERTIAL_CARD_TEXT}`}>
-                      <CreditCard className="w-3.5 h-3.5" /> Tarjeta
-                    </p>
-                  </QuietTip>
-                  <p className={`mt-0.5 text-2xl sm:text-3xl font-black tabular-nums tracking-tight ${VERTIAL_CARD_TEXT}`}>
+                <div className={`rounded-xl border ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} px-2 py-1`}>
+                  <p className={`text-[10px] font-semibold flex items-center gap-1 ${VERTIAL_CARD_TEXT}`}>
+                    <CreditCard className="w-3 h-3" /> Tarjeta
+                  </p>
+                  <p className={`text-lg font-black tabular-nums tracking-tight ${VERTIAL_CARD_TEXT}`}>
                     {summary.salesByMethod.tarjeta.toFixed(2)}€
                   </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="shrink-0 grid grid-cols-3 gap-1">
                 {([
                   { key: 'pizza' as const, label: 'Pizzas' },
                   { key: 'burger' as const, label: 'Burgers' },
@@ -1753,10 +1901,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 ]).map((u) => (
                   <label
                     key={u.key}
-                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 flex flex-col gap-1 cursor-text"
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-stone-50 dark:bg-stone-900 px-1 py-0.5 flex flex-col gap-0.5 cursor-text"
                   >
-                    <span className="text-xs font-medium text-stone-500 inline-flex items-center gap-1">
-                      <DeliveryFoodUnitIcon unit={u.key} className="w-4 h-4" />
+                    <span className="text-[9px] font-medium text-stone-500 inline-flex items-center gap-0.5">
+                      <DeliveryFoodUnitIcon unit={u.key} className="w-3 h-3" />
                       {u.label}
                     </span>
                     <input
@@ -1765,113 +1913,91 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       placeholder="0"
                       value={manualFood[u.key]}
                       onChange={(e) => handleFoodSlotChange(u.key, e.target.value)}
-                      className="w-full min-h-11 px-2 py-2 text-xl font-black tabular-nums border border-slate-200 dark:border-slate-700 rounded-xl bg-stone-50 dark:bg-stone-900 text-stone-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      className="w-full min-h-8 px-1 py-0.5 text-sm font-black tabular-nums border border-slate-200 dark:border-slate-700 rounded-md bg-white dark:bg-stone-950 text-stone-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
                     />
                   </label>
                 ))}
               </div>
 
-              <ShiftBrandBillingSummary
-                rows={brandBilling.rows}
-                unbranded={brandBilling.unbranded}
-                total={brandBilling.total}
-                loading={shiftOrdersLoading}
-                compact
-              />
-
-              <div className="rounded-lg border border-stone-200 dark:border-stone-700 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setShowDayOrders((v) => !v)}
-                  className={`w-full min-h-11 px-2.5 py-2 flex items-center justify-between text-left touch-manipulation active:scale-[0.99] ${
-                    showDayOrders
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700'
-                  }`}
-                >
-                  <span className={`text-xs font-bold ${showDayOrders ? 'text-white' : 'text-stone-800 dark:text-stone-100'}`}>
-                    Pedidos ({dayOrdersBreakdown.orderCount})
-                  </span>
-                  {showDayOrders ? (
-                    <ChevronUp className="w-4 h-4 text-white shrink-0" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-stone-500 shrink-0" />
-                  )}
-                </button>
-                {showDayOrders && (
-                  <div className="border-t border-gray-100 dark:border-gray-800 max-h-[42vh] overflow-y-auto">
-                    {shiftOrdersLoading ? (
-                      <p className="px-3 py-3 text-[11px] text-gray-500">Cargando…</p>
-                    ) : dayOrdersBreakdown.orders.length === 0 ? (
-                      <p className="px-3 py-3 text-[11px] text-gray-500">Sin pedidos en este turno</p>
-                    ) : (
-                      <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                        {dayOrdersBreakdown.orders.map((order) => {
-                          const time = order.createdAt
-                            ? new Date(order.createdAt).toLocaleTimeString('es-ES', {
-                                timeStyle: 'short',
-                              })
-                            : '—';
-                          const brandShares = orderBrandSharesById.get(order.orderId) || [];
-                          return (
-                            <li key={order.orderId} className="px-3 py-2.5">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">
-                                    #{order.orderNumber} · {order.customerName || 'Cliente'}
-                                  </p>
-                                  <p className="text-[10px] text-gray-500 mt-0.5">
-                                    {time} · {order.channel || '—'} · {order.itemCount} unidades
-                                  </p>
-                                  <p className="text-[10px] text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
-                                    {order.items
-                                      .map((it) => `${it.quantity}× ${it.name}`)
-                                      .join(' · ')}
-                                  </p>
-                                  {brandShares.length > 0 ? (
-                                    <div className="mt-1.5 space-y-1">
-                                      {brandShares.map((s) => {
-                                        const showWhy =
-                                          brandShares.length > 1 || s.sharedAssigned > 0;
-                                        return (
-                                          <div
-                                            key={`${order.orderId}-${s.brandId || 'none'}`}
-                                            className="rounded-md bg-gray-900/5 px-1.5 py-1 dark:bg-white/10"
-                                          >
-                                            <div className="flex items-center justify-between gap-2 text-[10px] font-semibold text-gray-800 dark:text-gray-100">
-                                              <span className="truncate max-w-[8rem]">{s.name}</span>
-                                              <span className="tabular-nums shrink-0">
-                                                {s.amount.toFixed(2)}€
-                                              </span>
-                                            </div>
-                                            {showWhy && s.why ? (
-                                              <p className="mt-0.5 text-[9px] leading-snug text-gray-500 dark:text-gray-400">
-                                                {s.why}
-                                              </p>
-                                            ) : null}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null}
-                                </div>
-                                <span className="text-xs font-bold tabular-nums text-gray-900 dark:text-gray-100 shrink-0">
-                                  {order.total.toFixed(2)}€
-                                </span>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                )}
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+                <ShiftBrandBillingSummary
+                  rows={brandBilling.rows}
+                  unbranded={brandBilling.unbranded}
+                  total={brandBilling.total}
+                  loading={shiftOrdersLoading}
+                  dense
+                />
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowDayOrders((v) => !v)}
+                className="shrink-0 w-full min-h-8 px-2 py-1 rounded-lg border border-stone-200 dark:border-stone-700 text-[10px] font-bold text-stone-600 dark:text-stone-300 flex items-center justify-between"
+              >
+                <span>Pedidos ({dayOrdersBreakdown.orderCount})</span>
+                {showDayOrders ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+              {showDayOrders ? (
+                <div className="shrink-0 max-h-[28vh] overflow-y-auto rounded-lg border border-stone-200 dark:border-stone-700">
+                  {shiftOrdersLoading ? (
+                    <p className="px-2 py-2 text-[10px] text-gray-500">Cargando…</p>
+                  ) : dayOrdersBreakdown.orders.length === 0 ? (
+                    <p className="px-2 py-2 text-[10px] text-gray-500">Sin pedidos</p>
+                  ) : (
+                    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {dayOrdersBreakdown.orders.map((order) => (
+                        <li key={order.orderId} className="px-2 py-1.5 flex justify-between gap-2 text-[10px]">
+                          <span className="truncate font-semibold text-stone-800 dark:text-stone-100">
+                            #{order.orderNumber} · {order.customerName || 'Cliente'}
+                          </span>
+                          <span className="tabular-nums font-bold shrink-0">{order.total.toFixed(2)}€</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : null}
             </div>
-          ) : (
-            <div>
-              <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-                Conteo de efectivo de cierre
+          ) : null}
+
+          {/* Delivery Apps editor: siempre montado para snapshot/cálculos; visible solo en paso 2 */}
+          {showDeliveryClosingSlots ? (
+            <div
+              className={
+                closingStep === 2
+                  ? 'flex-1 min-h-0 overflow-hidden flex flex-col'
+                  : 'hidden'
+              }
+              aria-hidden={closingStep !== 2}
+            >
+              <AggregatorClosingEditor
+                autoRows={aggregatorRows}
+                foodByChannel={foodReport.byAggregator}
+                initialManualDraft={
+                  savedDraft?.appsManualDraft && Object.keys(savedDraft.appsManualDraft).length > 0
+                    ? savedDraft.appsManualDraft
+                    : appsManualDraft && Object.keys(appsManualDraft).length > 0
+                      ? appsManualDraft
+                      : null
+                }
+                onSnapshotChange={handleAppsSnapshotChange}
+                onManualDraftChange={handleAppsManualDraftChange}
+                title="Apps"
+                startStep={1}
+                appsBrandRows={appsBrandBilling.rows}
+                appsBrandUnbranded={appsBrandBilling.unbranded}
+                closingBrands={closingBrands}
+                dense
+                fillHeight
+              />
+            </div>
+          ) : null}
+
+          {/* Restaurant paso 1 — CashCountGrid + esperado */}
+          {!showDeliveryClosingSlots && closingStep === 1 ? (
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+              <h4 className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                Conteo de efectivo
               </h4>
               <CashCountGrid
                 counts={counts}
@@ -1882,285 +2008,296 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     setCashSlot(total > 0 ? total.toFixed(2) : '');
                   }
                 }}
+                compact
               />
-            </div>
-          )}
-
-          {showDeliveryClosingSlots && (
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-stone-900 dark:text-stone-100 px-0.5">
-                2. Integradores
-              </p>
-              <AggregatorClosingEditor
-                autoRows={aggregatorRows}
-                foodByChannel={foodReport.byAggregator}
-                initialManualDraft={
-                  savedDraft?.appsManualDraft && Object.keys(savedDraft.appsManualDraft).length > 0
-                    ? savedDraft.appsManualDraft
-                    : null
-                }
-                onSnapshotChange={handleAppsSnapshotChange}
-                onManualDraftChange={handleAppsManualDraftChange}
-                title="Apps de delivery"
-                startStep={2}
-                appsBrandRows={appsBrandBilling.rows}
-                appsBrandUnbranded={appsBrandBilling.unbranded}
-              />
-            </div>
-          )}
-
-          {/* Arqueo */}
-          <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-3 space-y-3 shadow-sm">
-            <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
-              {showDeliveryClosingSlots ? '3. Arqueo' : 'Arqueo'}
-            </p>
-
-            {showDeliveryClosingSlots && (
-              <label className={`block rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-3 py-2 cursor-text`}>
-                <QuietTip tip="Lo que hay ahora en el cajón. Cuéntalo y escríbelo aquí.">
-                  <span className={`text-xs font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
-                    <Banknote className="w-3.5 h-3.5" /> Efectivo contado
-                  </span>
-                </QuietTip>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="0,00"
-                  value={cashSlotDisplay}
-                  onFocus={() => {
-                    setCashSlotFocused(true);
-                    setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
-                  }}
-                  onBlur={() => setCashSlotFocused(false)}
-                  onChange={(e) => handleCashSlotChange(e.target.value)}
-                  className={`mt-1 w-full min-h-12 px-2 py-2 text-3xl font-black tabular-nums border ${VERTIAL_CASH_BORDER} rounded-xl bg-white dark:bg-slate-950 ${VERTIAL_CASH_TEXT} focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-500`}
-                />
-              </label>
-            )}
-
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between gap-2 items-baseline">
-                <QuietTip tip="Fondo + cobros en efectivo − salidas y devoluciones del TPV.">
-                  <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Efectivo TPV</span>
-                </QuietTip>
-                <span className={`text-lg font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{expectedTpv.toFixed(2)}€</span>
-              </div>
-              {showDeliveryClosingSlots && (
-                <div className="flex justify-between gap-2 items-baseline">
-                  <QuietTip tip="Pedidos de Glovo/Just Eat/etc. cobrados en efectivo en tienda. Entra en el cajón.">
-                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>+ No pagado apps (efectivo)</span>
-                  </QuietTip>
-                  <span className={`text-lg font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{aggregatorCashTotal.toFixed(2)}€</span>
+              <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 space-y-1">
+                <div className="flex justify-between items-baseline text-xs">
+                  <span className={`font-semibold ${VERTIAL_CASH_TEXT}`}>Esperado</span>
+                  <span className={`text-xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{expected.toFixed(2)}€</span>
                 </div>
-              )}
-              {showDeliveryClosingSlots && aggregatorCardTotal > 0 && (
-                <div className="flex justify-between gap-2 items-baseline">
-                  <QuietTip tip="Pedidos de apps cobrados con tarjeta en tienda. No suma al cajón de efectivo.">
-                    <span className={`font-medium ${VERTIAL_CARD_TEXT}`}>No pagado apps (tarjeta)</span>
-                  </QuietTip>
-                  <span className={`text-lg font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>{aggregatorCardTotal.toFixed(2)}€</span>
-                </div>
-              )}
-              <div className="border-t border-slate-200 dark:border-slate-800 pt-2 flex justify-between items-baseline">
-                <QuietTip tip="Lo que debería haber en el cajón: Efectivo TPV + no pagado apps en efectivo.">
-                  <span className={`font-semibold ${VERTIAL_CASH_TEXT}`}>Esperado en caja</span>
-                </QuietTip>
-                <span className={`text-2xl sm:text-3xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{expected.toFixed(2)}€</span>
-              </div>
-              <div className="flex justify-between gap-2 items-baseline">
-                <QuietTip tip="Lo que has escrito arriba al contar el cajón.">
+                <div className="flex justify-between items-baseline text-xs">
                   <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Contado</span>
-                </QuietTip>
-                <span className={`text-xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{countedTotal.toFixed(2)}€</span>
+                  <span className={`text-base font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{countedTotal.toFixed(2)}€</span>
+                </div>
+                {countedTotal > 0 ? (
+                  <div className={`px-2.5 py-1.5 rounded-xl border ${diff === 0 ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-stone-800 dark:text-stone-100 inline-flex items-center gap-1">
+                        {diff === 0 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />}
+                        {diff === 0 ? 'Cuadra' : diff > 0 ? 'Sobra' : 'Falta'}
+                      </span>
+                      <span className={`text-lg font-black tabular-nums ${diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>
+                        {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
-            {countedTotal > 0 && (
-              <div className={`px-3 py-2.5 rounded-xl border ${diff === 0 ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <QuietTip tip="Contado menos esperado. 0 = cuadra. + sobra. − falta.">
-                    <span className="text-sm font-semibold text-stone-800 dark:text-stone-100 inline-flex items-center gap-1.5">
-                      {diff === 0 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertTriangle className="w-4 h-4 text-amber-600" />}
-                      {diff === 0 ? 'La caja cuadra' : diff > 0 ? 'Sobrante' : 'Falta efectivo'}
-                    </span>
-                  </QuietTip>
-                  <span className={`text-2xl font-black tabular-nums ${diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>
-                    {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+          ) : null}
+
+          {/* Delivery paso 3 — Arqueo + totales tienda / marcas / día */}
+          {showDeliveryClosingSlots && closingStep === 3 ? (
+            <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto overscroll-contain">
+              <div className="shrink-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 space-y-1">
+                <label className={`block rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-2 py-1 cursor-text`}>
+                  <span className={`text-[10px] font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
+                    <Banknote className="w-3 h-3" /> Efectivo contado
                   </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0,00"
+                    value={cashSlotDisplay}
+                    onFocus={() => {
+                      setCashSlotFocused(true);
+                      setCashSlot(countedTotal > 0 ? countedTotal.toFixed(2) : cashSlot);
+                    }}
+                    onBlur={() => setCashSlotFocused(false)}
+                    onChange={(e) => handleCashSlotChange(e.target.value)}
+                    className={`mt-0.5 w-full min-h-10 px-2 py-1 text-xl font-black tabular-nums border ${VERTIAL_CASH_BORDER} rounded-xl bg-white dark:bg-slate-950 ${VERTIAL_CASH_TEXT} focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-500`}
+                  />
+                </label>
+
+                <div className="space-y-0.5 text-[11px]">
+                  <div className="flex justify-between gap-2 items-baseline">
+                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Efectivo TPV</span>
+                    <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(expectedTpv)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 items-baseline">
+                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>+ Apps no pagado efectivo</span>
+                    <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(aggregatorCashTotal)}</span>
+                  </div>
+                  {aggregatorCardTotal > 0 ? (
+                    <div className="flex justify-between gap-2 items-baseline">
+                      <span className={`font-medium ${VERTIAL_CARD_TEXT}`}>Apps no pagado tarjeta</span>
+                      <span className={`font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>{formatMoneyEs(aggregatorCardTotal)}</span>
+                    </div>
+                  ) : null}
+                  <div className="border-t border-slate-200 dark:border-slate-800 pt-0.5 flex justify-between items-baseline">
+                    <span className={`font-semibold ${VERTIAL_CASH_TEXT}`}>Esperado</span>
+                    <span className={`text-lg font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(expected)}</span>
+                  </div>
+                  <div className="flex justify-between gap-2 items-baseline">
+                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Contado</span>
+                    <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(countedTotal)}</span>
+                  </div>
                 </div>
+                {countedTotal > 0 ? (
+                  <div className={`px-2 py-1 rounded-xl border ${diff === 0 ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold text-stone-800 dark:text-stone-100 inline-flex items-center gap-1">
+                        {diff === 0 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />}
+                        {diff === 0 ? 'Cuadra' : diff > 0 ? 'Sobra' : 'Falta'}
+                      </span>
+                      <span className={`text-base font-black tabular-nums ${diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>
+                        {diff >= 0 ? '+' : ''}{formatMoneyEs(diff)}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
-            )}
-          </div>
 
-          {/* Detalle opcional — CTA azul Vertial para que se vea en tablet */}
-          <div
-            className={`rounded-xl overflow-hidden border ${
-              showExtraDetail
-                ? 'border-blue-600'
-                : 'border-blue-500 ring-2 ring-blue-500/25 shadow-sm shadow-blue-600/15'
-            }`}
-          >
-            <button
-              type="button"
-              onClick={() => setShowExtraDetail((v) => !v)}
-              className={`w-full min-h-12 px-3 py-2.5 flex items-center justify-between text-left text-sm font-bold touch-manipulation active:scale-[0.99] ${
-                showExtraDetail
-                  ? 'bg-blue-700 text-white'
-                  : 'bg-[var(--v-blue,#2563eb)] text-white hover:bg-[#1d4ed8]'
-              }`}
-            >
-              <span className="inline-flex items-center gap-2">
-                <Receipt className="w-4 h-4 shrink-0 opacity-90" />
-                {showExtraDetail ? 'Ocultar detalle' : 'Detalle del turno'}
-              </span>
-              {showExtraDetail ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-            </button>
-            {showExtraDetail && (
-              <div className="p-3 border-t border-gray-100 dark:border-gray-800 space-y-4">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
-                    <div className="text-[10px] text-zinc-500">Ventas</div>
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalSales.toFixed(2)}€</div>
-                  </div>
-                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
-                    <div className="text-[10px] text-zinc-500">Devoluciones</div>
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalReturns.toFixed(2)}€</div>
-                  </div>
-                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
-                    <div className="text-[10px] text-zinc-500">Entradas</div>
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalCashIn.toFixed(2)}€</div>
-                  </div>
-                  <div className="p-2.5 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40">
-                    <div className="text-[10px] text-zinc-500">Salidas</div>
-                    <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{summary.totalCashOut.toFixed(2)}€</div>
-                  </div>
-                </div>
+              <input
+                type="text"
+                className="shrink-0 w-full min-h-8 px-2 py-1 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-xs"
+                placeholder="Notas (opcional)"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
 
-                <div className="flex gap-2 flex-wrap text-[11px]">
-                  {summary.salesByMethod.efectivo > 0 && (
-                    <span className={`px-2 py-1 rounded-md font-semibold border tabular-nums ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} ${VERTIAL_CASH_TEXT}`}>
-                      Efectivo: {summary.salesByMethod.efectivo.toFixed(2)}€
+              <button
+                type="button"
+                onClick={() => setShowExtraDetail((v) => !v)}
+                className={`shrink-0 w-full min-h-11 px-3 py-2 rounded-xl text-sm font-bold flex items-center justify-between touch-manipulation ${
+                  showExtraDetail
+                    ? 'bg-[var(--v-blue,#2563eb)] text-white shadow-md'
+                    : 'bg-[var(--v-blue,#2563eb)]/10 border-2 border-[var(--v-blue,#2563eb)] text-[var(--v-blue,#2563eb)]'
+                }`}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Receipt className="w-4 h-4" />
+                  {showExtraDetail ? 'Ocultar detalle del turno' : 'Detalle del turno · entradas y salidas'}
+                </span>
+                {showExtraDetail ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+              </button>
+              {showExtraDetail ? (
+                <div className="rounded-xl border-2 border-[var(--v-blue,#2563eb)]/40 bg-blue-50/50 dark:bg-blue-950/20 p-2.5 space-y-3">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div className="p-2 rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900/40">
+                      <div className="text-[10px] text-zinc-500">Ventas TPV</div>
+                      <div className="text-sm font-semibold tabular-nums">{formatMoneyEs(summary.totalSales)}</div>
+                    </div>
+                    <div className="p-2 rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900/40">
+                      <div className="text-[10px] text-zinc-500">Devoluciones</div>
+                      <div className="text-sm font-semibold tabular-nums">{formatMoneyEs(summary.totalReturns)}</div>
+                    </div>
+                    <div className="p-2 rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950/40">
+                      <div className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">Entradas</div>
+                      <div className="text-sm font-black tabular-nums text-emerald-800 dark:text-emerald-200">{formatMoneyEs(summary.totalCashIn)}</div>
+                    </div>
+                    <div className="p-2 rounded-lg border border-rose-200 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/40">
+                      <div className="text-[10px] font-semibold text-rose-700 dark:text-rose-300">Salidas</div>
+                      <div className="text-sm font-black tabular-nums text-rose-800 dark:text-rose-200">{formatMoneyEs(summary.totalCashOut)}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-1.5 flex-wrap text-[11px]">
+                    {summary.salesByMethod.efectivo > 0 ? (
+                      <span className={`px-2 py-1 rounded-md font-semibold border tabular-nums ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} ${VERTIAL_CASH_TEXT}`}>
+                        Efectivo: {formatMoneyEs(summary.salesByMethod.efectivo)}
+                      </span>
+                    ) : null}
+                    {summary.salesByMethod.tarjeta > 0 ? (
+                      <span className={`px-2 py-1 rounded-md font-semibold border tabular-nums ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} ${VERTIAL_CARD_TEXT}`}>
+                        Tarjeta: {formatMoneyEs(summary.salesByMethod.tarjeta)}
+                      </span>
+                    ) : null}
+                    {summary.salesByMethod.bizum > 0 ? (
+                      <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">
+                        Bizum: {formatMoneyEs(summary.salesByMethod.bizum)}
+                      </span>
+                    ) : null}
+                    {summary.salesByMethod.online > 0 ? (
+                      <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">
+                        Online: {formatMoneyEs(summary.salesByMethod.online)}
+                      </span>
+                    ) : null}
+                    <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">
+                      {summary.totalTransactions} operaciones
                     </span>
-                  )}
-                  {summary.salesByMethod.tarjeta > 0 && (
-                    <span className={`px-2 py-1 rounded-md font-semibold border tabular-nums ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} ${VERTIAL_CARD_TEXT}`}>
-                      Tarjeta: {summary.salesByMethod.tarjeta.toFixed(2)}€
-                    </span>
-                  )}
-                  {summary.salesByMethod.bizum > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Bizum: {summary.salesByMethod.bizum.toFixed(2)}€</span>}
-                  {summary.salesByMethod.online > 0 && <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">Online: {summary.salesByMethod.online.toFixed(2)}€</span>}
-                  <span className="px-2 py-1 rounded-md font-medium border border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200">{summary.totalTransactions} operaciones</span>
-                </div>
-
-                <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 p-3 space-y-1.5 text-xs">
-                  <div className="flex justify-between"><span className="text-zinc-500">Fondo apertura</span><span className="font-semibold">{session.initialCashAmount.toFixed(2)}€</span></div>
-                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Cobros efectivo</span><span className="font-semibold">{summary.salesByMethod.efectivo.toFixed(2)}€</span></div>
-                  {cashStaffConsumption > 0 && (
-                    <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Consumo equipo</span><span className="font-semibold">{cashStaffConsumption.toFixed(2)}€</span></div>
-                  )}
-                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">+ Entradas</span><span className="font-semibold">{summary.totalCashIn.toFixed(2)}€</span></div>
-                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Devoluciones</span><span className="font-semibold">{cashReturnsTotal.toFixed(2)}€</span></div>
-                  <div className="flex justify-between"><span className="text-zinc-600 dark:text-zinc-300">− Salidas</span><span className="font-semibold">{summary.totalCashOut.toFixed(2)}€</span></div>
-                  <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1.5 flex justify-between font-semibold">
-                    <span>= Efectivo TPV</span>
-                    <span className="text-zinc-900 dark:text-zinc-100">{expectedTpv.toFixed(2)}€</span>
                   </div>
-                </div>
 
-                <RegisterShiftSalesBreakdown
-                  session={session}
-                  orders={shiftOrders}
-                  loading={shiftOrdersLoading}
-                  registerSummary={summary}
-                />
+                  <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 p-2.5 space-y-1 text-xs">
+                    <div className="flex justify-between gap-2">
+                      <span className="text-zinc-500">Fondo apertura</span>
+                      <span className="font-semibold tabular-nums">{formatMoneyEs(session.initialCashAmount)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-zinc-600 dark:text-zinc-300">+ Cobros efectivo</span>
+                      <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.efectivo)}</span>
+                    </div>
+                    {cashStaffConsumption > 0 ? (
+                      <div className="flex justify-between gap-2">
+                        <span className="text-zinc-600 dark:text-zinc-300">+ Consumo equipo</span>
+                        <span className="font-semibold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span>
+                      </div>
+                    ) : null}
+                    <div className="flex justify-between gap-2">
+                      <span className="text-zinc-600 dark:text-zinc-300">+ Entradas</span>
+                      <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-zinc-600 dark:text-zinc-300">− Devoluciones</span>
+                      <span className="font-semibold tabular-nums">{formatMoneyEs(cashReturnsTotal)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-zinc-600 dark:text-zinc-300">− Salidas</span>
+                      <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span>
+                    </div>
+                    <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1 flex justify-between gap-2 font-semibold">
+                      <span>= Efectivo TPV</span>
+                      <span className="tabular-nums text-zinc-900 dark:text-zinc-100">{formatMoneyEs(expectedTpv)}</span>
+                    </div>
+                  </div>
 
-                {(() => {
-                  const cashOps = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
-                  const voided = (session.voidedCashMovements || []).slice().sort(
-                    (a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime(),
-                  );
-                  if (cashOps.length === 0 && voided.length === 0) {
+                  <RegisterShiftSalesBreakdown
+                    session={session}
+                    orders={shiftOrders}
+                    loading={shiftOrdersLoading}
+                    registerSummary={summary}
+                  />
+
+                  {(() => {
+                    const cashOps = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
+                    const voided = (session.voidedCashMovements || []).slice().sort(
+                      (a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime(),
+                    );
+                    if (cashOps.length === 0 && voided.length === 0) {
+                      return (
+                        <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-400">
+                          Sin movimientos de caja (entradas / salidas / devoluciones) en este turno.
+                        </div>
+                      );
+                    }
                     return (
-                      <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-400">
-                        Sin movimientos de caja (entradas / salidas / devoluciones) en este turno.
+                      <div className="space-y-3">
+                        {cashOps.length > 0 ? (
+                          <div>
+                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                              Movimientos de caja ({cashOps.length})
+                            </h4>
+                            <div className="space-y-1 max-h-40 overflow-y-auto">
+                              {[...cashOps].reverse().map((tx) => (
+                                <div
+                                  key={tx.id}
+                                  className="flex items-center justify-between gap-2 text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-gray-400 mr-1.5">
+                                      {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                                    </span>
+                                    <span className="font-semibold text-gray-700 dark:text-gray-300">
+                                      {cashMovementLabel(tx)}
+                                    </span>
+                                    {tx.description ? (
+                                      <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
+                                    ) : null}
+                                  </div>
+                                  <span className="shrink-0 font-semibold tabular-nums">
+                                    {tx.type === 'cash_in' ? '+' : '−'}
+                                    {formatMoneyEs(tx.amount)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        {voided.length > 0 ? (
+                          <div>
+                            <h4 className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-1.5">
+                              Movimientos eliminados ({voided.length})
+                            </h4>
+                            <div className="space-y-1 max-h-40 overflow-y-auto">
+                              {voided.map((v) => (
+                                <div
+                                  key={v.id}
+                                  className="text-xs p-2 rounded-lg border border-rose-200 bg-rose-50/80 dark:border-rose-900 dark:bg-rose-950/30"
+                                >
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0">
+                                      <p className="font-semibold text-stone-800 dark:text-stone-100">
+                                        {TPV_CASH_TX_LABELS[v.type] || v.type} anulada
+                                        {v.originalDescription ? ` · ${v.originalDescription}` : ''}
+                                      </p>
+                                      <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 break-words">
+                                        Motivo: {v.voidReason}
+                                      </p>
+                                      <p className="text-[10px] text-stone-500 mt-0.5">
+                                        {new Date(v.voidedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                                        {v.voidedBy ? ` · ${v.voidedBy}` : ''}
+                                      </p>
+                                    </div>
+                                    <span className="shrink-0 font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+                                      {v.type === 'cash_in' ? '+' : '−'}
+                                      {formatMoneyEs(Number(v.amount || 0))}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     );
-                  }
-                  return (
-                    <div className="space-y-3">
-                      {cashOps.length > 0 ? (
-                        <div>
-                          <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">
-                            Movimientos de caja ({cashOps.length})
-                          </h4>
-                          <div className="space-y-1 max-h-40 overflow-y-auto">
-                            {[...cashOps].reverse().map((tx) => (
-                              <div
-                                key={tx.id}
-                                className="flex items-center justify-between gap-2 text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <span className="text-gray-400 mr-1.5">
-                                    {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                                  </span>
-                                  <span className="font-semibold text-gray-700 dark:text-gray-300">
-                                    {cashMovementLabel(tx)}
-                                  </span>
-                                  {tx.description ? (
-                                    <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
-                                  ) : null}
-                                </div>
-                                <span className="shrink-0 font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
-                                  {tx.type === 'cash_in' ? '+' : '−'}
-                                  {tx.amount.toFixed(2)}€
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                      {voided.length > 0 ? (
-                        <div>
-                          <h4 className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-2">
-                            Salidas / movimientos eliminados ({voided.length})
-                          </h4>
-                          <div className="space-y-1 max-h-40 overflow-y-auto">
-                            {voided.map((v) => (
-                              <div
-                                key={v.id}
-                                className="text-xs p-2 rounded-lg border border-rose-200 bg-rose-50/80 dark:border-rose-900 dark:bg-rose-950/30"
-                              >
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <p className="font-semibold text-stone-800 dark:text-stone-100">
-                                      {TPV_CASH_TX_LABELS[v.type] || v.type} anulada
-                                      {v.originalDescription ? ` · ${v.originalDescription}` : ''}
-                                    </p>
-                                    <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 break-words">
-                                      Motivo eliminación: {v.voidReason}
-                                    </p>
-                                    <p className="text-[10px] text-stone-500 mt-0.5">
-                                      {new Date(v.voidedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                                      {v.voidedBy ? ` · ${v.voidedBy}` : ''}
-                                    </p>
-                                  </div>
-                                  <span className="shrink-0 font-semibold tabular-nums text-rose-700 dark:text-rose-300">
-                                    {v.type === 'cash_in' ? '+' : '−'}
-                                    {Number(v.amount || 0).toFixed(2)}€
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })()}
+                  })()}
 
-                {showDeliveryClosingSlots && (
                   <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Billetes / monedas (opcional)</h4>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Billetes / monedas (opcional)
+                    </h4>
                     <CashCountGrid
+                      compact
                       counts={counts}
                       onChange={(next) => {
                         setCounts(next);
@@ -2171,142 +2308,329 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       }}
                     />
                   </div>
-                )}
 
-                {session.cashCounts.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Arqueos del turno</h4>
+                  {session.cashCounts.length > 0 ? (
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Arqueos del turno
+                      </h4>
+                      <div className="space-y-1">
+                        {session.cashCounts.map((cc) => (
+                          <div
+                            key={cc.id}
+                            className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg gap-2"
+                          >
+                            <span className="text-gray-500 truncate">
+                              {new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}
+                            </span>
+                            <span className="font-semibold tabular-nums shrink-0">
+                              {cc.difference >= 0 ? '+' : ''}
+                              {formatMoneyEs(cc.difference)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {(session.incidents?.length || 0) > 0 ? (
+                    <div>
+                      <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                        Incidencias ({session.incidents!.length})
+                      </h4>
+                      <div className="space-y-1">
+                        {session.incidents!.map((inc) => (
+                          <div
+                            key={inc.id}
+                            className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg gap-2"
+                          >
+                            <span className="text-gray-600 truncate">{inc.description}</span>
+                            {inc.amount != null ? (
+                              <span className="font-semibold tabular-nums shrink-0">{formatMoneyEs(inc.amount)}</span>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {/* Final del cierre: totales caja + integradores */}
+              <div className="space-y-2 pb-1">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500 px-0.5">
+                  Resumen final del cierre
+                </p>
+
+                <div className="rounded-xl border-2 border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-950 overflow-hidden">
+                  <div className="px-2.5 py-1.5 bg-stone-800 text-white flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wide">Caja tienda</span>
+                    <span className="text-sm font-black tabular-nums">{formatMoneyEs(tpvAllSales)}</span>
+                  </div>
+                  <div className="p-2 space-y-1.5">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG}`}>
+                        <p className={`text-[10px] font-semibold ${VERTIAL_CASH_TEXT}`}>Efectivo</p>
+                        <p className={`text-base font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>
+                          {formatMoneyEs(tpvCashSales)}
+                        </p>
+                      </div>
+                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}>
+                        <p className={`text-[10px] font-semibold ${VERTIAL_CARD_TEXT}`}>Tarjeta</p>
+                        <p className={`text-base font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>
+                          {formatMoneyEs(tpvCardSales)}
+                        </p>
+                      </div>
+                    </div>
+                    {(brandBilling.rows.length > 0 || brandBilling.unbranded > 0) ? (
+                      <div className="space-y-1 pt-0.5 border-t border-stone-100 dark:border-stone-800">
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Por marca</p>
+                        {closingBrands.map((slot) => {
+                          const aliases = new Set(brandIdAliases(slot.brandId));
+                          const row = brandBilling.rows.find(
+                            (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
+                          );
+                          const revenue = row?.revenue ?? 0;
+                          const cash = row?.revenueEfectivo ?? 0;
+                          const card = row?.revenueTarjeta ?? 0;
+                          return (
+                            <div key={slot.brandId} className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="font-semibold text-stone-700 dark:text-stone-200 truncate">
+                                {slot.name}
+                              </span>
+                              <span className="tabular-nums font-black shrink-0">
+                                {formatMoneyEs(revenue)}
+                                <span className={`ml-1.5 font-semibold ${VERTIAL_CASH_TEXT}`}>
+                                  Efectivo {formatDecimalEs(cash)}€
+                                </span>
+                                <span className={`ml-1 font-semibold ${VERTIAL_CARD_TEXT}`}>
+                                  Tarjeta {formatDecimalEs(card)}€
+                                </span>
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {brandBilling.unbranded > 0 ? (
+                          <div className="flex justify-between text-[11px] text-stone-500">
+                            <span>Sin marca</span>
+                            <span className="tabular-nums font-semibold">{formatMoneyEs(brandBilling.unbranded)}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="flex justify-between text-[11px] pt-0.5 border-t border-stone-100 dark:border-stone-800">
+                      <span className="font-medium text-stone-500">Esperado en cajón</span>
+                      <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(expected)}</span>
+                    </div>
+                    <div className="flex justify-between text-[11px]">
+                      <span className="font-medium text-stone-500">Contado</span>
+                      <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(countedTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border-2 border-blue-300 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20 overflow-hidden">
+                  <div className="px-2.5 py-1.5 bg-[var(--v-blue,#2563eb)] text-white flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wide">Integradores</span>
+                    <span className="text-sm font-black tabular-nums">{formatMoneyEs(integratorsTotal)}</span>
+                  </div>
+                  <div className="p-2 space-y-1.5">
                     <div className="space-y-1">
-                      {session.cashCounts.map((cc) => (
-                        <div key={cc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                          <span className="text-gray-500">{new Date(cc.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })} — {cc.countedBy}</span>
-                          <span className="font-semibold tabular-nums text-zinc-800 dark:text-zinc-200">
-                            {cc.difference >= 0 ? '+' : ''}{cc.difference.toFixed(2)}€
+                      {finalAggregatorRows.map((row) => (
+                        <div
+                          key={row.platform.channel}
+                          className="flex items-center justify-between gap-2 rounded-lg bg-white/80 dark:bg-stone-900/60 px-2 py-1.5 border border-blue-100 dark:border-blue-900/40"
+                        >
+                          <span className="text-xs font-bold text-stone-800 dark:text-stone-100 truncate">
+                            {row.platform.label}
+                          </span>
+                          <span className="text-sm font-black tabular-nums shrink-0">
+                            {formatMoneyEs(row.totalSales)}
                           </span>
                         </div>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {(session.incidents?.length || 0) > 0 && (
-                  <div>
-                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Incidencias ({session.incidents.length})</h4>
-                    <div className="space-y-1">
-                      {session.incidents.map((inc) => (
-                        <div key={inc.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                          <span className="text-gray-600 truncate max-w-[220px]">{inc.description}</span>
-                          {inc.amount != null && <span className="font-semibold">{inc.amount.toFixed(2)}€</span>}
-                        </div>
-                      ))}
+                    {closingBrands.length > 0 ? (
+                      <div className="space-y-1 pt-0.5 border-t border-blue-200/60 dark:border-blue-900/40">
+                        <p className="text-[9px] font-bold uppercase tracking-wide text-blue-600/80 dark:text-blue-300/80">
+                          Por marca · 2ª caja
+                        </p>
+                        {closingBrands.map((slot) => {
+                          const aliases = new Set(brandIdAliases(slot.brandId));
+                          let manualSum = 0;
+                          let hasManual = false;
+                          const byCh = appsSnapshot?.brandTotalsByChannel;
+                          if (byCh) {
+                            for (const byBrand of Object.values(byCh)) {
+                              for (const [id, amt] of Object.entries(byBrand || {})) {
+                                if (aliases.has(id) || brandIdAliases(id).some((a) => aliases.has(a))) {
+                                  manualSum += Number(amt) || 0;
+                                  hasManual = true;
+                                }
+                              }
+                            }
+                          }
+                          const row = appsBrandBilling.rows.find(
+                            (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
+                          );
+                          const revenue = hasManual ? Math.round(manualSum * 100) / 100 : (row?.revenue ?? 0);
+                          return (
+                            <div key={slot.brandId} className="flex justify-between gap-2 text-[11px]">
+                              <span className="truncate text-stone-600 dark:text-stone-300">
+                                {slot.name}
+                              </span>
+                              <span className="tabular-nums font-bold shrink-0">
+                                {formatMoneyEs(revenue)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <div className="grid grid-cols-2 gap-1.5 pt-0.5 border-t border-blue-200/60 dark:border-blue-900/40">
+                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG}`}>
+                        <p className={`text-[10px] font-semibold ${VERTIAL_CASH_TEXT}`}>No pagado efectivo</p>
+                        <p className={`text-sm font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>
+                          {formatMoneyEs(aggregatorCashTotal)}
+                        </p>
+                      </div>
+                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}>
+                        <p className={`text-[10px] font-semibold ${VERTIAL_CARD_TEXT}`}>No pagado tarjeta</p>
+                        <p className={`text-sm font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>
+                          {formatMoneyEs(aggregatorCardTotal)}
+                        </p>
+                      </div>
                     </div>
                   </div>
-                )}
-              </div>
-            )}
-          </div>
+                </div>
 
-          <div>
-            <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider mb-1">Notas</label>
-            <textarea
-              rows={1}
-              className="w-full min-h-11 px-2.5 py-2 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-sm resize-none"
-              placeholder="Opcional…"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
-          </div>
+                <div className="rounded-xl border border-slate-800 bg-slate-950 text-white px-2.5 py-2.5 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      Total día · caja + integradores
+                    </span>
+                    <span className="text-lg font-black tabular-nums">{formatMoneyEs(dayMoneyTotal)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold tabular-nums">
+                    <span className="text-stone-300">Caja {formatMoneyEs(tpvAllSales)}</span>
+                    <span className="text-blue-300">Integradores {formatMoneyEs(integratorsTotal)}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold tabular-nums">
+                    <span className="text-emerald-300">Efectivo cajón {formatMoneyEs(dayCashTotal)}</span>
+                    <span className="text-sky-300">Tarjeta {formatMoneyEs(dayCardTotal)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
-          {showDeliveryClosingSlots ? (
-            <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-950 text-white dark:bg-white dark:text-slate-900 px-3 py-3 space-y-2 shadow-sm">
-              <div className="flex items-end justify-between gap-3">
-                <div>
-                  <QuietTip tip="Suma de todo el turno: TPV + lo hecho en apps (para el Excel).">
-                    <p className="text-xs font-semibold uppercase tracking-wide opacity-70">Total del día</p>
-                  </QuietTip>
-                  <p className="mt-1 text-xs opacity-80 inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="inline-flex items-center gap-1">
-                      <DeliveryFoodUnitIcon unit="pizza" className="w-3.5 h-3.5" muted />
-                      {closingFood.pizza} pizzas
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <DeliveryFoodUnitIcon unit="burger" className="w-3.5 h-3.5" muted />
-                      {closingFood.burger} burgers
-                    </span>
-                    <span className="inline-flex items-center gap-1">
-                      <DeliveryFoodUnitIcon unit="taco" className="w-3.5 h-3.5" muted />
-                      {closingFood.taco} tacos
-                    </span>
-                  </p>
+          {/* Restaurant paso 2 — notas + confirmar */}
+          {!showDeliveryClosingSlots && closingStep === 2 ? (
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+              <div className="rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 space-y-1">
+                <div className="flex justify-between items-baseline text-xs">
+                  <span className={`font-semibold ${VERTIAL_CASH_TEXT}`}>Esperado</span>
+                  <span className={`text-xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{expected.toFixed(2)}€</span>
                 </div>
-                <p className="text-3xl sm:text-4xl font-black tabular-nums shrink-0 tracking-tight">{dayMoneyTotal.toFixed(2)}€</p>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className={`rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-3 py-2`}>
-                  <p className={`text-xs font-semibold ${VERTIAL_CASH_TEXT}`}>Efectivo</p>
-                  <p className={`text-xl font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{dayCashTotal.toFixed(2)}€</p>
+                <div className="flex justify-between items-baseline text-xs">
+                  <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Contado</span>
+                  <span className={`text-base font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{countedTotal.toFixed(2)}€</span>
                 </div>
-                <div className={`rounded-xl border ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} px-3 py-2`}>
-                  <p className={`text-xs font-semibold ${VERTIAL_CARD_TEXT}`}>Tarjeta</p>
-                  <p className={`text-xl font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>{dayCardTotal.toFixed(2)}€</p>
+                <div className={`px-2.5 py-1.5 rounded-xl border ${diff === 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold">
+                      {diff === 0 ? 'Cuadra' : diff > 0 ? 'Sobra' : 'Falta'}
+                    </span>
+                    <span className="text-lg font-black tabular-nums">
+                      {diff >= 0 ? '+' : ''}{diff.toFixed(2)}€
+                    </span>
+                  </div>
                 </div>
               </div>
-              {(tpvBizumSales > 0 || tpvOnlineSales > 0 || tpvOtherSales > 0) ? (
-                <p className="text-xs opacity-75">
-                  {tpvBizumSales > 0 ? `Bizum ${tpvBizumSales.toFixed(2)}€ ` : ''}
-                  {tpvOnlineSales > 0 ? `Online ${tpvOnlineSales.toFixed(2)}€ ` : ''}
-                  {tpvOtherSales > 0 ? `Otros ${tpvOtherSales.toFixed(2)}€` : ''}
-                </p>
-              ) : null}
+              <input
+                type="text"
+                className="w-full min-h-9 px-2.5 py-1.5 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-xs"
+                placeholder="Notas (opcional)"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+              <p className="text-[11px] text-stone-500">
+                Confirma el cierre. {!browserOnline ? 'Sin red: se subirá al recuperar conexión.' : ''}
+              </p>
             </div>
           ) : null}
         </div>
 
-        {showDeliveryClosingSlots ? (
-          <div className="flex-shrink-0 px-3 py-2 border-t border-slate-200 dark:border-slate-800 bg-slate-950 text-white flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total en vivo</span>
-            <span className="tabular-nums text-lg font-black text-white">
-              {dayMoneyTotal.toFixed(2)}€
-              <span className="ml-2 text-sm font-semibold">
-                <span className="text-emerald-300">Efectivo {dayCashTotal.toFixed(2)}€</span>
-                <span className="mx-1.5 text-slate-500">·</span>
-                <span className="text-sky-300">Tarjeta {dayCardTotal.toFixed(2)}€</span>
+        {showDeliveryClosingSlots && closingStep === 3 ? (
+          <div className="flex-shrink-0 px-2.5 py-1 border-t border-slate-200 dark:border-slate-800 bg-slate-950 text-white flex items-center justify-between gap-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Día · {closingFood.pizza}P {closingFood.burger}B {closingFood.taco}T
+            </span>
+            <span className="tabular-nums text-sm font-black text-white">
+              {formatMoneyEs(dayMoneyTotal)}
+              <span className="ml-1.5 text-[10px] font-semibold">
+                <span className="text-emerald-300">Efectivo {formatDecimalEs(dayCashTotal)}€</span>
+                <span className="mx-1 text-slate-500">·</span>
+                <span className="text-sky-300">Tarjeta {formatDecimalEs(dayCardTotal)}€</span>
               </span>
             </span>
           </div>
         ) : null}
 
-        <div className="flex-shrink-0 p-3 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className={`${VERTIAL_BTN_SECONDARY} w-full sm:w-auto`}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveForLater}
-            disabled={busy}
-            className={`${VERTIAL_BTN_SECONDARY} w-full sm:w-auto`}
-          >
-            <Save className="w-4 h-4" />
-            Guardar para luego
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onClose(counts, notes, finalAggregatorRows, {
-              pizza: closingFood.pizza,
-              burger: closingFood.burger,
-              taco: closingFood.taco,
-              byChannel: closingFoodByChannel,
-            })}
-            className={`${VERTIAL_BTN_PRIMARY} flex-1 w-full`}
-          >
-            <Lock className="w-4 h-4" /> {busy ? 'Cerrando…' : 'Confirmar cierre de caja'}
-          </button>
+        <div className="flex-shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-slate-200 dark:border-slate-800">
+          <div className="flex gap-1.5">
+            {closingStep > 1 ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => goClosingStep(closingStep - 1)}
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-11 min-w-[5.5rem]`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Atrás
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleSaveForLater}
+                disabled={busy}
+                className={`${VERTIAL_BTN_SECONDARY} !min-h-11 min-w-[5.5rem] !text-xs`}
+              >
+                <Save className="w-3.5 h-3.5" />
+                Guardar
+              </button>
+            )}
+            {closingStep < closingMaxStep ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => goClosingStep(closingStep + 1)}
+                className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1`}
+              >
+                Siguiente
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onClose(counts, notes, finalAggregatorRows, {
+                  pizza: closingFood.pizza,
+                  burger: closingFood.burger,
+                  taco: closingFood.taco,
+                  byChannel: closingFoodByChannel,
+                }, appsSnapshot?.brandTotalsByChannel)}
+                className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1`}
+              >
+                <Lock className="w-4 h-4" />
+                {busy
+                  ? 'Cerrando…'
+                  : !browserOnline
+                    ? 'Confirmar (sin red)'
+                    : 'Confirmar'}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -4031,6 +4355,16 @@ export function TpvRegisterGate({
     });
   }, [activeSession?._id, activeSession?.workerId, activeSession?.workerName, activeSession?.openedAt, clockedInWorkers]);
 
+  // Cache pedidos del turno para poder cerrar apps/marcas sin red.
+  useEffect(() => {
+    if (!dataUserId || !isTpvRegisterSessionOpen(activeSession)) return;
+    prefetchShiftOrdersForSession(dataUserId, activeSession);
+    const t = window.setInterval(() => {
+      prefetchShiftOrdersForSession(dataUserId, activeSession);
+    }, 120_000);
+    return () => window.clearInterval(t);
+  }, [dataUserId, activeSession?._id, activeSession?.openedAt, activeSession?.pointOfSaleId]);
+
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession)) {
       return;
@@ -4542,6 +4876,7 @@ export function TpvRegisterGate({
     notes: string,
     aggregatorRows: AggregatorCashRow[] = [],
     productClosingCounts?: TpvRegisterSession['productClosingCounts'],
+    brandTotalsByChannel?: Record<string, Record<string, number>>,
   ) => {
     const snapshotId = String(closingSession?._id || activeSession?._id || '').trim();
     const live = snapshotId
@@ -4576,6 +4911,10 @@ export function TpvRegisterGate({
       summary.salesByChannel[row.platform.channel] = row.totalSales;
     }
     aggregatorCashSum = Math.round(aggregatorCashSum * 100) / 100;
+    const aggregatorClosingBrandTotals =
+      brandTotalsByChannel && Object.keys(brandTotalsByChannel).length > 0
+        ? brandTotalsByChannel
+        : undefined;
     const expected = Math.round((expectedTpv + aggregatorCashSum) * 100) / 100;
     const diff = finalAmount - expected;
     const saleOps = session.transactions.filter((t) => t.type === 'sale').length;
@@ -4594,6 +4933,7 @@ export function TpvRegisterGate({
       aggregatorClosingTotals,
       aggregatorClosingCash,
       aggregatorClosingCard,
+      ...(aggregatorClosingBrandTotals ? { aggregatorClosingBrandTotals } : {}),
       ...(productClosingCounts ? { productClosingCounts } : {}),
       closingValidationStatus: autoValidated ? 'validated' : 'pending',
       ...(autoValidated
@@ -4604,37 +4944,80 @@ export function TpvRegisterGate({
           }
         : {}),
     };
-    try {
-      const updated = await updateTpvRegisterSessionRequest(dataUserId, closedPayload as TpvRegisterSession);
+    const applyClosedLocally = (updated: TpvRegisterSession, opts?: { offline?: boolean }) => {
       stickyOpenSessionRef.current = null;
       clearClosingFormDraft(String(updated._id || session._id || ''));
-      setSessions(prev => prev.map(s => s._id === updated._id ? updated : s));
+      setSessions((prev) => {
+        const id = String(updated._id || '');
+        const exists = prev.some((s) => s._id === id);
+        return exists
+          ? prev.map((s) => (s._id === id ? updated : s))
+          : [...prev, updated];
+      });
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: updated }));
       setShowClosing(false);
       setClosingSession(null);
       setPostCloseSession(updated);
       setPostCloseAggregatorRows(aggregatorRows);
+      if (opts?.offline) {
+        toast.success(
+          `Caja cerrada sin red. Se subirá al volver la conexión. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
+        );
+        return;
+      }
       toast.success(
         autoValidated
           ? `Caja cerrada (sin ventas, validada automáticamente). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`
           : `Caja cerrada. Pendiente de validación gerente. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
       );
-      // El Excel Uriel no se descarga al cerrar: queda guardado en el servidor;
-      // el CEO lo baja a mano desde Caja → Excel.
+      // El Excel de Facturación no se descarga al cerrar: queda en el servidor;
+      // el CEO lo baja a mano desde Caja → Facturación.
       if (!autoValidated) {
         void createNotification({
-        level: Math.abs(diff) >= 20 ? 'warning' : 'info',
-        category: 'tpv',
-        title: 'Cierre de caja pendiente de validación',
-        message: `${session.workerName} cerró ${session.pointOfSaleName || 'caja'} (${session.terminalName || 'TPV'}). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
-        entityId: updated._id,
-        entityType: 'tpv_register_session',
-        route: '/saas/vertical/delivery/caja',
-        metadata: { difference: diff, pointOfSaleId: session.pointOfSaleId },
+          level: Math.abs(diff) >= 20 ? 'warning' : 'info',
+          category: 'tpv',
+          title: 'Cierre de caja pendiente de validación',
+          message: `${session.workerName} cerró ${session.pointOfSaleName || 'caja'} (${session.terminalName || 'TPV'}). Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
+          entityId: updated._id,
+          entityType: 'tpv_register_session',
+          route: isRestaurantBusinessType(currentBusiness?.businessType)
+            ? '/saas/caja'
+            : '/saas/vertical/delivery/caja',
+          metadata: { difference: diff, pointOfSaleId: session.pointOfSaleId },
         }).catch(() => null);
       }
+    };
+
+    try {
+      const offlineClose = !isBrowserOnline();
+      if (offlineClose) {
+        const closedLocal = {
+          ...(closedPayload as TpvRegisterSession),
+          _id: session._id,
+          _rev: session._rev,
+        };
+        enqueueTpvOfflineItem('register_close', { userId: dataUserId, session: closedLocal });
+        applyClosedLocally(closedLocal, { offline: true });
+        return;
+      }
+      const updated = await updateTpvRegisterSessionRequest(dataUserId, closedPayload as TpvRegisterSession);
+      applyClosedLocally(updated);
     } catch (error) {
-      toast.error(toUserFacingMessage(error, 'Error al cerrar la caja. Inténtalo de nuevo.'));
+      const msg = extractErrorMessage(error);
+      const looksNetwork =
+        !isBrowserOnline()
+        || /failed to fetch|network|timeout|offline|ERR_INTERNET|Load failed/i.test(msg);
+      if (looksNetwork) {
+        const closedLocal = {
+          ...(closedPayload as TpvRegisterSession),
+          _id: session._id,
+          _rev: session._rev,
+        };
+        enqueueTpvOfflineItem('register_close', { userId: dataUserId, session: closedLocal });
+        applyClosedLocally(closedLocal, { offline: true });
+      } else {
+        toast.error(toUserFacingMessage(error, 'Error al cerrar la caja. Inténtalo de nuevo.'));
+      }
     } finally {
       setClosingBusy(false);
     }

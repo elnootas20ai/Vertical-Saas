@@ -7,7 +7,14 @@ export type TpvOfflineQueueItemType =
   | 'order_create'
   | 'order_update'
   | 'order_cancel'
-  | 'register_tx';
+  | 'register_tx'
+  /** Cierre de caja local; se sube al recuperar red (después de txs/pedidos). */
+  | 'register_close'
+  /** Venta canónica carnicería (FEFO/stock); sync vía createButcherSaleRequest. */
+  | 'butcher_sale'
+  | 'dining_comanda_add'
+  | 'dining_comanda_send'
+  | 'dining_pay';
 
 export type TpvOfflineQueueItem = {
   id: string;

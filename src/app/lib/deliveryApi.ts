@@ -2037,6 +2037,12 @@ export interface TpvRegisterSession {
   aggregatorClosingCard?: Record<string, number>;
 
   /**
+   * Totales por marca dentro de cada integrador (2ª caja).
+   * channel → brandId → €. No sustituye aggregatorClosingTotals (suma).
+   */
+  aggregatorClosingBrandTotals?: Record<string, Record<string, number>>;
+
+  /**
    * Conteo de pizzas / burgers / tacos del turno al cerrar caja.
    * `byChannel` opcional por integrador (glovo, ubereats…).
    */

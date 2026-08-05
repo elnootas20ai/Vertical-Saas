@@ -149,22 +149,15 @@ export function exitTpvTabletSessionPath(): string {
 }
 
 /**
- * Salir del TPV tablet (modo código de tienda / trabajador):
+ * Salir del TPV tablet (modo código de tienda):
  * quita el vínculo, cierra sesión y va a la pantalla de código.
+ * Independiente del CEO: nunca redirige a delivery-ops / restaurant-ops.
  * Usa location.replace para evitar races de redirect a /saas.
- *
- * Cuenta empresa/admin: solo limpia el binding y vuelve al SaaS (sin logout).
  */
 export async function leaveTpvTabletSession(
   logout: () => Promise<void>,
-  options?: { keepAuthAndGoTo?: string },
 ): Promise<void> {
   clearTpvTabletBinding();
-  const keepTo = String(options?.keepAuthAndGoTo || '').trim();
-  if (keepTo && typeof window !== 'undefined') {
-    window.location.replace(keepTo);
-    return;
-  }
   try {
     await logout();
   } catch {

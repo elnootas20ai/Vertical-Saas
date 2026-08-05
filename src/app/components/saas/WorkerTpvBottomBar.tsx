@@ -3,10 +3,9 @@ import { ClipboardCheck, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useVerticalCatalog } from '../../hooks/useVerticalCatalog';
-import { isWorkerAccount } from '../../lib/authApi';
 import { isTpvTabletBound, leaveTpvTabletSession } from '../../lib/tpvTabletSession';
 import { requestTpvStockReviewOpen } from '../../lib/tpvStockReview';
-import { resolveRetailOpsHomePath, resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
+import { resolveTpvCeoExitPath } from '../../lib/retailOpsPaths';
 
 /** Barra inferior del TPV: revisión de stock + salir (tablet o modo CEO). */
 export function WorkerTpvBottomBar({
@@ -18,7 +17,7 @@ export function WorkerTpvBottomBar({
   onExitCeo?: () => void;
 } = {}) {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const { currentBusiness } = useBusiness();
   const { config } = useVerticalCatalog();
   const tabletBound = isTpvTabletBound();
@@ -28,14 +27,8 @@ export function WorkerTpvBottomBar({
 
   if (!showStock && !showExit) return null;
 
+  /** Código de tienda: siempre pantalla de código (nunca ops CEO). */
   const handleExitTablet = () => {
-    // Admin/empresa: no echar a la pantalla de código ni cerrar sesión.
-    if (!isWorkerAccount(user)) {
-      void leaveTpvTabletSession(logout, {
-        keepAuthAndGoTo: resolveRetailOpsHomePath(currentBusiness?.businessType),
-      });
-      return;
-    }
     void leaveTpvTabletSession(logout);
   };
 
@@ -62,7 +55,7 @@ export function WorkerTpvBottomBar({
       {showExit && (
         <button
           type="button"
-          onClick={ceoMode ? handleExitCeo : handleExitTablet}
+          onClick={tabletBound ? handleExitTablet : handleExitCeo}
           className={`${btnBase} border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800`}
         >
           <LogOut className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
