@@ -362,16 +362,14 @@ function cryptoRandom() {
 webhookRouter.post('/glovo/:businessId', (req, res) => handlePlatformWebhook('glovo', req, res));
 webhookRouter.post('/justeat/:businessId', (req, res) => handlePlatformWebhook('justeat', req, res));
 // Primario Uber (sin businessId) ANTES de /:businessId
-// GET/HEAD: solo para comprobar la URL en el navegador (Uber envía POST).
+// GET solo para comprobar la URL en el navegador (Uber siempre envía POST).
 webhookRouter.get('/ubereats', (_req, res) => {
   res.status(200).json({
     ok: true,
     service: 'uber-eats-webhook',
-    method: 'POST',
-    hint: 'Este endpoint recibe webhooks POST de Uber. Abrirlo en el navegador (GET) solo comprueba que está vivo.',
+    hint: 'Endpoint activo. Uber debe llamar con POST (no abras solo la URL en el navegador).',
   });
 });
-webhookRouter.head('/ubereats', (_req, res) => res.status(200).end());
 webhookRouter.post('/ubereats', (req, res) => {
   void handleUberPrimaryWebhook(req, res);
 });
