@@ -210,14 +210,31 @@ export function orderMatchesPdvScope(order, pdvId, primaryPdvId, pdvName, pdvWor
   return false;
 }
 
-/** Resuelve referencia de tienda (PDV `_id` o centro de trabajo) al `_id` del PDV. */
+/** Resuelve referencia de tienda (PDV `_id`, centro `wc-…` o `wc:…`) al `_id` del PDV. */
 function resolvePdvIdFromRef(pdvs, ref) {
-  const r = String(ref || '').trim();
+  let r = String(ref || '').trim();
+  if (!r) return null;
+  if (r.startsWith('wc:')) r = r.slice(3).trim();
   if (!r) return null;
   const byId = (pdvs || []).find((p) => p && p._id === r);
   if (byId) return byId._id;
   const byWc = (pdvs || []).find((p) => String(p?.workCenterId || '').trim() === r);
   return byWc?._id || null;
+}
+
+/** Contexto de filtro PDV para trabajador invitado (empleo suele ser wc-…). */
+function resolveWorkerPdvFilter(pdvs, workerEmploymentRef) {
+  const ref = String(workerEmploymentRef || '').trim();
+  if (!ref) return { pdvId: null, pdvName: '', pdvWorkCenterId: '' };
+  const pdvId = resolvePdvIdFromRef(pdvs, ref) || null;
+  const pdvDoc =
+    (pdvs || []).find((p) => p && p._id === pdvId) ||
+    (pdvs || []).find((p) => String(p?.workCenterId || '').trim() === ref.replace(/^wc:/, ''));
+  return {
+    pdvId: pdvId || (String(ref).startsWith('pdv-') ? ref : null),
+    pdvName: String(pdvDoc?.name || '').trim(),
+    pdvWorkCenterId: String(pdvDoc?.workCenterId || '').trim() || (ref.startsWith('wc') ? ref.replace(/^wc:/, '') : ''),
+  };
 }
 
 /** Empresa real del PDV: prioriza la tienda/centro sobre un business_id del cliente (evita limpieza→delivery). */
@@ -570,12 +587,14 @@ export async function listDeliveryOrders(req, res) {
     if (req.callerIsWorker) {
       const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const workerRef = String(req.callerAccount?.employment?.salesPointId || '').trim();
-      const workerPdv = resolvePdvIdFromRef(pdvs, workerRef);
+      const { pdvId: workerPdv, pdvName, pdvWorkCenterId } = resolveWorkerPdvFilter(pdvs, workerRef);
       const today = new Date().toISOString().slice(0, 10);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
       orders = orders.filter((o) => {
-        if (workerPdv) {
-          if (!orderMatchesPdvScope(o, workerPdv, primaryPdvId)) return false;
+        if (workerPdv || pdvWorkCenterId) {
+          if (!orderMatchesPdvScope(o, workerPdv || workerRef, primaryPdvId, pdvName, pdvWorkCenterId)) {
+            return false;
+          }
         } else if (workerRef && o.salesPointId && o.salesPointId !== workerRef) {
           return false;
         }
@@ -1638,10 +1657,10 @@ export async function filterDeliveryOrders(req, res) {
     if (req.callerIsWorker) {
       const workerRef = String(req.callerAccount?.employment?.salesPointId || '').trim();
       if (workerRef) {
-        // Empleo suele guardar el centro (wc-…); los pedidos llevan el PDV (pdv-…).
-        // Sin resolver, el filtro deja el tablero vacío (caso Pol / Badalona).
+        // Empleo = centro (wc-…); pedidos = PDV (pdv-…). Misma regla Badalona/Tiana/invitados.
         const pdvsForWorker = await listScopedPointsOfSaleForUser(req, userId);
-        salesPointId = resolvePdvIdFromRef(pdvsForWorker, workerRef) || workerRef;
+        const { pdvId } = resolveWorkerPdvFilter(pdvsForWorker, workerRef);
+        salesPointId = pdvId || workerRef;
       }
       if (!dateFrom) dateFrom = new Date().toISOString().slice(0, 10);
     }
@@ -1655,12 +1674,8 @@ export async function filterDeliveryOrders(req, res) {
     if (salesPointId) {
       const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
-      const pdv = resolvePdvIdFromRef(pdvs, String(salesPointId).trim()) || String(salesPointId).trim();
-      const pdvDoc =
-        (pdvs || []).find((p) => p && p._id === pdv) ||
-        (pdvs || []).find((p) => String(p?.workCenterId || '').trim() === String(salesPointId).trim());
-      const pdvName = String(pdvDoc?.name || '').trim();
-      const pdvWorkCenterId = String(pdvDoc?.workCenterId || '').trim();
+      const { pdvId, pdvName, pdvWorkCenterId } = resolveWorkerPdvFilter(pdvs, String(salesPointId).trim());
+      const pdv = pdvId || String(salesPointId).trim();
       orders = orders.filter((o) =>
         orderMatchesPdvScope(o, pdv, primaryPdvId, pdvName, pdvWorkCenterId),
       );

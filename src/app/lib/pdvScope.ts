@@ -63,8 +63,9 @@ export function resolvePdvIdFromStoreRef(
   pointsOfSale: PointOfSale[],
   ref: string | null | undefined,
 ): { pdvId: string | null; pdvName: string | null; workCenterId: string | null } {
-  const r = String(ref || '').trim();
+  let r = String(ref || '').trim();
   if (!r) return { pdvId: null, pdvName: null, workCenterId: null };
+  if (r.startsWith('wc:')) r = r.slice(3).trim();
   const bare = r.startsWith('wc:') ? r.slice(3) : r;
   const byId = pointsOfSale.find((p) => p._id === r || p._id === bare);
   if (byId) {
@@ -85,7 +86,7 @@ export function resolvePdvIdFromStoreRef(
       workCenterId: String(byWc.workCenterId || '').trim() || bare,
     };
   }
-  return { pdvId: null, pdvName: null, workCenterId: bare };
+  return { pdvId: null, pdvName: null, workCenterId: bare.startsWith('wc-') || bare.startsWith('wc') ? bare : null };
 }
 
 export function isInvitedWorkerUser(user: AuthUser | null | undefined): boolean {

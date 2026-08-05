@@ -245,15 +245,21 @@ export function useWorkerAssignedStore() {
       resolvedWorkCenter
       || (hasAssignment && salesPointRef ? stubAssignedWorkCenter(salesPointRef, storeLabel) : null);
 
-    // Tienda de la contratación (employment) o PDV resuelto — NUNCA omitir si hay empleo.
+    // Tienda de la contratación (employment) o PDV resuelto — NUNCA devolver un wc- como si fuera PDV.
     const employmentStoreId = String(user?.employment?.salesPointId || '').trim().replace(/^wc:/, '');
     const scheduleStoreId = String(memberSchedule?.work_center_id || '').trim().replace(/^wc:/, '');
-    const assignedPdvId =
+    const resolvedPdvOnly =
       scoped.pointsOfSale[0]?._id
       || scoped.assignedPdvId
-      || employmentStoreId
-      || (salesPointRef && !salesPointRef.startsWith('wc:') ? salesPointRef : '')
-      || scheduleStoreId
+      || '';
+    const employmentLooksLikePdv =
+      employmentStoreId.startsWith('pdv-') || employmentStoreId.startsWith('pdv:');
+    const assignedPdvId =
+      resolvedPdvOnly
+      || (employmentLooksLikePdv ? employmentStoreId : '')
+      || (salesPointRef && !salesPointRef.startsWith('wc:') && !salesPointRef.startsWith('wc-')
+        ? salesPointRef
+        : '')
       || '';
     const assignedWorkCenterId =
       String(resolvedWorkCenter?._id || resolvedWorkCenter?.id || '').trim()
