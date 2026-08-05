@@ -2572,6 +2572,50 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     <span className="text-sky-300">Tarjeta {formatMoneyEs(dayCardTotal)}</span>
                   </div>
                 </div>
+
+                {/* Total unidades de todos los steps (TPV paso 1 + apps paso 2) */}
+                <div className="rounded-xl border-2 border-stone-800 dark:border-stone-500 bg-white dark:bg-stone-950 overflow-hidden">
+                  <div className="px-2.5 py-1.5 bg-stone-900 text-white flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wide">
+                      Total unidades · todo el día
+                    </span>
+                    <span className="text-[10px] font-semibold text-stone-300 tabular-nums">
+                      TPV + apps
+                    </span>
+                  </div>
+                  <div className="p-2 space-y-2">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([
+                        { key: 'pizza' as const, label: 'Pizzas' },
+                        { key: 'burger' as const, label: 'Burgers' },
+                        { key: 'taco' as const, label: 'Tacos' },
+                      ]).map((u) => (
+                        <div
+                          key={u.key}
+                          className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-900 px-2 py-2 text-center"
+                        >
+                          <p className="text-[10px] font-semibold text-stone-500 inline-flex items-center justify-center gap-0.5 w-full">
+                            <DeliveryFoodUnitIcon unit={u.key} className="w-3.5 h-3.5" />
+                            {u.label}
+                          </p>
+                          <p className="mt-0.5 text-2xl font-black tabular-nums text-stone-900 dark:text-white">
+                            {closingFood[u.key]}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="text-[10px] text-stone-500 space-y-0.5 px-0.5">
+                      <p className="tabular-nums">
+                        <span className="font-semibold text-stone-600 dark:text-stone-300">TPV:</span>{' '}
+                        {tpvClosingFood.pizza}P · {tpvClosingFood.burger}B · {tpvClosingFood.taco}T
+                      </p>
+                      <p className="tabular-nums">
+                        <span className="font-semibold text-stone-600 dark:text-stone-300">Apps:</span>{' '}
+                        {appsFoodTotals.pizza}P · {appsFoodTotals.burger}B · {appsFoodTotals.taco}T
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           ) : null}
@@ -2614,18 +2658,28 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
         </div>
 
         {showDeliveryClosingSlots && closingStep === 3 ? (
-          <div className="flex-shrink-0 px-2.5 py-1 border-t border-slate-200 dark:border-slate-800 bg-slate-950 text-white flex items-center justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              Día · {closingFood.pizza}P {closingFood.burger}B {closingFood.taco}T
-            </span>
-            <span className="tabular-nums text-sm font-black text-white">
-              {formatMoneyEs(dayMoneyTotal)}
-              <span className="ml-1.5 text-[10px] font-semibold">
-                <span className="text-emerald-300">Efectivo {formatDecimalEs(dayCashTotal)}€</span>
-                <span className="mx-1 text-slate-500">·</span>
-                <span className="text-sky-300">Tarjeta {formatDecimalEs(dayCardTotal)}€</span>
+          <div className="flex-shrink-0 px-2.5 py-1.5 border-t border-slate-200 dark:border-slate-800 bg-slate-950 text-white space-y-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                Total unidades
               </span>
-            </span>
+              <span className="text-xs font-black tabular-nums text-white">
+                {closingFood.pizza} pizzas · {closingFood.burger} burgers · {closingFood.taco} tacos
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                € día
+              </span>
+              <span className="tabular-nums text-sm font-black text-white">
+                {formatMoneyEs(dayMoneyTotal)}
+                <span className="ml-1.5 text-[10px] font-semibold">
+                  <span className="text-emerald-300">Efectivo {formatDecimalEs(dayCashTotal)}€</span>
+                  <span className="mx-1 text-slate-500">·</span>
+                  <span className="text-sky-300">Tarjeta {formatDecimalEs(dayCardTotal)}€</span>
+                </span>
+              </span>
+            </div>
           </div>
         ) : null}
 
