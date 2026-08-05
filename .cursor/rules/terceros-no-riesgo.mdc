@@ -1,0 +1,53 @@
+---
+description: No poner Vertial en riesgo con terceros — siempre avisar antes
+alwaysApply: true
+---
+
+# Terceros: no arriesgar Vertial sin aviso
+
+Vertial (código, `.env`, CouchDB, tokens, cuenta SaaS, producción) **no se expone a terceros a ciegas**.
+
+## Obligatorio: AVISAR antes
+
+Antes de proponer o ejecutar cualquiera de esto, **parar y explicar en castellano claro** el riesgo y pedir OK explícito:
+
+1. **Túneles / URLs públicas** hacia local o el VPS (`localtunnel`, `ngrok`, Cloudflare Tunnel, similar).
+2. **OAuth / APIs de terceros** (Uber, Glovo, Just Eat, Stripe, Monei, Google, etc.) que pidan redirect, webhooks o secrets en el portal ajeno.
+3. **Webhooks** que apunten a un dominio/túnel que no controlemos al 100 %.
+4. **Compartir o pegar en chat** Client Secret, API keys, tokens, contraseñas CouchDB, JWT, `.env`.
+5. **Instalar o dejar corriendo** software de terceros que reenvíe tráfico de Vertial a internet.
+6. **Deploy o cambios en prod** motivados solo por una integración externa (salvo OK explícito de deploy).
+
+“OK explícito” = el usuario dice algo claro tipo: *«abre el túnel»*, *«conecta Uber»*, *«pon el webhook en X»*.  
+No vale asumir por el contexto del chat.
+
+## Aviso mínimo (siempre)
+
+En una frase concreta:
+
+- **Qué** se va a abrir/conectar.
+- **Qué datos** pueden pasar (pedidos, tokens, tráfico HTTP).
+- **Quién** podría verlos (proveedor del túnel, Uber, internet pública).
+- **Cómo se cierra** (parar proceso, revocar secret, quitar redirect).
+
+Ejemplo:
+
+> Para probar el webhook de Uber haría falta un túnel público a tu PC. Ese servicio ve el tráfico HTTP mientras esté abierto. ¿Lo quieres igual, o lo dejamos solo en local sin túnel?
+
+## Prohibido sin OK
+
+- Arrancar túneles “para que funcione”.
+- Meter Client Secret / keys de terceros en `.env` de prod sin que el usuario lo pida.
+- Dejar montadas rutas OAuth/webhook a medias que rompan el backend si faltan archivos.
+- Minimizar el riesgo (“no pasa nada”, “es solo test”) sin explicar el riesgo real.
+
+## Sí se puede sin preguntar
+
+- Hablar de la integración en abstracto (pasos del portal, scopes, arquitectura).
+- Código **local** de adapters/UI **sin** abrir túnel ni exponer secrets.
+- Usar solo endpoints ya existentes de Vertial en `localhost`.
+- Revertir o apagar algo de terceros que ya esté abriendo riesgo (parar túnel, quitar import roto).
+
+## Si el usuario duda o dice “quita eso”
+
+Priorizar **seguridad y estabilidad de Vertial** sobre la integración: parar túnel, quitar OAuth a medias, dejar el backend arrancable. No insistir en “dejarlo montado para probar”.

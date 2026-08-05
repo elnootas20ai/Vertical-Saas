@@ -253,6 +253,11 @@ export async function updateWebOrderRequest(businessId: string, orderId: string,
 export interface DeliveryIntegrationEntry {
   enabled: boolean;
   token: string;
+  /** Conectado vía OAuth Uber (access_token guardado aparte del token webhook). */
+  oauth?: boolean;
+  connectedAt?: string;
+  expiresAt?: string;
+  env?: string;
 }
 
 export interface DeliveryIntegrations {
@@ -260,6 +265,14 @@ export interface DeliveryIntegrations {
   globo: DeliveryIntegrationEntry;
   justead: DeliveryIntegrationEntry;
   flipdish: DeliveryIntegrationEntry;
+}
+
+export interface UberEatsOAuthConfig {
+  configured: boolean;
+  env: string;
+  redirectUri: string;
+  scopes: string;
+  clientIdPreview?: string;
 }
 
 export async function getDeliveryIntegrationsRequest(businessId: string) {
@@ -273,4 +286,28 @@ export async function saveDeliveryIntegrationsRequest(businessId: string, integr
     `/api/web/integrations/${encodeURIComponent(businessId)}`,
     { method: 'PUT', body: JSON.stringify({ integrations }) },
   );
+}
+
+export async function getUberEatsOAuthConfigRequest() {
+  return authRequest<{ ok: boolean } & UberEatsOAuthConfig>('/api/uber-eats/oauth/config');
+}
+
+export async function startUberEatsOAuthRequest(businessId: string) {
+  return authRequest<{ ok: boolean; authorizeUrl: string; redirectUri: string; env: string }>(
+    `/api/uber-eats/oauth/start?businessId=${encodeURIComponent(businessId)}`,
+  );
+}
+
+export async function completeUberEatsOAuthRequest(code: string, state: string) {
+  return authRequest<{
+    ok: boolean;
+    integrations?: DeliveryIntegrations;
+    connected?: boolean;
+    expiresAt?: string;
+    scope?: string;
+    error?: string;
+  }>('/api/uber-eats/oauth/callback', {
+    method: 'POST',
+    body: JSON.stringify({ code, state }),
+  });
 }

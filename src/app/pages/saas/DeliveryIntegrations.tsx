@@ -1,29 +1,42 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-  Plug, Save, Loader2, Eye, EyeOff, ToggleLeft, ToggleRight, ExternalLink, Copy, Check,
+  Plug, Save, Loader2, Eye, EyeOff, ToggleLeft, ToggleRight, ExternalLink, Copy, Check, Link2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { getApiBase } from '../../lib/apiBase';
+import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 import {
+  completeUberEatsOAuthRequest,
   getDeliveryIntegrationsRequest,
+  getUberEatsOAuthConfigRequest,
   saveDeliveryIntegrationsRequest,
+  startUberEatsOAuthRequest,
   type DeliveryIntegrations,
+  type UberEatsOAuthConfig,
 } from '../../lib/webApi';
 import { Layout } from '../../components/saas/Layout';
 import { DEFAULT_DELIVERY_INTEGRATIONS, AGGREGATOR_PLATFORMS } from '../../lib/deliveryIntegrationsUi';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 
 export function DeliveryIntegrations() {
+  const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
   const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
+  const isAdmin = isVertialSuperAdminEmail(user?.email);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const oauthHandledRef = useRef<string | null>(null);
 
   const [integrations, setIntegrations] = useState<DeliveryIntegrations>(DEFAULT_DELIVERY_INTEGRATIONS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [connectingUber, setConnectingUber] = useState(false);
   const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [uberCfg, setUberCfg] = useState<UberEatsOAuthConfig | null>(null);
 
   const apiBase = useMemo(() => getApiBase(), []);
   const buildWebhookUrl = useCallback(
@@ -59,6 +72,64 @@ export function DeliveryIntegrations() {
     void loadIntegrations();
   }, [loadIntegrations]);
 
+  useEffect(() => {
+    if (!isAdmin) {
+      setUberCfg(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const cfg = await getUberEatsOAuthConfigRequest();
+        if (!cancelled) {
+          setUberCfg({
+            configured: Boolean(cfg.configured),
+            env: String(cfg.env || 'sandbox'),
+            redirectUri: String(cfg.redirectUri || ''),
+            scopes: String(cfg.scopes || ''),
+            clientIdPreview: cfg.clientIdPreview,
+          });
+        }
+      } catch {
+        if (!cancelled) setUberCfg({ configured: false, env: 'sandbox', redirectUri: '', scopes: '' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin]);
+
+  // Callback OAuth: ?code=&state= (solo admin)
+  useEffect(() => {
+    if (!isAdmin || !businessId) return;
+    const code = searchParams.get('code');
+    const state = searchParams.get('state');
+    const err = searchParams.get('error');
+    if (err) {
+      toast.error(`Uber OAuth: ${err}`);
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    if (!code || !state) return;
+    const key = `${code}:${state}`;
+    if (oauthHandledRef.current === key) return;
+    oauthHandledRef.current = key;
+
+    void (async () => {
+      setConnectingUber(true);
+      try {
+        const res = await completeUberEatsOAuthRequest(code, state);
+        if (res.integrations) setIntegrations(res.integrations);
+        toast.success('Uber Eats conectado (OAuth)');
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'No se pudo completar OAuth de Uber');
+      } finally {
+        setConnectingUber(false);
+        setSearchParams({}, { replace: true });
+      }
+    })();
+  }, [isAdmin, businessId, searchParams, setSearchParams]);
+
   const saveIntegrations = async () => {
     if (!businessId) return;
     setSaving(true);
@@ -70,6 +141,19 @@ export function DeliveryIntegrations() {
       toast.error('Error al guardar integraciones');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const connectUberOAuth = async () => {
+    if (!businessId || !isAdmin) return;
+    setConnectingUber(true);
+    try {
+      const res = await startUberEatsOAuthRequest(businessId);
+      if (!res.authorizeUrl) throw new Error('Sin URL de autorización');
+      window.location.href = res.authorizeUrl;
+    } catch (e) {
+      setConnectingUber(false);
+      toast.error(e instanceof Error ? e.message : 'No se pudo iniciar OAuth de Uber');
     }
   };
 
@@ -112,6 +196,7 @@ export function DeliveryIntegrations() {
             {platformCards.map(({ key, urlSlug, label, colorClass, accentClass, devUrl }) => {
               const webhookUrl = buildWebhookUrl(urlSlug);
               const isCopied = copiedKey === key;
+              const uberOauth = key === 'uber' && Boolean(integrations.uber?.oauth);
               return (
                 <div key={key} className={`rounded-xl border ${accentClass} bg-white dark:bg-gray-800 p-5 space-y-3`}>
                   <div className="flex items-center justify-between">
@@ -120,6 +205,11 @@ export function DeliveryIntegrations() {
                       {integrations[key].enabled && (
                         <span className="text-[10px] font-medium text-green-600 bg-green-50 dark:bg-green-900/30 px-1.5 py-0.5 rounded-full">
                           Activo
+                        </span>
+                      )}
+                      {uberOauth && (
+                        <span className="text-[10px] font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded-full">
+                          OAuth
                         </span>
                       )}
                     </div>
@@ -162,7 +252,7 @@ export function DeliveryIntegrations() {
 
                   <div>
                     <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">
-                      Token secreto <span className="font-normal text-gray-400">(opcional para caja; necesario para pedidos automáticos)</span>
+                      Token secreto <span className="font-normal text-gray-400">(webhook / caja; no es el OAuth de Uber)</span>
                     </label>
                     <div className="relative">
                       <input
@@ -184,6 +274,30 @@ export function DeliveryIntegrations() {
                       </button>
                     </div>
                   </div>
+
+                  {key === 'uber' && isAdmin && (
+                    <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-3 space-y-2 bg-gray-50/80 dark:bg-gray-900/40">
+                      <p className="text-[11px] text-gray-600 dark:text-gray-400">
+                        OAuth Uber Eats (solo <strong>uriel@admin.com</strong> en prod — sin túnel).
+                        {uberCfg?.env ? ` Entorno Uber: ${uberCfg.env}.` : ''}
+                        {uberCfg?.configured === false ? ' Faltan claves UBER_EATS_* en .env del servidor.' : ''}
+                      </p>
+                      {uberCfg?.redirectUri ? (
+                        <p className="text-[10px] font-mono text-gray-500 break-all">
+                          Redirect: {uberCfg.redirectUri}
+                        </p>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void connectUberOAuth()}
+                        disabled={!businessId || connectingUber || uberCfg?.configured === false}
+                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-black text-white text-xs font-semibold hover:bg-gray-800 disabled:opacity-50"
+                      >
+                        {connectingUber ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                        {uberOauth ? 'Reconectar Uber Eats' : 'Conectar Uber Eats (OAuth)'}
+                      </button>
+                    </div>
+                  )}
 
                   <a
                     href={devUrl}

@@ -81,6 +81,7 @@ import { cleaningBillingRouter } from './routers/cleaningBillingRouter.js';
 import { cleaningMaterialsRouter } from './routers/cleaningMaterialsRouter.js';
 import { constructionRouter } from './routers/constructionRouter.js';
 import { webPublicRouter, webProtectedRouter } from './routers/webRouter.js';
+import { uberEatsRouter } from './routers/uberEatsRouter.js';
 import { gdprRouter } from './routers/gdprRouter.js';
 import { settingsRouter } from './routers/settingsRouter.js';
 import { supportRouter } from './routers/supportRouter.js';
@@ -1133,6 +1134,15 @@ app.use('/api/v1', apiLimiter, publicApiRouter);
 // WEB Storefront — rutas públicas (sin auth) + protegidas
 app.use('/api/web', webPublicRouter);
 app.use('/api/web', requireAuthAndEmailVerified, requireActiveSubscription, burstLimiter, planAwareLimiter, webProtectedRouter);
+// Uber Eats OAuth: solo autenticado; el controller limita a uriel@admin.com
+app.use(
+  '/api/uber-eats',
+  requireAuthAndEmailVerified,
+  requireActiveSubscription,
+  burstLimiter,
+  planAwareLimiter,
+  uberEatsRouter,
+);
 
 // CRM-01: Formulario embebible público (sin requireAuth — acceso por dealerId)
 app.use('/api/appointments', requireAuthAndEmailVerified, requireActiveSubscription, appointmentsRouter);

@@ -11321,8 +11321,19 @@ export function buildWebConfigDocument(businessId, data = {}, existing = null) {
 }
 
 function sanitizeIntegrationEntry(entry) {
-  if (!entry || typeof entry !== 'object') return { enabled: false, token: '' };
-  return { enabled: Boolean(entry.enabled), token: String(entry.token || '') };
+  if (!entry || typeof entry !== 'object') {
+    return { enabled: false, token: '', oauth: false, connectedAt: '', expiresAt: '', env: '' };
+  }
+  const hasOauth = Boolean(entry.oauth || entry.accessToken);
+  return {
+    enabled: Boolean(entry.enabled),
+    // Token de webhook (NO es el access_token OAuth de Uber)
+    token: String(entry.token || ''),
+    oauth: hasOauth,
+    connectedAt: String(entry.connectedAt || ''),
+    expiresAt: String(entry.expiresAt || ''),
+    env: String(entry.env || ''),
+  };
 }
 
 export function sanitizeWebConfig(doc) {

@@ -278,7 +278,21 @@ export async function saveDeliveryIntegrations(req, res) {
     const db = getWebDbName();
     await ensureDatabase(req, db);
     const current = await getWebConfigByBusinessId(req, businessId);
-    const doc = buildWebConfigDocument(businessId, { integrations }, current);
+    const prev = current?.integrations || {};
+
+    // Preservar campos OAuth internos al guardar token/enabled desde la UI.
+    const merged = {};
+    for (const key of ['uber', 'globo', 'justead', 'flipdish']) {
+      const incoming = integrations[key] && typeof integrations[key] === 'object' ? integrations[key] : {};
+      const existing = prev[key] && typeof prev[key] === 'object' ? prev[key] : {};
+      merged[key] = {
+        ...existing,
+        enabled: Boolean(incoming.enabled),
+        token: String(incoming.token ?? existing.token ?? ''),
+      };
+    }
+
+    const doc = buildWebConfigDocument(businessId, { integrations: merged }, current);
     const saved = await putDocument(req, db, doc._id, doc);
 
     return res.json({

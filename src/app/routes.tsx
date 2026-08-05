@@ -679,6 +679,8 @@ export const router = createBrowserRouter([
           { path: 'caja/tpv', element: <RequireBusinessOwner><RequireRestaurantVertical><RedirectEventsFromRetailRoutes><RestaurantCeoTpvPage /></RedirectEventsFromRetailRoutes></RequireRestaurantVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/caja', element: <RequireBusinessOwner><RequireDeliveryVertical><RequirePdvTerminal><CajaPage /></RequirePdvTerminal></RequireDeliveryVertical></RequireBusinessOwner> },
           { path: 'vertical/delivery/integraciones', element: <RequireBusinessOwner><RequireDeliveryVertical><RequireWebOrderingVertical><DeliveryIntegrations /></RequireWebOrderingVertical></RequireDeliveryVertical></RequireBusinessOwner> },
+          // Alias corto (redirect Uber OAuth / bookmarks) → ruta real de Integraciones
+          { path: 'delivery-integrations', element: <Navigate to="/saas/vertical/delivery/integraciones" replace /> },
           { path: 'vertical/delivery/informes', element: <RequireBusinessOwner><RequireDeliveryVertical><DeliveryReports /></RequireDeliveryVertical></RequireBusinessOwner> },
           { path: 'delivery-crm', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
           { path: 'delivery-crm/worker', element: <Navigate to={DELIVERY_CRM_REDIRECT_PATH} replace /> },
