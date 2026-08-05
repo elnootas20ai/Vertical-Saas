@@ -90,9 +90,11 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).toContain('Pago: Efectivo');
     expect(text).toContain('Pizza Margarita');
     expect(text).toContain('1x Pizza Margarita');
-    expect(text).toContain('EXTRA DE queso');
+    expect(text).toContain('EXTRA queso');
     expect(text).not.toContain('DE MAS');
-    expect(text).toContain('DE MENOS');
+    expect(text).not.toContain('DE MENOS');
+    expect(text).not.toContain('EXTRA DE');
+    expect(text).toContain('SIN cebolla');
     expect(text).toContain('cebolla');
     expect(text).toContain('Bien hecha');
     expect(text).toContain('Sin timbre');

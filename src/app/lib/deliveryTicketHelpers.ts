@@ -6,13 +6,24 @@ import type {
 } from './deliveryTicketTypes';
 import type { DeliveryOrderItem } from './deliveryApi';
 
-/** Etiqueta cocina/ticket al quitar un ingrediente (nunca “menos”). */
+/** Etiqueta cocina/ticket al quitar un ingrediente (nunca “menos” / “DE MENOS”). */
 export function formatRemovedIngredientLabel(name: string): string {
   const n = String(name || '').trim();
   if (!n) return '';
   // Evitar "SIN SIN cebolla" si ya venía con prefijo.
   const bare = n.replace(/^(?:-\s*)?(?:sin\s+)/i, '').trim() || n;
   return `SIN ${bare}`;
+}
+
+/** Etiqueta cocina al añadir un extra de pago (nunca “DE MÁS” / “DE MAS”). */
+export function formatKitchenExtraLabel(name: string): string {
+  const n = String(name || '').trim();
+  if (!n) return '';
+  const bare =
+    n
+      .replace(/^(?:\+\s*)?(?:extra\s+(?:de\s+)?|de\s+m[aá]s\s+)/i, '')
+      .trim() || n;
+  return `EXTRA ${bare}`;
 }
 
 /** Parsea líneas guardadas: "SIN X", "- sin X", "- X". */

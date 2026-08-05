@@ -1,9 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatKitchenExtraLabel,
+  formatRemovedIngredientLabel,
   orderItemCustomizationDetail,
   orderItemCustomizationParts,
 } from '../src/app/lib/deliveryTicketHelpers.js';
 import { buildTicketDocument } from '../src/app/lib/vertialPrint/ticketDocument.js';
+
+describe('etiquetas cocina SIN / EXTRA', () => {
+  it('extra nunca dice DE MÁS / DE MAS', () => {
+    expect(formatKitchenExtraLabel('queso')).toBe('EXTRA queso');
+    expect(formatKitchenExtraLabel('Extra queso')).toBe('EXTRA queso');
+    expect(formatKitchenExtraLabel('DE MÁS bacon')).toBe('EXTRA bacon');
+    expect(formatKitchenExtraLabel('de mas piña')).toBe('EXTRA piña');
+    expect(formatKitchenExtraLabel('+ DE MAS mozzarella')).toBe('EXTRA mozzarella');
+  });
+
+  it('quitado es SIN, no menos', () => {
+    expect(formatRemovedIngredientLabel('cebolla')).toBe('SIN cebolla');
+    expect(formatRemovedIngredientLabel('sin tomate')).toBe('SIN tomate');
+  });
+});
 
 describe('orderItemCustomizationDetail — sin duplicar SIN', () => {
   it('no duplica cuando extras y ingredients llevan el mismo “sin”', () => {

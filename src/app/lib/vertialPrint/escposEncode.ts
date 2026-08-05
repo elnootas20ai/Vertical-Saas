@@ -1,3 +1,7 @@
+import {
+  formatKitchenExtraLabel,
+  formatRemovedIngredientLabel,
+} from '../deliveryTicketHelpers';
 import type { TicketDocument } from './ticketDocument';
 
 const ESC = 0x1b;
@@ -119,7 +123,7 @@ function pushLineDetail(
     chunks.push(textLine(`  + ${name}`, width));
   }
   for (const name of line.removed || []) {
-    chunks.push(textLine(`  SIN ${name}`, width));
+    chunks.push(textLine(`  ${formatRemovedIngredientLabel(name)}`, width));
   }
   if (line.note) {
     chunks.push(textLine(`  NOTA: ${line.note}`, width));
@@ -141,11 +145,6 @@ function setPrintColor(red: boolean): Uint8Array {
  * `xN Nombre` negrita + doble ancho/alto (un poco más grande).
  * Composición / extras / notas en normal.
  */
-function kitchenExtraLabel(name: string): string {
-  const cleaned = String(name || '').replace(/^extra\s+/i, '').trim() || String(name || '').trim();
-  return `EXTRA DE ${cleaned}`;
-}
-
 function pushKitchenLineDetail(
   chunks: Uint8Array[],
   line: TicketDocument['lines'][number],
@@ -163,12 +162,12 @@ function pushKitchenLineDetail(
   }
   for (const name of line.added || []) {
     chunks.push(setPrintColor(true));
-    chunks.push(textLine(`  + ${kitchenExtraLabel(name)}`, widthFor(paperWidthMm)));
+    chunks.push(textLine(`  ${formatKitchenExtraLabel(name)}`, widthFor(paperWidthMm)));
     chunks.push(setPrintColor(false));
   }
   for (const name of line.removed || []) {
     chunks.push(setPrintColor(true));
-    chunks.push(textLine(`  - DE MENOS ${name}`, widthFor(paperWidthMm)));
+    chunks.push(textLine(`  ${formatRemovedIngredientLabel(name)}`, widthFor(paperWidthMm)));
     chunks.push(setPrintColor(false));
   }
   if (line.note) {
@@ -446,7 +445,7 @@ export function encodeTicketEscpos(
         chunks.push(textLine(`  + ${name}`, width));
       }
       for (const name of line.removed || []) {
-        chunks.push(textLine(`  SIN ${name}`, width));
+        chunks.push(textLine(`  ${formatRemovedIngredientLabel(name)}`, width));
       }
       if (line.note) {
         chunks.push(textLine(`  NOTA: ${line.note}`, width));

@@ -1,3 +1,7 @@
+import {
+  formatKitchenExtraLabel,
+  formatRemovedIngredientLabel,
+} from '../deliveryTicketHelpers';
 import type { TicketDocument } from './ticketDocument';
 import {
   sanitizeEscposText,
@@ -97,16 +101,11 @@ function pushLineDetail(
   setTextSize(builder, 1, 1);
   for (const name of item.composition || []) line(builder, `  > ${name}`, width);
   for (const name of item.added || []) line(builder, `  + ${name}`, width);
-  for (const name of item.removed || []) line(builder, `  SIN ${name}`, width);
+  for (const name of item.removed || []) line(builder, `  ${formatRemovedIngredientLabel(name)}`, width);
   if (item.note) line(builder, `  NOTA: ${item.note}`, width);
 }
 
-/** Comanda cocina: `xN Nombre` más grande; extras como EXTRA DE. */
-function kitchenExtraLabel(name: string): string {
-  const cleaned = String(name || '').replace(/^extra\s+/i, '').trim() || String(name || '').trim();
-  return `EXTRA DE ${cleaned}`;
-}
-
+/** Comanda cocina: `xN Nombre` más grande; EXTRA / SIN. */
 function pushKitchenLineDetail(
   builder: EposBuilder,
   item: TicketDocument['lines'][number],
@@ -122,12 +121,12 @@ function pushKitchenLineDetail(
   }
   for (const name of item.added || []) {
     if (builder.addTextStyle) builder.addTextStyle(false, false, true);
-    line(builder, `  + ${kitchenExtraLabel(name)}`, cols);
+    line(builder, `  ${formatKitchenExtraLabel(name)}`, cols);
     if (builder.addTextStyle) builder.addTextStyle(false, false, false);
   }
   for (const name of item.removed || []) {
     if (builder.addTextStyle) builder.addTextStyle(true, false, false);
-    line(builder, `  - DE MENOS ${name}`, cols);
+    line(builder, `  ${formatRemovedIngredientLabel(name)}`, cols);
     if (builder.addTextStyle) builder.addTextStyle(false, false, false);
   }
   if (item.note) {
@@ -300,7 +299,7 @@ export function buildEposTicket(
       setTextSize(builder, 1, 1);
       for (const name of item.composition || []) line(builder, `  > ${name}`, width);
       for (const name of item.added || []) line(builder, `  + ${name}`, width);
-      for (const name of item.removed || []) line(builder, `  SIN ${name}`, width);
+      for (const name of item.removed || []) line(builder, `  ${formatRemovedIngredientLabel(name)}`, width);
       if (item.note) line(builder, `  NOTA: ${item.note}`, width);
     }
     sep(builder, width);

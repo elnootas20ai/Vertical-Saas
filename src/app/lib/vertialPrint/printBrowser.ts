@@ -1,3 +1,7 @@
+import {
+  formatKitchenExtraLabel,
+  formatRemovedIngredientLabel,
+} from '../deliveryTicketHelpers';
 import type { DeliveryTicketPrintOptions } from '../deliveryTicketTypes';
 import type { TicketDocument } from './ticketDocument';
 
@@ -44,11 +48,6 @@ table{width:100%;border-collapse:collapse}.b{font-weight:bold}
 @media print{body{margin:0}}
 `;
 
-function kitchenExtraLabel(name: string): string {
-  const cleaned = String(name || '').replace(/^extra\s+/i, '').trim() || String(name || '').trim();
-  return `EXTRA DE ${cleaned}`;
-}
-
 function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = false): string {
   const bits: string[] = [];
   if (line.composition?.length) {
@@ -64,7 +63,7 @@ function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = fa
     for (const name of line.added) {
       bits.push(
         kitchen
-          ? `<div class="add">+ ${escapeHtml(kitchenExtraLabel(name))}</div>`
+          ? `<div class="add">${escapeHtml(formatKitchenExtraLabel(name))}</div>`
           : `<div class="add">+ ${escapeHtml(name)}</div>`,
       );
     }
@@ -73,8 +72,8 @@ function buildLineDetailHtml(line: TicketDocument['lines'][number], kitchen = fa
     for (const name of line.removed) {
       bits.push(
         kitchen
-          ? `<div class="rem">- DE MENOS ${escapeHtml(name)}</div>`
-          : `<div class="rem">SIN ${escapeHtml(name)}</div>`,
+          ? `<div class="rem">${escapeHtml(formatRemovedIngredientLabel(name))}</div>`
+          : `<div class="rem">${escapeHtml(formatRemovedIngredientLabel(name))}</div>`,
       );
     }
   }
