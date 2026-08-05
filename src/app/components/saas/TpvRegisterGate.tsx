@@ -71,13 +71,16 @@ import {
   buildShiftAppsBrandTotals,
   buildShiftBrandRevenue,
 } from '../../lib/registerShiftBrandBilling';
-import { listBrandsRequest } from '../../lib/brandApi';
-import { buildBrandLabelsMap, brandIdAliases, displayBrandName } from '../../lib/brandLabels';
+import { listBrandsRequest, type Brand } from '../../lib/brandApi';
+import { buildBrandLabelsMap, brandIdAliases } from '../../lib/brandLabels';
 
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import {
+  closingSlotsFromBillingSheets,
+  resolveBillingSheetsForClosing,
   splitRulesFromBillingConfig,
   type BrandBillingSplitRules,
+  type ClosingBillingBrandSlot,
 } from '../../lib/brandBillingConfig';
 import {
   filterStoresForWorkerAssignment,
@@ -1477,8 +1480,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const bodyScrollRef = useRef<HTMLDivElement | null>(null);
   const [browserOnline, setBrowserOnline] = useState(() => isBrowserOnline());
   const [brandLabels, setBrandLabels] = useState<Record<string, string>>({});
-  /** Marcas creadas del negocio (nombres reales, p. ej. Pau Royo). */
-  const [businessBrands, setBusinessBrands] = useState<Array<{ brandId: string; name: string; active: boolean }>>([]);
+  /** Catálogo de marcas (para hojas de Facturación / 2ª caja). */
+  const [catalogBrands, setCatalogBrands] = useState<Brand[]>([]);
+  /** Hojas de Facturación resueltas (tacos pueden ir con Black Burger). */
+  const [billingSheetsResolved, setBillingSheetsResolved] = useState<
+    ReturnType<typeof resolveBillingSheetsForClosing>
+  >([]);
   const [billingRules, setBillingRules] = useState<BrandBillingSplitRules>(() =>
     splitRulesFromBillingConfig(null),
   );
@@ -1671,28 +1678,19 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     ])
       .then(([brands, billingConfig]) => {
         if (cancelled) return;
-        setBrandLabels(buildBrandLabelsMap(brands));
-        setBusinessBrands(
-          (brands || [])
-            .filter((b) => b && !b.deletedAt)
-            .map((b) => {
-              // Preferir `id` de negocio (el que va en pedidos); `_id` Couch como respaldo.
-              const brandId = String(b.id || b._id || '').trim();
-              const name = String(b.name || '').trim() || brandId;
-              return {
-                brandId,
-                name,
-                active: b.active !== false,
-              };
-            })
-            .filter((b) => b.brandId && b.name),
+        const list = (brands || []).filter((b) => b && !b.deletedAt);
+        setBrandLabels(buildBrandLabelsMap(list));
+        setCatalogBrands(list);
+        setBillingSheetsResolved(
+          resolveBillingSheetsForClosing(billingConfig?.sheets, list),
         );
         setBillingRules(splitRulesFromBillingConfig(billingConfig));
       })
       .catch(() => {
         if (!cancelled) {
           setBrandLabels({});
-          setBusinessBrands([]);
+          setCatalogBrands([]);
+          setBillingSheetsResolved([]);
           setBillingRules(splitRulesFromBillingConfig(null));
         }
       });
@@ -1712,106 +1710,45 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   );
 
   /**
-   * Todas las marcas creadas del negocio para el cierre (nombres reales).
-   * Si hay 1, 2, 3, 4 o 5 → salen todas. Empareja IDs con alias (brand- / brand:).
+   * 2ª caja = hojas de Facturación (no marcas sueltas).
+   * Ejemplo Pau: pizza + Black Burger + tacos → 2 slots; tacos bajo el nombre de Black Burger.
    */
-  const closingBrands = useMemo(() => {
-    type Cand = { brandId: string; name: string; score: number; active: boolean };
-    const byId = new Map<string, Cand>();
-    const aliasToCanonical = new Map<string, string>();
+  const closingBrands = useMemo((): ClosingBillingBrandSlot[] => {
+    const fromSheets = closingSlotsFromBillingSheets(billingSheetsResolved, catalogBrands);
+    if (fromSheets.length > 0) return fromSheets;
 
-    const registerAliases = (canonicalId: string) => {
-      for (const a of brandIdAliases(canonicalId)) {
-        aliasToCanonical.set(a, canonicalId);
-      }
-    };
-
-    const resolveCanonical = (brandId: string): string => {
-      const id = String(brandId || '').trim();
-      if (!id) return '';
-      return aliasToCanonical.get(id) || id;
-    };
-
-    const upsert = (brandId: string, name: string, score: number, active = true) => {
-      const raw = String(brandId || '').trim();
-      if (!raw) return;
-      const id = resolveCanonical(raw) || raw;
-      registerAliases(id);
-      for (const a of brandIdAliases(raw)) aliasToCanonical.set(a, id);
-      const label = String(name || '').trim() || displayBrandName(id, brandLabels) || id;
-      const prev = byId.get(id);
-      if (!prev) {
-        byId.set(id, { brandId: id, name: label, score, active });
-        return;
-      }
-      byId.set(id, {
-        brandId: id,
-        name: label !== id && label ? label : prev.name,
-        score: Math.max(prev.score, score),
-        active: prev.active || active,
-      });
-    };
-
-    // 1) Catálogo del negocio
-    for (const b of businessBrands) {
-      upsert(b.brandId, b.name, b.active ? 10 : 5, b.active);
+    // Fallback si aún no hay hojas: 1 entrada por marca activa del catálogo.
+    const byName = new Map<string, ClosingBillingBrandSlot>();
+    for (const b of catalogBrands) {
+      if (b.active === false) continue;
+      const brandId = String(b.id || b._id || '').trim();
+      const name = String(b.name || '').trim() || brandId;
+      if (!brandId || !name) continue;
+      const key = name.toLowerCase();
+      if (byName.has(key)) continue;
+      byName.set(key, { brandId, name, memberBrandIds: [brandId] });
     }
-
-    // 2) Con ventas en el turno
-    for (const row of brandBilling.rows) {
-      const canon = resolveCanonical(row.brandId) || row.brandId;
-      const fromBiz = businessBrands.find(
-        (b) => resolveCanonical(b.brandId) === canon || brandIdAliases(b.brandId).includes(row.brandId),
-      );
-      upsert(
-        row.brandId,
-        fromBiz?.name || displayBrandName(row.brandId, brandLabels) || String(row.name || '').trim() || row.brandId,
-        1000 + (Number(row.revenue) || 0),
-        true,
-      );
-    }
-    for (const row of appsBrandBilling.rows) {
-      const canon = resolveCanonical(row.brandId) || row.brandId;
-      const fromBiz = businessBrands.find(
-        (b) => resolveCanonical(b.brandId) === canon || brandIdAliases(b.brandId).includes(row.brandId),
-      );
-      upsert(
-        row.brandId,
-        fromBiz?.name || displayBrandName(row.brandId, brandLabels) || String(row.name || '').trim() || row.brandId,
-        1000 + (Number(row.revenue) || 0),
-        true,
-      );
-    }
-
-    // 3) Fallback labels si el catálogo aún no cargó
-    if (byId.size === 0) {
-      const byName = new Map<string, { brandId: string; name: string }>();
-      for (const [id, name] of Object.entries(brandLabels)) {
-        const n = String(name || '').trim();
-        if (!n) continue;
-        const key = n.toLowerCase();
-        if (byName.has(key)) continue;
-        byName.set(key, { brandId: String(id || '').trim(), name: n });
-      }
+    if (byName.size > 0) {
       return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
     }
+    return Object.entries(brandLabels)
+      .filter(([, name]) => String(name || '').trim())
+      .map(([id, name]) => ({
+        brandId: id,
+        name: String(name).trim(),
+        memberBrandIds: [id],
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }, [billingSheetsResolved, catalogBrands, brandLabels]);
 
-    const ranked = [...byId.values()].sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (a.active !== b.active) return a.active ? -1 : 1;
-      return a.name.localeCompare(b.name, 'es');
-    });
-
-    const seenNames = new Set<string>();
-    const out: Array<{ brandId: string; name: string }> = [];
-    for (const r of ranked) {
-      const key = r.name.toLowerCase();
-      if (seenNames.has(key)) continue;
-      seenNames.add(key);
-      out.push({ brandId: r.brandId, name: r.name });
+  const closingSlotAliasSet = useCallback((slot: ClosingBillingBrandSlot) => {
+    const ids = slot.memberBrandIds?.length ? slot.memberBrandIds : [slot.brandId];
+    const aliases = new Set<string>();
+    for (const id of ids) {
+      for (const a of brandIdAliases(id)) aliases.add(a);
     }
-    return out;
-  }, [businessBrands, brandBilling.rows, appsBrandBilling.rows, brandLabels]);
+    return aliases;
+  }, []);
 
   return (
     <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-stretch sm:items-center justify-center p-0 sm:p-3`}>
@@ -2386,13 +2323,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       <div className="space-y-1 pt-0.5 border-t border-stone-100 dark:border-stone-800">
                         <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Por marca</p>
                         {closingBrands.map((slot) => {
-                          const aliases = new Set(brandIdAliases(slot.brandId));
-                          const row = brandBilling.rows.find(
+                          const aliases = closingSlotAliasSet(slot);
+                          const matching = brandBilling.rows.filter(
                             (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
                           );
-                          const revenue = row?.revenue ?? 0;
-                          const cash = row?.revenueEfectivo ?? 0;
-                          const card = row?.revenueTarjeta ?? 0;
+                          const revenue = matching.reduce((s, r) => s + (Number(r.revenue) || 0), 0);
+                          const cash = matching.reduce((s, r) => s + (Number(r.revenueEfectivo) || 0), 0);
+                          const card = matching.reduce((s, r) => s + (Number(r.revenueTarjeta) || 0), 0);
                           return (
                             <div key={slot.brandId} className="flex items-center justify-between gap-2 text-[11px]">
                               <span className="font-semibold text-stone-700 dark:text-stone-200 truncate">
@@ -2456,7 +2393,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                           Por marca · 2ª caja
                         </p>
                         {closingBrands.map((slot) => {
-                          const aliases = new Set(brandIdAliases(slot.brandId));
+                          const aliases = closingSlotAliasSet(slot);
                           let manualSum = 0;
                           let hasManual = false;
                           const byCh = appsSnapshot?.brandTotalsByChannel;
@@ -2470,10 +2407,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                               }
                             }
                           }
-                          const row = appsBrandBilling.rows.find(
+                          const matching = appsBrandBilling.rows.filter(
                             (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
                           );
-                          const revenue = hasManual ? Math.round(manualSum * 100) / 100 : (row?.revenue ?? 0);
+                          const systemSum = matching.reduce((s, r) => s + (Number(r.revenue) || 0), 0);
+                          const revenue = hasManual ? Math.round(manualSum * 100) / 100 : systemSum;
                           return (
                             <div key={slot.brandId} className="flex justify-between gap-2 text-[11px]">
                               <span className="truncate text-stone-600 dark:text-stone-300">

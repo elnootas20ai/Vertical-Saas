@@ -586,3 +586,93 @@ export function allocateSharedUnitsByPresence(
 export function isBrandBillingUnlocked(brands: Brand[]): boolean {
   return brandsForBilling(brands).length >= 2;
 }
+
+/**
+ * Slot de 2ª caja / cierre: 1 por hoja de Facturación (no 1 por marca suelta).
+ * Si tacos facturan con Black Burger → un solo input con el nombre de la marca que manda.
+ */
+export type ClosingBillingBrandSlot = {
+  /** Marca ancla (la que predomina en la hoja). */
+  brandId: string;
+  /** Nombre visible (marca ancla). */
+  name: string;
+  /** Todas las marcas de la hoja (p. ej. burger + taco). */
+  memberBrandIds: string[];
+};
+
+/** Hojas listas para cierre/Excel: config guardada o sugerencia Uriel (tacos → burger). */
+export function resolveBillingSheetsForClosing(
+  sheets: BrandBillingSheet[] | null | undefined,
+  brands: Brand[],
+): BrandBillingSheet[] {
+  if (!sheets || sheets.length === 0) {
+    return suggestBillingSheetsFromBrands(brands);
+  }
+  return syncBillingSheetsWithBrands(sheets, brands);
+}
+
+/**
+ * Marca ancla de una hoja: burger si hay, si no pizza, si no la primera de brandIds.
+ * El nombre de la ancla es el que se muestra en «Total [marca]».
+ */
+export function predominantBrandIdForSheet(
+  sheet: BrandBillingSheet,
+  brands: Brand[] = [],
+): string {
+  const memberIds = (sheet.brandIds || []).map((id) => String(id || '').trim()).filter(Boolean);
+  if (memberIds.length === 0) return '';
+  if (memberIds.length === 1) return memberIds[0];
+
+  const byId = brandsByIdMap(brands);
+  const preferUnit: FoodUnitKey | null = sheetHasUnit(sheet, 'burger')
+    ? 'burger'
+    : sheetHasUnit(sheet, 'pizza')
+      ? 'pizza'
+      : sheetHasUnit(sheet, 'taco')
+        ? 'taco'
+        : null;
+
+  if (preferUnit) {
+    const match = memberIds.find((id) => {
+      const brand = byId.get(id);
+      return brand ? resolveBrandFoodUnitKey(brand) === preferUnit : false;
+    });
+    if (match) return match;
+  }
+  return memberIds[0];
+}
+
+/** Slots de 2ª caja desde hojas de Facturación (Pau: 3 marcas → 2 inputs). */
+export function closingSlotsFromBillingSheets(
+  sheets: BrandBillingSheet[],
+  brands: Brand[],
+): ClosingBillingBrandSlot[] {
+  const byId = brandsByIdMap(brands);
+  const out: ClosingBillingBrandSlot[] = [];
+  const seenHosts = new Set<string>();
+
+  for (const sheet of sheets || []) {
+    const memberBrandIds = (sheet.brandIds || [])
+      .map((id) => String(id || '').trim())
+      .filter(Boolean);
+    if (memberBrandIds.length === 0) continue;
+
+    const hostId = predominantBrandIdForSheet(sheet, brands) || memberBrandIds[0];
+    if (!hostId || seenHosts.has(hostId)) continue;
+    seenHosts.add(hostId);
+
+    const hostBrand = byId.get(hostId);
+    const name =
+      String(hostBrand?.name || '').trim()
+      || String(sheet.label || '').trim()
+      || hostId;
+
+    out.push({
+      brandId: hostId,
+      name,
+      memberBrandIds,
+    });
+  }
+
+  return out;
+}

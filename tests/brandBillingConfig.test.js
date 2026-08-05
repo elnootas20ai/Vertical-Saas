@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   allocateSharedUnitsByPresence,
   assignBrandToSheetExclusive,
+  closingSlotsFromBillingSheets,
   coalesceTacoIntoBurgerSheets,
   enforceExclusiveBrandAssignment,
   isBrandBillingUnlocked,
+  predominantBrandIdForSheet,
+  resolveBillingSheetsForClosing,
   resolveBrandFoodUnitKey,
   sheetMoneyShares,
   suggestBillingSheetsFromBrands,
@@ -192,5 +195,44 @@ describe('enforceExclusiveBrandAssignment', () => {
     const moved = assignBrandToSheetExclusive(clean, 's2', 'b1', brands);
     expect(moved[0].brandIds).toEqual(['m1']);
     expect(moved[1].brandIds).toEqual(['b1']);
+  });
+});
+
+describe('closingSlotsFromBillingSheets / 2ª caja', () => {
+  const pauBrands = [
+    {
+      _id: 'm1', id: 'm1', type: 'brand', business_id: 'b', user_id: 'u',
+      name: 'Modomio', description: '', logo: '', website: '', deliveryLineKind: 'pizza',
+      active: true, createdAt: '', updatedAt: '',
+    },
+    {
+      _id: 'b1', id: 'b1', type: 'brand', business_id: 'b', user_id: 'u',
+      name: 'Black Burger', description: '', logo: '', website: '', deliveryLineKind: 'burger_fastfood',
+      active: true, createdAt: '', updatedAt: '',
+    },
+    {
+      _id: 't1', id: 't1', type: 'brand', business_id: 'b', user_id: 'u',
+      name: 'Tacos Uriel', description: '', logo: '', website: '', deliveryLineKind: 'tacos_mexican',
+      active: true, createdAt: '', updatedAt: '',
+    },
+  ];
+
+  it('3 marcas con tacos en Black Burger → 2 slots; nombre = marca que manda', () => {
+    const sheets = resolveBillingSheetsForClosing(null, pauBrands);
+    const slots = closingSlotsFromBillingSheets(sheets, pauBrands);
+    expect(slots).toHaveLength(2);
+    expect(slots.map((s) => s.name)).toEqual(['Modomio', 'Black Burger']);
+    expect(slots[1].brandId).toBe('b1');
+    expect(slots[1].memberBrandIds).toEqual(['b1', 't1']);
+    expect(predominantBrandIdForSheet(sheets[1], pauBrands)).toBe('b1');
+  });
+
+  it('1 marca → 1 slot', () => {
+    const one = [pauBrands[0]];
+    const sheets = resolveBillingSheetsForClosing(null, one);
+    const slots = closingSlotsFromBillingSheets(sheets, one);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].name).toBe('Modomio');
+    expect(slots[0].memberBrandIds).toEqual(['m1']);
   });
 });

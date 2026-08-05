@@ -78,8 +78,11 @@ interface AggregatorClosingEditorProps {
   /** Totales apps por marca (Facturación), p. ej. Modomio / Blackburger. */
   appsBrandRows?: ShiftAppsBrandTotalRow[];
   appsBrandUnbranded?: number;
-  /** Marcas del negocio para inputs «Total [marca]» por app (2ª caja). */
-  closingBrands?: Array<{ brandId: string; name: string }>;
+  /**
+   * Slots de 2ª caja = hojas de Facturación (marca que manda).
+   * Si tacos facturan con Black Burger → un solo «Total Black Burger».
+   */
+  closingBrands?: Array<{ brandId: string; name: string; memberBrandIds?: string[] }>;
   /** Cierre por pasos: todas las apps visibles en una sola vista compacta. */
   dense?: boolean;
   /** Ocupa altura del padre sin scroll interno. */
@@ -289,7 +292,7 @@ export function AggregatorClosingEditor({
     () => closingBrands.map((b) => b.brandId).filter(Boolean),
     [closingBrands],
   );
-  /** Todas las marcas del cierre, con nombre real (Total Modomio, Total Blackburger…). */
+  /** Todas las hojas de Facturación del cierre (Total Modomio, Total Black Burger…). */
   const marcaSlots = useMemo(() => {
     return closingBrands
       .filter((b) => b.brandId)
