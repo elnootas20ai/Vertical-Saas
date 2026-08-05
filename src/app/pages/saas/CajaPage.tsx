@@ -700,6 +700,10 @@ export function CajaPage() {
     () => [...scopedPdvIds].sort().join('|'),
     [scopedPdvIds],
   );
+  const scopedPdvKeyRef = useRef(scopedPdvKey);
+  useEffect(() => {
+    scopedPdvKeyRef.current = scopedPdvKey;
+  }, [scopedPdvKey]);
 
   const loadData = useCallback(async (options?: { silent?: boolean }) => {
     if (!dataUserId) return;
@@ -718,7 +722,8 @@ export function CajaPage() {
       const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(dataUserId, {
         businessId,
       });
-      const pdvIds = scopedPdvKey ? scopedPdvKey.split('|') : [];
+      // Filtrado PDV en cliente (scopedPdvKey no debe re-disparar este fetch).
+      const pdvIds = scopedPdvKeyRef.current ? scopedPdvKeyRef.current.split('|') : [];
       const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values())
         .filter((s) => tpvSessionBelongsToBusiness(s, businessId, pdvIds));
       setSessions(unique);
@@ -730,7 +735,7 @@ export function CajaPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dataUserId, businessId, scopedPdvKey]);
+  }, [dataUserId, businessId]);
 
   // Al cambiar de empresa, forzar recarga completa (mismo dueño ≠ mismos datos).
   useEffect(() => {
@@ -742,6 +747,16 @@ export function CajaPage() {
   }, [businessId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Cuando llegan los PDVs del scope, refiltrar sin volver a pedir bootstrap al servidor.
+  useEffect(() => {
+    if (!businessId || !hasLoadedOnceRef.current) return;
+    setSessions((prev) => {
+      const pdvIds = scopedPdvKey ? scopedPdvKey.split('|') : [];
+      if (!pdvIds.length) return prev;
+      return prev.filter((s) => tpvSessionBelongsToBusiness(s, businessId, pdvIds));
+    });
+  }, [scopedPdvKey, businessId]);
 
   const validateParam = searchParams.get('validate');
   const viewParam = searchParams.get('view');
@@ -783,7 +798,7 @@ export function CajaPage() {
   }, [loading, sessions, deepLinkSessionId, validateParam, setSearchParams]);
 
   useEffect(() => {
-    const id = window.setInterval(() => { void loadData({ silent: true }); }, 30000);
+    const id = window.setInterval(() => { void loadData({ silent: true }); }, 60_000);
     return () => window.clearInterval(id);
   }, [loadData]);
 

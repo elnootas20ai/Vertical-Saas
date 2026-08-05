@@ -2997,13 +2997,16 @@ export async function listTpvRegisterSessions(req, res) {
         sessions = filterTpvRegisterSessionsForBusiness(sessions, businessFilter, scopedPdvIds);
       }
     }
-    return res.json({ ok: true, sessions: sessions.map(sanitizeTpvRegisterSession) });
+    return res.json({
+      ok: true,
+      sessions: sessions.map((s) => sanitizeTpvRegisterSession(s, { slimClosed: true })),
+    });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al cargar sesiones de caja TPV' });
   }
 }
 
-/** Caja: una lectura al delivery DB (TPV + reparto). */
+/** Caja: TPV + reparto (Mango por type+user_id; sin _all_docs). */
 export async function listCajaBootstrap(req, res) {
   try {
     const { userId } = req.params;
@@ -3049,7 +3052,7 @@ export async function listCajaBootstrap(req, res) {
 
     return res.json({
       ok: true,
-      sessions: tpvSessions.map(sanitizeTpvRegisterSession),
+      sessions: tpvSessions.map((s) => sanitizeTpvRegisterSession(s, { slimClosed: true })),
       driverSessions: driverSessions.map(sanitizeDriverCashSession),
     });
   } catch (error) {
@@ -3082,7 +3085,7 @@ export async function createTpvRegisterSession(req, res) {
     const businessId = scope.businessId;
     const scopedPdvIds = scope.scopedPdvIds;
 
-    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    let allSessions = await listTpvRegisterSessionsByUser(req, userId);
 
     // Alias tienda: PDV id y workCenterId (cajas viejas a veces guardan el WC).
     const scopedPdvsList = businessId
@@ -3120,6 +3123,8 @@ export async function createTpvRegisterSession(req, res) {
           account.fullName || 'Sistema',
         );
         await putDocument(req, db, closedDoc._id, closedDoc);
+        // Actualizar en memoria: evita un 2º listTpvRegisterSessionsByUser (muy caro).
+        allSessions = (allSessions || []).map((s) => (s._id === closedDoc._id ? closedDoc : s));
         triggerReactiveAlert(userId, 'cash_session_changed', {
           sessionId: closedDoc._id,
           sessionType: 'tpv',
@@ -3128,8 +3133,7 @@ export async function createTpvRegisterSession(req, res) {
       }
     }
 
-    const refreshed = await listTpvRegisterSessionsByUser(req, userId);
-    const openSameStore = (refreshed || [])
+    const openSameStore = (allSessions || [])
       .filter(
         (s) =>
           s.status === 'open' &&

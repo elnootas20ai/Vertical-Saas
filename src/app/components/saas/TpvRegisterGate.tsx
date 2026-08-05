@@ -4884,8 +4884,9 @@ export function TpvRegisterGate({
       setOpeningRecoverHold(true);
       return;
     }
+    // Hold mínimo: las sesiones ya están; no bloquear la UI medio segundo de más.
     setOpeningRecoverHold(true);
-    const timer = window.setTimeout(() => setOpeningRecoverHold(false), 450);
+    const timer = window.setTimeout(() => setOpeningRecoverHold(false), 80);
     return () => window.clearTimeout(timer);
   }, [loading, activeSession?._id, activeSession?.status]);
 

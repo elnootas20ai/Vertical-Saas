@@ -6666,21 +6666,47 @@ export function sanitizeDriverCashSession(doc) {
 }
 
 export async function listDriverCashSessionsByUser(req, userId) {
-  const docs = await getDeliveryDatabaseDocumentsInflight(req);
+  const uid = String(userId || '').trim();
+  const db = getDeliveryDbName();
+  await ensureDatabase(req, db);
+  await ensureDeliveryTypeUserIndex(req, db);
+
+  let docs;
+  try {
+    docs = uid
+      ? await findDocuments(
+          req,
+          db,
+          { type: 'driver_cash_session', user_id: uid },
+          { pageSize: 500, maxDocs: 5_000 },
+        )
+      : await findDocuments(
+          req,
+          db,
+          { type: 'driver_cash_session' },
+          { pageSize: 500, maxDocs: 5_000 },
+        );
+  } catch {
+    const all = await getDeliveryDatabaseDocumentsInflight(req);
+    docs = all.filter(
+      (doc) => doc?.type === 'driver_cash_session' && (!uid || doc?.user_id === uid),
+    );
+  }
+
   return docs
-    .filter((doc) => doc?.type === 'driver_cash_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter(
+      (doc) =>
+        doc?.type === 'driver_cash_session' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+    )
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
-/** Una sola pasada al delivery DB para la pantalla Caja (TPV + reparto). */
+/** Caja CEO: TPV + reparto por Mango (sin _all_docs del delivery DB entero). */
 export async function listCajaDataByUser(req, userId) {
-  const docs = await getDeliveryDatabaseDocumentsInflight(req);
-  const tpvSessions = docs
-    .filter((doc) => doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  const driverSessions = docs
-    .filter((doc) => doc?.type === 'driver_cash_session' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
-    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const [tpvSessions, driverSessions] = await Promise.all([
+    listTpvRegisterSessionsByUser(req, userId),
+    listDriverCashSessionsByUser(req, userId),
+  ]);
   return { tpvSessions, driverSessions };
 }
 
@@ -7436,8 +7462,18 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
   };
 }
 
-export function sanitizeTpvRegisterSession(doc) {
+/**
+ * @param {object} doc
+ * @param {{ slimClosed?: boolean }} [opts] slimClosed: en listados, recorta txs de cajas cerradas (payload enorme).
+ */
+export function sanitizeTpvRegisterSession(doc, opts = {}) {
   if (!doc) return null;
+  const status = normalizeTpvRegisterStatus(doc.status);
+  let transactions = Array.isArray(doc.transactions) ? doc.transactions : [];
+  // Listados CEO/TPV: cajas cerradas no necesitan el historial completo en el JSON inicial.
+  if (opts.slimClosed && status === 'closed' && transactions.length > 40) {
+    transactions = transactions.slice(-40);
+  }
   return {
     _id: doc._id,
     _rev: doc._rev,
@@ -7457,13 +7493,13 @@ export function sanitizeTpvRegisterSession(doc) {
     printerId: doc.printerId || '',
     printerName: doc.printerName || '',
 
-    status: normalizeTpvRegisterStatus(doc.status),
+    status,
     openedAt: doc.openedAt || '',
     openedBy: doc.openedBy || '',
     openingCashCount: doc.openingCashCount || {},
     initialCashAmount: Number(doc.initialCashAmount || 0),
 
-    transactions: Array.isArray(doc.transactions) ? doc.transactions : [],
+    transactions,
     cashCounts: Array.isArray(doc.cashCounts) ? doc.cashCounts : [],
 
     closedAt: doc.closedAt || '',
