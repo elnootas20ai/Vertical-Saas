@@ -1,32 +1,33 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Plug, Save, Loader2, Eye, EyeOff, ToggleLeft, ToggleRight, ExternalLink, Copy, Check, Link2,
+  Plug, Save, Loader2, Eye, EyeOff, ToggleLeft, ToggleRight, ExternalLink, Copy, Check, Link2, Store,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { getApiBase } from '../../lib/apiBase';
-import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
 import {
   completeUberEatsOAuthRequest,
   getDeliveryIntegrationsRequest,
   getUberEatsOAuthConfigRequest,
+  listUberEatsStoresRequest,
   saveDeliveryIntegrationsRequest,
+  selectUberEatsStoreRequest,
   startUberEatsOAuthRequest,
   type DeliveryIntegrations,
   type UberEatsOAuthConfig,
+  type UberEatsStoreOption,
 } from '../../lib/webApi';
 import { Layout } from '../../components/saas/Layout';
 import { DEFAULT_DELIVERY_INTEGRATIONS, AGGREGATOR_PLATFORMS } from '../../lib/deliveryIntegrationsUi';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
 
+const UBER_PRIMARY_WEBHOOK = 'https://vertialapp.com/api/delivery-webhooks/ubereats';
+
 export function DeliveryIntegrations() {
-  const { user } = useAuth();
   const { currentBusiness } = useBusiness();
   const businessId = currentBusiness?.business_id || '';
   const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
-  const isAdmin = isVertialSuperAdminEmail(user?.email);
   const [searchParams, setSearchParams] = useSearchParams();
   const oauthHandledRef = useRef<string | null>(null);
 
@@ -34,9 +35,12 @@ export function DeliveryIntegrations() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [connectingUber, setConnectingUber] = useState(false);
+  const [loadingStores, setLoadingStores] = useState(false);
+  const [selectingStoreId, setSelectingStoreId] = useState<string | null>(null);
   const [showTokens, setShowTokens] = useState<Record<string, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [uberCfg, setUberCfg] = useState<UberEatsOAuthConfig | null>(null);
+  const [uberStores, setUberStores] = useState<UberEatsStoreOption[]>([]);
 
   const apiBase = useMemo(() => getApiBase(), []);
   const buildWebhookUrl = useCallback(
@@ -44,14 +48,14 @@ export function DeliveryIntegrations() {
     [apiBase, businessId],
   );
 
-  const copyWebhookUrl = useCallback(async (key: string, url: string) => {
+  const copyText = useCallback(async (key: string, url: string, okMsg: string) => {
     try {
       await navigator.clipboard.writeText(url);
       setCopiedKey(key);
-      toast.success('URL copiada al portapapeles');
+      toast.success(okMsg);
       window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 2000);
     } catch {
-      toast.error('No se pudo copiar la URL');
+      toast.error('No se pudo copiar');
     }
   }, []);
 
@@ -68,15 +72,24 @@ export function DeliveryIntegrations() {
     }
   }, [businessId]);
 
+  const refreshUberStores = useCallback(async () => {
+    if (!businessId || !integrations.uber?.oauth) return;
+    setLoadingStores(true);
+    try {
+      const res = await listUberEatsStoresRequest(businessId);
+      setUberStores(Array.isArray(res.stores) ? res.stores : []);
+    } catch {
+      setUberStores([]);
+    } finally {
+      setLoadingStores(false);
+    }
+  }, [businessId, integrations.uber?.oauth]);
+
   useEffect(() => {
     void loadIntegrations();
   }, [loadIntegrations]);
 
   useEffect(() => {
-    if (!isAdmin) {
-      setUberCfg(null);
-      return;
-    }
     let cancelled = false;
     void (async () => {
       try {
@@ -97,11 +110,14 @@ export function DeliveryIntegrations() {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin]);
+  }, []);
 
-  // Callback OAuth: ?code=&state= (solo admin)
   useEffect(() => {
-    if (!isAdmin || !businessId) return;
+    if (integrations.uber?.oauth) void refreshUberStores();
+  }, [integrations.uber?.oauth, refreshUberStores]);
+
+  useEffect(() => {
+    if (!businessId) return;
     const code = searchParams.get('code');
     const state = searchParams.get('state');
     const err = searchParams.get('error');
@@ -120,7 +136,12 @@ export function DeliveryIntegrations() {
       try {
         const res = await completeUberEatsOAuthRequest(code, state);
         if (res.integrations) setIntegrations(res.integrations);
-        toast.success('Uber Eats conectado (OAuth)');
+        if (Array.isArray(res.stores)) setUberStores(res.stores);
+        toast.success(
+          res.stores?.length
+            ? `Uber conectado. Elige la tienda (${res.stores.length}).`
+            : 'Uber Eats conectado. Si no ves tiendas, la cuenta merchant aún no tiene locales.',
+        );
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'No se pudo completar OAuth de Uber');
       } finally {
@@ -128,7 +149,7 @@ export function DeliveryIntegrations() {
         setSearchParams({}, { replace: true });
       }
     })();
-  }, [isAdmin, businessId, searchParams, setSearchParams]);
+  }, [businessId, searchParams, setSearchParams]);
 
   const saveIntegrations = async () => {
     if (!businessId) return;
@@ -145,7 +166,7 @@ export function DeliveryIntegrations() {
   };
 
   const connectUberOAuth = async () => {
-    if (!businessId || !isAdmin) return;
+    if (!businessId) return;
     setConnectingUber(true);
     try {
       const res = await startUberEatsOAuthRequest(businessId);
@@ -157,7 +178,23 @@ export function DeliveryIntegrations() {
     }
   };
 
+  const selectStore = async (store: UberEatsStoreOption) => {
+    if (!businessId) return;
+    setSelectingStoreId(store.storeId);
+    try {
+      const res = await selectUberEatsStoreRequest(businessId, store.storeId, store.name);
+      if (res.integrations) setIntegrations(res.integrations);
+      toast.success(`Tienda vinculada: ${store.name}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo vincular la tienda');
+    } finally {
+      setSelectingStoreId(null);
+    }
+  };
+
   const activeCount = AGGREGATOR_PLATFORMS.filter((p) => integrations[p.integrationKey]?.enabled).length;
+  const uberOauth = Boolean(integrations.uber?.oauth);
+  const uberStoreLinked = Boolean(integrations.uber?.storeId);
 
   const platformCards = [
     { key: 'uber' as const, urlSlug: 'ubereats', devUrl: 'https://developer.uber.com/docs/eats' },
@@ -196,20 +233,24 @@ export function DeliveryIntegrations() {
             {platformCards.map(({ key, urlSlug, label, colorClass, accentClass, devUrl }) => {
               const webhookUrl = buildWebhookUrl(urlSlug);
               const isCopied = copiedKey === key;
-              const uberOauth = key === 'uber' && Boolean(integrations.uber?.oauth);
               return (
                 <div key={key} className={`rounded-xl border ${accentClass} bg-white dark:bg-gray-800 p-5 space-y-3`}>
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${colorClass}`}>{label}</span>
                       {integrations[key].enabled && (
                         <span className="text-[10px] font-medium text-green-600 bg-green-50 dark:bg-green-900/30 px-1.5 py-0.5 rounded-full">
                           Activo
                         </span>
                       )}
-                      {uberOauth && (
+                      {key === 'uber' && uberOauth && (
                         <span className="text-[10px] font-medium text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded-full">
                           OAuth
+                        </span>
+                      )}
+                      {key === 'uber' && uberStoreLinked && (
+                        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded-full">
+                          Tienda vinculada
                         </span>
                       )}
                     </div>
@@ -237,7 +278,7 @@ export function DeliveryIntegrations() {
                       </code>
                       <button
                         type="button"
-                        onClick={() => copyWebhookUrl(key, webhookUrl)}
+                        onClick={() => void copyText(key, webhookUrl, 'URL copiada')}
                         disabled={!businessId}
                         className="shrink-0 inline-flex items-center justify-center w-10 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
                         title="Copiar URL"
@@ -275,18 +316,30 @@ export function DeliveryIntegrations() {
                     </div>
                   </div>
 
-                  {key === 'uber' && isAdmin && (
-                    <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-3 space-y-2 bg-gray-50/80 dark:bg-gray-900/40">
+                  {key === 'uber' && (
+                    <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-3 space-y-3 bg-gray-50/80 dark:bg-gray-900/40">
                       <p className="text-[11px] text-gray-600 dark:text-gray-400">
-                        OAuth Uber Eats (solo <strong>uriel@admin.com</strong> en prod — sin túnel).
-                        {uberCfg?.env ? ` Entorno Uber: ${uberCfg.env}.` : ''}
-                        {uberCfg?.configured === false ? ' Faltan claves UBER_EATS_* en .env del servidor.' : ''}
+                        Flujo Uber: <strong>1)</strong> Conectar cuenta merchant → <strong>2)</strong> Elegir tienda → pedidos al webhook.
+                        {uberCfg?.env ? ` Entorno: ${uberCfg.env}.` : ''}
+                        {uberCfg?.configured === false ? ' Faltan claves UBER_EATS_* en el servidor.' : ''}
                       </p>
-                      {uberCfg?.redirectUri ? (
-                        <p className="text-[10px] font-mono text-gray-500 break-all">
-                          Redirect: {uberCfg.redirectUri}
-                        </p>
-                      ) : null}
+
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-500 mb-1">Webhook primario (portal Uber)</p>
+                        <div className="flex gap-2">
+                          <code className="flex-1 text-[10px] font-mono break-all px-2 py-1.5 rounded bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-700">
+                            {UBER_PRIMARY_WEBHOOK}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => void copyText('uber-primary', UBER_PRIMARY_WEBHOOK, 'Webhook primario copiado')}
+                            className="shrink-0 w-9 inline-flex items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700"
+                          >
+                            {copiedKey === 'uber-primary' ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </div>
+
                       <button
                         type="button"
                         onClick={() => void connectUberOAuth()}
@@ -294,8 +347,82 @@ export function DeliveryIntegrations() {
                         className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-black text-white text-xs font-semibold hover:bg-gray-800 disabled:opacity-50"
                       >
                         {connectingUber ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
-                        {uberOauth ? 'Reconectar Uber Eats' : 'Conectar Uber Eats (OAuth)'}
+                        {uberOauth ? 'Reconectar cuenta Uber' : '1. Conectar Uber Eats (OAuth)'}
                       </button>
+
+                      {uberOauth && (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-semibold text-gray-700 dark:text-gray-200 flex items-center gap-1">
+                              <Store className="w-3.5 h-3.5" />
+                              2. Tienda Uber
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => void refreshUberStores()}
+                              disabled={loadingStores}
+                              className="text-[10px] font-semibold text-purple-600 hover:underline disabled:opacity-50"
+                            >
+                              {loadingStores ? 'Cargando…' : 'Actualizar lista'}
+                            </button>
+                          </div>
+
+                          {uberStoreLinked ? (
+                            <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                              Vinculada: <strong>{integrations.uber.storeName || integrations.uber.storeId}</strong>
+                              {integrations.uber.provisionedAt
+                                ? ` · ${new Date(integrations.uber.provisionedAt).toLocaleString('es-ES')}`
+                                : ''}
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                              Aún no hay tienda vinculada. Entra con la cuenta del restaurante en Conectar y elige local.
+                            </p>
+                          )}
+
+                          {loadingStores ? (
+                            <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Cargando tiendas…
+                            </div>
+                          ) : uberStores.length === 0 ? (
+                            <p className="text-[11px] text-gray-500">
+                              No hay tiendas en esta cuenta Uber. Pide acceso merchant o tienda TEST a Uber.
+                            </p>
+                          ) : (
+                            <ul className="space-y-1.5">
+                              {uberStores.map((store) => {
+                                const selected = integrations.uber.storeId === store.storeId;
+                                const busy = selectingStoreId === store.storeId;
+                                return (
+                                  <li
+                                    key={store.storeId}
+                                    className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-2 ${
+                                      selected
+                                        ? 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/40'
+                                        : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950'
+                                    }`}
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-gray-900 dark:text-gray-100 truncate">{store.name}</p>
+                                      <p className="text-[10px] text-gray-500 truncate">
+                                        {[store.address, store.city].filter(Boolean).join(', ') || store.storeId}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      disabled={busy || selected}
+                                      onClick={() => void selectStore(store)}
+                                      className="shrink-0 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-black text-white disabled:opacity-50"
+                                    >
+                                      {busy ? '…' : selected ? 'Activa' : 'Vincular'}
+                                    </button>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 

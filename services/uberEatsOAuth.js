@@ -26,6 +26,8 @@ export function getUberEatsClientSecret() {
 }
 
 export function getUberEatsScopes() {
+  // Usuario (authorization_code): provisioning + listar tiendas.
+  // Pedidos usan client_credentials (eats.order) aparte — ver uberEatsStores.js.
   return env('UBER_EATS_SCOPES', 'eats.pos_provisioning');
 }
 

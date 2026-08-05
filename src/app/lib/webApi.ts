@@ -258,6 +258,17 @@ export interface DeliveryIntegrationEntry {
   connectedAt?: string;
   expiresAt?: string;
   env?: string;
+  storeId?: string;
+  storeName?: string;
+  provisionedAt?: string;
+}
+
+export interface UberEatsStoreOption {
+  storeId: string;
+  name: string;
+  address?: string;
+  city?: string;
+  integrationEnabled?: boolean;
 }
 
 export interface DeliveryIntegrations {
@@ -305,9 +316,34 @@ export async function completeUberEatsOAuthRequest(code: string, state: string) 
     connected?: boolean;
     expiresAt?: string;
     scope?: string;
+    stores?: UberEatsStoreOption[];
     error?: string;
   }>('/api/uber-eats/oauth/callback', {
     method: 'POST',
     body: JSON.stringify({ code, state }),
+  });
+}
+
+export async function listUberEatsStoresRequest(businessId: string) {
+  return authRequest<{
+    ok: boolean;
+    stores: UberEatsStoreOption[];
+    selectedStoreId?: string;
+    selectedStoreName?: string;
+    provisionedAt?: string;
+  }>(`/api/uber-eats/stores?businessId=${encodeURIComponent(businessId)}`);
+}
+
+export async function selectUberEatsStoreRequest(businessId: string, storeId: string, storeName?: string) {
+  return authRequest<{
+    ok: boolean;
+    integrations?: DeliveryIntegrations;
+    storeId?: string;
+    storeName?: string;
+    provisioned?: boolean;
+    error?: string;
+  }>('/api/uber-eats/stores/select', {
+    method: 'POST',
+    body: JSON.stringify({ businessId, storeId, storeName: storeName || '' }),
   });
 }

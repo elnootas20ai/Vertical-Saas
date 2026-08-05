@@ -11322,7 +11322,17 @@ export function buildWebConfigDocument(businessId, data = {}, existing = null) {
 
 function sanitizeIntegrationEntry(entry) {
   if (!entry || typeof entry !== 'object') {
-    return { enabled: false, token: '', oauth: false, connectedAt: '', expiresAt: '', env: '' };
+    return {
+      enabled: false,
+      token: '',
+      oauth: false,
+      connectedAt: '',
+      expiresAt: '',
+      env: '',
+      storeId: '',
+      storeName: '',
+      provisionedAt: '',
+    };
   }
   const hasOauth = Boolean(entry.oauth || entry.accessToken);
   return {
@@ -11333,6 +11343,9 @@ function sanitizeIntegrationEntry(entry) {
     connectedAt: String(entry.connectedAt || ''),
     expiresAt: String(entry.expiresAt || ''),
     env: String(entry.env || ''),
+    storeId: String(entry.storeId || ''),
+    storeName: String(entry.storeName || ''),
+    provisionedAt: String(entry.provisionedAt || ''),
   };
 }
 
