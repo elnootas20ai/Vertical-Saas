@@ -98,6 +98,92 @@ describe('categoriesForTpvScope', () => {
     expect(bbCats).toEqual(['Burgers']);
   });
 
+  it('combos y tacos se quedan en cada marca; no pestaña General', () => {
+    const brands = [
+      {
+        _id: 'mod',
+        name: 'Modomio',
+        active: true,
+        catalogCategories: ['Pizzas', 'Combos'],
+      },
+      {
+        _id: 'bb',
+        name: 'blackburger',
+        active: true,
+        catalogCategories: ['Burgers', 'Combos', 'Tacos'],
+      },
+      {
+        _id: 'tacos',
+        name: 'Tacos',
+        active: false,
+        catalogCategories: ['Tacos'],
+      },
+    ];
+    const catalog = [
+      {
+        _id: 'combo-mod',
+        itemType: 'combo',
+        name: 'Individual',
+        category: 'Combos',
+        active: true,
+        brandIds: ['mod'],
+        unitPrice: 12,
+      },
+      {
+        _id: 'combo-bb',
+        itemType: 'combo',
+        name: 'Combo Blackburger',
+        category: 'Combos',
+        active: true,
+        brandIds: ['bb'],
+        unitPrice: 14,
+      },
+      {
+        _id: 'taco-1',
+        itemType: 'product',
+        name: 'Steak Taco',
+        category: 'Tacos',
+        active: true,
+        brandIds: ['bb'],
+        unitPrice: 5,
+      },
+      {
+        _id: 'reventa-1',
+        itemType: 'product',
+        name: 'Helado Reventa',
+        category: 'Reventa',
+        active: true,
+        brandIds: [],
+        unitPrice: 3,
+      },
+    ];
+    const sections = buildTpvCatalogSections(brands, catalog);
+    expect(sections.map((s) => s.label)).not.toContain('General');
+    expect(sections.some((s) => s.label === 'Tacos' && s.scope?.kind === 'brand')).toBe(false);
+    const modCats = categoriesForTpvScope({ kind: 'brand', brandId: 'mod' }, brands, catalog);
+    const bbCats = categoriesForTpvScope({ kind: 'brand', brandId: 'bb' }, brands, catalog);
+    expect(modCats).toContain('Combos');
+    expect(bbCats).toEqual(expect.arrayContaining(['Combos', 'Tacos']));
+    const modCombos = filterTpvCatalogProducts(
+      catalog,
+      { kind: 'brand', brandId: 'mod' },
+      null,
+      '',
+      {},
+      brands,
+    );
+    const bbItems = filterTpvCatalogProducts(
+      catalog,
+      { kind: 'brand', brandId: 'bb' },
+      null,
+      '',
+      {},
+      brands,
+    );
+    expect(modCombos.map((i) => i._id)).toEqual(['combo-mod']);
+    expect(bbItems.map((i) => i._id).sort()).toEqual(['combo-bb', 'taco-1']);
+  });
+
   it('no muestra ingredientes de inventario (module stock) en el TPV', () => {
     const brands = [
       { _id: 'mod', name: 'modomio', active: true, catalogCategories: ['Pizzas'] },

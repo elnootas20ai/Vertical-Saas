@@ -167,6 +167,9 @@ function isCrossBrandOrganizerCategory(
   brands: Brand[],
   catalog: CatalogItem[],
 ): boolean {
+  // Combos / Tacos / Pizzas / Burgers… se quedan en cada marca.
+  // Solo bebidas, postres, complementos… van a pestaña compartida.
+  if (isBrandFoodCategory(category)) return false;
   return categoryUsedByMultipleBrands(category, brands, catalog);
 }
 
@@ -277,6 +280,8 @@ export function buildTpvCatalogSections(
   for (const groupKey of [...sharedKeys].sort((a, b) =>
     sharedGroupLabel(a).localeCompare(sharedGroupLabel(b), 'es'),
   )) {
+    // «General» = cajón raro (p. ej. Reventa); no mostrar pestaña.
+    if (groupKey === 'general') continue;
     sections.push({
       id: formatTpvSectionId({ kind: 'shared', groupKey }),
       scope: { kind: 'shared', groupKey },
