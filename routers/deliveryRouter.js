@@ -42,6 +42,7 @@ import {
   listTpvRegisterSessions,
   listCajaBootstrap,
   createTpvRegisterSession,
+  reopenTpvRegisterSession,
   updateTpvRegisterSession,
   removeTpvRegisterSession,
   listPointsOfSale,
@@ -171,6 +172,7 @@ deliveryRouter.get('/caja-bootstrap/:userId', listCajaBootstrap);
 
 deliveryRouter.get('/tpv-sessions/:userId', listTpvRegisterSessions);
 deliveryRouter.post('/tpv-sessions/:userId', createTpvRegisterSession);
+deliveryRouter.post('/tpv-sessions/:userId/:sessionId/reopen', reopenTpvRegisterSession);
 deliveryRouter.put('/tpv-sessions/:userId/:sessionId', updateTpvRegisterSession);
 deliveryRouter.delete('/tpv-sessions/:userId/:sessionId', removeTpvRegisterSession);
 

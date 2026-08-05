@@ -3187,6 +3187,111 @@ export async function createTpvRegisterSession(req, res) {
   }
 }
 
+/** Reabrir caja TPV cerrada por error (hoy o ayer, misma tienda). */
+export async function reopenTpvRegisterSession(req, res) {
+  try {
+    const { userId, sessionId } = req.params;
+    const reason = String(req.body?.reason || 'Cierre accidental').trim() || 'Cierre accidental';
+    const existing = await ensureTpvRegisterOwner(req, userId, sessionId);
+    if (!existing) return res.status(404).json({ ok: false, error: 'Sesión de caja TPV no encontrada' });
+    if (String(existing.status || '') === 'open') {
+      return res.json({ ok: true, session: sanitizeTpvRegisterSession(existing) });
+    }
+    if (String(existing.status || '') !== 'closed') {
+      return badRequest(res, 'Solo se pueden reabrir cajas cerradas');
+    }
+    const account = await findAccountByUserId(req, userId);
+    if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+
+    const closedDay = calendarDayInTimeZone(existing.closedAt || existing.openedAt, 'Europe/Madrid');
+    const today = calendarDayInTimeZone(new Date(), 'Europe/Madrid');
+    const yesterday = (() => {
+      const parts = String(today || '').split('-').map((x) => Number(x));
+      if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return '';
+      const [y, m, d] = parts;
+      return calendarDayInTimeZone(new Date(Date.UTC(y, m - 1, d - 1, 12)), 'Europe/Madrid');
+    })();
+    if (closedDay && closedDay !== today && closedDay !== yesterday) {
+      return badRequest(
+        res,
+        'Solo se puede reabrir una caja cerrada hoy o ayer. Para turnos más antiguos abre una caja nueva.',
+      );
+    }
+
+    const allSessions = await listTpvRegisterSessionsByUser(req, userId);
+    const pdvId = String(existing.pointOfSaleId || '').trim();
+    const otherOpen = (allSessions || []).find(
+      (s) =>
+        s &&
+        s._id !== existing._id &&
+        s.status === 'open' &&
+        !s.deletedAt &&
+        String(s.pointOfSaleId || '').trim() === pdvId,
+    );
+    if (otherOpen) {
+      return res.status(409).json({
+        ok: false,
+        error: `Ya hay otra caja abierta en ${otherOpen.pointOfSaleName || 'esta tienda'}. Ciérrala antes de reabrir.`,
+        existingSessionId: otherOpen._id,
+      });
+    }
+
+    const now = new Date().toISOString();
+    const reopenHistory = [
+      ...(Array.isArray(existing.reopenHistory) ? existing.reopenHistory : []),
+      {
+        reopenedAt: now,
+        reopenedBy: account.fullName || userId,
+        reason,
+        previousClosedAt: existing.closedAt || '',
+        previousDifference: Number(existing.difference || 0),
+      },
+    ];
+    const db = getDeliveryDbName();
+    const doc = buildTpvRegisterSessionDocument(
+      userId,
+      {
+        ...existing,
+        status: 'open',
+        closedAt: '',
+        closedBy: '',
+        closingCashCount: {},
+        finalCashAmount: 0,
+        expectedCash: 0,
+        difference: 0,
+        closingNotes: '',
+        closingValidatedBy: '',
+        closingValidatedAt: '',
+        closingValidationStatus: '',
+        closingValidationNotes: '',
+        reopenHistory,
+      },
+      existing,
+    );
+    const saved = await putDocument(req, db, doc._id, doc);
+    await logAccountActivity(req, {
+      actorUserId: userId,
+      actorName: account.fullName,
+      targetUserId: userId,
+      type: 'tpv_register_session',
+      action: `Reabrió caja TPV "${doc.terminalName}" (${doc.pointOfSaleName || ''})`,
+      entityId: doc._id,
+      entityLabel: doc.terminalName || 'Terminal',
+      metadata: { status: 'open', reason },
+    });
+    triggerReactiveAlert(userId, 'cash_session_changed', {
+      sessionId: doc._id,
+      sessionType: 'tpv',
+      action: 'reopened',
+    }).catch(() => null);
+    const sanitized = sanitizeTpvRegisterSession({ ...doc, _rev: saved.rev });
+    broadcastTpvSessionLive(account, userId, { ...doc, _rev: saved.rev });
+    return res.json({ ok: true, session: sanitized });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message || 'Error al reabrir caja TPV' });
+  }
+}
+
 export async function updateTpvRegisterSession(req, res) {
   try {
     const { userId, sessionId } = req.params;

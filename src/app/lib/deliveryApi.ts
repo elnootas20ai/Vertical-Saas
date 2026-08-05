@@ -2071,6 +2071,9 @@ export interface TpvRegisterSession {
   /** Solo en PUT: ids de entradas/salidas/devoluciones a anular (no se persiste). */
   removedTransactionIds?: string[];
 
+  /** Auditoría si se reabrió un cierre accidental. */
+  reopenHistory?: ReopenRecord[];
+
   createdAt: string;
   updatedAt: string;
 }
@@ -2148,6 +2151,23 @@ export async function updateTpvRegisterSessionRequest(userId: string, session: T
     { method: 'PUT', body: JSON.stringify({ session }) },
   );
   if (!result.session) throw new Error('Respuesta inválida del servidor');
+  return result.session;
+}
+
+/** Reabre una caja TPV cerrada por error (hoy o ayer). Conserva ventas del turno. */
+export async function reopenTpvRegisterSessionRequest(
+  userId: string,
+  sessionId: string,
+  reason = 'Cierre accidental',
+): Promise<TpvRegisterSession> {
+  const id = normalizeUserId(userId);
+  const sid = String(sessionId || '').trim();
+  if (!sid) throw new Error('Falta el id de la sesión de caja');
+  const result = await request<{ ok: boolean; session: TpvRegisterSession; error?: string }>(
+    `/api/delivery/tpv-sessions/${encodeURIComponent(id)}/${encodeURIComponent(sid)}/reopen`,
+    { method: 'POST', body: JSON.stringify({ reason }) },
+  );
+  if (!result.session) throw new Error(result.error || 'Respuesta inválida del servidor');
   return result.session;
 }
 

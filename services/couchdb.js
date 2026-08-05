@@ -7350,20 +7350,50 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
     transactions: Array.isArray(data.transactions) ? data.transactions : (existing?.transactions || []),
     cashCounts: Array.isArray(data.cashCounts) ? data.cashCounts : (existing?.cashCounts || []),
 
-    closedAt: status === 'closed' ? (data.closedAt || existing?.closedAt || now) : (existing?.closedAt || ''),
-    closedBy: String(data.closedBy || existing?.closedBy || ''),
-    closingCashCount: data.closingCashCount || existing?.closingCashCount || {},
-    finalCashAmount: Number(data.finalCashAmount ?? existing?.finalCashAmount ?? 0),
-    expectedCash: Number(data.expectedCash ?? existing?.expectedCash ?? 0),
-    difference: Number(data.difference ?? existing?.difference ?? 0),
-    closingNotes: String(data.closingNotes ?? existing?.closingNotes ?? ''),
+    // Si status=open (reapertura por error), limpiar cierre; no conservar closedAt del existing.
+    closedAt: status === 'closed' ? (data.closedAt || existing?.closedAt || now) : '',
+    closedBy: status === 'closed' ? String(data.closedBy || existing?.closedBy || '') : '',
+    closingCashCount:
+      status === 'closed'
+        ? (data.closingCashCount || existing?.closingCashCount || {})
+        : (data.closingCashCount || {}),
+    finalCashAmount:
+      status === 'closed'
+        ? Number(data.finalCashAmount ?? existing?.finalCashAmount ?? 0)
+        : Number(data.finalCashAmount ?? 0),
+    expectedCash:
+      status === 'closed'
+        ? Number(data.expectedCash ?? existing?.expectedCash ?? 0)
+        : Number(data.expectedCash ?? 0),
+    difference:
+      status === 'closed'
+        ? Number(data.difference ?? existing?.difference ?? 0)
+        : Number(data.difference ?? 0),
+    closingNotes:
+      status === 'closed'
+        ? String(data.closingNotes ?? existing?.closingNotes ?? '')
+        : String(data.closingNotes ?? ''),
 
-    closingValidatedBy: String(data.closingValidatedBy ?? existing?.closingValidatedBy ?? ''),
-    closingValidatedAt: String(data.closingValidatedAt ?? existing?.closingValidatedAt ?? ''),
+    closingValidatedBy:
+      status === 'closed'
+        ? String(data.closingValidatedBy ?? existing?.closingValidatedBy ?? '')
+        : '',
+    closingValidatedAt:
+      status === 'closed'
+        ? String(data.closingValidatedAt ?? existing?.closingValidatedAt ?? '')
+        : '',
     closingValidationStatus: ['pending', 'validated', 'rejected'].includes(String(data.closingValidationStatus || existing?.closingValidationStatus || ''))
-      ? String(data.closingValidationStatus || existing?.closingValidationStatus)
+      ? (status === 'closed'
+        ? String(data.closingValidationStatus || existing?.closingValidationStatus)
+        : '')
       : (status === 'closed' ? 'pending' : ''),
-    closingValidationNotes: String(data.closingValidationNotes ?? existing?.closingValidationNotes ?? ''),
+    closingValidationNotes:
+      status === 'closed'
+        ? String(data.closingValidationNotes ?? existing?.closingValidationNotes ?? '')
+        : '',
+    reopenHistory: Array.isArray(data.reopenHistory)
+      ? data.reopenHistory
+      : (existing?.reopenHistory || []),
 
     incidents: Array.isArray(data.incidents) ? data.incidents : (existing?.incidents || []),
     voidedCashMovements: Array.isArray(data.voidedCashMovements)
@@ -7459,6 +7489,7 @@ export function sanitizeTpvRegisterSession(doc) {
     brandBillingRulesSnapshot: doc.brandBillingRulesSnapshot || undefined,
     productClosingCounts: sanitizeProductClosingCounts(doc.productClosingCounts),
     linkedOrderIds: Array.isArray(doc.linkedOrderIds) ? doc.linkedOrderIds : [],
+    reopenHistory: Array.isArray(doc.reopenHistory) ? doc.reopenHistory : [],
 
     business_id: String(doc.business_id || doc.businessId || '').trim(),
 

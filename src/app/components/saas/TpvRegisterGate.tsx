@@ -4795,7 +4795,7 @@ export function TpvRegisterGate({
     try {
       const reopened = await reopenTpvRegisterSessionRequest(
         dataUserId,
-        closedSession,
+        closedSession._id,
         'Cierre accidental',
       );
       const storeId = String(reopened.pointOfSaleId || '').trim();

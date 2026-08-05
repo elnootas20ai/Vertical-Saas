@@ -632,6 +632,45 @@ export function findLastClosedTpvSession(
   return closedForStore[0];
 }
 
+/** YYYY-MM-DD en Europe/Madrid (día operativo de bares ES). */
+export function calendarDayMadrid(value?: string | Date | null): string {
+  const d = value instanceof Date ? value : new Date(value || Date.now());
+  if (Number.isNaN(d.getTime())) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Madrid',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Última caja cerrada hoy o ayer (Madrid) en esa tienda — candidata a reapertura por error.
+ * Prefiere mismo terminal; si no, el cierre más reciente de la PDV.
+ */
+export function findReopenableClosedTpvSession(
+  sessions: TpvRegisterSession[],
+  pdvId: string,
+  terminalId?: string | null,
+  pointsOfSale: Array<{ _id: string; workCenterId?: string }> = [],
+): TpvRegisterSession | null {
+  const last = findLastClosedTpvSession(sessions, pdvId, terminalId, pointsOfSale);
+  if (!last || String(last.status || '') !== 'closed') return null;
+  const closedDay = calendarDayMadrid(last.closedAt || last.openedAt);
+  const today = calendarDayMadrid(new Date());
+  const parts = today.split('-').map((x) => Number(x));
+  const yesterday =
+    parts.length === 3 && parts.every((n) => Number.isFinite(n))
+      ? calendarDayMadrid(new Date(Date.UTC(parts[0], parts[1] - 1, parts[2] - 1, 12)))
+      : '';
+  if (!closedDay || (closedDay !== today && closedDay !== yesterday)) return null;
+  return last;
+}
+
 /** Efectivo contado al cerrar (para sugerir fondo del día siguiente). */
 export function resolvePreviousCloseCashAmount(session: TpvRegisterSession | null | undefined): number | null {
   if (!session || String(session.status || '') !== 'closed') return null;
