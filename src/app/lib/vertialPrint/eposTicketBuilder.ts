@@ -196,6 +196,11 @@ export function buildEposTicket(
       boldLine(builder, `Tel: ${doc.customerPhone}`, tallCols);
       setTextSize(builder, 1, 1);
     }
+    if (doc.paymentLabel) {
+      setTextSize(builder, 1, 2);
+      boldLine(builder, `Pago: ${doc.paymentLabel}`, tallCols);
+      setTextSize(builder, 1, 1);
+    }
     sep(builder, width);
     for (const item of doc.lines) {
       pushKitchenLineDetail(builder, item, paperWidthMm);

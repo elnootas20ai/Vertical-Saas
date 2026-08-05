@@ -119,6 +119,7 @@ ${doc.deliveryTypeLabel ? `<p class="kitchen-item">${escapeHtml(doc.deliveryType
 ${doc.customerName ? `<p class="kitchen-item">Cliente: ${escapeHtml(doc.customerName)}</p>` : ''}
 ${doc.customerPhone ? `<p class="kitchen-item">Tel: ${escapeHtml(doc.customerPhone)}</p>` : ''}
 ${doc.customerAddress ? `<p class="kitchen-item">Dir: ${escapeHtml(doc.customerAddress)}</p>` : ''}
+${doc.paymentLabel ? `<p class="kitchen-item">Pago: ${escapeHtml(doc.paymentLabel)}</p>` : ''}
 <div class="hr"></div>
 ${rows}
 ${doc.orderNotes ? `<div class="order-note">NOTA PEDIDO: ${escapeHtml(doc.orderNotes)}</div>` : ''}

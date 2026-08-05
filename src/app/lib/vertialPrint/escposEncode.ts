@@ -331,6 +331,13 @@ export function encodeTicketEscpos(
       chunks.push(setBold(false));
       chunks.push(setSize(SIZE_NORMAL));
     }
+    if (doc.paymentLabel) {
+      chunks.push(setSize(SIZE_TALL));
+      chunks.push(setBold(true));
+      chunks.push(textLine(`Pago: ${doc.paymentLabel}`, tallCols));
+      chunks.push(setBold(false));
+      chunks.push(setSize(SIZE_NORMAL));
+    }
     chunks.push(textLine(sepLine(width), width));
     for (const line of doc.lines) {
       pushKitchenLineDetail(chunks, line, paperWidthMm);

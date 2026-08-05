@@ -87,6 +87,7 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(orderIdx).toBeGreaterThan(titleIdx);
     expect(text).toContain('Envio a domicilio');
     expect(text).toContain('Tel: 666123456');
+    expect(text).toContain('Pago: Efectivo');
     expect(text).toContain('Pizza Margarita');
     expect(text).toContain('1x Pizza Margarita');
     expect(text).toContain('EXTRA DE queso');
@@ -120,9 +121,19 @@ describe('ticket variants — botones Cocina / Reparto / Ticket cliente', () => 
     expect(text).not.toMatch(/Atendido:/);
     expect(text).not.toMatch(/NIF\/CIF/);
     expect(text).not.toMatch(/Tienda:/);
-    expect(text).not.toMatch(/Metodo/i);
-    expect(text).not.toMatch(/Efectivo|Tarjeta|Cobrado/i);
-    expect(doc.paymentLabel).toBe('');
+    expect(text).not.toMatch(/Cobrado|Pendiente/i);
+    expect(doc.paymentLabel).toBe('Efectivo');
+    expect(doc.paymentStatusLabel).toBe('');
+  });
+
+  it('cocina: muestra Tarjeta cuando el pedido va con tarjeta', () => {
+    const opts = baseOptions();
+    opts.order.paymentMethod = 'tarjeta';
+    const doc = buildTicketDocument({ ...opts, variant: 'kitchen' });
+    expect(doc.paymentLabel).toBe('Tarjeta');
+    const text = decodeEscpos(encodeTicketEscpos(doc));
+    expect(text).toContain('Pago: Tarjeta');
+    expect(text).not.toMatch(/TOTAL|Cobrado/i);
   });
 
   it('reparto: dirección, productos, total y cobro', () => {
