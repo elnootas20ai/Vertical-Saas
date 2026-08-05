@@ -23,6 +23,8 @@ const NAME_INCLUDES = [
   'bacon',
   'calzone aperta',
   'calzone apertas',
+  'calzone abierta',
+  'calzone abiertas',
   'margarita',
   'margherita',
   'roquefort',

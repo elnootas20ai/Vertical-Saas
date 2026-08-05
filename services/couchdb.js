@@ -7549,12 +7549,21 @@ export function shouldRegisterTpvSaleOnTpvOrderCreate(doc) {
   return Number.isFinite(amount) && amount > 0;
 }
 
+function txMatchesTpvOrderId(t, orderId) {
+  const oid = String(orderId || '').trim();
+  if (!oid || !t) return false;
+  return (
+    String(t.orderId || '').trim() === oid
+    || String(t.linkedDeliveryOrderId || '').trim() === oid
+  );
+}
+
 /** Suma importes de ventas ya registradas en caja para un pedido (evita doble conteo). */
 export function sumTpvRegisterSaleAmountForOrder(transactions, orderId) {
   const oid = String(orderId || '').trim();
   if (!oid) return 0;
   return (Array.isArray(transactions) ? transactions : [])
-    .filter((t) => t && t.type === 'sale' && String(t.orderId || '').trim() === oid)
+    .filter((t) => t && t.type === 'sale' && txMatchesTpvOrderId(t, oid))
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 }
 
@@ -7563,7 +7572,7 @@ export function sumTpvRegisterReturnAmountForOrder(transactions, orderId) {
   const oid = String(orderId || '').trim();
   if (!oid) return 0;
   return (Array.isArray(transactions) ? transactions : [])
-    .filter((t) => t && t.type === 'return' && String(t.orderId || '').trim() === oid)
+    .filter((t) => t && t.type === 'return' && txMatchesTpvOrderId(t, oid))
     .reduce((sum, t) => sum + Number(t.amount || 0), 0);
 }
 

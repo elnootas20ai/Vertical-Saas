@@ -32,7 +32,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   findActivePromotionByCode,
   computePromoDiscount,
-  computeFixedUnitPriceDiscount,
+  priceLinesWithFixedUnitPromos,
   listAutoFixedUnitPricePromotions,
   listSelectableCompanyPromoCodes,
   readStoredPromotions,
@@ -1665,11 +1665,27 @@ export function TpvRapidoOrderFlow({
       };
     });
     const salesPointId = String(register?.session?.pointOfSaleId || '').trim();
-    return computeFixedUnitPriceDiscount(
+    return priceLinesWithFixedUnitPromos(
       lines,
       listAutoFixedUnitPricePromotions(companyPromos, new Date(), { salesPointId }),
     );
   }, [cart, companyPromos, register?.session?.pointOfSaleId]);
+
+  /** Precio cobrado por línea (promo 11€ ya metida en el € de la pizza). */
+  const pricedByLineId = useMemo(() => {
+    const map = new Map<string, (typeof autoPromoCalc.priced)[number]>();
+    cart.forEach((ci, idx) => {
+      const row = autoPromoCalc.priced[idx];
+      if (row) map.set(ci.lineId, row);
+    });
+    return map;
+  }, [cart, autoPromoCalc.priced]);
+
+  /** Subtotal visible = suma de lo que se cobra en líneas (no el catálogo lleno). */
+  const chargedCartTotal = useMemo(
+    () => Math.max(0, cartTotal - Math.min(cartTotal, Math.max(0, autoPromoCalc.discount))),
+    [cartTotal, autoPromoCalc.discount],
+  );
 
   const clientPromoSelected = useMemo(() => {
     if (!selectedClientPromoId) return null;
@@ -1724,7 +1740,11 @@ export function TpvRapidoOrderFlow({
   }, [promoMode, cartTotal, appliedPromo, clientPromoSelected, compute2x1Discount, autoPromoCalc]);
 
   const finalTotal = effectiveCalc.finalTotal;
-  const discountAmount = effectiveCalc.discount;
+  /**
+   * En pedido: la promo fija ya va en el precio de línea.
+   * Solo guardamos descuentos “aparte” (código / cliente) para no restar dos veces.
+   */
+  const discountAmount = effectiveCalc.manualDiscount;
 
   const configuredDeliveryFee = useMemo(() => {
     if (isRestaurantMode) return 0;
@@ -2623,13 +2643,17 @@ export function TpvRapidoOrderFlow({
       actionBusyRef.current = true;
       try {
         const items: DeliveryOrderItem[] = cart.map((ci) => {
-          const unitPrice = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+          const priced = pricedByLineId.get(ci.lineId);
+          const unitPrice = priced?.unitPrice
+            ?? cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+          const total = priced?.total
+            ?? cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization);
           return {
             id: ci.lineId,
             name: ci.catalogItem.name,
             quantity: ci.quantity,
             unitPrice,
-            total: cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization),
+            total,
             notes: ci.customization.notes?.trim() || undefined,
             catalogItemId: ci.catalogItem._id,
             category: ci.catalogItem.category,
@@ -2818,12 +2842,18 @@ export function TpvRapidoOrderFlow({
           created = await registerSplitPaymentsRequest(userId, created._id, parts);
           cajaStatus = null;
         } else if (!collectOnDelivery) {
-          // Airbag: si el servidor no metió caja, la sesión local sí cuenta el cobro.
-          await ensureLocalCajaSaleForOrder(registerFromGate, created, {
-            paymentMethod: created.paymentMethod,
-            amount: Number(created.paidAmount || payableTotal),
-            registeredBy: takerName || 'TPV',
-          });
+          // Airbag solo si el servidor NO registró (si ya lo hizo, no volver a sumar).
+          const serverCajaOk =
+            cajaStatus === 'registered'
+            || cajaStatus === 'already_registered'
+            || cajaStatus === 'nothing_to_register';
+          if (!serverCajaOk) {
+            await ensureLocalCajaSaleForOrder(registerFromGate, created, {
+              paymentMethod: created.paymentMethod,
+              amount: Number(created.paidAmount || payableTotal),
+              registeredBy: takerName || 'TPV',
+            });
+          }
         }
 
         notifyDeliveryOpsLive({
@@ -2869,7 +2899,7 @@ export function TpvRapidoOrderFlow({
         setSubmitting(false);
       }
     },
-    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven],
+    [saleClient, deliveryType, cart, selectedAddressId, paymentMethod, pendingSplitParts, finalTotal, payableTotal, deliveryFeeAmount, orderNotes, userId, phonePrefix, register?.selectedOrderTakerId, selectedOrderTaker, appliedPromo, discountAmount, promoMode, clientPromoSelected, effectiveCalc, register?.session, user?.fullName, user?.user_id, user?.id, user?.email, tabletMode, tpvBrandIngredientSelection, tpvCategoryTemplates, storeIngredients, brands, restaurantTable, restaurantDiningOrder, onRestaurantDiningOrderUpdated, onRestaurantOrderComplete, currentBusiness, writeBusinessId, businessId, catalog, effectiveOrderTakerId, showTpvError, cashGiven, pricedByLineId],
   );
 
   const handleSaveEditedDeliveryOrder = useCallback(async () => {
@@ -2878,13 +2908,17 @@ export function TpvRapidoOrderFlow({
     actionBusyRef.current = true;
     try {
       const items: DeliveryOrderItem[] = cart.map((ci) => {
-        const unitPrice = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+        const priced = pricedByLineId.get(ci.lineId);
+        const unitPrice = priced?.unitPrice
+          ?? cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+        const total = priced?.total
+          ?? cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization);
         return {
           id: ci.lineId,
           name: ci.catalogItem.name,
           quantity: ci.quantity,
           unitPrice,
-          total: cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization),
+          total,
           notes: ci.customization.notes?.trim() || undefined,
           catalogItemId: ci.catalogItem._id,
           category: ci.catalogItem.category,
@@ -2968,6 +3002,7 @@ export function TpvRapidoOrderFlow({
     onEditingDeliveryOrderSaved,
     goBack,
     showTpvError,
+    pricedByLineId,
   ]);
 
   const accountDue = useMemo(
@@ -5266,10 +5301,14 @@ export function TpvRapidoOrderFlow({
                           </p>
                         ) : null}
                         {cart.map((ci) => {
-                          const lineUnit = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
-                          const lineTotal = cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization);
+                          const priced = pricedByLineId.get(ci.lineId);
+                          const catalogUnit = cartLineUnitPrice(ci.catalogItem.unitPrice, ci.customization);
+                          const lineUnit = priced?.unitPrice ?? catalogUnit;
+                          const lineTotal = priced?.total
+                            ?? cartLineTotal(ci.catalogItem.unitPrice, ci.quantity, ci.customization);
                           const extras = buildOrderExtras(ci.customization);
                           const customizable = isCustomizableCatalogItem(ci.catalogItem);
+                          const promoOnLine = Boolean(priced && priced.lineDiscount > 0);
                           return (
                             <div
                               key={ci.lineId}
@@ -5329,9 +5368,16 @@ export function TpvRapidoOrderFlow({
                                   )}
                                 </button>
                                 <div className="flex items-center gap-1 shrink-0">
-                                  <span className="font-semibold text-gray-700 dark:text-gray-300 tabular-nums text-xs">
-                                    {formatPrice(lineTotal)}
-                                  </span>
+                                  <div className="text-right">
+                                    {promoOnLine && priced && priced.catalogTotal !== lineTotal ? (
+                                      <p className="text-[10px] text-gray-400 line-through tabular-nums leading-none">
+                                        {formatPrice(priced.catalogTotal)}
+                                      </p>
+                                    ) : null}
+                                    <span className={`font-semibold tabular-nums text-xs ${promoOnLine ? 'text-emerald-700 dark:text-emerald-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                                      {formatPrice(lineTotal)}
+                                    </span>
+                                  </div>
                                   <button
                                     type="button"
                                     onClick={() => decrementCartLine(ci.lineId)}
@@ -5504,15 +5550,17 @@ export function TpvRapidoOrderFlow({
                         </div>
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-gray-500 dark:text-gray-400">Subtotal</span>
-                          <span className="font-bold tabular-nums">{formatPrice(cartTotal)}</span>
+                          <span className="font-bold tabular-nums">{formatPrice(chargedCartTotal)}</span>
                         </div>
                         {effectiveCalc.autoDiscount > 0 ? (
                           <div className="flex items-center justify-between text-[10px] text-emerald-700 dark:text-emerald-400 mt-0.5">
                             <span className="truncate pr-2">
                               {effectiveCalc.autoPromoNames[0] || 'Promo automática'}
+                              {' '}
+                              (en precio)
                             </span>
                             <span className="font-semibold tabular-nums shrink-0">
-                              -{formatPrice(effectiveCalc.autoDiscount)}
+                              ahorras {formatPrice(effectiveCalc.autoDiscount)}
                             </span>
                           </div>
                         ) : null}

@@ -293,6 +293,112 @@ export function listAutoFixedUnitPricePromotions(
   });
 }
 
+export type FixedUnitPricedLine = {
+  /** Precio unitario cobrado (tras promo). */
+  unitPrice: number;
+  /** Total de línea cobrado. */
+  total: number;
+  catalogUnitPrice: number;
+  catalogTotal: number;
+  lineDiscount: number;
+  promoId?: string;
+  promoName?: string;
+};
+
+function money2(n: number): number {
+  return Math.round(Number(n || 0) * 100) / 100;
+}
+
+/**
+ * Precio cobrado por línea con promos `fixed_unit_price`.
+ * Así la suma de líneas = total real (sin descuento “fantasma” aparte).
+ */
+export function priceLinesWithFixedUnitPromos(
+  lines: PromoCartLine[],
+  promos: StoredPromotion[] = listAutoFixedUnitPricePromotions(),
+  now = new Date(),
+): {
+  priced: FixedUnitPricedLine[];
+  discount: number;
+  applied: StoredPromotion[];
+  matchedLineCount: number;
+} {
+  const active = promos.filter((p) => isPromotionActiveNow(p, now) && p.type === 'fixed_unit_price');
+  const priced: FixedUnitPricedLine[] = [];
+  let discount = 0;
+  let matchedLineCount = 0;
+  const used = new Set<string>();
+
+  for (const line of lines) {
+    const qty = Math.max(0, Number(line.quantity || 0));
+    const fullUnit = Number(line.unitPrice || 0);
+    const baseUnit = Number(
+      line.baseUnitPrice != null && Number.isFinite(Number(line.baseUnitPrice))
+        ? line.baseUnitPrice
+        : fullUnit,
+    );
+    const extrasUnit = Number(
+      line.extrasUnitPrice != null && Number.isFinite(Number(line.extrasUnitPrice))
+        ? line.extrasUnitPrice
+        : Math.max(0, fullUnit - baseUnit),
+    );
+    const catalogUnit = Number.isFinite(fullUnit) && fullUnit > 0
+      ? fullUnit
+      : money2(baseUnit + extrasUnit);
+    const catalogTotal = money2(catalogUnit * (Number.isFinite(qty) ? qty : 0));
+
+    let chargedUnit = catalogUnit;
+    let lineDiscount = 0;
+    let promoId: string | undefined;
+    let promoName: string | undefined;
+
+    if (active.length > 0 && Number.isFinite(qty) && qty > 0) {
+      for (const promo of active) {
+        if (!matchPromoProduct(promo.productMatch, line)) continue;
+        const fixed = Number(promo.fixedUnitPrice ?? promo.discountValue ?? 0);
+        if (!Number.isFinite(fixed) || fixed < 0) continue;
+
+        const extrasMode: PromoExtrasMode =
+          promo.extrasMode === 'include_in_fixed' ? 'include_in_fixed' : 'on_top';
+
+        if (extrasMode === 'include_in_fixed') {
+          const unit = catalogUnit;
+          if (!Number.isFinite(unit) || unit <= 0 || unit <= fixed) continue;
+          lineDiscount = money2((unit - fixed) * qty);
+          chargedUnit = fixed;
+        } else {
+          if (!Number.isFinite(baseUnit) || baseUnit <= 0 || baseUnit <= fixed) continue;
+          lineDiscount = money2((baseUnit - fixed) * qty);
+          chargedUnit = money2(fixed + Math.max(0, extrasUnit));
+        }
+        matchedLineCount += 1;
+        used.add(promo.id);
+        promoId = promo.id;
+        promoName = promo.name;
+        break;
+      }
+    }
+
+    discount += lineDiscount;
+    priced.push({
+      unitPrice: money2(chargedUnit),
+      total: money2(chargedUnit * (Number.isFinite(qty) ? qty : 0)),
+      catalogUnitPrice: money2(catalogUnit),
+      catalogTotal,
+      lineDiscount,
+      promoId,
+      promoName,
+    });
+  }
+
+  return {
+    priced,
+    discount: money2(discount),
+    applied: active.filter((p) => used.has(p.id)),
+    matchedLineCount,
+  };
+}
+
 /**
  * Descuento = suma de (precio base − precio fijo) × qty cuando el producto matchea
  * y el precio base es mayor que el fijo.
@@ -305,61 +411,8 @@ export function computeFixedUnitPriceDiscount(
   promos: StoredPromotion[] = listAutoFixedUnitPricePromotions(),
   now = new Date(),
 ): { discount: number; applied: StoredPromotion[]; matchedLineCount: number } {
-  const active = promos.filter((p) => isPromotionActiveNow(p, now) && p.type === 'fixed_unit_price');
-  if (active.length === 0 || lines.length === 0) {
-    return { discount: 0, applied: [], matchedLineCount: 0 };
-  }
-
-  let discount = 0;
-  let matchedLineCount = 0;
-  const used = new Set<string>();
-
-  for (const line of lines) {
-    const qty = Math.max(0, Number(line.quantity || 0));
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-
-    const fullUnit = Number(line.unitPrice || 0);
-    const baseUnit = Number(
-      line.baseUnitPrice != null && Number.isFinite(Number(line.baseUnitPrice))
-        ? line.baseUnitPrice
-        : fullUnit,
-    );
-    const extrasUnit = Number(
-      line.extrasUnitPrice != null && Number.isFinite(Number(line.extrasUnitPrice))
-        ? line.extrasUnitPrice
-        : Math.max(0, fullUnit - baseUnit),
-    );
-
-    for (const promo of active) {
-      if (!matchPromoProduct(promo.productMatch, line)) continue;
-      const fixed = Number(promo.fixedUnitPrice ?? promo.discountValue ?? 0);
-      if (!Number.isFinite(fixed) || fixed < 0) continue;
-
-      const extrasMode: PromoExtrasMode =
-        promo.extrasMode === 'include_in_fixed' ? 'include_in_fixed' : 'on_top';
-
-      if (extrasMode === 'include_in_fixed') {
-        const unit = Number.isFinite(fullUnit) && fullUnit > 0
-          ? fullUnit
-          : baseUnit + extrasUnit;
-        if (!Number.isFinite(unit) || unit <= 0 || unit <= fixed) continue;
-        discount += (unit - fixed) * qty;
-      } else {
-        // on_top: solo baja el producto base a `fixed`; extras se cobran enteros.
-        if (!Number.isFinite(baseUnit) || baseUnit <= 0 || baseUnit <= fixed) continue;
-        discount += (baseUnit - fixed) * qty;
-      }
-      matchedLineCount += 1;
-      used.add(promo.id);
-      break; // una promo por línea
-    }
-  }
-
-  return {
-    discount: Math.max(0, Math.round(discount * 100) / 100),
-    applied: active.filter((p) => used.has(p.id)),
-    matchedLineCount,
-  };
+  const { discount, applied, matchedLineCount } = priceLinesWithFixedUnitPromos(lines, promos, now);
+  return { discount, applied, matchedLineCount };
 }
 
 /** Inferencia de ámbito según tipo (para promos antiguas sin discountTarget). */

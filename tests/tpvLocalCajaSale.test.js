@@ -3,6 +3,7 @@ import {
   buildTpvSaleTxFromOrder,
   mergeTpvRegisterTransactions,
   sessionHasSaleForOrder,
+  sessionSaleAmountForOrder,
 } from '../src/app/lib/tpvLocalCajaSale.ts';
 
 describe('tpvLocalCajaSale', () => {
@@ -14,6 +15,16 @@ describe('tpvLocalCajaSale', () => {
     };
     expect(sessionHasSaleForOrder(session, 'dord-a')).toBe(true);
     expect(sessionHasSaleForOrder(session, 'dord-b')).toBe(false);
+  });
+
+  it('suma ventas del pedido (orderId o linked) para no doblar airbag', () => {
+    const session = {
+      transactions: [
+        { id: 'tx1', type: 'sale', orderId: 'dord-a', amount: 26, date: '2026-01-01' },
+        { id: 'tx2', type: 'sale', linkedDeliveryOrderId: 'dord-a', amount: 26, date: '2026-01-01' },
+      ],
+    };
+    expect(sessionSaleAmountForOrder(session, 'dord-a')).toBe(52);
   });
 
   it('arma tx de venta desde pedido', () => {

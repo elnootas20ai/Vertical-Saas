@@ -22,6 +22,13 @@ describe('sumTpvRegisterSaleAmountForOrder', () => {
     expect(sumTpvRegisterSaleAmountForOrder(null, 'order-1')).toBe(0);
     expect(sumTpvRegisterSaleAmountForOrder([], '')).toBe(0);
   });
+
+  it('también cuenta linkedDeliveryOrderId', () => {
+    const txs = [
+      { type: 'sale', linkedDeliveryOrderId: 'order-9', amount: 26 },
+    ];
+    expect(sumTpvRegisterSaleAmountForOrder(txs, 'order-9')).toBe(26);
+  });
 });
 
 describe('shouldRegisterTpvSaleOnTpvOrderCreate', () => {

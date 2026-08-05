@@ -6,6 +6,7 @@ import {
   isPromotionActiveNow,
   listAutoFixedUnitPricePromotions,
   matchPromoProduct,
+  priceLinesWithFixedUnitPromos,
   type StoredPromotion,
 } from '../src/app/lib/promoCodes';
 
@@ -56,6 +57,34 @@ describe('promo fixed_unit_price', () => {
     expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Pizza Bacon' })).toBe(true);
     expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Bacon' })).toBe(true);
     expect(matchPromoProduct(pizzaPromo.productMatch, { name: 'Pizza 4 quesos' })).toBe(false);
+  });
+
+  it('calzone abierta también matchea si está en nameIncludes', () => {
+    const withAbierta: StoredPromotion = {
+      ...pizzaPromo,
+      productMatch: {
+        ...pizzaPromo.productMatch,
+        nameIncludes: [...(pizzaPromo.productMatch?.nameIncludes || []), 'calzone abierta'],
+      },
+    };
+    expect(matchPromoProduct(withAbierta.productMatch, { name: 'Calzone Abierta' })).toBe(true);
+  });
+
+  it('precio en línea: suma de líneas = total cobrado (sin descuento fantasma)', () => {
+    const { priced, discount } = priceLinesWithFixedUnitPromos(
+      [
+        { name: 'Bacon', unitPrice: 14.5, baseUnitPrice: 14.5, extrasUnitPrice: 0, quantity: 1 },
+        { name: 'BBQ', unitPrice: 15.5, quantity: 2 },
+      ],
+      [pizzaPromo],
+      mondayAtNoon(),
+    );
+    expect(discount).toBeCloseTo(3.5);
+    expect(priced[0].unitPrice).toBeCloseTo(11);
+    expect(priced[0].total).toBeCloseTo(11);
+    expect(priced[1].unitPrice).toBeCloseTo(15.5);
+    const sum = priced.reduce((s, l) => s + l.total, 0);
+    expect(sum).toBeCloseTo(14.5 + 31 - 3.5);
   });
 
   it('no aplica a burger de bacon (solo las 5 pizzas)', () => {

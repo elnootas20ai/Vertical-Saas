@@ -11,15 +11,27 @@ type RegisterLike = {
   addTransaction: (tx: Omit<TpvRegisterTransaction, 'id' | 'date'>) => Promise<void>;
 } | null | undefined;
 
+export function sessionSaleAmountForOrder(
+  session: TpvRegisterSession | null | undefined,
+  orderId: string,
+): number {
+  const oid = String(orderId || '').trim();
+  if (!oid || !session) return 0;
+  return (session.transactions || [])
+    .filter((t) => {
+      if (t?.type !== 'sale') return false;
+      const tid = String(t.orderId || '').trim();
+      const linked = String(t.linkedDeliveryOrderId || '').trim();
+      return tid === oid || linked === oid;
+    })
+    .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+}
+
 export function sessionHasSaleForOrder(
   session: TpvRegisterSession | null | undefined,
   orderId: string,
 ): boolean {
-  const oid = String(orderId || '').trim();
-  if (!oid || !session) return false;
-  return (session.transactions || []).some(
-    (t) => t?.type === 'sale' && String(t.orderId || t.linkedDeliveryOrderId || '').trim() === oid,
-  );
+  return sessionSaleAmountForOrder(session, orderId) > 0.001;
 }
 
 export function buildTpvSaleTxFromOrder(
@@ -77,12 +89,17 @@ export async function ensureLocalCajaSaleForOrder(
   if (!register?.session || !register.addTransaction) return false;
   const orderId = String(order._id || '').trim();
   if (!orderId) return false;
-  if (!opts?.allowMultiple && sessionHasSaleForOrder(register.session, orderId)) return true;
-  const amount =
+  const target =
     opts?.amount != null && Number.isFinite(opts.amount)
       ? Number(opts.amount)
       : resolveDeliveryOrderChargeTotal(order as DeliveryOrder);
-  if (!(amount > 0)) return false;
+  if (!(target > 0)) return false;
+  // Idempotente: solo registra lo que falte (evita doble cobro airbag + servidor).
+  const already = sessionSaleAmountForOrder(register.session, orderId);
+  const amount = opts?.allowMultiple
+    ? target
+    : Math.round((target - already) * 100) / 100;
+  if (!(amount > 0.001)) return true;
   try {
     await register.addTransaction(
       buildTpvSaleTxFromOrder(order, { ...opts, amount }),
