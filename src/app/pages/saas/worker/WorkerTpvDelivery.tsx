@@ -528,25 +528,35 @@ function OrderCard({
           {canEdit && (
             <button
               type="button"
-              onClick={() => onEdit?.(order)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onEdit?.(order);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
               disabled={advancing}
               title="Añadir o quitar productos"
-              className={`flex items-center justify-center rounded-lg border-2 border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] font-bold hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 disabled:opacity-50 touch-manipulation ${
+              className={`relative z-20 flex items-center justify-center rounded-lg border-2 border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] font-bold hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 disabled:opacity-50 touch-manipulation ${
                 compact
                   ? 'min-w-[2.5rem] min-h-[2.75rem] px-1'
                   : 'min-w-[2.75rem] min-h-[44px] px-1.5'
               }`}
             >
-              <Plus className={compact ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} />
+              <Plus className={compact ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} aria-hidden />
             </button>
           )}
           {!readOnly && nextLabel && (
             <button
               type="button"
-              onClick={() => onAdvance(order)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onAdvance(order);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
               disabled={advancing}
               title={nextLabel}
-              className={`flex flex-col items-center justify-center rounded-lg bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
+              className={`relative z-20 flex flex-col items-center justify-center rounded-lg bg-[var(--v-blue,#2563eb)] hover:bg-[#1d4ed8] text-white font-bold transition-all disabled:opacity-50 touch-manipulation ${
                 compact
                   ? 'min-w-[3.25rem] min-h-[2.75rem] px-1.5 py-1 gap-0.5 text-[10px]'
                   : 'min-w-[3.5rem] min-h-[44px] px-2 py-2 gap-0.5 rounded-lg text-[10px]'
@@ -1252,14 +1262,19 @@ function OrderDetail({
           {canEdit && (
             <button
               type="button"
-              onClick={() => onEdit?.(order)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onEdit?.(order);
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
               disabled={advancing || markingPaid}
               title="Añadir o quitar productos"
-              className={`flex items-center justify-center gap-1 rounded-lg border-2 border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] font-bold hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 disabled:opacity-50 touch-manipulation shrink-0 ${
+              className={`relative z-20 flex items-center justify-center gap-1 rounded-lg border-2 border-blue-300 bg-blue-50 text-[var(--v-blue,#2563eb)] font-bold hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-950/40 dark:text-blue-300 disabled:opacity-50 touch-manipulation shrink-0 ${
                 compact ? 'px-2.5 py-2 text-sm' : 'px-3 py-3 rounded-xl text-sm'
               }`}
             >
-              <Plus className={compact ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} />
+              <Plus className={compact ? 'w-4 h-4' : 'w-5 h-5'} strokeWidth={2.5} aria-hidden />
               {!compact && 'Más'}
             </button>
           )}
@@ -2253,8 +2268,10 @@ export function WorkerTpvDelivery({
         tabletMode
         onBack={backToBoard}
         editingDeliveryOrder={editingOrder}
+        registerOverride={register ?? undefined}
         onEditingDeliveryOrderSaved={() => {
           setEditingOrder(null);
+          setView('board');
           void loadOrders({ silent: true });
         }}
       />

@@ -92,7 +92,8 @@ export default defineConfig(({ mode }) => {
 
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        maximumFileSizeToCacheInBytes: 15 * 1024 * 1024,
+        // Main bundle SaaS suele superar 15–20 MB; sin esto el PWA build falla en deploy.
+        maximumFileSizeToCacheInBytes: 30 * 1024 * 1024,
       },
 
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],

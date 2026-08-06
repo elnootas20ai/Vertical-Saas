@@ -25,8 +25,8 @@ export const HELADERIA_TICKETS: HeladeriaTicket[] = [
     id: 'HEL-002',
     title: 'TPV Heladería independiente',
     area: 'tpv',
-    status: 'mvp',
-    note: 'Cobro local MVP. Siguiente: PDV, impresora y caja abierta.',
+    status: 'next',
+    note: 'Catálogo + PDV + cliente CRM. Siguiente: persistir ventas en caja e impresora.',
   },
   {
     id: 'HEL-003',

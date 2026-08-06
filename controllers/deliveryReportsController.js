@@ -127,8 +127,14 @@ function sumRevenue(orders) {
 
 function timingMetrics(order) {
   const kitchen = minutesBetween(order.kitchenStartedAt, order.kitchenCompletedAt);
-  const assembly = minutesBetween(order.assemblyStartedAt, order.assemblyCompletedAt);
-  const delivery = minutesBetween(order.departedAt, order.deliveredAt);
+  const assemblyStart = order.assemblyStartedAt || order.createdAt;
+  const assembly = minutesBetween(assemblyStart, order.assemblyCompletedAt);
+  // Ida estimada (salida → vuelta / 2). Recogida no aplica.
+  let delivery = null;
+  if (String(order.deliveryType || '') !== 'recogida') {
+    const roundTrip = minutesBetween(order.departedAt || order.assemblyCompletedAt, order.deliveredAt);
+    if (roundTrip != null && roundTrip > 0) delivery = roundTrip / 2;
+  }
   const total = minutesBetween(order.createdAt, order.deliveredAt);
   return { kitchen, assembly, delivery, total };
 }

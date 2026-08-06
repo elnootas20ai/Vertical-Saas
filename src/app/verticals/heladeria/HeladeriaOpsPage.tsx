@@ -1,5 +1,5 @@
 import { Activity, ClipboardList, Plug, Receipt, ShoppingBag } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_SURFACE } from '../../lib/vertialUiTokens';
 import { HeladeriaMvpShell } from './HeladeriaMvpShell';
 
@@ -30,7 +30,7 @@ export function HeladeriaOpsPage() {
               Operativa del día
             </h2>
             <p className="mt-1 text-sm text-stone-500">
-              MVP listo. Aquí irán pedidos activos, mostrador y alertas — sin usar el módulo Delivery.
+              El TPV ya lee el catálogo y el PDV activo. Aquí irán los tickets del día y alertas.
             </p>
           </div>
         </div>

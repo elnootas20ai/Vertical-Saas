@@ -5918,17 +5918,26 @@ export function buildDeliveryOrderDocument(userId, data = {}, existing = null) {
   // el cliente no tiene que enviarlo manualmente.
   let departedAt = String(data.departedAt || existing?.departedAt || '');
 
-  if (statusChanged) {
+  // Anclas de fase: también al CREAR (existing=null). Si solo se aplican en
+  // statusChanged, un pedido TPV creado ya en 'listo' no lleva assemblyStartedAt
+  // y la base operativa muestra montaje/reparto vacíos (—).
+  if (!existing || statusChanged) {
     if (newStatus === 'cocina' && !kitchenStartedAt) kitchenStartedAt = now;
     if (newStatus === 'listo') {
       if (!kitchenCompletedAt) kitchenCompletedAt = now;
       if (!assemblyStartedAt) assemblyStartedAt = now;
     }
     if (newStatus === 'en_reparto') {
+      if (!assemblyStartedAt) {
+        assemblyStartedAt = String(existing?.createdAt || data.createdAt || now);
+      }
       if (!assemblyCompletedAt) assemblyCompletedAt = now;
       if (!departedAt) departedAt = now;
     }
     if (newStatus === 'entregado') {
+      if (!assemblyStartedAt) {
+        assemblyStartedAt = String(existing?.createdAt || data.createdAt || now);
+      }
       if (!assemblyCompletedAt) assemblyCompletedAt = now;
       // Si se marca como entregado sin haber pasado por 'en_reparto' (p. ej.
       // recogida en local), fijamos también departedAt = now para que las

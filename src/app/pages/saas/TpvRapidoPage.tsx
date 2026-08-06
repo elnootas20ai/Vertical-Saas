@@ -1490,12 +1490,19 @@ export function TpvRapidoOrderFlow({
   const editHydratedRef = useRef<string | null>(null);
 
   // Hidratar carrito al editar (domicilio o recogida; montaje o reparto).
+  // No esperar al catálogo: stubs desde líneas del pedido; al llegar la carta se rehidrata.
   useEffect(() => {
     if (!editingDeliveryOrder || !isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) return;
     if (!userId) return;
-    if (editHydratedRef.current === editingDeliveryOrder._id) return;
-    if (loadingCatalog) return;
-    editHydratedRef.current = editingDeliveryOrder._id;
+    const orderId = String(editingDeliveryOrder._id || '').trim();
+    if (!orderId) return;
+
+    const catalogReady = !loadingCatalog;
+    const hydrateKey = `${orderId}:${catalogReady ? 'ready' : 'stub'}`;
+    if (editHydratedRef.current === hydrateKey) return;
+    // Si ya hidratamos con carta lista, no pisar con stubs.
+    if (editHydratedRef.current === `${orderId}:ready`) return;
+    editHydratedRef.current = hydrateKey;
 
     const order = editingDeliveryOrder;
     const seeds = seedTpvCartFromDeliveryOrder(order, catalogById, userId);
@@ -2724,6 +2731,7 @@ export function TpvRapidoOrderFlow({
           deliveryType,
           channel: 'tpv',
           status: submitStatus,
+          // Siempre anclar montaje (web + tablet). Sin esto el OP no mide tiempos.
           ...(submitStatus === 'entregado'
             ? {
                 assemblyStartedAt: now,
@@ -2732,9 +2740,7 @@ export function TpvRapidoOrderFlow({
                 departedAt: now,
                 deliveredAt: now,
               }
-            : tabletMode
-              ? { assemblyStartedAt: now, kitchenCompletedAt: now }
-              : {}),
+            : { assemblyStartedAt: now, kitchenCompletedAt: now }),
           salesPointId: pdvId,
           salesPointName: pdvName,
           business_id: writeBusinessId || tpvCatalogBusinessId || businessId || '',
@@ -4189,10 +4195,12 @@ export function TpvRapidoOrderFlow({
   const registerStable = register || (needsOpenRegister ? registerStickyRef.current : null);
 
   const allowProductsWithoutRegister =
-    embeddedInRestaurantTpv
-    && isRestaurantMode
-    && currentStep === 'products'
-    && !restaurantTable?.isCounter;
+    (embeddedInRestaurantTpv
+      && isRestaurantMode
+      && currentStep === 'products'
+      && !restaurantTable?.isCounter)
+    // Editar pedido del tablero: no bloquear si el contexto de caja parpadea un frame.
+    || isEditingDeliveryOrder;
 
   if (needsOpenRegister && !registerStable && !allowProductsWithoutRegister) {
     return (

@@ -5,6 +5,7 @@ export const DELIVERY_OPS_BUSINESS_TYPES = ['delivery'] as const;
 export const GUIDED_ACTIVATION_BUSINESS_TYPES = [
   ...DELIVERY_OPS_BUSINESS_TYPES,
   'restaurant',
+  'iceCreamShop',
   'carDealership',
   'cleaning',
   'gym',
@@ -55,6 +56,7 @@ export function getGuidedActivationChecklistTitle(businessType?: string | null):
   if (t === 'workshop') return 'Alta taller';
   if (t === 'events') return 'Alta eventos';
   if (t === 'butcherShop') return 'Alta carnicería';
+  if (t === 'iceCreamShop') return 'Alta heladería';
   return 'Alta delivery';
 }
 
@@ -67,6 +69,7 @@ export function getGuidedActivationFirstStepId(businessType?: string | null): st
   if (t === 'events') return 'events_company';
   if (t === 'butcherShop') return 'butcher_products';
   if (t === 'restaurant') return 'retail_store';
+  if (t === 'iceCreamShop') return 'delivery_store';
   if (isDeliveryOpsBusinessType(t)) return 'delivery_store';
   return undefined;
 }

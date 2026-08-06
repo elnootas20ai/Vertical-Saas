@@ -9,3 +9,9 @@ export { HeladeriaTpvPage } from './HeladeriaTpvPage';
 export { HeladeriaCajaPage } from './HeladeriaCajaPage';
 export { HeladeriaEncargosPage } from './HeladeriaEncargosPage';
 export { HeladeriaIntegracionesPage } from './HeladeriaIntegracionesPage';
+export { buildHeladeriaActivationStepDefs } from './heladeriaActivationChecklist';
+export {
+  mapCatalogToHeladeriaProducts,
+  readHeladeriaSessionTickets,
+  writeHeladeriaSessionTickets,
+} from './heladeriaTpvCatalog';

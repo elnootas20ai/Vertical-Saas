@@ -38,6 +38,7 @@ import { usePointOfSaleAccess } from '../../hooks/usePointOfSaleAccess';
 import { writeBillingSelection } from '../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../lib/planAddonCatalog';
 import { getAuthHeaders } from '../../lib/authApi';
+import { fetchDailySummary, type DailySummary } from '../../lib/clockinsApi';
 import {
   getOpsCenterRequest,
   localDateInputValue,
@@ -1107,10 +1108,12 @@ function QuickAccess({ cfg, kpis, cashPend, incidents, onNavigate, activationFoc
 
 function Metrics({
   kpis,
+  clockSummary,
   title = 'Métricas operativas',
   hint,
 }: {
   kpis: OpsCenterData['kpis'] | null;
+  clockSummary?: DailySummary | null;
   title?: string;
   hint?: string | null;
 }) {
@@ -1119,7 +1122,31 @@ function Metrics({
   const hasPrep = Number(kpis.avgPrepTimeMinutes) > 0;
   const hasDeliveryAvg = Number(kpis.avgDeliveryTimeMinutes) > 0;
   const hasTicket = Number(kpis.averageTicket) > 0 || Number(kpis.revenue) > 0;
-  const cards = [
+  const clockScored =
+    (Number(clockSummary?.onTime) || 0) +
+    (Number(clockSummary?.earlyEntry) || 0) +
+    (Number(clockSummary?.late) || 0);
+  const clockPct =
+    clockSummary?.onTimePercentage != null
+      ? Number(clockSummary.onTimePercentage)
+      : clockScored > 0
+        ? Math.round(
+            (((Number(clockSummary?.onTime) || 0) + (Number(clockSummary?.earlyEntry) || 0)) / clockScored) * 100,
+          )
+        : null;
+  const hasClockPunctuality = clockPct != null;
+  const avgLate = Number(clockSummary?.avgLateMinutes) || 0;
+  const avgEntryDelay = Number(clockSummary?.avgEntryDelayMinutes) || 0;
+  const hasLateAvg = hasClockPunctuality && (avgLate > 0 || Number(clockSummary?.late) > 0);
+  const hasEntryDelayAvg = hasClockPunctuality && clockScored > 0;
+  const cards: Array<{
+    l: string;
+    v: string;
+    i: typeof Euro;
+    c: string;
+    tip?: string;
+    sub?: string;
+  }> = [
     { l: 'Facturación', v: `${eur(kpis.revenue)} €`, i: Euro, c: 'text-emerald-600 dark:text-emerald-400' },
     { l: 'Pedidos', v: String(kpis.totalOrders), i: ShoppingBag, c: 'text-blue-600 dark:text-blue-400' },
     {
@@ -1130,27 +1157,52 @@ function Metrics({
       tip: 'Media de pedidos cobrados o entregados',
     },
     {
-      l: 'Prep. media',
+      l: 'Montaje media',
       v: hasPrep ? `${kpis.avgPrepTimeMinutes} min` : '—',
       i: Timer,
       c: 'text-orange-600 dark:text-orange-400',
-      tip: 'Solo pedidos ya entregados con tiempos de cocina/montaje',
+      tip: 'Media de montaje: desde que entra el pedido hasta listo para salir',
     },
     {
-      l: 'Entrega media',
+      l: 'Reparto media',
       v: hasDeliveryAvg ? `${kpis.avgDeliveryTimeMinutes} min` : '—',
       i: Truck,
       c: 'text-cyan-600 dark:text-cyan-400',
-      tip: 'Desde crear el pedido hasta marcarlo entregado',
+      tip: 'Ida estimada: (salida → vuelta al local) ÷ 2. No se marca la entrega en puerta',
     },
     {
       l: 'Puntualidad',
+      v: hasClockPunctuality ? `${clockPct}%` : '—',
+      i: Users,
+      c: hasClockPunctuality
+        ? (clockPct! >= 80 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')
+        : 'text-gray-400 dark:text-gray-500',
+      tip: 'Fichajes a tiempo vs horario de turno (≥5 min = tarde). Incluye llegadas anticipadas',
+      sub: hasClockPunctuality
+        ? `${(Number(clockSummary?.onTime) || 0) + (Number(clockSummary?.earlyEntry) || 0)}/${clockScored} a tiempo`
+        : undefined,
+    },
+    {
+      l: 'Retraso media',
+      v: hasLateAvg ? `${avgLate} min` : hasEntryDelayAvg ? `${avgEntryDelay} min` : '—',
+      i: Clock,
+      c: hasLateAvg
+        ? 'text-amber-600 dark:text-amber-400'
+        : hasEntryDelayAvg
+          ? 'text-gray-600 dark:text-gray-300'
+          : 'text-gray-400 dark:text-gray-500',
+      tip: hasLateAvg
+        ? `Media solo entre quien llegó tarde (${Number(clockSummary?.late) || 0}). Media de todas las entradas: ${avgEntryDelay} min`
+        : 'Media de retraso en la entrada (min ≥ 0) respecto al inicio de turno',
+    },
+    {
+      l: 'Pedidos a tiempo',
       v: hasTimedDeliveries ? `${kpis.onTimePercentage}%` : '—',
       i: CheckCircle2,
       c: hasTimedDeliveries
         ? (kpis.onTimePercentage >= 80 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400')
         : 'text-gray-400 dark:text-gray-500',
-      tip: 'Entregas a tiempo vs umbral de retraso (hace falta al menos 1 entregado)',
+      tip: 'Entregas a tiempo vs umbral de retraso del pedido (hace falta al menos 1 entregado)',
     },
   ];
   return (
@@ -1165,12 +1217,15 @@ function Metrics({
           </span>
         ) : null}
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-4 gap-2.5">
         {cards.map(c => (
           <div key={c.l} className="text-center py-0.5 rounded-lg bg-gray-50/70 dark:bg-gray-900/40 px-1" title={c.tip}>
             <c.i className={`w-[18px] h-[18px] mx-auto mb-0.5 ${c.c}`} />
             <p className={`text-lg font-bold tabular-nums ${c.c}`}>{c.v}</p>
             <p className="text-[10px] font-medium text-gray-500 dark:text-gray-400 mt-0.5 leading-tight">{c.l}</p>
+            {c.sub ? (
+              <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-0.5 tabular-nums leading-tight">{c.sub}</p>
+            ) : null}
           </div>
         ))}
       </div>
@@ -1564,6 +1619,7 @@ export function DeliveryOpsCenter() {
   const [data, setData] = useState<OpsCenterData | null>(null);
   const [liveByPdv, setLiveByPdv] = useState<Record<string, OpsCenterData>>({});
   const [loading, setLoading] = useState(true);
+  const [clockSummary, setClockSummary] = useState<DailySummary | null>(null);
   const { focus: activationFocus, clearFocus: clearActivationFocus } = useActivationFocus();
 
   useEffect(() => {
@@ -1905,6 +1961,26 @@ export function DeliveryOpsCenter() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
+    const date = filters.date || localDateInputValue();
+    if (!businessId) {
+      setClockSummary(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchDailySummary(businessId, date)
+      .then((summary) => {
+        if (!cancelled) setClockSummary(summary?.ok ? summary : null);
+      })
+      .catch(() => {
+        if (!cancelled) setClockSummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentBusiness?.business_id, currentBusiness?.id, filters.date, lastUp]);
+
+  useEffect(() => {
     const onLocalLive = () => {
       void load();
     };
@@ -2142,6 +2218,7 @@ export function DeliveryOpsCenter() {
 
             <Metrics
               kpis={data?.kpis || null}
+              clockSummary={clockSummary}
               title={isLiveAll ? 'Métricas operativas · todas' : 'Métricas operativas'}
               hint={isLiveAll ? `${opsPdvs.length} tiendas · en vivo` : null}
             />

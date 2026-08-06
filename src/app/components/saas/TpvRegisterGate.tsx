@@ -215,6 +215,30 @@ function parseClosingCountInput(raw: string, fallback = 0): number {
   return Number.isFinite(n) && n >= 0 ? n : Math.max(0, Math.floor(fallback));
 }
 
+/** Slots P/B/T sin editar de verdad: vacíos o todo a 0 (borrador auto-guardado antes de cargar pedidos). */
+function foodSlotsAreUntouched(food: { pizza?: string; burger?: string; taco?: string } | null | undefined): boolean {
+  if (!food) return true;
+  const vals = [food.pizza, food.burger, food.taco].map((v) => String(v ?? '').trim());
+  return vals.every((v) => !v || v === '0');
+}
+
+/** Solo cuenta como borrador de unidades si el usuario dejó algún total > 0. */
+function draftHasUserFoodCounts(food: { pizza?: string; burger?: string; taco?: string } | null | undefined): boolean {
+  if (!food) return false;
+  const pizza = Math.max(0, Math.floor(Number(String(food.pizza || '').trim()) || 0));
+  const burger = Math.max(0, Math.floor(Number(String(food.burger || '').trim()) || 0));
+  const taco = Math.max(0, Math.floor(Number(String(food.taco || '').trim()) || 0));
+  return pizza + burger + taco > 0;
+}
+
+function foodSlotsFromSystemCounts(counts: FoodFamilyCounts): { pizza: string; burger: string; taco: string } {
+  return {
+    pizza: String(Math.max(0, Math.floor(counts.pizza || 0))),
+    burger: String(Math.max(0, Math.floor(counts.burger || 0))),
+    taco: String(Math.max(0, Math.floor(counts.taco || 0))),
+  };
+}
+
 /** Aproxima un importe en billetes/monedas EUR para el conteo de apertura. */
 function buildDenominationFromAmount(amount: number): CashDenominationCount {
   const counts = emptyCashDenominationCount();
@@ -1740,18 +1764,19 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
   const [cashSlot, setCashSlot] = useState(() => savedDraft?.cashSlot || '');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
-  const [manualFood, setManualFood] = useState(
-    () => savedDraft?.manualFood || { pizza: '', burger: '', taco: '' },
-  );
-  const draftHasFood = Boolean(
-    savedDraft?.manualFood
-    && (
-      String(savedDraft.manualFood.pizza || '').trim()
-      || String(savedDraft.manualFood.burger || '').trim()
-      || String(savedDraft.manualFood.taco || '').trim()
-    ),
-  );
-  const [foodSlotsInitialized, setFoodSlotsInitialized] = useState(() => draftHasFood);
+  const draftHasFood = draftHasUserFoodCounts(savedDraft?.manualFood);
+  const [manualFood, setManualFood] = useState(() => {
+    if (draftHasFood && savedDraft?.manualFood) {
+      return {
+        pizza: String(savedDraft.manualFood.pizza || ''),
+        burger: String(savedDraft.manualFood.burger || ''),
+        taco: String(savedDraft.manualFood.taco || ''),
+      };
+    }
+    return { pizza: '', burger: '', taco: '' };
+  });
+  /** El usuario ha tocado P/B/T o restauró un borrador con totales > 0: no pisar con el sistema. */
+  const [foodLockedByUser, setFoodLockedByUser] = useState(() => draftHasFood);
   const [appsSnapshot, setAppsSnapshot] = useState<AggregatorClosingSnapshot | null>(null);
   const [appsManualDraft, setAppsManualDraft] = useState<ManualLinesByChannel>(
     () => savedDraft?.appsManualDraft || {},
@@ -1977,33 +2002,19 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       ? countedTotal.toFixed(2)
       : cashSlot;
 
+  // Rellenar P/B/T del TPV cuando llegan los pedidos. No bloquear por borrador con "0"
+  // (el auto-guardado lo escribía antes de cargar y dejaba el paso 1 vacío/a cero).
   useEffect(() => {
-    if (!showDeliveryClosingSlots || foodSlotsInitialized) return;
-    if (draftHasFood) {
-      setFoodSlotsInitialized(true);
-      return;
-    }
-    setManualFood({
-      pizza: String(tpvSystemFood.pizza || 0),
-      burger: String(tpvSystemFood.burger || 0),
-      taco: String(tpvSystemFood.taco || 0),
-    });
-    setFoodSlotsInitialized(true);
-  }, [showDeliveryClosingSlots, foodSlotsInitialized, tpvSystemFood, draftHasFood]);
-
-  useEffect(() => {
-    if (!showDeliveryClosingSlots || !foodSlotsInitialized || shiftOrdersLoading || draftHasFood) return;
+    if (!showDeliveryClosingSlots || foodLockedByUser || shiftOrdersLoading) return;
     setManualFood((prev) => {
-      const stillDefault = prev.pizza === '0' && prev.burger === '0' && prev.taco === '0';
-      if (!stillDefault) return prev;
-      if (tpvSystemFood.pizza === 0 && tpvSystemFood.burger === 0 && tpvSystemFood.taco === 0) return prev;
-      return {
-        pizza: String(tpvSystemFood.pizza || 0),
-        burger: String(tpvSystemFood.burger || 0),
-        taco: String(tpvSystemFood.taco || 0),
-      };
+      if (!foodSlotsAreUntouched(prev)) return prev;
+      const next = foodSlotsFromSystemCounts(tpvSystemFood);
+      if (prev.pizza === next.pizza && prev.burger === next.burger && prev.taco === next.taco) {
+        return prev;
+      }
+      return next;
     });
-  }, [showDeliveryClosingSlots, foodSlotsInitialized, shiftOrdersLoading, tpvSystemFood, draftHasFood]);
+  }, [showDeliveryClosingSlots, foodLockedByUser, shiftOrdersLoading, tpvSystemFood]);
 
   const handleCashSlotChange = useCallback((value: string) => {
     const formatted = formatMoneyAsYouType(value, true);
@@ -2018,6 +2029,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
   const handleFoodSlotChange = useCallback((key: keyof FoodFamilyCounts, value: string) => {
     const cleaned = value.replace(/[^\d]/g, '');
+    setFoodLockedByUser(true);
     setManualFood((prev) => ({ ...prev, [key]: cleaned }));
   }, []);
 
@@ -2272,9 +2284,20 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               </div>
 
               <div className="shrink-0">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500 mb-1.5">
-                  Unidades del turno
-                </p>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500">
+                    Unidades del turno
+                  </p>
+                  {shiftOrdersLoading ? (
+                    <span className="text-[10px] font-semibold text-stone-400 animate-pulse">
+                      Cargando ventas…
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-semibold tabular-nums text-stone-400">
+                      Sistema {tpvSystemFood.pizza}P / {tpvSystemFood.burger}B / {tpvSystemFood.taco}T
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   {([
                     { key: 'pizza' as const, label: 'Pizzas' },
@@ -2292,10 +2315,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                       <input
                         type="text"
                         inputMode="numeric"
-                        placeholder="0"
+                        placeholder={shiftOrdersLoading ? '…' : '0'}
+                        disabled={busy || shiftOrdersLoading}
                         value={manualFood[u.key]}
                         onChange={(e) => handleFoodSlotChange(u.key, e.target.value)}
-                        className="w-full min-h-10 px-1.5 py-1 text-base font-black tabular-nums border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-950 text-stone-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                        className="w-full min-h-10 px-1.5 py-1 text-base font-black tabular-nums border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-950 text-stone-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 disabled:opacity-60"
                       />
                     </label>
                   ))}

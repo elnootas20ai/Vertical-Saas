@@ -1,13 +1,24 @@
-import { isRestaurantBusinessType, isStrictDeliveryBusinessType } from './deliveryOpsTypes';
+import {
+  isIceCreamShopBusinessType,
+  isRestaurantBusinessType,
+  isStrictDeliveryBusinessType,
+} from './deliveryOpsTypes';
 import {
   resolveRetailCajaPath,
   resolveRetailCeoTpvPath,
   resolveRetailOpsHomePath,
 } from './retailOpsPaths';
 
+function isHeladeriaOpsPath(path: string): boolean {
+  return (
+    path.startsWith('/saas/heladeria-')
+    || path.startsWith('/saas/vertical/heladeria')
+  );
+}
+
 /**
  * Al cambiar de empresa, si la ruta es del otro vertical retail, ir a la home correcta.
- * Delivery ↔ Bar/restaurante no se mezclan.
+ * Delivery ↔ Bar/restaurante ↔ Heladería no se mezclan.
  */
 export function resolvePathAfterBusinessSwitch(
   pathname: string,
@@ -16,6 +27,7 @@ export function resolvePathAfterBusinessSwitch(
   const path = String(pathname || '');
   const nextIsRestaurant = isRestaurantBusinessType(nextBusinessType);
   const nextIsDelivery = isStrictDeliveryBusinessType(nextBusinessType);
+  const nextIsHeladeria = isIceCreamShopBusinessType(nextBusinessType);
 
   const onRestaurantOps =
     path.startsWith('/saas/restaurant-ops')
@@ -29,14 +41,26 @@ export function resolvePathAfterBusinessSwitch(
     path.startsWith('/saas/delivery-ops')
     || path.startsWith('/saas/vertical/delivery/');
 
+  const onHeladeriaOps = isHeladeriaOpsPath(path);
+
   if (onRestaurantOps && !nextIsRestaurant) {
     if (path.includes('/tpv')) return resolveRetailCeoTpvPath(nextBusinessType);
     if (path.startsWith('/saas/caja')) return resolveRetailCajaPath(nextBusinessType);
-    return nextIsDelivery ? resolveRetailOpsHomePath(nextBusinessType) : '/saas';
+    if (nextIsDelivery || nextIsHeladeria) return resolveRetailOpsHomePath(nextBusinessType);
+    return '/saas';
   }
 
   if (onDeliveryOps && !nextIsDelivery) {
-    if (nextIsRestaurant) {
+    if (nextIsRestaurant || nextIsHeladeria) {
+      if (path.includes('/tpv')) return resolveRetailCeoTpvPath(nextBusinessType);
+      if (path.includes('/caja')) return resolveRetailCajaPath(nextBusinessType);
+      return resolveRetailOpsHomePath(nextBusinessType);
+    }
+    return '/saas';
+  }
+
+  if (onHeladeriaOps && !nextIsHeladeria) {
+    if (nextIsRestaurant || nextIsDelivery) {
       if (path.includes('/tpv')) return resolveRetailCeoTpvPath(nextBusinessType);
       if (path.includes('/caja')) return resolveRetailCajaPath(nextBusinessType);
       return resolveRetailOpsHomePath(nextBusinessType);

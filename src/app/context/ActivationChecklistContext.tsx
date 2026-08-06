@@ -6,6 +6,7 @@ import {
   EMPTY_DELIVERY_ACTIVATION_FLAGS,
   type DeliveryActivationFlags,
 } from '../lib/deliveryActivationChecklist';
+import { buildHeladeriaActivationStepDefs } from '../verticals/heladeria/heladeriaActivationChecklist';
 import { listCatalogItemsRequest, listScaleDevicesRequest } from '../lib/deliveryApi';
 import { filterCatalogItemsForBusinessScope } from '../lib/catalogBusinessScope';
 import {
@@ -78,6 +79,7 @@ import { resolveVehicleListBusinessId } from '../lib/vehicleVertical';
 import {
   isDeliveryOpsBusinessType,
   isGuidedActivationBusinessType,
+  isIceCreamShopBusinessType,
   isRestaurantBusinessType,
 } from '../lib/deliveryOpsTypes';
 import { isDeliveryBrandActivationComplete } from '../lib/brandUtils';
@@ -207,7 +209,9 @@ function buildStepDefsForBusiness(
   bundle: ActivationFlagsBundle | null,
 ): StepDef[] {
   const kind = bundle?.kind
-    ?? (isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType)
+    ?? (isDeliveryOpsBusinessType(businessType)
+      || isRestaurantBusinessType(businessType)
+      || isIceCreamShopBusinessType(businessType)
       ? 'delivery'
       : businessType === 'carDealership'
         ? 'compraventa'
@@ -229,6 +233,9 @@ function buildStepDefsForBusiness(
       : EMPTY_DELIVERY_ACTIVATION_FLAGS;
     if (isRestaurantBusinessType(businessType)) {
       return buildRestaurantActivationStepDefs(flags);
+    }
+    if (isIceCreamShopBusinessType(businessType)) {
+      return buildHeladeriaActivationStepDefs(flags);
     }
     return buildDeliveryActivationStepDefs(flags);
   }
@@ -351,7 +358,11 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
     const load = async () => {
       lastLoadAt = Date.now();
       try {
-        if (isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType)) {
+        if (
+          isDeliveryOpsBusinessType(businessType)
+          || isRestaurantBusinessType(businessType)
+          || isIceCreamShopBusinessType(businessType)
+        ) {
           // Solo lectura: el checklist observa el estado, nunca crea/repara PDVs.
           const isRestaurant = isRestaurantBusinessType(businessType);
           const [storeState, brands, catalog, floorConfig, diningTables] = await Promise.all([
@@ -392,7 +403,10 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
           );
           const priced = catalogForBusiness.filter((item) => Number(item.unitPrice ?? 0) > 0);
 
-          const setupCtx = { isDelivery: !isRestaurant, retailStoreCount: retailStores.length };
+          const setupCtx = {
+            isDelivery: !isRestaurant && !isIceCreamShopBusinessType(businessType),
+            retailStoreCount: retailStores.length,
+          };
           const brandReady = isDeliveryBrandActivationComplete(brands, setupCtx);
           const hasSalaMapped = isRestaurant
             ? isSalaQuickSetupComplete(floorConfig) || (Array.isArray(diningTables) && diningTables.length > 0)
@@ -589,7 +603,11 @@ export function ActivationChecklistProvider({ children }: { children: ReactNode 
         }
       } catch {
         if (cancelled || activationFlagsRef.current) return;
-        if (isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType)) {
+        if (
+          isDeliveryOpsBusinessType(businessType)
+          || isRestaurantBusinessType(businessType)
+          || isIceCreamShopBusinessType(businessType)
+        ) {
           const fallback: ActivationFlagsBundle = { kind: 'delivery', flags: EMPTY_DELIVERY_ACTIVATION_FLAGS };
           activationFlagsRef.current = fallback;
           setActivationFlags(fallback);

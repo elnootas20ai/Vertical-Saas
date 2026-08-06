@@ -92,12 +92,21 @@ function timingOf(order: DeliveryOrder): {
   total: number | null;
   prep: number | null;
 } {
+  const assemblyStart = order.assemblyStartedAt || order.createdAt;
+  const assemblyEnd = order.assemblyCompletedAt || undefined;
+  const prepStart = order.kitchenStartedAt || order.assemblyStartedAt || order.createdAt;
+  // Ida estimada: marcan salida y vuelta al local, no la puerta → (ida+vuelta) / 2.
+  const roundTrip =
+    String(order.deliveryType || '') === 'recogida'
+      ? null
+      : minutesBetween(order.departedAt || order.assemblyCompletedAt, order.deliveredAt);
+  const oneWay = roundTrip != null && roundTrip > 0 ? roundTrip / 2 : null;
   return {
     kitchen: minutesBetween(order.kitchenStartedAt, order.kitchenCompletedAt),
-    assembly: minutesBetween(order.assemblyStartedAt, order.assemblyCompletedAt),
-    delivery: minutesBetween(order.departedAt, order.deliveredAt),
+    assembly: minutesBetween(assemblyStart, assemblyEnd),
+    delivery: oneWay,
     total: minutesBetween(order.createdAt, order.deliveredAt),
-    prep: minutesBetween(order.kitchenStartedAt, order.assemblyCompletedAt),
+    prep: minutesBetween(prepStart, assemblyEnd),
   };
 }
 

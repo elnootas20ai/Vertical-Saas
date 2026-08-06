@@ -4393,11 +4393,11 @@ export async function getOpsCenter(req, res) {
     const revenue = revenueOrders.reduce((s, o) => s + (o.totalAmount || 0), 0);
     const avgTicket = revenueOrders.length > 0 ? revenue / revenueOrders.length : 0;
 
-    // Prep/montaje: el TPV suele saltar cocina → usar assemblyStartedAt o createdAt.
+    // Montaje: inicio montaje → listo para salir (TPV suele saltar cocina).
     const prepTimes = delivered
       .map((o) => {
-        const start = o.kitchenStartedAt || o.assemblyStartedAt || o.createdAt;
-        const end = o.assemblyCompletedAt || (o.status === 'entregado' ? o.deliveredAt : null);
+        const start = o.assemblyStartedAt || o.kitchenStartedAt || o.createdAt;
+        const end = o.assemblyCompletedAt;
         if (!start || !end) return null;
         const mins = (new Date(end) - new Date(start)) / 60000;
         return Number.isFinite(mins) && mins >= 0 ? mins : null;
@@ -4405,9 +4405,18 @@ export async function getOpsCenter(req, res) {
       .filter((t) => t != null);
     const avgPrepTime = prepTimes.length > 0 ? prepTimes.reduce((a, b) => a + b, 0) / prepTimes.length : 0;
 
+    // Reparto: salida → vuelta al local. No marcan entrega en puerta → ida ≈ ida+vuelta / 2.
     const deliveryTimes = delivered
-      .map(o => o.createdAt && o.deliveredAt ? (new Date(o.deliveredAt) - new Date(o.createdAt)) / 60000 : null)
-      .filter((t) => t != null && t > 0);
+      .filter((o) => String(o.deliveryType || '') !== 'recogida')
+      .map((o) => {
+        const start = o.departedAt || o.assemblyCompletedAt;
+        const end = o.deliveredAt;
+        if (!start || !end) return null;
+        const roundTrip = (new Date(end) - new Date(start)) / 60000;
+        if (!Number.isFinite(roundTrip) || roundTrip <= 0) return null;
+        return roundTrip / 2;
+      })
+      .filter((t) => t != null);
     const avgDeliveryTime = deliveryTimes.length > 0 ? deliveryTimes.reduce((a, b) => a + b, 0) / deliveryTimes.length : 0;
     const businessOp = businessIdQuery
       ? await getBusinessAlertsOperational(req, businessIdQuery)

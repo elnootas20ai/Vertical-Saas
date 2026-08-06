@@ -130,7 +130,7 @@ function StoreTimingBlock({
   const timingRows: Array<[string, TimingBucket]> = [
     ['Cliente', store.times.total],
     ['Montaje', store.times.assembly],
-    ['Reparto', store.times.delivery],
+    ['Reparto (ida≈)', store.times.delivery],
     ['Prep', store.times.prep],
     ['Pizzas', store.times.pizzaKitchen],
   ];

@@ -1965,6 +1965,8 @@ async function loadScheduleDocs(req, businessId) {
  *  - `completed`: cuántos ya cerraron salida
  *  - `totalWorkedMinutes`: suma de minutos trabajados del día
  *  - `avgLateMinutes`: media de minutos de retraso entre los que llegaron tarde
+ *  - `avgEntryDelayMinutes`: media de retraso (min ≥ 0) de todas las entradas con turno
+ *  - `onTimePercentage`: % a tiempo (incluye llegada anticipada) sobre entradas con turno
  *
  * Respeta la visibilidad por orgchart: solo cuenta a la gente que el solicitante
  * puede ver según su rol y posición jerárquica.
@@ -2023,6 +2025,8 @@ export async function getDailySummary(req, res) {
     let totalWorkedMinutes = 0;
     let totalLateMinutes = 0;
     let lateCount = 0;
+    let totalEntryDelayMinutes = 0;
+    let entryDelaySamples = 0;
     const offenders = [];
 
     for (const rec of dayClockins) {
@@ -2034,9 +2038,14 @@ export async function getDailySummary(req, res) {
       const actualMs = new Date(entry.time).getTime();
       const diffMin = scheduledMs ? Math.round((actualMs - scheduledMs) / 60000) : 0;
 
+      if (scheduledMs) {
+        entryDelaySamples += 1;
+        totalEntryDelayMinutes += Math.max(0, diffMin);
+      }
+
       if (scheduledMs && diffMin <= -CLOCKIN_THRESHOLDS_MIN.EARLY_ENTRY) {
         earlyEntry += 1;
-      } else if (diffMin >= CLOCKIN_THRESHOLDS_MIN.LATE) {
+      } else if (scheduledMs && diffMin >= CLOCKIN_THRESHOLDS_MIN.LATE) {
         late += 1;
         totalLateMinutes += diffMin;
         lateCount += 1;
@@ -2045,7 +2054,7 @@ export async function getDailySummary(req, res) {
           memberName: resolveMemberLabel(memberMap, rec.member_id, rec.member_name),
           lateMinutes: diffMin,
         });
-      } else {
+      } else if (scheduledMs) {
         onTime += 1;
       }
 
@@ -2078,6 +2087,12 @@ export async function getDailySummary(req, res) {
       completed,
       totalWorkedMinutes,
       avgLateMinutes: lateCount > 0 ? Math.round(totalLateMinutes / lateCount) : 0,
+      avgEntryDelayMinutes:
+        entryDelaySamples > 0 ? Math.round(totalEntryDelayMinutes / entryDelaySamples) : 0,
+      onTimePercentage: (() => {
+        const scored = onTime + earlyEntry + late;
+        return scored > 0 ? Math.round(((onTime + earlyEntry) / scored) * 100) : null;
+      })(),
       lateMembers: offenders
         .sort((a, b) => b.lateMinutes - a.lateMinutes)
         .slice(0, 5),

@@ -833,6 +833,10 @@ export interface DailySummary {
   completed: number;
   totalWorkedMinutes: number;
   avgLateMinutes: number;
+  /** Media de retraso (min ≥ 0) de todas las entradas con turno ese día. */
+  avgEntryDelayMinutes?: number;
+  /** % a tiempo (incluye anticipadas) sobre entradas con turno. */
+  onTimePercentage?: number | null;
   lateMembers: Array<{ memberId: string; memberName: string; lateMinutes: number }>;
 }
 
