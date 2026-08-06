@@ -4,7 +4,12 @@ import { toast } from 'sonner';
 import { isDeliveryBrandActivationComplete, isDefaultCommercialBrand, resolveBrandSetupContext, sortBrandsForDisplay } from '../../lib/brandUtils';
 import { DELIVERY_MARCA_SETTINGS_PATH } from '../../lib/deliveryActivationGates';
 import { notifyDeliveryBrandsChanged, notifyDeliveryCatalogChanged, resolveBusinessScopeId, DELIVERY_CONFIG_CHANGED } from '../../lib/deliverySetup';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import {
+  isDeliveryOpsBusinessType,
+  isIceCreamShopBusinessType,
+  isRestaurantBusinessType,
+  usesTpvCatalogOpsBusinessType,
+} from '../../lib/deliveryOpsTypes';
 import { resolveTpvCatalogBusinessId } from '../../lib/tpvRegisterScope';
 import { getRetailOpsUiCopy } from '../../lib/retailUiCopy';
 import { filterCatalogItemsForBusinessScope, dedupeCatalogItemsForDisplay, expandCatalogItemsForDeletion } from '../../lib/catalogBusinessScope';
@@ -52,8 +57,9 @@ import {
 import { commercialLineBrands, organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
+  HELADERIA_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
-  DELIVERY_CATALOG_TEMPLATE_FILENAME,
+  catalogTemplateFilenameForVertical,
   downloadDeliveryCatalogImportTemplate,
   partitionDeliveryCatalogImportEntries,
 } from '../../lib/deliveryCatalogExcelTemplate';
@@ -2603,10 +2609,15 @@ export function CatalogPage() {
   const itemLabelPlural = verticalConfig.itemLabelPlural || 'Productos';
   const isDeliveryOps = isDeliveryOpsBusinessType(currentBusiness?.businessType);
   const isRestaurantCatalog = isRestaurantBusinessType(currentBusiness?.businessType);
-  /** Misma UI/flujo de catálogo TPV (delivery y bar/restaurante). */
-  const usesTpvCatalogUi = isDeliveryOps || isRestaurantCatalog;
-  const catalogVertical = isRestaurantCatalog ? 'restaurant' : 'delivery';
-  const catalogImportTemplateFilename = DELIVERY_CATALOG_TEMPLATE_FILENAME;
+  const isHeladeriaCatalog = isIceCreamShopBusinessType(currentBusiness?.businessType);
+  /** Misma UI/flujo de catálogo TPV (delivery, bar/restaurante y heladería). */
+  const usesTpvCatalogUi = isDeliveryOps || isRestaurantCatalog || isHeladeriaCatalog;
+  const catalogVertical = isRestaurantCatalog
+    ? 'restaurant'
+    : isHeladeriaCatalog
+      ? 'iceCreamShop'
+      : 'delivery';
+  const catalogImportTemplateFilename = catalogTemplateFilenameForVertical(catalogVertical);
   const retailStoreCount = useMemo(
     () => activeStore.retailWorkCenters.filter((wc) => wc.active !== false).length,
     [activeStore.retailWorkCenters],
@@ -2739,7 +2750,9 @@ export function CatalogPage() {
     { key: 'allergens', label: 'Alérgenos' },
   ];
 
-  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = DELIVERY_CATALOG_IMPORT_FIELDS;
+  const MODULE_IMPORT_FIELDS: ImportFieldDef[] = isHeladeriaCatalog
+    ? HELADERIA_CATALOG_IMPORT_FIELDS
+    : DELIVERY_CATALOG_IMPORT_FIELDS;
 
   const commercialLines = useMemo(
     () => sortBrandsForDisplay(commercialLineBrands(brands)),
@@ -2757,9 +2770,11 @@ export function CatalogPage() {
   );
 
   const handleDownloadCatalogTemplate = useCallback(() => {
-    downloadDeliveryCatalogImportTemplate(templateOrganizerLines, catalogImportTemplateFilename);
-    toast.success('Plantilla catálogo');
-  }, [templateOrganizerLines, catalogImportTemplateFilename]);
+    downloadDeliveryCatalogImportTemplate(templateOrganizerLines, catalogImportTemplateFilename, {
+      vertical: catalogVertical,
+    });
+    toast.success(isHeladeriaCatalog ? 'Plantilla catálogo heladería' : 'Plantilla catálogo');
+  }, [templateOrganizerLines, catalogImportTemplateFilename, catalogVertical, isHeladeriaCatalog]);
 
   const handleAIEntries = async (entries: Record<string, unknown>[]) => {
     if (!dataUserId) return;

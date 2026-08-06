@@ -15,7 +15,7 @@ export function AccessFlowDemo() {
     { id: '03', name: 'Registro', path: '/auth/register', description: 'Crear nueva cuenta' },
     { id: '04', name: 'Onboarding Tipo', path: '/auth/onboarding/business-type', description: 'Selección tipo de negocio' },
     { id: '05', name: 'Onboarding Empresa', path: '/auth/onboarding/company', description: 'Datos de empresa + ANCOVE' },
-    { id: '06', name: 'Onboarding Estructura', path: '/auth/onboarding/structure', description: 'Usuarios, ubicaciones y contexto' },
+    { id: '06', name: 'Onboarding Estructura', path: '/auth/onboarding/structure', description: 'Empresas, PDV, trabajadores y marcas' },
     { id: '07', name: 'Onboarding Necesidades', path: '/auth/onboarding/needs', description: 'Funcionalidades a activar' },
     { id: '08', name: 'Plan Recomendado', path: '/auth/onboarding/recommendation', description: 'Recomendación con lógica MVP' },
     { id: '09', name: 'Información de Pago', path: '/auth/onboarding/payment-info', description: 'Captura de tarjeta obligatoria' },

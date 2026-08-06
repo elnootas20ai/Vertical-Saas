@@ -76,7 +76,7 @@ const SLIDES: Slide[] = [
     eyebrow: 'Multi-vertical y seguro',
     title: 'Una plataforma, muchas operativas',
     subtitle:
-      'Compraventa, restauración, delivery, taller y más. Datos cifrados, alojados en Europa y con alertas configurables. 30 días gratis, sin tarjeta.',
+      'Compraventa, restauración, delivery, taller y más. Datos cifrados, alojados en Europa y con alertas configurables. Sin permanencia.',
     features: [
       { icon: Layers, title: 'Verticales especializadas', desc: 'La operativa exacta de tu sector.' },
       { icon: Bell, title: 'Centro de alertas', desc: 'Push, email e in-app configurables por rol.' },
@@ -311,7 +311,7 @@ export function NativeOnboarding() {
               onClick={() => finish(AUTH_PATHS.register)}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-6 py-3.5 text-base font-semibold text-zinc-950 shadow-lg shadow-emerald-500/20 transition-colors active:bg-emerald-400"
             >
-              Crear mi cuenta gratis
+              Registrarse
               <ArrowRight className="h-5 w-5" />
             </button>
             <button

@@ -52,6 +52,7 @@ import {
   buildTransferPaymentConcept,
   shouldBlockSubscriptionAccess,
 } from '../shared/billing/subscriptionAccess.js';
+import { quoteSubscriptionFromAccount } from '../shared/billing/subscriptionQuote.js';
 
 const APP_URL = process.env.APP_URL || 'http://localhost:3005';
 
@@ -861,7 +862,8 @@ export async function getTransferInstructions(req, res) {
     }
 
     const sub = account.subscription || {};
-    const planId = String(sub.selectedPlanId || 'basic').toLowerCase();
+    const quote = quoteSubscriptionFromAccount(account);
+    const planId = quote.planId;
     const plan = PLAN_CATALOG[planId] || PLAN_CATALOG.basic;
     const concept =
       String(sub.paymentConcept || '').trim() || buildTransferPaymentConcept(userId);
@@ -873,19 +875,38 @@ export async function getTransferInstructions(req, res) {
       email: account.email || '',
       subscription: {
         status: sub.status || 'pending_payment',
-        planName: sub.planName || plan.name,
+        planName: sub.planName || quote.planName || plan.name,
         selectedPlanId: planId,
-        billingMode: sub.billingMode || 'monthly',
+        billingMode: quote.billingMode,
         paymentConcept: concept,
         paymentSentAt: sub.paymentSentAt || '',
         currentPeriodEnd: sub.currentPeriodEnd || '',
         billingExempt: Boolean(sub.billingExempt),
+        quotedMonthlyEquivalentEuros: quote.monthlyEquivalentEuros,
+        quotedAmountDueEuros: quote.amountDueEuros,
       },
       plan: {
         id: planId,
-        name: plan.name,
+        name: quote.planName || plan.name,
         monthlyPriceCents: plan.monthlyPrice,
         monthlyPriceEuros: plan.monthlyPrice / 100,
+        annualPriceCents: plan.annualPrice,
+        annualPriceEuros: plan.annualPrice / 100,
+      },
+      quote: {
+        billingMode: quote.billingMode,
+        billingLabel: quote.billingLabel,
+        periodLabel: quote.periodLabel,
+        monthlyEquivalentEuros: quote.monthlyEquivalentEuros,
+        amountDueEuros: quote.amountDueEuros,
+        amountDueCents: quote.amountDueCents,
+        listMonthlyEuros: quote.listMonthlyEuros,
+        baseMonthlyEuros: quote.baseMonthlyEuros,
+        extrasMonthlyEuros: quote.extrasMonthlyEuros,
+        extras: quote.extras,
+        included: quote.included,
+        lines: quote.lines,
+        formulaNote: quote.formulaNote,
       },
       transfer: bank,
       accessBlocked: shouldBlockSubscriptionAccess(sub),
@@ -935,10 +956,17 @@ export async function notifyTransferPayment(req, res) {
     const planId = String(sub.selectedPlanId || 'basic').toLowerCase();
     const plan = PLAN_CATALOG[planId] || PLAN_CATALOG.basic;
 
+    const quoteBefore = quoteSubscriptionFromAccount(account);
     const nextSub = appendSubscriptionHistory(
       {
         ...sub,
         status: 'payment_sent',
+        selectedPlanId: quoteBefore.planId,
+        planName: quoteBefore.planName,
+        billingMode: quoteBefore.billingMode,
+        quotedMonthlyEquivalentEuros: quoteBefore.monthlyEquivalentEuros,
+        quotedAmountDueEuros: quoteBefore.amountDueEuros,
+        quotedAmountDueCents: quoteBefore.amountDueCents,
         paymentConcept: concept,
         paymentSentAt: now,
         paymentProvider: sub.paymentProvider || 'bank_transfer',
@@ -971,7 +999,8 @@ export async function notifyTransferPayment(req, res) {
       metadata: { paymentConcept: concept, planId },
     });
 
-    const amountLabel = `${(plan.monthlyPrice / 100).toFixed(2)} €/mes`;
+    const quote = quoteSubscriptionFromAccount({ ...account, subscription: nextSub });
+    const amountLabel = `${quote.amountDueEuros.toFixed(2)} €/${quote.periodLabel} (${quote.billingLabel})`;
     await sendAdminAlert({
       key: `payment_sent:${userId}`,
       subject: `Pago avisado: ${account.companyName || account.email}`,
@@ -981,7 +1010,8 @@ export async function notifyTransferPayment(req, res) {
           <li><strong>Empresa:</strong> ${account.companyName || '—'}</li>
           <li><strong>Titular:</strong> ${account.fullName || '—'}</li>
           <li><strong>Email:</strong> ${account.email || '—'}</li>
-          <li><strong>Plan:</strong> ${plan.name} (${amountLabel})</li>
+          <li><strong>Plan:</strong> ${quote.planName} · ${amountLabel}</li>
+          <li><strong>Cuota equiv.:</strong> ${quote.monthlyEquivalentEuros.toFixed(2)} €/mes</li>
           <li><strong>Concepto:</strong> ${concept}</li>
           <li><strong>Fecha aviso:</strong> ${now}</li>
         </ul>

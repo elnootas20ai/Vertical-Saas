@@ -236,7 +236,7 @@ export function PaymentInfo() {
       expiryDate: formData.expiryDate,
       cvv: formData.cvv,
       billingMode: data.subscriptionSelection.billingMode,
-      selectedPlanId: data.subscriptionSelection.recommendedPlanId,
+      selectedPlanId: orderSummary.selectedPlanId,
     });
 
     setIsSubmitting(false);
@@ -309,10 +309,10 @@ export function PaymentInfo() {
       <OnboardingStepHeading
         compact
         stepLabel="Paso 6 · Pago"
-        title={skipMonei ? 'Inicia tu prueba gratuita' : 'Información de pago'}
+        title={skipMonei ? 'Activa tu cuenta' : 'Información de pago'}
         subtitle={
           skipMonei
-            ? 'Revisa tu plan y continúa para activar los 14 días de prueba.'
+            ? 'Revisa tu plan y continúa para activar Vertial.'
             : 'Datos de tarjeta. Trámite seguro y cifrado.'
         }
       />
@@ -329,11 +329,11 @@ export function PaymentInfo() {
         ) : null}
 
         <div className="shrink-0 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-[11px] leading-snug text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100">
-          <p className="font-semibold">14 días de prueba gratuita</p>
+          <p className="font-semibold">Activación de tu plan</p>
           <p className="mt-0.5 text-blue-800/90 dark:text-blue-200/90">
             {skipMonei
-              ? 'Empieza hoy sin coste. Al terminar la prueba podrás activar el cobro del plan.'
-              : 'Guardamos tu tarjeta para el cobro automático al terminar la prueba. Hoy no se realiza ningún cargo.'}
+              ? 'Revisa el resumen y continúa para activar tu cuenta en Vertial.'
+              : 'Guardamos tu tarjeta de forma segura para el cobro del plan seleccionado.'}
           </p>
         </div>
 
@@ -480,8 +480,7 @@ export function PaymentInfo() {
                 className="mt-0.5 h-4 w-4 shrink-0 rounded border-2 border-gray-300"
               />
               <span className="text-[11px] leading-snug text-gray-700 dark:text-gray-300">
-                Confirmo los datos y autorizo guardar este método de pago. Entiendo que empiezo con 14 días de prueba
-                gratuita y que el cobro del plan se hará al finalizar la prueba.
+                Confirmo los datos y autorizo guardar este método de pago para la suscripción del plan seleccionado.
               </span>
             </label>
             {errors.acceptTerms ? (

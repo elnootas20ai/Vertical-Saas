@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { CheckCircle2, Copy, CreditCard, Loader2, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -10,7 +11,8 @@ import { isIosCustomerAccessOnlyApp } from '../../lib/appStoreCompliance';
 import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
 
 export function SubscriptionPaymentPage() {
-  const { user, logout, refreshCurrentUser } = useAuth();
+  const navigate = useNavigate();
+  const { user, logout, refreshCurrentUser, sessionSyncedWithServer } = useAuth();
   const [data, setData] = useState<TransferInstructionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -40,6 +42,27 @@ export function SubscriptionPaymentPage() {
       cancelled = true;
     };
   }, [iosAccessOnly]);
+
+  // Si el admin ya activó el pago, salir de la pantalla de transferencia.
+  // Solo con sesión sync del auth (evitar reload loop por estados stale).
+  useEffect(() => {
+    if (iosAccessOnly || !sessionSyncedWithServer) return;
+    const status = String(user?.subscription?.status || '');
+    if (status === 'subscription_active' || status === 'trial_active' || status === 'trial_expiring') {
+      navigate('/saas/dashboard', { replace: true });
+    }
+  }, [iosAccessOnly, sessionSyncedWithServer, user?.subscription?.status, navigate]);
+
+  // Mientras espera validación, refrescar perfil por si el admin acaba de marcar pagado.
+  useEffect(() => {
+    if (iosAccessOnly) return;
+    const status = String(user?.subscription?.status || data?.subscription?.status || '');
+    if (status !== 'payment_sent' && status !== 'pending_payment') return;
+    const id = window.setInterval(() => {
+      void refreshCurrentUser();
+    }, 8000);
+    return () => window.clearInterval(id);
+  }, [iosAccessOnly, user?.subscription?.status, data?.subscription?.status, refreshCurrentUser]);
 
   if (iosAccessOnly) {
     return (
@@ -96,7 +119,25 @@ export function SubscriptionPaymentPage() {
 
   const companyName = data?.companyName || user?.companyName || user?.fullName || 'Tu empresa';
   const planName = data?.plan?.name || data?.subscription?.planName || 'Básico';
-  const price = data?.plan?.monthlyPriceEuros ?? 49;
+  const billingMode =
+    data?.quote?.billingMode === 'annual' || data?.subscription?.billingMode === 'annual'
+      ? 'annual'
+      : 'monthly';
+  const amountDue =
+    Number(data?.quote?.amountDueEuros) ||
+    Number(data?.subscription?.quotedAmountDueEuros) ||
+    (billingMode === 'annual'
+      ? Number(data?.plan?.annualPriceEuros) || (Number(data?.plan?.monthlyPriceEuros) || 49) * 12 * 0.8
+      : Number(data?.plan?.monthlyPriceEuros) || 49);
+  const monthlyEquiv =
+    Number(data?.quote?.monthlyEquivalentEuros) ||
+    Number(data?.subscription?.quotedMonthlyEquivalentEuros) ||
+    (billingMode === 'annual' ? amountDue / 12 : amountDue);
+  const billingLabel =
+    data?.quote?.billingLabel ||
+    (billingMode === 'annual' ? 'cobro anual (−20%)' : 'cobro mensual');
+  const periodLabel = data?.quote?.periodLabel || (billingMode === 'annual' ? 'año' : 'mes');
+  const extras = data?.quote?.extras;
   const concept = data?.subscription?.paymentConcept || 'VERTIAL-······';
   const iban = data?.transfer?.iban || '—';
   const holder = data?.transfer?.holder || 'Vertial';
@@ -107,66 +148,92 @@ export function SubscriptionPaymentPage() {
     data?.subscription?.status === 'trial_expiring';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-white">
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-6 py-10">
-        <header className="mb-10 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <img src="/vertial-logo.svg" alt="Vertial" className="h-9 w-auto" />
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-300/80">Suscripción</p>
-              <h1 className="text-xl font-semibold tracking-tight">Activa Vertial</h1>
+    <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950 text-white">
+      <div className="mx-auto flex h-full max-w-2xl flex-col px-4 py-3 sm:px-6 sm:py-4">
+        <header className="mb-3 flex shrink-0 items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <img src="/vertial-logo.svg" alt="Vertial" className="h-7 w-auto sm:h-8" />
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-300/80">Suscripción</p>
+              <h1 className="truncate text-base font-semibold tracking-tight sm:text-lg">Activa Vertial</h1>
             </div>
           </div>
           <button
             type="button"
             onClick={() => void logout()}
-            className="inline-flex items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-sm text-white/80 hover:bg-white/5"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/5 sm:text-sm"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-3.5 w-3.5" />
             Salir
           </button>
         </header>
 
         {loading ? (
           <div className="flex flex-1 items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-emerald-300" aria-label="Cargando" />
+            <Loader2 className="h-7 w-7 animate-spin text-emerald-300" aria-label="Cargando" />
           </div>
         ) : (
-          <div className="space-y-6">
-            <section className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur">
-              <p className="text-sm text-white/60">Empresa</p>
-              <p className="mt-1 text-2xl font-semibold">{companyName}</p>
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-xl bg-black/20 p-4">
-                  <p className="text-xs uppercase tracking-wide text-white/50">Plan</p>
-                  <p className="mt-1 text-lg font-medium">{planName}</p>
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5 sm:gap-3">
+            <section className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 sm:px-4 sm:py-3">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold sm:text-base">{companyName}</p>
+                  <p className="mt-0.5 text-[11px] text-white/60">
+                    Plan {planName} · {billingLabel}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold tabular-nums text-emerald-200">
+                    {amountDue.toFixed(2)} €
+                    <span className="text-xs font-medium text-white/55">/{periodLabel}</span>
+                  </p>
+                  {data?.quote?.formulaNote ? (
+                    <p className="mt-0.5 text-[10px] text-white/50">{data.quote.formulaNote}</p>
+                  ) : billingMode === 'annual' ? (
+                    <p className="text-[10px] text-white/50">
+                      Equiv. {monthlyEquiv.toFixed(2)} €/mes
+                    </p>
+                  ) : null}
+                  {Array.isArray(data?.quote?.lines) && data.quote.lines.length > 0 ? (
+                    <ul className="mt-1 space-y-0.5 text-[10px] text-white/45">
+                      {data.quote.lines.map((line) => (
+                        <li key={line.key}>
+                          {line.label}
+                          {line.qty > 1 ? ` ×${line.qty}` : ''}: {line.totalMonthly} €/mes
+                        </li>
+                      ))}
+                    </ul>
+                  ) : extras &&
+                    (extras.extraPdv > 0 ||
+                      extras.extraBusinesses > 0 ||
+                      extras.extraBrands > 0 ||
+                      extras.extraWorkers > 0) ? (
+                    <p className="mt-0.5 text-[10px] text-white/45">
+                      Incluye extras
+                      {extras.extraPdv > 0 ? ` · +${extras.extraPdv} PDV` : ''}
+                      {extras.extraWorkers > 0 ? ` · +${extras.extraWorkers} trab.` : ''}
+                      {extras.extraBusinesses > 0 ? ` · +${extras.extraBusinesses} emp.` : ''}
+                      {extras.extraBrands > 0 ? ` · +${extras.extraBrands} marcas` : ''}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="rounded-xl bg-black/20 p-4">
-                  <p className="text-xs uppercase tracking-wide text-white/50">Precio mensual</p>
-                  <p className="mt-1 text-lg font-medium">{price.toFixed(2)} €</p>
-                </div>
+                {isActive ? (
+                  <span className="rounded-md border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-100">
+                    Activa
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-white/55">Transfiere este importe</span>
+                )}
               </div>
-              {isActive ? (
-                <p className="mt-4 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
-                  Tu suscripción está activa. Puedes seguir usando Vertial con normalidad.
-                </p>
-              ) : (
-                <p className="mt-4 text-sm text-white/70">
-                  Para acceder al SaaS realiza la transferencia con el concepto indicado. Cuando
-                  validemos el pago, activaremos tu cuenta.
-                </p>
-              )}
             </section>
 
-            <section className="rounded-2xl border border-emerald-400/20 bg-gradient-to-b from-emerald-500/10 to-transparent p-6">
-              <div className="mb-4 flex items-center gap-2">
-                <CreditCard className="h-5 w-5 text-emerald-300" />
-                <h2 className="text-lg font-semibold">Pago por transferencia</h2>
+            <section className="min-h-0 flex-1 rounded-xl border border-emerald-400/20 bg-gradient-to-b from-emerald-500/10 to-transparent px-3 py-2.5 sm:px-4 sm:py-3">
+              <div className="mb-2 flex items-center gap-1.5">
+                <CreditCard className="h-4 w-4 text-emerald-300" />
+                <h2 className="text-sm font-semibold sm:text-base">Datos de transferencia</h2>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-1.5">
                 <InfoRow
-                  label="IBAN"
+                  label="IBAN / cuenta"
                   value={iban}
                   onCopy={() => void copyText(iban, 'iban')}
                   copied={copied === 'iban'}
@@ -186,52 +253,49 @@ export function SubscriptionPaymentPage() {
                 />
               </div>
 
-              <ol className="mt-6 space-y-2 text-sm text-white/75">
-                <li>1. Realiza la transferencia con el importe del plan.</li>
-                <li>2. Usa exactamente el concepto indicado.</li>
-                <li>3. Pulsa el botón cuando hayas realizado el pago.</li>
-              </ol>
+              <p className="mt-2 text-[10px] leading-snug text-white/55 sm:text-[11px]">
+                Transfiere el importe · pega el concepto exacto · pulsa «He realizado el pago».
+              </p>
             </section>
 
             {error ? (
-              <p className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+              <p className="shrink-0 rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-100">
                 {error}
               </p>
             ) : null}
 
             {alreadySent || doneMessage ? (
-              <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-5">
-                <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
-                  <div>
-                    <p className="font-medium text-emerald-100">Hemos recibido tu aviso</p>
-                    <p className="mt-1 text-sm text-emerald-50/80">
-                      {doneMessage ||
-                        'Comprobaremos la transferencia lo antes posible. Recibirás acceso automáticamente una vez validado el pago.'}
-                    </p>
-                  </div>
+              <div className="shrink-0 rounded-lg border border-emerald-400/30 bg-emerald-500/10 px-3 py-2">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
+                  <p className="text-xs leading-snug text-emerald-50/90">
+                    {doneMessage ||
+                      'Aviso recibido. Activaremos el acceso al validar la transferencia.'}
+                  </p>
                 </div>
               </div>
             ) : null}
 
-            {!isActive ? (
-              <button
-                type="button"
-                disabled={submitting || alreadySent}
-                onClick={() => void handleNotifyPaid()}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-4 text-base font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-                {alreadySent ? 'Aviso enviado' : 'He realizado el pago'}
-              </button>
-            ) : (
-              <a
-                href="/saas/dashboard"
-                className="inline-flex w-full items-center justify-center rounded-xl bg-white px-6 py-4 text-base font-semibold text-slate-950 transition hover:bg-white/90"
-              >
-                Ir al Dashboard
-              </a>
-            )}
+            <div className="shrink-0 pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+              {!isActive ? (
+                <button
+                  type="button"
+                  disabled={submitting || alreadySent}
+                  onClick={() => void handleNotifyPaid()}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  {alreadySent ? 'Aviso enviado' : 'He realizado el pago'}
+                </button>
+              ) : (
+                <a
+                  href="/saas/dashboard"
+                  className="inline-flex w-full items-center justify-center rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-white/90"
+                >
+                  Ir al Dashboard
+                </a>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -254,23 +318,27 @@ function InfoRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-3 rounded-xl px-4 py-3 ${
+      className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 sm:px-3 ${
         emphasis ? 'bg-emerald-400/15 ring-1 ring-emerald-300/30' : 'bg-black/25'
       }`}
     >
       <div className="min-w-0">
-        <p className="text-xs uppercase tracking-wide text-white/50">{label}</p>
-        <p className={`truncate font-mono text-sm ${emphasis ? 'font-semibold text-emerald-100' : ''}`}>
+        <p className="text-[10px] uppercase tracking-wide text-white/50">{label}</p>
+        <p
+          className={`truncate font-mono text-xs sm:text-sm ${
+            emphasis ? 'font-semibold text-emerald-100' : 'text-white/95'
+          }`}
+        >
           {value}
         </p>
       </div>
       <button
         type="button"
         onClick={onCopy}
-        className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-white/15 px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/5"
+        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-white/15 px-2 py-1 text-[10px] text-white/80 hover:bg-white/5 sm:text-xs"
       >
-        <Copy className="h-3.5 w-3.5" />
-        {copied ? 'Copiado' : 'Copiar'}
+        <Copy className="h-3 w-3" />
+        {copied ? 'OK' : 'Copiar'}
       </button>
     </div>
   );

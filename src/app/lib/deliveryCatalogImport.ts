@@ -171,7 +171,10 @@ export function resolveImportTaxRate(
     const n = Number(raw);
     if (Number.isFinite(n) && n >= 0 && n <= 100) return n;
   }
-  return String(vertical || '').trim() === 'restaurant' ? 10 : 21;
+  const v = String(vertical || '').trim();
+  // Comida / heladería: IVA reducido por defecto (se puede sobreescribir con columna iva).
+  if (v === 'restaurant' || v === 'iceCreamShop') return 10;
+  return 21;
 }
 
 export type ResolveBrandIdsFromImportResult = {
@@ -627,6 +630,14 @@ export async function mapImportEntryToCatalogItem(
         ingredients: parsed.join(', '),
       };
     }
+  }
+
+  const formatoRaw = String(entry.formato || entry.format || entry.tamano || entry.tamaño || '').trim();
+  if (formatoRaw) {
+    item.customFields = {
+      ...(item.customFields || {}),
+      formato: formatoRaw,
+    };
   }
 
   if (item.itemType === 'combo') {

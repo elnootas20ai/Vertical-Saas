@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Monitor, Store } from 'lucide-react';
+import { Monitor, Store } from 'lucide-react';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
+import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useBusinessOptional } from '../../context/BusinessContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
@@ -162,28 +163,23 @@ export function TpvTabletLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 flex flex-col items-center justify-center p-6">
-      <div className="w-full max-w-md">
-        <div className="flex justify-center mb-8">
-          <VertialLogo className="h-10 brightness-0 invert" />
-        </div>
-
-        <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-8 border border-white/10">
-          <button
-            type="button"
-            onClick={goBack}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 transition-colors mb-4"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Volver
-          </button>
-
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 rounded-xl bg-indigo-100 dark:bg-indigo-900/40 flex items-center justify-center">
-              <Monitor className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">TPV Tablet</h1>
+    <AccesoSplitLayout visualKey="login-company" scrollable onBack={goBack} backLabel="Volver">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
+        <div className="w-full max-w-md shrink-0">
+          <div className="rounded-2xl border-2 border-gray-200 bg-white p-4 pb-3.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:p-6 sm:pb-5">
+            <div className="mb-4 text-center sm:mb-5">
+              <div className="mb-3 hidden items-center justify-center sm:flex">
+                <VertialLogo size="md" />
+              </div>
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-900/30">
+                <Monitor className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              </div>
+              <span className="mb-2 inline-block rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                TPV tablet
+              </span>
+              <h1 className="mb-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
+                Código de tienda
+              </h1>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {storeLabel
                   ? storeLabel
@@ -192,51 +188,66 @@ export function TpvTabletLogin() {
                     : `Activa la tablet con el código de tu ${tabletCopy.storeCountLabel}`}
               </p>
             </div>
+
+            {errors.general ? (
+              <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                {errors.general}
+              </div>
+            ) : null}
+
+            <form onSubmit={performLogin} className="space-y-5">
+              {binding ? (
+                <div className="flex items-center justify-between px-1 text-xs text-gray-500 dark:text-gray-400">
+                  <span>Tablet vinculada a esta tienda</span>
+                  <button
+                    type="button"
+                    onClick={resetTerminal}
+                    className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                  >
+                    Otra tienda
+                  </button>
+                </div>
+              ) : null}
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {tabletCopy.tabletCodeLabel}
+                </label>
+                <ACCESO__Input
+                  ref={terminalRef}
+                  value={terminalCode}
+                  onChange={(e) => {
+                    setTerminalCode(e.target.value.toUpperCase());
+                    setErrors((prev) => ({ ...prev, terminalCode: undefined, general: undefined }));
+                  }}
+                  onKeyDown={handleTerminalKeyDown}
+                  placeholder="Ej. ABC123"
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  className="text-center font-mono text-lg uppercase tracking-widest"
+                  icon={<Store className="h-4 w-4" />}
+                />
+                {errors.terminalCode ? (
+                  <p className="mt-1 text-xs text-red-600">{errors.terminalCode}</p>
+                ) : null}
+              </div>
+              <ACCESO__Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting ? 'Entrando…' : 'Entrar al TPV'}
+              </ACCESO__Button>
+            </form>
           </div>
 
-          {errors.general && (
-            <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 text-sm">
-              {errors.general}
-            </div>
-          )}
-
-          <form onSubmit={performLogin} className="space-y-5">
-            {binding && (
-              <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 px-1">
-                <span>Tablet vinculada a esta tienda</span>
-                <button type="button" onClick={resetTerminal} className="text-indigo-600 hover:underline">
-                  Otra tienda
-                </button>
-              </div>
-            )}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                {tabletCopy.tabletCodeLabel}
-              </label>
-              <ACCESO__Input
-                ref={terminalRef}
-                value={terminalCode}
-                onChange={(e) => {
-                  setTerminalCode(e.target.value.toUpperCase());
-                  setErrors((prev) => ({ ...prev, terminalCode: undefined, general: undefined }));
-                }}
-                onKeyDown={handleTerminalKeyDown}
-                placeholder="Ej. ABC123"
-                autoComplete="off"
-                autoCapitalize="characters"
-                className="font-mono uppercase tracking-widest text-center text-lg"
-                icon={<Store className="w-4 h-4" />}
-              />
-              {errors.terminalCode && (
-                <p className="mt-1 text-xs text-red-600">{errors.terminalCode}</p>
-              )}
-            </div>
-            <ACCESO__Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? 'Entrando…' : 'Entrar al TPV'}
-            </ACCESO__Button>
-          </form>
+          <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
+            ¿Eres trabajador?{' '}
+            <button
+              type="button"
+              onClick={() => navigate(AUTH_PATHS.workerLogin)}
+              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+            >
+              Iniciar sesión
+            </button>
+          </p>
         </div>
       </div>
-    </div>
+    </AccesoSplitLayout>
   );
 }

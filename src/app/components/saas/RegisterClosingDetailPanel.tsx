@@ -213,6 +213,77 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
         </span>
       </div>
 
+      {/* Caja 1 · Tienda + Caja 2 · Apps */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900/50 p-3 space-y-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Caja 1</p>
+              <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Tienda (TPV)</p>
+            </div>
+            <p className="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">
+              {fmtMoney(summary.totalSales)}€
+            </p>
+          </div>
+          <div className="space-y-1 text-xs">
+            <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
+              <span className="font-semibold">Efectivo</span>
+              <span className="font-semibold tabular-nums">{fmtMoney(summary.salesByMethod.efectivo)}€</span>
+            </div>
+            <div className="flex justify-between gap-2 text-sky-700 dark:text-sky-300">
+              <span className="font-semibold">Tarjeta</span>
+              <span className="font-semibold tabular-nums">{fmtMoney(summary.salesByMethod.tarjeta)}€</span>
+            </div>
+            {(summary.salesByMethod.bizum || 0) > 0 ? (
+              <div className="flex justify-between gap-2 text-zinc-500">
+                <span>Bizum</span>
+                <span className="font-semibold tabular-nums">{fmtMoney(summary.salesByMethod.bizum)}€</span>
+              </div>
+            ) : null}
+          </div>
+          {!ordersLoading && brandBilling.rows.length > 0 ? (
+            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-1.5 space-y-0.5">
+              {brandBilling.rows.map((row) => (
+                <div key={row.brandId} className="flex justify-between gap-2 text-[11px] text-zinc-600 dark:text-zinc-300">
+                  <span className="truncate">{row.name}</span>
+                  <span className="tabular-nums font-semibold shrink-0">{fmtMoney(row.revenue)}€</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/30 p-3 space-y-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-blue-500/80">Caja 2</p>
+              <p className="text-sm font-bold text-blue-950 dark:text-blue-50">Apps (hecho en app)</p>
+            </div>
+            <p className="text-lg font-semibold tabular-nums text-blue-950 dark:text-blue-50">
+              {fmtMoney(aggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0))}€
+            </p>
+          </div>
+          <div className="space-y-1 text-xs">
+            {aggregatorRows.map((r) => {
+              const amt = Number(r.totalSales) || 0;
+              if (amt <= 0) return null;
+              return (
+                <div key={r.platform.channel} className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80">
+                  <span className="font-semibold truncate">{r.platform.label}</span>
+                  <span className="font-semibold tabular-nums shrink-0">{fmtMoney(amt)}€</span>
+                </div>
+              );
+            })}
+            {aggregatorCashTotal > 0 ? (
+              <div className="flex justify-between gap-2 text-emerald-700 dark:text-emerald-300">
+                <span className="font-semibold">No pagado efectivo → cajón</span>
+                <span className="font-semibold tabular-nums">{fmtMoney(aggregatorCashTotal)}€</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         {[
           {
@@ -270,6 +341,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
           rows={brandBilling.rows}
           unbranded={brandBilling.unbranded}
           total={brandBilling.total}
+          title="Caja 1 · por marca"
         />
       ) : null}
 
@@ -392,7 +464,7 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
       <AggregatorCashSummary
         rows={aggregatorRows}
         foodByChannel={aggregatorFoodByChannel}
-        title="Cajas agregadores (declarado en cierre)"
+        title="Caja 2 · apps (declarado en cierre)"
       />
 
       {transactions.some((t) => t.type === 'cash_in' || t.type === 'cash_out' || t.type === 'return') && (

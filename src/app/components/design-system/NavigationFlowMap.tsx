@@ -39,7 +39,7 @@ export function NavigationFlowMap() {
             </div>
             <div className="bg-blue-100 p-3 rounded-lg text-sm border-2 border-blue-500">
               <div className="font-semibold text-blue-900">→ /auth/entry</div>
-              <div className="text-blue-700 text-xs">Probar gratis</div>
+              <div className="text-blue-700 text-xs">Registrarse</div>
             </div>
             <div className="bg-blue-100 p-3 rounded-lg text-sm border-2 border-blue-500">
               <div className="font-semibold text-blue-900">→ /auth/login</div>

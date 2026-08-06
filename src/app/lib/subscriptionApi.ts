@@ -145,12 +145,47 @@ export interface TransferInstructionsResponse {
     paymentSentAt?: string;
     currentPeriodEnd?: string;
     billingExempt?: boolean;
+    quotedMonthlyEquivalentEuros?: number;
+    quotedAmountDueEuros?: number;
   };
   plan: {
     id: string;
     name: string;
     monthlyPriceCents: number;
     monthlyPriceEuros: number;
+    annualPriceCents?: number;
+    annualPriceEuros?: number;
+  };
+  quote?: {
+    billingMode: 'monthly' | 'annual' | string;
+    billingLabel: string;
+    periodLabel: string;
+    monthlyEquivalentEuros: number;
+    amountDueEuros: number;
+    amountDueCents: number;
+    listMonthlyEuros?: number;
+    baseMonthlyEuros: number;
+    extrasMonthlyEuros: number;
+    formulaNote?: string;
+    lines?: Array<{
+      key: string;
+      label: string;
+      qty: number;
+      unitMonthly: number;
+      totalMonthly: number;
+    }>;
+    extras: {
+      extraPdv: number;
+      extraBusinesses: number;
+      extraBrands: number;
+      extraWorkers: number;
+    };
+    included?: {
+      pdv: number;
+      businesses: number;
+      brands: number;
+      workers: number;
+    };
   };
   transfer: {
     iban: string;

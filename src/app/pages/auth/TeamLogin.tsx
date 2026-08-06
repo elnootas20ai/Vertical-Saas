@@ -1,10 +1,11 @@
 import { useState, useRef, type FormEvent, type PointerEvent, type KeyboardEvent } from 'react';
 import { useNavigate } from 'react-router';
-import { Eye, Building2, User, Lock, ShieldAlert, ArrowLeft, ArrowRight } from 'lucide-react';
+import { Eye, Building2, User, Lock, ShieldAlert, ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
+import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { useAuth } from '../../context/AuthContext';
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 
@@ -86,17 +87,21 @@ export function TeamLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-800 flex items-center justify-center p-6">
-      <div className="w-full max-w-md">
-        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-8 shadow-sm">
-          <div className="text-center mb-8">
-            <div className="flex items-center justify-center mb-6">
-              <VertialLogo size="lg" />
+    <AccesoSplitLayout visualKey="login-company" scrollable onBack={() => navigate(AUTH_PATHS.entry)}>
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
+      <div className="w-full max-w-md shrink-0">
+        <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-4 pb-3.5 sm:p-6 sm:pb-5 shadow-sm">
+          <div className="text-center mb-4 sm:mb-5">
+            <div className="hidden sm:flex items-center justify-center mb-3">
+              <VertialLogo size="md" />
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
+            <span className="inline-block mb-2 px-2.5 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
               Acceso de equipo
+            </span>
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">
+              {step === 'companyCode' ? 'Código de empresa' : 'Credenciales'}
             </h1>
-            <p className="text-gray-600 dark:text-gray-400">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
               {step === 'companyCode'
                 ? 'Introduce el código que te proporcionó tu empresa'
                 : 'Introduce tu usuario y contraseña'}
@@ -161,10 +166,10 @@ export function TeamLogin() {
                   setStep('companyCode');
                   setErrors({});
                 }}
-                className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors mb-2"
+                className="mb-2 text-left text-sm font-medium text-slate-600 hover:text-blue-700 dark:text-slate-300 dark:hover:text-blue-300"
               >
-                <ArrowLeft className="w-4 h-4" />
                 Empresa: <span className="font-mono font-bold tracking-wider">{companyCode}</span>
+                <span className="ml-1 text-xs font-normal text-slate-400">(cambiar)</span>
               </button>
 
               <ACCESO__Input
@@ -240,14 +245,8 @@ export function TeamLogin() {
             Acceso empresa
           </button>
         </p>
-
-        <div className="mt-4 text-center">
-          <ACCESO__Button variant="ghost" onClick={() => navigate(AUTH_PATHS.entry)}>
-            <ArrowLeft className="w-4 h-4 mr-1" />
-            Elegir tipo de acceso
-          </ACCESO__Button>
-        </div>
       </div>
-    </div>
+      </div>
+    </AccesoSplitLayout>
   );
 }

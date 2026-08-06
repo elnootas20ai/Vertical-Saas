@@ -38,9 +38,9 @@ export function CardEstadoCuenta({
           <div className="flex items-start gap-3">
             <Calendar className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
             <div>
-              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Periodo de prueba</h3>
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Periodo de activación</h3>
               <p className="text-sm text-gray-700 dark:text-gray-300">
-                Te quedan <strong>{daysRemaining} días</strong> de prueba gratuita
+                Te quedan <strong>{daysRemaining} días</strong>
               </p>
             </div>
           </div>

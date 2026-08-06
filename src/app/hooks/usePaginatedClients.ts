@@ -94,7 +94,9 @@ export function usePaginatedClients(options: UsePaginatedClientsOptions) {
       if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Error al cargar clientes');
     } finally {
-      if (!controller.signal.aborted) {
+      // Si esta petición fue abortada por otra más nueva, esa otra pone loading=true.
+      // Si era la última activa, hay que apagar el spinner (si no, se queda «Cargando…»).
+      if (abortRef.current === controller || !abortRef.current) {
         setIsLoading(false);
       }
     }

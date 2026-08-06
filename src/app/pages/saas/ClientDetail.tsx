@@ -267,6 +267,11 @@ const DELIVERY_CLIENT_TAGS = [
   'empresa', 'pedido grande', 'domicilio habitual', 'solo recogida',
 ];
 
+const HELADERIA_CLIENT_TAGS = [
+  'vip', 'frecuente', 'encargo tarta', 'alérgico frutos secos', 'alérgico leche',
+  'sin lactosa', 'empresa', 'evento', 'preferencia vainilla', 'preferencia chocolate',
+];
+
 function mapStoredClientToDetail(found: CrmClient | AppContextClient): Client {
   const location = resolveClientLocationFields(found);
   return {
@@ -311,8 +316,9 @@ export function ClientDetail() {
   const { user: authUser } = useAuth();
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
   const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
-  /** CRM operativo (delivery o bar/restaurante): ficha con historial de pedidos/cuentas. */
-  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness;
+  const isHeladeriaBusiness = currentBusiness?.businessType === 'iceCreamShop';
+  /** CRM operativo (delivery, bar/restaurante o heladería). */
+  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness || isHeladeriaBusiness;
   const clientPlan = useClientDetailPlanAccess();
   const [activeTab, setActiveTab] = useState('resumen');
   const [showCreateContractModal, setShowCreateContractModal] = useState(false);
@@ -759,7 +765,11 @@ export function ClientDetail() {
   }
 
   const tagSearch = newTag.toLowerCase().trim();
-  const tagSuggestionsSource = isOpsCrmBusiness ? DELIVERY_CLIENT_TAGS : CLIENT_PREDEFINED_TAGS;
+  const tagSuggestionsSource = isHeladeriaBusiness
+    ? HELADERIA_CLIENT_TAGS
+    : isOpsCrmBusiness
+      ? DELIVERY_CLIENT_TAGS
+      : CLIENT_PREDEFINED_TAGS;
   const clientTagSuggestions = tagSuggestionsSource.filter(
     (s) => !(ctxClient?.tags || []).includes(s) && (tagSearch === '' || s.toLowerCase().includes(tagSearch)),
   );

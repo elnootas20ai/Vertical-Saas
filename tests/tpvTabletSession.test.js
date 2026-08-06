@@ -14,6 +14,7 @@ import {
   readTpvTabletBinding,
   TPV_TABLET_VERTICAL_RESTAURANT,
 } from '../src/app/lib/tpvTabletSession.ts';
+import { AUTH_PATHS } from '../src/app/lib/authEntryPaths.ts';
 
 const storage = new Map();
 
@@ -124,7 +125,7 @@ describe('tpvTabletSession — rutas tablet', () => {
     expect(readTpvTabletBinding()).toBeNull();
   });
 
-  it('leaveTpvTabletSession hace logout y sale a pantalla de código (fuera SaaS)', async () => {
+  it('leaveTpvTabletSession hace logout y sale a login trabajador (sin pillarse en login empresa)', async () => {
     writeTpvTabletBinding({
       terminalCode: 'STORE-001',
       pdvId: 'pdv-1',
@@ -148,7 +149,9 @@ describe('tpvTabletSession — rutas tablet', () => {
       });
       expect(logoutCalls).toBe(1);
       expect(readTpvTabletBinding()).toBeNull();
-      expect(replaced).toEqual([TPV_TABLET_LOGIN_PATH]);
+      expect(replaced).toEqual([
+        `${AUTH_PATHS.workerLogin}?from=tpv-tablet&code=STORE-001`,
+      ]);
     } finally {
       globalThis.window = prev;
     }

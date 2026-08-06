@@ -47,9 +47,29 @@ export const DELIVERY_CATALOG_TEMPLATE_HEADERS = DELIVERY_CATALOG_IMPORT_COLUMNS
 export const DELIVERY_CATALOG_TEMPLATE_VERSION = 4;
 
 export const DELIVERY_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_tpv.xlsx';
+export const HELADERIA_CATALOG_TEMPLATE_FILENAME = 'plantilla_catalogo_heladeria.xlsx';
 
 /** Filas vacías en «catalogo» (fila 2 en adelante). No se importan si están vacías. */
 export const DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS = 5000;
+
+export type CatalogTemplateVertical = 'delivery' | 'restaurant' | 'iceCreamShop';
+
+/** Categorías TPV típicas de heladería (hoja referencia / valores válidos). */
+export const HELADERIA_CATALOG_CATEGORIES = [
+  'Sabores',
+  'Tarrinas',
+  'Conos',
+  'Batidos',
+  'Toppings',
+  'Encargos',
+  'Bebidas',
+  'Complementos',
+  'Postres',
+  'Combos',
+] as const;
+
+/** Columnas extra de la plantilla heladería (tras el core oficial). */
+export const HELADERIA_CATALOG_EXTRA_HEADERS = ['alergenos', 'formato'] as const;
 
 export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   { key: 'name', label: 'nombre', required: true, example: 'Pizza Margarita' },
@@ -62,11 +82,26 @@ export const DELIVERY_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
   // Opcionales (no van en la plantilla base; se mapean si el Excel las trae)
   { key: 'tipo_menu', label: 'tipo_menu', example: 'estandar' },
   { key: 'taxRate', label: 'iva', example: '10' },
+  { key: 'allergens', label: 'alergenos', example: 'leche, frutos secos' },
+  { key: 'formato', label: 'formato', example: '2 bolas' },
+];
+
+export const HELADERIA_CATALOG_IMPORT_FIELDS: ImportFieldDef[] = [
+  { key: 'name', label: 'nombre', required: true, example: 'Vainilla Madagascar' },
+  { key: 'sku', label: 'codigo', example: 'HEL-VAI-01' },
+  { key: 'category', label: 'categoria', required: true, example: 'Sabores' },
+  { key: 'linea', label: 'linea', example: 'Heladería' },
+  { key: 'price', label: 'precio', required: true, example: '2.80' },
+  { key: 'ingredients', label: 'ingredientes', example: 'Leche, nata, vainilla' },
+  { key: 'description', label: 'descripcion', example: 'Helado artesano' },
+  { key: 'allergens', label: 'alergenos', example: 'leche' },
+  { key: 'formato', label: 'formato', example: 'bola / tarrina 500ml' },
+  { key: 'taxRate', label: 'iva', example: '10' },
 ];
 
 /** Sinónimos de cabecera para auto-mapeo (plantilla oficial + exportaciones habituales). */
 export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
-  name: ['nombre', 'name', 'producto', 'product', 'articulo', 'nombre producto', 'product name'],
+  name: ['nombre', 'name', 'producto', 'product', 'articulo', 'nombre producto', 'product name', 'sabor'],
   sku: ['codigo', 'codigo producto', 'id producto', 'sku', 'codigo sku', 'ref', 'referencia', 'cod'],
   category: ['categoria', 'category', 'seccion', 'familia', 'tipo', 'categoria tpv', 'grupo', 'departamento'],
   linea: ['linea', 'line', 'marca', 'organizador', 'linea comercial', 'linea tpv', 'brand line'],
@@ -75,6 +110,8 @@ export const DELIVERY_CATALOG_HEADER_ALIASES: Record<string, string[]> = {
   description: ['descripcion', 'description', 'desc', 'notas', 'observaciones'],
   tipo_menu: ['tipo_menu', 'tipo menu', 'tipo menú', 'menu', 'menú', 'tamano menu', 'tamaño menú', 'combo tipo'],
   taxRate: ['iva', 'tax', 'taxrate', 'vat', 'impuesto', 'tipo iva', '% iva'],
+  allergens: ['alergenos', 'alérgenos', 'allergens', 'alergeno', 'alérgeno', 'alergias'],
+  formato: ['formato', 'format', 'tamano', 'tamaño', 'size', 'presentacion', 'presentación'],
 };
 
 export type DeliveryCatalogImportIssue = {
@@ -115,10 +152,36 @@ const CATEGORY_PRODUCT_EXAMPLES: Record<string, string> = {
   Bocadillos: 'Bocadillo mixto',
   Cafés: 'Café con leche',
   Bollería: 'Croissant',
+  Sabores: 'Vainilla Madagascar',
+  Tarrinas: 'Tarrina 500 ml chocolate',
+  Conos: 'Cono 2 bolas',
+  Batidos: 'Batido de fresa',
+  Toppings: 'Salsa de chocolate',
+  Encargos: 'Tarta helada 8 raciones',
 };
 
+export function isHeladeriaCatalogVertical(vertical?: string | null): boolean {
+  return String(vertical || '').trim() === 'iceCreamShop';
+}
+
+export function catalogTemplateFilenameForVertical(vertical?: string | null): string {
+  return isHeladeriaCatalogVertical(vertical)
+    ? HELADERIA_CATALOG_TEMPLATE_FILENAME
+    : DELIVERY_CATALOG_TEMPLATE_FILENAME;
+}
+
+export function catalogTemplateHeadersForVertical(vertical?: string | null): string[] {
+  if (isHeladeriaCatalogVertical(vertical)) {
+    return [...DELIVERY_CATALOG_TEMPLATE_HEADERS, ...HELADERIA_CATALOG_EXTRA_HEADERS];
+  }
+  return [...DELIVERY_CATALOG_TEMPLATE_HEADERS];
+}
+
 /** Categorías TPV de una línea (las de la marca o las típicas del tipo de negocio). */
-export function lineCategoriesForCatalogTemplate(brand: ImportBrandLike): string[] {
+export function lineCategoriesForCatalogTemplate(
+  brand: ImportBrandLike,
+  vertical?: string | null,
+): string[] {
   const fromBrand = (brand.catalogCategories ?? [])
     .map((c) => normalizeImportCategory(String(c || '')))
     .filter((c) => c && !shouldClearBrandForCategory(c));
@@ -126,6 +189,10 @@ export function lineCategoriesForCatalogTemplate(brand: ImportBrandLike): string
     const cats = [...new Set(fromBrand)];
     if (!cats.some((c) => c === 'Combos')) cats.push('Combos');
     return cats;
+  }
+
+  if (isHeladeriaCatalogVertical(vertical)) {
+    return [...HELADERIA_CATALOG_CATEGORIES];
   }
 
   const preset = getDeliveryBrandLinePreset(brand.deliveryLineKind);
@@ -161,8 +228,10 @@ function exampleProductName(category: string, lineName: string, index: number): 
  */
 export function buildDeliveryCatalogEmptyDataRows(
   count = DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS,
+  vertical?: string | null,
 ): string[][] {
-  return Array.from({ length: count }, () => DELIVERY_CATALOG_TEMPLATE_HEADERS.map(() => ''));
+  const headers = catalogTemplateHeadersForVertical(vertical);
+  return Array.from({ length: count }, () => headers.map(() => ''));
 }
 
 /**
@@ -261,13 +330,25 @@ export function buildDeliveryCatalogSampleRows(commercialLines: ImportBrandLike[
 }
 
 /** Combinaciones linea + categoría válidas (hoja referencia_tpv). */
-function buildCatalogReferenceRows(commercialLines: ImportBrandLike[]): string[][] {
+function buildCatalogReferenceRows(
+  commercialLines: ImportBrandLike[],
+  vertical?: string | null,
+): string[][] {
   const lines = organizerBrandsForCatalogTemplate(commercialLines);
   const rows: string[][] = [['linea', 'categoria', 'va_en_columna_linea', 'va_en_columna_categoria']];
+  const heladeria = isHeladeriaCatalogVertical(vertical);
+
+  if (heladeria && lines.length === 0) {
+    for (const cat of HELADERIA_CATALOG_CATEGORIES) {
+      const shared = ['Bebidas', 'Complementos', 'Postres'].includes(cat);
+      rows.push([shared ? '' : 'Heladería', cat, shared ? '' : 'Heladería', cat]);
+    }
+    return rows;
+  }
 
   for (const brand of lines) {
     const lineName = String(brand.name || '').trim();
-    for (const cat of lineCategoriesForCatalogTemplate(brand)) {
+    for (const cat of lineCategoriesForCatalogTemplate(brand, vertical)) {
       rows.push([lineName, cat, lineName, cat]);
     }
   }
@@ -281,27 +362,83 @@ function buildCatalogReferenceRows(commercialLines: ImportBrandLike[]): string[]
   return rows;
 }
 
-function buildValidValuesRows(commercialLines: ImportBrandLike[]): string[][] {
+function buildValidValuesRows(
+  commercialLines: ImportBrandLike[],
+  vertical?: string | null,
+): string[][] {
   const lines = organizerBrandsForCatalogTemplate(commercialLines);
   const rows: string[][] = [['linea (pestaña TPV)', 'categorias validas', 'notas']];
+  const heladeria = isHeladeriaCatalogVertical(vertical);
 
   for (const brand of lines) {
-    const cats = lineCategoriesForCatalogTemplate(brand).join(', ');
-    rows.push([brand.name, cats || 'Principales, Entrantes', 'Nombre exacto en columna linea']);
+    const cats = lineCategoriesForCatalogTemplate(brand, vertical).join(', ');
+    rows.push([
+      brand.name,
+      cats || (heladeria ? 'Sabores, Tarrinas, Conos' : 'Principales, Entrantes'),
+      'Nombre exacto en columna linea',
+    ]);
   }
 
-  rows.push(
-    ['(dejar vacío)', 'Bebidas', 'Pestaña compartida — sin linea'],
-    ['(dejar vacío)', 'Complementos', 'Pestaña compartida — sin linea'],
-    ['(dejar vacío)', 'Postres', 'Pestaña compartida — sin linea'],
-  );
+  if (heladeria) {
+    rows.push(
+      ['(dejar vacío)', 'Bebidas', 'Pestaña compartida — sin linea'],
+      ['(dejar vacío)', 'Toppings', 'Puede ir sin linea o con tu marca Heladería'],
+      ['(dejar vacío)', 'Complementos', 'Pestaña compartida — sin linea'],
+    );
+  } else {
+    rows.push(
+      ['(dejar vacío)', 'Bebidas', 'Pestaña compartida — sin linea'],
+      ['(dejar vacío)', 'Complementos', 'Pestaña compartida — sin linea'],
+      ['(dejar vacío)', 'Postres', 'Pestaña compartida — sin linea'],
+    );
+  }
   return rows;
 }
 
-function instructionLines(commercialLines: ImportBrandLike[]): string[] {
+function instructionLines(
+  commercialLines: ImportBrandLike[],
+  vertical?: string | null,
+): string[] {
   const lines = organizerBrandsForCatalogTemplate(commercialLines);
   const lineNames = lines.map((b) => b.name.trim()).filter(Boolean);
   const namesText = lineNames.length > 0 ? lineNames.join(' | ') : '(configura marcas en Ajustes → Marca)';
+  const headers = catalogTemplateHeadersForVertical(vertical);
+
+  if (isHeladeriaCatalogVertical(vertical)) {
+    return [
+      `PLANTILLA HELADERÍA v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
+      `${DELIVERY_CATALOG_TEMPLATE_EMPTY_DATA_ROWS} filas vacías en «catalogo» (desde fila 2).`,
+      '',
+      'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
+      '',
+      'COLUMNAS fila 1 (NO renombrar):',
+      `  ${headers.join(' | ')}`,
+      '',
+      'RELLENA desde la fila 2. Las filas vacías no se importan.',
+      '',
+      'OBLIGATORIO por producto:',
+      '  · nombre — sabor o producto en TPV (ej. Vainilla Madagascar)',
+      '  · categoria — Sabores, Tarrinas, Conos, Batidos, Toppings, Encargos, Bebidas…',
+      '  · precio — número (2.80)',
+      '',
+      'HELADERÍA:',
+      '  · Sabores — bola / sabor a granel (precio por bola o unidad)',
+      '  · Tarrinas / Conos — formatos listos (500 ml, 1 L, cono 2 bolas…)',
+      '  · Batidos — milkshakes y cremosos',
+      '  · Toppings — salsas, toppings, extras',
+      '  · Encargos — tartas, encargos anticipados, packs fiesta',
+      '  · alergenos — leche, frutos secos, soja, gluten… (separados por coma)',
+      '  · formato — bola, 2 bolas, tarrina 500ml, encargo 8 raciones…',
+      '  · IVA: se aplica 10% al importar (puedes poner columna iva si hace falta)',
+      '',
+      'RECOMENDADO:',
+      '  · codigo — HEL-VAI-01 (mismo código = actualiza sin duplicar)',
+      '  · linea — pestaña TPV: ' + namesText,
+      '  · ingredientes — Leche, nata, vainilla… (escandallo / coste)',
+      '',
+      'Consulta «referencia_tpv» y «valores_validos» para tus líneas y categorías.',
+    ];
+  }
 
   return [
     `PLANTILLA OFICIAL v${DELIVERY_CATALOG_TEMPLATE_VERSION} — Catálogo + TPV`,
@@ -310,7 +447,7 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
     'HOJA A IMPORTAR: «catalogo» (la primera). Las demás hojas son solo ayuda.',
     '',
     'COLUMNAS fila 1 (NO renombrar):',
-    `  ${DELIVERY_CATALOG_TEMPLATE_HEADERS.join(' | ')}`,
+    `  ${headers.join(' | ')}`,
     '',
     'RELLENA desde la fila 2. Las filas vacías no se importan.',
     '',
@@ -344,6 +481,7 @@ function instructionLines(commercialLines: ImportBrandLike[]): string[] {
 export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
   const coreHeaders = DELIVERY_CATALOG_CORE_COLUMNS.map((key) => DELIVERY_CATALOG_IMPORT_LABELS[key]);
   if (headers.length < coreHeaders.length) return false;
+  // Heladería puede traer columnas extra (alergenos, formato) tras el core.
   return coreHeaders.every((expected, idx) => {
     const actual = normalizeImportHeader(String(headers[idx] ?? ''));
     const exp = normalizeImportHeader(expected);
@@ -354,22 +492,33 @@ export function isOfficialCatalogTemplateHeaders(headers: string[]): boolean {
   });
 }
 
-export function buildDeliveryCatalogImportWorkbook(commercialLines: ImportBrandLike[] = []) {
+export function buildDeliveryCatalogImportWorkbook(
+  commercialLines: ImportBrandLike[] = [],
+  vertical?: string | null,
+) {
   const organizers = organizerBrandsForCatalogTemplate(commercialLines);
-  const catalogRows = [DELIVERY_CATALOG_TEMPLATE_HEADERS, ...buildDeliveryCatalogEmptyDataRows()];
+  const headers = catalogTemplateHeadersForVertical(vertical);
+  const catalogRows = [headers, ...buildDeliveryCatalogEmptyDataRows(undefined, vertical)];
+  const colCount = headers.length;
+  const lastCol = String.fromCharCode('A'.charCodeAt(0) + Math.max(colCount - 1, 0));
 
   const catalogSheet = XLSX.utils.aoa_to_sheet(catalogRows);
-  catalogSheet['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 36 }, { wch: 42 }];
-  catalogSheet['!autofilter'] = { ref: 'A1:G1' };
+  catalogSheet['!cols'] = isHeladeriaCatalogVertical(vertical)
+    ? [
+        { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 10 },
+        { wch: 32 }, { wch: 28 }, { wch: 22 }, { wch: 18 },
+      ]
+    : [{ wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 16 }, { wch: 10 }, { wch: 36 }, { wch: 42 }];
+  catalogSheet['!autofilter'] = { ref: `A1:${lastCol}1` };
   catalogSheet['!freeze'] = { xSplit: 0, ySplit: 1, topLeftCell: 'A2', activePane: 'bottomLeft', state: 'frozen' };
 
-  const referenceSheet = XLSX.utils.aoa_to_sheet(buildCatalogReferenceRows(organizers));
+  const referenceSheet = XLSX.utils.aoa_to_sheet(buildCatalogReferenceRows(organizers, vertical));
   referenceSheet['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 22 }, { wch: 22 }];
 
-  const validSheet = XLSX.utils.aoa_to_sheet(buildValidValuesRows(organizers));
+  const validSheet = XLSX.utils.aoa_to_sheet(buildValidValuesRows(organizers, vertical));
   validSheet['!cols'] = [{ wch: 22 }, { wch: 32 }, { wch: 36 }];
 
-  const helpSheet = XLSX.utils.aoa_to_sheet(instructionLines(organizers).map((line) => [line]));
+  const helpSheet = XLSX.utils.aoa_to_sheet(instructionLines(organizers, vertical).map((line) => [line]));
   helpSheet['!cols'] = [{ wch: 100 }];
 
   const wb = XLSX.utils.book_new();
@@ -383,11 +532,16 @@ export function buildDeliveryCatalogImportWorkbook(commercialLines: ImportBrandL
 
 export function downloadDeliveryCatalogImportTemplate(
   commercialLines: ImportBrandLike[] = [],
-  filename = DELIVERY_CATALOG_TEMPLATE_FILENAME,
+  filename?: string,
+  options?: { vertical?: string | null },
 ) {
+  const vertical = options?.vertical;
   const organizers = organizerBrandsForCatalogTemplate(commercialLines);
-  const wb = buildDeliveryCatalogImportWorkbook(organizers);
-  XLSX.writeFile(wb, filename || DELIVERY_CATALOG_TEMPLATE_FILENAME);
+  const wb = buildDeliveryCatalogImportWorkbook(organizers, vertical);
+  XLSX.writeFile(
+    wb,
+    filename || catalogTemplateFilenameForVertical(vertical),
+  );
 }
 
 export function parseImportPrice(raw: string): number {

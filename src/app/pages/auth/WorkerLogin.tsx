@@ -16,6 +16,7 @@ import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSi
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
 import { signInWithApple } from '../../lib/appleSignIn';
 import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
+import { clearTpvTabletReturnCode, peekTpvTabletReturnCode } from '../../lib/tpvTabletSession';
 
 const CREDENTIALS_KEY = 'vertial_saved_worker_login';
 
@@ -36,12 +37,22 @@ export function WorkerLogin() {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
 
+  const search = new URLSearchParams(location.search);
+  const fromQueryTablet = search.get('from') === 'tpv-tablet';
+  const codeFromQuery = normalizeTpvTabletCode(search.get('code') || '');
+  const codeFromSession = peekTpvTabletReturnCode();
+
   const tpvReturn = location.state as {
     fromTpvTablet?: boolean;
     terminalCode?: string;
     returnTo?: string;
     message?: string;
   } | null;
+
+  const fromTpvTablet = Boolean(tpvReturn?.fromTpvTablet || fromQueryTablet || codeFromQuery || codeFromSession);
+  const tabletCode = normalizeTpvTabletCode(
+    tpvReturn?.terminalCode || codeFromQuery || codeFromSession || '',
+  );
 
   const saved = loadSavedLogin();
   const [formData, setFormData] = useState({
@@ -57,9 +68,10 @@ export function WorkerLogin() {
 
   const goAfterLogin = useCallback(
     (fallback?: string) => {
-      if (tpvReturn?.fromTpvTablet) {
-        const code = normalizeTpvTabletCode(tpvReturn.terminalCode || '');
-        navigate(tpvReturn.returnTo || AUTH_PATHS.tpvTabletLogin, {
+      if (fromTpvTablet) {
+        const code = tabletCode;
+        clearTpvTabletReturnCode();
+        navigate(tpvReturn?.returnTo || AUTH_PATHS.tpvTabletLogin, {
           replace: true,
           state: code ? { terminalCode: code } : undefined,
         });
@@ -67,7 +79,7 @@ export function WorkerLogin() {
       }
       navigate(fallback || WORKER_DEFAULT_LANDING_PATH);
     },
-    [navigate, tpvReturn],
+    [navigate, fromTpvTablet, tabletCode, tpvReturn?.returnTo],
   );
 
   const handlePasswordPeekStart = (e: PointerEvent<HTMLButtonElement>) => {
@@ -212,7 +224,11 @@ export function WorkerLogin() {
   }, [showGoogleAuth, googleReady]);
 
   return (
-    <AccesoSplitLayout visualKey="register-user" scrollable>
+    <AccesoSplitLayout
+      visualKey="register-user"
+      scrollable
+      onBack={() => navigate(AUTH_PATHS.entry)}
+    >
       <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
       <div className="w-full max-w-md shrink-0">
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-4 pb-3.5 sm:p-6 sm:pb-5 shadow-sm">
@@ -231,10 +247,15 @@ export function WorkerLogin() {
             </h1>
           </div>
 
-          {tpvReturn?.message && !lockInfo && (
+          {(tpvReturn?.message || fromTpvTablet) && !lockInfo && (
             <div className="mb-4 rounded-xl bg-amber-50 border border-amber-200 p-4 flex items-start gap-3">
               <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <p className="text-sm text-amber-800">{tpvReturn.message}</p>
+              <p className="text-sm text-amber-800">
+                {tpvReturn?.message
+                  || (tabletCode
+                    ? `TPV tablet · inicia sesión y vuelve a la tienda (${tabletCode}).`
+                    : 'TPV tablet · inicia sesión de trabajador para continuar.')}
+              </p>
             </div>
           )}
 
@@ -392,12 +413,6 @@ export function WorkerLogin() {
               Acceso empresa
             </button>
           </p>
-        </div>
-
-        <div className="mt-6 text-center">
-          <ACCESO__Button variant="ghost" onClick={() => navigate(AUTH_PATHS.entry)}>
-            ← Elegir tipo de acceso
-          </ACCESO__Button>
         </div>
       </div>
       </div>

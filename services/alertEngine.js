@@ -3422,7 +3422,7 @@ async function checkOnboardingAlerts(userId) {
         level,
         category: 'onboarding',
         title: `Tu configuración inicial está al ${pct}%`,
-        message: `Te faltan ${total - completed} pasos para tener tu negocio listo. Completa el onboarding para aprovechar tu prueba gratuita.`,
+        message: `Te faltan ${total - completed} pasos para tener tu negocio listo. Completa el onboarding para dejar Vertial operativo.`,
         entityId: setupDoc._id,
         entityType: 'setup_progress',
         route: '/saas/onboarding',

@@ -136,7 +136,7 @@ export function VertialSubscriptionSummary({
             {subscription.trialEndsAt &&
             ['trial_active', 'trial_expiring'].includes(subscription.status) ? (
               <p className="mt-1 text-xs text-blue-700 dark:text-blue-300">
-                Prueba gratuita hasta el{' '}
+                Activación hasta el{' '}
                 {new Date(subscription.trialEndsAt).toLocaleDateString('es-ES', {
                   day: 'numeric',
                   month: 'long',

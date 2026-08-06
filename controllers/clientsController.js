@@ -151,22 +151,39 @@ export async function listClients(req, res) {
     let clients = pageDocs.map(sanitizer).filter(Boolean);
     const enrichLiveStats = req.query.liveStats === '1' || req.query.liveStats === 'true';
     if (enrichLiveStats && clients.length > 0) {
-      const allOrders = await listDeliveryOrdersByUser(req, ownerUserId);
-      const deliveryOrders = businessId
-        ? await scopeDeliveryOrdersToBusinessId(req, ownerUserId, businessId, allOrders)
-        : allOrders;
-      let diningOrders = [];
-      try {
-        diningOrders = await loadDiningOrdersForClientCrm(req, ownerUserId, businessId);
-      } catch {
-        diningOrders = [];
+      // Heladería (y verticales sin pedidos delivery/sala): no escanear pedidos del titular.
+      // En cuentas multi-empresa eso bloqueaba el CRM minutos enteros.
+      let skipOrderEnrichment = false;
+      if (businessId) {
+        try {
+          const businesses = await listBusinessesByUser(req, ownerUserId);
+          const biz = businesses.find(
+            (b) => normalizeBusinessScopeId(b.business_id || b._id) === businessId,
+          );
+          const bt = String(biz?.businessType || '').trim().toLowerCase();
+          if (bt === 'icecreamshop') skipOrderEnrichment = true;
+        } catch {
+          /* si falla el lookup, seguir con enrich (comportamiento anterior) */
+        }
       }
-      clients = clients.map((row) => {
-        const withDelivery = enrichClientRowWithLiveDeliveryStats(row, deliveryOrders);
-        if (!diningOrders.length) return withDelivery;
-        const withDining = enrichClientRowWithLiveDiningStats(row, diningOrders);
-        return mergeClientLiveStats(row, withDelivery, withDining);
-      });
+      if (!skipOrderEnrichment) {
+        const allOrders = await listDeliveryOrdersByUser(req, ownerUserId);
+        const deliveryOrders = businessId
+          ? await scopeDeliveryOrdersToBusinessId(req, ownerUserId, businessId, allOrders)
+          : allOrders;
+        let diningOrders = [];
+        try {
+          diningOrders = await loadDiningOrdersForClientCrm(req, ownerUserId, businessId);
+        } catch {
+          diningOrders = [];
+        }
+        clients = clients.map((row) => {
+          const withDelivery = enrichClientRowWithLiveDeliveryStats(row, deliveryOrders);
+          if (!diningOrders.length) return withDelivery;
+          const withDining = enrichClientRowWithLiveDiningStats(row, diningOrders);
+          return mergeClientLiveStats(row, withDelivery, withDining);
+        });
+      }
     }
     return res.json({ ok: true, clients, meta });
   } catch (error) {

@@ -9,17 +9,128 @@ export function getClientTemplateHeaders(includeResponsible = true): string[] {
   return headers;
 }
 
+/** Etiquetas sugeridas en plantilla heladería. */
+export const HELADERIA_CLIENT_TAG_EXAMPLES = [
+  'VIP',
+  'Frecuente',
+  'Encargo tarta',
+  'Alérgico frutos secos',
+  'Alérgico leche',
+  'Empresa',
+  'Evento',
+] as const;
+
 export const LEAD_TEMPLATE_HEADERS = [
   'Nombre', 'Teléfono', 'Email', 'Fuente', 'Estado', 'Vehículo de interés',
   'Presupuesto', 'Notas', 'Responsable', 'Etiquetas',
 ] as const;
 
-export function downloadClientImportTemplate(options?: { includeResponsible?: boolean }) {
-  const headers = getClientTemplateHeaders(options?.includeResponsible !== false);
-  const ws = XLSX.utils.aoa_to_sheet([headers]);
+export type ClientTemplateOptions = {
+  includeResponsible?: boolean;
+  /** iceCreamShop → plantilla con ejemplos y hoja de instrucciones heladería */
+  vertical?: string | null;
+};
+
+function isHeladeriaClientVertical(vertical?: string | null): boolean {
+  return String(vertical || '').trim() === 'iceCreamShop';
+}
+
+function buildHeladeriaClientExampleRows(includeResponsible: boolean): string[][] {
+  const base = (row: {
+    name: string;
+    phone: string;
+    email: string;
+    address: string;
+    city: string;
+    cp: string;
+    notes: string;
+    tags: string;
+  }) => {
+    const cells = [
+      row.name,
+      row.phone,
+      row.email,
+      '',
+      row.address,
+      row.city,
+      row.cp,
+      row.notes,
+    ];
+    if (includeResponsible) cells.push('');
+    cells.push(row.tags);
+    return cells;
+  };
+
+  return [
+    base({
+      name: 'Ejemplo · Ana López',
+      phone: '600111222',
+      email: 'ana@ejemplo.com',
+      address: 'C/ Helados 12',
+      city: 'Barcelona',
+      cp: '08001',
+      notes: 'Prefiere vainilla y chocolate. Borrar fila de ejemplo.',
+      tags: 'VIP, Frecuente',
+    }),
+    base({
+      name: 'Ejemplo · Empresa Fiestas SL',
+      phone: '930000111',
+      email: 'pedidos@fiestas.ejemplo',
+      address: 'Av. Eventos 5',
+      city: 'Barcelona',
+      cp: '08018',
+      notes: 'Encargos tartas fin de semana',
+      tags: 'Empresa, Encargo tarta',
+    }),
+  ];
+}
+
+function heladeriaClientInstructionLines(): string[] {
+  return [
+    'PLANTILLA CLIENTES — HELADERÍA',
+    '',
+    'HOJA A IMPORTAR: «Clientes» (la primera).',
+    '',
+    'COLUMNAS:',
+    '  Nombre* | Teléfono* | Email | DNI | Dirección | Ciudad | Código postal | Notas | Etiquetas',
+    '',
+    'OBLIGATORIO: Nombre y Teléfono.',
+    '',
+    'ETIQUETAS útiles (separadas por coma):',
+    `  ${HELADERIA_CLIENT_TAG_EXAMPLES.join(' | ')}`,
+    '',
+    'NOTAS: preferencias de sabor, alergias, encargos habituales, tamaño tarta…',
+    '',
+    'Borra las filas «Ejemplo · …» antes de importar o cámbialas por clientes reales.',
+    '',
+    'Tras importar verás Pedidos / Total gastado / Último pedido en la exportación Excel.',
+  ];
+}
+
+export function downloadClientImportTemplate(options?: ClientTemplateOptions) {
+  const includeResponsible = options?.includeResponsible !== false;
+  const heladeria = isHeladeriaClientVertical(options?.vertical);
+  const headers = getClientTemplateHeaders(includeResponsible);
+  const rows: string[][] = [headers];
+  if (heladeria) {
+    rows.push(...buildHeladeriaClientExampleRows(includeResponsible));
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = headers.map((h) => ({ wch: Math.max(12, h.length + 4) }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
-  XLSX.writeFile(wb, 'plantilla_clientes.xlsx');
+
+  if (heladeria) {
+    const help = XLSX.utils.aoa_to_sheet(heladeriaClientInstructionLines().map((line) => [line]));
+    help['!cols'] = [{ wch: 90 }];
+    XLSX.utils.book_append_sheet(wb, help, 'instrucciones');
+  }
+
+  XLSX.writeFile(
+    wb,
+    heladeria ? 'plantilla_clientes_heladeria.xlsx' : 'plantilla_clientes.xlsx',
+  );
 }
 
 function downloadCsvFile(filename: string, headers: string[]) {
@@ -33,8 +144,12 @@ function downloadCsvFile(filename: string, headers: string[]) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadClientImportTemplateCsv(options?: { includeResponsible?: boolean }) {
-  downloadCsvFile('plantilla_clientes.csv', getClientTemplateHeaders(options?.includeResponsible !== false));
+export function downloadClientImportTemplateCsv(options?: ClientTemplateOptions) {
+  const heladeria = isHeladeriaClientVertical(options?.vertical);
+  downloadCsvFile(
+    heladeria ? 'plantilla_clientes_heladeria.csv' : 'plantilla_clientes.csv',
+    getClientTemplateHeaders(options?.includeResponsible !== false),
+  );
 }
 
 export function downloadLeadImportTemplate() {

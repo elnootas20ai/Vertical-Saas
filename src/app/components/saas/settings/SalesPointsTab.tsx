@@ -51,11 +51,9 @@ import {
   deleteWorkCenter,
   WORK_CENTER_TYPE_LABELS,
   WORK_CENTER_TYPE_SHORT,
-  OWNERSHIP_LABELS,
   type WorkCenter,
   type WorkCenterType,
   type OwnershipType,
-  type ContractInfo,
 } from '../../../lib/workCentersApi';
 import { ensureRentFinanceFromWorkCenter } from '../../../lib/rentFinanceSync';
 import {
@@ -96,8 +94,6 @@ import {
 } from '../../../lib/deliveryApi';
 import { isSalaManagedWorkCenter } from '../../../lib/salaRoomTerminal';
 import {
-  formatMoneyAsYouType,
-  parseSpanishMoneyInput,
   moneyNumberToDisplay,
 } from '../../../lib/workCenterMoneyInput';
 import { AddButtonDropdown } from '../AddButtonDropdown';
@@ -105,11 +101,6 @@ import { useActivationFocus } from '../../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../ActivationGuideUi';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
-import {
-  settingsOwnershipChoiceClass,
-  settingsOwnershipIconClass,
-  settingsOwnershipRadioClass,
-} from './settingsFormStyles';
 import {
   Search,
   X,
@@ -123,10 +114,7 @@ import {
   Store,
   Building2,
   Warehouse,
-  Home,
   Tag,
-  FileText,
-  Euro,
   Users,
   ArrowRight,
   AlertTriangle,
@@ -188,6 +176,134 @@ function shouldSyncRetailPdv(
   return usesRetailPdvFlow && isRetailWorkCenterType(centerType);
 }
 
+type PdvWizardStepId = 'general' | 'ubicacion' | 'horarios';
+
+type PdvCreateFormState = {
+  name: string;
+  centerType: WorkCenterType;
+  customTypeName: string;
+  ownership: OwnershipType;
+  address: string;
+  city: string;
+  postalCode: string;
+  province: string;
+  phone: string;
+  email: string;
+  expectedStaffCount: string;
+  squareMeters: string;
+  notes: string;
+  purchasePrice: string;
+  purchaseDate: string;
+  cadastralReference: string;
+  contractStartDate: string;
+  contractEndDate: string;
+  monthlyPrice: string;
+  deposit: string;
+  landlord: string;
+  landlordPhone: string;
+  landlordEmail: string;
+  contractNotes: string;
+};
+
+type PdvCreateDraft = {
+  form: PdvCreateFormState;
+  openingHours: BusinessHoursConfig;
+  hoursConfirmed: boolean;
+  step: PdvWizardStepId;
+  pdvCode: string;
+  pdvCodeManual: boolean;
+  isMobilePdv: boolean;
+  savedAt: number;
+};
+
+function pdvCreateDraftStorageKey(businessId: string): string {
+  return `vertial:pdv-create-draft:${String(businessId || '').replace(/^business:/, '').trim()}`;
+}
+
+function readPdvCreateDraft(businessId: string): PdvCreateDraft | null {
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
+  if (!bid || typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(pdvCreateDraftStorageKey(bid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PdvCreateDraft;
+    if (!parsed?.form || typeof parsed.form !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePdvCreateDraft(businessId: string, draft: Omit<PdvCreateDraft, 'savedAt'>): void {
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
+  if (!bid || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(
+      pdvCreateDraftStorageKey(bid),
+      JSON.stringify({ ...draft, savedAt: Date.now() } satisfies PdvCreateDraft),
+    );
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function clearPdvCreateDraft(businessId: string): void {
+  const bid = String(businessId || '').replace(/^business:/, '').trim();
+  if (!bid || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(pdvCreateDraftStorageKey(bid));
+  } catch {
+    /* ignore */
+  }
+}
+
+function pdvCreateDraftHasContent(draft: Pick<PdvCreateDraft, 'form' | 'step' | 'hoursConfirmed' | 'openingHours'>): boolean {
+  const f = draft.form;
+  if (
+    String(f?.name || '').trim()
+    || String(f?.address || '').trim()
+    || String(f?.city || '').trim()
+    || String(f?.phone || '').trim()
+    || String(f?.notes || '').trim()
+  ) {
+    return true;
+  }
+  if (draft.step && draft.step !== 'general') return true;
+  if (draft.hoursConfirmed) return true;
+  const schedule = draft.openingHours?.schedule;
+  if (!schedule) return false;
+  return (['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const).some(
+    (day) => String(schedule[day]?.from || '').trim() || String(schedule[day]?.to || '').trim(),
+  );
+}
+
+const EMPTY_PDV_CREATE_FORM: PdvCreateFormState = {
+  name: '',
+  centerType: 'punto_de_venta',
+  customTypeName: '',
+  ownership: 'propiedad',
+  address: '',
+  city: '',
+  postalCode: '',
+  province: '',
+  phone: '',
+  email: '',
+  expectedStaffCount: '0',
+  squareMeters: '',
+  notes: '',
+  purchasePrice: '',
+  purchaseDate: '',
+  cadastralReference: '',
+  contractStartDate: '',
+  contractEndDate: '',
+  monthlyPrice: '',
+  deposit: '',
+  landlord: '',
+  landlordPhone: '',
+  landlordEmail: '',
+  contractNotes: '',
+};
+
 interface WorkCenterModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -236,41 +352,18 @@ function WorkCenterModal({
   schedulesBusinessId = '',
 }: WorkCenterModalProps) {
   const navigate = useNavigate();
+  const draftBusinessId = String(schedulesBusinessId || '').replace(/^business:/, '').trim();
+  const draftRestoredRef = useRef(false);
 
-  const [form, setForm] = useState({
-    name: '',
-    centerType: 'punto_de_venta' as WorkCenterType,
-    customTypeName: '',
-    ownership: 'propiedad' as OwnershipType,
-    address: '',
-    city: '',
-    postalCode: '',
-    province: '',
-    phone: '',
-    email: '',
-    expectedStaffCount: '0',
-    squareMeters: '',
-    notes: '',
-    purchasePrice: '',
-    purchaseDate: '',
-    cadastralReference: '',
-    contractStartDate: '',
-    contractEndDate: '',
-    monthlyPrice: '',
-    deposit: '',
-    landlord: '',
-    landlordPhone: '',
-    landlordEmail: '',
-    contractNotes: '',
-  });
+  const [form, setForm] = useState<PdvCreateFormState>(EMPTY_PDV_CREATE_FORM);
   const [saving, setSaving] = useState(false);
   const [openingHours, setOpeningHours] = useState<BusinessHoursConfig>(DEFAULT_BUSINESS_HOURS_CONFIG);
   /** Crear PDV: hay que confirmar que se revisó el horario L–D. */
   const [hoursConfirmed, setHoursConfirmed] = useState(false);
   const [applyingTemplates, setApplyingTemplates] = useState(false);
-  const [step, setStep] = useState<'general' | 'ubicacion' | 'propiedad' | 'horarios'>('general');
+  const [step, setStep] = useState<PdvWizardStepId>('general');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [pdvMoreOpen, setPdvMoreOpen] = useState<'general' | 'ubicacion' | 'contrato' | null>(null);
+  const [pdvMoreOpen, setPdvMoreOpen] = useState<'general' | 'ubicacion' | null>(null);
   const [pdvCode, setPdvCode] = useState('');
   const [pdvCodeManual, setPdvCodeManual] = useState(false);
   const [isMobilePdv, setIsMobilePdv] = useState(false);
@@ -283,6 +376,14 @@ function WorkCenterModal({
   const showPdvCodeField = enablePdvCodeEdit && isRetailCenter;
 
   useEffect(() => {
+    if (!isOpen) {
+      draftRestoredRef.current = false;
+      return;
+    }
+
+    setFieldErrors({});
+    setPdvMoreOpen(null);
+
     if (editItem) {
       setForm({
         name: stripPdvDisplayNameBase(editItem.name),
@@ -310,46 +411,75 @@ function WorkCenterModal({
         landlordEmail: editItem.contract?.landlordEmail || '',
         contractNotes: editItem.contract?.contractNotes || '',
       });
-    } else {
-      setForm({
-        name: '', centerType: 'punto_de_venta', customTypeName: '', ownership: 'propiedad',
-        address: '', city: '', postalCode: '', province: '', phone: '', email: '', expectedStaffCount: '0', squareMeters: '',
-        notes: '', purchasePrice: '', purchaseDate: '', cadastralReference: '',
-        contractStartDate: '', contractEndDate: '', monthlyPrice: '', deposit: '',
-        landlord: '', landlordPhone: '', landlordEmail: '', contractNotes: '',
-      });
+      setStep(initialWizardStep === 'horarios' && includeOpeningHours ? 'horarios' : 'general');
+      setIsMobilePdv(
+        String(editItem.address || '')
+          .trim()
+          .toLowerCase() === PDV_MOBILE_ADDRESS_LABEL.toLowerCase(),
+      );
+      setPdvCode(editPdvCode || '');
+      setPdvCodeManual(Boolean(editPdvCode));
+      setHoursConfirmed(false);
+      setOpeningHours(
+        editItem.openingHours
+          ? normalizeBusinessHoursConfig(editItem.openingHours)
+          : normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG),
+      );
+      return;
     }
-    setStep('general');
-    setFieldErrors({});
-    setPdvMoreOpen(null);
-    setIsMobilePdv(
-      String(editItem?.address || '')
-        .trim()
-        .toLowerCase() === PDV_MOBILE_ADDRESS_LABEL.toLowerCase(),
-    );
-    setPdvCode(editPdvCode || '');
-    setPdvCodeManual(Boolean(editPdvCode));
+
+    // Crear PDV: recuperar borrador local si se cerró a medias.
+    const draft = draftBusinessId ? readPdvCreateDraft(draftBusinessId) : null;
+    if (draft && pdvCreateDraftHasContent(draft)) {
+      setForm({ ...EMPTY_PDV_CREATE_FORM, ...draft.form });
+      setStep(
+        initialWizardStep === 'horarios' && includeOpeningHours
+          ? 'horarios'
+          : (() => {
+              const raw = String(draft.step || 'general');
+              return raw === 'propiedad' || (raw === 'horarios' && !includeOpeningHours)
+                ? 'ubicacion'
+                : (raw as PdvWizardStepId);
+            })(),
+      );
+      setIsMobilePdv(Boolean(draft.isMobilePdv));
+      setPdvCode(draft.pdvCode || '');
+      setPdvCodeManual(Boolean(draft.pdvCodeManual));
+      setHoursConfirmed(Boolean(draft.hoursConfirmed));
+      setOpeningHours(
+        includeOpeningHours
+          ? normalizeBusinessHoursConfig(draft.openingHours || createBlankBusinessHoursConfig())
+          : normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG),
+      );
+      if (!draftRestoredRef.current) {
+        draftRestoredRef.current = true;
+        toast.message('Borrador recuperado', {
+          description: 'Seguimos donde lo dejaste al cerrar.',
+        });
+      }
+      return;
+    }
+
+    setForm(EMPTY_PDV_CREATE_FORM);
+    setStep(initialWizardStep === 'horarios' && includeOpeningHours ? 'horarios' : 'general');
+    setIsMobilePdv(false);
+    setPdvCode('');
+    setPdvCodeManual(false);
     setHoursConfirmed(false);
-    if (editItem?.openingHours) {
-      setOpeningHours(normalizeBusinessHoursConfig(editItem.openingHours));
-    } else if (includeOpeningHours && !editItem) {
-      // Crear PDV: horario en blanco → hay que poner bien cada día.
-      setOpeningHours(createBlankBusinessHoursConfig());
-    } else {
-      setOpeningHours(normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG));
-    }
-    if (isOpen && initialWizardStep === 'horarios' && includeOpeningHours) {
-      setStep('horarios');
-    }
-  }, [editItem, isOpen, initialWizardStep, includeOpeningHours, editPdvCode]);
+    setOpeningHours(
+      includeOpeningHours
+        ? createBlankBusinessHoursConfig()
+        : normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG),
+    );
+  }, [editItem, isOpen, initialWizardStep, includeOpeningHours, editPdvCode, draftBusinessId]);
 
   useEffect(() => {
-    if (!isOpen || !includeOpeningHours) return;
-    if (editItem?.openingHours) {
+    if (!isOpen || !includeOpeningHours || !editItem) return;
+    if (editItem.openingHours) {
       setOpeningHours(normalizeBusinessHoursConfig(editItem.openingHours));
       return;
     }
-    if (!editItem || !legacyUserId) return;
+    if (!legacyUserId) return;
     let cancelled = false;
     getBusinessHours(legacyUserId)
       .then((legacy) => {
@@ -360,6 +490,66 @@ function WorkCenterModal({
       cancelled = true;
     };
   }, [isOpen, includeOpeningHours, editItem, legacyUserId]);
+
+  /** Autoguarda borrador al crear (al cerrar o cambiar de pestaña no se pierde). */
+  useEffect(() => {
+    if (!isOpen || editItem || !draftBusinessId) return;
+    const timer = window.setTimeout(() => {
+      const payload = {
+        form,
+        openingHours,
+        hoursConfirmed,
+        step,
+        pdvCode,
+        pdvCodeManual,
+        isMobilePdv,
+      };
+      if (pdvCreateDraftHasContent(payload)) writePdvCreateDraft(draftBusinessId, payload);
+      else clearPdvCreateDraft(draftBusinessId);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [
+    isOpen,
+    editItem,
+    draftBusinessId,
+    form,
+    openingHours,
+    hoursConfirmed,
+    step,
+    pdvCode,
+    pdvCodeManual,
+    isMobilePdv,
+  ]);
+
+  const persistCreateDraftNow = useCallback(() => {
+    if (editItem || !draftBusinessId) return;
+    const payload = {
+      form,
+      openingHours,
+      hoursConfirmed,
+      step,
+      pdvCode,
+      pdvCodeManual,
+      isMobilePdv,
+    };
+    if (pdvCreateDraftHasContent(payload)) writePdvCreateDraft(draftBusinessId, payload);
+    else clearPdvCreateDraft(draftBusinessId);
+  }, [
+    editItem,
+    draftBusinessId,
+    form,
+    openingHours,
+    hoursConfirmed,
+    step,
+    pdvCode,
+    pdvCodeManual,
+    isMobilePdv,
+  ]);
+
+  const handleRequestClose = useCallback(() => {
+    persistCreateDraftNow();
+    onClose();
+  }, [persistCreateDraftNow, onClose]);
 
   useEffect(() => {
     setPdvMoreOpen(null);
@@ -433,8 +623,8 @@ function WorkCenterModal({
   };
 
   const stepIds = includeOpeningHours
-    ? (['general', 'ubicacion', 'propiedad', 'horarios'] as const)
-    : (['general', 'ubicacion', 'propiedad'] as const);
+    ? (['general', 'ubicacion', 'horarios'] as const)
+    : (['general', 'ubicacion'] as const);
   type WizardStepId = (typeof stepIds)[number];
 
   const stepHasFieldError = (sid: WizardStepId) => {
@@ -443,9 +633,7 @@ function WorkCenterModal({
         ? (['name', 'customTypeName', 'expectedStaffCount', 'pdvCode'] as const)
         : sid === 'ubicacion'
           ? (['address', 'city', 'postalCode', 'phone', 'email'] as const)
-          : sid === 'horarios'
-            ? (['horarios'] as const)
-            : (['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'] as const);
+          : (['horarios'] as const);
     return keys.some((k) => Boolean(fieldErrors[k]));
   };
 
@@ -501,30 +689,6 @@ function WorkCenterModal({
       }
     };
 
-    const validatePropiedad = () => {
-      if (form.ownership === 'propiedad') {
-        const ppRaw = String(form.purchasePrice ?? '').trim();
-        const pp = ppRaw === '' && simplifyPdvCreate ? 0 : Number(ppRaw.replace(',', '.'));
-        if (!ppRaw && !simplifyPdvCreate) {
-          nextErr.purchasePrice = 'Indica el precio de compra (puedes poner 0)';
-        } else if (!Number.isFinite(pp) || pp < 0) {
-          nextErr.purchasePrice = 'Precio de compra no válido';
-        }
-        if (!simplifyPdvCreate && !form.purchaseDate.trim()) {
-          nextErr.purchaseDate = 'Indica la fecha de compra';
-        }
-      } else {
-        if (!form.landlord.trim()) nextErr.landlord = 'Indica el nombre del arrendador';
-        if (!form.contractStartDate.trim()) {
-          nextErr.contractStartDate = 'Indica el inicio del contrato';
-        }
-        const mp = parseSpanishMoneyInput(form.monthlyPrice);
-        if (!String(form.monthlyPrice ?? '').trim() || !Number.isFinite(mp) || mp <= 0) {
-          nextErr.monthlyPrice = 'Indica el precio mensual del alquiler';
-        }
-      }
-    };
-
     const validateHorarios = () => {
       if (!includeOpeningHours) return;
       const issue = getBusinessHoursIssue(openingHours);
@@ -540,7 +704,6 @@ function WorkCenterModal({
     let staffCount = Number(form.expectedStaffCount || 0);
     if (!onlyStep || onlyStep === 'general') staffCount = validateGeneral();
     if (!onlyStep || onlyStep === 'ubicacion') validateUbicacion();
-    if (!onlyStep || onlyStep === 'propiedad') validatePropiedad();
     if (!onlyStep || onlyStep === 'horarios') validateHorarios();
 
     return { errors: nextErr, nameValidation: nameErr, staffCount };
@@ -549,12 +712,8 @@ function WorkCenterModal({
   const focusFirstWizardError = (nextErr: Record<string, string>) => {
     const s1 = ['name', 'customTypeName', 'expectedStaffCount', 'pdvCode'].some((k) => nextErr[k]);
     const s2 = ['address', 'city', 'postalCode', 'phone', 'email', 'notes'].some((k) => nextErr[k]);
-    const s3 = ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].some(
-      (k) => nextErr[k],
-    );
     if (s1) setStep('general');
     else if (s2) setStep('ubicacion');
-    else if (s3) setStep('propiedad');
     else if (nextErr.horarios) setStep('horarios');
     const summary = Object.values(nextErr).filter(Boolean).slice(0, 2).join(' · ');
     toast.error(summary || 'Revisa los campos marcados en rojo');
@@ -582,17 +741,6 @@ function WorkCenterModal({
     setFieldErrors({});
     setSaving(true);
     try {
-      const contract: ContractInfo | undefined = form.ownership === 'alquiler' ? {
-        startDate: form.contractStartDate || undefined,
-        endDate: form.contractEndDate || undefined,
-        monthlyPrice: String(form.monthlyPrice ?? '').trim() ? parseSpanishMoneyInput(form.monthlyPrice) : undefined,
-        deposit: String(form.deposit ?? '').trim() ? parseSpanishMoneyInput(form.deposit) : undefined,
-        landlord: form.landlord.trim() || undefined,
-        landlordPhone: form.landlordPhone.trim() || undefined,
-        landlordEmail: form.landlordEmail.trim() || undefined,
-        contractNotes: form.contractNotes.trim() || undefined,
-      } : undefined;
-
       const isRetailSave =
         enablePdvCodeEdit &&
         (forcePointOfSale || form.centerType === 'punto_de_venta' || form.centerType === 'almacen');
@@ -636,17 +784,10 @@ function WorkCenterModal({
           !forcePointOfSale && form.centerType === 'custom'
             ? sanitizeRetailTextField(form.customTypeName, PDV_RETAIL_LIMITS.customTypeMax)
             : undefined,
-        ownership: form.ownership,
-        contract,
-        purchasePrice:
-          form.ownership === 'propiedad'
-            ? (() => {
-                const raw = String(form.purchasePrice ?? '').trim();
-                if (!raw && simplifyPdvCreate) return 0;
-                return raw ? Number(raw.replace(',', '.')) : undefined;
-              })()
-            : undefined,
-        purchaseDate: form.ownership === 'propiedad' ? form.purchaseDate || undefined : undefined,
+        ownership: editItem?.ownership || 'propiedad',
+        contract: editItem?.contract,
+        purchasePrice: editItem?.purchasePrice,
+        purchaseDate: editItem?.purchaseDate,
         cadastralReference: form.cadastralReference.trim() || undefined,
         address: sanitizeRetailTextField(form.address, PDV_RETAIL_LIMITS.addressMax) || undefined,
         city: sanitizeRetailTextField(form.city, PDV_RETAIL_LIMITS.cityMax) || undefined,
@@ -678,6 +819,7 @@ function WorkCenterModal({
           /* best-effort: el centro ya está guardado */
         }
       }
+      if (draftBusinessId) clearPdvCreateDraft(draftBusinessId);
       onClose();
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
@@ -738,30 +880,22 @@ function WorkCenterModal({
   const wizardRows: { id: WizardStepId; n: number; title: string; hint: string }[] = [
     { id: 'general', n: 1, title: 'General', hint: simplifyPdvCreate ? 'Tipo y nombre' : 'Tipo, nombre, trabajadores' },
     { id: 'ubicacion', n: 2, title: 'Ubicación', hint: 'Dirección y contacto' },
-    {
-      id: 'propiedad',
-      n: 3,
-      title: form.ownership === 'alquiler' ? 'Contrato' : 'Propiedad',
-      hint: form.ownership === 'alquiler' ? 'Alquiler' : 'Compra',
-    },
     ...(includeOpeningHours
-      ? [{ id: 'horarios' as WizardStepId, n: 4, title: 'Horarios', hint: 'Apertura del local' }]
+      ? [{ id: 'horarios' as WizardStepId, n: 3, title: 'Horarios', hint: 'Días y horas de apertura' }]
       : []),
   ];
 
   const stepOrder = wizardRows.map((r) => r.id);
   const activeStepIndex = stepOrder.indexOf(step);
-  const isLastStep = includeOpeningHours ? step === 'horarios' : step === 'propiedad';
+  const isLastStep = includeOpeningHours ? step === 'horarios' : step === 'ubicacion';
 
   const goNext = () => {
     if (step === 'general') setStep('ubicacion');
-    else if (step === 'ubicacion') setStep('propiedad');
-    else if (step === 'propiedad' && includeOpeningHours) setStep('horarios');
+    else if (step === 'ubicacion' && includeOpeningHours) setStep('horarios');
   };
 
   const goBack = () => {
-    if (step === 'horarios') setStep('propiedad');
-    else if (step === 'propiedad') setStep('ubicacion');
+    if (step === 'horarios') setStep('ubicacion');
     else if (step === 'ubicacion') setStep('general');
   };
 
@@ -808,20 +942,24 @@ function WorkCenterModal({
   return (
     <SettingsWizardShell
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleRequestClose}
       title={modalTitle}
-      subtitle={editItem ? 'Actualiza los datos del centro' : undefined}
+      subtitle={
+        editItem
+          ? 'Actualiza los datos del centro'
+          : 'Si cierras, guardamos un borrador para seguir luego'
+      }
       icon={<Store className="h-5 w-5" />}
       steps={shellSteps}
       activeStepId={step}
       onStepChange={(id) => setStep(id as WizardStepId)}
-      maxHeight={step === 'horarios' ? 'min(90dvh,720px)' : simplifyPdvCreate ? 'min(92dvh,780px)' : 'min(90dvh,920px)'}
-      size={simplifyPdvCreate || step === 'horarios' ? 'medium' : 'default'}
-      bodyOverflow={step === 'horarios' ? 'hidden' : 'auto'}
+      maxHeight={step === 'horarios' ? 'min(92dvh,820px)' : simplifyPdvCreate ? 'min(92dvh,780px)' : 'min(90dvh,920px)'}
+      size={step === 'horarios' ? 'medium' : simplifyPdvCreate ? 'medium' : 'default'}
+      bodyOverflow="auto"
       preview={step === 'horarios' ? undefined : storePreview}
       footer={
         <SettingsWizardFooter
-          onCancel={onClose}
+          onCancel={handleRequestClose}
           showBack={activeStepIndex > 0}
           onBack={goBack}
           onNext={goNextValidated}
@@ -1033,67 +1171,6 @@ function WorkCenterModal({
                 ) : null}
               </div>
 
-              <div className={simplifyPdvCreate ? 'sm:col-span-3' : ''}>
-                <label className={labelClass}>Régimen</label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {(['propiedad', 'alquiler'] as OwnershipType[]).map((ow) => {
-                    const selected = form.ownership === ow;
-                    return (
-                      <button
-                        key={ow}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => {
-                          setForm(f => ({ ...f, ownership: ow }));
-                          setFieldErrors((p) => {
-                            const n = { ...p };
-                            ['purchasePrice', 'purchaseDate', 'landlord', 'contractStartDate', 'monthlyPrice'].forEach(
-                              (k) => {
-                                delete n[k];
-                              },
-                            );
-                            return n;
-                          });
-                        }}
-                        className={settingsOwnershipChoiceClass(ow, selected, simplifyPdvCreate)}
-                      >
-                        <span className={settingsOwnershipRadioClass(ow, selected)} aria-hidden>
-                          {selected ? <span className="h-2 w-2 rounded-full bg-white" /> : null}
-                        </span>
-                        <span className={settingsOwnershipIconClass(ow, selected)}>
-                          {ow === 'propiedad' ? <Home className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                        </span>
-                        <span className={`min-w-0 flex-1 ${simplifyPdvCreate ? 'text-center' : ''}`}>
-                          <span
-                            className={`block font-bold leading-tight ${
-                              selected
-                                ? ow === 'propiedad'
-                                  ? 'text-emerald-900 dark:text-emerald-100'
-                                  : 'text-orange-900 dark:text-orange-100'
-                                : 'text-gray-800 dark:text-gray-200'
-                            } ${simplifyPdvCreate ? 'text-xs' : 'text-sm'}`}
-                          >
-                            {OWNERSHIP_LABELS[ow]}
-                          </span>
-                          {!simplifyPdvCreate ? (
-                            <span
-                              className={`mt-0.5 block text-[11px] leading-tight ${
-                                selected
-                                  ? ow === 'propiedad'
-                                    ? 'text-emerald-700/90 dark:text-emerald-200/80'
-                                    : 'text-orange-700/90 dark:text-orange-200/80'
-                                  : 'text-gray-500 dark:text-gray-500'
-                              }`}
-                            >
-                              {ow === 'propiedad' ? 'Local en propiedad' : 'Contrato de alquiler'}
-                            </span>
-                          ) : null}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
               </div>
 
               <div>
@@ -1348,264 +1425,41 @@ function WorkCenterModal({
             </div>
           )}
 
-          {step === 'propiedad' && form.ownership === 'propiedad' && (
-            <div className={simplifyPdvCreate ? 'space-y-3' : 'space-y-4'}>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>Precio de compra (€) *</label>
-                  <input
-                    type="number"
-                    min={0}
-                    className={inputClass('purchasePrice')}
-                    placeholder="0"
-                    value={form.purchasePrice}
-                    onChange={(e) => {
-                      clearFieldError('purchasePrice');
-                      setForm(f => ({ ...f, purchasePrice: e.target.value }));
-                    }}
-                  />
-                  {fieldErrors.purchasePrice ? (
-                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.purchasePrice}</p>
-                  ) : null}
-                </div>
-                <div>
-                  <label className={labelClass}>
-                    Fecha de compra{simplifyPdvCreate ? ' (opc.)' : ' *'}
-                  </label>
-                  <input
-                    type="date"
-                    className={inputClass('purchaseDate')}
-                    value={form.purchaseDate}
-                    onChange={(e) => {
-                      clearFieldError('purchaseDate');
-                      setForm(f => ({ ...f, purchaseDate: e.target.value }));
-                    }}
-                  />
-                  {fieldErrors.purchaseDate ? (
-                    <p className="text-xs text-red-600 dark:text-red-400 mt-1 font-medium">{fieldErrors.purchaseDate}</p>
-                  ) : null}
-                </div>
-              </div>
-              {simplifyPdvCreate && (
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Precio en 0 si no aplica; la fecha de compra es opcional en el alta rápida.
-                </p>
-              )}
-            </div>
-          )}
-
-          {step === 'propiedad' && form.ownership === 'alquiler' && (
-            <div className={simplifyPdvCreate ? 'flex flex-col gap-3' : 'space-y-4'}>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>Inicio del contrato *</label>
-                  <input
-                    type="date"
-                    className={inputClass('contractStartDate')}
-                    value={form.contractStartDate}
-                    onChange={(e) => {
-                      clearFieldError('contractStartDate');
-                      setForm(f => ({ ...f, contractStartDate: e.target.value }));
-                    }}
-                  />
-                </div>
-                {!simplifyPdvCreate && (
-                <div>
-                  <label className={labelClass}>Fin del contrato</label>
-                  <input
-                    type="date"
-                    className={inputClass()}
-                    value={form.contractEndDate}
-                    onChange={(e) => setForm(f => ({ ...f, contractEndDate: e.target.value }))}
-                  />
-                </div>
-                )}
-                {simplifyPdvCreate && (
-                <div>
-                  <label className={labelClass}>Precio mensual (€) *</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    className={inputClass('monthlyPrice')}
-                    placeholder="1.200"
-                    value={form.monthlyPrice}
-                    onChange={(e) => {
-                      clearFieldError('monthlyPrice');
-                      setForm((f) => ({ ...f, monthlyPrice: formatMoneyAsYouType(e.target.value, true) }));
-                    }}
-                  />
-                </div>
-                )}
-              </div>
-              {!simplifyPdvCreate && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClass}>Precio mensual (€) *</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    autoComplete="off"
-                    className={inputClass('monthlyPrice')}
-                    placeholder="1.200 o 1.200,50"
-                    value={form.monthlyPrice}
-                    onChange={(e) => {
-                      clearFieldError('monthlyPrice');
-                      setForm((f) => ({ ...f, monthlyPrice: formatMoneyAsYouType(e.target.value, true) }));
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Fianza (€)</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    className={inputClass()}
-                    placeholder="2.400"
-                    value={form.deposit}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, deposit: formatMoneyAsYouType(e.target.value, false) }))
-                    }
-                  />
-                </div>
-              </div>
-              )}
-              <div>
-                <label className={labelClass}>Arrendador (nombre) *</label>
-                <input
-                  className={inputClass('landlord')}
-                  placeholder="Nombre o razón social"
-                  value={form.landlord}
-                  onChange={(e) => {
-                    clearFieldError('landlord');
-                    setForm(f => ({ ...f, landlord: e.target.value }));
-                  }}
-                />
-              </div>
-              {!simplifyPdvCreate && (
-              <>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClass}>Teléfono arrendador</label>
-                  <input
-                    className={inputClass()}
-                    placeholder="+34 600 000 000"
-                    value={form.landlordPhone}
-                    onChange={(e) => setForm(f => ({ ...f, landlordPhone: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>Email arrendador</label>
-                  <input
-                    type="email"
-                    className={inputClass()}
-                    placeholder="arrendador@email.com"
-                    value={form.landlordEmail}
-                    onChange={(e) => setForm(f => ({ ...f, landlordEmail: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Notas del contrato</label>
-                <textarea
-                  rows={2}
-                  className={`${inputClass()} resize-none`}
-                  placeholder="Condiciones especiales, renovación..."
-                  value={form.contractNotes}
-                  onChange={(e) => setForm(f => ({ ...f, contractNotes: e.target.value }))}
-                />
-              </div>
-              </>
-              )}
-
-              {simplifyPdvCreate &&
-                renderPdvMore(
-                  'contrato',
-                  'Más opciones del contrato',
-                  <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className={labelClass}>Fin del contrato</label>
-                        <input
-                          type="date"
-                          className={inputClass()}
-                          value={form.contractEndDate}
-                          onChange={(e) => setForm(f => ({ ...f, contractEndDate: e.target.value }))}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Fianza (€)</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          className={inputClass()}
-                          placeholder="2.400"
-                          value={form.deposit}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, deposit: formatMoneyAsYouType(e.target.value, false) }))
-                          }
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className={labelClass}>Tel. arrendador</label>
-                        <input
-                          className={inputClass()}
-                          placeholder="+34 …"
-                          value={form.landlordPhone}
-                          onChange={(e) => setForm(f => ({ ...f, landlordPhone: e.target.value }))}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Email arrendador</label>
-                        <input
-                          type="email"
-                          className={inputClass()}
-                          placeholder="arrendador@…"
-                          value={form.landlordEmail}
-                          onChange={(e) => setForm(f => ({ ...f, landlordEmail: e.target.value }))}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className={labelClass}>Notas del contrato</label>
-                      <textarea
-                        rows={2}
-                        className={`${inputClass()} resize-none`}
-                        placeholder="Condiciones, renovación…"
-                        value={form.contractNotes}
-                        onChange={(e) => setForm(f => ({ ...f, contractNotes: e.target.value }))}
-                      />
-                    </div>
-                  </>,
-                )}
-            </div>
-          )}
-
           {step === 'horarios' && includeOpeningHours && (
-            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-              <p className="shrink-0 text-[11px] leading-snug text-gray-600 dark:text-gray-400">
-                Configura cada día (L–D). Base del local; no limita el fichaje.
-              </p>
+            <div className="flex flex-col gap-2">
               {fieldErrors.horarios ? (
-                <p className="shrink-0 text-xs font-medium text-red-600 dark:text-red-400">{fieldErrors.horarios}</p>
+                <p className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-medium text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200">
+                  {fieldErrors.horarios}
+                </p>
               ) : null}
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <BusinessHoursEditor
-                  config={openingHours}
-                  onChange={(next) => {
-                    setOpeningHours(next);
-                    setHoursConfirmed(false);
-                    clearFieldError('horarios');
-                  }}
-                  storeLabel={storeHoursLabel}
-                  wizard
-                />
-              </div>
-              {schedulesBusinessId ? (
+              <BusinessHoursEditor
+                config={openingHours}
+                onChange={(next) => {
+                  setOpeningHours(next);
+                  setHoursConfirmed(false);
+                  clearFieldError('horarios');
+                }}
+                storeLabel={storeHoursLabel}
+                wizard
+              />
+              {!editItem ? (
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-stone-200 bg-white px-2.5 py-2 dark:border-stone-700 dark:bg-stone-900">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 rounded border-stone-300 text-blue-600 focus:ring-blue-500"
+                    checked={hoursConfirmed}
+                    onChange={(e) => {
+                      setHoursConfirmed(e.target.checked);
+                      if (e.target.checked) clearFieldError('horarios');
+                    }}
+                  />
+                  <span className="text-xs text-stone-700 dark:text-stone-300">
+                    <span className="font-semibold">Confirmo el horario</span>
+                    <span className="text-stone-400"> · revisado L–D</span>
+                  </span>
+                </label>
+              ) : null}
+              {schedulesBusinessId && editItem ? (
                 <button
                   type="button"
                   disabled={applyingTemplates || Boolean(getBusinessHoursIssue(openingHours))}
@@ -1643,26 +1497,10 @@ function WorkCenterModal({
                       }
                     })();
                   }}
-                  className="w-full shrink-0 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-semibold text-stone-700 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-600 dark:bg-stone-900/40 dark:text-stone-200 dark:hover:bg-stone-800"
+                  className="w-full rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-xs font-semibold text-stone-600 hover:bg-stone-100 disabled:opacity-50 dark:border-stone-600 dark:bg-stone-900/40 dark:text-stone-300 dark:hover:bg-stone-800"
                 >
-                  {applyingTemplates ? 'Aplicando…' : 'Aplicar a plantillas RRHH'}
+                  {applyingTemplates ? 'Aplicando…' : 'Sincronizar con plantillas RRHH'}
                 </button>
-              ) : null}
-              {!editItem ? (
-                <label className="flex shrink-0 items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    checked={hoursConfirmed}
-                    onChange={(e) => {
-                      setHoursConfirmed(e.target.checked);
-                      if (e.target.checked) clearFieldError('horarios');
-                    }}
-                  />
-                  <span className="text-[11px] leading-snug text-gray-700 dark:text-gray-300">
-                    He revisado el horario de cada día (L–D) y está correcto.
-                  </span>
-                </label>
               ) : null}
             </div>
           )}
@@ -2522,9 +2360,12 @@ export function SalesPointsTab() {
   const kpis = useMemo(() => {
     const byType = { oficina: 0, punto_de_venta: 0, almacen: 0, custom: 0 };
     workCenters.forEach(wc => { byType[wc.centerType] = (byType[wc.centerType] || 0) + 1; });
-    const owned = workCenters.filter(w => w.ownership === 'propiedad').length;
-    const rented = workCenters.filter(w => w.ownership === 'alquiler').length;
-    return { total: workCenters.length, active: workCenters.filter(s => s.active).length, inactive: workCenters.filter(s => !s.active).length, byType, owned, rented };
+    return {
+      total: workCenters.length,
+      active: workCenters.filter(s => s.active).length,
+      inactive: workCenters.filter(s => !s.active).length,
+      byType,
+    };
   }, [workCenters]);
 
   const getTypeLabel = (wc: WorkCenter) => wc.centerType === 'custom' ? (wc.customTypeName || 'Otro') : WORK_CENTER_TYPE_SHORT[wc.centerType];
@@ -2532,7 +2373,7 @@ export function SalesPointsTab() {
   return (
     <div className="space-y-6">
       {/* KPIs */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl">
           <div className="text-indigo-600 mb-2"><Building2 className="w-5 h-5" /></div>
           <div className="text-2xl font-bold text-indigo-900 dark:text-indigo-200">{kpis.total}</div>
@@ -2543,15 +2384,10 @@ export function SalesPointsTab() {
           <div className="text-2xl font-bold text-green-900 dark:text-green-200">{kpis.active}</div>
           <div className="text-xs text-green-700 dark:text-green-400 mt-0.5">Activos</div>
         </div>
-        <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border-2 border-emerald-200 dark:border-emerald-800 rounded-xl">
-          <div className="text-emerald-600 mb-2"><Home className="w-5 h-5" /></div>
-          <div className="text-2xl font-bold text-emerald-900 dark:text-emerald-200">{kpis.owned}</div>
-          <div className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Propiedad</div>
-        </div>
-        <div className="p-4 bg-orange-50 dark:bg-orange-900/20 border-2 border-orange-200 dark:border-orange-800 rounded-xl">
-          <div className="text-orange-600 mb-2"><FileText className="w-5 h-5" /></div>
-          <div className="text-2xl font-bold text-orange-900 dark:text-orange-200">{kpis.rented}</div>
-          <div className="text-xs text-orange-700 dark:text-orange-400 mt-0.5">Alquiler</div>
+        <div className="p-4 bg-stone-50 dark:bg-stone-900/20 border-2 border-stone-200 dark:border-stone-700 rounded-xl">
+          <div className="text-stone-600 mb-2"><Store className="w-5 h-5" /></div>
+          <div className="text-2xl font-bold text-stone-900 dark:text-stone-200">{kpis.inactive}</div>
+          <div className="text-xs text-stone-700 dark:text-stone-400 mt-0.5">Inactivos</div>
         </div>
       </div>
 
@@ -2717,9 +2553,6 @@ export function SalesPointsTab() {
                       <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${CENTER_TYPE_COLORS[wc.centerType]}`}>
                         {getTypeLabel(wc)}
                       </span>
-                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${wc.ownership === 'propiedad' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'}`}>
-                        {OWNERSHIP_LABELS[wc.ownership]}
-                      </span>
                       {primary && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300" title="PDV principal de la cuenta, no se puede eliminar">
                           <Lock className="w-2.5 h-2.5" />
@@ -2840,26 +2673,6 @@ export function SalesPointsTab() {
                   <Users className="w-3.5 h-3.5 shrink-0" />
                   <span>{wc.expectedStaffCount ?? 3} trabajador{(wc.expectedStaffCount ?? 3) !== 1 ? 'es' : ''}</span>
                 </div>
-                {wc.ownership === 'alquiler' && wc.contract?.monthlyPrice && (
-                  <div className="flex items-center gap-2 text-xs text-orange-600 dark:text-orange-400">
-                    <Euro className="w-3.5 h-3.5 shrink-0" />
-                    <span>{wc.contract.monthlyPrice.toLocaleString('es-ES')}€/mes</span>
-                    {wc.contract.endDate && <span className="text-gray-400">· Hasta {new Date(wc.contract.endDate).toLocaleDateString('es-ES')}</span>}
-                  </div>
-                )}
-                {wc.ownership === 'alquiler' && wc.contract?.landlord && (
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    <span className="w-3.5 h-3.5 shrink-0 text-center font-bold text-[10px]">👤</span>
-                    <span>Arrendador: {wc.contract.landlord}</span>
-                  </div>
-                )}
-                {wc.ownership === 'propiedad' && wc.purchasePrice && (
-                  <div className="flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
-                    <Euro className="w-3.5 h-3.5 shrink-0" />
-                    <span>Valor: {wc.purchasePrice.toLocaleString('es-ES')}€</span>
-                    {wc.purchaseDate && <span className="text-gray-400">· Compra {new Date(wc.purchaseDate).toLocaleDateString('es-ES')}</span>}
-                  </div>
-                )}
                 {wc.squareMeters && (
                   <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                     <span className="w-3.5 h-3.5 shrink-0 text-center font-bold text-[10px]">📐</span>

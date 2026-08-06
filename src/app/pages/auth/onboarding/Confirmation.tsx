@@ -29,6 +29,7 @@ export function Confirmation() {
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [countdown, setCountdown] = useState(10);
+  const [saveReady, setSaveReady] = useState(false);
   const completionStarted = useRef(false);
 
   useEffect(() => {
@@ -53,8 +54,8 @@ export function Confirmation() {
           ? `¡${tradeName} ya está en Vertial Delivery!`
           : '¡Tu espacio en Vertial Delivery está listo!',
         headingSubtitle: tradeName
-          ? `Estamos activando el panel de ${tradeName}: plan, prueba gratuita y acceso a locales, caja y pedidos.`
-          : 'Estamos activando tu plan, la prueba gratuita y el acceso a locales, caja y pedidos.',
+          ? `Estamos activando el panel de ${tradeName}: plan y acceso a locales, caja y pedidos.`
+          : 'Estamos activando tu plan y el acceso a locales, caja y pedidos.',
       };
     }
     if (isRestaurant) {
@@ -63,8 +64,8 @@ export function Confirmation() {
           ? `¡${tradeName} ya está en ${RESTAURANT_BRAND}!`
           : `¡Tu espacio en ${RESTAURANT_BRAND} está listo!`,
         headingSubtitle: tradeName
-          ? `Estamos activando bar/restaurante para ${tradeName}: plan, prueba gratuita, TPV y operativa de sala.`
-          : 'Estamos activando tu bar/restaurante: plan, prueba gratuita, TPV y operativa de sala.',
+          ? `Estamos activando bar/restaurante para ${tradeName}: plan, TPV y operativa de sala.`
+          : 'Estamos activando tu bar/restaurante: plan, TPV y operativa de sala.',
       };
     }
     return {
@@ -90,15 +91,18 @@ export function Confirmation() {
     let countdownTimer: number | undefined;
     let finalTimer: number | undefined;
 
-    const goToSaas = () => {
-      navigate('/saas/dashboard', { replace: true });
+    const goToPaywall = () => {
+      // Cliente nuevo: paywall de transferencia (no dashboard con spinner/race a Gate).
+      navigate('/saas/subscription', { replace: true });
     };
 
+    // Esperar a que updateProfile provisione la empresa antes de salir.
     void updateOnboardingData(data as unknown as Record<string, unknown>)
       .catch((error) => {
         console.error('Error saving onboarding:', error);
       })
       .finally(() => {
+        setSaveReady(true);
         countdownTimer = window.setInterval(() => {
           setCountdown((prev) => {
             if (prev <= 1) {
@@ -109,7 +113,7 @@ export function Confirmation() {
           });
         }, 1000);
 
-        finalTimer = window.setTimeout(goToSaas, 10000);
+        finalTimer = window.setTimeout(goToPaywall, 10000);
       });
 
     return () => {
@@ -206,9 +210,10 @@ export function Confirmation() {
             size="lg"
             fullWidth
             icon="next"
-            onClick={() => navigate('/saas/dashboard', { replace: true })}
+            disabled={!saveReady}
+            onClick={() => navigate('/saas/subscription', { replace: true })}
           >
-            {t('onboarding.confirmation.goNow')}
+            {saveReady ? t('onboarding.confirmation.goNow') : 'Guardando…'}
           </ACCESO__Button>
         </div>
       ) : null}

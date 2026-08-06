@@ -10285,6 +10285,18 @@ export function buildBrandBillingConfigDocument(businessId, data = {}, existing 
   const modeStr = String(modeRaw || 'majority').trim();
   const sharedSplitMode =
     modeStr === 'equal' || modeStr === 'by_units' ? 'equal' : 'majority';
+  const orphanRaw =
+    data.orphanMode !== undefined ? data.orphanMode : existing?.orphanMode;
+  const orphanStr = String(orphanRaw || 'shift_majority').trim();
+  const orphanMode =
+    orphanStr === 'equal' || orphanStr === 'fixed_brand' || orphanStr === 'unassigned'
+      ? orphanStr
+      : 'shift_majority';
+  const orphanFixedBrandId = String(
+    data.orphanFixedBrandId !== undefined
+      ? data.orphanFixedBrandId
+      : (existing?.orphanFixedBrandId || ''),
+  ).trim();
 
   const out = {
     _id: id,
@@ -10293,6 +10305,8 @@ export function buildBrandBillingConfigDocument(businessId, data = {}, existing 
     sheets,
     sharedSplitMode,
     monoBrandTakesAll: monoRaw !== false,
+    orphanMode,
+    orphanFixedBrandId,
     createdAt: existing?.createdAt || now,
     updatedAt: now,
   };
@@ -10305,6 +10319,11 @@ export function sanitizeBrandBillingConfig(doc) {
   const modeStr = String(doc.sharedSplitMode || 'majority').trim();
   const sharedSplitMode =
     modeStr === 'equal' || modeStr === 'by_units' ? 'equal' : 'majority';
+  const orphanStr = String(doc.orphanMode || 'shift_majority').trim();
+  const orphanMode =
+    orphanStr === 'equal' || orphanStr === 'fixed_brand' || orphanStr === 'unassigned'
+      ? orphanStr
+      : 'shift_majority';
   return {
     _id: doc._id,
     _rev: doc._rev,
@@ -10313,6 +10332,8 @@ export function sanitizeBrandBillingConfig(doc) {
     sheets: Array.isArray(doc.sheets) ? doc.sheets : [],
     sharedSplitMode,
     monoBrandTakesAll: doc.monoBrandTakesAll !== false,
+    orphanMode,
+    orphanFixedBrandId: String(doc.orphanFixedBrandId || '').trim(),
     createdAt: doc.createdAt || '',
     updatedAt: doc.updatedAt || '',
   };
@@ -11542,8 +11563,8 @@ export function sanitizeWebConfig(doc) {
 }
 
 export function sanitizeDeliveryIntegrations(doc) {
-  if (!doc) return null;
-  const integrations = doc.integrations || {};
+  // Sin web_config aún: devolver defaults (nunca null → la UI no se rompe).
+  const integrations = (doc && typeof doc === 'object' && doc.integrations) || {};
   return {
     uber:    sanitizeIntegrationEntry(integrations.uber),
     globo:   sanitizeIntegrationEntry(integrations.globo),

@@ -82,6 +82,12 @@ async function syncRegisterSession(
             localSession.aggregatorClosingCard ?? remote.aggregatorClosingCard,
           aggregatorClosingBrandTotals:
             localSession.aggregatorClosingBrandTotals ?? remote.aggregatorClosingBrandTotals,
+          aggregatorClosingUnpaidCashByBrand:
+            localSession.aggregatorClosingUnpaidCashByBrand
+            ?? remote.aggregatorClosingUnpaidCashByBrand,
+          aggregatorClosingUnpaidCardByBrand:
+            localSession.aggregatorClosingUnpaidCardByBrand
+            ?? remote.aggregatorClosingUnpaidCardByBrand,
           productClosingCounts:
             localSession.productClosingCounts ?? remote.productClosingCounts,
         }

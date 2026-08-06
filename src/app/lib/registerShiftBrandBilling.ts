@@ -9,11 +9,14 @@ import {
   resolveOrderCashCardAmounts,
 } from './registerShiftSalesBreakdown';
 import {
+  normalizeBillingOrphanMode,
   splitRulesFromBillingConfig,
   type BrandBillingConfig,
+  type BrandBillingOrphanMode,
   type BrandBillingSplitRules,
+  type ClosingBillingBrandSlot,
 } from './brandBillingConfig';
-import { displayBrandName } from './brandLabels';
+import { brandIdAliases, displayBrandName } from './brandLabels';
 import { isAggregatorChannel } from './deliveryIntegrationsUi';
 import { normalizeTpvPaymentMethod } from './tpvCajaMath';
 
@@ -87,6 +90,227 @@ export type ShiftBrandRevenueRow = {
   /** Texto corto del “por qué” */
   why: string;
 };
+
+type BrandRevenueBundle = {
+  rows: ShiftBrandRevenueRow[];
+  unbranded: number;
+  total: number;
+};
+
+function emptyBrandRow(
+  brandId: string,
+  name: string,
+  amount: number,
+  total: number,
+): ShiftBrandRevenueRow {
+  const rev = roundMoney2(amount);
+  return {
+    brandId,
+    name,
+    revenue: rev,
+    revenueEfectivo: 0,
+    revenueTarjeta: 0,
+    ownRevenue: 0,
+    sharedAssigned: rev,
+    orderCount: 0,
+    sharePercent: total > 0 ? Math.round((rev / total) * 1000) / 10 : 0,
+    why: `${rev.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € sueltos`,
+  };
+}
+
+function addAmountToBrandRow(row: ShiftBrandRevenueRow, add: number, total: number): void {
+  const amt = roundMoney2(add);
+  if (amt <= 0) return;
+  const rowPay = Math.max(0, Number(row.revenueEfectivo) || 0)
+    + Math.max(0, Number(row.revenueTarjeta) || 0);
+  const cashRatio = rowPay > 0
+    ? Math.max(0, Number(row.revenueEfectivo) || 0) / rowPay
+    : 0.5;
+  const addCash = roundMoney2(amt * cashRatio);
+  const addCard = roundMoney2(amt - addCash);
+  row.revenue = roundMoney2((Number(row.revenue) || 0) + amt);
+  row.revenueEfectivo = roundMoney2((Number(row.revenueEfectivo) || 0) + addCash);
+  row.revenueTarjeta = roundMoney2((Number(row.revenueTarjeta) || 0) + addCard);
+  row.sharedAssigned = roundMoney2((Number(row.sharedAssigned) || 0) + amt);
+  row.why = buildWhy(
+    Number(row.ownRevenue) || 0,
+    Number(row.sharedAssigned) || 0,
+    Number(row.orderCount) || 0,
+  );
+  row.sharePercent = total > 0 ? Math.round((row.revenue / total) * 1000) / 10 : 0;
+}
+
+/**
+ * Asigna € sueltos (sin marca) según regla de Facturación (orphanMode).
+ * Cerveza sola, solo bebidas, restos, etc.
+ */
+export function absorbUnbrandedIntoBrandRows(
+  source: BrandRevenueBundle,
+  rules?: Pick<BrandBillingSplitRules, 'orphanMode' | 'orphanFixedBrandId'> | null,
+  brandLabels: Record<string, string> = {},
+): BrandRevenueBundle {
+  const rows = Array.isArray(source.rows) ? source.rows.map((r) => ({ ...r })) : [];
+  const unbranded = roundMoney2(source.unbranded);
+  const total = roundMoney2(source.total);
+  if (unbranded <= 0) {
+    return { rows, unbranded: 0, total };
+  }
+
+  const mode: BrandBillingOrphanMode = normalizeBillingOrphanMode(rules?.orphanMode);
+  const fixedId = String(rules?.orphanFixedBrandId || '').trim();
+
+  if (mode === 'unassigned') {
+    return { rows, unbranded, total };
+  }
+
+  if (mode === 'fixed_brand' && fixedId) {
+    const idx = rows.findIndex(
+      (r) => r.brandId === fixedId || brandIdAliases(r.brandId).includes(fixedId),
+    );
+    if (idx >= 0) {
+      addAmountToBrandRow(rows[idx], unbranded, total);
+    } else {
+      rows.push(
+        emptyBrandRow(fixedId, displayBrandName(fixedId, brandLabels), unbranded, total),
+      );
+    }
+    return {
+      rows: rows.sort((a, b) => b.revenue - a.revenue),
+      unbranded: 0,
+      total,
+    };
+  }
+
+  if (rows.length === 0) {
+    // Sin ventas de marca aún: fixed ya cubierto; resto queda para rollup a hojas.
+    return { rows, unbranded, total };
+  }
+
+  if (mode === 'shift_majority' || mode === 'fixed_brand') {
+    // fixed sin id → caer a dominante del turno
+    let winner = 0;
+    for (let i = 1; i < rows.length; i += 1) {
+      if ((Number(rows[i].revenue) || 0) > (Number(rows[winner].revenue) || 0)) winner = i;
+    }
+    addAmountToBrandRow(rows[winner], unbranded, total);
+    return {
+      rows: rows.sort((a, b) => b.revenue - a.revenue),
+      unbranded: 0,
+      total,
+    };
+  }
+
+  // equal
+  let assigned = 0;
+  for (let i = 0; i < rows.length; i += 1) {
+    const isLast = i === rows.length - 1;
+    const add = isLast
+      ? roundMoney2(unbranded - assigned)
+      : roundMoney2(unbranded / rows.length);
+    addAmountToBrandRow(rows[i], add, total);
+    assigned = roundMoney2(assigned + add);
+  }
+  return {
+    rows: rows.sort((a, b) => b.revenue - a.revenue),
+    unbranded: 0,
+    total,
+  };
+}
+
+/**
+ * Agrupa € por hojas de Facturación (p. ej. tacos bajo Black Burger).
+ * Absorbe «sin marca» y restos según orphanMode de Facturación.
+ */
+export function rollupBrandRevenueToClosingSlots(
+  source: BrandRevenueBundle,
+  slots: ClosingBillingBrandSlot[],
+  rules?: Pick<BrandBillingSplitRules, 'orphanMode' | 'orphanFixedBrandId'> | null,
+  brandLabels: Record<string, string> = {},
+): BrandRevenueBundle {
+  const rows = Array.isArray(source.rows) ? source.rows : [];
+  const unbranded = roundMoney2(source.unbranded);
+  const total = roundMoney2(source.total);
+  if (!slots.length) {
+    return absorbUnbrandedIntoBrandRows({ rows, unbranded, total }, rules, brandLabels);
+  }
+
+  const used = new Set<string>();
+  const rolled: ShiftBrandRevenueRow[] = [];
+
+  for (const slot of slots) {
+    const memberIds = slot.memberBrandIds?.length ? slot.memberBrandIds : [slot.brandId];
+    const aliases = new Set<string>();
+    for (const id of memberIds) {
+      for (const a of brandIdAliases(id)) aliases.add(a);
+    }
+    const matching = rows.filter(
+      (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
+    );
+    for (const r of matching) used.add(r.brandId);
+
+    const revenue = roundMoney2(matching.reduce((s, r) => s + (Number(r.revenue) || 0), 0));
+    if (revenue <= 0) continue;
+
+    const revenueEfectivo = roundMoney2(
+      matching.reduce((s, r) => s + (Number(r.revenueEfectivo) || 0), 0),
+    );
+    const revenueTarjeta = roundMoney2(
+      matching.reduce((s, r) => s + (Number(r.revenueTarjeta) || 0), 0),
+    );
+    const ownRevenue = roundMoney2(
+      matching.reduce((s, r) => s + (Number(r.ownRevenue) || 0), 0),
+    );
+    const sharedAssigned = roundMoney2(
+      matching.reduce((s, r) => s + (Number(r.sharedAssigned) || 0), 0),
+    );
+    const orderCount = matching.reduce((s, r) => s + (Number(r.orderCount) || 0), 0);
+
+    rolled.push({
+      brandId: slot.brandId,
+      name: slot.name,
+      revenue,
+      revenueEfectivo,
+      revenueTarjeta,
+      ownRevenue,
+      sharedAssigned,
+      orderCount,
+      sharePercent: total > 0 ? Math.round((revenue / total) * 1000) / 10 : 0,
+      why: buildWhy(ownRevenue, sharedAssigned, orderCount),
+    });
+  }
+
+  let leftover = 0;
+  for (const r of rows) {
+    if (used.has(r.brandId)) continue;
+    leftover = roundMoney2(leftover + (Number(r.revenue) || 0));
+  }
+  const pool = roundMoney2(unbranded + leftover);
+
+  if (rolled.length === 0 && pool > 0) {
+    const mode = normalizeBillingOrphanMode(rules?.orphanMode);
+    if (mode === 'unassigned') {
+      return { rows: [], unbranded: pool, total };
+    }
+    const fixedId = String(rules?.orphanFixedBrandId || '').trim();
+    const host = mode === 'fixed_brand' && fixedId
+      ? (slots.find(
+        (s) =>
+          s.brandId === fixedId
+          || (s.memberBrandIds || []).some((id) => brandIdAliases(id).includes(fixedId)),
+      ) || slots[0])
+      : slots[0];
+    rolled.push(
+      emptyBrandRow(host.brandId, host.name, pool, total),
+    );
+    return { rows: rolled, unbranded: 0, total };
+  }
+
+  return absorbUnbrandedIntoBrandRows(
+    { rows: rolled, unbranded: pool, total },
+    rules,
+    brandLabels,
+  );
+}
 
 function buildWhy(own: number, shared: number, orderCount: number): string {
   const parts: string[] = [];
@@ -229,7 +453,11 @@ export function buildShiftBrandRevenue(
     .filter((r) => r.revenue > 0)
     .sort((a, b) => b.revenue - a.revenue);
 
-  return { rows, unbranded, total };
+  return absorbUnbrandedIntoBrandRows(
+    { rows, unbranded, total },
+    splitRules,
+    brandLabels,
+  );
 }
 
 export type ShiftAppsBrandTotalRow = {
@@ -300,7 +528,77 @@ export function buildShiftAppsBrandTotals(
     .filter((r) => r.revenue > 0)
     .sort((a, b) => b.revenue - a.revenue || a.name.localeCompare(b.name, 'es'));
 
-  return { rows, unbranded, total };
+  const mode = normalizeBillingOrphanMode(splitRules.orphanMode);
+  if (unbranded <= 0) return { rows, unbranded: 0, total };
+  if (mode === 'unassigned') return { rows, unbranded, total };
+
+  const fixedId = String(splitRules.orphanFixedBrandId || '').trim();
+  if (mode === 'fixed_brand' && fixedId) {
+    const idx = rows.findIndex(
+      (r) => r.brandId === fixedId || brandIdAliases(r.brandId).includes(fixedId),
+    );
+    if (idx >= 0) {
+      const next = rows.map((r, i) => {
+        if (i !== idx) return r;
+        const revenue = roundMoney2((Number(r.revenue) || 0) + unbranded);
+        return {
+          ...r,
+          revenue,
+          sharePercent: total > 0 ? Math.round((revenue / total) * 1000) / 10 : 0,
+        };
+      });
+      return { rows: next, unbranded: 0, total };
+    }
+    return {
+      rows: [
+        ...rows,
+        {
+          brandId: fixedId,
+          name: displayBrandName(fixedId, brandLabels),
+          revenue: unbranded,
+          orderCount: 0,
+          sharePercent: total > 0 ? Math.round((unbranded / total) * 1000) / 10 : 0,
+        },
+      ].sort((a, b) => b.revenue - a.revenue),
+      unbranded: 0,
+      total,
+    };
+  }
+
+  if (rows.length === 0) return { rows, unbranded, total };
+
+  if (mode === 'shift_majority' || mode === 'fixed_brand') {
+    let winner = 0;
+    for (let i = 1; i < rows.length; i += 1) {
+      if ((Number(rows[i].revenue) || 0) > (Number(rows[winner].revenue) || 0)) winner = i;
+    }
+    const next = rows.map((r, i) => {
+      if (i !== winner) return r;
+      const revenue = roundMoney2((Number(r.revenue) || 0) + unbranded);
+      return {
+        ...r,
+        revenue,
+        sharePercent: total > 0 ? Math.round((revenue / total) * 1000) / 10 : 0,
+      };
+    });
+    return { rows: next.sort((a, b) => b.revenue - a.revenue), unbranded: 0, total };
+  }
+
+  let assigned = 0;
+  const absorbed = rows.map((r, i) => {
+    const isLast = i === rows.length - 1;
+    const add = isLast
+      ? roundMoney2(unbranded - assigned)
+      : roundMoney2(unbranded / rows.length);
+    assigned = roundMoney2(assigned + add);
+    const revenue = roundMoney2((Number(r.revenue) || 0) + add);
+    return {
+      ...r,
+      revenue,
+      sharePercent: total > 0 ? Math.round((revenue / total) * 1000) / 10 : 0,
+    };
+  });
+  return { rows: absorbed, unbranded: 0, total };
 }
 
 /**

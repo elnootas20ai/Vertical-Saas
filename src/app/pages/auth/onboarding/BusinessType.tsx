@@ -89,12 +89,14 @@ export function BusinessType() {
       }
     >
       <OnboardingStepHeading
+        compact
         stepLabel="Paso 1 · Tipo de negocio"
         title="¿Qué tipo de negocio tienes?"
         subtitle="Selecciona el sector que mejor describa tu actividad principal."
       />
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain scrollbar-visible grid grid-cols-[repeat(auto-fill,minmax(min(100%,8.75rem),1fr))] gap-2 auto-rows-fr content-start">
+      {/* Sin auto-rows-fr: encogía las tarjetas al alto de pantalla y cortaba Heladería sin scroll. */}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,8.5rem),1fr))] gap-2 content-start pb-2">
         {BUSINESS_TYPES.map((bt) => {
           const Icon = bt.icon;
           const enabled = ENABLED_TYPES.has(bt.id);

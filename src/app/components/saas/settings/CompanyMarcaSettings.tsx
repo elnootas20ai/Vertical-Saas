@@ -64,7 +64,7 @@ import {
   isDeliveryBusinessType,
   resolveBusinessScopeId,
 } from '../../../lib/deliverySetup';
-import { isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
+import { isIceCreamShopBusinessType, isRestaurantBusinessType } from '../../../lib/deliveryOpsTypes';
 import { useTenantEntitlements, countCommercialBrands } from '../../../hooks/useTenantEntitlements';
 import { writeBillingSelection } from '../../../lib/billingSelection';
 import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
@@ -821,8 +821,11 @@ export function CompanyMarcaSettings() {
   const businessId = resolveBusinessScopeId(currentBusiness);
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
+  const isHeladeria = isIceCreamShopBusinessType(currentBusiness?.businessType);
+  /** PDV obligatorio antes de marca (delivery y heladería). */
+  const needsPdvBeforeBrand = isDelivery || isHeladeria;
   /** Mismo asistente de línea (qué vendes → categorías) para TPV retail. */
-  const showCommercialLineWizard = isDelivery || isRestaurant;
+  const showCommercialLineWizard = isDelivery || isRestaurant || isHeladeria;
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
   const pdvGate = useDeliveryStorePdvGate();
   const pdvGateReloadedRef = useRef(false);
@@ -832,10 +835,10 @@ export function CompanyMarcaSettings() {
   }, [businessId]);
 
   useEffect(() => {
-    if (!isDelivery || pdvGate.loading || pdvGate.ready || pdvGateReloadedRef.current) return;
+    if (!needsPdvBeforeBrand || pdvGate.loading || pdvGate.ready || pdvGateReloadedRef.current) return;
     pdvGateReloadedRef.current = true;
     void pdvGate.reload();
-  }, [isDelivery, pdvGate.loading, pdvGate.ready, pdvGate.reload]);
+  }, [needsPdvBeforeBrand, pdvGate.loading, pdvGate.ready, pdvGate.reload]);
 
   const [brands, setBrands] = useState<Brand[]>([]);
   const [stores, setStores] = useState<WorkCenter[]>([]);
@@ -857,9 +860,9 @@ export function CompanyMarcaSettings() {
 
   const retailStores = useMemo(() => {
     const active = stores.filter((s) => s.active);
-    if (!isDelivery) return active;
+    if (!needsPdvBeforeBrand && !isRestaurant) return active;
     return active.filter((s) => s.centerType === 'punto_de_venta' || s.centerType === 'almacen');
-  }, [stores, isDelivery]);
+  }, [stores, needsPdvBeforeBrand, isRestaurant]);
 
   const loadAll = useCallback(async () => {
     if (!businessId) return;
@@ -914,13 +917,13 @@ export function CompanyMarcaSettings() {
   }, [brands, search, filterActive]);
 
   const setupCtx = useMemo(
-    () => ({ isDelivery, retailStoreCount: retailStores.length }),
-    [isDelivery, retailStores.length],
+    () => ({ isDelivery: needsPdvBeforeBrand, retailStoreCount: retailStores.length }),
+    [needsPdvBeforeBrand, retailStores.length],
   );
 
   const openCreate = useCallback(() => {
     const pending = findBrandToCompleteInActivation(brands, setupCtx);
-    if (isDelivery && pending) {
+    if (needsPdvBeforeBrand && pending) {
       setEditingBrand(pending);
       setShowModal(true);
       return;
@@ -932,7 +935,7 @@ export function CompanyMarcaSettings() {
     }
     setEditingBrand(null);
     setShowModal(true);
-  }, [entitlements.canCreateCommercialBrand, brands, setupCtx, isDelivery]);
+  }, [entitlements.canCreateCommercialBrand, brands, setupCtx, needsPdvBeforeBrand]);
 
   const openBrandWizardForActivation = useCallback(
     (highlight?: string | null) => {
@@ -970,8 +973,8 @@ export function CompanyMarcaSettings() {
       newBrandQueryHandledRef.current = false;
       return;
     }
-    if (loading || (isDelivery && pdvGate.loading)) return;
-    if (isDelivery && !pdvGate.ready) {
+    if (loading || (needsPdvBeforeBrand && pdvGate.loading)) return;
+    if (needsPdvBeforeBrand && !pdvGate.ready) {
       void pdvGate.reload();
       return;
     }
@@ -985,7 +988,7 @@ export function CompanyMarcaSettings() {
     setSearchParams(next, { replace: true });
   }, [
     loading,
-    isDelivery,
+    needsPdvBeforeBrand,
     pdvGate.loading,
     pdvGate.ready,
     searchParams,
@@ -1047,7 +1050,7 @@ export function CompanyMarcaSettings() {
         toast.success(`«${updated.name}» actualizada`);
       } else {
         const pendingShell = findBrandToCompleteInActivation(brands, setupCtx);
-        if (isDelivery && pendingShell) {
+        if (needsPdvBeforeBrand && pendingShell) {
           toast.error('Ya tienes una marca pendiente. Complétala en el asistente antes de crear otra.');
           setEditingBrand(pendingShell);
           setShowModal(true);
@@ -1132,7 +1135,7 @@ export function CompanyMarcaSettings() {
     );
   }
 
-  if (isDelivery && pdvGate.loading) {
+  if (needsPdvBeforeBrand && pdvGate.loading) {
     return (
       <div className="py-12 text-center text-sm text-gray-500 dark:text-gray-400">
         Comprobando tienda y PDV…
@@ -1140,7 +1143,7 @@ export function CompanyMarcaSettings() {
     );
   }
 
-  if (isDelivery && !pdvGate.ready) {
+  if (needsPdvBeforeBrand && !pdvGate.ready) {
     return (
       <div className="py-6">
         <DeliveryActivationGatePanel kind="store_pdv" />

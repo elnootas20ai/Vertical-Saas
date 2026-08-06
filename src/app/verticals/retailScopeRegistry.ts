@@ -11,6 +11,7 @@ import { buildDeliverySidebarStoreRows } from '../lib/deliveryApi';
 import type { AuthUser } from '../lib/authApi';
 import { isCompraventaBusinessType } from '../lib/compraventaSetup';
 import {
+  isIceCreamShopBusinessType,
   isRestaurantBusinessType,
   isStrictDeliveryBusinessType,
 } from '../lib/deliveryOpsTypes';
@@ -82,7 +83,10 @@ export function resolveRetailScopeKind(
   businessType: string | null | undefined,
 ): RetailScopeKind {
   if (isRestaurantBusinessType(businessType)) return 'restaurant';
-  if (isStrictDeliveryBusinessType(businessType)) return 'delivery';
+  // Heladería usa el mismo pipeline de tiendas/PDV retail que delivery (sin mezclar módulos).
+  if (isStrictDeliveryBusinessType(businessType) || isIceCreamShopBusinessType(businessType)) {
+    return 'delivery';
+  }
   return 'strict';
 }
 
@@ -284,6 +288,9 @@ export function shouldLoadRetailStoresForBusiness(
   }
 
   if (hints?.force) return true;
+
+  // Heladería: siempre cargar tiendas/PDV de la empresa (Crear PDV / selector sidebar).
+  if (isIceCreamShopBusinessType(ctx.business.businessType)) return true;
 
   return shouldUseDeliveryStores(
     { business: ctx.business as Business, businesses: ctx.businesses as Business[] },

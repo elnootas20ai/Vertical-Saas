@@ -14,7 +14,7 @@ export function ACCESO__TrialBanner({ status, daysRemaining, onChoosePlan }: ACC
       borderColor: 'border-blue-200',
       iconColor: 'text-blue-600',
       textColor: 'text-blue-900',
-      message: `Te quedan ${daysRemaining} días de prueba gratuita`,
+      message: `Te quedan ${daysRemaining} días de activación`,
       showCta: false
     },
     trial_casi_fin: {
@@ -23,7 +23,7 @@ export function ACCESO__TrialBanner({ status, daysRemaining, onChoosePlan }: ACC
       borderColor: 'border-amber-300',
       iconColor: 'text-amber-600',
       textColor: 'text-amber-900',
-      message: `¡Solo te quedan ${daysRemaining} días de prueba!`,
+      message: `¡Solo te quedan ${daysRemaining} días de activación!`,
       showCta: true,
       ctaText: 'Elegir plan'
     },
@@ -33,7 +33,7 @@ export function ACCESO__TrialBanner({ status, daysRemaining, onChoosePlan }: ACC
       borderColor: 'border-red-300',
       iconColor: 'text-red-600',
       textColor: 'text-red-900',
-      message: 'Tu prueba ha finalizado',
+      message: 'Tu periodo de activación ha finalizado',
       showCta: true,
       ctaText: 'Activar plan'
     }

@@ -2,8 +2,8 @@ import type { VerticalModuleDefinition } from '../types';
 
 /**
  * Módulo Heladería — frontera de código.
- * Independiente de delivery / restaurant / butcher / compraventa.
- * No importar pantallas ni lib de negocio de otros verticales.
+ * Producto: el sidebar/core operativo reutiliza el shell Delivery (Clientes, TPV, ops, caja…).
+ * Código propio vive aquí; no mezclar lógica de negocio delivery dentro de estos archivos.
  */
 export const HELADERIA_MODULE: VerticalModuleDefinition = {
   id: 'heladeria',
@@ -30,8 +30,4 @@ export function isHeladeriaModuleRoute(pathname: string): boolean {
   );
 }
 
-export function isIceCreamShopBusinessType(
-  businessType: string | null | undefined,
-): boolean {
-  return String(businessType || '').trim() === 'iceCreamShop';
-}
+export { isIceCreamShopBusinessType } from '../../lib/deliveryOpsTypes';

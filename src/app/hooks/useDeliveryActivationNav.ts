@@ -15,7 +15,10 @@ export function useDeliveryActivationNav() {
   const businessCtx = useBusinessOptional();
   const currentBusiness = businessCtx?.currentBusiness ?? null;
   const businessesFetchSettled = businessCtx?.businessesFetchSettled ?? false;
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  const businessType = String(currentBusiness?.businessType || '').trim();
+  // Heladería usa el mismo shell operativo/sidebar que Delivery.
+  const isDelivery =
+    isDeliveryBusinessType(businessType) || businessType === 'iceCreamShop';
   const businessId = currentBusiness?.business_id || '';
   const activeStore = useActiveStoreScope();
   const [brandReady, setBrandReady] = useState(!isDelivery);

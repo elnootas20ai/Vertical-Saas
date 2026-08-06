@@ -284,6 +284,37 @@ function getClientHealthBadge(account: AuthUser) {
   return computeClientHealthFromLogin(account.lastLoginAt, account.createdAt);
 }
 
+/** Bloque de sección en ficha admin (título + cuerpo). */
+function AdminSection({
+  title,
+  subtitle,
+  children,
+  tone = 'default',
+}: {
+  title: string;
+  subtitle?: string;
+  children: ReactNode;
+  tone?: 'default' | 'alert' | 'ok' | 'warn';
+}) {
+  const toneClass =
+    tone === 'alert'
+      ? 'border-rose-200 dark:border-rose-900/50 bg-rose-50/40 dark:bg-rose-950/20'
+      : tone === 'ok'
+        ? 'border-emerald-200 dark:border-emerald-900/50 bg-emerald-50/40 dark:bg-emerald-950/20'
+        : tone === 'warn'
+          ? 'border-amber-200 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20'
+          : 'border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900';
+  return (
+    <section className={`rounded-2xl border ${toneClass} p-4 sm:p-5 space-y-4`}>
+      <header className="space-y-0.5">
+        <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">{title}</h3>
+        {subtitle ? <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">{subtitle}</p> : null}
+      </header>
+      {children}
+    </section>
+  );
+}
+
 /** Control ± de cupos extra (mismo gesto en PDV, marcas, empresas, trabajadores). */
 function AdminExtraSlotControl({
   label,
@@ -304,14 +335,14 @@ function AdminExtraSlotControl({
 }) {
   const safe = Math.max(min, Math.min(max, Math.floor(Number(value) || 0)));
   return (
-    <div className="rounded-xl border border-violet-200/80 dark:border-violet-800 bg-white/70 dark:bg-gray-900/40 p-3 space-y-2">
-      <label className="block text-xs font-semibold text-violet-800 dark:text-violet-200">{label}</label>
+    <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-950/40 p-3 space-y-2">
+      <label className="block text-xs font-semibold text-stone-700 dark:text-stone-200">{label}</label>
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => onChange(Math.max(min, safe - 1))}
           disabled={safe <= min}
-          className="min-h-11 min-w-11 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-lg font-bold text-violet-800 dark:text-violet-200 hover:bg-violet-50 disabled:opacity-40"
+          className="min-h-11 min-w-11 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-lg font-bold text-stone-800 dark:text-stone-100 hover:bg-blue-50 disabled:opacity-40"
           title={`Bajar 1 ${stepLabel}`}
           aria-label={`Bajar ${label}`}
         >
@@ -323,22 +354,35 @@ function AdminExtraSlotControl({
           max={max}
           value={safe}
           onChange={(e) => onChange(Math.max(min, Math.min(max, Math.floor(Number(e.target.value) || 0))))}
-          className="flex-1 min-h-11 px-3 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-center text-base font-bold text-gray-900 dark:text-gray-100 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200 dark:focus:ring-violet-900"
+          className="flex-1 min-h-11 px-3 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-center text-base font-bold text-stone-900 dark:text-stone-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
         />
         <button
           type="button"
           onClick={() => onChange(Math.min(max, safe + 1))}
           disabled={safe >= max}
-          className="min-h-11 min-w-11 rounded-xl border border-violet-200 dark:border-violet-700 bg-white dark:bg-gray-900 text-lg font-bold text-violet-800 dark:text-violet-200 hover:bg-violet-50 disabled:opacity-40"
+          className="min-h-11 min-w-11 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-lg font-bold text-stone-800 dark:text-stone-100 hover:bg-blue-50 disabled:opacity-40"
           title={`Subir 1 ${stepLabel}`}
           aria-label={`Subir ${label}`}
         >
           +
         </button>
       </div>
-      <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed">{help}</p>
+      <p className="text-xs text-stone-500 dark:text-stone-400 leading-relaxed">{help}</p>
     </div>
   );
+}
+
+function formatAdminLastLogin(iso?: string) {
+  if (!iso) return 'Nunca';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('es-ES', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 interface EditModalProps {
@@ -438,20 +482,55 @@ export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }:
           billingExempt,
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({} as { ok?: boolean; error?: string; subscription?: AuthUser['subscription'] }));
       if (data.ok) {
         setSubscriptionStatus('subscription_active');
         setReactivateResult({ ok: true });
         const updated = await updateUser(account.user_id, {});
-        if (updated.user) onSaved(updated.user);
+        const nextUser = updated.user
+          ? {
+              ...updated.user,
+              subscription: data.subscription || updated.user.subscription,
+            }
+          : {
+              ...account,
+              subscription: data.subscription || {
+                ...account.subscription,
+                status: 'subscription_active' as const,
+              },
+            };
+        onSaved(nextUser);
+        return;
+      }
+
+      // Fallback: activar por updateProfile (superadmin) si el endpoint admin falla.
+      const fallback = await updateUser(account.user_id, {
+        status: 'active',
+        subscription: {
+          ...account.subscription,
+          status: 'subscription_active',
+          billingExempt,
+          cancelAtPeriodEnd: false,
+          adminPlanLocked: true,
+          planName,
+          selectedPlanId,
+        },
+      });
+      if (fallback.success && fallback.user) {
+        setSubscriptionStatus('subscription_active');
+        setReactivateResult({ ok: true });
+        onSaved(fallback.user);
       } else {
-        setReactivateResult({ ok: false, error: data.error || 'Error desconocido' });
+        setReactivateResult({
+          ok: false,
+          error: data.error || fallback.error || 'No se pudo activar el pago',
+        });
       }
     } catch (err: unknown) {
       setReactivateResult({ ok: false, error: err instanceof Error ? err.message : 'Error de red' });
     } finally {
       setReactivating(false);
-      setTimeout(() => setReactivateResult(null), 5000);
+      setTimeout(() => setReactivateResult(null), 8000);
     }
   };
 
@@ -642,6 +721,457 @@ export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }:
   const totalWorkerLimit = baseWorkerLimit + extraWorkers;
 
   const isPage = layout === 'page';
+  const statusBadge = getStatusBadge(subscriptionStatus || account.subscription?.status);
+  const health = getClientHealthBadge(account);
+  const hasCard = Boolean(account.paymentSummary?.lastFourDigits);
+  const needsRestore = accountNeedsAccessRestore || subscriptionStatus === 'suspended';
+  const subStatusLabel =
+    SUBSCRIPTION_STATUS_OPTIONS.find((s) => s.id === (account.subscription?.status || subscriptionStatus))?.label ||
+    account.subscription?.status ||
+    subscriptionStatus;
+
+  const manageBody = (
+    <div className={`space-y-4 ${isPage ? '' : 'p-6 space-y-5'}`}>
+      {/* 1. Resumen útil */}
+      {isPage && (
+        <AdminSection title="Resumen" subtitle="Lo importante de un vistazo">
+          <div className="flex flex-wrap gap-2">
+            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusBadge.color}`}>
+              {statusBadge.label}
+            </span>
+            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${healthBadgeClasses(health.status)}`}>
+              {health.label}
+            </span>
+            <span className="inline-flex items-center rounded-full bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200 px-2.5 py-1 text-[11px] font-semibold">
+              Plan {planName}
+            </span>
+            {isBlocked ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 text-rose-800 px-2.5 py-1 text-[11px] font-semibold">
+                <Lock className="w-3 h-3" /> Bloqueada
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-1 text-[11px] font-semibold">
+                <Unlock className="w-3 h-3" /> Activa
+              </span>
+            )}
+            {billingExempt ? (
+              <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-800 px-2.5 py-1 text-[11px] font-semibold">
+                Exento suspensión
+              </span>
+            ) : null}
+            {adminProAccess ? (
+              <span className="inline-flex items-center rounded-full bg-blue-50 text-blue-800 px-2.5 py-1 text-[11px] font-semibold">
+                PRO admin
+              </span>
+            ) : null}
+            <span className="inline-flex items-center rounded-full bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-200 px-2.5 py-1 text-[11px] font-semibold">
+              Tarjeta {hasCard ? `····${account.paymentSummary?.lastFourDigits}` : 'no'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {[
+              { label: 'PDV', value: String(totalPdvLimit), hint: `${basePdvLimit}+${extraPdv}` },
+              { label: 'Trabajadores', value: String(totalWorkerLimit), hint: `${baseWorkerLimit}+${extraWorkers}` },
+              { label: 'Marcas', value: String(totalBrandLimit), hint: `${baseBrandLimit}+${extraBrands}` },
+              { label: 'Empresas', value: String(totalBusinessLimit), hint: `${baseBusinessLimit}+${extraBusiness}` },
+            ].map((kpi) => (
+              <div key={kpi.label} className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/50 px-3 py-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-stone-500">{kpi.label}</p>
+                <p className="text-xl font-bold text-stone-900 dark:text-stone-100">{kpi.value}</p>
+                <p className="text-[10px] text-stone-400">{kpi.hint}</p>
+              </div>
+            ))}
+          </div>
+          <div className="text-xs text-stone-500 dark:text-stone-400 space-y-1">
+            <p>Último login: <strong className="text-stone-800 dark:text-stone-200">{formatAdminLastLogin(account.lastLoginAt)}</strong></p>
+            <p>Alta: <strong className="text-stone-800 dark:text-stone-200">{formatAdminLastLogin(account.createdAt)}</strong></p>
+            {account.subscription?.currentPeriodEnd ? (
+              <p>Periodo hasta: <strong className="text-stone-800 dark:text-stone-200">{formatAdminLastLogin(account.subscription.currentPeriodEnd)}</strong></p>
+            ) : null}
+            <p className="font-mono text-[10px] break-all text-stone-400">{account.user_id}</p>
+          </div>
+        </AdminSection>
+      )}
+
+      {/* 2. Acciones rápidas (lo que más usas) */}
+      <AdminSection
+        title="Acciones rápidas"
+        subtitle="Entrar como el cliente, copiar enlace o bloquear la cuenta"
+      >
+        <div className="grid gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => void handleImpersonate()}
+            disabled={impersonating}
+            className={`${VERTIAL_BTN_PRIMARY} w-full`}
+          >
+            <UserCheck className={`w-4 h-4 ${impersonating ? 'animate-spin' : ''}`} />
+            {impersonating ? 'Entrando…' : `Acceder como ${account.firstName || 'cliente'}`}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleSendLink()}
+            className={`${VERTIAL_BTN_SECONDARY} w-full`}
+          >
+            {linkCopied ? <Check className="w-4 h-4" /> : <Link className="w-4 h-4" />}
+            {linkCopied ? 'Enlace copiado' : 'Copiar enlace de acceso'}
+          </button>
+        </div>
+        {impersonateError ? (
+          <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <p className="text-sm text-rose-700">{impersonateError}</p>
+          </div>
+        ) : null}
+        <div className={`flex items-center justify-between rounded-xl px-3 py-2.5 border ${isBlocked ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
+          <div className="flex items-center gap-2">
+            {isBlocked ? <Lock className="w-4 h-4 text-rose-600" /> : <Unlock className="w-4 h-4 text-emerald-600" />}
+            <span className={`text-sm font-semibold ${isBlocked ? 'text-rose-700' : 'text-emerald-700'}`}>
+              {isBlocked ? 'Cuenta bloqueada' : 'Cuenta activa'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsBlocked((prev) => !prev)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold text-white ${isBlocked ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}
+          >
+            {isBlocked ? 'Desbloquear' : 'Bloquear'}
+          </button>
+        </div>
+      </AdminSection>
+
+      {/* 3. Urgente: reactivar */}
+      {needsRestore && (
+        <AdminSection
+          title={
+            subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent'
+              ? 'Pago avisado — activar'
+              : 'Restaurar acceso'
+          }
+          subtitle={
+            subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent'
+              ? 'Si ves el ingreso en el banco, activa la suscripción.'
+              : 'El cliente está bloqueado o en impago. Activa o marca exento.'
+          }
+          tone="ok"
+        >
+          <p className="text-xs text-emerald-800 dark:text-emerald-200">
+            Estado ahora: <strong>{subStatusLabel}</strong>
+            {billingExempt ? ' · Exento' : ''}
+          </p>
+          {(account.subscription as { paymentConcept?: string } | undefined)?.paymentConcept ? (
+            <p className="text-xs font-mono text-emerald-900 dark:text-emerald-100 bg-white/60 dark:bg-black/20 rounded-lg px-3 py-2">
+              Concepto: {(account.subscription as { paymentConcept?: string }).paymentConcept}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void handleReactivateAccount()}
+            disabled={reactivating}
+            className={`${VERTIAL_BTN_PRIMARY} w-full bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20`}
+          >
+            <CheckCircle className={`w-4 h-4 ${reactivating ? 'animate-spin' : ''}`} />
+            {reactivating
+              ? 'Activando…'
+              : subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent'
+                ? 'Marcar pagado y activar acceso'
+                : 'Activar suscripción'}
+          </button>
+          <p className="text-[11px] text-emerald-800/80 dark:text-emerald-200/80">
+            Esto pone la cuenta en <strong>Suscripción activa</strong> (1 mes). El cliente debe refrescar o volver a entrar.
+          </p>
+          {(account.subscription as { moneiSubscriptionId?: string } | undefined)?.moneiSubscriptionId ? (
+            <button
+              type="button"
+              onClick={() => void handleClearMoneiLink()}
+              disabled={clearingMonei}
+              className={`${VERTIAL_BTN_SECONDARY} w-full`}
+            >
+              {clearingMonei ? 'Quitando enlace…' : 'Quitar enlace MONEI'}
+            </button>
+          ) : null}
+          {reactivateResult?.ok ? (
+            <p className="text-xs text-emerald-700 font-semibold">Cuenta reactivada.</p>
+          ) : null}
+          {reactivateResult && !reactivateResult.ok ? (
+            <p className="text-xs text-rose-700">{reactivateResult.error}</p>
+          ) : null}
+          {clearMoneiResult?.ok ? (
+            <p className="text-xs text-emerald-700">Enlace MONEI eliminado.</p>
+          ) : null}
+          {clearMoneiResult && !clearMoneiResult.ok ? (
+            <p className="text-xs text-rose-700">{clearMoneiResult.error}</p>
+          ) : null}
+        </AdminSection>
+      )}
+
+      {/* 4. Cupos */}
+      <AdminSection
+        title="Cupos (subir / bajar)"
+        subtitle={`Base del plan ${planName}: ${basePdvLimit} PDV · ${baseWorkerLimit} trabajadores · ${baseBrandLimit} marcas · ${baseBusinessLimit} empresas`}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          <label className="inline-flex items-start gap-2 cursor-pointer rounded-xl border border-stone-200 dark:border-stone-700 px-3 py-2.5 flex-1 min-w-[12rem]">
+            <input
+              type="checkbox"
+              checked={adminProAccess}
+              onChange={(e) => setAdminProAccess(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-stone-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-stone-800 dark:text-stone-100">
+              <span className="font-semibold block">Funciones PRO</span>
+              <span className="text-xs text-stone-500">Aunque el plan sea Básico/Normal</span>
+            </span>
+          </label>
+          <label className="inline-flex items-start gap-2 cursor-pointer rounded-xl border border-stone-200 dark:border-stone-700 px-3 py-2.5 flex-1 min-w-[12rem]">
+            <input
+              type="checkbox"
+              checked={billingExempt}
+              onChange={(e) => setBillingExempt(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-stone-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-stone-800 dark:text-stone-100">
+              <span className="font-semibold block">Exento de suspensión</span>
+              <span className="text-xs text-stone-500">No corta el cron/Monei por impago</span>
+            </span>
+          </label>
+        </div>
+        <div className={`grid gap-3 ${isPage ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
+          <AdminExtraSlotControl
+            label="PDV extra"
+            value={extraPdv}
+            max={99}
+            stepLabel="PDV"
+            onChange={(n) => setExtraPointOfSaleSlots(String(n))}
+            help={<>Total <strong>{totalPdvLimit}</strong> ({basePdvLimit}+{extraPdv}). Ref: {formatAddonPriceShort('extra_pdv')}</>}
+          />
+          <AdminExtraSlotControl
+            label="Trabajadores extra"
+            value={extraWorkers}
+            max={999}
+            stepLabel="trabajador"
+            onChange={(n) => setExtraWorkerSlots(String(n))}
+            help={<>Total <strong>{totalWorkerLimit}</strong> ({baseWorkerLimit}+{extraWorkers}). Ref: {formatAddonPriceShort('extra_worker')}</>}
+          />
+          <AdminExtraSlotControl
+            label="Marcas extra"
+            value={extraBrands}
+            max={99}
+            stepLabel="marca"
+            onChange={(n) => setExtraCommercialBrandSlots(String(n))}
+            help={<>Total <strong>{totalBrandLimit}</strong> ({baseBrandLimit}+{extraBrands}). Ref: {formatAddonPriceShort('extra_brand')}</>}
+          />
+          <AdminExtraSlotControl
+            label="Empresas extra"
+            value={extraBusiness}
+            max={99}
+            stepLabel="empresa"
+            onChange={(n) => setExtraBusinessSlots(String(n))}
+            help={<>Total <strong>{totalBusinessLimit}</strong> ({baseBusinessLimit}+{extraBusiness}). Ref: {formatAddonPriceShort('extra_business')}</>}
+          />
+        </div>
+      </AdminSection>
+
+      {/* 5. Plan y suscripción */}
+      <AdminSection title="Plan y suscripción" subtitle="Cambia el plan real del cliente y el estado de cobro">
+        <div>
+          <label className="block text-xs font-semibold text-stone-500 uppercase tracking-wider mb-1.5">Plan</label>
+          <div className="grid grid-cols-3 gap-2">
+            {PLAN_OPTIONS.map((p) => {
+              const isCurrent = selectedPlanId === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => handlePlanChange(p.id)}
+                  className={`px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors border ${
+                    isCurrent
+                      ? 'bg-[var(--v-blue,#2563eb)] text-white border-[var(--v-blue,#2563eb)]'
+                      : 'bg-white text-stone-600 hover:bg-stone-50 border-stone-200 dark:bg-stone-900 dark:text-stone-300 dark:border-stone-700'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleSavePlan()}
+            disabled={savingPlan || saving}
+            className={`${VERTIAL_BTN_SECONDARY} mt-2 w-full`}
+          >
+            {savingPlan ? 'Guardando plan…' : `Guardar plan (${planName})`}
+          </button>
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-stone-500 uppercase tracking-wider mb-1.5">Estado suscripción</label>
+          <select
+            value={subscriptionStatus}
+            onChange={(e) => setSubscriptionStatus(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-sm text-stone-900 dark:text-stone-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          >
+            {SUBSCRIPTION_STATUS_OPTIONS.map((s) => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/40 px-3 py-2.5 text-xs text-stone-600 dark:text-stone-300 space-y-1">
+          <p>Suscripción: <strong>{subStatusLabel}</strong>{billingExempt ? ' · Exento' : ''}</p>
+          {account.subscription?.trialEndsAt ? (
+            <p>Trial hasta: {formatAdminLastLogin(account.subscription.trialEndsAt)}</p>
+          ) : null}
+          {(account.subscription as { moneiSubscriptionId?: string } | undefined)?.moneiSubscriptionId ? (
+            <p className="font-mono text-[10px] break-all">
+              MONEI: {(account.subscription as { moneiSubscriptionId?: string }).moneiSubscriptionId}
+            </p>
+          ) : (
+            <p className="text-emerald-700 dark:text-emerald-300">Sin enlace MONEI (cuenta manual)</p>
+          )}
+        </div>
+      </AdminSection>
+
+      {/* 6. Datos */}
+      <AdminSection title="Datos de la cuenta" subtitle="Email y nombre de empresa">
+        <div>
+          <label className="block text-xs font-semibold text-stone-500 uppercase tracking-wider mb-1.5">Email</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-3.5 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-stone-500 uppercase tracking-wider mb-1.5">Empresa</label>
+          <div className="relative">
+            <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400" />
+            <input
+              type="text"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              placeholder="Nombre de la empresa"
+            />
+          </div>
+        </div>
+      </AdminSection>
+
+      {/* 7. Verificación */}
+      <AdminSection title="Verificación empresa" subtitle="CIF / documentos del onboarding">
+        <AdminCompanyVerificationPanel
+          account={account}
+          adminLabel={adminLabel}
+          onSaved={onSaved}
+          onSave={updateUser}
+        />
+      </AdminSection>
+
+      {/* 8. Contraseña */}
+      <AdminSection title="Contraseña" subtitle="Ver, copiar o regenerar">
+        <div className="flex items-center gap-2">
+          <div className="flex-1 flex items-center gap-2 bg-stone-50 dark:bg-stone-950 border border-stone-200 dark:border-stone-700 rounded-xl px-3.5 py-2.5">
+            <Key className="w-4 h-4 text-stone-400 shrink-0" />
+            <code className="text-sm text-stone-700 dark:text-stone-300 flex-1 font-mono">
+              {generatedPassword
+                ? (showPassword ? generatedPassword : '••••••••••••••')
+                : (account.password ? (showPassword ? account.password : '••••••••••••') : 'No disponible')}
+            </code>
+            <button type="button" onClick={() => setShowPassword((v) => !v)} className="text-stone-400 hover:text-stone-600">
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+          {(generatedPassword || account.password) && (
+            <button
+              type="button"
+              onClick={handleCopyPassword}
+              className="p-2.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900"
+              title="Copiar contraseña"
+            >
+              {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-stone-500" />}
+            </button>
+          )}
+        </div>
+        {generatedPassword ? (
+          <div className="flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <p className="text-xs text-amber-700">Nueva contraseña generada. Cópiala antes de salir.</p>
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => void handleResetPassword()}
+          disabled={resetting}
+          className={`${VERTIAL_BTN_SECONDARY} w-full`}
+        >
+          <Key className={`w-4 h-4 ${resetting ? 'animate-spin' : ''}`} />
+          {resetting ? 'Generando…' : 'Resetear contraseña'}
+        </button>
+      </AdminSection>
+
+      {/* 9. Meses gratis */}
+      <AdminSection title="Regalar meses" subtitle="Cortesía sobre la fecha de fin actual" tone="warn">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void handleGrantFreeMonths(1)}
+            disabled={grantingMonths}
+            className={`${VERTIAL_BTN_SECONDARY} flex-1`}
+          >
+            <Sparkles className={`w-4 h-4 ${grantingMonths ? 'animate-spin' : ''}`} />
+            1 mes
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleGrantFreeMonths(2)}
+            disabled={grantingMonths}
+            className={`${VERTIAL_BTN_SECONDARY} flex-1`}
+          >
+            <Sparkles className={`w-4 h-4 ${grantingMonths ? 'animate-spin' : ''}`} />
+            2 meses
+          </button>
+        </div>
+        {grantResult?.ok ? (
+          <p className="text-xs text-emerald-700 font-semibold">
+            {grantResult.months} {grantResult.months === 1 ? 'mes' : 'meses'} aplicado{grantResult.months === 2 ? 's' : ''}.
+          </p>
+        ) : null}
+        {grantResult && !grantResult.ok ? (
+          <p className="text-xs text-rose-700">{grantResult.error}</p>
+        ) : null}
+        {Array.isArray((account.subscription as Record<string, unknown>)?.freeMonthsHistory) &&
+          ((account.subscription as Record<string, unknown>).freeMonthsHistory as Array<{ months: number; grantedAt: string }>).length > 0 && (
+          <div className="border-t border-amber-200 dark:border-amber-800 pt-2">
+            <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider mb-1">Historial</p>
+            {((account.subscription as Record<string, unknown>).freeMonthsHistory as Array<{ months: number; grantedAt: string }>).map((entry, i) => (
+              <p key={i} className="text-[11px] text-amber-800 dark:text-amber-300">
+                +{entry.months} {entry.months === 1 ? 'mes' : 'meses'} — {new Date(entry.grantedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </p>
+            ))}
+          </div>
+        )}
+      </AdminSection>
+
+      {saveError ? (
+        <div className="flex items-center gap-2 rounded-xl bg-rose-50 border border-rose-200 px-4 py-3">
+          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+          <p className="text-sm text-rose-700">{saveError}</p>
+        </div>
+      ) : null}
+      {saveSuccess ? (
+        <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
+          <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+          <p className="text-sm text-emerald-700">Cambios guardados correctamente</p>
+        </div>
+      ) : null}
+      {!isPage && (
+        <button type="button" onClick={() => void handleSave()} disabled={saving} className={`${VERTIAL_BTN_PRIMARY} w-full`}>
+          <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
+          {saving ? 'Guardando…' : 'Guardar cambios'}
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -657,54 +1187,59 @@ export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }:
       <div
         className={
           isPage
-            ? 'relative bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm w-full'
+            ? 'relative w-full space-y-4'
             : 'relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto'
         }
       >
-        <div className="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-800 rounded-t-2xl px-6 py-4 z-10">
+        <div
+          className={
+            isPage
+              ? 'sticky top-0 z-10 rounded-2xl border border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-900/95 backdrop-blur-sm px-4 py-3 sm:px-5'
+              : 'sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-800 rounded-t-2xl px-6 py-4 z-10'
+          }
+        >
           <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            {isPage && (
-              <button
-                type="button"
-                onClick={onClose}
-                className={`${VERTIAL_BTN_SECONDARY} shrink-0 px-3`}
-                title="Volver a clientes"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                <span className="hidden sm:inline">Volver</span>
+            <div className="flex items-center gap-3 min-w-0">
+              {isPage && (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className={`${VERTIAL_BTN_SECONDARY} shrink-0 px-3`}
+                  title="Volver a clientes"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span className="hidden sm:inline">Volver</span>
+                </button>
+              )}
+              <div className="w-10 h-10 rounded-full bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 overflow-hidden flex items-center justify-center shrink-0">
+                {account.avatar ? (
+                  <img src={account.avatar} alt={account.fullName} className="w-full h-full object-cover" />
+                ) : (
+                  <span className="font-bold text-stone-600 dark:text-stone-300 text-sm">{initials(account)}</span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-stone-900 dark:text-stone-100 leading-tight truncate">{account.fullName}</p>
+                {account.companyName ? (
+                  <p className="text-sm text-stone-600 dark:text-stone-300 truncate">{account.companyName}</p>
+                ) : null}
+                <p className="text-xs text-stone-400 truncate">{account.email}</p>
+              </div>
+            </div>
+            {!isPage && (
+              <button onClick={onClose} className="p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-500" title="Cerrar">
+                <X className="w-5 h-5" />
               </button>
             )}
-            <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-700 overflow-hidden flex items-center justify-center shrink-0">
-              {account.avatar ? (
-                <img src={account.avatar} alt={account.fullName} className="w-full h-full object-cover" />
-              ) : (
-                <span className="font-bold text-gray-600 dark:text-gray-400 text-sm">{initials(account)}</span>
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="font-bold text-gray-900 dark:text-gray-100 leading-tight truncate">{account.fullName}</p>
-              {account.companyName ? (
-                <p className="text-sm text-gray-600 dark:text-gray-300 truncate">{account.companyName}</p>
-              ) : null}
-              <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{account.email}</p>
-              <p className="text-xs text-gray-400 dark:text-gray-500 font-mono truncate">{account.user_id}</p>
-            </div>
           </div>
-          {!isPage && (
-            <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-gray-500 dark:text-gray-400" title="Cerrar">
-              <X className="w-5 h-5" />
-            </button>
-          )}
-          </div>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-3 flex gap-2">
             <button
               type="button"
               onClick={() => setModalTab('manage')}
               className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
                 modalTab === 'manage'
-                  ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                  : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
               }`}
             >
               Gestión
@@ -714,8 +1249,8 @@ export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }:
               onClick={() => setModalTab('usage')}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
                 modalTab === 'usage'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                  ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                  : 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-300'
               }`}
             >
               <Activity className="w-4 h-4" />
@@ -723,440 +1258,20 @@ export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }:
             </button>
           </div>
         </div>
+
         {modalTab === 'usage' ? (
-          <div className="p-6">
-            <AdminClientUsagePanel account={account} />
+          <div className={isPage ? '' : 'p-6'}>
+            <AdminSection title="Uso y actividad" subtitle="Logins, sesiones, TPV y APIs">
+              <AdminClientUsagePanel account={account} />
+            </AdminSection>
           </div>
         ) : (
-        <div className="p-6 space-y-5">
-          {isPage && (
-            <p className="text-sm text-stone-500 dark:text-stone-400">
-              Misma ficha de siempre: verificación, plan, cupos ±, contraseña, acceso como cliente, reactivar y meses gratis.
-            </p>
-          )}
-
-          {isPage && (
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight">
-              Verificación y estado
-            </h3>
-          )}
-          <AdminCompanyVerificationPanel
-            account={account}
-            adminLabel={adminLabel}
-            onSaved={onSaved}
-            onSave={updateUser}
-          />
-
-          <div className={`flex items-center justify-between rounded-2xl px-4 py-3 ${isBlocked ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
-            <div className="flex items-center gap-2">
-              {isBlocked ? <Lock className="w-4 h-4 text-red-600" /> : <Unlock className="w-4 h-4 text-green-600" />}
-              <span className={`text-sm font-semibold ${isBlocked ? 'text-red-700' : 'text-green-700'}`}>
-                {isBlocked ? 'Cuenta bloqueada' : 'Cuenta activa'}
-              </span>
-            </div>
-            <button
-              onClick={() => setIsBlocked((prev) => !prev)}
-              className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-colors ${isBlocked ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-red-600 hover:bg-red-700 text-white'}`}
-            >
-              {isBlocked ? 'Desbloquear' : 'Bloquear'}
-            </button>
-          </div>
-
-          {isPage && (
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
-              Datos, plan y suscripción
-            </h3>
-          )}
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 transition-all" />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Empresa</label>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
-                <input type="text" value={companyName} onChange={(e) => setCompanyName(e.target.value)}
-                  className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-sm text-gray-900 dark:text-gray-100 dark:bg-gray-900 transition-all"
-                  placeholder="Nombre de la empresa" />
-              </div>
-            </div>
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 px-3 py-2.5 text-xs text-slate-700 dark:text-slate-300 space-y-1">
-              <p className="font-semibold text-slate-900 dark:text-slate-100">Estado de acceso</p>
-              <p>
-                Suscripción:{' '}
-                <span className="font-medium">
-                  {SUBSCRIPTION_STATUS_OPTIONS.find((s) => s.id === (account.subscription?.status || subscriptionStatus))?.label ||
-                    account.subscription?.status ||
-                    subscriptionStatus}
-                </span>
-                {billingExempt ? ' · Exento de suspensión' : ''}
-              </p>
-              {account.subscription?.trialEndsAt ? (
-                <p>Trial hasta: {new Date(account.subscription.trialEndsAt).toLocaleString('es-ES')}</p>
-              ) : null}
-              {account.subscription?.currentPeriodEnd ? (
-                <p>Periodo hasta: {new Date(account.subscription.currentPeriodEnd).toLocaleString('es-ES')}</p>
-              ) : null}
-              {(account.subscription as { moneiSubscriptionId?: string } | undefined)?.moneiSubscriptionId ? (
-                <p className="font-mono text-[10px] break-all">
-                  MONEI: {(account.subscription as { moneiSubscriptionId?: string }).moneiSubscriptionId}
-                </p>
-              ) : (
-                <p className="text-emerald-700 dark:text-emerald-300">Sin enlace MONEI (cuenta manual)</p>
-              )}
-              {!billingExempt && accountNeedsAccessRestore ? (
-                <p className="text-amber-800 dark:text-amber-200">
-                  El cliente verá bloqueo o pantalla de pago hasta reactivar o marcar exento.
-                </p>
-              ) : null}
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">
-                Plan real del cliente
-              </label>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                Básico, Mediano o Pro — se guarda en la suscripción del cliente (no es simulación local).
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                {PLAN_OPTIONS.map((p) => {
-                  const isCurrent = selectedPlanId === p.id;
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => handlePlanChange(p.id)}
-                      className={`px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors border ${
-                        isCurrent
-                          ? p.id === 'pro'
-                            ? 'bg-violet-600 text-white border-violet-600'
-                            : p.id === 'normal'
-                              ? 'bg-emerald-600 text-white border-emerald-600'
-                              : 'bg-slate-700 text-white border-slate-700'
-                          : 'bg-white text-gray-600 hover:bg-gray-50 border-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-800'
-                      }`}
-                    >
-                      {p.name}
-                    </button>
-                  );
-                })}
-              </div>
-              <button
-                type="button"
-                onClick={() => void handleSavePlan()}
-                disabled={savingPlan || saving}
-                className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold transition-colors disabled:opacity-50"
-              >
-                {savingPlan ? 'Guardando plan...' : `Guardar plan (${planName})`}
-              </button>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Estado suscripción</label>
-              <select value={subscriptionStatus} onChange={(e) => setSubscriptionStatus(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900 outline-none text-sm text-gray-900 dark:text-gray-100 transition-all appearance-none bg-white dark:bg-gray-900">
-                {SUBSCRIPTION_STATUS_OPTIONS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {isPage && (
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
-              Cupos extras (subir / bajar)
-            </h3>
-          )}
-          <div className="rounded-2xl border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 p-4 space-y-3">
-            <p className="text-xs font-semibold text-violet-800 dark:text-violet-200 uppercase tracking-wider">
-              Ventajas sin cobro (superadmin)
-            </p>
-            <p className="text-xs text-violet-700 dark:text-violet-300 leading-relaxed">
-              Para clientes que no pagan por pasarela: amplía PDV, marcas comerciales y/o funciones PRO. El plan del desplegable sigue
-              contando como base ({basePdvLimit} PDV, {baseBrandLimit} marca comercial en {planName}).
-            </p>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={adminProAccess}
-                onChange={(e) => setAdminProAccess(e.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
-              />
-              <span className="text-sm text-violet-900 dark:text-violet-100">
-                <span className="font-semibold block">Funciones PRO</span>
-                <span className="text-xs text-violet-700 dark:text-violet-300">
-                  Desbloquea PRO aunque el plan sea Básico/Normal (centros extra, etc.).
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={billingExempt}
-                onChange={(e) => setBillingExempt(e.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
-              />
-              <span className="text-sm text-violet-900 dark:text-violet-100">
-                <span className="font-semibold block">Exento de suspensión automática</span>
-                <span className="text-xs text-violet-700 dark:text-violet-300">
-                  Mantiene la cuenta activa aunque Monei o el cron marquen impago (clientes sin cobro en pasarela).
-                </span>
-              </span>
-            </label>
-            <div className={`grid gap-3 ${isPage ? 'sm:grid-cols-2' : 'grid-cols-1'}`}>
-              <AdminExtraSlotControl
-                label="PDV extra (además del plan)"
-                value={extraPdv}
-                max={99}
-                stepLabel="PDV"
-                onChange={(n) => setExtraPointOfSaleSlots(String(n))}
-                help={
-                  <>
-                    Cupo total permitido: <strong>{totalPdvLimit}</strong> PDV ({basePdvLimit} del plan + {extraPdv} extra).
-                    Referencia comercial: {formatAddonPriceShort('extra_pdv')} por cada PDV de pago.
-                  </>
-                }
-              />
-              <AdminExtraSlotControl
-                label="Marcas comerciales extra"
-                value={extraBrands}
-                max={99}
-                stepLabel="marca"
-                onChange={(n) => setExtraCommercialBrandSlots(String(n))}
-                help={
-                  <>
-                    Cupo total: <strong>{totalBrandLimit}</strong> líneas comerciales ({baseBrandLimit} del plan + {extraBrands}{' '}
-                    extra). Referencia comercial: {formatAddonPriceShort('extra_brand')} por cada marca de pago.
-                  </>
-                }
-              />
-              <AdminExtraSlotControl
-                label="Empresas extra"
-                value={extraBusiness}
-                max={99}
-                stepLabel="empresa"
-                onChange={(n) => setExtraBusinessSlots(String(n))}
-                help={
-                  <>
-                    Cupo total: <strong>{totalBusinessLimit}</strong> empresas ({baseBusinessLimit} del plan + {extraBusiness}{' '}
-                    extra). Referencia comercial: {formatAddonPriceShort('extra_business')} por cada empresa de pago.
-                  </>
-                }
-              />
-              <AdminExtraSlotControl
-                label="Trabajadores extra"
-                value={extraWorkers}
-                max={999}
-                stepLabel="trabajador"
-                onChange={(n) => setExtraWorkerSlots(String(n))}
-                help={
-                  <>
-                    Cupo total: <strong>{totalWorkerLimit}</strong> trabajadores ({baseWorkerLimit} del plan + {extraWorkers}{' '}
-                    extra). Ej.: Pro 12 + 3 extra = 15; +8 extra = 20. Referencia: {formatAddonPriceShort('extra_worker')}.
-                  </>
-                }
-              />
-            </div>
-          </div>
-
-          {isPage && (
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
-              Acceso (contraseña, enlace, impersonar)
-            </h3>
-          )}
-          <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4 space-y-3">
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Contraseña</p>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 flex items-center gap-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3.5 py-2.5">
-                <Key className="w-4 h-4 text-gray-400 dark:text-gray-500 shrink-0" />
-                <code className="text-sm text-gray-700 dark:text-gray-300 flex-1 font-mono">
-                  {generatedPassword
-                    ? (showPassword ? generatedPassword : '••••••••••••••')
-                    : (account.password ? (showPassword ? account.password : '••••••••••••') : 'No disponible')}
-                </code>
-                <button onClick={() => setShowPassword((v) => !v)} className="text-gray-400 dark:text-gray-500 hover:text-gray-600 transition-colors">
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-              {(generatedPassword || account.password) && (
-                <button onClick={handleCopyPassword}
-                  className="p-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400" title="Copiar contraseña">
-                  {copied ? <Check className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                </button>
-              )}
-            </div>
-            {generatedPassword && (
-              <div className="flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <p className="text-xs text-amber-700">Nueva contraseña generada. Cópiala antes de cerrar.</p>
-              </div>
-            )}
-            <button onClick={() => void handleResetPassword()} disabled={resetting}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium text-gray-700 dark:text-gray-300 transition-colors disabled:opacity-50">
-              <Key className={`w-4 h-4 ${resetting ? 'animate-spin' : ''}`} />
-              {resetting ? 'Generando...' : 'Resetear contraseña'}
-            </button>
-          </div>
-          <button onClick={() => void handleSendLink()}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-950/30 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-sm font-semibold text-blue-700 dark:text-blue-300 transition-colors">
-            {linkCopied ? <><Check className="w-4 h-4" />¡Enlace copiado al portapapeles!</> : <><Link className="w-4 h-4" />Enviar enlace de acceso</>}
-          </button>
-
-          <button onClick={() => void handleImpersonate()} disabled={impersonating}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-950/30 hover:bg-violet-100 dark:hover:bg-violet-900/30 text-sm font-semibold text-violet-700 dark:text-violet-300 transition-colors disabled:opacity-50">
-            <UserCheck className={`w-4 h-4 ${impersonating ? 'animate-spin' : ''}`} />
-            {impersonating ? 'Iniciando sesión...' : `Acceder como ${account.firstName || account.email}`}
-          </button>
-          {impersonateError && (
-            <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
-              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-              <p className="text-sm text-red-700">{impersonateError}</p>
-            </div>
-          )}
-
-          {isPage && (accountNeedsAccessRestore || subscriptionStatus === 'suspended') && (
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
-              Activar / restaurar acceso
-            </h3>
-          )}
-          {(accountNeedsAccessRestore || subscriptionStatus === 'suspended') && (
-            <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 space-y-3">
-              <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 uppercase tracking-wider">
-                {(subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent')
-                  ? 'Validar transferencia y activar'
-                  : 'Restaurar acceso al SaaS'}
-              </p>
-              <p className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">
-                {(subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent')
-                  ? 'El cliente avisó del pago. Si ves el ingreso en el banco, activa la suscripción (1 mes). También puedes usar «1 mes gratis» más abajo sin marcar pago.'
-                  : 'Activa la suscripción para dar acceso. Usa «Exento de suspensión» solo si no quieres que el cron/pasarela vuelva a cortar. Para 1 mes de cortesía usa «1 mes gratis».'}
-              </p>
-              {(account.subscription as { paymentConcept?: string } | undefined)?.paymentConcept ? (
-                <p className="text-xs font-mono text-emerald-900 dark:text-emerald-100 bg-white/60 dark:bg-black/20 rounded-lg px-3 py-2">
-                  Concepto: {(account.subscription as { paymentConcept?: string }).paymentConcept}
-                </p>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => void handleReactivateAccount()}
-                disabled={reactivating}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
-              >
-                <CheckCircle className={`w-4 h-4 ${reactivating ? 'animate-spin' : ''}`} />
-                {reactivating
-                  ? 'Activando…'
-                  : subscriptionStatus === 'payment_sent' || account.subscription?.status === 'payment_sent'
-                    ? 'Activar suscripción (pago validado)'
-                    : 'Activar suscripción'}
-              </button>
-              {(account.subscription as { moneiSubscriptionId?: string } | undefined)?.moneiSubscriptionId ? (
-                <button
-                  type="button"
-                  onClick={() => void handleClearMoneiLink()}
-                  disabled={clearingMonei}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-300 bg-white text-emerald-800 text-sm font-semibold hover:bg-emerald-100/80 disabled:opacity-50 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
-                >
-                  {clearingMonei ? 'Quitando enlace…' : 'Quitar enlace MONEI (evitar suspensiones fantasma)'}
-                </button>
-              ) : null}
-              {reactivateResult?.ok && (
-                <p className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold">
-                  Cuenta reactivada. El cliente puede volver a entrar al SaaS.
-                </p>
-              )}
-              {reactivateResult && !reactivateResult.ok && (
-                <p className="text-xs text-red-700 dark:text-red-300">{reactivateResult.error}</p>
-              )}
-              {clearMoneiResult?.ok && (
-                <p className="text-xs text-emerald-700 dark:text-emerald-300">Enlace MONEI eliminado.</p>
-              )}
-              {clearMoneiResult && !clearMoneiResult.ok && (
-                <p className="text-xs text-red-700 dark:text-red-300">{clearMoneiResult.error}</p>
-              )}
-            </div>
-          )}
-
-          {isPage && (
-            <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-tight pt-1">
-              Regalar meses gratis
-            </h3>
-          )}
-          <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-              <p className="text-xs font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wider">Regalar meses gratis</p>
-            </div>
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              Extiende la suscripción activa del usuario sin coste. Se aplica sobre la fecha de fin actual.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => void handleGrantFreeMonths(1)}
-                disabled={grantingMonths}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
-              >
-                <Sparkles className={`w-4 h-4 ${grantingMonths ? 'animate-spin' : ''}`} />
-                1 mes gratis
-              </button>
-              <button
-                onClick={() => void handleGrantFreeMonths(2)}
-                disabled={grantingMonths}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold transition-colors disabled:opacity-50"
-              >
-                <Sparkles className={`w-4 h-4 ${grantingMonths ? 'animate-spin' : ''}`} />
-                2 meses gratis
-              </button>
-            </div>
-            {grantResult?.ok && (
-              <div className="flex items-center gap-2 rounded-xl bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 px-3 py-2">
-                <CheckCircle className="w-3.5 h-3.5 text-green-600 shrink-0" />
-                <p className="text-xs text-green-700 dark:text-green-300">
-                  ¡{grantResult.months} {grantResult.months === 1 ? 'mes' : 'meses'} gratis aplicado{grantResult.months === 2 ? 's' : ''} correctamente!
-                </p>
-              </div>
-            )}
-            {grantResult && !grantResult.ok && (
-              <div className="flex items-center gap-2 rounded-xl bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 px-3 py-2">
-                <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0" />
-                <p className="text-xs text-red-700 dark:text-red-300">{grantResult.error}</p>
-              </div>
-            )}
-            {Array.isArray((account.subscription as Record<string, unknown>)?.freeMonthsHistory) &&
-              ((account.subscription as Record<string, unknown>).freeMonthsHistory as Array<{ months: number; grantedAt: string }>).length > 0 && (
-              <div className="border-t border-amber-200 dark:border-amber-800 pt-2 mt-2">
-                <p className="text-[10px] font-semibold text-amber-600 dark:text-amber-500 uppercase tracking-wider mb-1">Historial</p>
-                {((account.subscription as Record<string, unknown>).freeMonthsHistory as Array<{ months: number; grantedAt: string }>).map((entry, i) => (
-                  <p key={i} className="text-[11px] text-amber-700 dark:text-amber-400">
-                    +{entry.months} {entry.months === 1 ? 'mes' : 'meses'} — {new Date(entry.grantedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {saveError && (
-            <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
-              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
-              <p className="text-sm text-red-700">{saveError}</p>
-            </div>
-          )}
-          {saveSuccess && (
-            <div className="flex items-center gap-2 rounded-xl bg-green-50 border border-green-200 px-4 py-3">
-              <CheckCircle className="w-4 h-4 text-green-600 shrink-0" />
-              <p className="text-sm text-green-700">Cambios guardados correctamente</p>
-            </div>
-          )}
-          {!isPage && (
-            <button onClick={() => void handleSave()} disabled={saving}
-              className={`${VERTIAL_BTN_PRIMARY} w-full`}>
-              <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
-              {saving ? 'Guardando...' : 'Guardar cambios'}
-            </button>
-          )}
-        </div>
+          manageBody
         )}
       </div>
 
       {isPage && modalTab === 'manage' && (
-        <div className="fixed bottom-0 inset-x-0 z-20 border-t border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-950/95 backdrop-blur-sm px-4 py-3 safe-area-pb">
+        <div className="fixed bottom-0 inset-x-0 z-20 border-t border-stone-200 dark:border-stone-800 bg-white/95 dark:bg-stone-950/95 backdrop-blur-sm px-4 py-3">
           <div className="max-w-4xl mx-auto flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
             <button type="button" onClick={onClose} className={VERTIAL_BTN_SECONDARY}>
               <ArrowLeft className="w-4 h-4" />
@@ -1164,15 +1279,9 @@ export function EditClientModal({ account, onClose, onSaved, layout = 'modal' }:
             </button>
             <button type="button" onClick={() => void handleSave()} disabled={saving} className={VERTIAL_BTN_PRIMARY}>
               <Save className={`w-4 h-4 ${saving ? 'animate-spin' : ''}`} />
-              {saving ? 'Guardando...' : 'Guardar cambios'}
+              {saving ? 'Guardando…' : 'Guardar cambios'}
             </button>
           </div>
-          {(saveError || saveSuccess) && (
-            <div className="max-w-4xl mx-auto mt-2 text-xs">
-              {saveError ? <p className="text-red-600">{saveError}</p> : null}
-              {saveSuccess ? <p className="text-green-700">Cambios guardados correctamente</p> : null}
-            </div>
-          )}
         </div>
       )}
     </div>

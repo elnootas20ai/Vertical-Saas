@@ -11,6 +11,9 @@ project(':capacitor-app').projectDir = new File('../node_modules/@capacitor/app/
 include ':capacitor-camera'
 project(':capacitor-camera').projectDir = new File('../node_modules/@capacitor/camera/android')
 
+include ':capacitor-geolocation'
+project(':capacitor-geolocation').projectDir = new File('../node_modules/@capacitor/geolocation/android')
+
 include ':capacitor-push-notifications'
 project(':capacitor-push-notifications').projectDir = new File('../node_modules/@capacitor/push-notifications/android')
 
@@ -20,5 +23,11 @@ project(':capacitor-splash-screen').projectDir = new File('../node_modules/@capa
 include ':capacitor-status-bar'
 project(':capacitor-status-bar').projectDir = new File('../node_modules/@capacitor/status-bar/android')
 
+include ':capacitor-native-settings'
+project(':capacitor-native-settings').projectDir = new File('../node_modules/capacitor-native-settings/android')
+
 include ':esc-pos-proxy-capacitor-plugin'
 project(':esc-pos-proxy-capacitor-plugin').projectDir = new File('../node_modules/esc-pos-proxy-capacitor-plugin/android')
+
+include ':vertial-ios-bridge'
+project(':vertial-ios-bridge').projectDir = new File('../plugins/vertial-ios-bridge/android')

@@ -2184,8 +2184,8 @@ export function WorkerTpvDelivery({
       ...(tabletBinding && !ceoMode
         ? [{
             id: 'exit',
-            label: 'Cerrar tablet',
-            title: 'Salir del TPV y volver al código de tienda',
+            label: 'Cambiar trabajador',
+            title: 'Volver a la pantalla de código de tienda',
             icon: <Tablet />,
             onClick: exitTabletTpv,
           }]
@@ -2344,9 +2344,9 @@ export function WorkerTpvDelivery({
                   </button>
                 )}
                 {tabletBinding && !ceoMode && (
-                  <button type="button" onClick={exitTabletTpv} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300" title="Salir del TPV">
+                  <button type="button" onClick={exitTabletTpv} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200" title="Salir e iniciar sesión de trabajador">
                     <DoorOpen className="w-4 h-4" />
-                    Salir
+                    Cambiar trabajador
                   </button>
                 )}
                 <button

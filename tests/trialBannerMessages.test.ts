@@ -13,19 +13,20 @@ describe('trial banner messages', () => {
       hasMoneiSubscription: false,
     });
     expect(content.title).toContain('14 días');
+    expect(content.title).not.toMatch(/gratis|prueba gratuita/i);
     expect(content.detail).toContain('Sin cargo');
     expect(content.detail).toContain('4242');
-    expect(content.ctaLabel).toBe('Ver facturación');
+    expect(content.ctaLabel).toBe('Ver Mi plan');
   });
 
-  it('describe el cobro automático con suscripción MONEI en prueba', () => {
+  it('describe el cobro automático con suscripción MONEI en activación', () => {
     const content = getTrialActiveBannerContent({
       daysLeft: 10,
       hasSavedCard: true,
       hasMoneiSubscription: true,
     });
     expect(content.detail).toContain('primer cobro');
-    expect(content.ctaLabel).toBe('Ver facturación');
+    expect(content.ctaLabel).toBe('Ver Mi plan');
   });
 
   it('pide configurar pago si no hay tarjeta', () => {

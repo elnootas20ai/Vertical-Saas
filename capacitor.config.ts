@@ -14,6 +14,9 @@ const config: CapacitorConfig = {
     Camera: {
       // Permissions are declared in AndroidManifest.xml and Info.plist
     },
+    Geolocation: {
+      // Fichaje: ACCESS_FINE/COARSE en AndroidManifest + NSLocationWhenInUse en iOS
+    },
     PushNotifications: {
       // Foreground: badge. Lock screen / background: lo pinta el SO (APNs/FCM alert).
       presentationOptions: ['badge', 'sound', 'alert'],

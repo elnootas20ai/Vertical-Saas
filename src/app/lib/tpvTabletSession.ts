@@ -1,5 +1,6 @@
 import type { PointOfSale } from './deliveryApi';
 import { isRestaurantBusinessType } from './deliveryOpsTypes';
+import { AUTH_PATHS } from './authEntryPaths';
 
 /** Vertical fijado por el código tablet TPV según el negocio vinculado. */
 export type TpvTabletVertical = 'delivery' | 'restaurant';
@@ -12,6 +13,9 @@ export const TPV_TABLET_DELIVERY_PATH = '/saas/worker/tpv/delivery';
 
 /** Ruta canónica del TPV operativo tablet en bar/restaurante. */
 export const TPV_TABLET_RESTAURANT_PATH = '/saas/worker/tpv/restaurant';
+
+/** Código de tienda al salir del TPV (para volver a activar tras login trabajador). */
+const TPV_TABLET_RETURN_CODE_KEY = 'vertial_tpv_tablet_return_code';
 
 export interface TpvTabletBinding {
   terminalCode: string;
@@ -140,7 +144,36 @@ export function clearTpvTabletBinding(): void {
 }
 
 /** Pantalla pública de código de tienda (fuera del SaaS). */
-export const TPV_TABLET_LOGIN_PATH = '/auth/tpv-tablet';
+export const TPV_TABLET_LOGIN_PATH = AUTH_PATHS.tpvTabletLogin;
+
+/** Destino al salir del TPV tablet: login trabajador (no login empresa). */
+export const TPV_TABLET_EXIT_PATH = AUTH_PATHS.workerLogin;
+
+export function peekTpvTabletReturnCode(): string {
+  try {
+    return String(sessionStorage.getItem(TPV_TABLET_RETURN_CODE_KEY) || '').trim().toUpperCase();
+  } catch {
+    return '';
+  }
+}
+
+export function clearTpvTabletReturnCode(): void {
+  try {
+    sessionStorage.removeItem(TPV_TABLET_RETURN_CODE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function rememberTpvTabletReturnCode(code: string): void {
+  const normalized = String(code || '').trim().toUpperCase();
+  if (!normalized) return;
+  try {
+    sessionStorage.setItem(TPV_TABLET_RETURN_CODE_KEY, normalized);
+  } catch {
+    // ignore
+  }
+}
 
 /** Desvincula la tablet y devuelve la ruta de login por código. */
 export function exitTpvTabletSessionPath(): string {
@@ -148,23 +181,50 @@ export function exitTpvTabletSessionPath(): string {
   return TPV_TABLET_LOGIN_PATH;
 }
 
+export type LeaveTpvTabletSessionOptions = {
+  /**
+   * Admin/CEO: no cierra sesión y va a esta ruta (p. ej. ops).
+   * Si no se pasa, logout + login trabajador.
+   */
+  keepAuthAndGoTo?: string;
+};
+
 /**
  * Salir del TPV tablet (modo código de tienda):
- * quita el vínculo, cierra sesión y va a la pantalla de código.
- * Independiente del CEO: nunca redirige a delivery-ops / restaurant-ops.
- * Usa location.replace para evitar races de redirect a /saas.
+ * quita el vínculo, cierra sesión y va a **iniciar sesión trabajador**.
+ * Evita el bounce login-empresa → código (SaasRoot pintaba /auth/login).
+ * Usa location.replace antes del logout para no quedar pillado en SaaS.
  */
 export async function leaveTpvTabletSession(
   logout: () => Promise<void>,
+  opts?: LeaveTpvTabletSessionOptions,
 ): Promise<void> {
+  const binding = readTpvTabletBinding();
+  const code = String(binding?.terminalCode || '').trim().toUpperCase();
   clearTpvTabletBinding();
+
+  if (opts?.keepAuthAndGoTo) {
+    if (typeof window !== 'undefined') {
+      window.location.replace(String(opts.keepAuthAndGoTo).trim() || TPV_TABLET_EXIT_PATH);
+    }
+    return;
+  }
+
+  if (code) rememberTpvTabletReturnCode(code);
+
+  const dest = code
+    ? `${TPV_TABLET_EXIT_PATH}?from=tpv-tablet&code=${encodeURIComponent(code)}`
+    : TPV_TABLET_EXIT_PATH;
+
+  // Importante: replace ANTES de await logout. Si logout pone isAuthenticated=false
+  // estando aún en /saas, SaasRoot pinta /auth/login y se queda pillado un momento.
+  if (typeof window !== 'undefined') {
+    window.location.replace(dest);
+  }
   try {
     await logout();
   } catch {
-    // Seguir igual a la pantalla de código.
-  }
-  if (typeof window !== 'undefined') {
-    window.location.replace(TPV_TABLET_LOGIN_PATH);
+    // Ya vamos al login trabajador.
   }
 }
 

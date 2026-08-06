@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  ArrowLeft, ArrowRight, Check, Users, Handshake, TrendingUp, Shield,
+  ArrowRight, Check, Users, Handshake, TrendingUp, Shield,
   User, Mail, Phone, Building2, Globe, MessageSquare, ChevronRight,
   CheckCircle, AlertCircle, Loader2, Star, Zap, BarChart3, DollarSign,
   Gift, Rocket, HeadphonesIcon, Copy, BadgePercent, LogIn,
@@ -11,6 +11,7 @@ import { listAffiliateVerticals, DEFAULT_AFFILIATE_COMMISSION_RATE } from '../..
 import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appStoreCompliance';
 import { IosCustomerAccessOnlyScreen } from '../../components/saas/IosCustomerAccessOnlyScreen';
+import { AccesoBackLink } from '../../components/auth/AccesoBackLink';
 
 const STEPS = [
   { icon: Rocket, title: 'Solicita tu acceso', desc: 'Rellena el formulario con tus datos. En menos de 48h tendrás tu código de afiliado.' },
@@ -184,11 +185,8 @@ export function AffiliatePage() {
     <div className="min-h-screen bg-white scroll-smooth">
       {/* ── Header ── */}
       <header className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-slate-100">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <button onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-medium text-sm">
-            <ArrowLeft className="w-4 h-4" /> Volver
-          </button>
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between gap-3">
+          <AccesoBackLink onClick={() => navigate('/')} label="Volver" />
           <span className="text-xl font-black text-slate-900 tracking-tight">Vertial</span>
           <div className="hidden sm:flex items-center gap-2">
             <button
@@ -207,6 +205,7 @@ export function AffiliatePage() {
               Unirme ahora <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
+          <div className="w-[5.5rem] sm:hidden" aria-hidden />
         </div>
       </header>
 

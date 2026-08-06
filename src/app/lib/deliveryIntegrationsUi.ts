@@ -55,6 +55,27 @@ export const DEFAULT_DELIVERY_INTEGRATIONS: DeliveryIntegrations = {
   flipdish: { enabled: false, token: '' },
 };
 
+const INTEGRATION_KEYS = ['uber', 'globo', 'justead', 'flipdish'] as const;
+
+/** Fusiona respuesta API (parcial o null) con defaults para que la UI nunca lea `undefined`. */
+export function normalizeDeliveryIntegrations(
+  raw: Partial<DeliveryIntegrations> | null | undefined,
+): DeliveryIntegrations {
+  const out = { ...DEFAULT_DELIVERY_INTEGRATIONS };
+  if (!raw || typeof raw !== 'object') return out;
+  for (const key of INTEGRATION_KEYS) {
+    const entry = raw[key];
+    if (!entry || typeof entry !== 'object') continue;
+    out[key] = {
+      ...DEFAULT_DELIVERY_INTEGRATIONS[key],
+      ...entry,
+      enabled: Boolean(entry.enabled),
+      token: String(entry.token ?? ''),
+    };
+  }
+  return out;
+}
+
 /** Alguna integración delivery activa (el token no es necesario para la caja). */
 export function hasAnyDeliveryIntegrationEnabled(integrations: DeliveryIntegrations | null | undefined): boolean {
   if (!integrations) return false;

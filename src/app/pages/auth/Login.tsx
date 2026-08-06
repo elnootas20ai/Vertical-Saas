@@ -356,7 +356,7 @@ export function Login() {
   }, [showGoogleAuth, googleReady]);
 
   return (
-    <AccesoSplitLayout visualKey="login-company" scrollable>
+    <AccesoSplitLayout visualKey="login-company" scrollable onBack={() => navigate(AUTH_PATHS.entry)}>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
       <div className="w-full max-w-md shrink-0">
         <div className="bg-white dark:bg-gray-800 border-2 border-gray-200 dark:border-gray-700 rounded-2xl p-4 pb-3.5 sm:p-6 sm:pb-5 shadow-sm">
@@ -676,13 +676,6 @@ export function Login() {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => navigate(AUTH_PATHS.entry)}
-              className="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors text-center"
-            >
-              ← Volver al inicio
-            </button>
           </nav>
         </div>
       </div>

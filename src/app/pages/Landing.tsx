@@ -34,7 +34,7 @@ export function Landing() {
               onClick={() => navigate('/auth/entry')}
               className="px-8 py-4 bg-[#0f1419] text-white rounded-lg hover:bg-[#1a1f26] transition-colors font-medium flex items-center gap-2"
             >
-              Probar gratis 14 días
+              Registrarse
               <ArrowRight className="w-5 h-5" />
             </button>
             <button 
@@ -51,11 +51,11 @@ export function Landing() {
           <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-gray-600 dark:text-gray-400">
             <div className="flex items-center gap-2">
               <Check className="w-5 h-5 text-green-600" />
-              <span>Sin tarjeta</span>
+              <span>Alta en minutos</span>
             </div>
             <div className="flex items-center gap-2">
               <Check className="w-5 h-5 text-green-600" />
-              <span>14 días gratis</span>
+              <span>Datos en Europa</span>
             </div>
             <div className="flex items-center gap-2">
               <Check className="w-5 h-5 text-green-600" />
@@ -507,7 +507,7 @@ export function Landing() {
                 onClick={() => navigate('/auth/entry')}
                 className="w-full px-6 py-3 border-2 border-gray-900 text-gray-900 dark:text-gray-100 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors font-medium"
               >
-                Empezar gratis
+                Registrarse
               </button>
             </div>
 
@@ -571,7 +571,7 @@ export function Landing() {
                 onClick={() => navigate('/auth/entry')}
                 className="w-full px-6 py-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors font-medium"
               >
-                Empezar gratis
+                Registrarse
               </button>
             </div>
 
@@ -649,8 +649,8 @@ export function Landing() {
                   </div>
                 </div>
                 <div>
-                  <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">14 días de prueba gratis</h4>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">Prueba todas las funcionalidades sin tarjeta de crédito. Decide después.</p>
+                  <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Alta en minutos</h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">Regístrate, elige tu vertical y configura tu negocio con el asistente.</p>
                 </div>
               </div>
               <div className="flex gap-4">
@@ -1018,14 +1018,14 @@ export function Landing() {
             Empieza a gestionar tu compraventa de forma profesional
           </h2>
           <p className="text-xl text-gray-300 mb-8">
-            14 días de prueba gratis. Sin tarjeta. Sin permanencia. Empieza hoy.
+            Sin permanencia. Soporte en español. Empieza hoy.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button 
               onClick={() => navigate('/auth/entry')}
               className="px-8 py-4 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors font-medium flex items-center gap-2"
             >
-              Crear cuenta gratis
+              Registrarse
               <ArrowRight className="w-5 h-5" />
             </button>
             <button 

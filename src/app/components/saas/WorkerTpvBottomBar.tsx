@@ -57,9 +57,10 @@ export function WorkerTpvBottomBar({
           type="button"
           onClick={tabletBound ? handleExitTablet : handleExitCeo}
           className={`${btnBase} border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800`}
+          title={tabletBound ? 'Salir e iniciar sesión de trabajador' : 'Salir del TPV al SaaS'}
         >
           <LogOut className={compact ? 'w-4 h-4' : 'w-5 h-5'} />
-          Salir del TPV
+          {tabletBound ? 'Cambiar trabajador' : 'Salir del TPV'}
         </button>
       )}
       {showStock && (

@@ -20,6 +20,7 @@ import {
   adminPlanFieldsFromId,
   isAdminPlanLocked,
 } from './adminPlanLock.js';
+import { quoteSubscription } from './subscriptionQuote.js';
 
 export function normalizeInfrastructureMetrics(metrics = {}) {
   return {
@@ -101,6 +102,11 @@ export function buildSubscriptionFromOnboarding(onboardingData, existingSubscrip
   const extras = computeOnboardingExtraSlots(tier, metrics);
   const billingMode = resolveBillingMode(onboardingData, overrides);
   const now = new Date().toISOString();
+  const quote = quoteSubscription({
+    planId: tier,
+    billingMode,
+    ...extras,
+  });
 
   // No activar trial automáticamente: preservar estado (p. ej. pending_payment / payment_sent).
   const status = prev.status || 'pending_payment';
@@ -115,6 +121,9 @@ export function buildSubscriptionFromOnboarding(onboardingData, existingSubscrip
     extraBusinessSlots: extras.extraBusinessSlots,
     extraCommercialBrandSlots: extras.extraCommercialBrandSlots,
     extraWorkerSlots: extras.extraWorkerSlots,
+    quotedMonthlyEquivalentEuros: quote.monthlyEquivalentEuros,
+    quotedAmountDueEuros: quote.amountDueEuros,
+    quotedAmountDueCents: quote.amountDueCents,
     trialEndsAt: resolveTrialEndsAt(onboardingData, prev) || prev.trialEndsAt || '',
     currentPeriodStart: prev.currentPeriodStart || '',
     onboardingProvisionedAt: now,

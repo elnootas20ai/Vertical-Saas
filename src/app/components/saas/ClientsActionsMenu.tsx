@@ -20,6 +20,7 @@ import {
   type ClientExportRow,
 } from '../../lib/crmImportTemplates';
 import type { ClientsListFeatureId } from '../../hooks/useClientsListPlanAccess';
+import { VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 interface MenuItem {
   id: string;
@@ -39,6 +40,8 @@ interface MenuSection {
 
 export interface ClientsActionsMenuProps {
   isDeliveryBusiness: boolean;
+  /** iceCreamShop → plantilla Excel de clientes heladería */
+  clientTemplateVertical?: string | null;
   canUseSegments: boolean;
   canExport: boolean;
   canImportFromBusiness: boolean;
@@ -63,6 +66,7 @@ export interface ClientsActionsMenuProps {
 
 export function ClientsActionsMenu({
   isDeliveryBusiness,
+  clientTemplateVertical = null,
   canUseSegments,
   canExport,
   canImportFromBusiness,
@@ -203,8 +207,15 @@ export function ClientsActionsMenu({
           locked: !canExport,
           action: () =>
             guardPlan(canExport, 'lista_export', () => {
-              downloadClientImportTemplate({ includeResponsible: false });
-              toast.success('Plantilla descargada');
+              downloadClientImportTemplate({
+                includeResponsible: false,
+                vertical: clientTemplateVertical,
+              });
+              toast.success(
+                clientTemplateVertical === 'iceCreamShop'
+                  ? 'Plantilla clientes heladería'
+                  : 'Plantilla descargada',
+              );
             }),
         },
         {
@@ -279,14 +290,14 @@ export function ClientsActionsMenu({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-xl border-2 border-gray-900 bg-gray-900 px-3.5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-black dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white"
+        className={`${VERTIAL_BTN_SECONDARY} !min-h-10 !gap-1.5 !px-3.5 !py-2 !text-sm`}
         aria-expanded={open}
         aria-haspopup="menu"
       >
         <MoreHorizontal className="h-4 w-4" />
         <span>Acciones</span>
         {segmentConditionsCount > 0 ? (
-          <span className="rounded-full bg-indigo-500 px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-indigo-600">
+          <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
             {segmentConditionsCount}
           </span>
         ) : null}
@@ -315,8 +326,8 @@ export function ClientsActionsMenu({
                       onClick={item.action}
                       className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                         item.highlight
-                          ? 'bg-indigo-50/70 hover:bg-indigo-50 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/40'
-                          : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                          ? 'bg-blue-50/80 hover:bg-blue-50 dark:bg-blue-950/20 dark:hover:bg-blue-950/40'
+                          : 'hover:bg-stone-50 dark:hover:bg-stone-800'
                       }`}
                     >
                       <div className="mt-0.5 flex-shrink-0">{item.icon}</div>

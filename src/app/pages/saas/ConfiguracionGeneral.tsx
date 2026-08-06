@@ -48,7 +48,12 @@ import {
   loadDeliveryStores,
 } from '../../lib/deliverySetup';
 import { loadRetailStoresForBusiness } from '../../verticals/retailScopeRegistry';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
+import {
+  isDeliveryOpsBusinessType,
+  isIceCreamShopBusinessType,
+  isRestaurantBusinessType,
+  usesTpvCatalogOpsBusinessType,
+} from '../../lib/deliveryOpsTypes';
 import { resolveRetailCeoTpvPath } from '../../lib/retailOpsPaths';
 import { getHrLocationCopy } from '../../lib/retailLocationCopy';
 import {
@@ -81,8 +86,9 @@ import {
 import { organizerBrandsForCatalogTemplate } from '../../lib/deliveryCatalogImportLogic';
 import {
   DELIVERY_CATALOG_IMPORT_FIELDS,
+  HELADERIA_CATALOG_IMPORT_FIELDS,
   DELIVERY_CATALOG_HEADER_ALIASES,
-  DELIVERY_CATALOG_TEMPLATE_FILENAME,
+  catalogTemplateFilenameForVertical,
   downloadDeliveryCatalogImportTemplate,
   formatDeliveryCatalogImportValidationToast,
   partitionDeliveryCatalogImportEntries,
@@ -385,12 +391,18 @@ export function ConfiguracionGeneral() {
   const dataUserId = resolveBusinessDataUserId(user, biz);
   const isDeliveryBiz = biz?.businessType === 'delivery';
   const isRestaurantBiz = isRestaurantBusinessType(biz?.businessType);
+  const isHeladeriaBiz = isIceCreamShopBusinessType(biz?.businessType);
   const isEventsBiz = biz?.businessType === 'events';
   const isDeliveryOpsBiz = isDeliveryOpsBusinessType(biz?.businessType);
-  /** Delivery y bar/restaurante: mismo catálogo TPV + import Excel Modomio. */
-  const usesTpvCatalogOps = isDeliveryOpsBiz || isRestaurantBiz;
+  /** Delivery, bar/restaurante y heladería: catálogo TPV + import Excel. */
+  const usesTpvCatalogOps = isDeliveryOpsBiz || isRestaurantBiz || isHeladeriaBiz;
+  const catalogVertical = isRestaurantBiz
+    ? 'restaurant'
+    : isHeladeriaBiz
+      ? 'iceCreamShop'
+      : 'delivery';
   const businessScopeId = resolveBusinessScopeId(biz);
-  const catalogImportTemplateFilename = DELIVERY_CATALOG_TEMPLATE_FILENAME;
+  const catalogImportTemplateFilename = catalogTemplateFilenameForVertical(catalogVertical);
   const isCarDealershipBiz = biz?.businessType === 'carDealership';
   const retailCeoTpvPath = resolveRetailCeoTpvPath(biz?.businessType);
   const visibleConnections = useMemo(
@@ -408,7 +420,9 @@ export function ConfiguracionGeneral() {
     (resolvedImportStatus?.catalog ?? biz?.initialImportStatus?.catalog) === 'completed';
 
   const catalogImportFields: ImportFieldDef[] = useMemo(() => {
-    if (usesTpvCatalogOps) return DELIVERY_CATALOG_IMPORT_FIELDS;
+    if (usesTpvCatalogOps) {
+      return isHeladeriaBiz ? HELADERIA_CATALOG_IMPORT_FIELDS : DELIVERY_CATALOG_IMPORT_FIELDS;
+    }
     return [
       { key: 'name', label: 'Nombre', required: true, example: 'Artículo ejemplo' },
       { key: 'sku', label: 'SKU', example: 'SKU-001' },
@@ -422,15 +436,17 @@ export function ConfiguracionGeneral() {
       { key: 'minStock', label: 'Stock mínimo', example: '20' },
       { key: 'notes', label: 'Notas', example: '' },
     ];
-  }, [usesTpvCatalogOps]);
+  }, [usesTpvCatalogOps, isHeladeriaBiz]);
 
   const handleDownloadCatalogTemplate = useCallback(async () => {
     if (!bizId) return;
     const brandList = await listBrandsRequest(bizId).catch(() => []);
     const lines = organizerBrandsForCatalogTemplate(brandList);
-    downloadDeliveryCatalogImportTemplate(lines, catalogImportTemplateFilename);
-    toast.success('Plantilla catálogo');
-  }, [bizId, catalogImportTemplateFilename]);
+    downloadDeliveryCatalogImportTemplate(lines, catalogImportTemplateFilename, {
+      vertical: catalogVertical,
+    });
+    toast.success(isHeladeriaBiz ? 'Plantilla catálogo heladería' : 'Plantilla catálogo');
+  }, [bizId, catalogImportTemplateFilename, catalogVertical, isHeladeriaBiz]);
 
   const handleCatalogImport = useCallback(async (
     entries: Record<string, string>[],
@@ -447,8 +463,9 @@ export function ConfiguracionGeneral() {
 
     const businessType = biz?.businessType || 'delivery';
     const usesTpvCatalogImport =
-      isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType);
-    const catalogVertical = isRestaurantBusinessType(businessType) ? 'restaurant' : businessType;
+      isDeliveryOpsBusinessType(businessType)
+      || isRestaurantBusinessType(businessType)
+      || isIceCreamShopBusinessType(businessType);
     let brandCache = bizId ? await listBrandsRequest(bizId).catch(() => []) : [];
 
     let importRows = entries;
@@ -651,7 +668,7 @@ export function ConfiguracionGeneral() {
     setLoadingCenters(true);
     try {
       const state =
-        isDeliveryOpsBusinessType(biz?.businessType) || isRestaurantBusinessType(biz?.businessType)
+        usesTpvCatalogOpsBusinessType(biz?.businessType)
         ? await loadRetailStoresForBusiness(user, biz, businesses, {
             accountBusinessCount: businesses.length,
             knownBusinessIds: businesses.map((b) => b.business_id).filter(Boolean),

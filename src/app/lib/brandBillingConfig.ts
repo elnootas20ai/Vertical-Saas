@@ -27,6 +27,15 @@ export type BrandBillingSheet = {
 
 export type BrandBillingSharedSplitMode = 'majority' | 'by_units' | 'equal';
 
+/**
+ * Pedido (o líneas) sin ninguna marca: cerveza suelta, solo bebidas, etc.
+ * - shift_majority: todo a la marca que más ha facturado en el turno
+ * - equal: a medias entre las marcas del turno / hojas
+ * - fixed_brand: siempre a orphanFixedBrandId
+ * - unassigned: dejar «Sin marca» (no recomendado)
+ */
+export type BrandBillingOrphanMode = 'shift_majority' | 'equal' | 'fixed_brand' | 'unassigned';
+
 export type BrandBillingConfig = {
   _id: string;
   _rev?: string;
@@ -42,6 +51,10 @@ export type BrandBillingConfig = {
   sharedSplitMode: BrandBillingSharedSplitMode;
   /** Pedido de 1 sola marca: bebidas/postres sin marca van enteros a esa marca. */
   monoBrandTakesAll: boolean;
+  /** Pedido/líneas sin ninguna marca (suelto). */
+  orphanMode: BrandBillingOrphanMode;
+  /** Si orphanMode = fixed_brand: id de marca destino. */
+  orphanFixedBrandId: string;
   updatedAt: string;
   createdAt?: string;
 };
@@ -50,6 +63,8 @@ export type BrandBillingConfig = {
 export type BrandBillingSplitRules = {
   sharedSplitMode: BrandBillingSharedSplitMode;
   monoBrandTakesAll: boolean;
+  orphanMode: BrandBillingOrphanMode;
+  orphanFixedBrandId: string;
 };
 
 export const SHARED_SPLIT_MODE_OPTIONS: Array<{
@@ -83,6 +98,51 @@ export function normalizeBillingSharedSplitMode(
   return 'majority';
 }
 
+export const ORPHAN_MODE_OPTIONS: Array<{
+  value: BrandBillingOrphanMode;
+  label: string;
+  shortLabel: string;
+  hint: string;
+  example: string;
+}> = [
+  {
+    value: 'shift_majority',
+    label: 'A la marca que más lleva el turno',
+    shortLabel: 'Dominante del turno',
+    hint: 'Una cerveza sola, o solo bebidas sin marca, se apunta a la marca que más ha facturado en ese turno.',
+    example: 'Turno: Modomio 200 € · Black Burger 80 € · cerveza suelta 3 € → los 3 € a Modomio',
+  },
+  {
+    value: 'equal',
+    label: 'A medias entre las marcas del turno',
+    shortLabel: 'A medias',
+    hint: 'Lo suelto se parte a partes iguales entre las marcas que ya tienen ventas en el turno.',
+    example: '2 marcas en el turno + cerveza 4 € → 2 € a cada una',
+  },
+  {
+    value: 'fixed_brand',
+    label: 'Siempre a una marca fija',
+    shortLabel: 'Marca fija',
+    hint: 'Elige abajo a qué marca va todo lo suelto sin marca (recomendado si casi todo es de una).',
+    example: 'Cerveza suelta 3 € → siempre a la marca que elijas',
+  },
+  {
+    value: 'unassigned',
+    label: 'Dejar sin marca',
+    shortLabel: 'Sin asignar',
+    hint: 'No recomendado: verás «Sin marca» en el cierre. Solo si quieres revisarlo a mano.',
+    example: 'Cerveza 3 € → aparece como Sin marca 3 €',
+  },
+];
+
+export function normalizeBillingOrphanMode(
+  raw: string | null | undefined,
+): BrandBillingOrphanMode {
+  const mode = String(raw || 'shift_majority').trim();
+  if (mode === 'equal' || mode === 'fixed_brand' || mode === 'unassigned') return mode;
+  return 'shift_majority';
+}
+
 export const FOOD_UNIT_OPTIONS: Array<{ key: FoodUnitKey; defaultHeader: string; label: string }> = [
   { key: 'pizza', defaultHeader: 'TOTAL PIZZA', label: 'Pizzas' },
   { key: 'burger', defaultHeader: 'TOTAL BURGUER', label: 'Burgers' },
@@ -102,6 +162,8 @@ export function emptyBrandBillingConfig(businessId: string): BrandBillingConfig 
     sheets: [],
     sharedSplitMode: 'majority',
     monoBrandTakesAll: true,
+    orphanMode: 'shift_majority',
+    orphanFixedBrandId: '',
     createdAt: now,
     updatedAt: now,
   };
@@ -109,11 +171,16 @@ export function emptyBrandBillingConfig(businessId: string): BrandBillingConfig 
 
 /** Reglas de cruce listas para el motor (sin hardcode de marcas). */
 export function splitRulesFromBillingConfig(
-  config: Pick<BrandBillingConfig, 'sharedSplitMode' | 'monoBrandTakesAll'> | null | undefined,
+  config: Pick<
+    BrandBillingConfig,
+    'sharedSplitMode' | 'monoBrandTakesAll' | 'orphanMode' | 'orphanFixedBrandId'
+  > | null | undefined,
 ): BrandBillingSplitRules {
   return {
     sharedSplitMode: normalizeBillingSharedSplitMode(config?.sharedSplitMode),
     monoBrandTakesAll: config?.monoBrandTakesAll !== false,
+    orphanMode: normalizeBillingOrphanMode(config?.orphanMode),
+    orphanFixedBrandId: String(config?.orphanFixedBrandId || '').trim(),
   };
 }
 
@@ -485,6 +552,8 @@ export function normalizeBrandBillingConfig(
     sheets,
     sharedSplitMode: normalizeBillingSharedSplitMode(raw.sharedSplitMode),
     monoBrandTakesAll: raw.monoBrandTakesAll !== false,
+    orphanMode: normalizeBillingOrphanMode(raw.orphanMode),
+    orphanFixedBrandId: String(raw.orphanFixedBrandId || '').trim(),
     createdAt: String(raw.createdAt || base.createdAt || ''),
     updatedAt: String(raw.updatedAt || base.updatedAt),
   };

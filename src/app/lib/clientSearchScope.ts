@@ -1,11 +1,11 @@
 import type { Business } from './businessApi';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
+import { usesOpsCrmBusinessType } from './deliveryOpsTypes';
 
 /**
  * Verticales cuyo CRM debe filtrar clientes por empresa activa (no mezclar cuentas/negocios).
  */
 export function usesBusinessScopedClients(businessType?: string | null): boolean {
-  return isDeliveryOpsBusinessType(businessType) || isRestaurantBusinessType(businessType);
+  return usesOpsCrmBusinessType(businessType);
 }
 
 /** businessId para listado/búsqueda CRM cuando el vertical lo requiere. */

@@ -7,17 +7,20 @@ import {
   saveBrandBillingConfigRequest,
 } from '../../../lib/brandBillingApi';
 import {
+  ORPHAN_MODE_OPTIONS,
   SHARED_SPLIT_MODE_OPTIONS,
   assignBrandToSheetExclusive,
   brandsForBilling,
   emptyBrandBillingConfig,
   isBrandBillingUnlocked,
+  normalizeBillingOrphanMode,
   normalizeBillingSharedSplitMode,
   removeBrandFromSheet,
   resolveBrandFoodUnitKey,
   suggestBillingSheetsFromBrands,
   syncBillingSheetsWithBrands,
   type BrandBillingConfig,
+  type BrandBillingOrphanMode,
   type BrandBillingSheet,
 } from '../../../lib/brandBillingConfig';
 import { deliveryBrandLineKindLabel } from '../../../lib/deliveryBrandLineKinds';
@@ -28,9 +31,13 @@ const saveBtnClass =
 function ActiveRuleSummary({
   monoOn,
   splitMode,
+  orphanMode,
+  orphanBrandName,
 }: {
   monoOn: boolean;
   splitMode: 'majority' | 'equal';
+  orphanMode: BrandBillingOrphanMode;
+  orphanBrandName?: string;
 }) {
   const mixLabel =
     splitMode === 'equal'
@@ -39,6 +46,14 @@ function ActiveRuleSummary({
   const monoLabel = monoOn
     ? 'si solo hay una marca, todo a esa'
     : 'si solo hay una marca, la bebida puede quedar sin asignar';
+  const orphanLabel =
+    orphanMode === 'equal'
+      ? 'si el pedido va suelto (solo cerveza, etc.), a medias entre marcas del turno'
+      : orphanMode === 'fixed_brand'
+        ? `si el pedido va suelto, siempre a ${orphanBrandName || 'la marca fija'}`
+        : orphanMode === 'unassigned'
+          ? 'si el pedido va suelto, queda Sin marca'
+          : 'si el pedido va suelto, a la marca que más lleva el turno';
 
   return (
     <div className="rounded-lg border border-emerald-200 bg-emerald-50/90 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/40">
@@ -46,10 +61,10 @@ function ActiveRuleSummary({
         Ahora mismo
       </p>
       <p className="mt-1 text-[11px] leading-snug text-emerald-950 dark:text-emerald-100">
-        {monoLabel}. Y {mixLabel}.
+        {monoLabel}. {mixLabel}. Y {orphanLabel}.
       </p>
       <p className="mt-1.5 text-[10px] text-emerald-800/80 dark:text-emerald-300/80">
-        Lo de cada marca sigue yendo a su marca. Esto solo mueve bebidas, postres y similares sin marca.
+        Lo de cada marca sigue yendo a su marca. Esto solo mueve lo que no tiene marca (bebidas, sueltos…).
       </p>
     </div>
   );
@@ -84,6 +99,11 @@ export function BrandBillingSettingsPanel({
 
   const splitMode = normalizeBillingSharedSplitMode(config.sharedSplitMode);
   const monoOn = config.monoBrandTakesAll !== false;
+  const orphanMode = normalizeBillingOrphanMode(config.orphanMode);
+  const orphanFixedBrandId = String(config.orphanFixedBrandId || '').trim();
+  const orphanBrandName = selectableBrands.find(
+    (b) => String(b.id || b._id || '').trim() === orphanFixedBrandId,
+  )?.name;
 
   const load = useCallback(async () => {
     if (!businessId || !unlocked) return;
@@ -169,6 +189,8 @@ export function BrandBillingSettingsPanel({
         sheets,
         sharedSplitMode: normalizeBillingSharedSplitMode(config.sharedSplitMode),
         monoBrandTakesAll: config.monoBrandTakesAll !== false,
+        orphanMode: normalizeBillingOrphanMode(config.orphanMode),
+        orphanFixedBrandId: String(config.orphanFixedBrandId || '').trim(),
       };
       const saved = await saveBrandBillingConfigRequest(businessId, toSave);
       setConfig({
@@ -462,8 +484,97 @@ export function BrandBillingSettingsPanel({
               </label>
             </div>
 
+            <div className="space-y-2 border-b border-gray-100 px-3 py-3 dark:border-gray-800">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                3 · Pedido suelto (sin ninguna marca)
+              </p>
+              <p className="text-[11px] leading-snug text-gray-600 dark:text-gray-300">
+                Una cerveza sola, solo bebidas, o cualquier ticket donde <span className="font-semibold">nada</span> tiene marca.
+                Tiene que ir a alguna marca igual:
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {ORPHAN_MODE_OPTIONS.map((opt) => {
+                  const selected = orphanMode === opt.value;
+                  return (
+                    <label
+                      key={opt.value}
+                      className={`relative flex cursor-pointer flex-col rounded-xl border-2 px-3 py-2.5 transition-colors ${
+                        selected
+                          ? 'border-amber-600 bg-amber-50/80 dark:border-amber-400 dark:bg-amber-950/40'
+                          : 'border-gray-200 bg-white hover:border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:hover:border-gray-600'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name="orphanMode"
+                          className="h-3.5 w-3.5 border-gray-300 text-amber-600 focus:ring-amber-600"
+                          checked={selected}
+                          onChange={() => {
+                            setConfig((prev) => ({
+                              ...prev,
+                              orphanMode: opt.value,
+                            }));
+                          }}
+                        />
+                        <span className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                          {opt.shortLabel}
+                        </span>
+                        {selected ? (
+                          <span className="ml-auto rounded-full bg-amber-600 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white">
+                            Activa
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="mt-1.5 text-[11px] font-semibold leading-snug text-gray-800 dark:text-gray-200">
+                        {opt.label}
+                      </span>
+                      <span className="mt-1 text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                        {opt.hint}
+                      </span>
+                      <span className="mt-2 rounded-lg bg-white/80 px-2 py-1.5 text-[10px] font-medium leading-snug text-amber-950 ring-1 ring-amber-100 dark:bg-gray-950/50 dark:text-amber-100 dark:ring-amber-900">
+                        Ejemplo: {opt.example}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {orphanMode === 'fixed_brand' ? (
+                <label className="mt-2 block space-y-1">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                    Marca fija para sueltos
+                  </span>
+                  <select
+                    value={orphanFixedBrandId}
+                    onChange={(e) => {
+                      setConfig((prev) => ({
+                        ...prev,
+                        orphanFixedBrandId: e.target.value,
+                      }));
+                    }}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-900 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100"
+                  >
+                    <option value="">Elige marca…</option>
+                    {selectableBrands.map((b) => {
+                      const id = String(b.id || b._id || '').trim();
+                      return (
+                        <option key={id} value={id}>
+                          {b.name}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+              ) : null}
+            </div>
+
             <div className="space-y-2 bg-gray-50/80 px-3 py-3 dark:bg-gray-800/30">
-              <ActiveRuleSummary monoOn={monoOn} splitMode={splitMode} />
+              <ActiveRuleSummary
+                monoOn={monoOn}
+                splitMode={splitMode}
+                orphanMode={orphanMode}
+                orphanBrandName={orphanBrandName}
+              />
               <p className="text-[10px] leading-snug text-gray-500 dark:text-gray-400">
                 Las hojas de arriba agrupan marcas en el Excel. Si tienes 3 marcas y quieres
                 facturar dos juntas, ponlas en la misma hoja. Pulsa <span className="font-semibold">Guardar</span> para aplicar.

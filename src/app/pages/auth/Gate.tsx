@@ -19,6 +19,8 @@ import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
 import { VertialLogo } from '../../components/VertialLogo';
 import { useOnboarding } from '../../context/OnboardingContext';
 import { useAuth } from '../../context/AuthContext';
+import { isWorkerAccount } from '../../lib/authApi';
+import { shouldBlockSaasAccess } from '../../lib/billingRecovery';
 import { resolveWorkerSessionEntryPath } from '../../lib/workerProfileCompletion';
 import { useBusiness } from '../../context/BusinessContext';
 import { useApp } from '../../context/AppContext';
@@ -186,6 +188,13 @@ export function Gate() {
     }
   }, [user, isWorkerUser, navigate]);
 
+  // Cliente empresa pendiente de pago: Gate no aplica; ir al paywall.
+  useEffect(() => {
+    if (!user || isWorkerUser || isWorkerAccount(user)) return;
+    if (!shouldBlockSaasAccess(user.subscription?.status, user.subscription)) return;
+    navigate('/saas/subscription', { replace: true });
+  }, [user, isWorkerUser, navigate]);
+
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showComingSoonModal, setShowComingSoonModal] = useState(false);
@@ -297,6 +306,10 @@ export function Gate() {
   useEffect(() => {
     if (location.pathname !== '/auth/gate') return;
     if (isWorkerUser) return;
+    if (shouldBlockSaasAccess(user?.subscription?.status, user?.subscription)) {
+      navigate('/saas/subscription', { replace: true });
+      return;
+    }
     if (isBusinessesPending || showBusinessesLoadError) return;
     if (businesses.length !== 1) return;
     const only = businesses[0];
@@ -308,6 +321,7 @@ export function Gate() {
   }, [
     location.pathname,
     isWorkerUser,
+    user?.subscription,
     isBusinessesPending,
     showBusinessesLoadError,
     businesses,
@@ -341,7 +355,10 @@ export function Gate() {
         if (!result.success || !result.business?.business_id) return;
         await reloadBusinesses();
         switchBusiness(result.business.business_id);
-        navigate(saasPathWithBusinessScope('/saas/dashboard', result.business.business_id), { replace: true });
+        const dest = shouldBlockSaasAccess(user?.subscription?.status, user?.subscription)
+          ? '/saas/subscription'
+          : saasPathWithBusinessScope('/saas/dashboard', result.business.business_id);
+        navigate(dest, { replace: true });
       })
       .finally(() => setIsAutoProvisioning(false));
   }, [

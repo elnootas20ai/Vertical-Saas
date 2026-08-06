@@ -1099,15 +1099,11 @@ function deserializeSubscription(
         cancelAtPeriodEnd: false,
       };
     }
+    // Sin suscripción en /me: tratar como pendiente (no trial fantasma).
     return {
-      status: 'trial_active',
+      status: 'pending_payment',
       planName: 'Basic',
       selectedPlanId: 'basic',
-      trialEndsAt: new Date(Date.now() + 14 * 86400000),
-      currentPeriodStart: new Date(),
-      currentPeriodEnd: new Date(Date.now() + 14 * 86400000),
-      gracePeriodEndsAt: new Date(Date.now() + 17 * 86400000),
-      lastPaymentAt: undefined,
       cancelAtPeriodEnd: false,
     };
   }
@@ -1333,14 +1329,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
 
   const [subscription, setSubscription] = useState<Subscription>({
-    status: 'trial_active',
+    // Default conservador: no abrir el SaaS antes de sincronizar /me.
+    status: 'pending_payment',
     planName: 'Basic',
     selectedPlanId: 'basic',
-    trialEndsAt: new Date(Date.now() + 30 * 86400000),
-    currentPeriodStart: new Date(),
-    currentPeriodEnd: new Date(Date.now() + 30 * 86400000),
-    gracePeriodEndsAt: new Date(Date.now() + 30 * 86400000),
-    lastPaymentAt: undefined,
     cancelAtPeriodEnd: false,
   });
 

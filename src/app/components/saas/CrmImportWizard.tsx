@@ -48,6 +48,8 @@ interface CrmImportWizardProps {
   initialMode?: ImportMode;
   /** false = sin columna Responsable (p. ej. delivery) */
   includeResponsible?: boolean;
+  /** iceCreamShop → plantilla Excel clientes heladería */
+  templateVertical?: string | null;
   /** Si se indica, exporta todos los clientes del servidor bajo demanda. */
   exportUserId?: string;
   /** Scope de exportación por empresa (delivery multi-empresa). */
@@ -96,6 +98,7 @@ export function CrmImportWizard({
   onClose,
   initialMode,
   includeResponsible = true,
+  templateVertical = null,
   exportUserId,
   exportBusinessId,
   importBusinessId,
@@ -149,8 +152,15 @@ export function CrmImportWizard({
           description: 'Cabeceras listas para rellenar (.xlsx)',
           icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600" />,
           action: () => {
-            downloadClientImportTemplate({ includeResponsible: includeResp });
-            toast.success('Plantilla Excel descargada');
+            downloadClientImportTemplate({
+              includeResponsible: includeResp,
+              vertical: templateVertical,
+            });
+            toast.success(
+              templateVertical === 'iceCreamShop'
+                ? 'Plantilla Excel heladería descargada'
+                : 'Plantilla Excel descargada',
+            );
           },
         },
         {
@@ -159,8 +169,15 @@ export function CrmImportWizard({
           description: 'Mismo formato en CSV (punto y coma)',
           icon: <FileText className="w-4 h-4 text-blue-600" />,
           action: () => {
-            downloadClientImportTemplateCsv({ includeResponsible: includeResp });
-            toast.success('Plantilla CSV descargada');
+            downloadClientImportTemplateCsv({
+              includeResponsible: includeResp,
+              vertical: templateVertical,
+            });
+            toast.success(
+              templateVertical === 'iceCreamShop'
+                ? 'Plantilla CSV heladería descargada'
+                : 'Plantilla CSV descargada',
+            );
           },
         },
         ...(exportCount > 0 || exportUserId
@@ -225,7 +242,7 @@ export function CrmImportWizard({
         },
       },
     ];
-  }, [mode, includeResponsible, clientExportRows, exportUserId, clientsTotalCount, exportingClients, user?.user_id]);
+  }, [mode, includeResponsible, templateVertical, clientExportRows, exportUserId, clientsTotalCount, exportingClients, user?.user_id, exportBusinessId]);
 
   const applyParsedTable = (headers: string[], body: string[][]) => {
     const normalized = normalizeParsedTable([headers, ...body]);

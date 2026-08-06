@@ -10,7 +10,7 @@
  * - 2+ marcas → líneas con brandIds a su marca; lo compartido (bebidas…)
  *   va ENTERO a la marca con más unidades en el ticket (majority).
  *   Empate de uds → la que más € de producto propio lleva en el pedido.
- * - 0 marcas → unbranded / por categoría.
+ * - 0 marcas en líneas → si el pedido trae brandIds, se usan; si no, unbranded.
  */
 
 /** Defaults de categorías solo para etiquetar informes cuando no hay marca. */
@@ -238,9 +238,28 @@ export function attributeOrderRevenueByBrand(order, options) {
       byBrand[id] = (byBrand[id] || 0) + amt;
     }
   } else {
-    unbranded = sharedRevenue;
-    for (const line of sharedLines) {
-      byCategory[line.category] = (byCategory[line.category] || 0) + line.amount;
+    // Ninguna línea con marca: intentar marca del pedido; si no, queda sin marca.
+    const orderBrandIds = itemBrandIds({ brandIds: order?.brandIds });
+    if (orderBrandIds.length === 1) {
+      byBrand[orderBrandIds[0]] = (byBrand[orderBrandIds[0]] || 0) + sharedRevenue;
+      presentBrandIds.push(orderBrandIds[0]);
+    } else if (orderBrandIds.length >= 2) {
+      const parts = splitSharedAmount(
+        orderBrandIds,
+        {},
+        sharedRevenue,
+        sharedSplitMode,
+        {},
+      );
+      for (const [id, amt] of Object.entries(parts)) {
+        byBrand[id] = (byBrand[id] || 0) + amt;
+        if (!presentBrandIds.includes(id)) presentBrandIds.push(id);
+      }
+    } else {
+      unbranded = sharedRevenue;
+      for (const line of sharedLines) {
+        byCategory[line.category] = (byCategory[line.category] || 0) + line.amount;
+      }
     }
   }
 

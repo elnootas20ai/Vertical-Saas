@@ -8,6 +8,7 @@ import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { ACCESO__Checkbox } from '../../components/design-system/ACCESO__Checkbox';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
+import { AUTH_PATHS } from '../../lib/authEntryPaths';
 import { useAuth } from '../../context/AuthContext';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable, shouldHideBusinessOrganizationRegistrationOnIos } from '../../lib/appStoreCompliance';
@@ -289,7 +290,11 @@ export function Register() {
   }
 
   return (
-    <AccesoSplitLayout visualKey={isUserAccount ? 'register-user' : 'register-company'} scrollable>
+    <AccesoSplitLayout
+      visualKey={isUserAccount ? 'register-user' : 'register-company'}
+      scrollable
+      onBack={() => navigate(AUTH_PATHS.entry)}
+    >
       <div className="flex min-h-dvh flex-col items-center justify-center p-4 sm:p-6 lg:min-h-0 lg:flex-1 lg:px-8">
       <div className="w-full max-w-lg shrink-0">
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 shadow-sm">
@@ -591,14 +596,7 @@ export function Register() {
             )}
           </form>
 
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-400">
-            <button
-              type="button"
-              onClick={() => navigate('/auth/entry')}
-              className="font-medium hover:underline"
-            >
-              ← Volver
-            </button>
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-xs text-gray-600 dark:text-gray-400">
             <p>
               ¿Ya tienes cuenta?{' '}
               <button

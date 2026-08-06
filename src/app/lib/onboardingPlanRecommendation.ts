@@ -45,9 +45,8 @@ export interface NeedsOptionDefinition {
   description: string;
 }
 
-function addonUnitMonthlyPrice(baseEur: number, billingMode: 'monthly' | 'annual'): number {
-  if (billingMode === 'monthly') return baseEur;
-  return Math.round(baseEur * (1 - PLAN_ADDON_ANNUAL_DISCOUNT));
+function roundMoney(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
 }
 
 const DEFAULT_PLANS: OnboardingPlanDefinition[] = VERTIAL_PLANS.map((p) => ({
@@ -188,6 +187,8 @@ const VERTICAL_LABELS: Record<string, string> = {
   carDealership: 'Compraventa',
   workshop: 'Taller',
   events: 'Eventos',
+  butcherShop: 'Carnicería',
+  iceCreamShop: 'Heladería',
 };
 
 export function getVerticalLabel(businessType: string): string {
@@ -441,6 +442,11 @@ export interface OnboardingPricingBreakdown {
   total: number;
 }
 
+/**
+ * Misma fórmula que shared/billing/subscriptionQuote.js:
+ * lista mensual (plan + extras a precio mes) → si anual, ×12×0,8.
+ * `total` = cuota mensual a mostrar (ya con descuento prorrateado si es anual).
+ */
 export function calculateOnboardingPricing(params: {
   plan: OnboardingPlanDefinition;
   billingMode: 'monthly' | 'annual';
@@ -457,30 +463,56 @@ export function calculateOnboardingPricing(params: {
   const extraBusinesses = Math.max(0, metrics.businessCount - plan.maxBusinesses);
   const extraBrands = Math.max(0, metrics.commercialBrandCount - plan.maxCommercialBrands);
 
-  const pdvUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_pdv'), billingMode);
-  const brandUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_brand'), billingMode);
-  const businessUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_business'), billingMode);
-  const userUnit = addonUnitMonthlyPrice(getAddonMonthlyPriceEur('extra_worker'), billingMode);
+  const pdvUnit = getAddonMonthlyPriceEur('extra_pdv');
+  const brandUnit = getAddonMonthlyPriceEur('extra_brand');
+  const businessUnit = getAddonMonthlyPriceEur('extra_business');
+  const userUnit = getAddonMonthlyPriceEur('extra_worker');
 
-  const extraUsersCost = extraUsers * userUnit;
-  const extraPdvCost = extraPdv * pdvUnit;
-  const extraBusinessesCost = extraBusinesses * businessUnit;
-  const extraBrandsCost = extraBrands * brandUnit;
-  const baseCost = billingMode === 'monthly' ? plan.priceMonthly : plan.priceAnnual;
-  const total = baseCost + extraUsersCost + extraPdvCost + extraBusinessesCost + extraBrandsCost;
+  const extraUsersCostList = extraUsers * userUnit;
+  const extraPdvCostList = extraPdv * pdvUnit;
+  const extraBusinessesCostList = extraBusinesses * businessUnit;
+  const extraBrandsCostList = extraBrands * brandUnit;
+  const baseCostList = plan.priceMonthly;
+  const listMonthly = roundMoney(
+    baseCostList + extraUsersCostList + extraPdvCostList + extraBusinessesCostList + extraBrandsCostList,
+  );
+
+  const amountDue =
+    billingMode === 'annual'
+      ? roundMoney(listMonthly * 12 * (1 - PLAN_ADDON_ANNUAL_DISCOUNT))
+      : listMonthly;
+  const total = billingMode === 'annual' ? roundMoney(amountDue / 12) : listMonthly;
+  const ratio = listMonthly > 0 ? total / listMonthly : 1;
 
   return {
-    baseCost,
+    baseCost: roundMoney(baseCostList * ratio),
     extraUsers,
     extraPdv,
     extraBusinesses,
     extraBrands,
-    extraUsersCost,
-    extraPdvCost,
-    extraBusinessesCost,
-    extraBrandsCost,
+    extraUsersCost: roundMoney(extraUsersCostList * ratio),
+    extraPdvCost: roundMoney(extraPdvCostList * ratio),
+    extraBusinessesCost: roundMoney(extraBusinessesCostList * ratio),
+    extraBrandsCost: roundMoney(extraBrandsCostList * ratio),
     total,
   };
+}
+
+/** Importe a pagar ahora (1 mes o 1 año) con la misma fórmula. */
+export function calculateOnboardingAmountDue(params: Parameters<typeof calculateOnboardingPricing>[0]): number {
+  const metrics = normalizeInfrastructureMetrics(params);
+  const listMonthly = roundMoney(
+    params.plan.priceMonthly +
+      Math.max(0, metrics.userCount - params.plan.maxUsers) * getAddonMonthlyPriceEur('extra_worker') +
+      Math.max(0, metrics.locationCount - params.plan.maxLocations) * getAddonMonthlyPriceEur('extra_pdv') +
+      Math.max(0, metrics.businessCount - params.plan.maxBusinesses) * getAddonMonthlyPriceEur('extra_business') +
+      Math.max(0, metrics.commercialBrandCount - params.plan.maxCommercialBrands) *
+        getAddonMonthlyPriceEur('extra_brand'),
+  );
+  if (params.billingMode === 'annual') {
+    return roundMoney(listMonthly * 12 * (1 - PLAN_ADDON_ANNUAL_DISCOUNT));
+  }
+  return listMonthly;
 }
 
 export function recommendOnboardingPlan(params: {

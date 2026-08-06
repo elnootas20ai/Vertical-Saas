@@ -1,6 +1,9 @@
 /**
- * Permiso de notificaciones nativo (iOS/Android) / navegador:
- * pide el diálogo del sistema UNA sola vez por cuenta (CEO o trabajador).
+ * Permisos nativos al entrar (iOS/Android):
+ * 1) Notificaciones (push) — una vez por cuenta
+ * 2) Ubicación — para fichaje (diálogo del sistema)
+ *
+ * En web/PWA no fuerza ubicación aquí (sale al fichar).
  */
 import { useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -11,7 +14,10 @@ import {
   readPushConsent,
   writePushConsent,
 } from '../../lib/pushPermissionConsent';
+import { ensureLocationPermissionPrompt } from '../../hooks/useGeolocation';
+
 const ASK_DELAY_MS = 1600;
+const LOCATION_ASK_DELAY_MS = 3200;
 
 async function systemReceiveStatus(): Promise<'granted' | 'denied' | 'prompt' | 'unsupported'> {
   if (isVertialNativeApp()) {
@@ -50,8 +56,31 @@ function triggerPushRegister(): void {
   }
 }
 
+const LOCATION_CONSENT_PREFIX = 'vertial.locationConsentAsked.v1.';
+
+function locationAskKey(userId: string): string {
+  return `${LOCATION_CONSENT_PREFIX}${userId}`;
+}
+
+function alreadyAskedLocation(userId: string): boolean {
+  try {
+    return window.localStorage.getItem(locationAskKey(userId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markAskedLocation(userId: string): void {
+  try {
+    window.localStorage.setItem(locationAskKey(userId), '1');
+  } catch {
+    /* ignore */
+  }
+}
+
 export function PushPermissionGate({ userId }: { userId: string | null }) {
   const ranForUserRef = useRef<string | null>(null);
+  const locationRanRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -89,18 +118,15 @@ export function PushPermissionGate({ userId }: { userId: string | null }) {
               writePushConsent(userId, 'accepted');
               triggerPushRegister();
             }
-            // Si niega en reinstall, NO bajamos accepted en cuenta (user rule: sí forever)
             return;
           }
           return;
         }
 
-        // Cuenta dijo no → no insistir nunca
         if (accountDecision === 'declined') {
           return;
         }
 
-        // SO ya denegó sin haber guardado → declined y no insistir
         if (status === 'denied') {
           writePushConsent(userId, 'declined');
           return;
@@ -115,6 +141,31 @@ export function PushPermissionGate({ userId }: { userId: string | null }) {
         }
       })();
     }, ASK_DELAY_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [userId]);
+
+  // Ubicación (fichaje): una vez por cuenta en app nativa, tras el push
+  useEffect(() => {
+    if (!userId || !isVertialNativeApp()) return;
+    if (locationRanRef.current === userId) return;
+    if (alreadyAskedLocation(userId)) {
+      locationRanRef.current = userId;
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        if (cancelled) return;
+        locationRanRef.current = userId;
+        markAskedLocation(userId);
+        await ensureLocationPermissionPrompt();
+      })();
+    }, LOCATION_ASK_DELAY_MS);
 
     return () => {
       cancelled = true;

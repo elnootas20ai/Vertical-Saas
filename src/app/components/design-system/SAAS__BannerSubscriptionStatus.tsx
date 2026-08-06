@@ -19,7 +19,7 @@ export function SAAS__BannerSubscriptionStatus() {
           <div className="flex items-center gap-3">
             <Info className="w-5 h-5 text-blue-600 shrink-0" />
             <p className="text-sm text-blue-900">
-              <span className="font-semibold">Prueba gratuita activa.</span> Te quedan {trialDaysRemaining} días de prueba.
+              <span className="font-semibold">Periodo de activación.</span> Te quedan {trialDaysRemaining} días.
             </p>
           </div>
           {!iosAccessOnly ? (
@@ -42,7 +42,7 @@ export function SAAS__BannerSubscriptionStatus() {
           <div className="flex items-center gap-3">
             <Clock className="w-5 h-5 text-amber-600 shrink-0" />
             <p className="text-sm text-amber-900">
-              <span className="font-semibold">Tu prueba gratuita ha finalizado.</span>
+              <span className="font-semibold">Tu periodo de activación ha finalizado.</span>
               {iosAccessOnly
                 ? ' Contacta con soporte para reactivar el acceso.'
                 : ' Elige un plan para continuar.'}

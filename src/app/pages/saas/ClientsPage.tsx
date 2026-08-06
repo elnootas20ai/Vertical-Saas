@@ -73,6 +73,7 @@ import {
   RotateCcw, ClipboardList, Zap, ReceiptText, Droplets,
   Settings2, Timer, Workflow, Save, Lock, ShoppingBag,
 } from 'lucide-react';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_SURFACE } from '../../lib/vertialUiTokens';
 import { useClientsListPlanAccess } from '../../hooks/useClientsListPlanAccess';
 import {
   ClientsListPlanBanner,
@@ -122,6 +123,16 @@ const DELIVERY_CLIENT_COL_DEFS: ColumnDef<ClientColId>[] = [
   { id: 'tags',     label: 'Etiquetas' },
   { id: 'loyalty',  label: 'Fidelización' },
   { id: 'ciudad',   label: 'Ciudad' },
+];
+
+/** Heladería: columnas claras (sin pedidos/gasto vacíos). */
+const HELADERIA_CLIENT_COL_DEFS: ColumnDef<ClientColId>[] = [
+  { id: 'nombre',    label: 'Cliente',   required: true },
+  { id: 'estado',    label: 'Estado' },
+  { id: 'contacto',  label: 'Contacto' },
+  { id: 'tags',      label: 'Etiquetas' },
+  { id: 'direccion', label: 'Calle' },
+  { id: 'ciudad',    label: 'Ciudad' },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1578,15 +1589,24 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const branches = useMemo(() => currentBusiness?.branches ?? [], [currentBusiness]);
   const isDeliveryBusiness = currentBusiness?.businessType === 'delivery';
   const isRestaurantBusiness = currentBusiness?.businessType === 'restaurant';
-  /** CRM operativo con gasto / último pedido (delivery o bar-restaurante). */
-  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness;
+  const isHeladeriaBusiness = currentBusiness?.businessType === 'iceCreamShop';
+  /** CRM operativo + Excel acotado (delivery, restaurante, heladería). */
+  const isOpsCrmBusiness = isDeliveryBusiness || isRestaurantBusiness || isHeladeriaBusiness;
+  /** Acciones CRM tipo delivery (import Excel sin responsable, borrar masivo, menú). */
+  const usesDeliveryLikeCrmActions = isDeliveryBusiness || isHeladeriaBusiness;
+  /**
+   * Stats desde pedidos delivery/sala. Heladería NO: en el mismo SaaS disparaba
+   * listDeliveryOrdersByUser de todo el titular y el listado quedaba en «Cargando…».
+   */
+  const useClientLiveStats = isDeliveryBusiness || isRestaurantBusiness;
   const isBusinessScopedClients = usesBusinessScopedClients(currentBusiness?.businessType);
   const scopedClientsBusinessId = isBusinessScopedClients && businessScopeId ? businessScopeId : undefined;
   const listPlan = useClientsListPlanAccess();
-  const clientColDefsForUi = useMemo(
-    () => (isOpsCrmBusiness ? DELIVERY_CLIENT_COL_DEFS : CLIENT_COL_DEFS),
-    [isOpsCrmBusiness],
-  );
+  const clientColDefsForUi = useMemo(() => {
+    if (isHeladeriaBusiness) return HELADERIA_CLIENT_COL_DEFS;
+    if (isOpsCrmBusiness) return DELIVERY_CLIENT_COL_DEFS;
+    return CLIENT_COL_DEFS;
+  }, [isHeladeriaBusiness, isOpsCrmBusiness]);
   const viewClientDetail = useCallback((clientId: string) => {
     const path = `/saas/crm/clientes/${clientId}`;
     if (embedDeliveryOps) {
@@ -1604,13 +1624,27 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     navigate(`/saas/caja/tpv?clientId=${encodeURIComponent(clientId)}`);
   }, [navigate]);
 
+  const goToHeladeriaTpvForClient = useCallback((clientId: string) => {
+    navigate(`/saas/vertical/heladeria/tpv?clientId=${encodeURIComponent(clientId)}`);
+  }, [navigate]);
+
   const goToOpsTpvForClient = useCallback((clientId: string) => {
+    if (isHeladeriaBusiness) {
+      goToHeladeriaTpvForClient(clientId);
+      return;
+    }
     if (isDeliveryBusiness) {
       goToDeliveryTpvForClient(clientId);
       return;
     }
     goToRestaurantTpvForClient(clientId);
-  }, [isDeliveryBusiness, goToDeliveryTpvForClient, goToRestaurantTpvForClient]);
+  }, [
+    isHeladeriaBusiness,
+    isDeliveryBusiness,
+    goToHeladeriaTpvForClient,
+    goToDeliveryTpvForClient,
+    goToRestaurantTpvForClient,
+  ]);
 
   const [activeTab,               setActiveTab]               = useState<ClientTabId>('clients');
   const [activePill,              setActivePill]              = useState<LeadPill>('all');
@@ -1683,7 +1717,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       clientsDataUserId,
       undefined,
       scopedClientsBusinessId,
-      { liveStats: isOpsCrmBusiness },
+      { liveStats: useClientLiveStats },
     )
       .then((all) => {
         if (!cancelled) setSegmentAllClients(all);
@@ -1692,7 +1726,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         if (!cancelled) setLoadingSegmentClients(false);
       });
     return () => { cancelled = true; };
-  }, [useSegmentMode, clientsDataUserId, segmentConditions.length, isOpsCrmBusiness, businessScopeId]);
+  }, [useSegmentMode, clientsDataUserId, segmentConditions.length, useClientLiveStats, businessScopeId]);
 
   const [invoiceClientOptions, setInvoiceClientOptions] = useState<Client[]>([]);
 
@@ -1723,7 +1757,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     branchId: filterBranch,
     workCenterId: filterWorkCenter,
     pageSize: 20,
-    liveStats: isOpsCrmBusiness,
+    liveStats: useClientLiveStats,
   });
 
   useEffect(() => {
@@ -2032,13 +2066,13 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         clientsDataUserId,
         undefined,
         scopedClientsBusinessId,
-        { liveStats: isOpsCrmBusiness },
+        { liveStats: useClientLiveStats },
       );
       downloadClientsExport(
         all.map((c) => mapClientToExportRow(c)),
         {
-          includeResponsible: !isOpsCrmBusiness,
-          includeDeliveryStats: isOpsCrmBusiness,
+          includeResponsible: !usesDeliveryLikeCrmActions,
+          includeDeliveryStats: useClientLiveStats,
         },
       );
       toast.success(`Exportados ${all.length} clientes`, { id: toastId });
@@ -2051,7 +2085,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     businessScopeId,
     clientsDataUserId,
     exportingClients,
-    isOpsCrmBusiness,
+    scopedClientsBusinessId,
+    useClientLiveStats,
+    usesDeliveryLikeCrmActions,
   ]);
 
   const { paginated: paginatedClientsLocal, pagination: clientsPaginationLocal } = usePagination(
@@ -2088,7 +2124,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   }, []);
 
   const enterClientSelectMode = useCallback(() => {
-    if (!isDeliveryBusiness || clientsListTotal <= 0) {
+    if (!usesDeliveryLikeCrmActions || clientsListTotal <= 0) {
       toast.info('No hay clientes que eliminar');
       return;
     }
@@ -2098,7 +2134,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     setBulkDeleteConfirmStep(false);
     setShowClientsDeleteGuard(false);
     toast.message('Marca los clientes y pulsa «Borrar»', { duration: 5000 });
-  }, [clientsListTotal, isDeliveryBusiness]);
+  }, [clientsListTotal, usesDeliveryLikeCrmActions]);
 
   const clientSelectScopeKey = `${debouncedSearch}|${filterBranch}|${filterWorkCenter}|${scopedClientsBusinessId || ''}`;
   const clientSelectScopeKeyRef = useRef(clientSelectScopeKey);
@@ -2139,7 +2175,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   }, [paginatedClients, selectAllInAccount]);
 
   const selectAllMatchingClients = useCallback(() => {
-    if (!isDeliveryBusiness || clientsListTotal <= 0) return;
+    if (!usesDeliveryLikeCrmActions || clientsListTotal <= 0) return;
     setBulkDeleteConfirmStep(false);
     if (!useServerClients || useSegmentMode) {
       setSelectAllInAccount(false);
@@ -2153,7 +2189,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   }, [
     clientsListTotal,
     filteredClients,
-    isDeliveryBusiness,
+    usesDeliveryLikeCrmActions,
     useSegmentMode,
     useServerClients,
   ]);
@@ -2170,7 +2206,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     && (selectAllInAccount || selectedClientIds.size >= clientsListTotal);
 
   const handleBulkDeleteSelectedClients = () => {
-    if (!clientsDataUserId || !isDeliveryBusiness) {
+    if (!clientsDataUserId || !usesDeliveryLikeCrmActions) {
       toast.error('No hay sesión para borrar clientes');
       return;
     }
@@ -2190,7 +2226,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   };
 
   const executeClientsBulkDeleteAfterGuard = useCallback(async () => {
-    if (!clientsDataUserId || !isDeliveryBusiness) return;
+    if (!clientsDataUserId || !usesDeliveryLikeCrmActions) return;
     const deleteAll = selectAllInAccount;
     const ids = [...selectedClientIds];
     const count = deleteAll ? clientsListTotal : ids.length;
@@ -2247,7 +2283,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     exitClientSelectMode,
     filterBranch,
     filterWorkCenter,
-    isDeliveryBusiness,
+    usesDeliveryLikeCrmActions,
     refreshPaginatedClients,
     scopedClientsBusinessId,
     selectAllInAccount,
@@ -2774,9 +2810,11 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
   const clearCFilters  = () => { setCFilterName([]); setCFilterStatus([]); setCFilterCity([]); setCSort({ key: 'name', dir: 'asc' }); setFilterBranch('all'); setFilterWorkCenter('all'); };
 
   const { visibleColumns: visibleLeadCols, visibleIds: visibleLeadColIds, columnOrder: leadColOrder, toggleColumn: toggleLeadCol, reorderColumns: reorderLeadCols, resetToDefault: resetLeadCols } = useColumnPreferences('leads', LEAD_COL_DEFS);
-  const clientColPrefsKey = isOpsCrmBusiness
-    ? (isDeliveryBusiness ? 'clients-delivery-v2' : 'clients-restaurant-v1')
-    : 'clients';
+  const clientColPrefsKey = isHeladeriaBusiness
+    ? 'clients-heladeria-v1'
+    : isOpsCrmBusiness
+      ? (usesDeliveryLikeCrmActions ? 'clients-delivery-v2' : 'clients-restaurant-v1')
+      : 'clients';
   const { visibleColumns: visibleClientCols, visibleIds: visibleClientColIds, columnOrder: clientColOrder, toggleColumn: toggleClientCol, reorderColumns: reorderClientCols, resetToDefault: resetClientCols } = useColumnPreferences(clientColPrefsKey, clientColDefsForUi);
 
   const effectiveVisibleClientCols = useMemo(() => {
@@ -3130,101 +3168,204 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
   // ─── Tab: Clients ─────────────────────────────────────────────────────────
 
-  const renderClientsToolbar = () => (
-    <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:px-4">
-      <div className="flex items-center justify-between gap-2">
-        <ViewToggle view={clientsView} setView={setClientsView} />
-        <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
-          <ClientsActionsMenu
-            isDeliveryBusiness={isDeliveryBusiness}
-            canUseSegments={listPlan.canUseSegments}
-            canExport={listPlan.canExport}
-            canImportFromBusiness={listPlan.canImportFromBusiness}
-            hasOtherBusinesses={otherBusinesses.length > 0}
-            segmentConditionsCount={segmentConditions.length}
-            exportTotalCount={clientsListTotal}
-            exportClients={clientExportRows}
-            onExportAllClients={useServerClients ? handleExportAllClients : undefined}
-            exportingClients={exportingClients}
-            requiredPlanLabel={listPlan.requiredPlanLabel}
-            onQuickAddClient={() => setShowAddClientModal(true)}
-            onAIAddClient={() => setShowAIClientModal(true)}
-            onImportClients={() => setCrmImportMode('clients')}
-            onToggleSegmentBuilder={() => setShowSegmentBuilder((prev) => !prev)}
-            onImportFromBusiness={() => {
-              setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
-              setShowImportFromBusiness(true);
-            }}
-            onStartDeleteClients={isDeliveryBusiness ? enterClientSelectMode : undefined}
-            canDeleteClients={isDeliveryBusiness && clientsListTotal > 0}
-          />
-        </ActivationFieldWrap>
-      </div>
-
-      {isDeliveryBusiness && clientSelectMode ? (
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50/70 px-3 py-2 dark:border-red-900/40 dark:bg-red-950/20">
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-red-800 dark:text-red-200">
-              <input
-                type="checkbox"
-                checked={allMatchingClientsSelected}
-                disabled={bulkDeletingClients}
-                onChange={() => {
-                  if (allMatchingClientsSelected) clearClientSelection();
-                  else selectAllMatchingClients();
-                }}
-                className="h-4 w-4 rounded border-red-300 text-red-600 focus:ring-red-500"
-              />
-              Seleccionar todos ({clientsListTotal})
-            </label>
-            <span className="text-xs text-red-700/80 dark:text-red-300/80">
-              {selectedClientsCount} seleccionado{selectedClientsCount === 1 ? '' : 's'}
-              {selectAllInAccount ? ' (toda la cuenta)' : ''}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={exitClientSelectMode}
-              className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              disabled={selectedClientsCount === 0 || bulkDeletingClients}
-              onClick={handleBulkDeleteSelectedClients}
-              className={
-                bulkDeleteConfirmStep
-                  ? 'inline-flex items-center gap-1.5 rounded-lg border border-red-800 bg-red-700 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-40'
-                  : 'inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40'
-              }
-            >
-              {bulkDeletingClients ? (
-                <>Borrando…</>
-              ) : bulkDeleteConfirmStep ? (
-                <>Estoy seguro ({selectedClientsCount})</>
-              ) : (
-                <>
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Borrar{selectedClientsCount > 0 ? ` (${selectedClientsCount})` : ''}
-                </>
-              )}
-            </button>
-          </div>
-          {bulkDeleteConfirmStep && selectedClientsCount > 0 ? (
-            <p className="w-full text-[11px] font-medium text-red-800 dark:text-red-200">
-              Pulsa «Estoy seguro» y escribe ESTOY SEGURO en el aviso para confirmar.
-            </p>
-          ) : null}
+  const renderClientSelectBar = () =>
+    usesDeliveryLikeCrmActions && clientSelectMode ? (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 dark:border-rose-900/40 dark:bg-rose-950/20">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-semibold text-rose-800 dark:text-rose-200">
+            <input
+              type="checkbox"
+              checked={allMatchingClientsSelected}
+              disabled={bulkDeletingClients}
+              onChange={() => {
+                if (allMatchingClientsSelected) clearClientSelection();
+                else selectAllMatchingClients();
+              }}
+              className="h-4 w-4 rounded border-rose-300 text-rose-600 focus:ring-rose-500"
+            />
+            Seleccionar todos ({clientsListTotal})
+          </label>
+          <span className="text-xs text-rose-700/80 dark:text-rose-300/80">
+            {selectedClientsCount} seleccionado{selectedClientsCount === 1 ? '' : 's'}
+            {selectAllInAccount ? ' (toda la cuenta)' : ''}
+          </span>
         </div>
-      ) : null}
-    </div>
-  );
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={exitClientSelectMode} className={VERTIAL_BTN_SECONDARY + ' !min-h-9 !px-3 !py-1.5 !text-xs'}>
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={selectedClientsCount === 0 || bulkDeletingClients}
+            onClick={handleBulkDeleteSelectedClients}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-[var(--v-rose,#e11d48)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#be123c] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {bulkDeletingClients ? (
+              <>Borrando…</>
+            ) : bulkDeleteConfirmStep ? (
+              <>Estoy seguro ({selectedClientsCount})</>
+            ) : (
+              <>
+                <Trash2 className="h-3.5 w-3.5" />
+                Borrar{selectedClientsCount > 0 ? ` (${selectedClientsCount})` : ''}
+              </>
+            )}
+          </button>
+        </div>
+        {bulkDeleteConfirmStep && selectedClientsCount > 0 ? (
+          <p className="w-full text-[11px] font-medium text-rose-800 dark:text-rose-200">
+            Pulsa «Estoy seguro» y escribe ESTOY SEGURO en el aviso para confirmar.
+          </p>
+        ) : null}
+      </div>
+    ) : null;
+
+  const renderClientsToolbar = () => {
+    const actionsMenu = (
+      <ActivationFieldWrap fieldKey="client-add" activeKey={activationFocus}>
+        <ClientsActionsMenu
+          isDeliveryBusiness={usesDeliveryLikeCrmActions}
+          clientTemplateVertical={isHeladeriaBusiness ? 'iceCreamShop' : null}
+          canUseSegments={listPlan.canUseSegments}
+          canExport={listPlan.canExport}
+          canImportFromBusiness={listPlan.canImportFromBusiness}
+          hasOtherBusinesses={otherBusinesses.length > 0}
+          segmentConditionsCount={segmentConditions.length}
+          exportTotalCount={clientsListTotal}
+          exportClients={clientExportRows}
+          onExportAllClients={useServerClients ? handleExportAllClients : undefined}
+          exportingClients={exportingClients}
+          requiredPlanLabel={listPlan.requiredPlanLabel}
+          onQuickAddClient={() => setShowAddClientModal(true)}
+          onAIAddClient={() => setShowAIClientModal(true)}
+          onImportClients={() => setCrmImportMode('clients')}
+          onToggleSegmentBuilder={() => setShowSegmentBuilder((prev) => !prev)}
+          onImportFromBusiness={() => {
+            setImportSourceBusinessId(resolveBusinessScopeId(otherBusinesses[0]) || '');
+            setShowImportFromBusiness(true);
+          }}
+          onStartDeleteClients={usesDeliveryLikeCrmActions ? enterClientSelectMode : undefined}
+          canDeleteClients={usesDeliveryLikeCrmActions && clientsListTotal > 0}
+        />
+      </ActivationFieldWrap>
+    );
+
+    if (isHeladeriaBusiness) {
+      const allClientTags = Array.from(
+        new Set((useServerClients ? serverClients : (contextClients || [])).flatMap((c) => c.tags || [])),
+      ).sort();
+
+      return (
+        <div className={`${VERTIAL_SURFACE} space-y-3 p-3 md:p-4`}>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+                {clientsListTotal} cliente{clientsListTotal !== 1 ? 's' : ''}
+              </p>
+              <p className="text-xs text-stone-500 dark:text-stone-400">
+                Busca, importa Excel o da de alta en un momento
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <ViewToggle view={clientsView} setView={setClientsView} />
+              <button
+                type="button"
+                onClick={() => setShowAddClientModal(true)}
+                className={VERTIAL_BTN_PRIMARY + ' !min-h-10 !px-3.5 !py-2 !text-sm'}
+              >
+                <Plus className="h-4 w-4" />
+                Nuevo cliente
+              </button>
+              {actionsMenu}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-stone-400" />
+              <input
+                type="text"
+                placeholder="Buscar por nombre, teléfono o email…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="h-11 w-full rounded-xl border border-stone-200 bg-stone-50/80 pl-10 pr-10 text-sm text-stone-900 placeholder:text-stone-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+                aria-label="Buscar clientes"
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 hover:bg-stone-100 dark:hover:bg-stone-800"
+                  aria-label="Limpiar búsqueda"
+                >
+                  <X className="h-3.5 w-3.5 text-stone-400" />
+                </button>
+              ) : null}
+            </div>
+            {hasWorkCenters ? (
+              <select
+                className="h-11 w-full shrink-0 rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-900 focus:border-blue-500 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100 sm:w-[min(100%,240px)]"
+                value={filterWorkCenter}
+                onChange={(e) => setFilterWorkCenter(e.target.value)}
+              >
+                <option value="all">Todos los centros</option>
+                {activeWorkCenters.map((wc) => (
+                  <option key={wc.id} value={wc.id}>{wc.name}</option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+
+          {allClientTags.length > 0 ? (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
+              <Tag className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+              <button
+                type="button"
+                onClick={() => setFilterClientTag('')}
+                className={`shrink-0 rounded-xl border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  !filterClientTag
+                    ? 'border-blue-600 bg-blue-600 text-white'
+                    : 'border-stone-200 bg-white text-stone-600 hover:border-blue-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300'
+                }`}
+              >
+                Todas
+              </button>
+              {allClientTags.map((tag) => (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => setFilterClientTag(filterClientTag === tag ? '' : tag)}
+                  className={`shrink-0 whitespace-nowrap rounded-xl border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                    filterClientTag === tag
+                      ? 'border-blue-600 bg-blue-600 text-white'
+                      : 'border-stone-200 bg-white text-stone-600 hover:border-blue-300 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {renderClientSelectBar()}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 md:px-4">
+        <div className="flex items-center justify-between gap-2">
+          <ViewToggle view={clientsView} setView={setClientsView} />
+          {actionsMenu}
+        </div>
+        {renderClientSelectBar()}
+      </div>
+    );
+  };
 
   const renderClientsTab = () => (
     <div className="space-y-3">
-      {isDeliveryBusiness && listPlan.lockedCount > 0 && (
+      {usesDeliveryLikeCrmActions && listPlan.lockedCount > 0 && (
         <ClientsListPlanBanner
           planLabel={listPlan.planLabel}
           unlockedCount={listPlan.unlockedCount}
@@ -3232,7 +3373,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         />
       )}
 
-      {isDeliveryBusiness && showSegmentBuilder && listPlan.canUseSegments && (
+      {usesDeliveryLikeCrmActions && showSegmentBuilder && listPlan.canUseSegments && (
         <div className="mt-1">
           <SegmentBuilder
             entityType="clients"
@@ -3244,23 +3385,23 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         </div>
       )}
 
-      {/* Filtro por tags de clientes */}
-      {(() => {
-        if (isDeliveryBusiness && !listPlan.canFilterTags) return null;
+      {/* Filtro por tags — heladería ya los lleva en la toolbar */}
+      {!isHeladeriaBusiness && (() => {
+        if (usesDeliveryLikeCrmActions && !listPlan.canFilterTags) return null;
         const allClientTags = Array.from(new Set(
           (useServerClients ? serverClients : (contextClients || [])).flatMap(c => c.tags || [])
         )).sort();
         if (allClientTags.length === 0) return null;
         return (
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
-            <Tag className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+            <Tag className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
             <button onClick={() => setFilterClientTag('')}
-              className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${!filterClientTag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-gray-400'}`}>
+              className={`flex-shrink-0 px-2.5 py-1 rounded-xl text-xs font-semibold border transition-all ${!filterClientTag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-700 hover:border-blue-300'}`}>
               Todas las etiquetas
             </button>
             {allClientTags.map(tag => (
               <button key={tag} onClick={() => setFilterClientTag(filterClientTag === tag ? '' : tag)}
-                className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all whitespace-nowrap ${filterClientTag === tag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-gray-400'}`}>
+                className={`flex-shrink-0 px-2.5 py-1 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap ${filterClientTag === tag ? 'bg-blue-600 text-white border-blue-600' : 'bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-700 hover:border-blue-300'}`}>
                 {tag}
               </button>
             ))}
@@ -3271,21 +3412,21 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
       {/* Pills de Puntos de Venta — Clientes */}
       {branches.length > 0 && (
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none' }}>
-          <Store className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 flex-shrink-0" />
+          <Store className="w-3.5 h-3.5 text-stone-400 flex-shrink-0" />
           <button onClick={() => setFilterBranch('all')}
-            className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all whitespace-nowrap ${
+            className={`flex-shrink-0 px-2.5 py-1 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap ${
               filterBranch === 'all'
-                ? 'bg-violet-600 text-white border-violet-600'
-                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-violet-300'
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-700 hover:border-blue-300'
             }`}>
             Todos los PDV
           </button>
           {branches.map(b => (
             <button key={b.branch_id} onClick={() => setFilterBranch(filterBranch === b.branch_id ? 'all' : b.branch_id)}
-              className={`flex-shrink-0 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all whitespace-nowrap ${
+              className={`flex-shrink-0 px-2.5 py-1 rounded-xl text-xs font-semibold border transition-all whitespace-nowrap ${
                 filterBranch === b.branch_id
-                  ? 'bg-violet-600 text-white border-violet-600'
-                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:border-violet-300'
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-700 hover:border-blue-300'
               }`}>
               {b.name}
               {b.city && <span className="ml-1 opacity-60">· {b.city}</span>}
@@ -3309,8 +3450,12 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
               const isSelected = clientSelectMode && isClientSelected(clientId);
               return (
               <div key={client.id}
-                className={`group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-l-4 ${client.status === 'active' ? 'border-l-emerald-500' : 'border-l-slate-400'} rounded-2xl p-4 hover:shadow-md transition-all cursor-pointer ${
-                  isSelected ? 'ring-2 ring-red-400 dark:ring-red-500' : ''
+                className={`group rounded-2xl border border-l-4 p-4 transition-all cursor-pointer ${
+                  isHeladeriaBusiness
+                    ? 'border-stone-200 bg-white hover:border-blue-200 hover:shadow-sm dark:border-stone-700 dark:bg-stone-900'
+                    : 'border-gray-200 bg-white hover:shadow-md dark:border-gray-700 dark:bg-gray-800'
+                } ${client.status === 'active' ? 'border-l-emerald-500' : 'border-l-stone-400'} ${
+                  isSelected ? 'ring-2 ring-rose-400 dark:ring-rose-500' : ''
                 }`}
                 onClick={() => {
                   if (clientSelectMode) {
@@ -3337,7 +3482,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                         dni={client.dni}
                         phone={client.phone}
                         stats={deliveryStats}
-                        showTier={listPlan.canViewSpent}
+                        showTier={useClientLiveStats && listPlan.canViewSpent}
                       />
                     ) : (
                       <>
@@ -3354,7 +3499,19 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 min-w-0"><Mail className="w-3.5 h-3.5 flex-shrink-0" /><span className="truncate">{client.email}</span></div>
                   {client.city && <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"><MapPin className="w-3.5 h-3.5" />{client.city}</div>}
                 </div>
-                {isOpsCrmBusiness ? (
+                {isHeladeriaBusiness && (client.tags?.length ?? 0) > 0 ? (
+                  <div className="mb-2 flex flex-wrap gap-1.5">
+                    {client.tags!.slice(0, 4).map((tag) => (
+                      <span
+                        key={tag}
+                        className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[11px] font-medium text-stone-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {isOpsCrmBusiness && !isHeladeriaBusiness ? (
                   <DeliveryClientCardExtras
                     stats={deliveryStats}
                     tags={client.tags || []}
@@ -3381,10 +3538,16 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                       <DeliveryClientRowActions
                         onView={() => viewClientDetail(client.id)}
                         onNewOrder={() => goToOpsTpvForClient(client.id)}
-                        onDelete={isDeliveryBusiness ? () => void handleDeleteDeliveryClient(client) : undefined}
+                        onDelete={usesDeliveryLikeCrmActions ? () => void handleDeleteDeliveryClient(client) : undefined}
                         deleting={deletingClientId === client.id}
                         alwaysVisible
-                        newOrderTitle={isRestaurantBusiness ? 'Abrir TPV sala' : 'Nuevo pedido'}
+                        newOrderTitle={
+                          isRestaurantBusiness
+                            ? 'Abrir TPV sala'
+                            : isHeladeriaBusiness
+                              ? 'Abrir TPV heladería'
+                              : 'Nuevo pedido'
+                        }
                       />
                     ) : !isOpsCrmBusiness ? (
                       <>
@@ -3421,31 +3584,37 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
       {/* Tabla con ColFilter */}
       {clientsView === 'table' && (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              <span className="font-semibold text-gray-900 dark:text-gray-100">{clientsListTotal}</span> cliente{clientsListTotal !== 1 ? 's' : ''}
-              {isOpsCrmBusiness && (
-                <span className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
-                  listPlan.isBasicPlan
-                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
-                    : listPlan.planTier === 'pro'
-                      ? 'bg-violet-100 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200'
-                      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200'
-                }`}>
-                  Plan {listPlan.planLabel}
-                </span>
+        <div className={`${isHeladeriaBusiness ? VERTIAL_SURFACE : 'bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700'} overflow-hidden`}>
+          <div className={`px-5 py-3 flex items-center justify-between ${isHeladeriaBusiness ? 'border-b border-stone-100 dark:border-stone-800' : 'border-b border-gray-100 dark:border-gray-800'}`}>
+            <span className={`text-sm ${isHeladeriaBusiness ? 'text-stone-500 dark:text-stone-400' : 'text-gray-500 dark:text-gray-400'}`}>
+              {isHeladeriaBusiness ? (
+                <span className="font-medium text-stone-700 dark:text-stone-200">Listado</span>
+              ) : (
+                <>
+                  <span className="font-semibold text-gray-900 dark:text-gray-100">{clientsListTotal}</span> cliente{clientsListTotal !== 1 ? 's' : ''}
+                  {isOpsCrmBusiness && (
+                    <span className={`ml-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                      listPlan.isBasicPlan
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
+                        : listPlan.planTier === 'pro'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200'
+                          : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200'
+                    }`}>
+                      Plan {listPlan.planLabel}
+                    </span>
+                  )}
+                </>
               )}
             </span>
             <div className="flex items-center gap-2">
-              {isOpsCrmBusiness && lockedDeliveryColIds.length > 0 && (
+              {!isHeladeriaBusiness && isOpsCrmBusiness && lockedDeliveryColIds.length > 0 && (
                 <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500" title="Columnas bloqueadas en tu plan">
                   <Lock className="h-3 w-3" />
                   {lockedDeliveryColIds.length} columna{lockedDeliveryColIds.length !== 1 ? 's' : ''} bloqueada{lockedDeliveryColIds.length !== 1 ? 's' : ''}
                 </span>
               )}
               {(cActiveFilters > 0 || cSort) && (
-                <button onClick={clearCFilters} className="text-xs text-red-500 font-medium flex items-center gap-1"><X className="w-3 h-3" /> Limpiar filtros</button>
+                <button onClick={clearCFilters} className="text-xs text-rose-600 font-medium flex items-center gap-1"><X className="w-3 h-3" /> Limpiar filtros</button>
               )}
               <ColumnCustomizer columns={clientColDefsForUi} visibleIds={visibleClientColIds} columnOrder={clientColOrder} onToggle={toggleClientCol} onReorder={reorderClientCols} onReset={resetClientCols} />
             </div>
@@ -3453,7 +3622,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[400px]">
               <thead>
-                <tr className="border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800">
+                <tr className={`border-b ${isHeladeriaBusiness ? 'border-stone-100 bg-stone-50/80 dark:border-stone-800 dark:bg-stone-900/60' : 'border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800'}`}>
                   <th className="w-1 px-0" />
                   {clientSelectMode ? (
                     <th className="px-3 py-3 w-10">
@@ -3465,7 +3634,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                           if (allMatchingClientsSelected) clearClientSelection();
                           else selectAllMatchingClients();
                         }}
-                        className="h-4 w-4 rounded border-gray-300 text-red-600 focus:ring-red-500"
+                        className="h-4 w-4 rounded border-stone-300 text-rose-600 focus:ring-rose-500"
                         title={`Seleccionar todos (${clientsListTotal})`}
                       />
                     </th>
@@ -3526,7 +3695,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                   )}
                   {effectiveVisibleClientCols.includes('responsable') && <th className="px-5 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Responsable</th>}
                   {effectiveVisibleClientCols.includes('docs') && <th className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Docs</th>}
-                  {isDeliveryBusiness && lockedDeliveryColIds.map((colId) => {
+                  {usesDeliveryLikeCrmActions && lockedDeliveryColIds.map((colId) => {
                     const label = clientColDefsForUi.find((c) => c.id === colId)?.label || colId;
                     return (
                       <th
@@ -3586,7 +3755,7 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                             dni={client.dni}
                             phone={client.phone}
                             stats={deliveryStats}
-                            showTier={listPlan.canViewSpent}
+                            showTier={useClientLiveStats && listPlan.canViewSpent}
                           />
                         ) : (
                           <>
@@ -3646,9 +3815,15 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
                           <DeliveryClientRowActions
                             onView={() => viewClientDetail(client.id)}
                             onNewOrder={() => goToOpsTpvForClient(client.id)}
-                            onDelete={isDeliveryBusiness ? () => void handleDeleteDeliveryClient(client) : undefined}
+                            onDelete={usesDeliveryLikeCrmActions ? () => void handleDeleteDeliveryClient(client) : undefined}
                             deleting={deletingClientId === client.id}
-                            newOrderTitle={isRestaurantBusiness ? 'Abrir TPV sala' : 'Nuevo pedido'}
+                            newOrderTitle={
+                              isRestaurantBusiness
+                                ? 'Abrir TPV sala'
+                                : isHeladeriaBusiness
+                                  ? 'Abrir TPV heladería'
+                                  : 'Nuevo pedido'
+                            }
                           />
                         ) : !isOpsCrmBusiness ? (
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -4283,7 +4458,9 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
     leads: 'Gestión de leads',
     clients: isRestaurantBusiness
       ? 'Clientes del local · reservas y fidelización'
-      : 'Gestión de clientes',
+      : isHeladeriaBusiness
+        ? 'Ficha de clientes · alta, Excel y búsqueda'
+        : 'Gestión de clientes',
     billing: 'Gestión de facturación',
     alerts: 'Alertas y recordatorios comerciales',
   };
@@ -4295,52 +4472,54 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
 
         {activeTab === 'clients' ? renderClientsToolbar() : null}
 
-        {/* Misma barra de búsqueda en todas las pestañas: debajo del nav, altura fija, sin saltos al cambiar */}
-        <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm px-3 py-3 md:px-4 md:py-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative min-w-0 flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
-              <input
-                type="text"
-                placeholder={
-                  activeTab === 'billing'
-                    ? 'Buscar facturas por número, cliente o matrícula…'
-                    : activeTab === 'clients'
-                      ? 'Buscar clientes por nombre, email o teléfono…'
-                      : activeTab === 'alerts'
-                        ? 'Buscar en alertas (texto visible en la lista)…'
-                        : 'Buscar leads por nombre, vehículo o contacto…'
-                }
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-11 w-full rounded-xl border-2 border-gray-200 bg-white pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:placeholder:text-gray-500"
-                aria-label="Buscar en CRM"
-              />
-              {searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700"
-                  aria-label="Limpiar búsqueda"
+        {/* Heladería: búsqueda ya va en la toolbar unificada */}
+        {!(isHeladeriaBusiness && activeTab === 'clients') ? (
+          <div className="rounded-2xl border border-stone-200 bg-white px-3 py-3 shadow-sm dark:border-stone-700 dark:bg-stone-900 md:px-4 md:py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="relative min-w-0 flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                <input
+                  type="text"
+                  placeholder={
+                    activeTab === 'billing'
+                      ? 'Buscar facturas por número, cliente o matrícula…'
+                      : activeTab === 'clients'
+                        ? 'Buscar clientes por nombre, email o teléfono…'
+                        : activeTab === 'alerts'
+                          ? 'Buscar en alertas (texto visible en la lista)…'
+                          : 'Buscar leads por nombre, vehículo o contacto…'
+                  }
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-stone-200 bg-stone-50/80 pl-10 pr-10 text-sm text-stone-900 placeholder:text-stone-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100"
+                  aria-label="Buscar en CRM"
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 hover:bg-stone-100 dark:hover:bg-stone-800"
+                    aria-label="Limpiar búsqueda"
+                  >
+                    <X className="h-3.5 w-3.5 text-stone-400" />
+                  </button>
+                ) : null}
+              </div>
+              {hasWorkCenters ? (
+                <select
+                  className="h-11 w-full shrink-0 rounded-xl border border-stone-200 bg-white px-3 text-sm text-stone-900 focus:border-blue-500 focus:outline-none dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100 sm:w-[min(100%,280px)] sm:min-w-[200px]"
+                  value={filterWorkCenter}
+                  onChange={(e) => setFilterWorkCenter(e.target.value)}
                 >
-                  <X className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500" />
-                </button>
+                  <option value="all">Todos los centros</option>
+                  {activeWorkCenters.map((wc) => (
+                    <option key={wc.id} value={wc.id}>{wc.name}</option>
+                  ))}
+                </select>
               ) : null}
             </div>
-            {hasWorkCenters ? (
-              <select
-                className="h-11 w-full shrink-0 rounded-xl border-2 border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 sm:w-[min(100%,280px)] sm:min-w-[200px]"
-                value={filterWorkCenter}
-                onChange={(e) => setFilterWorkCenter(e.target.value)}
-              >
-                <option value="all">Todos los centros</option>
-                {activeWorkCenters.map((wc) => (
-                  <option key={wc.id} value={wc.id}>{wc.name}</option>
-                ))}
-              </select>
-            ) : null}
           </div>
-        </div>
+        ) : null}
 
         {activeTab === 'leads'   && renderLeadsTab()}
         {activeTab === 'clients' && renderClientsTab()}
@@ -4515,7 +4694,8 @@ export function ClientsPage({ embedDeliveryOps }: ClientsPageProps = {}) {
         exportUserId={clientsDataUserId || authUser?.user_id}
         exportBusinessId={scopedClientsBusinessId}
         importBusinessId={scopedClientsBusinessId}
-        includeResponsible={!isDeliveryBusiness}
+        includeResponsible={!usesDeliveryLikeCrmActions}
+        templateVertical={isHeladeriaBusiness ? 'iceCreamShop' : null}
         onImportComplete={() => {
           if (useServerClients && !useSegmentMode) void refreshPaginatedClients();
         }}

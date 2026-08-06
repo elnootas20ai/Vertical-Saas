@@ -63,17 +63,16 @@ import {
   tpvOnlyFoodFromReport,
   type FoodFamilyCounts,
 } from '../../lib/shiftFoodFamilyCounts';
-import {
-  buildShiftSalesBreakdown,
-  filterOrdersForRegisterSession,
-} from '../../lib/registerShiftSalesBreakdown';
 import { AggregatorClosingEditor, type AggregatorClosingSnapshot, type ManualLinesByChannel } from './AggregatorClosingEditor';
 import { DeliveryFoodUnitIcon } from './delivery/DeliveryFoodUnitIcon';
 import { AggregatorCashSummary } from './AggregatorCashSummary';
+import { sessionToUrielAmounts } from '../../lib/cajaUrielClosingsExcelExport';
 import { ShiftBrandBillingSummary } from './ShiftBrandBillingSummary';
 import {
   buildShiftAppsBrandTotals,
   buildShiftBrandRevenue,
+  rollupBrandRevenueToClosingSlots,
+  scaleAppsBrandTotalsToAppTotal,
 } from '../../lib/registerShiftBrandBilling';
 import { listBrandsRequest, type Brand } from '../../lib/brandApi';
 import { buildBrandLabelsMap, brandIdAliases } from '../../lib/brandLabels';
@@ -82,6 +81,7 @@ import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import {
   closingSlotsFromBillingSheets,
   resolveBillingSheetsForClosing,
+  suggestBillingSheetsFromBrands,
   splitRulesFromBillingConfig,
   type BrandBillingSplitRules,
   type ClosingBillingBrandSlot,
@@ -153,6 +153,7 @@ import {
   fetchMembersWorkBlocks,
   type ClockinRecord,
 } from '../../lib/clockinsApi';
+import { requestClockinGeo } from '../../hooks/useGeolocation';
 import type { WorkCenter } from '../../lib/workCentersApi';
 import { listUsersRequest, type AuthUser } from '../../lib/authApi';
 import {
@@ -160,8 +161,9 @@ import {
   Printer, Smartphone, CheckCircle2, X, AlertTriangle, Calculator, ChevronDown,
   ChevronUp, ChevronLeft, ChevronRight, Clock, TrendingUp, TrendingDown, DollarSign, Receipt, BarChart3,
   MapPin, Store, Plus, LogIn, UserCheck, Loader2, RefreshCw, Coffee, Square,
-  MoreVertical, Save, RotateCcw,
+  MoreVertical, Save, RotateCcw, Eye,
 } from 'lucide-react';
+import { RegisterClosingDetailPanel } from './RegisterClosingDetailPanel';
 import { useModalClose } from '../../hooks/useModalClose';
 import {
   VERTIAL_BTN_PRIMARY,
@@ -391,10 +393,12 @@ interface OpeningData {
   counts: CashDenominationCount;
 }
 
-function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false }: {
+function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLoading, pointsOfSale, workCenters, workerOptions, registerSessions, restrictedToPdvId, onClearStorePick, isManagerView = false, isTabletMode = false, tabletStoreLabel, onOpeningPdvChange, restaurantOpening = false, clockInBusinessId = '', clockInOwnerUserId = '', onClockInChanged }: {
   onOpen: (data: OpeningData) => void;
   /** Reabrir turno cerrado hoy/ayer por error (conserva ventas). */
   onReopenClosed?: (session: TpvRegisterSession) => void | Promise<void>;
+  /** Ver el cierre sin reabrir la caja. */
+  onViewClosed?: (session: TpvRegisterSession) => void;
   loading: boolean;
   pointsOfSale: PointOfSale[];
   workCenters: WorkCenter[];
@@ -413,6 +417,10 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
   onOpeningPdvChange?: (pdvId: string) => void;
   /** Bar/restaurante: tienda fijada arriba, sin auto-scroll al bloque terminal. */
   restaurantOpening?: boolean;
+  /** Contexto para panel de fichaje embebido en apertura. */
+  clockInBusinessId?: string;
+  clockInOwnerUserId?: string;
+  onClockInChanged?: () => void;
 }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -535,6 +543,40 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
       setReopening(false);
     }
   };
+
+  const reopenableBanner = reopenableSession ? (
+    <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50/90 dark:bg-stone-900/50 px-2.5 py-1.5 flex flex-wrap items-center gap-2">
+      <p className="text-[11px] font-semibold text-stone-700 dark:text-stone-200 min-w-0 flex-1 truncate">
+        Caja de {reopenableDayLabel} cerrada
+        {reopenableSession.pointOfSaleName ? (
+          <span className="font-normal text-stone-500"> · {reopenableSession.pointOfSaleName}</span>
+        ) : null}
+      </p>
+      <div className="flex items-center gap-1.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => onViewClosed?.(reopenableSession)}
+          disabled={!onViewClosed || parentLoading}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#2563EB] hover:bg-blue-700 disabled:opacity-60 text-white text-[11px] font-semibold"
+        >
+          <Eye className="w-3 h-3" />
+          Ver
+        </button>
+        {onReopenClosed ? (
+          <button
+            type="button"
+            onClick={() => void handleReopenClick()}
+            disabled={reopening || parentLoading}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 text-[11px] font-semibold disabled:opacity-60"
+            title="Solo si la cerraste por error"
+          >
+            {reopening ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3 h-3" />}
+            Reabrir
+          </button>
+        ) : null}
+      </div>
+    </div>
+  ) : null;
 
   const didPrefillFromPreviousCloseRef = useRef(false);
   useEffect(() => {
@@ -742,7 +784,7 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
     });
   };
 
-  const inputCls = 'w-full px-3 py-2.5 border-2 border-gray-200 dark:border-gray-700 rounded-xl focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
+  const inputCls = 'w-full px-2.5 py-2 border border-gray-200 dark:border-gray-700 rounded-lg focus:border-gray-900 dark:focus:border-gray-400 outline-none bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm';
 
   const goBack = () => {
     if (isTabletMode) {
@@ -795,91 +837,6 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
 
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const terminalSectionRef = useRef<HTMLDivElement>(null);
-  const [showScrollHint, setShowScrollHint] = useState(false);
-
-  const openingSteps = useMemo(() => {
-    if (isTabletMode) {
-      const wDone = Boolean(effectiveWorkerName());
-      return [
-        {
-          id: 'worker',
-          label: 'Quién abre',
-          done: wDone && tabletStep > 1,
-          current: tabletStep === 1,
-        },
-        {
-          id: 'cash',
-          label: 'Efectivo',
-          done: tabletStep === 2,
-          current: tabletStep === 2,
-        },
-        {
-          id: 'tpv',
-          label: 'TPV',
-          done: false,
-          current: false,
-        },
-      ];
-    }
-    const steps: { id: string; label: string; done: boolean; current: boolean }[] = [];
-    const wDone = Boolean(effectiveWorkerName());
-    steps.push({ id: 'worker', label: 'Trabajador', done: wDone, current: !wDone });
-    if (isManagerView && !restrictedToPdvId && hasStores) {
-      const pDone = Boolean(selectedPdvId);
-      steps.push({ id: 'pdv', label: 'Tienda', done: pDone, current: wDone && !pDone });
-    }
-    const tDone = Boolean(selectedTerminalId);
-    steps.push({
-      id: 'terminal',
-      label: 'Terminal',
-      done: tDone,
-      current: wDone && Boolean(selectedPdvId || restrictedToPdvId) && !tDone,
-    });
-    steps.push({
-      id: 'cash',
-      label: 'Efectivo',
-      done: wDone && tDone,
-      current: wDone && tDone && !hasNonZeroCount,
-    });
-    return steps;
-  }, [
-    isTabletMode,
-    effectiveWorkerName,
-    isManagerView,
-    restrictedToPdvId,
-    hasStores,
-    selectedPdvId,
-    selectedTerminalId,
-    hasNonZeroCount,
-    cashCountReady,
-    tabletStep,
-  ]);
-
-  const updateScrollHint = useCallback(() => {
-    const el = bodyScrollRef.current;
-    if (!el) {
-      setShowScrollHint(false);
-      return;
-    }
-    const overflow = el.scrollHeight > el.clientHeight + 12;
-    const notAtBottom = el.scrollTop + el.clientHeight < el.scrollHeight - 32;
-    setShowScrollHint(overflow && notAtBottom);
-  }, []);
-
-  useEffect(() => {
-    updateScrollHint();
-    const el = bodyScrollRef.current;
-    if (!el) return;
-    el.addEventListener('scroll', updateScrollHint, { passive: true });
-    const ro = new ResizeObserver(updateScrollHint);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener('scroll', updateScrollHint);
-      ro.disconnect();
-    };
-  }, [updateScrollHint, selectedPdvId, selectedTerminalId, hasWorkers, hasStores]);
-
-  const pdvById = useMemo(() => new Map(pointsOfSale.map((p) => [p._id, p])), [pointsOfSale]);
 
   useEffect(() => {
     if (!selectedPdvId || selectedTerminalId) return;
@@ -896,202 +853,143 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
   const displayStoreName = selectedPdv
     ? pointOfSaleDisplayLabel(selectedPdv)
     : tabletStoreLabel || '';
+  /** Tienda ya fijada (restaurant / trabajador / tablet): UI más simple. */
+  const storeAlreadyFixed = Boolean(restrictedToPdvId || restaurantOpening || isTabletMode);
+  const terminalLabel = selectedTerminal
+    ? (selectedTerminal.code || selectedTerminal.name)
+    : '';
+
+  const openBlockedReason = !hasWorkers
+    ? 'Añade trabajadores en Equipo'
+    : !effectiveWorkerName()
+      ? 'Ficha o elige quién abre la caja'
+      : selectedWorkerVacationMsg
+        ? selectedWorkerVacationMsg
+        : !hasResolvedPdv
+          ? 'Elige la tienda'
+          : !(selectedTerminal || allowSyntheticTerminal)
+            ? 'Elige el terminal'
+            : '';
 
   return (
-    <div className="h-[100svh] bg-gray-50 dark:bg-gray-900 flex flex-col p-2 sm:p-3 overflow-hidden">
-      <div className={`bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full ${isTabletMode ? 'max-w-2xl' : 'max-w-6xl'} mx-auto flex-1 min-h-0 flex flex-col overflow-hidden`}>
-        {/* Header */}
-        <div className={`border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 relative ${isTabletMode ? 'px-4 py-2.5' : 'px-5 sm:px-6 py-3 sm:py-4'}`}>
-          <div className={`bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0 ${isTabletMode ? 'w-9 h-9' : 'w-11 h-11'}`}>
-            <Unlock className={`text-emerald-600 ${isTabletMode ? 'w-4 h-4' : 'w-5 h-5'}`} />
+    <div className="h-full min-h-0 bg-stone-50 dark:bg-stone-950 flex items-stretch sm:items-center justify-center p-2 sm:p-3 overflow-hidden">
+      <div className={`bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-lg w-full ${isTabletMode ? 'max-w-xl' : 'max-w-4xl'} h-full sm:h-auto sm:max-h-[min(88svh,680px)] min-h-0 flex flex-col overflow-hidden`}>
+        {/* Header — una sola línea clara */}
+        <div className="shrink-0 border-b border-stone-200 dark:border-stone-800 flex items-center gap-2.5 px-3 sm:px-4 py-2.5">
+          <div className="bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center shrink-0 w-9 h-9">
+            <Unlock className="text-emerald-600 w-4 h-4" />
           </div>
           <div className="flex-1 min-w-0">
-            {isTabletMode || selectedPdv ? (
-              <>
-                <h1 className={`font-bold text-gray-900 dark:text-gray-100 leading-tight flex items-center gap-2 truncate ${isTabletMode ? 'text-base' : 'text-lg sm:text-xl'}`}>
-                  <Store className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <span className="truncate">{displayStoreName || 'Tu tienda'}</span>
-                </h1>
-                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 truncate">
-                  {isTabletMode
-                    ? tabletStep === 1
-                      ? 'Paso 1 · Elige quién abre la caja hoy'
-                      : effectiveWorkerName()
-                        ? `Paso 2 · ${effectiveWorkerName()} cuenta el efectivo`
-                        : 'Paso 2 · Conteo de efectivo inicial'
-                    : `Apertura de caja${selectedPdv?.code ? ` · ${selectedPdv.code}` : ''}${selectedTerminal ? ` · Terminal ${selectedTerminal.code || selectedTerminal.name}` : ''}`}
-                </p>
-              </>
-            ) : (
-              <>
-                <h1 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 leading-tight">Apertura de caja</h1>
-                <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">Selecciona punto de venta, terminal y cuenta el efectivo</p>
-              </>
-            )}
+            <h1 className="font-bold text-stone-900 dark:text-stone-100 leading-tight truncate text-sm sm:text-base">
+              {displayStoreName || 'Apertura de caja'}
+            </h1>
+            <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+              {isTabletMode
+                ? tabletStep === 1
+                  ? '1 · Ficha tu entrada'
+                  : '2 · Cuenta el efectivo e abre'
+                : storeAlreadyFixed
+                  ? `Apertura${terminalLabel ? ` · ${terminalLabel}` : ''}`
+                  : 'Elige tienda, ficha y cuenta el efectivo'}
+            </p>
           </div>
-          {cashCountReady && (
-            <span className="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
-              Contado: {total.toFixed(2)}€
+          {cashCountReady ? (
+            <span className="hidden sm:inline-flex px-2.5 py-1 rounded-lg bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-800 dark:text-stone-100 text-[11px] font-bold tabular-nums">
+              {total.toFixed(2)}€
             </span>
-          )}
+          ) : null}
           <button
             type="button"
             onClick={goBack}
-            className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shrink-0"
+            className="p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors shrink-0"
             aria-label="Salir"
             title="Salir"
           >
-            <X className="w-5 h-5 text-gray-500" />
+            <X className="w-4 h-4 text-stone-500" />
           </button>
         </div>
 
-        {/* Pasos visibles (scroll abajo en móvil) */}
-        <div className="shrink-0 px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/50">
-          {isTabletMode ? (
-                <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 text-center sm:text-left">
-              {tabletStep === 1
-                ? 'Tu fichaje se registra al abrir la caja · El resto puede fichar después'
-                : 'Cuenta el dinero en caja antes de empezar'}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-            {openingSteps.map((s, idx) => (
-              <span
-                key={s.id}
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
-                  s.current
-                    ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200'
-                    : s.done
-                      ? 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'
-                      : 'border-gray-200 bg-white/60 text-gray-400 dark:border-gray-700 dark:bg-gray-800/40'
-                }`}
-              >
-                <span
-                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    s.done ? 'bg-emerald-600 text-white' : s.current ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500 dark:bg-gray-700'
-                  }`}
-                >
-                  {s.done ? '✓' : idx + 1}
-                </span>
-                {s.label}
-              </span>
-            ))}
+        {!isTabletMode && reopenableBanner ? (
+          <div className="shrink-0 px-3 py-2 border-b border-stone-200 dark:border-stone-800">
+            {reopenableBanner}
           </div>
-        </div>
+        ) : null}
 
-        {/* Body: 2 columns on lg+ (tablet = solo efectivo) */}
+        {/* Pasos solo en tablet (flujo 1→2) */}
+        {isTabletMode ? (
+          <div className="shrink-0 px-3 sm:px-4 py-2 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/60">
+            <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300">
+              {tabletStep === 1
+                ? 'Pulsa Fichar en tu nombre'
+                : 'Cuenta el dinero del cajón (0 € si está vacío)'}
+            </p>
+          </div>
+        ) : null}
+
+        {/* Body: 2 columnas desde md (~768px), no lg — en ~900px antes se apilaba todo */}
         <div
           ref={bodyScrollRef}
-          className={`flex-1 min-h-0 ${isTabletMode ? 'flex flex-col overflow-y-auto' : 'grid grid-cols-1 lg:grid-cols-5 gap-0 overflow-y-auto lg:overflow-hidden'} relative`}
+          className={`flex-1 min-h-0 ${isTabletMode ? 'flex flex-col overflow-y-auto' : 'grid grid-cols-1 md:grid-cols-2 md:grid-rows-1 gap-0 overflow-y-auto md:overflow-hidden'} relative`}
         >
           {isTabletMode && tabletStep === 1 && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3">
-              {reopenableSession && (
-                <div className="p-3 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40">
-                  <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
-                    ¿Cerraste la caja de {reopenableDayLabel} por error?
-                  </p>
-                  <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
-                    Reabre el mismo turno y conservas las ventas. No hace falta abrir una caja nueva.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void handleReopenClick()}
-                    disabled={reopening || parentLoading}
-                    className="mt-2 w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
-                  >
-                    {reopening ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                    Reabrir caja de {reopenableDayLabel}
-                  </button>
-                </div>
-              )}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-                  <User className="w-3 h-3 inline mr-1" />
-                  ¿Quién abre la caja? *
-                </label>
-                {hasWorkers ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {workerOptions.map((w) => {
-                      const vacationMsg = vacationBlockedById[w.id];
-                      const blocked = Boolean(vacationMsg);
-                      return (
-                      <button
-                        key={w.id}
-                        type="button"
-                        disabled={blocked}
-                        onClick={() => !blocked && setSelectedWorkerId(w.id)}
-                        className={`p-3 min-h-[56px] rounded-xl border-2 text-left transition-all touch-manipulation ${
-                          blocked
-                            ? 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-900/60 opacity-60 cursor-not-allowed'
-                            : selectedWorkerId === w.id
-                              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 bg-white dark:bg-gray-800'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${
-                            blocked
-                              ? 'bg-gray-300 dark:bg-gray-600 text-white'
-                              : selectedWorkerId === w.id
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                          }`}>
-                            <User className="w-5 h-5" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="font-bold text-base text-gray-900 dark:text-gray-100 truncate">{w.name}</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400">
-                              {blocked ? 'Vacaciones / baja' : 'Toca para seleccionar'}
-                            </div>
-                          </div>
-                          {selectedWorkerId === w.id && !blocked && (
-                            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 ml-auto" />
-                          )}
-                        </div>
-                      </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-800 dark:text-amber-200">
-                    No hay miembros en el equipo. Añade trabajadores en <span className="font-bold">Equipo</span> para poder abrir caja.
-                  </div>
-                )}
-              </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-3 flex flex-col">
+              {reopenableBanner}
               {displayStoreName && (
-                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
-                  <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">Tienda</p>
+                <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-2.5 shrink-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Tienda</p>
                   <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                     <Store className="w-4 h-4 text-emerald-600 shrink-0" />
                     {displayStoreName}
                   </p>
                 </div>
               )}
+              {clockInBusinessId && hasResolvedPdv ? (
+                <div className="flex-1 min-h-[240px] flex flex-col min-w-0">
+                  <ClockInModal
+                    embedded
+                    storeLabel={displayStoreName || 'Tienda'}
+                    businessId={clockInBusinessId}
+                    ownerUserId={clockInOwnerUserId}
+                    pdvId={String(selectedPdv?._id || restrictedToPdvId || '')}
+                    workCenterId={String(selectedPdv?.workCenterId || '')}
+                    onCancel={() => undefined}
+                    onChanged={onClockInChanged}
+                    onMemberClockedIn={(memberId) => {
+                      setSelectedWorkerId(memberId);
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-2xl border-2 border-dashed border-violet-300 dark:border-violet-700 bg-violet-50/60 dark:bg-violet-950/30 px-4 py-6 text-center space-y-2">
+                  <LogIn className="w-5 h-5 text-violet-600 mx-auto" />
+                  <p className="text-sm font-bold text-violet-900 dark:text-violet-100">Fichaje del equipo</p>
+                  <p className="text-xs text-violet-800/80 dark:text-violet-200/80">Cargando tienda para fichar…</p>
+                </div>
+              )}
+              {!hasWorkers ? (
+                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  No hay miembros en el equipo. Añade trabajadores en <span className="font-bold">Equipo</span>.
+                </div>
+              ) : selectedWorkerId ? (
+                <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium shrink-0">
+                  Abre la caja: <strong>{effectiveWorkerName()}</strong> (quien acaba de fichar)
+                </p>
+              ) : (
+                <p className="text-xs text-violet-700 dark:text-violet-300 font-medium shrink-0">
+                  Pulsa <strong>Fichar</strong> en tu nombre para continuar
+                </p>
+              )}
             </div>
           )}
 
           {isTabletMode && tabletStep === 2 && (
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 flex flex-col">
-              {reopenableSession && (
-                <div className="mb-3 p-3 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40">
-                  <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
-                    ¿Cerraste la caja de {reopenableDayLabel} por error?
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => void handleReopenClick()}
-                    disabled={reopening || parentLoading}
-                    className="mt-2 w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
-                  >
-                    {reopening ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                    Reabrir caja de {reopenableDayLabel}
-                  </button>
-                </div>
-              )}
-              <div className="mb-3 flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 flex flex-col gap-2.5">
+              {reopenableBanner}
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2">
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Abre la caja</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                    Fichaje · abre la caja
+                  </p>
                   <p className="font-semibold text-gray-900 dark:text-gray-100 truncate">{effectiveWorkerName()}</p>
                 </div>
                 <button
@@ -1102,26 +1000,24 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
                   Cambiar
                 </button>
               </div>
-              <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-2 py-0.5 rounded-md">
-                  0 € también es válido
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                  {total.toFixed(2)}€
                 </span>
               </div>
               {previousCloseCash != null && (
-                <div className="mb-3 p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
-                  <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200 mb-1">
-                    Efectivo al cerrar{previousCloseLabel ? ` (${previousCloseLabel})` : ''}
-                  </p>
-                  <p className="text-lg font-bold text-amber-900 dark:text-amber-100 tabular-nums">
-                    {previousCloseCash.toFixed(2)}€
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-1.5">
+                  <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
+                    Cierre{previousCloseLabel ? ` ${previousCloseLabel}` : ''}:{' '}
+                    <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
                   </p>
                   <button
                     type="button"
                     onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
-                    className="mt-2 w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
+                    className="shrink-0 px-2 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
                   >
-                    Usar como fondo inicial
+                    Usar fondo
                   </button>
                 </div>
               )}
@@ -1131,287 +1027,211 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
             </div>
           )}
 
-          {/* Left panel: who + where (oculto en tablet) */}
+          {/* Desktop: columna fichaje | columna efectivo */}
           {!isTabletMode && (
-          <div className="lg:col-span-3 p-5 sm:p-6 lg:overflow-y-auto space-y-5 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
-            {/* Worker */}
-            <div>
-              <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Trabajador *</label>
-              {hasWorkers ? (
-                <div className="relative space-y-2">
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <select
-                      value={selectedWorkerId}
-                      onChange={(e) => setSelectedWorkerId(e.target.value)}
-                      className={`${inputCls} pl-10`}
-                      autoFocus
-                    >
-                      <option value="">Selecciona…</option>
-                      {workerOptions.map((w) => (
-                        <option key={w.id} value={w.id} disabled={Boolean(vacationBlockedById[w.id])}>
-                          {vacationBlockedById[w.id] ? `${w.name} (vacaciones/baja)` : w.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  {selectedWorkerVacationMsg ? (
-                    <p className="text-xs text-amber-700 dark:text-amber-300">{selectedWorkerVacationMsg}</p>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
-                  No se detecta ningún miembro en <span className="font-bold">Equipo</span>. No puedes abrir caja hasta conectar el equipo.
-                </div>
-              )}
-            </div>
-
-            {/* Tiendas / PDV — solo gerente elige; trabajador entra con tienda asignada al invitar */}
-            {isManagerView && !restrictedToPdvId && hasStores && (
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider"><MapPin className="w-3 h-3 inline mr-1" />Tienda *</label>
-                  <button
-                    type="button"
-                    onClick={handlePointOfSaleAction}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-bold border transition-colors inline-flex items-center gap-1 ${
-                      pointOfSaleAccess.canCreatePointOfSale
-                        ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30'
-                        : 'border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30'
-                    }`}
-                    title={pointOfSaleActionTitle}
-                  >
-                    {pointOfSaleAccess.canCreatePointOfSale && <Plus className="w-3 h-3" />}
-                    {pointOfSaleActionLabel}
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                  {(storeRows.length > 0
-                    ? storeRows
-                    : allActivePdvs.map((pdv) => ({
-                        rowId: pdv._id,
-                        pdvId: pdv._id,
-                        workCenterId: pdv.workCenterId,
-                        title: pointOfSaleDisplayLabel(pdv),
-                        code: pdv.code,
-                        inactive: false,
-                        needsPdv: false,
-                      }))
-                  ).map((row) => {
-                    const pdv = row.pdvId ? pdvById.get(row.pdvId) : undefined;
-                    const selected = Boolean(row.pdvId && selectedPdvId === row.pdvId);
-                    const termCount = pdv?.terminals.filter((t) => t.active !== false).length ?? 0;
-                    return (
+            <>
+              {/* Franja terminal (sin comer espacio del fichaje) */}
+              {selectedPdv && availableTerminals.length > 1 ? (
+                <div
+                  ref={terminalSectionRef}
+                  className="md:col-span-2 shrink-0 px-3 py-2 border-b border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 flex flex-wrap items-center gap-2"
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500 shrink-0">
+                    Terminal
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 min-w-0">
+                    {availableTerminals.map((t) => (
                       <button
-                        key={row.rowId}
+                        key={t.id}
                         type="button"
-                        onClick={() => handleSelectStoreRow(row)}
-                        className={`p-2.5 rounded-xl border-2 text-left transition-all ${
-                          selected
-                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20'
-                            : row.needsPdv
-                              ? 'border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-900/10 hover:border-amber-300'
-                              : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                        onClick={() => setSelectedTerminalId(t.id)}
+                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${
+                          selectedTerminalId === t.id
+                            ? 'border-[#2563EB] bg-blue-50 text-[#2563EB] dark:bg-blue-950/40 dark:text-blue-200'
+                            : 'border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:border-stone-300'
                         }`}
                       >
-                        <div className="font-semibold text-sm text-gray-900 dark:text-gray-100 flex items-center gap-1.5 truncate">
-                          <Store className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span className="truncate">{row.title}</span>
-                        </div>
-                        <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">
-                          {row.needsPdv
-                            ? 'Completa dirección en Ajustes'
-                            : `${row.code || pdv?.code || '—'} · ${termCount} TPV${termCount !== 1 ? 's' : ''}`}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {restrictedToPdvId && hasStores && displayPdvs.length === 0 && onClearStorePick && (
-              <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-amber-900 dark:text-amber-100">
-                <p className="font-semibold">Esta tienda ya no está disponible.</p>
-                <button type="button" onClick={onClearStorePick} className="mt-3 px-4 py-2 rounded-xl bg-amber-600 text-white font-semibold text-xs">
-                  Elegir otra tienda
-                </button>
-              </div>
-            )}
-
-            {restrictedToPdvId && hasStores && displayPdvs.length > 0 && (
-              <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
-                <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300 mb-1">Tu tienda</p>
-                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                  <Store className="w-4 h-4 text-emerald-600 shrink-0" />
-                  {pointOfSaleDisplayLabel(displayPdvs[0])}
-                </p>
-              </div>
-            )}
-
-            {isManagerView && !restrictedToPdvId && !hasStores && !parentLoading && (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 text-sm text-gray-600 dark:text-gray-400">
-                <p>No hay PDV activos en esta empresa.</p>
-                <button
-                  type="button"
-                  onClick={() => navigate('/saas/settings/tienda')}
-                  className="mt-2 text-emerald-600 dark:text-emerald-400 font-semibold hover:underline"
-                >
-                  Configurar tiendas en Ajustes
-                </button>
-              </div>
-            )}
-
-            {parentLoading && !hasStores && (
-              <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4 text-sm text-gray-500 dark:text-gray-400">
-                Cargando tiendas y PDV…
-              </div>
-            )}
-
-            {selectedPdvId && !selectedTerminalId && !allowSyntheticTerminal && (
-              <div className="lg:hidden flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/25 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold">
-                <ChevronDown className="w-4 h-4 shrink-0 animate-bounce" aria-hidden />
-                Siguiente: elige un terminal más abajo
-              </div>
-            )}
-
-            {/* Terminal selection from PDV (required) */}
-            {selectedPdv ? (
-              <div ref={terminalSectionRef} className="scroll-mt-4">
-                <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2"><Monitor className="w-3 h-3 inline mr-1" />Terminal *</label>
-                {availableTerminals.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {availableTerminals.map(t => (
-                      <button key={t.id} onClick={() => setSelectedTerminalId(t.id)}
-                        className={`p-2.5 rounded-xl border-2 text-left transition-all ${selectedTerminalId === t.id ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20' : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'}`}>
-                        <div className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">{t.code || t.name}</div>
-                        {t.name && t.code && <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">{t.name}</div>}
-                        <div className="flex gap-2 mt-1 text-[11px] text-gray-400 flex-wrap">
-                          {t.datafonName && <span className="flex items-center gap-0.5"><Smartphone className="w-2.5 h-2.5" />{t.datafonName}</span>}
-                          {t.printerName && <span className="flex items-center gap-0.5"><Printer className="w-2.5 h-2.5" />{t.printerName}</span>}
-                        </div>
+                        {t.code || t.name}
                       </button>
                     ))}
                   </div>
-                ) : allowSyntheticTerminal ? (
-                  <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-3 text-sm text-emerald-800 dark:text-emerald-200">
-                    Se usará el terminal principal de esta tienda al abrir caja.
+                </div>
+              ) : null}
+
+              <div className="p-3 md:overflow-y-auto border-b md:border-b-0 md:border-r border-stone-200 dark:border-stone-800 flex flex-col gap-2 min-h-0 min-w-0 md:h-full">
+                {isManagerView && !restrictedToPdvId && hasStores ? (
+                  <div className="shrink-0 space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
+                        Tienda *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handlePointOfSaleAction}
+                        className="px-2 py-1 rounded-md text-[10px] font-bold border border-stone-200 text-stone-600 hover:bg-stone-50"
+                        title={pointOfSaleActionTitle}
+                      >
+                        {pointOfSaleActionLabel}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(storeRows.length > 0
+                        ? storeRows
+                        : allActivePdvs.map((pdv) => ({
+                            rowId: pdv._id,
+                            pdvId: pdv._id,
+                            workCenterId: pdv.workCenterId,
+                            title: pointOfSaleDisplayLabel(pdv),
+                            code: pdv.code,
+                            inactive: false,
+                            needsPdv: false,
+                          }))
+                      ).map((row) => {
+                        const selected = Boolean(row.pdvId && selectedPdvId === row.pdvId);
+                        return (
+                          <button
+                            key={row.rowId}
+                            type="button"
+                            onClick={() => handleSelectStoreRow(row)}
+                            className={`px-2 py-2 rounded-xl border text-left text-xs font-semibold truncate ${
+                              selected
+                                ? 'border-emerald-500 bg-emerald-50 text-emerald-900'
+                                : 'border-stone-200 dark:border-stone-700 text-stone-800 dark:text-stone-100'
+                            }`}
+                          >
+                            {row.title}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                ) : (
-                  <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                ) : null}
+
+                {restrictedToPdvId && hasStores && displayPdvs.length === 0 && onClearStorePick ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <p className="font-semibold">Esta tienda ya no está disponible.</p>
+                    <button type="button" onClick={onClearStorePick} className="mt-2 px-3 py-1.5 rounded-lg bg-amber-600 text-white text-xs font-semibold">
+                      Elegir otra tienda
+                    </button>
+                  </div>
+                ) : null}
+
+                {isManagerView && !restrictedToPdvId && !hasStores && !parentLoading ? (
+                  <div className="rounded-xl border border-stone-200 p-3 text-sm text-stone-600">
+                    No hay PDV activos.{' '}
+                    <button type="button" onClick={() => navigate('/saas/settings/tienda')} className="font-semibold text-[#2563EB] hover:underline">
+                      Configurar tiendas
+                    </button>
+                  </div>
+                ) : null}
+
+                {parentLoading && !hasStores ? (
+                  <p className="text-sm text-stone-500">Cargando tiendas…</p>
+                ) : null}
+
+                {selectedPdv && availableTerminals.length === 0 && !allowSyntheticTerminal ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                     Este PDV no tiene terminales activos. Configúralos en Ajustes.
                   </div>
-                )}
-              </div>
-            ) : null}
+                ) : null}
 
-            {/* Selected terminal info summary */}
-            {selectedTerminal && (
-              <div className="flex gap-2 flex-wrap text-xs">
-                <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 rounded-lg font-medium flex items-center gap-1"><Monitor className="w-3 h-3" />{selectedTerminal.code || selectedTerminal.name}</span>
-                {effectiveDatafon && <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 rounded-lg font-medium flex items-center gap-1"><Smartphone className="w-3 h-3" />{effectiveDatafon}</span>}
-                {effectivePrinter && <span className="px-2.5 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg font-medium flex items-center gap-1"><Printer className="w-3 h-3" />{effectivePrinter}</span>}
+                <div className="flex-1 min-h-0 flex flex-col">
+                  {clockInBusinessId && hasResolvedPdv ? (
+                    <ClockInModal
+                      embedded
+                      storeLabel={displayStoreName || selectedPdv?.name || 'Tienda'}
+                      businessId={clockInBusinessId}
+                      ownerUserId={clockInOwnerUserId}
+                      pdvId={String(selectedPdv?._id || restrictedToPdvId || '')}
+                      workCenterId={String(selectedPdv?.workCenterId || '')}
+                      onCancel={() => undefined}
+                      onChanged={onClockInChanged}
+                      onMemberClockedIn={(memberId) => {
+                        setSelectedWorkerId(memberId);
+                      }}
+                    />
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-stone-300 dark:border-stone-600 bg-stone-50 dark:bg-stone-950/40 px-4 py-8 text-center">
+                      <LogIn className="w-5 h-5 text-stone-500 mx-auto mb-2" />
+                      <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Fichaje</p>
+                      <p className="text-xs text-stone-500 mt-1">
+                        {clockInBusinessId ? 'Elige la tienda para ver el equipo.' : 'Cargando…'}
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
+
+              <div className="p-3 bg-stone-50 dark:bg-stone-950/50 md:overflow-y-auto flex flex-col gap-2.5 min-h-0 min-w-0 md:h-full">
+                <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-3 py-2 space-y-1.5 shrink-0">
+                  <label className="block text-[10px] font-bold text-stone-500 uppercase tracking-wider">
+                    Quién abre la caja *
+                  </label>
+                  {hasWorkers ? (
+                    <div className="relative">
+                      <User className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-stone-400" />
+                      <select
+                        value={selectedWorkerId}
+                        onChange={(e) => setSelectedWorkerId(e.target.value)}
+                        className={`${inputCls} pl-8 min-h-10 text-sm`}
+                      >
+                        <option value="">Selecciona…</option>
+                        {workerOptions.map((w) => (
+                          <option key={w.id} value={w.id} disabled={Boolean(vacationBlockedById[w.id])}>
+                            {vacationBlockedById[w.id] ? `${w.name} (vacaciones/baja)` : w.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-amber-700">No hay equipo. Añade trabajadores en Equipo.</p>
+                  )}
+                  {selectedWorkerVacationMsg ? (
+                    <p className="text-[11px] text-amber-700">{selectedWorkerVacationMsg}</p>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 shrink-0">
+                  <label className="text-[10px] font-bold text-stone-500 uppercase tracking-wider">
+                    Efectivo en cajón *
+                  </label>
+                  <span className="text-[11px] font-bold text-stone-900 dark:text-stone-100 tabular-nums">
+                    {total.toFixed(2)}€
+                  </span>
+                </div>
+
+                {previousCloseCash != null ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-2.5 py-2 shrink-0">
+                    <p className="text-[11px] text-amber-900 dark:text-amber-100 min-w-0 flex-1">
+                      Último cierre{previousCloseLabel ? ` (${previousCloseLabel})` : ''}:{' '}
+                      <strong className="tabular-nums">{previousCloseCash.toFixed(2)}€</strong>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
+                      className="shrink-0 px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold"
+                    >
+                      Usar
+                    </button>
+                  </div>
+                ) : null}
+
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  <CashCountGrid counts={counts} onChange={setCounts} compact />
+                </div>
+              </div>
+            </>
           )}
 
           {isTabletMode && parentLoading && !selectedPdv && (
-            <div className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400 text-center">
+            <div className="px-5 py-4 text-sm text-stone-500 text-center">
               Cargando tu tienda…
             </div>
-          )}
-
-          {/* Right panel: cash count (solo modo gerente / no tablet) */}
-          {!isTabletMode && (
-          <div className="lg:col-span-2 p-5 sm:p-6 bg-gray-50 dark:bg-gray-900/40 lg:overflow-y-auto flex flex-col scroll-mt-4">
-            {selectedTerminalId && !hasNonZeroCount && (
-              <div className="lg:hidden flex items-center justify-center gap-2 mb-3 py-2 px-3 rounded-xl bg-amber-50 dark:bg-amber-900/25 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs font-semibold">
-                <ChevronDown className="w-4 h-4 shrink-0 animate-bounce" aria-hidden />
-                Cuenta el efectivo en esta zona (0 € si la caja está vacía)
-              </div>
-            )}
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <label className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Conteo de efectivo *</label>
-              {canOpen && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-2 py-0.5 rounded-md">
-                  0 € también es válido
-                </span>
-              )}
-            </div>
-            {reopenableSession && (
-              <div className="mb-3 p-3 rounded-xl border-2 border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40">
-                <p className="text-sm font-bold text-amber-900 dark:text-amber-100">
-                  ¿Cerraste la caja de {reopenableDayLabel} por error?
-                </p>
-                <p className="text-xs text-amber-800 dark:text-amber-200 mt-1">
-                  Reabre el mismo turno y conservas las ventas ({reopenableSession.pointOfSaleName || 'tienda'}).
-                </p>
-                <button
-                  type="button"
-                  onClick={() => void handleReopenClick()}
-                  disabled={reopening || parentLoading}
-                  className="mt-2 w-full py-2.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white text-sm font-bold transition-colors flex items-center justify-center gap-2"
-                >
-                  {reopening ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
-                  Reabrir caja de {reopenableDayLabel}
-                </button>
-              </div>
-            )}
-            {previousCloseCash != null && !reopenableSession && (
-              <div className="mb-3 p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
-                <p className="text-xs font-bold uppercase tracking-wide text-amber-800 dark:text-amber-200 mb-1">
-                  Efectivo al cerrar{previousCloseLabel ? ` (${previousCloseLabel})` : ''}
-                </p>
-                <p className="text-lg font-bold text-amber-900 dark:text-amber-100 tabular-nums">
-                  {previousCloseCash.toFixed(2)}€
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
-                  className="mt-2 w-full py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-colors"
-                >
-                  Usar como fondo inicial
-                </button>
-              </div>
-            )}
-            {previousCloseCash != null && reopenableSession && (
-              <div className="mb-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-                <p className="text-xs font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">
-                  O abrir caja nueva con fondo{previousCloseLabel ? ` (${previousCloseLabel})` : ''}
-                </p>
-                <p className="text-base font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-                  {previousCloseCash.toFixed(2)}€
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setCounts(buildDenominationFromAmount(previousCloseCash))}
-                  className="mt-2 w-full py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 text-xs font-bold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                >
-                  Usar como fondo inicial
-                </button>
-              </div>
-            )}
-            <div className="flex-1 min-h-0">
-              <CashCountGrid counts={counts} onChange={setCounts} />
-            </div>
-          </div>
-          )}
-
-          {showScrollHint && !isTabletMode && (
-            <button
-              type="button"
-              onClick={() => bodyScrollRef.current?.scrollBy({ top: 220, behavior: 'smooth' })}
-              className="lg:hidden absolute bottom-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 px-4 py-2 rounded-full bg-gray-900/90 text-white text-xs font-semibold shadow-lg backdrop-blur-sm"
-            >
-              <ChevronDown className="w-4 h-4 animate-bounce" />
-              Ver más abajo
-            </button>
           )}
         </div>
 
         {/* Footer */}
-        <div className={`shrink-0 border-t border-gray-200 dark:border-gray-700 flex gap-2 bg-white dark:bg-gray-800 ${isTabletMode ? 'px-4 py-2' : 'px-5 sm:px-6 py-3 sm:py-4 gap-3'}`}>
+        <div className="shrink-0 border-t border-gray-200 dark:border-gray-700 flex gap-2 bg-white dark:bg-gray-800 px-3 sm:px-4 py-2">
           {isTabletMode ? (
             <>
               <button
@@ -1420,9 +1240,9 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
                   if (tabletStep === 2) setTabletStep(1);
                   else goBack();
                 }}
-                className="px-4 py-2 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-semibold text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                className="px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-semibold text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                {tabletStep === 2 ? 'Anterior' : 'Salir'}
+                {tabletStep === 2 ? 'Anterior' : 'Cambiar trabajador'}
               </button>
               {tabletStep === 1 ? (
                 <button
@@ -1432,28 +1252,28 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
                     setTabletStep(2);
                   }}
                   disabled={!effectiveWorkerName() || parentLoading}
-                  className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                  className={`flex-1 py-2 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-1.5 ${
                     effectiveWorkerName()
                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
                   }`}
                 >
-                  Siguiente — Contar efectivo
-                  <ChevronDown className="w-4 h-4" />
+                  Siguiente — Contar
+                  <ChevronDown className="w-3.5 h-3.5" />
                 </button>
               ) : (
                 <button
                   type="button"
                   onClick={handleSubmit}
                   disabled={!canOpen || parentLoading || !cashCountReady}
-                  className={`flex-1 py-2.5 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                  className={`flex-1 py-2 rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-1.5 ${
                     canOpen && cashCountReady
                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                       : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
                   }`}
                 >
-                  <Unlock className="w-4 h-4" />
-                  Abrir caja y entrar al TPV — {total.toFixed(2)}€
+                  <Unlock className="w-3.5 h-3.5" />
+                  Abrir caja — {total.toFixed(2)}€
                 </button>
               )}
             </>
@@ -1462,17 +1282,24 @@ function OpeningScreen({ onOpen, onReopenClosed, loading: parentLoading, pointsO
           <button
             type="button"
             onClick={goBack}
-            className="px-5 py-3 border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            className="px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-semibold text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             Volver
           </button>
-          <button
-            onClick={handleSubmit}
-            disabled={!canOpen || parentLoading}
-            className={`flex-1 py-3.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${canOpen ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'}`}
-          >
-            <Unlock className="w-4 h-4" /> {`Abrir caja${selectedPdv ? ` — ${pointOfSaleDisplayLabel(selectedPdv)}` : ''}`} — {total.toFixed(2)}€ de fondo
-          </button>
+          <div className="flex-1 flex flex-col gap-1 min-w-0">
+            {!canOpen && openBlockedReason ? (
+              <p className="text-[11px] text-amber-700 dark:text-amber-300 font-medium truncate px-0.5">
+                {openBlockedReason}
+              </p>
+            ) : null}
+            <button
+              onClick={handleSubmit}
+              disabled={!canOpen || parentLoading}
+              className={`w-full py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-1.5 ${canOpen ? 'bg-[#2563EB] hover:bg-blue-700 text-white' : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'}`}
+            >
+              <Unlock className="w-4 h-4" /> Abrir caja — {total.toFixed(2)}€
+            </button>
+          </div>
             </>
           )}
         </div>
@@ -1538,6 +1365,351 @@ function clearClosingFormDraft(sessionId: string): void {
   }
 }
 
+/** Resumen de dinero/unidades/marcas del cierre (Caja 1 + Caja 2). */
+type ClosingBrandLine = {
+  brandId: string;
+  name: string;
+  /** Tienda / TPV */
+  caja1: number;
+  /** Apps hecho en app */
+  caja2: number;
+  total: number;
+};
+
+type ClosingExcelLikeAmounts = {
+  efectivo: number;
+  tpv: number;
+  x: number;
+  app: number;
+  uber: number;
+  justEat: number;
+  glovo: number;
+  total: number;
+  pizza: number;
+  burger: number;
+  taco: number;
+  expected: number;
+  counted: number;
+  diff: number;
+  unpaidCash: number;
+  unpaidCard: number;
+  brands: ClosingBrandLine[];
+};
+
+function sumAppsBrandTotalsBySlot(
+  slots: ClosingBillingBrandSlot[],
+  appsRows: Array<{ brandId: string; name: string; revenue: number }>,
+  unbranded = 0,
+): ClosingBrandLine[] {
+  if (!slots.length && appsRows.length === 0 && unbranded <= 0) return [];
+
+  const used = new Set<string>();
+  const lines: ClosingBrandLine[] = [];
+
+  for (const slot of slots) {
+    const memberIds = slot.memberBrandIds?.length ? slot.memberBrandIds : [slot.brandId];
+    const aliases = new Set<string>();
+    for (const id of memberIds) {
+      for (const a of brandIdAliases(id)) aliases.add(a);
+    }
+    const matching = appsRows.filter(
+      (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
+    );
+    for (const r of matching) used.add(r.brandId);
+    const caja2 = Math.round(matching.reduce((s, r) => s + (Number(r.revenue) || 0), 0) * 100) / 100;
+    if (caja2 <= 0) continue;
+    lines.push({
+      brandId: slot.brandId,
+      name: slot.name,
+      caja1: 0,
+      caja2,
+      total: caja2,
+    });
+  }
+
+  let leftover = unbranded;
+  for (const r of appsRows) {
+    if (used.has(r.brandId)) continue;
+    leftover = Math.round((leftover + (Number(r.revenue) || 0)) * 100) / 100;
+  }
+  if (leftover > 0 && lines.length > 0) {
+    lines[0] = {
+      ...lines[0],
+      caja2: Math.round((lines[0].caja2 + leftover) * 100) / 100,
+      total: Math.round((lines[0].total + leftover) * 100) / 100,
+    };
+  } else if (leftover > 0) {
+    for (const r of appsRows) {
+      if (used.has(r.brandId)) continue;
+      const caja2 = Math.round((Number(r.revenue) || 0) * 100) / 100;
+      if (caja2 <= 0) continue;
+      lines.push({
+        brandId: r.brandId,
+        name: r.name || r.brandId,
+        caja1: 0,
+        caja2,
+        total: caja2,
+      });
+    }
+  }
+
+  return lines.filter((l) => l.total > 0);
+}
+
+function mergeClosingBrandLines(
+  caja1Rows: Array<{ brandId: string; name: string; revenue: number }>,
+  caja2Lines: ClosingBrandLine[],
+  slots: ClosingBillingBrandSlot[],
+): ClosingBrandLine[] {
+  const byId = new Map<string, ClosingBrandLine>();
+
+  const ensure = (brandId: string, name: string) => {
+    let row = byId.get(brandId);
+    if (!row) {
+      row = { brandId, name, caja1: 0, caja2: 0, total: 0 };
+      byId.set(brandId, row);
+    }
+    return row;
+  };
+
+  for (const slot of slots) {
+    ensure(slot.brandId, slot.name);
+  }
+
+  for (const r of caja1Rows) {
+    const slot =
+      slots.find(
+        (s) =>
+          s.brandId === r.brandId
+          || (s.memberBrandIds || []).some((id) => brandIdAliases(id).includes(r.brandId))
+          || brandIdAliases(r.brandId).includes(s.brandId),
+      ) || null;
+    const id = slot?.brandId || r.brandId;
+    const name = slot?.name || r.name;
+    const row = ensure(id, name);
+    row.caja1 = Math.round((row.caja1 + (Number(r.revenue) || 0)) * 100) / 100;
+  }
+
+  for (const r of caja2Lines) {
+    const row = ensure(r.brandId, r.name);
+    row.caja2 = Math.round((row.caja2 + (Number(r.caja2) || 0)) * 100) / 100;
+  }
+
+  return [...byId.values()]
+    .map((r) => ({
+      ...r,
+      total: Math.round((r.caja1 + r.caja2) * 100) / 100,
+    }))
+    .filter((r) => r.total > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+function brandsFromClosedSession(session: TpvRegisterSession): ClosingBrandLine[] {
+  const byBrand: Record<string, number> = {};
+  for (const perBrand of Object.values(session.aggregatorClosingBrandTotals || {})) {
+    if (!perBrand || typeof perBrand !== 'object') continue;
+    for (const [brandId, raw] of Object.entries(perBrand)) {
+      const n = Number(raw) || 0;
+      if (n <= 0) continue;
+      byBrand[brandId] = Math.round(((byBrand[brandId] || 0) + n) * 100) / 100;
+    }
+  }
+  return Object.entries(byBrand)
+    .map(([brandId, caja2]) => ({
+      brandId,
+      name: brandId,
+      caja1: 0,
+      caja2,
+      total: caja2,
+    }))
+    .filter((r) => r.total > 0);
+}
+
+function excelLikeAmountsFromClosedSession(session: TpvRegisterSession): ClosingExcelLikeAmounts {
+  const amounts = sessionToUrielAmounts(session);
+  const expected = Number(session.expectedCash ?? calcTpvExpectedCash(session)) || 0;
+  const counted = Number(session.finalCashAmount) || 0;
+  const diff = Number.isFinite(Number(session.difference))
+    ? Number(session.difference)
+    : counted - expected;
+  const unpaidCash = Math.round(
+    Object.values(session.aggregatorClosingCash || {}).reduce((s, n) => s + (Number(n) || 0), 0) * 100,
+  ) / 100;
+  const unpaidCard = Math.round(
+    Object.values(session.aggregatorClosingCard || {}).reduce((s, n) => s + (Number(n) || 0), 0) * 100,
+  ) / 100;
+  return {
+    efectivo: amounts.efectivo,
+    tpv: amounts.tpv,
+    x: amounts.x,
+    app: amounts.app,
+    uber: amounts.uber,
+    justEat: amounts.justEat,
+    glovo: amounts.glovo,
+    total: amounts.total,
+    pizza: amounts.totalPizza,
+    burger: amounts.totalBurger,
+    taco: amounts.totalTaco,
+    expected,
+    counted,
+    diff,
+    unpaidCash,
+    unpaidCard,
+    brands: brandsFromClosedSession(session),
+  };
+}
+
+function ClosingExcelLikeSummary({
+  amounts,
+  compact = false,
+}: {
+  amounts: ClosingExcelLikeAmounts;
+  compact?: boolean;
+}) {
+  const moneyLines: Array<{ label: string; hint: string; value: number; emphasize?: boolean }> = [
+    { label: 'EFECTIVO', hint: 'Cobros en efectivo de la tienda (TPV)', value: amounts.efectivo },
+    { label: 'TPV', hint: 'Tarjeta cobrada en tienda', value: amounts.tpv },
+    { label: 'X', hint: 'Bizum y otros pagos locales', value: amounts.x },
+    { label: 'App', hint: 'Flipdish / app propia', value: amounts.app },
+    { label: 'UBER', hint: 'Uber Eats (hecho en apps)', value: amounts.uber },
+    { label: 'JUST EAT', hint: 'Just Eat (hecho en apps)', value: amounts.justEat },
+    { label: 'GLOVO', hint: 'Glovo (hecho en apps)', value: amounts.glovo },
+  ];
+  const visibleMoney = moneyLines.filter((l) => l.value > 0 || l.label === 'EFECTIVO' || l.label === 'TPV');
+  const brandLines = amounts.brands || [];
+  const diffLabel = amounts.diff === 0 ? 'Cuadra' : amounts.diff > 0 ? 'Sobra' : 'Falta';
+
+  return (
+    <div className={`rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 overflow-hidden ${compact ? '' : 'shadow-sm'}`}>
+      <div className={`border-b border-stone-100 dark:border-stone-800 ${compact ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
+        <p className={`font-bold text-stone-900 dark:text-stone-100 ${compact ? 'text-sm' : 'text-base'}`}>
+          Resumen del cierre
+        </p>
+        {!compact ? (
+          <p className="text-[11px] text-stone-500 mt-0.5 leading-snug">
+            Canales, marcas (Caja 1 + Caja 2) y unidades del día
+          </p>
+        ) : null}
+      </div>
+
+      <div className={compact ? 'px-3 py-2 space-y-1' : 'px-3.5 py-2.5 space-y-1.5'}>
+        {visibleMoney.map((line) => (
+          <div key={line.label} className="flex items-baseline justify-between gap-2">
+            <div className="min-w-0">
+              <p className={`font-bold text-stone-800 dark:text-stone-100 ${compact ? 'text-xs' : 'text-sm'}`}>
+                {line.label}
+              </p>
+              {!compact ? (
+                <p className="text-[10px] text-stone-500 truncate">{line.hint}</p>
+              ) : null}
+            </div>
+            <span className={`font-black tabular-nums text-stone-900 dark:text-stone-50 shrink-0 ${compact ? 'text-sm' : 'text-base'}`}>
+              {formatMoneyEs(line.value)}
+            </span>
+          </div>
+        ))}
+        <div className="flex items-baseline justify-between gap-2 border-t border-stone-200 dark:border-stone-700 pt-2 mt-1">
+          <div>
+            <p className={`font-black text-stone-900 dark:text-stone-50 ${compact ? 'text-sm' : 'text-base'}`}>TOTAL</p>
+            {!compact ? (
+              <p className="text-[10px] text-stone-500">Suma de los canales de arriba</p>
+            ) : null}
+          </div>
+          <span className={`font-black tabular-nums text-[#2563EB] shrink-0 ${compact ? 'text-lg' : 'text-2xl'}`}>
+            {formatMoneyEs(amounts.total)}
+          </span>
+        </div>
+      </div>
+
+      {brandLines.length > 0 ? (
+        <div className={`border-t border-stone-100 dark:border-stone-800 ${compact ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1.5">
+            Marcas
+          </p>
+          <div className={compact ? 'space-y-1' : 'space-y-1.5'}>
+            {brandLines.map((b) => (
+              <div key={b.brandId} className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className={`font-bold text-stone-800 dark:text-stone-100 truncate ${compact ? 'text-xs' : 'text-sm'}`}>
+                    {b.name}
+                  </p>
+                  {!compact ? (
+                    <p className="text-[10px] text-stone-500 tabular-nums">
+                      Caja 1 {formatMoneyEs(b.caja1)}
+                      <span className="mx-1 text-stone-300">·</span>
+                      Caja 2 {formatMoneyEs(b.caja2)}
+                    </p>
+                  ) : (
+                    <p className="text-[9px] text-stone-400 tabular-nums">
+                      1 {formatMoneyEs(b.caja1)} · 2 {formatMoneyEs(b.caja2)}
+                    </p>
+                  )}
+                </div>
+                <span className={`shrink-0 font-black tabular-nums text-stone-900 dark:text-stone-50 ${compact ? 'text-sm' : 'text-base'}`}>
+                  {formatMoneyEs(b.total)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className={`grid grid-cols-3 gap-px bg-stone-100 dark:bg-stone-800 border-t border-stone-100 dark:border-stone-800`}>
+        {([
+          { label: 'Pizzas', value: amounts.pizza },
+          { label: 'Burgers', value: amounts.burger },
+          { label: 'Tacos', value: amounts.taco },
+        ]).map((u) => (
+          <div key={u.label} className={`bg-white dark:bg-stone-950 text-center ${compact ? 'px-1 py-1.5' : 'px-2 py-2'}`}>
+            <p className="text-[10px] font-semibold text-stone-500">{u.label}</p>
+            <p className={`font-black tabular-nums text-stone-900 dark:text-stone-50 ${compact ? 'text-base' : 'text-xl'}`}>
+              {u.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className={`border-t border-stone-100 dark:border-stone-800 space-y-1 ${compact ? 'px-3 py-2' : 'px-3.5 py-2.5'}`}>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
+          Arqueo del cajón
+        </p>
+        <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+          <span>Esperado en cajón</span>
+          <span className="font-bold tabular-nums text-stone-900 dark:text-stone-100">{formatMoneyEs(amounts.expected)}</span>
+        </div>
+        <div className="flex justify-between gap-2 text-xs text-stone-600 dark:text-stone-300">
+          <span>Contado</span>
+          <span className="font-bold tabular-nums text-stone-900 dark:text-stone-100">{formatMoneyEs(amounts.counted)}</span>
+        </div>
+        <div className={`flex justify-between gap-2 text-xs font-bold ${
+          amounts.diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'
+        }`}>
+          <span>{diffLabel}</span>
+          <span className="tabular-nums">
+            {amounts.diff >= 0 ? '+' : ''}{formatMoneyEs(amounts.diff)}
+          </span>
+        </div>
+        {(amounts.unpaidCash > 0 || amounts.unpaidCard > 0) && !compact ? (
+          <div className="pt-1.5 mt-1 border-t border-stone-100 dark:border-stone-800 space-y-0.5 text-[11px]">
+            {amounts.unpaidCash > 0 ? (
+              <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
+                <span>No pagado apps → cajón</span>
+                <span className="font-bold tabular-nums">{formatMoneyEs(amounts.unpaidCash)}</span>
+              </div>
+            ) : null}
+            {amounts.unpaidCard > 0 ? (
+              <div className={`flex justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
+                <span>No pagado apps (tarjeta)</span>
+                <span className="font-bold tabular-nums">{formatMoneyEs(amounts.unpaidCard)}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarnings = [], busy = false, showDeliveryClosingSlots = true }: {
   session: TpvRegisterSession;
   dataUserId: string;
@@ -1546,7 +1718,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     notes: string,
     aggregatorRows: AggregatorCashRow[],
     productClosingCounts: NonNullable<TpvRegisterSession['productClosingCounts']>,
-    brandTotalsByChannel?: Record<string, Record<string, number>>,
+    appsClosingExtras?: {
+      brandTotalsByChannel?: Record<string, Record<string, number>>;
+      unpaidCashByBrandByChannel?: Record<string, Record<string, number>>;
+      unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
+    },
   ) => void;
   onCancel: () => void;
   restaurantWarnings?: string[];
@@ -1582,13 +1758,41 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   );
   const [draftRestored] = useState(() => Boolean(savedDraft));
   const [showExtraDetail, setShowExtraDetail] = useState(false);
-  const [showDayOrders, setShowDayOrders] = useState(false);
-  /** Delivery: TPV / Apps / Arqueo. Restaurant: Arqueo / Confirmar. */
+  /** Aviso final antes de cerrar la caja de verdad. */
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  /** Delivery: Tienda → Glovo → Uber → Just → Flip → Cierre. Restaurant: Arqueo / Confirmar. */
   const [closingStep, setClosingStep] = useState(1);
-  const closingMaxStep = showDeliveryClosingSlots ? 3 : 2;
-  const closingStepLabels = showDeliveryClosingSlots
-    ? (['TPV tienda', 'Apps', 'Arqueo'] as const)
-    : (['Arqueo', 'Confirmar'] as const);
+  const appClosingPlatforms = useMemo(
+    () => (showDeliveryClosingSlots ? getClosingAggregatorPlatforms() : []),
+    [showDeliveryClosingSlots],
+  );
+  const closingMaxStep = showDeliveryClosingSlots ? 1 + appClosingPlatforms.length + 1 : 2;
+  const closingStepLabels = useMemo(() => {
+    if (!showDeliveryClosingSlots) return ['Arqueo', 'Confirmar'] as string[];
+    const shortApp = (channel: string, label: string) => {
+      if (channel === 'ubereats') return 'Uber';
+      if (channel === 'justeat') return 'Just';
+      if (channel === 'flipdish') return 'Flip';
+      if (channel === 'glovo') return 'Glovo';
+      return label;
+    };
+    return [
+      'Caja 1',
+      ...appClosingPlatforms.map((p) => shortApp(p.channel, p.label)),
+      'Cierre',
+    ];
+  }, [showDeliveryClosingSlots, appClosingPlatforms]);
+  const deliveryAppStepIndex =
+    showDeliveryClosingSlots && closingStep >= 2 && closingStep <= 1 + appClosingPlatforms.length
+      ? closingStep - 2
+      : -1;
+  const focusAppChannel =
+    deliveryAppStepIndex >= 0
+      ? appClosingPlatforms[deliveryAppStepIndex]?.channel || null
+      : null;
+  const isDeliveryAppsStep = deliveryAppStepIndex >= 0;
+  const isDeliveryCierreStep =
+    showDeliveryClosingSlots && closingStep === closingMaxStep;
   const bodyScrollRef = useRef<HTMLDivElement | null>(null);
   const [browserOnline, setBrowserOnline] = useState(() => isBrowserOnline());
   const [brandLabels, setBrandLabels] = useState<Record<string, string>>({});
@@ -1613,7 +1817,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   }, []);
 
   useEffect(() => {
-    setShowDayOrders(false);
     setShowExtraDetail(false);
     const el = bodyScrollRef.current;
     if (el) el.scrollTop = 0;
@@ -1637,10 +1840,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     [session, shiftOrders],
   );
   const tpvSystemFood = useMemo(() => tpvOnlyFoodFromReport(foodReport), [foodReport]);
-  const dayOrdersBreakdown = useMemo(() => {
-    const scoped = filterOrdersForRegisterSession(session, shiftOrders);
-    return buildShiftSalesBreakdown(scoped);
-  }, [session, shiftOrders]);
 
   const handleAppsSnapshotChange = useCallback((snap: AggregatorClosingSnapshot) => {
     setAppsSnapshot(snap);
@@ -1716,9 +1915,62 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     (appsSnapshot?.appTotal
       ?? finalAggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0)) * 100,
   ) / 100;
-  const dayCashTotal = Math.round((tpvCashSales + aggregatorCashTotal) * 100) / 100;
-  const dayCardTotal = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
+  /** Esperado físico en cajón = efectivo TPV (fondo+cobros+entradas−salidas) + no pagado efectivo apps. */
+  const dayDrawerExpected = expected;
+  /** Cobros tarjeta tienda + no pagado tarjeta apps (informativo; no es el cajón). */
+  const dayCardCollected = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
+  /** Facturación día = ventas TPV + hecho en apps (2ª caja). El no pagado no se suma otra vez. */
   const dayMoneyTotal = Math.round((tpvAllSales + integratorsTotal) * 100) / 100;
+  /** Fila tipo resumen con los totales del cierre en vivo. */
+  const excelDaySummaryBase = useMemo((): ClosingExcelLikeAmounts => {
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const ch = (channel: string) => {
+      const row = finalAggregatorRows.find((x) => x.platform.channel === channel);
+      return r2(Number(row?.totalSales) || 0);
+    };
+    const efectivo = tpvCashSales;
+    const tpv = tpvCardSales;
+    const x = r2(
+      (Number(summary.salesByMethod.bizum) || 0) + (Number(summary.salesByMethod.otro) || 0),
+    );
+    const app = r2(ch('flipdish') + ch('app'));
+    const uber = ch('ubereats');
+    const justEat = ch('justeat');
+    const glovo = ch('glovo');
+    return {
+      efectivo,
+      tpv,
+      x,
+      app,
+      uber,
+      justEat,
+      glovo,
+      total: r2(efectivo + tpv + x + app + uber + justEat + glovo),
+      pizza: closingFood.pizza,
+      burger: closingFood.burger,
+      taco: closingFood.taco,
+      expected: dayDrawerExpected,
+      counted: countedTotal,
+      diff,
+      unpaidCash: aggregatorCashTotal,
+      unpaidCard: aggregatorCardTotal,
+      brands: [],
+    };
+  }, [
+    finalAggregatorRows,
+    tpvCashSales,
+    tpvCardSales,
+    summary.salesByMethod.bizum,
+    summary.salesByMethod.otro,
+    closingFood.pizza,
+    closingFood.burger,
+    closingFood.taco,
+    dayDrawerExpected,
+    countedTotal,
+    diff,
+    aggregatorCashTotal,
+    aggregatorCardTotal,
+  ]);
   const cashSlotDisplay = cashSlotFocused
     ? cashSlot
     : countedTotal > 0
@@ -1811,7 +2063,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     };
   }, [businessId, showDeliveryClosingSlots]);
 
-  const brandBilling = useMemo(
+  const brandBillingRaw = useMemo(
     () => buildShiftBrandRevenue(session, shiftOrders, brandLabels, billingRules),
     [session, shiftOrders, brandLabels, billingRules],
   );
@@ -1826,23 +2078,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
    * Ejemplo Pau: pizza + Black Burger + tacos → 2 slots; tacos bajo el nombre de Black Burger.
    */
   const closingBrands = useMemo((): ClosingBillingBrandSlot[] => {
-    const fromSheets = closingSlotsFromBillingSheets(billingSheetsResolved, catalogBrands);
+    // Siempre por hojas (como prod): tacos van con burger, no fila «Tacos».
+    const sheets = billingSheetsResolved.length > 0
+      ? billingSheetsResolved
+      : suggestBillingSheetsFromBrands(catalogBrands);
+    const fromSheets = closingSlotsFromBillingSheets(sheets, catalogBrands);
     if (fromSheets.length > 0) return fromSheets;
 
-    // Fallback si aún no hay hojas: 1 entrada por marca activa del catálogo.
-    const byName = new Map<string, ClosingBillingBrandSlot>();
-    for (const b of catalogBrands) {
-      if (b.active === false) continue;
-      const brandId = String(b.id || b._id || '').trim();
-      const name = String(b.name || '').trim() || brandId;
-      if (!brandId || !name) continue;
-      const key = name.toLowerCase();
-      if (byName.has(key)) continue;
-      byName.set(key, { brandId, name, memberBrandIds: [brandId] });
-    }
-    if (byName.size > 0) {
-      return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-    }
     return Object.entries(brandLabels)
       .filter(([, name]) => String(name || '').trim())
       .map(([id, name]) => ({
@@ -1852,6 +2094,59 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       }))
       .sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }, [billingSheetsResolved, catalogBrands, brandLabels]);
+
+  /** Filas «Por marca» según hojas + regla de sueltos (Facturación). */
+  const brandBilling = useMemo(
+    () => rollupBrandRevenueToClosingSlots(
+      brandBillingRaw,
+      closingBrands,
+      billingRules,
+      brandLabels,
+    ),
+    [brandBillingRaw, closingBrands, billingRules, brandLabels],
+  );
+
+  /** Resumen final con marcas (Caja 1 tienda + Caja 2 apps). */
+  const excelDaySummary = useMemo((): ClosingExcelLikeAmounts => {
+    const snapshotBrandMap = appsSnapshot?.brandTotalsByChannel;
+    let caja2Lines: ClosingBrandLine[] = [];
+    if (snapshotBrandMap && Object.keys(snapshotBrandMap).length > 0) {
+      const byBrand: Record<string, number> = {};
+      for (const perBrand of Object.values(snapshotBrandMap)) {
+        if (!perBrand || typeof perBrand !== 'object') continue;
+        for (const [brandId, raw] of Object.entries(perBrand)) {
+          const n = Number(raw) || 0;
+          if (n <= 0) continue;
+          byBrand[brandId] = Math.round(((byBrand[brandId] || 0) + n) * 100) / 100;
+        }
+      }
+      const appsRows = Object.entries(byBrand).map(([brandId, revenue]) => ({
+        brandId,
+        name: brandLabels[brandId] || brandId,
+        revenue,
+      }));
+      caja2Lines = sumAppsBrandTotalsBySlot(closingBrands, appsRows, 0);
+    }
+    if (caja2Lines.length === 0) {
+      const scaled = scaleAppsBrandTotalsToAppTotal(
+        appsBrandBilling.rows,
+        appsBrandBilling.unbranded,
+        integratorsTotal,
+      );
+      caja2Lines = sumAppsBrandTotalsBySlot(closingBrands, scaled.rows, scaled.unbranded);
+    }
+    const brands = mergeClosingBrandLines(brandBilling.rows, caja2Lines, closingBrands);
+    return { ...excelDaySummaryBase, brands };
+  }, [
+    excelDaySummaryBase,
+    appsSnapshot?.brandTotalsByChannel,
+    closingBrands,
+    brandLabels,
+    appsBrandBilling.rows,
+    appsBrandBilling.unbranded,
+    integratorsTotal,
+    brandBilling.rows,
+  ]);
 
   const closingSlotAliasSet = useCallback((slot: ClosingBillingBrandSlot) => {
     const ids = slot.memberBrandIds?.length ? slot.memberBrandIds : [slot.brandId];
@@ -1865,7 +2160,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   return (
     <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex items-stretch sm:items-center justify-center p-0 sm:p-3`}>
       <div
-        className="bg-white dark:bg-stone-900 sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl flex flex-col min-h-0 h-[100dvh] sm:h-auto sm:max-h-[min(96dvh,920px)]"
+        className="relative bg-white dark:bg-stone-900 sm:rounded-2xl shadow-2xl w-full sm:max-w-4xl flex flex-col min-h-0 h-[100dvh] sm:h-auto sm:max-h-[min(96dvh,920px)]"
       >
         <div className="flex-shrink-0 px-2.5 pt-[max(0.5rem,env(safe-area-inset-top))] pb-1.5 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center justify-between gap-2">
@@ -1896,17 +2191,38 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <X className="w-4 h-4" />
             </button>
           </div>
-          <div className="mt-1 flex gap-1" aria-hidden>
-            {Array.from({ length: closingMaxStep }, (_, i) => i + 1).map((n) => (
-              <div
-                key={n}
-                className={`h-0.5 flex-1 rounded-full ${
-                  n <= closingStep
-                    ? 'bg-[var(--v-blue,#2563eb)]'
-                    : 'bg-stone-200 dark:bg-stone-700'
-                }`}
-              />
-            ))}
+          <div className="mt-1.5 flex gap-0.5" role="list" aria-label="Pasos del cierre">
+            {closingStepLabels.map((label, i) => {
+              const n = i + 1;
+              const done = n < closingStep;
+              const current = n === closingStep;
+              return (
+                <button
+                  key={`${n}-${label}`}
+                  type="button"
+                  role="listitem"
+                  disabled={busy || n > closingStep}
+                  onClick={() => {
+                    if (n <= closingStep) goClosingStep(n);
+                  }}
+                  className={`min-w-0 flex-1 rounded-lg px-0.5 py-1 text-center transition-colors ${
+                    current
+                      ? 'bg-[var(--v-blue,#2563eb)] text-white'
+                      : done
+                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200'
+                        : 'bg-stone-100 text-stone-400 dark:bg-stone-800 dark:text-stone-500'
+                  } ${n <= closingStep && !busy ? 'cursor-pointer' : 'cursor-default'}`}
+                  title={`${n}. ${label}`}
+                >
+                  <span className="block text-[9px] font-black tabular-nums leading-none opacity-80">
+                    {n}
+                  </span>
+                  <span className="block text-[9px] font-bold truncate leading-tight mt-0.5">
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1922,104 +2238,92 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
           ) : null}
 
-          {/* Delivery paso 1 — TPV tienda (cabe en viewport) */}
+          {/* Delivery paso 1 — Caja 1 (tienda / TPV) */}
           {showDeliveryClosingSlots && closingStep === 1 ? (
-            <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-hidden">
-              <div className="shrink-0 grid grid-cols-2 gap-1.5">
-                <div className={`rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-2 py-1`}>
+            <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto overscroll-contain pb-1">
+              <div className="shrink-0">
+                <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                  Caja 1 · Tienda
+                </p>
+                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                  Lo cobrado en el TPV del local (efectivo y tarjeta). Contar el cajón es al final.
+                </p>
+              </div>
+
+              <div className="shrink-0 grid grid-cols-2 gap-2">
+                <div className={`rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-3 py-2`}>
                   <p className={`text-[10px] font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
-                    <Banknote className="w-3 h-3" /> Efectivo
+                    <Banknote className="w-3.5 h-3.5" /> Efectivo
                   </p>
-                  <p className={`text-lg font-black tabular-nums tracking-tight ${VERTIAL_CASH_TEXT}`}>
-                    {summary.salesByMethod.efectivo.toFixed(2)}€
+                  <p className={`text-xl font-black tabular-nums tracking-tight ${VERTIAL_CASH_TEXT}`}>
+                    {formatMoneyEs(summary.salesByMethod.efectivo)}
                   </p>
+                  <p className="text-[10px] text-stone-500 mt-0.5">Cobrado en TPV</p>
                 </div>
-                <div className={`rounded-xl border ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} px-2 py-1`}>
+                <div className={`rounded-xl border ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG} px-3 py-2`}>
                   <p className={`text-[10px] font-semibold flex items-center gap-1 ${VERTIAL_CARD_TEXT}`}>
-                    <CreditCard className="w-3 h-3" /> Tarjeta
+                    <CreditCard className="w-3.5 h-3.5" /> Tarjeta
                   </p>
-                  <p className={`text-lg font-black tabular-nums tracking-tight ${VERTIAL_CARD_TEXT}`}>
-                    {summary.salesByMethod.tarjeta.toFixed(2)}€
+                  <p className={`text-xl font-black tabular-nums tracking-tight ${VERTIAL_CARD_TEXT}`}>
+                    {formatMoneyEs(summary.salesByMethod.tarjeta)}
                   </p>
+                  <p className="text-[10px] text-stone-500 mt-0.5">Cobrado en TPV</p>
                 </div>
               </div>
 
-              <div className="shrink-0 grid grid-cols-3 gap-1">
-                {([
-                  { key: 'pizza' as const, label: 'Pizzas' },
-                  { key: 'burger' as const, label: 'Burgers' },
-                  { key: 'taco' as const, label: 'Tacos' },
-                ]).map((u) => (
-                  <label
-                    key={u.key}
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 bg-stone-50 dark:bg-stone-900 px-1 py-0.5 flex flex-col gap-0.5 cursor-text"
-                  >
-                    <span className="text-[9px] font-medium text-stone-500 inline-flex items-center gap-0.5">
-                      <DeliveryFoodUnitIcon unit={u.key} className="w-3 h-3" />
-                      {u.label}
-                    </span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0"
-                      value={manualFood[u.key]}
-                      onChange={(e) => handleFoodSlotChange(u.key, e.target.value)}
-                      className="w-full min-h-8 px-1 py-0.5 text-sm font-black tabular-nums border border-slate-200 dark:border-slate-700 rounded-md bg-white dark:bg-stone-950 text-stone-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                    />
-                  </label>
-                ))}
+              <div className="shrink-0">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500 mb-1.5">
+                  Unidades del turno
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'pizza' as const, label: 'Pizzas' },
+                    { key: 'burger' as const, label: 'Burgers' },
+                    { key: 'taco' as const, label: 'Tacos' },
+                  ]).map((u) => (
+                    <label
+                      key={u.key}
+                      className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/40 px-2 py-1.5 flex flex-col gap-1 cursor-text"
+                    >
+                      <span className="text-[10px] font-semibold text-stone-500 inline-flex items-center gap-1">
+                        <DeliveryFoodUnitIcon unit={u.key} className="w-3.5 h-3.5" />
+                        {u.label}
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={manualFood[u.key]}
+                        onChange={(e) => handleFoodSlotChange(u.key, e.target.value)}
+                        className="w-full min-h-10 px-1.5 py-1 text-base font-black tabular-nums border border-stone-200 dark:border-stone-700 rounded-lg bg-white dark:bg-stone-950 text-stone-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+              <div className="shrink-0">
                 <ShiftBrandBillingSummary
                   rows={brandBilling.rows}
                   unbranded={brandBilling.unbranded}
                   total={brandBilling.total}
                   loading={shiftOrdersLoading}
                   dense
+                  title="Caja 1 · por marca"
                 />
               </div>
-
-              <button
-                type="button"
-                onClick={() => setShowDayOrders((v) => !v)}
-                className="shrink-0 w-full min-h-8 px-2 py-1 rounded-lg border border-stone-200 dark:border-stone-700 text-[10px] font-bold text-stone-600 dark:text-stone-300 flex items-center justify-between"
-              >
-                <span>Pedidos ({dayOrdersBreakdown.orderCount})</span>
-                {showDayOrders ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-              </button>
-              {showDayOrders ? (
-                <div className="shrink-0 max-h-[28vh] overflow-y-auto rounded-lg border border-stone-200 dark:border-stone-700">
-                  {shiftOrdersLoading ? (
-                    <p className="px-2 py-2 text-[10px] text-gray-500">Cargando…</p>
-                  ) : dayOrdersBreakdown.orders.length === 0 ? (
-                    <p className="px-2 py-2 text-[10px] text-gray-500">Sin pedidos</p>
-                  ) : (
-                    <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                      {dayOrdersBreakdown.orders.map((order) => (
-                        <li key={order.orderId} className="px-2 py-1.5 flex justify-between gap-2 text-[10px]">
-                          <span className="truncate font-semibold text-stone-800 dark:text-stone-100">
-                            #{order.orderNumber} · {order.customerName || 'Cliente'}
-                          </span>
-                          <span className="tabular-nums font-bold shrink-0">{order.total.toFixed(2)}€</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              ) : null}
             </div>
           ) : null}
 
-          {/* Delivery Apps editor: siempre montado para snapshot/cálculos; visible solo en paso 2 */}
+          {/* Apps: montado siempre (snapshot); visible en pasos Glovo/Uber/Just/Flip */}
           {showDeliveryClosingSlots ? (
             <div
               className={
-                closingStep === 2
+                isDeliveryAppsStep
                   ? 'flex-1 min-h-0 overflow-hidden flex flex-col'
                   : 'hidden'
               }
-              aria-hidden={closingStep !== 2}
+              aria-hidden={!isDeliveryAppsStep}
             >
               <AggregatorClosingEditor
                 autoRows={aggregatorRows}
@@ -2034,12 +2338,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 onSnapshotChange={handleAppsSnapshotChange}
                 onManualDraftChange={handleAppsManualDraftChange}
                 title="Apps"
-                startStep={1}
+                startStep={2}
                 appsBrandRows={appsBrandBilling.rows}
                 appsBrandUnbranded={appsBrandBilling.unbranded}
                 closingBrands={closingBrands}
                 dense
                 fillHeight
+                focusChannel={focusAppChannel}
               />
             </div>
           ) : null}
@@ -2087,45 +2392,147 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             </div>
           ) : null}
 
-          {/* Delivery paso 3 — Arqueo + totales tienda / marcas / día */}
-          {showDeliveryClosingSlots && closingStep === 3 ? (
-            <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto overscroll-contain">
-              {/* Total unidades arriba del paso 3 (TPV + apps de steps 1–2) */}
-              <div className="shrink-0 rounded-xl border-2 border-stone-800 bg-stone-950 text-white px-2 py-2 space-y-1">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-stone-300 px-0.5">
-                  Total unidades · todo el cierre
-                </p>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {([
-                    { key: 'pizza' as const, label: 'Pizzas' },
-                    { key: 'burger' as const, label: 'Burgers' },
-                    { key: 'taco' as const, label: 'Tacos' },
-                  ]).map((u) => (
-                    <div
-                      key={u.key}
-                      className="rounded-lg border border-stone-600 bg-stone-900 px-1.5 py-1.5 text-center"
-                    >
-                      <p className="text-[10px] font-semibold text-stone-400 inline-flex items-center justify-center gap-0.5 w-full">
-                        <DeliveryFoodUnitIcon unit={u.key} className="w-3.5 h-3.5" />
-                        {u.label}
+          {/* Delivery paso final — Contar cajón + resumen limpio */}
+          {isDeliveryCierreStep ? (
+            <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto overscroll-contain pb-1">
+              {/* Detalle Caja 1 / Caja 2 */}
+              <div className="shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2.5 space-y-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                        Caja 1
                       </p>
-                      <p className="text-2xl font-black tabular-nums text-white leading-tight">
-                        {closingFood[u.key]}
+                      <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                        Tienda (TPV)
                       </p>
                     </div>
-                  ))}
+                    <p className="text-lg font-black tabular-nums text-stone-900 dark:text-stone-50">
+                      {formatMoneyEs(tpvAllSales)}
+                    </p>
+                  </div>
+                  <div className="space-y-1 text-[11px]">
+                    <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
+                      <span className="inline-flex items-center gap-1 font-semibold">
+                        <Banknote className="w-3 h-3" /> Efectivo
+                      </span>
+                      <span className="font-black tabular-nums">
+                        {formatMoneyEs(summary.salesByMethod.efectivo)}
+                      </span>
+                    </div>
+                    <div className={`flex justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
+                      <span className="inline-flex items-center gap-1 font-semibold">
+                        <CreditCard className="w-3 h-3" /> Tarjeta
+                      </span>
+                      <span className="font-black tabular-nums">
+                        {formatMoneyEs(summary.salesByMethod.tarjeta)}
+                      </span>
+                    </div>
+                    {(summary.salesByMethod.bizum || 0) + (summary.salesByMethod.otro || 0) > 0 ? (
+                      <div className="flex justify-between gap-2 text-stone-500">
+                        <span>Bizum / otros</span>
+                        <span className="font-bold tabular-nums">
+                          {formatMoneyEs(
+                            (summary.salesByMethod.bizum || 0) + (summary.salesByMethod.otro || 0),
+                          )}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  {brandBilling.rows.length > 0 ? (
+                    <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 space-y-0.5">
+                      {brandBilling.rows.map((row) => (
+                        <div
+                          key={row.brandId}
+                          className="flex justify-between gap-2 text-[10px] text-stone-600 dark:text-stone-300"
+                        >
+                          <span className="truncate font-medium">{row.name}</span>
+                          <span className="shrink-0 tabular-nums font-bold">
+                            {formatMoneyEs(row.revenue)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="text-[10px] text-stone-400 tabular-nums">
+                    Unidades {tpvClosingFood.pizza}P / {tpvClosingFood.burger}B / {tpvClosingFood.taco}T
+                  </p>
                 </div>
-                <p className="text-[10px] text-stone-400 tabular-nums px-0.5">
-                  TPV {tpvClosingFood.pizza}P/{tpvClosingFood.burger}B/{tpvClosingFood.taco}T
-                  {' · '}
-                  Apps {appsFoodTotals.pizza}P/{appsFoodTotals.burger}B/{appsFoodTotals.taco}T
+
+                <div className="rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/70 dark:bg-blue-950/30 px-3 py-2.5 space-y-2">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-blue-600/80 dark:text-blue-300/80">
+                        Caja 2
+                      </p>
+                      <p className="text-sm font-bold text-blue-950 dark:text-blue-50">
+                        Apps (hecho en app)
+                      </p>
+                    </div>
+                    <p className="text-lg font-black tabular-nums text-blue-950 dark:text-blue-50">
+                      {formatMoneyEs(integratorsTotal)}
+                    </p>
+                  </div>
+                  <div className="space-y-1 text-[11px]">
+                    {(appsSnapshot?.rows?.length
+                      ? appsSnapshot.rows
+                      : finalAggregatorRows
+                    ).map((r) => {
+                      const amt = Number(r.totalSales) || 0;
+                      if (amt <= 0) return null;
+                      return (
+                        <div
+                          key={r.platform.channel}
+                          className="flex justify-between gap-2 text-blue-900/80 dark:text-blue-100/80"
+                        >
+                          <span className="font-semibold truncate">{r.platform.label}</span>
+                          <span className="font-black tabular-nums shrink-0">
+                            {formatMoneyEs(amt)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {aggregatorCashTotal > 0 ? (
+                      <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
+                        <span className="font-semibold">No pagado efectivo → cajón</span>
+                        <span className="font-black tabular-nums">
+                          {formatMoneyEs(aggregatorCashTotal)}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  {appsBrandBilling.rows.length > 0 ? (
+                    <div className="border-t border-blue-200/60 dark:border-blue-900/40 pt-1.5 space-y-0.5">
+                      {appsBrandBilling.rows.map((row) => (
+                        <div
+                          key={row.brandId}
+                          className="flex justify-between gap-2 text-[10px] text-blue-900/70 dark:text-blue-100/70"
+                        >
+                          <span className="truncate font-medium">{row.name}</span>
+                          <span className="shrink-0 tabular-nums font-bold">
+                            {formatMoneyEs(row.revenue)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="text-[10px] text-blue-700/70 dark:text-blue-200/60 tabular-nums">
+                    Unidades {appsFoodTotals.pizza}P / {appsFoodTotals.burger}B / {appsFoodTotals.taco}T
+                  </p>
+                </div>
+              </div>
+
+              <div className="shrink-0">
+                <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Contar el cajón</p>
+                <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                  Esperado = Caja 1 efectivo + no pagado efectivo de Caja 2. La tarjeta no pagada no entra aquí.
                 </p>
               </div>
 
-              <div className="shrink-0 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-950 p-2 space-y-1">
-                <label className={`block rounded-xl border ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG} px-2 py-1 cursor-text`}>
-                  <span className={`text-[10px] font-semibold flex items-center gap-1 ${VERTIAL_CASH_TEXT}`}>
-                    <Banknote className="w-3 h-3" /> Efectivo contado
+              <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 p-3 space-y-3">
+                <label className="block cursor-text">
+                  <span className={`text-[11px] font-bold flex items-center gap-1.5 ${VERTIAL_CASH_TEXT}`}>
+                    <Banknote className="w-3.5 h-3.5" /> Efectivo contado
                   </span>
                   <input
                     type="text"
@@ -2138,42 +2545,33 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     }}
                     onBlur={() => setCashSlotFocused(false)}
                     onChange={(e) => handleCashSlotChange(e.target.value)}
-                    className={`mt-0.5 w-full min-h-10 px-2 py-1 text-xl font-black tabular-nums border ${VERTIAL_CASH_BORDER} rounded-xl bg-white dark:bg-slate-950 ${VERTIAL_CASH_TEXT} focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-500`}
+                    className={`mt-1.5 w-full min-h-14 px-3 py-2 text-3xl font-black tabular-nums tracking-tight border ${VERTIAL_CASH_BORDER} rounded-xl ${VERTIAL_CASH_BG} ${VERTIAL_CASH_TEXT} focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-500`}
                   />
                 </label>
 
-                <div className="space-y-0.5 text-[11px]">
-                  <div className="flex justify-between gap-2 items-baseline">
-                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Efectivo TPV</span>
-                    <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(expectedTpv)}</span>
+                <div className="space-y-1 text-[12px]">
+                  <div className="flex justify-between gap-2 items-baseline text-stone-600 dark:text-stone-300">
+                    <span>Efectivo Caja 1 (TPV)</span>
+                    <span className="font-bold tabular-nums">{formatMoneyEs(expectedTpv)}</span>
                   </div>
-                  <div className="flex justify-between gap-2 items-baseline">
-                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>+ Apps no pagado efectivo</span>
-                    <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(aggregatorCashTotal)}</span>
+                  <div className="flex justify-between gap-2 items-baseline text-stone-600 dark:text-stone-300">
+                    <span>+ Caja 2 no pagado efectivo</span>
+                    <span className="font-bold tabular-nums">{formatMoneyEs(aggregatorCashTotal)}</span>
                   </div>
-                  {aggregatorCardTotal > 0 ? (
-                    <div className="flex justify-between gap-2 items-baseline">
-                      <span className={`font-medium ${VERTIAL_CARD_TEXT}`}>Apps no pagado tarjeta</span>
-                      <span className={`font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>{formatMoneyEs(aggregatorCardTotal)}</span>
-                    </div>
-                  ) : null}
-                  <div className="border-t border-slate-200 dark:border-slate-800 pt-0.5 flex justify-between items-baseline">
-                    <span className={`font-semibold ${VERTIAL_CASH_TEXT}`}>Esperado</span>
-                    <span className={`text-lg font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(expected)}</span>
-                  </div>
-                  <div className="flex justify-between gap-2 items-baseline">
-                    <span className={`font-medium ${VERTIAL_CASH_TEXT}`}>Contado</span>
-                    <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(countedTotal)}</span>
+                  <div className={`flex justify-between gap-2 items-baseline border-t border-stone-100 dark:border-stone-800 pt-1.5 ${VERTIAL_CASH_TEXT}`}>
+                    <span className="font-bold">Esperado en cajón</span>
+                    <span className="text-xl font-black tabular-nums">{formatMoneyEs(expected)}</span>
                   </div>
                 </div>
+
                 {countedTotal > 0 ? (
-                  <div className={`px-2 py-1 rounded-xl border ${diff === 0 ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'}`}>
+                  <div className={`px-3 py-2 rounded-xl border ${diff === 0 ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-800' : 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800'}`}>
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-semibold text-stone-800 dark:text-stone-100 inline-flex items-center gap-1">
-                        {diff === 0 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />}
+                      <span className="text-sm font-bold text-stone-800 dark:text-stone-100 inline-flex items-center gap-1.5">
+                        {diff === 0 ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <AlertTriangle className="w-4 h-4 text-amber-600" />}
                         {diff === 0 ? 'Cuadra' : diff > 0 ? 'Sobra' : 'Falta'}
                       </span>
-                      <span className={`text-base font-black tabular-nums ${diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>
+                      <span className={`text-lg font-black tabular-nums ${diff === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-200'}`}>
                         {diff >= 0 ? '+' : ''}{formatMoneyEs(diff)}
                       </span>
                     </div>
@@ -2181,28 +2579,192 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 ) : null}
               </div>
 
+              {/* Cómo se forma el efectivo TPV + movimientos (arriba, no escondido) */}
+              <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2.5 space-y-1 text-xs">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1">
+                  Cómo sale el efectivo TPV
+                </p>
+                <div className="flex justify-between gap-2 text-stone-500">
+                  <span>Fondo apertura</span>
+                  <span className="font-semibold tabular-nums text-stone-800 dark:text-stone-100">
+                    {formatMoneyEs(session.initialCashAmount)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <span>+ Cobros efectivo</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.efectivo)}</span>
+                </div>
+                {cashStaffConsumption > 0 ? (
+                  <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                    <span>+ Consumo equipo</span>
+                    <span className="font-semibold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span>
+                  </div>
+                ) : null}
+                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <span>+ Entradas</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span>
+                </div>
+                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <span>− Devoluciones</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(cashReturnsTotal)}</span>
+                </div>
+                <div className="flex justify-between gap-2 text-stone-600 dark:text-stone-300">
+                  <span>− Salidas</span>
+                  <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span>
+                </div>
+                <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 flex justify-between gap-2 font-bold text-stone-900 dark:text-stone-100">
+                  <span>= Efectivo TPV</span>
+                  <span className="tabular-nums">{formatMoneyEs(expectedTpv)}</span>
+                </div>
+              </div>
+
+              {(() => {
+                const cashOps = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
+                const voided = (session.voidedCashMovements || []).slice().sort(
+                  (a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime(),
+                );
+                if (cashOps.length === 0 && voided.length === 0) return null;
+                return (
+                  <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-950 px-3 py-2.5 space-y-2">
+                    {cashOps.length > 0 ? (
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mb-1.5">
+                          Movimientos de caja ({cashOps.length})
+                        </p>
+                        <div className="space-y-1 max-h-44 overflow-y-auto">
+                          {[...cashOps].reverse().map((tx) => (
+                            <div
+                              key={tx.id}
+                              className="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded-lg bg-stone-50 dark:bg-stone-900"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <span className="text-stone-400 mr-1.5">
+                                  {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
+                                </span>
+                                <span className="font-semibold text-stone-700 dark:text-stone-200">
+                                  {cashMovementLabel(tx)}
+                                </span>
+                                {tx.description ? (
+                                  <span className="text-stone-500 ml-1.5 truncate">{tx.description}</span>
+                                ) : null}
+                              </div>
+                              <span className="shrink-0 font-bold tabular-nums">
+                                {tx.type === 'cash_in' ? '+' : '−'}
+                                {formatMoneyEs(tx.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {voided.length > 0 ? (
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600 mb-1.5">
+                          Movimientos eliminados ({voided.length})
+                        </p>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {voided.map((v) => (
+                            <div
+                              key={v.id}
+                              className="text-xs p-2 rounded-lg border border-rose-200 bg-rose-50/80 dark:border-rose-900 dark:bg-rose-950/30"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-stone-800 dark:text-stone-100">
+                                    {TPV_CASH_TX_LABELS[v.type] || v.type} anulada
+                                    {v.originalDescription ? ` · ${v.originalDescription}` : ''}
+                                  </p>
+                                  <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 break-words">
+                                    Motivo: {v.voidReason}
+                                  </p>
+                                </div>
+                                <span className="shrink-0 font-semibold tabular-nums text-rose-700 dark:text-rose-300">
+                                  {v.type === 'cash_in' ? '+' : '−'}
+                                  {formatMoneyEs(Number(v.amount || 0))}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })()}
+
+              {/* Unidades = Tienda (paso 1) + Glovo+Uber+Just+Flip (pasos 2–5) */}
+              <div className="shrink-0 rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50/80 dark:bg-stone-900/40 px-3 py-2.5">
+                <div className="mb-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                    Unidades del día · todo lo hecho
+                  </p>
+                  <p className="text-[10px] text-stone-500 mt-0.5 tabular-nums leading-snug">
+                    Caja 1 {tpvClosingFood.pizza}P/{tpvClosingFood.burger}B/{tpvClosingFood.taco}T
+                    {' + '}
+                    Caja 2 {appsFoodTotals.pizza}P/{appsFoodTotals.burger}B/{appsFoodTotals.taco}T
+                    {' = total abajo'}
+                  </p>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { key: 'pizza' as const, label: 'Pizzas' },
+                    { key: 'burger' as const, label: 'Burgers' },
+                    { key: 'taco' as const, label: 'Tacos' },
+                  ]).map((u) => (
+                    <div
+                      key={u.key}
+                      className="rounded-xl bg-white dark:bg-stone-950 border border-stone-200 dark:border-stone-700 px-2 py-2 text-center"
+                    >
+                      <p className="text-[10px] font-semibold text-stone-500 inline-flex items-center justify-center gap-1 w-full">
+                        <DeliveryFoodUnitIcon unit={u.key} className="w-3.5 h-3.5" muted />
+                        {u.label}
+                      </p>
+                      <p className="mt-0.5 text-2xl font-black tabular-nums text-stone-900 dark:text-stone-50 leading-none">
+                        {closingFood[u.key]}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <input
                 type="text"
-                className="shrink-0 w-full min-h-8 px-2 py-1 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-xs"
+                className="shrink-0 w-full min-h-10 px-3 py-2 border border-stone-200 dark:border-stone-700 rounded-xl focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 outline-none bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 text-sm"
                 placeholder="Notas (opcional)"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
 
+              {/* Resumen final — misma fila que el Excel de Facturación */}
+              <div className="shrink-0 space-y-2">
+                <ClosingExcelLikeSummary amounts={excelDaySummary} />
+                <p className="text-[11px] text-stone-500 px-0.5 tabular-nums">
+                  Comprobación: Caja 1 {formatMoneyEs(tpvAllSales)} + Caja 2 {formatMoneyEs(integratorsTotal)}
+                  {' = '}
+                  <strong className="text-stone-800 dark:text-stone-100">{formatMoneyEs(dayMoneyTotal)}</strong>
+                  {dayCardCollected > 0 ? (
+                    <>
+                      {' · '}
+                      <span className={VERTIAL_CARD_TEXT}>Tarjeta cobrada {formatMoneyEs(dayCardCollected)}</span>
+                    </>
+                  ) : null}
+                </p>
+              </div>
+
               <button
                 type="button"
                 onClick={() => setShowExtraDetail((v) => !v)}
-                className={`shrink-0 w-full min-h-11 px-3 py-2 rounded-xl text-sm font-bold flex items-center justify-between touch-manipulation ${
+                className={`shrink-0 w-full min-h-10 px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between touch-manipulation border ${
                   showExtraDetail
-                    ? 'bg-[var(--v-blue,#2563eb)] text-white shadow-md'
-                    : 'bg-[var(--v-blue,#2563eb)]/10 border-2 border-[var(--v-blue,#2563eb)] text-[var(--v-blue,#2563eb)]'
+                    ? 'border-blue-600 bg-blue-50 text-blue-800 dark:bg-blue-950/40 dark:text-blue-200 dark:border-blue-500'
+                    : 'border-stone-200 bg-white text-stone-600 dark:border-stone-700 dark:bg-stone-950 dark:text-stone-300'
                 }`}
               >
-                <span className="inline-flex items-center gap-2">
-                  <Receipt className="w-4 h-4" />
-                  {showExtraDetail ? 'Ocultar detalle del turno' : 'Detalle del turno · entradas y salidas'}
+                <span className="inline-flex items-center gap-1.5">
+                  <Receipt className="w-3.5 h-3.5" />
+                  {showExtraDetail ? 'Ocultar detalle del turno' : 'Detalle del turno'}
                 </span>
-                {showExtraDetail ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                {showExtraDetail ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
               {showExtraDetail ? (
                 <div className="rounded-xl border-2 border-[var(--v-blue,#2563eb)]/40 bg-blue-50/50 dark:bg-blue-950/20 p-2.5 space-y-3">
@@ -2251,129 +2813,12 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     </span>
                   </div>
 
-                  <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 p-2.5 space-y-1 text-xs">
-                    <div className="flex justify-between gap-2">
-                      <span className="text-zinc-500">Fondo apertura</span>
-                      <span className="font-semibold tabular-nums">{formatMoneyEs(session.initialCashAmount)}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-zinc-600 dark:text-zinc-300">+ Cobros efectivo</span>
-                      <span className="font-semibold tabular-nums">{formatMoneyEs(summary.salesByMethod.efectivo)}</span>
-                    </div>
-                    {cashStaffConsumption > 0 ? (
-                      <div className="flex justify-between gap-2">
-                        <span className="text-zinc-600 dark:text-zinc-300">+ Consumo equipo</span>
-                        <span className="font-semibold tabular-nums">{formatMoneyEs(cashStaffConsumption)}</span>
-                      </div>
-                    ) : null}
-                    <div className="flex justify-between gap-2">
-                      <span className="text-zinc-600 dark:text-zinc-300">+ Entradas</span>
-                      <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashIn)}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-zinc-600 dark:text-zinc-300">− Devoluciones</span>
-                      <span className="font-semibold tabular-nums">{formatMoneyEs(cashReturnsTotal)}</span>
-                    </div>
-                    <div className="flex justify-between gap-2">
-                      <span className="text-zinc-600 dark:text-zinc-300">− Salidas</span>
-                      <span className="font-semibold tabular-nums">{formatMoneyEs(summary.totalCashOut)}</span>
-                    </div>
-                    <div className="border-t border-zinc-200 dark:border-zinc-700 pt-1 flex justify-between gap-2 font-semibold">
-                      <span>= Efectivo TPV</span>
-                      <span className="tabular-nums text-zinc-900 dark:text-zinc-100">{formatMoneyEs(expectedTpv)}</span>
-                    </div>
-                  </div>
-
                   <RegisterShiftSalesBreakdown
                     session={session}
                     orders={shiftOrders}
                     loading={shiftOrdersLoading}
                     registerSummary={summary}
                   />
-
-                  {(() => {
-                    const cashOps = session.transactions.filter((t) => isTpvCashMovementTx(t.type));
-                    const voided = (session.voidedCashMovements || []).slice().sort(
-                      (a, b) => new Date(a.voidedAt).getTime() - new Date(b.voidedAt).getTime(),
-                    );
-                    if (cashOps.length === 0 && voided.length === 0) {
-                      return (
-                        <div className="rounded-lg border border-dashed border-gray-200 dark:border-gray-700 px-3 py-2 text-xs text-gray-400">
-                          Sin movimientos de caja (entradas / salidas / devoluciones) en este turno.
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="space-y-3">
-                        {cashOps.length > 0 ? (
-                          <div>
-                            <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
-                              Movimientos de caja ({cashOps.length})
-                            </h4>
-                            <div className="space-y-1 max-h-40 overflow-y-auto">
-                              {[...cashOps].reverse().map((tx) => (
-                                <div
-                                  key={tx.id}
-                                  className="flex items-center justify-between gap-2 text-xs p-2 bg-gray-50 dark:bg-gray-900 rounded-lg"
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    <span className="text-gray-400 mr-1.5">
-                                      {new Date(tx.date).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                                    </span>
-                                    <span className="font-semibold text-gray-700 dark:text-gray-300">
-                                      {cashMovementLabel(tx)}
-                                    </span>
-                                    {tx.description ? (
-                                      <span className="text-gray-500 ml-1.5 truncate">{tx.description}</span>
-                                    ) : null}
-                                  </div>
-                                  <span className="shrink-0 font-semibold tabular-nums">
-                                    {tx.type === 'cash_in' ? '+' : '−'}
-                                    {formatMoneyEs(tx.amount)}
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                        {voided.length > 0 ? (
-                          <div>
-                            <h4 className="text-xs font-bold text-rose-600 uppercase tracking-wider mb-1.5">
-                              Movimientos eliminados ({voided.length})
-                            </h4>
-                            <div className="space-y-1 max-h-40 overflow-y-auto">
-                              {voided.map((v) => (
-                                <div
-                                  key={v.id}
-                                  className="text-xs p-2 rounded-lg border border-rose-200 bg-rose-50/80 dark:border-rose-900 dark:bg-rose-950/30"
-                                >
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="min-w-0">
-                                      <p className="font-semibold text-stone-800 dark:text-stone-100">
-                                        {TPV_CASH_TX_LABELS[v.type] || v.type} anulada
-                                        {v.originalDescription ? ` · ${v.originalDescription}` : ''}
-                                      </p>
-                                      <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5 break-words">
-                                        Motivo: {v.voidReason}
-                                      </p>
-                                      <p className="text-[10px] text-stone-500 mt-0.5">
-                                        {new Date(v.voidedAt).toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                                        {v.voidedBy ? ` · ${v.voidedBy}` : ''}
-                                      </p>
-                                    </div>
-                                    <span className="shrink-0 font-semibold tabular-nums text-rose-700 dark:text-rose-300">
-                                      {v.type === 'cash_in' ? '+' : '−'}
-                                      {formatMoneyEs(Number(v.amount || 0))}
-                                    </span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })()}
 
                   <div>
                     <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5">
@@ -2438,217 +2883,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   ) : null}
                 </div>
               ) : null}
-
-              {/* Final del cierre: totales caja + integradores */}
-              <div className="space-y-2 pb-1">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500 px-0.5">
-                  Resumen final del cierre
-                </p>
-
-                <div className="rounded-xl border-2 border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-950 overflow-hidden">
-                  <div className="px-2.5 py-1.5 bg-stone-800 text-white flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wide">Caja tienda</span>
-                    <span className="text-sm font-black tabular-nums">{formatMoneyEs(tpvAllSales)}</span>
-                  </div>
-                  <div className="p-2 space-y-1.5">
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG}`}>
-                        <p className={`text-[10px] font-semibold ${VERTIAL_CASH_TEXT}`}>Efectivo</p>
-                        <p className={`text-base font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>
-                          {formatMoneyEs(tpvCashSales)}
-                        </p>
-                      </div>
-                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}>
-                        <p className={`text-[10px] font-semibold ${VERTIAL_CARD_TEXT}`}>Tarjeta</p>
-                        <p className={`text-base font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>
-                          {formatMoneyEs(tpvCardSales)}
-                        </p>
-                      </div>
-                    </div>
-                    {(brandBilling.rows.length > 0 || brandBilling.unbranded > 0) ? (
-                      <div className="space-y-1 pt-0.5 border-t border-stone-100 dark:border-stone-800">
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-stone-400">Por marca</p>
-                        {closingBrands.map((slot) => {
-                          const aliases = closingSlotAliasSet(slot);
-                          const matching = brandBilling.rows.filter(
-                            (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
-                          );
-                          const revenue = matching.reduce((s, r) => s + (Number(r.revenue) || 0), 0);
-                          const cash = matching.reduce((s, r) => s + (Number(r.revenueEfectivo) || 0), 0);
-                          const card = matching.reduce((s, r) => s + (Number(r.revenueTarjeta) || 0), 0);
-                          return (
-                            <div key={slot.brandId} className="flex items-center justify-between gap-2 text-[11px]">
-                              <span className="font-semibold text-stone-700 dark:text-stone-200 truncate">
-                                {slot.name}
-                              </span>
-                              <span className="tabular-nums font-black shrink-0">
-                                {formatMoneyEs(revenue)}
-                                <span className={`ml-1.5 font-semibold ${VERTIAL_CASH_TEXT}`}>
-                                  Efectivo {formatDecimalEs(cash)}€
-                                </span>
-                                <span className={`ml-1 font-semibold ${VERTIAL_CARD_TEXT}`}>
-                                  Tarjeta {formatDecimalEs(card)}€
-                                </span>
-                              </span>
-                            </div>
-                          );
-                        })}
-                        {brandBilling.unbranded > 0 ? (
-                          <div className="flex justify-between text-[11px] text-stone-500">
-                            <span>Sin marca</span>
-                            <span className="tabular-nums font-semibold">{formatMoneyEs(brandBilling.unbranded)}</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <div className="flex justify-between text-[11px] pt-0.5 border-t border-stone-100 dark:border-stone-800">
-                      <span className="font-medium text-stone-500">Esperado en cajón</span>
-                      <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(expected)}</span>
-                    </div>
-                    <div className="flex justify-between text-[11px]">
-                      <span className="font-medium text-stone-500">Contado</span>
-                      <span className={`font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>{formatMoneyEs(countedTotal)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border-2 border-blue-300 dark:border-blue-800 bg-blue-50/40 dark:bg-blue-950/20 overflow-hidden">
-                  <div className="px-2.5 py-1.5 bg-[var(--v-blue,#2563eb)] text-white flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wide">Integradores</span>
-                    <span className="text-sm font-black tabular-nums">{formatMoneyEs(integratorsTotal)}</span>
-                  </div>
-                  <div className="p-2 space-y-1.5">
-                    <div className="space-y-1">
-                      {finalAggregatorRows.map((row) => (
-                        <div
-                          key={row.platform.channel}
-                          className="flex items-center justify-between gap-2 rounded-lg bg-white/80 dark:bg-stone-900/60 px-2 py-1.5 border border-blue-100 dark:border-blue-900/40"
-                        >
-                          <span className="text-xs font-bold text-stone-800 dark:text-stone-100 truncate">
-                            {row.platform.label}
-                          </span>
-                          <span className="text-sm font-black tabular-nums shrink-0">
-                            {formatMoneyEs(row.totalSales)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                    {closingBrands.length > 0 ? (
-                      <div className="space-y-1 pt-0.5 border-t border-blue-200/60 dark:border-blue-900/40">
-                        <p className="text-[9px] font-bold uppercase tracking-wide text-blue-600/80 dark:text-blue-300/80">
-                          Por marca · 2ª caja
-                        </p>
-                        {closingBrands.map((slot) => {
-                          const aliases = closingSlotAliasSet(slot);
-                          let manualSum = 0;
-                          let hasManual = false;
-                          const byCh = appsSnapshot?.brandTotalsByChannel;
-                          if (byCh) {
-                            for (const byBrand of Object.values(byCh)) {
-                              for (const [id, amt] of Object.entries(byBrand || {})) {
-                                if (aliases.has(id) || brandIdAliases(id).some((a) => aliases.has(a))) {
-                                  manualSum += Number(amt) || 0;
-                                  hasManual = true;
-                                }
-                              }
-                            }
-                          }
-                          const matching = appsBrandBilling.rows.filter(
-                            (r) => aliases.has(r.brandId) || brandIdAliases(r.brandId).some((a) => aliases.has(a)),
-                          );
-                          const systemSum = matching.reduce((s, r) => s + (Number(r.revenue) || 0), 0);
-                          const revenue = hasManual ? Math.round(manualSum * 100) / 100 : systemSum;
-                          return (
-                            <div key={slot.brandId} className="flex justify-between gap-2 text-[11px]">
-                              <span className="truncate text-stone-600 dark:text-stone-300">
-                                {slot.name}
-                              </span>
-                              <span className="tabular-nums font-bold shrink-0">
-                                {formatMoneyEs(revenue)}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                    <div className="grid grid-cols-2 gap-1.5 pt-0.5 border-t border-blue-200/60 dark:border-blue-900/40">
-                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CASH_BORDER} ${VERTIAL_CASH_BG}`}>
-                        <p className={`text-[10px] font-semibold ${VERTIAL_CASH_TEXT}`}>No pagado efectivo</p>
-                        <p className={`text-sm font-black tabular-nums ${VERTIAL_CASH_TEXT}`}>
-                          {formatMoneyEs(aggregatorCashTotal)}
-                        </p>
-                      </div>
-                      <div className={`rounded-lg border px-2 py-1.5 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}>
-                        <p className={`text-[10px] font-semibold ${VERTIAL_CARD_TEXT}`}>No pagado tarjeta</p>
-                        <p className={`text-sm font-black tabular-nums ${VERTIAL_CARD_TEXT}`}>
-                          {formatMoneyEs(aggregatorCardTotal)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-800 bg-slate-950 text-white px-2.5 py-2.5 space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                      Total día · caja + integradores
-                    </span>
-                    <span className="text-lg font-black tabular-nums">{formatMoneyEs(dayMoneyTotal)}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold tabular-nums">
-                    <span className="text-stone-300">Caja {formatMoneyEs(tpvAllSales)}</span>
-                    <span className="text-blue-300">Integradores {formatMoneyEs(integratorsTotal)}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-semibold tabular-nums">
-                    <span className="text-emerald-300">Efectivo cajón {formatMoneyEs(dayCashTotal)}</span>
-                    <span className="text-sky-300">Tarjeta {formatMoneyEs(dayCardTotal)}</span>
-                  </div>
-                </div>
-
-                {/* Total unidades de todos los steps (TPV paso 1 + apps paso 2) */}
-                <div className="rounded-xl border-2 border-stone-800 dark:border-stone-500 bg-white dark:bg-stone-950 overflow-hidden">
-                  <div className="px-2.5 py-1.5 bg-stone-900 text-white flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wide">
-                      Total unidades · todo el día
-                    </span>
-                    <span className="text-[10px] font-semibold text-stone-300 tabular-nums">
-                      TPV + apps
-                    </span>
-                  </div>
-                  <div className="p-2 space-y-2">
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {([
-                        { key: 'pizza' as const, label: 'Pizzas' },
-                        { key: 'burger' as const, label: 'Burgers' },
-                        { key: 'taco' as const, label: 'Tacos' },
-                      ]).map((u) => (
-                        <div
-                          key={u.key}
-                          className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-900 px-2 py-2 text-center"
-                        >
-                          <p className="text-[10px] font-semibold text-stone-500 inline-flex items-center justify-center gap-0.5 w-full">
-                            <DeliveryFoodUnitIcon unit={u.key} className="w-3.5 h-3.5" />
-                            {u.label}
-                          </p>
-                          <p className="mt-0.5 text-2xl font-black tabular-nums text-stone-900 dark:text-white">
-                            {closingFood[u.key]}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="text-[10px] text-stone-500 space-y-0.5 px-0.5">
-                      <p className="tabular-nums">
-                        <span className="font-semibold text-stone-600 dark:text-stone-300">TPV:</span>{' '}
-                        {tpvClosingFood.pizza}P · {tpvClosingFood.burger}B · {tpvClosingFood.taco}T
-                      </p>
-                      <p className="tabular-nums">
-                        <span className="font-semibold text-stone-600 dark:text-stone-300">Apps:</span>{' '}
-                        {appsFoodTotals.pizza}P · {appsFoodTotals.burger}B · {appsFoodTotals.taco}T
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           ) : null}
 
@@ -2689,47 +2923,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
           ) : null}
         </div>
 
-        {showDeliveryClosingSlots && closingStep === 3 ? (
-          <div className="flex-shrink-0 border-t-2 border-stone-800 bg-stone-950 text-white px-2.5 py-2 space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-stone-300">
-                Total del día · pizzas / burgers / tacos
-              </span>
-              <span className="text-[10px] font-semibold text-stone-400">TPV + apps</span>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5">
-              {([
-                { key: 'pizza' as const, label: 'Pizzas' },
-                { key: 'burger' as const, label: 'Burgers' },
-                { key: 'taco' as const, label: 'Tacos' },
-              ]).map((u) => (
-                <div
-                  key={u.key}
-                  className="rounded-lg border border-stone-600 bg-stone-900 px-1.5 py-1.5 text-center"
-                >
-                  <p className="text-[10px] font-semibold text-stone-400">{u.label}</p>
-                  <p className="text-2xl font-black tabular-nums text-white leading-tight">
-                    {closingFood[u.key]}
-                  </p>
-                </div>
-              ))}
-            </div>
-            <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-stone-700">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
-                € día
-              </span>
-              <span className="tabular-nums text-sm font-black text-white">
-                {formatMoneyEs(dayMoneyTotal)}
-                <span className="ml-1.5 text-[10px] font-semibold">
-                  <span className="text-emerald-300">Efectivo {formatDecimalEs(dayCashTotal)}€</span>
-                  <span className="mx-1 text-slate-500">·</span>
-                  <span className="text-sky-300">Tarjeta {formatDecimalEs(dayCardTotal)}€</span>
-                </span>
-              </span>
-            </div>
-          </div>
-        ) : null}
-
         <div className="flex-shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-slate-200 dark:border-slate-800 space-y-1.5">
           <div className="flex gap-1.5">
             {closingStep > 1 ? (
@@ -2751,18 +2944,16 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                 className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1`}
               >
                 Siguiente
+                {closingStepLabels[closingStep] ? (
+                  <span className="font-semibold opacity-90">· {closingStepLabels[closingStep]}</span>
+                ) : null}
                 <ChevronRight className="w-4 h-4" />
               </button>
             ) : (
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => onClose(counts, notes, finalAggregatorRows, {
-                  pizza: closingFood.pizza,
-                  burger: closingFood.burger,
-                  taco: closingFood.taco,
-                  byChannel: closingFoodByChannel,
-                }, appsSnapshot?.brandTotalsByChannel)}
+                onClick={() => setConfirmCloseOpen(true)}
                 className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1`}
               >
                 <Lock className="w-4 h-4" />
@@ -2784,6 +2975,82 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
             Guardar para luego
           </button>
         </div>
+
+        {confirmCloseOpen ? (
+          <div
+            className="absolute inset-0 z-20 flex items-end sm:items-center justify-center bg-black/45 p-3"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-close-title"
+          >
+            <div className="w-full sm:max-w-lg max-h-[min(92svh,720px)] rounded-2xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-stone-900 shadow-xl overflow-hidden flex flex-col">
+              <div className="shrink-0 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-800 flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-amber-700 dark:text-amber-300" />
+                </div>
+                <div className="min-w-0">
+                  <h3 id="confirm-close-title" className="text-sm font-bold text-amber-950 dark:text-amber-100">
+                    ¿Seguro que quieres cerrar la caja?
+                  </h3>
+                  <p className="text-[11px] text-amber-800 dark:text-amber-200 mt-1 leading-snug">
+                    Revisa el resumen (como el Excel). Luego solo podrás mirarlo; reabrir es solo si fue un error.
+                  </p>
+                </div>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-3">
+                {showDeliveryClosingSlots ? (
+                  <ClosingExcelLikeSummary amounts={excelDaySummary} compact />
+                ) : (
+                  <div className="rounded-xl border border-stone-200 dark:border-stone-700 px-3 py-2.5 space-y-1 text-sm">
+                    <div className="flex justify-between gap-2">
+                      <span className="text-stone-500">Esperado</span>
+                      <span className="font-bold tabular-nums">{formatMoneyEs(expected)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2">
+                      <span className="text-stone-500">Contado</span>
+                      <span className="font-bold tabular-nums">{formatMoneyEs(countedTotal)}</span>
+                    </div>
+                    <div className="flex justify-between gap-2 font-bold">
+                      <span>{diff === 0 ? 'Cuadra' : diff > 0 ? 'Sobra' : 'Falta'}</span>
+                      <span className="tabular-nums">{diff >= 0 ? '+' : ''}{formatMoneyEs(diff)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="shrink-0 p-3 border-t border-stone-200 dark:border-stone-700 flex flex-col sm:flex-row gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setConfirmCloseOpen(false)}
+                  className={`${VERTIAL_BTN_SECONDARY} !min-h-11 flex-1`}
+                >
+                  No, seguir revisando
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmCloseOpen(false);
+                    onClose(counts, notes, finalAggregatorRows, {
+                      pizza: closingFood.pizza,
+                      burger: closingFood.burger,
+                      taco: closingFood.taco,
+                      byChannel: closingFoodByChannel,
+                    }, {
+                      brandTotalsByChannel: appsSnapshot?.brandTotalsByChannel,
+                      unpaidCashByBrandByChannel: appsSnapshot?.unpaidCashByBrandByChannel,
+                      unpaidCardByBrandByChannel: appsSnapshot?.unpaidCardByBrandByChannel,
+                    });
+                  }}
+                  className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1 !bg-amber-600 hover:!bg-amber-700`}
+                >
+                  <Lock className="w-4 h-4" />
+                  Sí, cerrar caja
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -2805,6 +3072,8 @@ function ClockInModal({
   sessionOpenedAt,
   onCancel,
   onChanged,
+  onMemberClockedIn,
+  embedded = false,
 }: {
   storeLabel: string;
   businessId: string;
@@ -2814,6 +3083,10 @@ function ClockInModal({
   sessionOpenedAt?: string | null;
   onCancel: () => void;
   onChanged?: () => void;
+  /** Tras fichar entrada (p. ej. preseleccionar quién abre la caja). */
+  onMemberClockedIn?: (memberId: string) => void;
+  /** Panel dentro de apertura de caja (sin popup a pantalla completa). */
+  embedded?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<string | null>(null);
@@ -2927,12 +3200,14 @@ function ClockInModal({
     setActionMsg(null);
     let already = false;
     try {
+      const geo = await requestClockinGeo();
       const rec = await clockIn(businessId, mid, member.fullName || member.email || 'Trabajador', {
         device_type: 'tablet',
         sales_point_id: pdvId || undefined,
         sales_point_name: storeLabel || undefined,
         work_center_id: workCenterId || undefined,
         store_team_clockin: true,
+        geo,
       });
       already = Boolean((rec as ClockinRecord & { alreadyActive?: boolean }).alreadyActive);
       const normalized: ClockinRecord = {
@@ -2965,6 +3240,7 @@ function ClockInModal({
         ? `${member.fullName || 'Trabajador'} — ya estaba fichado`
         : `${member.fullName || 'Trabajador'} — fichaje de entrada`,
     );
+    onMemberClockedIn?.(mid);
     onChanged?.();
     setActingId(null);
   };
@@ -2974,11 +3250,12 @@ function ClockInModal({
     if (!record) return;
     setActingId(member.user_id);
     try {
+      const geo = await requestClockinGeo();
       if (record.status === 'break' || deriveEffectiveClockinStatus(record) === 'break') {
-        await endBreak(record, undefined, storeClockinOpts);
+        await endBreak(record, geo, storeClockinOpts);
         toast.success(`${member.fullName || 'Trabajador'} — descanso finalizado`);
       } else {
-        await startBreak(record, undefined, storeClockinOpts);
+        await startBreak(record, geo, storeClockinOpts);
         toast.success(`${member.fullName || 'Trabajador'} — descanso iniciado`);
       }
       await load();
@@ -2995,7 +3272,8 @@ function ClockInModal({
     if (!record) return;
     setActingId(member.user_id);
     try {
-      await clockOut(record, undefined, storeClockinOpts);
+      const geo = await requestClockinGeo();
+      await clockOut(record, geo, storeClockinOpts);
       toast.success(`${member.fullName || 'Trabajador'} — jornada finalizada`);
       await load();
       onChanged?.();
@@ -3008,33 +3286,52 @@ function ClockInModal({
 
   const btnBase = 'flex-1 min-w-0 py-2.5 px-1.5 rounded-xl text-[11px] sm:text-sm font-semibold flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed transition-colors';
 
-  return (
-    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex p-3 sm:p-4 items-end sm:items-center`}>
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl mx-auto flex flex-col overflow-hidden max-h-[min(92svh,720px)] sm:max-h-[min(88svh,680px)]">
-        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 shrink-0">
-          <div className="w-10 h-10 sm:w-11 sm:h-11 bg-violet-100 dark:bg-violet-900/30 rounded-xl flex items-center justify-center shrink-0">
-            <LogIn className="w-5 h-5 text-violet-600" />
+  const panel = (
+    <div
+      className={
+        embedded
+          ? 'bg-white dark:bg-stone-900 rounded-xl border border-stone-200 dark:border-stone-700 w-full flex flex-col overflow-hidden min-h-0 flex-1'
+          : 'bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-3xl mx-auto flex flex-col overflow-hidden max-h-[min(92svh,720px)] sm:max-h-[min(88svh,680px)]'
+      }
+    >
+        <div className={`border-b border-stone-200 dark:border-stone-700 flex items-center gap-2.5 shrink-0 ${embedded ? 'px-3 py-2 bg-stone-50 dark:bg-stone-950/50' : 'px-4 sm:px-6 py-3 sm:py-4 border-violet-200 dark:border-violet-800'}`}>
+          <div
+            className={`rounded-xl flex items-center justify-center shrink-0 ${
+              embedded
+                ? 'w-8 h-8 bg-[#2563EB]'
+                : 'w-10 h-10 sm:w-11 sm:h-11 bg-violet-100 dark:bg-violet-900/30'
+            }`}
+          >
+            <LogIn className={embedded ? 'w-4 h-4 text-white' : 'w-5 h-5 text-violet-600'} />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">Registro de fichaje</h2>
-            <p className="text-[11px] sm:text-xs text-gray-500 dark:text-gray-400 truncate">
-              {storeLabel || 'Tienda'} · Ficha al resto del equipo (nómina)
+            <h2 className={`font-bold text-stone-900 dark:text-stone-100 ${embedded ? 'text-sm' : 'text-base sm:text-lg'}`}>
+              {embedded ? 'Fichaje' : 'Registro de fichaje'}
+            </h2>
+            <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+              {embedded
+                ? 'Pulsa Fichar en tu nombre'
+                : `${storeLabel || 'Tienda'} · Pulsa Fichar al entrar`}
             </p>
           </div>
           {!loading && team.length > 0 && (
-            <span className="inline-flex px-2.5 py-1 rounded-full bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300 text-[11px] sm:text-xs font-bold shrink-0">
+            <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${
+              embedded ? 'bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-100' : 'bg-violet-600 text-white'
+            }`}>
               {clockedInCount}/{team.length}
             </span>
           )}
-          <button type="button" onClick={() => void load()} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0" title="Actualizar">
-            <RefreshCw className={`w-4 h-4 text-gray-500 ${loading ? 'animate-spin' : ''}`} />
+          <button type="button" onClick={() => void load()} className="p-1.5 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-800 shrink-0" title="Actualizar">
+            <RefreshCw className={`w-4 h-4 text-stone-500 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <button type="button" onClick={onCancel} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0" aria-label="Cerrar">
-            <X className="w-5 h-5 text-gray-500" />
-          </button>
+          {!embedded && (
+            <button type="button" onClick={onCancel} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 shrink-0" aria-label="Cerrar">
+              <X className="w-5 h-5 text-gray-500" />
+            </button>
+          )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 py-3 sm:py-4 space-y-2.5">
+        <div className={`flex-1 min-h-0 overflow-y-auto overscroll-contain ${embedded ? 'px-2.5 py-2 space-y-2' : 'px-4 sm:px-6 py-3 sm:py-4 space-y-2.5'}`}>
           {actionMsg && (
             <div className={`p-3 rounded-xl text-sm font-medium ${
               actionMsg.type === 'ok'
@@ -3070,6 +3367,78 @@ function ClockInModal({
               ? new Date(clockInEntry.time).toLocaleTimeString('es-ES', { timeStyle: 'short' })
               : null;
             const busy = actingId === member.user_id;
+
+            if (embedded) {
+              return (
+                <div
+                  key={member.user_id}
+                  className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border ${
+                    onVacation
+                      ? 'border-sky-200 bg-sky-50/70 dark:bg-sky-950/20'
+                      : isActive
+                        ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30'
+                        : isOnBreak
+                          ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/30'
+                          : 'border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900'
+                  }`}
+                >
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                    onVacation ? 'bg-sky-500 text-white'
+                      : isOnBreak ? 'bg-amber-500 text-white'
+                        : isActive ? 'bg-emerald-600 text-white'
+                          : 'bg-stone-200 dark:bg-stone-700 text-stone-600 dark:text-stone-200'
+                  }`}>
+                    {isOnBreak ? <Coffee className="w-3.5 h-3.5" /> : isWorking ? <UserCheck className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
+                      {member.fullName || member.email}
+                    </p>
+                    <p className="text-[10px] text-stone-500 truncate">
+                      {onVacation
+                        ? (vacationMsg || 'Ausente')
+                        : isOnBreak && clockInTime
+                          ? `Descanso · ${clockInTime}`
+                          : isActive && clockInTime
+                            ? `En turno · ${clockInTime}`
+                            : isDone
+                              ? 'Jornada fin'
+                              : 'Sin fichar'}
+                    </p>
+                  </div>
+                  {canFichar ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleClockIn(member)}
+                      className="shrink-0 min-h-9 px-3 rounded-lg bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-bold disabled:opacity-40 inline-flex items-center gap-1"
+                    >
+                      {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
+                      Fichar
+                    </button>
+                  ) : (
+                    <div className="shrink-0 flex gap-1">
+                      <button
+                        type="button"
+                        disabled={busy || !canBreak}
+                        onClick={() => void handleBreak(member)}
+                        className="min-h-9 px-2 rounded-lg text-[10px] font-semibold border border-amber-200 bg-amber-50 text-amber-800 disabled:opacity-40"
+                      >
+                        {isOnBreak ? 'Fin desc.' : 'Descanso'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || !canFinish}
+                        onClick={() => void handleFinish(member)}
+                        className="min-h-9 px-2 rounded-lg text-[10px] font-semibold border border-stone-200 bg-stone-100 text-stone-700 disabled:opacity-40"
+                      >
+                        Fin
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            }
 
             return (
               <div
@@ -3168,29 +3537,45 @@ function ClockInModal({
           })}
         </div>
 
-        <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 space-y-2">
-          {clockedInCount > 0 && (
+        {!embedded && (
+          <div className="shrink-0 px-4 sm:px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-900/40 space-y-2">
+            {clockedInCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChanged?.();
+                  onCancel();
+                }}
+                className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold transition-colors flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Continuar ({clockedInCount} fichado{clockedInCount === 1 ? '' : 's'})
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => {
-                onChanged?.();
-                onCancel();
-              }}
-              className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-semibold transition-colors flex items-center justify-center gap-2"
+              onClick={onCancel}
+              className="w-full py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 font-semibold text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 transition-colors"
             >
-              <CheckCircle2 className="w-4 h-4" />
-              Continuar ({clockedInCount} fichado{clockedInCount === 1 ? '' : 's'})
+              Cerrar
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onCancel}
-            className="w-full py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 font-semibold text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 transition-colors"
-          >
-            Cerrar
-          </button>
-        </div>
-      </div>
+          </div>
+        )}
+        {embedded && clockedInCount > 0 ? (
+          <div className="shrink-0 px-3 py-1.5 border-t border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/40">
+            <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300 text-center">
+              {clockedInCount} fichado{clockedInCount === 1 ? '' : 's'}
+            </p>
+          </div>
+        ) : null}
+    </div>
+  );
+
+  if (embedded) return panel;
+
+  return (
+    <div className={`fixed inset-0 ${TPV_MODAL_Z} bg-black/40 backdrop-blur-sm flex p-3 sm:p-4 items-end sm:items-center`}>
+      {panel}
     </div>
   );
 }
@@ -4025,6 +4410,8 @@ export function TpvRegisterGate({
   }, [isNativeApp, printerBarTick]);
   const [postCloseSession, setPostCloseSession] = useState<TpvRegisterSession | null>(null);
   const [postCloseAggregatorRows, setPostCloseAggregatorRows] = useState<AggregatorCashRow[]>([]);
+  /** Detalle ampliado del cierre (sin reabrir). */
+  const [postCloseShowDetail, setPostCloseShowDetail] = useState(false);
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
   const [clockedInWorkers, setClockedInWorkers] = useState<TpvClockedInWorker[]>([]);
   const [clockedInWorkersLoading, setClockedInWorkersLoading] = useState(false);
@@ -4890,6 +5277,19 @@ export function TpvRegisterGate({
     return () => window.clearTimeout(timer);
   }, [loading, activeSession?._id, activeSession?.status]);
 
+  const handleViewClosed = useCallback((closedSession: TpvRegisterSession) => {
+    setPostCloseSession(closedSession);
+    setPostCloseShowDetail(false);
+    setPostCloseAggregatorRows(
+      aggregatorRowsFromClosingTotals(
+        getClosingAggregatorPlatforms(),
+        closedSession.aggregatorClosingTotals || closedSession.summary?.salesByChannel,
+        closedSession.aggregatorClosingCash,
+        closedSession.aggregatorClosingCard,
+      ),
+    );
+  }, []);
+
   const handleReopenClosed = async (closedSession: TpvRegisterSession) => {
     if (!dataUserId || !closedSession?._id) return;
     if (openingInFlightRef.current) return;
@@ -4918,6 +5318,7 @@ export function TpvRegisterGate({
       });
       setPostCloseSession(null);
       setPostCloseAggregatorRows([]);
+      setPostCloseShowDetail(false);
       window.dispatchEvent(new CustomEvent(TPV_SESSION_SYNC_EVENT, { detail: reopened }));
       toast.success(
         `Caja reabierta: ${reopened.pointOfSaleName || 'tienda'}${reopened.terminalName ? ` / ${reopened.terminalName}` : ''}`,
@@ -5021,12 +5422,14 @@ export function TpvRegisterGate({
       const wcId = String(pdvDoc?.workCenterId || tabletBinding?.workCenterId || '').trim();
       if (bid && openerId && pdvId) {
         try {
+          const geo = await requestClockinGeo();
           await clockIn(bid, openerId, data.workerName, {
             device_type: isTabletSession ? 'tablet' : 'web',
             sales_point_id: pdvId,
             sales_point_name: data.pointOfSaleName || pdvDoc?.name || '',
             work_center_id: wcId || undefined,
             store_team_clockin: true,
+            geo,
           });
           setSelectedOrderTakerId(openerId);
           void refreshClockedInWorkers({ silent: true });
@@ -5091,7 +5494,11 @@ export function TpvRegisterGate({
     notes: string,
     aggregatorRows: AggregatorCashRow[] = [],
     productClosingCounts?: TpvRegisterSession['productClosingCounts'],
-    brandTotalsByChannel?: Record<string, Record<string, number>>,
+    appsClosingExtras?: {
+      brandTotalsByChannel?: Record<string, Record<string, number>>;
+      unpaidCashByBrandByChannel?: Record<string, Record<string, number>>;
+      unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
+    },
   ) => {
     const snapshotId = String(closingSession?._id || activeSession?._id || '').trim();
     const live = snapshotId
@@ -5126,9 +5533,20 @@ export function TpvRegisterGate({
       summary.salesByChannel[row.platform.channel] = row.totalSales;
     }
     aggregatorCashSum = Math.round(aggregatorCashSum * 100) / 100;
+    const brandTotalsByChannel = appsClosingExtras?.brandTotalsByChannel;
+    const unpaidCashByBrandByChannel = appsClosingExtras?.unpaidCashByBrandByChannel;
+    const unpaidCardByBrandByChannel = appsClosingExtras?.unpaidCardByBrandByChannel;
     const aggregatorClosingBrandTotals =
       brandTotalsByChannel && Object.keys(brandTotalsByChannel).length > 0
         ? brandTotalsByChannel
+        : undefined;
+    const aggregatorClosingUnpaidCashByBrand =
+      unpaidCashByBrandByChannel && Object.keys(unpaidCashByBrandByChannel).length > 0
+        ? unpaidCashByBrandByChannel
+        : undefined;
+    const aggregatorClosingUnpaidCardByBrand =
+      unpaidCardByBrandByChannel && Object.keys(unpaidCardByBrandByChannel).length > 0
+        ? unpaidCardByBrandByChannel
         : undefined;
     const expected = Math.round((expectedTpv + aggregatorCashSum) * 100) / 100;
     const diff = finalAmount - expected;
@@ -5149,6 +5567,12 @@ export function TpvRegisterGate({
       aggregatorClosingCash,
       aggregatorClosingCard,
       ...(aggregatorClosingBrandTotals ? { aggregatorClosingBrandTotals } : {}),
+      ...(aggregatorClosingUnpaidCashByBrand
+        ? { aggregatorClosingUnpaidCashByBrand }
+        : {}),
+      ...(aggregatorClosingUnpaidCardByBrand
+        ? { aggregatorClosingUnpaidCardByBrand }
+        : {}),
       ...(productClosingCounts ? { productClosingCounts } : {}),
       closingValidationStatus: autoValidated ? 'validated' : 'pending',
       ...(autoValidated
@@ -5174,6 +5598,7 @@ export function TpvRegisterGate({
       setClosingSession(null);
       setPostCloseSession(updated);
       setPostCloseAggregatorRows(aggregatorRows);
+      setPostCloseShowDetail(false);
       if (opts?.offline) {
         toast.success(
           `Caja cerrada sin red. Se subirá al volver la conexión. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
@@ -5589,14 +6014,19 @@ export function TpvRegisterGate({
   const leavePostCloseScreen = useCallback(() => {
     setPostCloseSession(null);
     setPostCloseAggregatorRows([]);
-    // Tablet / código de tienda: salir del SaaS a la pantalla de código (antes del TPV).
+    setPostCloseShowDetail(false);
+    // Tablet / código de tienda: siempre vuelve al código (nunca al SaaS del CEO).
     if (isTabletSession) {
       void leaveTpvTabletSession(logout);
       return;
     }
-    // CEO / back office: volver a la operativa (no al TPV).
-    navigate(opsHomePath, { replace: true });
-  }, [isTabletSession, logout, navigate, opsHomePath]);
+    // CEO / gerente web: salir del TPV a la operativa SaaS.
+    if (!isWorkerUser) {
+      navigate(opsHomePath, { replace: true });
+      return;
+    }
+    // Trabajador web: se queda en apertura de caja (mismo gate), sin ir al SaaS CEO.
+  }, [isTabletSession, isWorkerUser, logout, navigate, opsHomePath]);
 
   const requestClockIn = useCallback(() => setShowClockIn(true), []);
 
@@ -5761,106 +6191,157 @@ export function TpvRegisterGate({
     );
   }
 
-  if (!activeSession && postCloseSession) {
-    const expected = calcTpvExpectedCash(postCloseSession);
+  if (postCloseSession && !isTpvRegisterSessionOpen(activeSession)) {
+    const excelClosed = excelLikeAmountsFromClosedSession(postCloseSession);
     const restaurantSummary = postCloseSession.summary;
+    const postCloseAggRows = postCloseAggregatorRows.length > 0
+      ? postCloseAggregatorRows
+      : aggregatorRowsFromClosingTotals(
+        getClosingAggregatorPlatforms(),
+        postCloseSession.aggregatorClosingTotals || postCloseSession.summary?.salesByChannel,
+        postCloseSession.aggregatorClosingCash,
+        postCloseSession.aggregatorClosingCard,
+      );
     return wrapShell(
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700 text-center relative">
-            <button
-              type="button"
-              onClick={leavePostCloseScreen}
-              className="absolute right-3 top-3 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              aria-label="Cerrar"
-              title="Cerrar"
-            >
-              <X className="w-5 h-5 text-gray-500" />
-            </button>
-            <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <Lock className="w-8 h-8 text-zinc-700 dark:text-zinc-300" />
+      <div className="min-h-screen bg-stone-50 dark:bg-stone-950 flex items-center justify-center p-3 sm:p-4">
+        <div className="bg-white dark:bg-stone-900 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-xl w-full max-w-lg max-h-[min(92svh,780px)] flex flex-col overflow-hidden">
+          <div className="shrink-0 px-4 py-3 border-b border-stone-200 dark:border-stone-800 relative">
+            {!isWorkerUser && !isTabletSession ? (
+              <button
+                type="button"
+                onClick={leavePostCloseScreen}
+                className="absolute right-2 top-2 p-2 rounded-xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+                aria-label="Salir del TPV"
+                title="Salir del TPV"
+              >
+                <X className="w-5 h-5 text-stone-500" />
+              </button>
+            ) : null}
+            <div className="flex items-center gap-3 pr-8">
+              <div className="w-10 h-10 rounded-xl bg-stone-100 dark:bg-stone-800 flex items-center justify-center shrink-0">
+                <Lock className="w-5 h-5 text-stone-700 dark:text-stone-300" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-base font-bold text-stone-900 dark:text-stone-100">Caja cerrada</h1>
+                <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
+                  {postCloseSession.pointOfSaleName ? `${postCloseSession.pointOfSaleName} · ` : ''}
+                  {postCloseSession.terminalName}
+                </p>
+              </div>
             </div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Caja cerrada</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {postCloseSession.pointOfSaleName ? `${postCloseSession.pointOfSaleName} · ` : ''}{postCloseSession.terminalName}
-            </p>
           </div>
-          <div className="p-6 space-y-3">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Efectivo esperado</span>
-              <span className="font-semibold text-gray-900 dark:text-gray-100">{expected.toFixed(2)}€</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Efectivo contado</span>
-              <span className="font-semibold text-gray-900 dark:text-gray-100">{Number(postCloseSession.finalCashAmount || 0).toFixed(2)}€</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Diferencia</span>
-              <span className={`font-semibold tabular-nums text-zinc-900 dark:text-zinc-100 ${Number(postCloseSession.difference || 0) !== 0 ? 'underline decoration-zinc-400 underline-offset-2' : ''}`}>
-                {(postCloseSession.difference || 0) >= 0 ? '+' : ''}{Number(postCloseSession.difference || 0).toFixed(2)}€
-              </span>
-            </div>
-            {isRestaurantVertical ? (
+
+          <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4">
+            {postCloseShowDetail ? (
+              <div className="space-y-3 min-h-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                    Detalle del turno
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setPostCloseShowDetail(false)}
+                    className="text-xs font-semibold text-[#2563EB] hover:underline shrink-0"
+                  >
+                    Volver al resumen
+                  </button>
+                </div>
+                {!isRestaurantVertical ? (
+                  <AggregatorCashSummary
+                    rows={postCloseAggRows}
+                    title="Apps del cierre"
+                  />
+                ) : null}
+                <RegisterClosingDetailPanel
+                  session={postCloseSession}
+                  aggregatorRows={postCloseAggRows}
+                />
+              </div>
+            ) : isRestaurantVertical ? (
               restaurantSummary ? (
-                <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-900/40 p-3 space-y-2">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-stone-500">
-                    Turno TPV sala
+                <div className="rounded-2xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/40 p-3 space-y-2">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
+                    Resumen del turno
                   </p>
                   <div className="flex justify-between text-sm">
-                    <span className="text-stone-500">Ventas del turno</span>
-                    <span className="font-semibold text-stone-900 dark:text-stone-100">
-                      {Number(restaurantSummary.totalSales || 0).toFixed(2)}€
-                    </span>
+                    <span className="text-stone-500">Ventas</span>
+                    <span className="font-bold tabular-nums">{formatMoneyEs(Number(restaurantSummary.totalSales || 0))}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-stone-500">Efectivo</span>
-                    <span className="font-semibold">{Number(restaurantSummary.salesByMethod?.efectivo || 0).toFixed(2)}€</span>
+                    <span className="font-bold tabular-nums">{formatMoneyEs(Number(restaurantSummary.salesByMethod?.efectivo || 0))}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-stone-500">Tarjeta</span>
-                    <span className="font-semibold">{Number(restaurantSummary.salesByMethod?.tarjeta || 0).toFixed(2)}€</span>
+                    <span className="font-bold tabular-nums">{formatMoneyEs(Number(restaurantSummary.salesByMethod?.tarjeta || 0))}</span>
+                  </div>
+                  <div className="flex justify-between text-sm border-t border-stone-200 dark:border-stone-700 pt-2">
+                    <span className="text-stone-500">Contado / esperado</span>
+                    <span className="font-bold tabular-nums">
+                      {formatMoneyEs(excelClosed.counted)} / {formatMoneyEs(excelClosed.expected)}
+                    </span>
+                  </div>
+                  <div className={`flex justify-between text-sm font-bold ${
+                    excelClosed.diff === 0 ? 'text-emerald-700' : 'text-amber-800'
+                  }`}>
+                    <span>{excelClosed.diff === 0 ? 'Cuadra' : excelClosed.diff > 0 ? 'Sobra' : 'Falta'}</span>
+                    <span className="tabular-nums">
+                      {excelClosed.diff >= 0 ? '+' : ''}{formatMoneyEs(excelClosed.diff)}
+                    </span>
                   </div>
                 </div>
               ) : null
             ) : (
-              <AggregatorCashSummary
-                rows={postCloseAggregatorRows.length > 0
-                  ? postCloseAggregatorRows
-                  : aggregatorRowsFromClosingTotals(
-                    getClosingAggregatorPlatforms(),
-                    postCloseSession.aggregatorClosingTotals || postCloseSession.summary?.salesByChannel,
-                    postCloseSession.aggregatorClosingCash,
-                    postCloseSession.aggregatorClosingCard,
-                  )}
-                title="Cajas agregadores"
-              />
+              <ClosingExcelLikeSummary amounts={excelClosed} />
             )}
           </div>
-          <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-3">
+
+          <div className="shrink-0 p-3 sm:p-4 border-t border-stone-200 dark:border-stone-800 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => setPostCloseShowDetail((v) => !v)}
+              className="w-full py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2"
+            >
+              <Eye className="w-4 h-4" />
+              {postCloseShowDetail ? 'Volver al resumen' : 'Más detalle del turno'}
+            </button>
             <button
               type="button"
               onClick={() => void handleReopenClosed(postCloseSession)}
-              className="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2.5 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-100 text-sm font-semibold transition-colors flex items-center justify-center gap-2"
             >
               <RotateCcw className="w-4 h-4" />
-              Reabrir esta caja
+              Reabrir por error
             </button>
             <div className="flex flex-col sm:flex-row gap-3">
               <button
+                type="button"
                 onClick={() => {
                   setPostCloseSession(null);
                   setPostCloseAggregatorRows([]);
+                  setPostCloseShowDetail(false);
                 }}
                 className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
                 Abrir otra caja
               </button>
-              <button
-                onClick={leavePostCloseScreen}
-                className="flex-1 py-3 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors"
-              >
-                {isTabletSession ? 'Salir al código' : 'Volver'}
-              </button>
+              {isTabletSession || isWorkerUser ? (
+                <button
+                  type="button"
+                  onClick={leavePostCloseScreen}
+                  className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  {isTabletSession ? 'Cambiar trabajador' : 'Volver'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={leavePostCloseScreen}
+                  className="flex-1 py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Salir del TPV
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -5937,6 +6418,7 @@ export function TpvRegisterGate({
       <OpeningScreen
         onOpen={handleOpen}
         onReopenClosed={handleReopenClosed}
+        onViewClosed={handleViewClosed}
         loading={loading}
         pointsOfSale={pointsOfSale}
         workCenters={workCenters}
@@ -5948,6 +6430,11 @@ export function TpvRegisterGate({
         restrictedToPdvId={openingRestrictedPdvId}
         restaurantOpening={isRestaurantVerticalChrome}
         onOpeningPdvChange={handleOpeningPdvChange}
+        clockInBusinessId={businessId || ''}
+        clockInOwnerUserId={dataUserId || ''}
+        onClockInChanged={() => {
+          void refreshClockedInWorkers({ silent: true });
+        }}
         onClearStorePick={
           !isWorkerUser && !isTabletSession
             ? () => {

@@ -427,15 +427,15 @@ export function buildTrialExpiringEmail(email, name, daysLeft, billingUrl) {
   const dayText = daysLeft === 1 ? '1 día' : `${daysLeft} días`;
 
   return {
-    subject: `⏰ Tu prueba gratuita termina en ${dayText} · Vertial`,
+    subject: `⏰ Tu periodo de activación termina en ${dayText} · Vertial`,
     html: wrapAccountEmail({
       bodyHtml: `
           <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:12px;padding:12px 16px;margin-bottom:24px;">
-            <p style="margin:0;color:#92400e;font-size:13px;font-weight:600;">Tu prueba termina en ${escapeHtml(dayText)}</p>
+            <p style="margin:0;color:#92400e;font-size:13px;font-weight:600;">Tu periodo de activación termina en ${escapeHtml(dayText)}</p>
           </div>
           <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Hola, ${escapeHtml(displayName)}</h2>
           <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
-            Tu periodo de prueba gratuita de <strong>Vertial</strong> está a punto de finalizar.
+            Tu periodo de activación en <strong>Vertial</strong> está a punto de finalizar.
             Para continuar usando todas las funcionalidades sin interrupciones, activa tu suscripción ahora.
           </p>
           <div style="background:${EMAIL_BRAND.footerBg};border:1px solid ${EMAIL_BRAND.border};border-radius:12px;padding:16px;margin-bottom:24px;">
@@ -743,14 +743,14 @@ export function buildTrialExpiredEmail(email, name, billingUrl) {
   const displayName = name ? name.split(' ')[0] : 'Usuario';
 
   return {
-    subject: '⛔ Tu periodo de prueba ha finalizado · Vertial',
+    subject: '⛔ Tu periodo de activación ha finalizado · Vertial',
     html: wrapAccountEmail({
-      headerLabel: 'Vertial · Prueba finalizada',
+      headerLabel: 'Vertial · Activación finalizada',
       bodyHtml: `
-          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Tu periodo de prueba ha terminado</h2>
+          <h2 style="margin:0 0 16px;color:${EMAIL_BRAND.text};font-size:22px;font-weight:700;">Tu periodo de activación ha terminado</h2>
           <p style="color:#52525b;margin:0 0 16px;line-height:1.6;">
-            Hola <strong>${escapeHtml(displayName)}</strong>, tus <strong>14 días de prueba gratuita</strong> en
-            <strong>Vertial</strong> han finalizado.
+            Hola <strong>${escapeHtml(displayName)}</strong>, tu periodo de activación en
+            <strong>Vertial</strong> ha finalizado.
           </p>
           <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:16px;margin-bottom:24px;">
             <p style="margin:0 0 8px;color:#b91c1c;font-size:14px;font-weight:600;">¿Qué ocurre ahora?</p>

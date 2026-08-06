@@ -6,6 +6,7 @@ import {
   applyHoursToOpenDays,
   cloneWeekSchedule,
   countOpenScheduleDays,
+  ensureOpenDayTimes,
   DEFAULT_BUSINESS_HOURS_CONFIG,
   getBusinessHoursIssue,
   getBusinessHoursPresetSchedule,
@@ -17,7 +18,7 @@ import {
   WEEKDAY_KEYS,
   WEEKEND_KEYS,
 } from '../../../lib/businessHoursUtils';
-import { VERTIAL_BTN_PRIMARY } from '../../../lib/vertialUiTokens';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY, VERTIAL_SURFACE } from '../../../lib/vertialUiTokens';
 
 const WEEKDAY_LABELS = SCHEDULE_DAY_LABELS_ES;
 
@@ -97,11 +98,11 @@ function OpenClosedSwitch({ open, onToggle, id }: { open: boolean; onToggle: () 
       aria-checked={open}
       onClick={onToggle}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-        open ? 'bg-gray-900 dark:bg-gray-100' : 'bg-gray-200 dark:bg-gray-600'
+        open ? 'bg-[#2563EB]' : 'bg-stone-200 dark:bg-stone-600'
       }`}
     >
       <span
-        className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform dark:bg-gray-900 ${
+        className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
           open ? 'translate-x-6' : 'translate-x-1'
         }`}
       />
@@ -125,6 +126,9 @@ function TimeField({
   disabled,
   label,
   fallback = '09:00',
+  large = false,
+  dense = false,
+  hideLabel = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -132,6 +136,11 @@ function TimeField({
   label: string;
   /** Si el valor viene vacío/roto, mostramos y emitimos este HH:mm (nunca "--"). */
   fallback?: string;
+  /** Controles más grandes (wizard PDV). */
+  large?: boolean;
+  /** Ultra compacto (una línea por día). */
+  dense?: boolean;
+  hideLabel?: boolean;
 }) {
   const normalized = normalizeScheduleTimeValue(value, fallback) || fallback;
   const { hour, minute } = splitHhMm(normalized);
@@ -148,17 +157,32 @@ function TimeField({
     onChange(`${h}:${m}`);
   };
 
-  const selectClass =
-    'h-10 min-w-[3.25rem] appearance-none rounded-lg border-0 bg-transparent px-1.5 text-center text-base font-semibold tabular-nums text-stone-900 outline-none disabled:opacity-45 dark:text-stone-100';
+  const selectClass = dense
+    ? 'h-8 min-w-[2.75rem] appearance-none rounded border-0 bg-transparent px-1 text-center text-sm font-semibold tabular-nums text-stone-900 outline-none disabled:opacity-45 dark:text-stone-100'
+    : large
+      ? 'h-12 min-w-[3.75rem] appearance-none rounded-lg border-0 bg-transparent px-2 text-center text-lg font-semibold tabular-nums text-stone-900 outline-none disabled:opacity-45 dark:text-stone-100'
+      : 'h-10 min-w-[3.25rem] appearance-none rounded-lg border-0 bg-transparent px-1.5 text-center text-base font-semibold tabular-nums text-stone-900 outline-none disabled:opacity-45 dark:text-stone-100';
 
   return (
-    <label className="inline-flex flex-col gap-1">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-stone-500">{label}</span>
+    <label className={`inline-flex flex-col ${dense ? 'gap-0' : 'gap-1'}`}>
+      {!hideLabel ? (
+        <span
+          className={`font-medium uppercase tracking-wide text-stone-500 ${
+            dense ? 'sr-only' : large ? 'text-xs' : 'text-[11px]'
+          }`}
+        >
+          {label}
+        </span>
+      ) : null}
       <span
-        className={`inline-flex items-center gap-0.5 rounded-xl border-2 bg-white px-2 py-0.5 dark:bg-stone-900 ${
+        className={`inline-flex items-center gap-0.5 bg-white dark:bg-stone-900 ${
+          dense ? 'rounded-lg border px-1 py-0' : large ? 'rounded-xl border-2 px-2.5 py-1' : 'rounded-xl border-2 px-2 py-0.5'
+        } ${
           disabled
             ? 'border-stone-100 opacity-60 dark:border-stone-800'
-            : 'border-stone-200 focus-within:border-[var(--v-blue,#2563eb)] focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-stone-700'
+            : dense
+              ? 'border-stone-200 focus-within:border-blue-500 dark:border-stone-700'
+              : 'border-stone-200 focus-within:border-[var(--v-blue,#2563eb)] focus-within:ring-2 focus-within:ring-blue-500/20 dark:border-stone-700'
         }`}
       >
         <select
@@ -174,7 +198,10 @@ function TimeField({
             </option>
           ))}
         </select>
-        <span className="pb-0.5 text-base font-bold text-stone-400" aria-hidden>
+        <span
+          className={`font-bold text-stone-400 ${dense ? 'text-sm' : large ? 'text-lg pb-0.5' : 'text-base pb-0.5'}`}
+          aria-hidden
+        >
           :
         </span>
         <select
@@ -201,20 +228,51 @@ function TimeRangeRow({
   onFrom,
   onTo,
   disabled,
+  large = false,
+  dense = false,
 }: {
   from: string;
   to: string;
   onFrom: (v: string) => void;
   onTo: (v: string) => void;
   disabled?: boolean;
+  large?: boolean;
+  dense?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
-      <TimeField value={from} onChange={onFrom} disabled={disabled} label="Apertura" fallback="09:00" />
-      <span className="mb-2.5 select-none text-base font-semibold leading-none text-stone-300 dark:text-stone-600" aria-hidden>
-        →
+    <div
+      className={`flex flex-wrap items-end ${
+        dense ? 'items-center gap-1.5' : large ? 'gap-x-4 gap-y-3' : 'gap-x-3 gap-y-2'
+      }`}
+    >
+      <TimeField
+        value={from}
+        onChange={onFrom}
+        disabled={disabled}
+        label="Apertura"
+        fallback="09:00"
+        large={large}
+        dense={dense}
+        hideLabel={dense}
+      />
+      <span
+        className={`select-none font-semibold leading-none text-stone-300 dark:text-stone-600 ${
+          dense ? 'text-sm' : large ? 'mb-3 text-xl' : 'mb-2.5 text-base'
+        }`}
+        aria-hidden
+      >
+        –
       </span>
-      <TimeField value={to} onChange={onTo} disabled={disabled} label="Cierre" fallback="19:00" />
+      <TimeField
+        value={to}
+        onChange={onTo}
+        disabled={disabled}
+        label="Cierre"
+        fallback="19:00"
+        large={large}
+        dense={dense}
+        hideLabel={dense}
+      />
     </div>
   );
 }
@@ -333,8 +391,8 @@ function DayScheduleRow({
         <span
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold ${
             open
-              ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-              : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
+              ? 'bg-blue-600 text-white'
+              : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400'
           }`}
         >
           {WEEKDAY_SHORT[day]}
@@ -351,6 +409,60 @@ function DayScheduleRow({
       ) : (
         <p className="mt-1.5 pl-[3.25rem] text-sm text-gray-400">Cerrado</p>
       )}
+    </div>
+  );
+}
+
+/** Fila densa: día + horas + switch en una sola línea. */
+function WizardDayRow({
+  day,
+  open,
+  from,
+  to,
+  onToggle,
+  onFrom,
+  onTo,
+}: {
+  day: ScheduleDayKey;
+  open: boolean;
+  from: string;
+  to: string;
+  onToggle: (open: boolean) => void;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+}) {
+  const fromLabel = normalizeScheduleTimeValue(from, '09:00') || '09:00';
+  const toLabel = normalizeScheduleTimeValue(to, '21:00') || '21:00';
+  return (
+    <div
+      className={`flex min-h-10 items-center gap-2 border-b border-stone-100 px-2.5 py-1.5 last:border-b-0 dark:border-stone-800 ${
+        open ? '' : 'bg-stone-50/70 dark:bg-stone-950/30'
+      }`}
+    >
+      <span
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[11px] font-bold ${
+          open
+            ? 'bg-[#2563EB] text-white'
+            : 'bg-stone-200 text-stone-500 dark:bg-stone-800 dark:text-stone-400'
+        }`}
+      >
+        {WEEKDAY_SHORT[day]}
+      </span>
+      <span className="w-[5.5rem] shrink-0 truncate text-sm font-medium text-stone-900 dark:text-stone-100 sm:w-24">
+        {WEEKDAY_LABELS[day]}
+      </span>
+      <div className="min-w-0 flex-1">
+        {open ? (
+          <TimeRangeRow dense from={fromLabel} to={toLabel} onFrom={onFrom} onTo={onTo} />
+        ) : (
+          <span className="text-xs text-stone-400">Cerrado</span>
+        )}
+      </div>
+      <OpenClosedSwitch
+        id={`wizard-day-${day}`}
+        open={open}
+        onToggle={() => onToggle(!open)}
+      />
     </div>
   );
 }
@@ -373,7 +485,17 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
   };
 
   const updateDay = (day: ScheduleDayKey, field: 'open' | 'from' | 'to', value: string | boolean) => {
-    const nextDay = { ...config.schedule[day], [field]: value };
+    const cur = config.schedule[day];
+    let nextDay = { ...cur, [field]: value };
+    if (field === 'open' && value === true) {
+      nextDay = ensureOpenDayTimes({ ...nextDay, open: true });
+    }
+    if (field === 'from' && typeof value === 'string') {
+      nextDay = ensureOpenDayTimes({ ...nextDay, open: true, from: value }, { to: '19:00' });
+    }
+    if (field === 'to' && typeof value === 'string') {
+      nextDay = ensureOpenDayTimes({ ...nextDay, open: true, to: value }, { from: '09:00' });
+    }
     const next = { ...config.schedule, [day]: nextDay };
     if (field === 'open' && value === false && countOpenScheduleDays(next) === 0) {
       toast.error('Debe quedar al menos un día abierto.');
@@ -404,6 +526,10 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
       toast.error('La hora de cierre debe ser distinta de la de apertura.');
       return;
     }
+    const ok = window.confirm(
+      `¿Aplicar a todo el horario?\n\nSe pondrá ${quickFrom}–${quickTo} en los ${openCount} día${openCount === 1 ? '' : 's'} abierto${openCount === 1 ? '' : 's'}.`,
+    );
+    if (!ok) return;
     publishSchedule(applyHoursToOpenDays(config.schedule, quickFrom, quickTo));
     toast.success(`Horario aplicado a ${openCount} día${openCount === 1 ? '' : 's'} abierto${openCount === 1 ? '' : 's'}.`);
   };
@@ -412,8 +538,18 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
   const weekendGroup = groupHours(config.schedule, WEEKEND_KEYS);
 
   const setWeekdays = (patch: Partial<{ open: boolean; from: string; to: string }>) => {
-    const next = patchScheduleDays(config.schedule, WEEKDAY_KEYS, patch);
-    if (patch.open === false && countOpenScheduleDays(next) === 0) {
+    // Al tocar apertura o cierre del bloque, guardar SIEMPRE el par completo
+    // (si no, un día se quedaba con una hora vacía y bloqueaba el avance).
+    const timePatch =
+      patch.from !== undefined || patch.to !== undefined
+        ? {
+            from: patch.from ?? weekdayGroup.from,
+            to: patch.to ?? weekdayGroup.to,
+            ...(patch.open !== undefined ? { open: patch.open } : { open: true as const }),
+          }
+        : patch;
+    const next = patchScheduleDays(config.schedule, WEEKDAY_KEYS, timePatch);
+    if (timePatch.open === false && countOpenScheduleDays(next) === 0) {
       toast.error('Debe quedar al menos un día abierto.');
       return;
     }
@@ -421,8 +557,16 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
   };
 
   const setWeekend = (patch: Partial<{ open: boolean; from: string; to: string }>) => {
-    const next = patchScheduleDays(config.schedule, WEEKEND_KEYS, patch);
-    if (patch.open === false && countOpenScheduleDays(next) === 0) {
+    const timePatch =
+      patch.from !== undefined || patch.to !== undefined
+        ? {
+            from: patch.from ?? weekendGroup.from,
+            to: patch.to ?? weekendGroup.to,
+            ...(patch.open !== undefined ? { open: patch.open } : { open: true as const }),
+          }
+        : patch;
+    const next = patchScheduleDays(config.schedule, WEEKEND_KEYS, timePatch);
+    if (timePatch.open === false && countOpenScheduleDays(next) === 0) {
       toast.error('Debe quedar al menos un día abierto.');
       return;
     }
@@ -433,172 +577,145 @@ export function BusinessHoursEditor({ config, onChange, storeLabel, compact = fa
   const hoursIssue = getBusinessHoursIssue(config);
   const showMixedHint = weekdayGroup.mixed || weekendGroup.mixed;
   const isDense = wizard || compact;
+  const lunchBreak = config.lunchBreak || DEFAULT_BUSINESS_HOURS_CONFIG.lunchBreak;
+
+  // Auto-abrir detalle por día fuera del wizard cuando hay mixto (compact).
+  useEffect(() => {
+    if (compact && showMixedHint) setShowDayDetail(true);
+  }, [compact, showMixedHint]);
 
   if (wizard) {
-    return (
-      <div className="flex w-full min-w-0 flex-col gap-2">
-        {hoursIssue ? (
-          <div
-            className="shrink-0 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-[11px] text-red-900 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-100"
-            role="alert"
-          >
-            {hoursIssue}
-          </div>
-        ) : null}
+    const renderDayList = (days: readonly ScheduleDayKey[]) =>
+      days.map((day) => {
+        const d = config.schedule[day];
+        return (
+          <WizardDayRow
+            key={day}
+            day={day}
+            open={d.open}
+            from={d.from}
+            to={d.to}
+            onToggle={(open) => updateDay(day, 'open', open)}
+            onFrom={(from) => updateDay(day, 'from', from)}
+            onTo={(to) => updateDay(day, 'to', to)}
+          />
+        );
+      });
 
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          {storeLabel ? (
-            <span className="min-w-0 truncate text-xs font-semibold text-stone-800 dark:text-stone-100">
-              {storeLabel}
-            </span>
-          ) : null}
-          <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600 dark:bg-stone-800 dark:text-stone-300">
-            {openDayCount} abiertos
-          </span>
-          <div className="ml-auto flex gap-1">
+    return (
+      <div className="flex w-full min-w-0 flex-col gap-2.5">
+        <div className="flex items-end justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
+              Horario · {storeLabel || 'tienda'}
+            </p>
+            <p className="text-[11px] text-stone-500">L–D · abre / cierra · horas</p>
+          </div>
+          {hoursIssue ? (
+            <p className="max-w-[55%] text-right text-[11px] font-medium text-rose-600 dark:text-rose-300">
+              {hoursIssue}
+            </p>
+          ) : (
+            <p className="text-[11px] text-stone-400">{openDayCount} abiertos</p>
+          )}
+        </div>
+
+        {/* Barra rápida */}
+        <div className={`${VERTIAL_SURFACE} flex flex-wrap items-center gap-2 px-2.5 py-2`}>
+          <TimeRangeRow dense from={quickFrom} to={quickTo} onFrom={setQuickFrom} onTo={setQuickTo} />
+          <button
+            type="button"
+            onClick={applyQuickToOpenDays}
+            className={`${VERTIAL_BTN_PRIMARY} !min-h-8 !rounded-lg !px-2.5 !text-xs`}
+          >
+            Aplicar a abiertos
+          </button>
+          <div className="flex flex-wrap gap-1">
             {PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 title={p.hint}
                 onClick={() => applyPreset(p.id)}
-                className="rounded-md border border-stone-200 bg-white px-2 py-1 text-[10px] font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200"
+                className="rounded-md border border-stone-200 bg-stone-50 px-2 py-1 text-[10px] font-medium text-stone-600 hover:border-blue-300 hover:text-blue-700 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
               >
-                {p.label.split(' ')[0]}
+                {p.label}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-800">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold text-gray-700 dark:text-gray-300">Días (L–D)</p>
-            <div className="flex gap-1">
-              {ALL_DAYS.map((day) => {
-                const open = config.schedule[day].open;
-                return (
-                  <button
-                    key={day}
-                    type="button"
-                    title={`${WEEKDAY_LABELS[day]} — ${open ? 'Abierto' : 'Cerrado'}`}
-                    onClick={() => toggleDayOpen(day)}
-                    className={`flex h-7 w-7 items-center justify-center rounded-md text-[11px] font-bold transition-colors ${
-                      open
-                        ? 'bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900'
-                        : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'
-                    }`}
-                  >
-                    {WEEKDAY_SHORT[day]}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            <ScheduleBlock
-              dense
-              title="Lunes a viernes"
-              subtitle="Entre semana"
-              open={weekdayGroup.open}
-              mixed={weekdayGroup.mixed}
-              mixedHint="Hay días entre semana con horario distinto."
-              from={weekdayGroup.from}
-              to={weekdayGroup.to}
-              onToggleOpen={() => setWeekdays({ open: !weekdayGroup.open })}
-              onFrom={(from) => setWeekdays({ from })}
-              onTo={(to) => setWeekdays({ to })}
-              switchId="weekdays-open"
-            />
-            <ScheduleBlock
-              dense
-              title="Sábado y domingo"
-              subtitle="Fin de semana"
-              open={weekendGroup.open}
-              mixed={weekendGroup.mixed}
-              mixedHint="Sábado y domingo no coinciden."
-              from={weekendGroup.from}
-              to={weekendGroup.to}
-              onToggleOpen={() => setWeekend({ open: !weekendGroup.open })}
-              onFrom={(from) => setWeekend({ from })}
-              onTo={(to) => setWeekend({ to })}
-              switchId="weekend-open"
-            />
-          </div>
-
-          <div className="mt-2 flex flex-col gap-1.5 border-t border-gray-100 pt-2 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-[11px] font-semibold text-gray-800 dark:text-gray-200">Misma hora en abiertos</p>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <TimeRangeRow from={quickFrom} to={quickTo} onFrom={setQuickFrom} onTo={setQuickTo} />
-              <button
-                type="button"
-                onClick={applyQuickToOpenDays}
-                className={`${VERTIAL_BTN_PRIMARY} !min-h-8 !px-2.5 !py-1 !text-[11px]`}
-              >
-                <Copy className="h-3 w-3" />
-                Aplicar
-              </button>
-            </div>
-          </div>
+        {/* Días: L–V + finde en un bloque */}
+        <div className={`${VERTIAL_SURFACE} overflow-hidden`}>
+          <p className="border-b border-stone-100 bg-stone-50/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:border-stone-800 dark:bg-stone-950/40">
+            Lunes – viernes
+          </p>
+          {renderDayList(WEEKDAY_KEYS)}
+          <p className="border-y border-stone-100 bg-stone-50/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-stone-500 dark:border-stone-800 dark:bg-stone-950/40">
+            Fin de semana
+          </p>
+          {renderDayList(WEEKEND_KEYS)}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setShowTimezone((v) => !v)}
-            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-800"
-          >
-            <Globe className="h-3 w-3 shrink-0" />
-            {config.timezone}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowDayDetail((v) => !v)}
-            className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-[11px] text-gray-600 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-800"
-          >
-            <Clock className="h-3 w-3 shrink-0" />
-            {showDayDetail ? 'Ocultar por día' : 'Ajustar por día'}
-          </button>
-          {showMixedHint ? (
-            <span className="text-[10px] text-amber-800 dark:text-amber-200">
-              Algún día distinto — ajusta por día
+        {/* Ajustes compactos */}
+        <div className={`${VERTIAL_SURFACE} space-y-2 px-2.5 py-2`}>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+            Ajustes
+          </p>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 rounded border-stone-300 text-blue-600 focus:ring-blue-500"
+              checked={Boolean(lunchBreak.enabled)}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  lunchBreak: {
+                    ...lunchBreak,
+                    enabled: e.target.checked,
+                    from: lunchBreak.from || '14:00',
+                    to: lunchBreak.to || '17:00',
+                  },
+                })
+              }
+            />
+            <span className="text-xs font-medium text-stone-800 dark:text-stone-200">
+              Horario partido
+              <span className="ml-1 font-normal text-stone-400">(cierra al mediodía)</span>
             </span>
+          </label>
+          {lunchBreak.enabled ? (
+            <div className="flex flex-wrap items-center gap-2 pl-5">
+              <span className="text-[11px] text-stone-500">Pausa</span>
+              <TimeRangeRow
+                dense
+                from={lunchBreak.from || '14:00'}
+                to={lunchBreak.to || '17:00'}
+                onFrom={(from) =>
+                  onChange({ ...config, lunchBreak: { ...lunchBreak, enabled: true, from } })
+                }
+                onTo={(to) =>
+                  onChange({ ...config, lunchBreak: { ...lunchBreak, enabled: true, to } })
+                }
+              />
+            </div>
           ) : null}
-        </div>
-
-        {showTimezone ? (
-          <select
-            value={config.timezone}
-            onChange={(e) => onChange({ ...config, timezone: e.target.value })}
-            className="h-8 w-full max-w-xs shrink-0 rounded-lg border border-gray-300 bg-white px-2 text-[11px] outline-none focus:border-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-          >
-            {TIMEZONE_OPTIONS.map((tz) => (
-              <option key={tz} value={tz}>
-                {tz}
-              </option>
-            ))}
-          </select>
-        ) : null}
-
-        {showDayDetail ? (
-          <div className="max-h-36 min-h-0 overflow-y-auto rounded-xl border border-gray-200 bg-white px-2 dark:border-gray-700 dark:bg-gray-800">
-            {ALL_DAYS.map((day) => {
-              const d = config.schedule[day];
-              return (
-                <DayScheduleRow
-                  key={day}
-                  day={day}
-                  open={d.open}
-                  from={d.from}
-                  to={d.to}
-                  onToggle={(open) => updateDay(day, 'open', open)}
-                  onFrom={(from) => updateDay(day, 'from', from)}
-                  onTo={(to) => updateDay(day, 'to', to)}
-                />
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-2">
+            <Globe className="h-3.5 w-3.5 shrink-0 text-stone-400" />
+            <span className="text-[11px] text-stone-500">Zona</span>
+            <select
+              value={config.timezone}
+              onChange={(e) => onChange({ ...config, timezone: e.target.value })}
+              className="h-8 min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-2 text-xs outline-none focus:border-blue-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+            >
+              {TIMEZONE_OPTIONS.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
           </div>
-        ) : null}
+        </div>
       </div>
     );
   }

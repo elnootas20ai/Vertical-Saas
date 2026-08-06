@@ -2,7 +2,12 @@ import type { Brand } from './brandsApi';
 import type { CatalogItem } from './deliveryApi';
 import { shouldClearBrandForCategory } from './deliveryCatalogImportLogic.ts';
 import { isDeliveryBusinessType, normalizeBusinessScopeId } from './deliverySetup';
-import { isDeliveryOpsBusinessType, isRestaurantBusinessType } from './deliveryOpsTypes';
+import {
+  isDeliveryOpsBusinessType,
+  isIceCreamShopBusinessType,
+  isRestaurantBusinessType,
+  usesTpvCatalogOpsBusinessType,
+} from './deliveryOpsTypes';
 import {
   catalogImportIdentityKey,
   catalogLooseIdentityKey,
@@ -48,10 +53,16 @@ export function catalogItemBelongsToBusinessScope(
   if (itemVertical === 'restaurant' && !isRestaurantBusinessType(activeType)) {
     return false;
   }
+  if (itemVertical === 'icecreamshop' && !isIceCreamShopBusinessType(activeType)) {
+    return false;
+  }
   if (isDeliveryBusinessType(activeType) && itemVertical && itemVertical !== 'delivery') {
     return false;
   }
   if (isRestaurantBusinessType(activeType) && itemVertical && itemVertical !== 'restaurant') {
+    return false;
+  }
+  if (isIceCreamShopBusinessType(activeType) && itemVertical && itemVertical !== 'icecreamshop') {
     return false;
   }
 
@@ -72,11 +83,10 @@ export function catalogItemBelongsToBusinessScope(
 
   const universalCategory = shouldClearBrandForCategory(String(item.category || ''));
   if (universalCategory) {
-    const allowsUniversal =
-      isDeliveryOpsBusinessType(activeType) || isRestaurantBusinessType(activeType);
+    const allowsUniversal = usesTpvCatalogOpsBusinessType(activeType);
     if (activeType && !allowsUniversal) return false;
     if (multiAccount) return allowsUniversal;
-    if (isRestaurantBusinessType(activeType)) return true;
+    if (isRestaurantBusinessType(activeType) || isIceCreamShopBusinessType(activeType)) return true;
     return brandIds.size > 0;
   }
 

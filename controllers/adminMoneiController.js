@@ -23,15 +23,19 @@ import {
   appendSubscriptionHistory,
   applySuperAdminSubscriptionActivation,
 } from '../services/subscriptionAdminActivation.js';
+import { isVertialSuperAdminEmail } from '../utils/superAdmin.js';
 import logger from '../services/logger.js';
 
 const MONEI_COMMISSION_PERCENT = 0.8;
 
+/** Admin SaaS (role) o cuenta plataforma uriel@admin.com. */
 function requireAdmin(req) {
-  if (req.authUser?.role !== 'Admin') {
-    return { ok: false, status: 403, error: 'Solo administradores' };
+  const role = String(req.authUser?.role || '').trim();
+  const email = String(req.authUser?.email || '').trim();
+  if (isVertialSuperAdminEmail(email) || role === 'Admin') {
+    return null;
   }
-  return null;
+  return { ok: false, status: 403, error: 'Solo administradores' };
 }
 
 function resolveAdminMode(req) {

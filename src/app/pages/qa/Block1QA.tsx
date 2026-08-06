@@ -24,12 +24,12 @@ const items: QAItem[] = [
   },
   {
     module: 'WEB__ Landing - Header',
-    feature: 'Botones: "Empezar gratis" → /auth/entry',
+    feature: 'Botones: "Registrarse" → /auth/entry',
     status: 'ok'
   },
   {
     module: 'WEB__ Landing - Hero',
-    feature: 'CTA Principal: "Probar gratis 14 días" → /auth/entry',
+    feature: 'CTA Principal: "Registrarse" → /auth/entry',
     status: 'ok'
   },
   {
@@ -39,7 +39,7 @@ const items: QAItem[] = [
   },
   {
     module: 'WEB__ Landing - Planes',
-    feature: 'Botones "Empezar gratis" en cada plan → /auth/entry',
+    feature: 'Botones "Registrarse" en cada plan → /auth/entry',
     status: 'ok'
   },
   {

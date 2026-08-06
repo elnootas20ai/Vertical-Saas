@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeCompanyBillingBreakdown } from '../src/app/lib/portfolioMetrics.ts';
 import {
+  absorbUnbrandedIntoBrandRows,
   buildShiftAppsBrandTotals,
   buildShiftBrandRevenue,
   getOrderBrandShares,
@@ -267,6 +268,137 @@ describe('buildShiftBrandRevenue', () => {
     const { rows } = buildShiftBrandRevenue(session, orders, { modo: 'Modomio' });
     expect(rows[0]?.revenueTarjeta).toBe(25);
     expect(rows[0]?.revenueEfectivo).toBe(0);
+  });
+
+  it('pedido suelto (cerveza): orphanMode shift_majority → marca dominante del turno', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+    };
+    const orders = [
+      paidOrder({
+        _id: 'branded',
+        totalAmount: 200,
+        paidAmount: 200,
+        paymentMethod: 'efectivo',
+        items: [{ brandIds: ['modo'], quantity: 1, total: 200 }],
+      }),
+      paidOrder({
+        _id: 'branded-bb',
+        totalAmount: 80,
+        paidAmount: 80,
+        paymentMethod: 'tarjeta',
+        items: [{ brandIds: ['bb'], quantity: 1, total: 80 }],
+      }),
+      paidOrder({
+        _id: 'orphan-beer',
+        totalAmount: 3,
+        paidAmount: 3,
+        paymentMethod: 'efectivo',
+        items: [{ category: 'Bebidas', name: 'Cerveza', quantity: 1, total: 3 }],
+      }),
+    ];
+    const { rows, unbranded } = buildShiftBrandRevenue(
+      session,
+      orders,
+      { modo: 'Modomio', bb: 'Black Burger' },
+      { orphanMode: 'shift_majority', monoBrandTakesAll: true, sharedSplitMode: 'majority' },
+    );
+    expect(unbranded).toBe(0);
+    expect(rows.find((r) => r.brandId === 'modo')?.revenue).toBe(203);
+    expect(rows.find((r) => r.brandId === 'bb')?.revenue).toBe(80);
+  });
+
+  it('pedido suelto: orphanMode equal → a medias', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+    };
+    const orders = [
+      paidOrder({
+        _id: 'a',
+        totalAmount: 100,
+        paidAmount: 100,
+        items: [{ brandIds: ['modo'], quantity: 1, total: 100 }],
+      }),
+      paidOrder({
+        _id: 'b',
+        totalAmount: 100,
+        paidAmount: 100,
+        items: [{ brandIds: ['bb'], quantity: 1, total: 100 }],
+      }),
+      paidOrder({
+        _id: 'beer',
+        totalAmount: 4,
+        paidAmount: 4,
+        items: [{ category: 'Bebidas', quantity: 1, total: 4 }],
+      }),
+    ];
+    const { rows, unbranded } = buildShiftBrandRevenue(
+      session,
+      orders,
+      { modo: 'Modomio', bb: 'BB' },
+      { orphanMode: 'equal', monoBrandTakesAll: true, sharedSplitMode: 'majority' },
+    );
+    expect(unbranded).toBe(0);
+    expect(rows.find((r) => r.brandId === 'modo')?.revenue).toBe(102);
+    expect(rows.find((r) => r.brandId === 'bb')?.revenue).toBe(102);
+  });
+
+  it('pedido suelto: orphanMode fixed_brand → marca elegida', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+    };
+    const orders = [
+      paidOrder({
+        _id: 'a',
+        totalAmount: 200,
+        paidAmount: 200,
+        items: [{ brandIds: ['modo'], quantity: 1, total: 200 }],
+      }),
+      paidOrder({
+        _id: 'beer',
+        totalAmount: 3,
+        paidAmount: 3,
+        items: [{ category: 'Bebidas', quantity: 1, total: 3 }],
+      }),
+    ];
+    const { rows, unbranded } = buildShiftBrandRevenue(
+      session,
+      orders,
+      { modo: 'Modomio', bb: 'BB' },
+      {
+        orphanMode: 'fixed_brand',
+        orphanFixedBrandId: 'bb',
+        monoBrandTakesAll: true,
+        sharedSplitMode: 'majority',
+      },
+    );
+    expect(unbranded).toBe(0);
+    expect(rows.find((r) => r.brandId === 'modo')?.revenue).toBe(200);
+    expect(rows.find((r) => r.brandId === 'bb')?.revenue).toBe(3);
+  });
+});
+
+describe('absorbUnbrandedIntoBrandRows — orphanMode', () => {
+  it('unassigned deja Sin marca', () => {
+    const out = absorbUnbrandedIntoBrandRows(
+      {
+        rows: [{ brandId: 'modo', name: 'M', revenue: 10, orderCount: 1, sharePercent: 100, revenueEfectivo: 10, revenueTarjeta: 0 }],
+        unbranded: 3,
+        total: 13,
+      },
+      { orphanMode: 'unassigned' },
+    );
+    expect(out.unbranded).toBe(3);
+    expect(out.rows[0].revenue).toBe(10);
   });
 });
 

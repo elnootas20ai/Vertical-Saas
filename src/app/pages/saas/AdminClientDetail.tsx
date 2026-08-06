@@ -4,17 +4,17 @@ import { ArrowLeft, Loader2 } from 'lucide-react';
 import { Layout } from '../../components/saas/Layout';
 import { useAuth } from '../../context/AuthContext';
 import { isVertialSuperAdminEmail } from '../../lib/superAdmin';
-import type { AuthUser } from '../../lib/authApi';
+import { getUserByIdRequest, type AuthUser } from '../../lib/authApi';
 import { EditClientModal } from './AdminPanel';
 
 /**
  * Ficha completa de cliente SaaS (super-admin).
- * Mismo contenido que el antiguo popup, en página como CRM delivery.
+ * Secciones ordenadas: resumen → acciones → cupos → plan → datos.
  */
 export function AdminClientDetail() {
   const { userId = '' } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const { user, listUsers } = useAuth();
+  const { user } = useAuth();
   const [account, setAccount] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -33,8 +33,8 @@ export function AdminClientDetail() {
     setLoading(true);
     setError('');
     try {
-      const users = await listUsers();
-      const found = users.find((u) => u.user_id === id) || null;
+      const response = await getUserByIdRequest(id);
+      const found = response.user || null;
       if (!found) {
         setAccount(null);
         setError('No se encontró esta cuenta en el panel admin.');
@@ -47,7 +47,7 @@ export function AdminClientDetail() {
     } finally {
       setLoading(false);
     }
-  }, [listUsers, userId]);
+  }, [userId]);
 
   useEffect(() => {
     void loadAccount();
@@ -66,10 +66,10 @@ export function AdminClientDetail() {
   const title = account?.companyName || account?.fullName || 'Cliente SaaS';
 
   return (
-    <Layout title={title} subtitle={account?.email || 'Ficha admin · mismas herramientas que antes'}>
+    <Layout title={title} subtitle={account?.email ? `${account.email} · Ficha admin` : 'Ficha admin'}>
       <div className="space-y-4 max-w-4xl mx-auto w-full">
         {loading && (
-          <div className="flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-4 py-8 text-sm text-gray-500">
+          <div className="flex items-center gap-2 rounded-2xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 px-4 py-8 text-sm text-stone-500">
             <Loader2 className="w-4 h-4 animate-spin" />
             Cargando cliente…
           </div>
@@ -80,12 +80,12 @@ export function AdminClientDetail() {
             <button
               type="button"
               onClick={backToList}
-              className="inline-flex items-center gap-2 text-sm font-semibold text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-stone-600 dark:text-stone-400 hover:text-stone-900"
             >
               <ArrowLeft className="w-4 h-4" />
               Volver a clientes
             </button>
-            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {error}
             </div>
           </div>

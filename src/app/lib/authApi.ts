@@ -1122,6 +1122,24 @@ export async function listUsersRequest(businessId?: string) {
   return request<AuthUser>(`/api/auth/users${qs}`);
 }
 
+/** Ficha admin: un usuario por id (super-admin lista completa; resto según alcance del listado). */
+export async function getUserByIdRequest(userId: string): Promise<ApiEnvelope<AuthUser>> {
+  const id = String(userId || '').trim();
+  if (!id) {
+    return { ok: false, error: 'Falta el id del cliente' };
+  }
+  const data = await listUsersRequest();
+  const users = Array.isArray(data.users) ? data.users : [];
+  const user = users.find((u) => {
+    const uid = String(u.user_id || u.id || '').trim();
+    return uid === id;
+  });
+  if (!user) {
+    return { ok: false, error: 'No se encontró esta cuenta en el panel admin.' };
+  }
+  return { ok: true, user };
+}
+
 export async function listRolesRequest() {
   return request<AuthUser>('/api/auth/roles');
 }

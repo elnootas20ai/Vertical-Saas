@@ -762,6 +762,43 @@ VERTICAL_CATALOG_CONFIGS.restaurant = {
   ...VERTICAL_CATALOG_CONFIGS.delivery,
 };
 
+VERTICAL_CATALOG_CONFIGS.iceCreamShop = {
+  itemLabel: 'Producto',
+  itemLabelPlural: 'Productos',
+  categories: [
+    'sabores', 'tarrinas', 'conos', 'batidos', 'toppings',
+    'encargos', 'bebidas', 'complementos', 'postres', 'combos', 'otros',
+  ],
+  units: [
+    { value: 'ud', label: 'Unidad' },
+    { value: 'bola', label: 'Bola' },
+    { value: 'cono', label: 'Cono' },
+    { value: 'tarrina', label: 'Tarrina' },
+    { value: 'l', label: 'Litro' },
+    { value: 'pack', label: 'Pack' },
+  ],
+  fields: [
+    FIELD.name, FIELD.description, FIELD.category, FIELD.unit,
+    FIELD.unitPrice, FIELD.costPrice, FIELD.supplier,
+    FIELD.stockQuantity, FIELD.minStock,
+    FIELD.allergens,
+    FIELD.image, FIELD.notes, FIELD.webVisible, FIELD.available, FIELD.salesPoint,
+  ],
+  features: {
+    allergens: true,
+    stock: true,
+    supplier: true,
+    webStore: true,
+    salesPoints: true,
+  },
+  customFields: [
+    { key: 'ingredients', label: 'Ingredientes', type: 'textarea', required: false },
+    { key: 'formato', label: 'Formato', type: 'text', required: false },
+    { key: 'isVegan', label: 'Vegano', type: 'boolean', required: false },
+    { key: 'isGlutenFree', label: 'Sin gluten', type: 'boolean', required: false },
+  ],
+};
+
 VERTICAL_CATALOG_CONFIGS.butcherShop = {
   itemLabel: 'Corte / producto',
   itemLabelPlural: 'Cortes y productos',

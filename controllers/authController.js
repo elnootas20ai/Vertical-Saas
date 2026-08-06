@@ -123,6 +123,7 @@ import { notifyInviteEmailFailed } from '../services/adminBusinessAlerts.js';
 import logger from '../services/logger.js';
 import { invalidateDb } from '../services/cache.js';
 import { buildSubscriptionFromOnboarding } from '../shared/billing/onboardingSubscription.js';
+import { shouldBlockSubscriptionAccess } from '../shared/billing/subscriptionAccess.js';
 import { isSkipMoneiSubscription } from '../shared/billing/skipMonei.js';
 import {
   provisionBusinessFromOnboarding,
@@ -301,6 +302,11 @@ function resolvePostLoginRedirect(account, { pendingInvitationsCount = 0 } = {})
       return WORKER_PAYROLL_SETUP_PATH;
     }
     return resolveWorkerSessionEntryPath(account);
+  }
+
+  // Empresa sin licencia activa → pantalla de transferencia (no Gate/dashboard).
+  if (shouldBlockSubscriptionAccess(account.subscription)) {
+    return '/saas/subscription';
   }
 
   return '/auth/gate';
@@ -1491,7 +1497,34 @@ export async function updateProfile(req, res) {
       updatedAt: new Date().toISOString(),
     };
 
-    const savedAccount = await saveAccount(req, updatedAccount);
+    let savedAccount = await saveAccount(req, updatedAccount);
+
+    // Completar onboarding vía updateProfile (Confirmation) debe crear la empresa
+    // igual que saveOnboarding: rellenar companyProfile ≠ documento Business en BD.
+    if (completingOnboarding) {
+      try {
+        const provision = await provisionBusinessFromOnboarding(req, savedAccount);
+        if (provision.ok && provision.businessId) {
+          const resolvedName = resolveBusinessNameFromOnboarding(savedAccount);
+          savedAccount = await saveAccount(req, {
+            ...savedAccount,
+            companyName: resolvedName || savedAccount.companyName,
+            onboardingData: {
+              ...(savedAccount.onboardingData || {}),
+              businessId: provision.businessId,
+              suppressAutoProvision: false,
+            },
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (provisionErr) {
+        console.error(
+          '[AUTH] Error provisionando empresa al completar onboarding (updateProfile):',
+          provisionErr?.message,
+        );
+      }
+    }
+
     const persistedAccount = (await findAccountByUserId(req, savedAccount.user_id)) || savedAccount;
 
     if (savedAccount.linkedBusinessId && (fullName !== undefined || email !== undefined || role !== undefined || permissions !== undefined || employment !== undefined)) {

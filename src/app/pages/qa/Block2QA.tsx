@@ -49,7 +49,7 @@ const items: QAItem[] = [
   },
   {
     module: 'ACCESO__ Onboarding - Structure',
-    feature: 'Campos numéricos: ubicaciones, empleados, vehículos mensuales',
+    feature: 'Campos numéricos: empresas, PDV, trabajadores, marcas',
     status: 'ok'
   },
   {

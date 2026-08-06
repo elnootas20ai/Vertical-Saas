@@ -2043,6 +2043,12 @@ export interface TpvRegisterSession {
    */
   aggregatorClosingBrandTotals?: Record<string, Record<string, number>>;
 
+  /** No pagado efectivo por marca y canal. channel → brandId → € (suma = aggregatorClosingCash). */
+  aggregatorClosingUnpaidCashByBrand?: Record<string, Record<string, number>>;
+
+  /** No pagado tarjeta por marca y canal. channel → brandId → €. */
+  aggregatorClosingUnpaidCardByBrand?: Record<string, Record<string, number>>;
+
   /**
    * Conteo de pizzas / burgers / tacos del turno al cerrar caja.
    * `byChannel` opcional por integrador (glovo, ubereats…).

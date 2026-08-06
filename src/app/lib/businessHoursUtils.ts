@@ -167,7 +167,8 @@ export function createBlankBusinessHoursConfig(): BusinessHoursConfig {
       wednesday: { open: true, from: '', to: '' },
       thursday: { open: true, from: '', to: '' },
       friday: { open: true, from: '', to: '' },
-      saturday: { open: true, from: '', to: '' },
+      // Finde cerrado por defecto: basta configurar L–V; si abre, se rellena al activarlo.
+      saturday: { open: false, from: '', to: '' },
       sunday: { open: false, from: '', to: '' },
     },
     holidays: [],
@@ -206,7 +207,31 @@ export function getBusinessHoursIssue(hours: BusinessHoursConfig | null | undefi
   if (countOpenScheduleDays(hours.schedule) === 0) {
     return 'Activa al menos un día abierto con su horario (L–D).';
   }
+  // Horario partido (pausa mediodía): válido junto a horarios distintos por día.
+  if (hours.lunchBreak?.enabled) {
+    const breakFrom = scheduleTimeToMinutes(hours.lunchBreak.from);
+    const breakTo = scheduleTimeToMinutes(hours.lunchBreak.to);
+    if (breakFrom < 0 || breakTo < 0) {
+      return 'Horario partido: usa horas válidas en la pausa (HH:mm).';
+    }
+    if (breakFrom >= breakTo) {
+      return 'Horario partido: el inicio de la pausa debe ser antes del fin.';
+    }
+  }
   return null;
+}
+
+/** Completa from/to vacíos al editar un día abierto (evita quedar a medias). */
+export function ensureOpenDayTimes(
+  day: DaySchedule,
+  defaults: { from?: string; to?: string } = {},
+): DaySchedule {
+  const fallbackFrom = defaults.from || '09:00';
+  const fallbackTo = defaults.to || '19:00';
+  if (!day.open) return { ...day };
+  const from = String(day.from || '').trim() || fallbackFrom;
+  const to = String(day.to || '').trim() || fallbackTo;
+  return { ...day, from, to };
 }
 
 export function hasValidBusinessHoursConfig(

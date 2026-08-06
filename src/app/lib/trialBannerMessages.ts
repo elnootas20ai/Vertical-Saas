@@ -17,13 +17,13 @@ export function getTrialActiveBannerContent(options: {
 }): TrialBannerContent {
   const { daysLeft, trialEndsAt, hasSavedCard, cardLastFour, hasMoneiSubscription } = options;
   const dayWord = daysLeft === 1 ? 'día' : 'días';
-  const title = `Prueba gratuita · ${daysLeft} ${dayWord} restantes`;
+  const title = `Periodo de activación · ${daysLeft} ${dayWord} restantes`;
   const endHint = trialEndsAt ? ` (hasta el ${formatTrialEndDate(trialEndsAt)})` : '';
 
   if (hasMoneiSubscription) {
     return {
       title,
-      detail: `Suscripción en periodo de prueba${endHint}. El primer cobro será automático al finalizar la prueba.`,
+      detail: `Suscripción en periodo de activación${endHint}. El primer cobro será automático al finalizar.`,
       ctaLabel: 'Ver Mi plan',
     };
   }
@@ -32,14 +32,14 @@ export function getTrialActiveBannerContent(options: {
     const cardHint = cardLastFour ? `Tarjeta ····${cardLastFour} guardada. ` : 'Tarjeta guardada. ';
     return {
       title,
-      detail: `${cardHint}Sin cargo hasta que termine la prueba${endHint}.`,
+      detail: `${cardHint}Sin cargo hasta que termine el periodo${endHint}.`,
       ctaLabel: 'Ver Mi plan',
     };
   }
 
   return {
     title,
-    detail: `Acceso completo durante la prueba${endHint}. Añade un método de pago antes de que termine.`,
+    detail: `Acceso completo durante la activación${endHint}. Añade un método de pago antes de que termine.`,
     ctaLabel: 'Configurar pago',
   };
 }
@@ -52,12 +52,12 @@ export function getTrialExpiringBannerContent(options: {
 }): TrialBannerContent {
   const { daysLeft, hasSavedCard, cardLastFour, hasMoneiSubscription } = options;
   const dayWord = daysLeft === 1 ? 'día' : 'días';
-  const title = `Tu prueba termina en ${daysLeft} ${dayWord}`;
+  const title = `Tu periodo de activación termina en ${daysLeft} ${dayWord}`;
 
   if (hasMoneiSubscription) {
     return {
       title,
-      detail: 'El cobro del plan se realizará automáticamente al finalizar la prueba.',
+      detail: 'El cobro del plan se realizará automáticamente al finalizar.',
       ctaLabel: 'Ver Mi plan',
     };
   }
@@ -73,7 +73,7 @@ export function getTrialExpiringBannerContent(options: {
 
   return {
     title,
-    detail: 'Añade un método de pago para no perder el acceso al terminar la prueba.',
+    detail: 'Añade un método de pago para no perder el acceso al terminar el periodo.',
     ctaLabel: 'Configurar pago',
   };
 }

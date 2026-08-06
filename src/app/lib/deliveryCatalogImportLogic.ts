@@ -158,6 +158,28 @@ const IMPORT_CATEGORY_ALIASES: Record<string, string> = {
   menú: 'Combos',
   'menu del dia': 'Combos',
   'menú del día': 'Combos',
+  // Heladería
+  sabores: 'Sabores',
+  sabor: 'Sabores',
+  helados: 'Sabores',
+  helado: 'Sabores',
+  tarrinas: 'Tarrinas',
+  tarrina: 'Tarrinas',
+  conos: 'Conos',
+  cono: 'Conos',
+  cucuruchos: 'Conos',
+  cucurucho: 'Conos',
+  batidos: 'Batidos',
+  batido: 'Batidos',
+  milkshakes: 'Batidos',
+  milkshake: 'Batidos',
+  toppings: 'Toppings',
+  topping: 'Toppings',
+  extras_helado: 'Toppings',
+  encargos: 'Encargos',
+  encargo: 'Encargos',
+  tartas: 'Encargos',
+  tarta: 'Encargos',
 };
 
 export function isImportComboCategory(category: string): boolean {

@@ -18,6 +18,8 @@ type Props = {
   compact?: boolean;
   /** Cierre en pasos: filas planas, sin expandir, mínima altura. */
   dense?: boolean;
+  /** Título del bloque (dense / normal). */
+  title?: string;
 };
 
 export function ShiftBrandBillingSummary({
@@ -27,6 +29,7 @@ export function ShiftBrandBillingSummary({
   loading = false,
   compact = false,
   dense = false,
+  title = 'Marcas',
 }: Props) {
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -37,11 +40,11 @@ export function ShiftBrandBillingSummary({
 
   if (dense) {
     return (
-      <div className="rounded-xl border border-stone-200 bg-white px-2 py-1.5 dark:border-stone-700 dark:bg-stone-900">
-        <div className="flex items-center justify-between gap-2 mb-1">
+      <div className="rounded-xl border border-stone-200 bg-white px-2.5 py-2 dark:border-stone-700 dark:bg-stone-900">
+        <div className="flex items-center justify-between gap-2 mb-1.5">
           <p className="text-[10px] font-bold uppercase tracking-wide text-stone-500 flex items-center gap-1">
             <Tag className="h-3 w-3" />
-            Marcas
+            {title}
           </p>
           {total > 0 ? (
             <p className="text-sm font-black tabular-nums text-stone-900 dark:text-stone-100">{fmt(total)}€</p>
@@ -90,7 +93,7 @@ export function ShiftBrandBillingSummary({
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-semibold text-stone-500 dark:text-stone-400 flex items-center gap-1">
           <Tag className="h-3.5 w-3.5" />
-          Totales por marca
+          {title === 'Marcas' ? 'Totales por marca' : title}
         </p>
         {total > 0 ? (
           <p className="text-lg font-black tabular-nums text-stone-900 dark:text-stone-100">

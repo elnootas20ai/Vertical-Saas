@@ -78,7 +78,7 @@ export const ONBOARDING_VISUALS: Record<OnboardingVisualKey, OnboardingVisual> =
     badge: 'Configuración · Paso 1',
     title: 'Una plataforma, muchos sectores',
     subtitle: 'Delivery, taller, clínica, hotel… Vertial se adapta a tu operativa real.',
-    highlights: ['24+ verticales', 'Setup guiado', 'Prueba gratuita incluida'],
+    highlights: ['24+ verticales', 'Setup guiado', 'Alta en minutos'],
   },
   company: {
     image: HERO_PHOTOS.modernOffice,
@@ -117,7 +117,7 @@ export const ONBOARDING_VISUALS: Record<OnboardingVisualKey, OnboardingVisual> =
     gradientTheme: 'emerald',
     badge: 'Configuración · Paso 6',
     title: 'Pago seguro y cifrado',
-    subtitle: 'Activa tu prueba gratuita. Solo se cobrará al finalizar el periodo de prueba.',
+    subtitle: 'Activa tu cuenta y el plan elegido. Pago seguro y cifrado.',
     highlights: ['Cifrado bancario', 'Cancela cuando quieras', 'Sin permanencia'],
   },
   'register-company': {
@@ -126,7 +126,7 @@ export const ONBOARDING_VISUALS: Record<OnboardingVisualKey, OnboardingVisual> =
     badge: 'Alta de empresa',
     title: 'Crea tu espacio en Vertial',
     subtitle: 'Stock, operaciones, clientes y documentos en un solo lugar.',
-    highlights: ['Setup en minutos', 'Multi-vertical', 'Prueba sin compromiso'],
+    highlights: ['Setup en minutos', 'Multi-vertical', 'Sin permanencia'],
   },
   'login-company': {
     image: HERO_PHOTOS.coworking,

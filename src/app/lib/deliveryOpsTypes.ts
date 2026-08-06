@@ -37,7 +37,13 @@ export function isEventsBusinessType(businessType?: string | null): boolean {
 /** Negocios con tienda / PDV / TPV en sidebar y ajustes. */
 export function isRetailStoreBusinessType(businessType?: string | null): boolean {
   const t = String(businessType || '').trim();
-  return isDeliveryOpsBusinessType(t) || t === 'restaurant' || t === 'carDealership' || t === 'butcherShop';
+  return (
+    isDeliveryOpsBusinessType(t)
+    || t === 'restaurant'
+    || t === 'carDealership'
+    || t === 'butcherShop'
+    || t === 'iceCreamShop'
+  );
 }
 
 export function getGuidedActivationChecklistTitle(businessType?: string | null): string {
@@ -72,6 +78,27 @@ export function isStrictDeliveryBusinessType(businessType?: string | null): bool
 
 export function isRestaurantBusinessType(businessType?: string | null): boolean {
   return String(businessType || '').trim() === 'restaurant';
+}
+
+export function isIceCreamShopBusinessType(businessType?: string | null): boolean {
+  return String(businessType || '').trim().toLowerCase() === 'icecreamshop';
+}
+
+/**
+ * Catálogo TPV + plantilla/import Excel (mismo flujo que delivery/restaurante).
+ * Heladería lo usa desde el core; no implica acoplar el módulo Delivery.
+ */
+export function usesTpvCatalogOpsBusinessType(businessType?: string | null): boolean {
+  return (
+    isDeliveryOpsBusinessType(businessType)
+    || isRestaurantBusinessType(businessType)
+    || isIceCreamShopBusinessType(businessType)
+  );
+}
+
+/** CRM con import Excel acotado a la empresa (delivery, restaurante, heladería). */
+export function usesOpsCrmBusinessType(businessType?: string | null): boolean {
+  return usesTpvCatalogOpsBusinessType(businessType);
 }
 
 type BusinessScopeRef = {

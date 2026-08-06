@@ -9,6 +9,7 @@ import {
   resolveBusinessScopeId,
   snapshotDeliveryStoreActivation,
 } from '../lib/deliverySetup';
+import { isIceCreamShopBusinessType } from '../lib/deliveryOpsTypes';
 import { readRetailScopeCache } from '../lib/retailScopeCache';
 import { readSidebarRetailCache } from '../lib/sidebarRetailCache';
 import type { WorkCenter } from '../lib/workCentersApi';
@@ -68,7 +69,10 @@ export function useDeliveryStorePdvGate() {
   const accountBusinessCount = businessCtx?.businessesFetchSettled
     ? (businessCtx?.businesses?.length ?? 0)
     : undefined;
-  const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
+  // Delivery + heladería: mismo gate tienda/PDV antes de Marca (sin mezclar módulos).
+  const isDelivery =
+    isDeliveryBusinessType(currentBusiness?.businessType)
+    || isIceCreamShopBusinessType(currentBusiness?.businessType);
   const activeStore = useActiveStoreScope();
 
   const businessId = resolveBusinessScopeId(currentBusiness);

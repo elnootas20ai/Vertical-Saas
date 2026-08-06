@@ -46,6 +46,32 @@ describe('businessHoursUtils', () => {
     expect(getBusinessHoursIssue(cfg)).toMatch(/antes del cierre/i);
   });
 
+  it('acepta horario distinto por día (partido L–V / finde)', () => {
+    const cfg = normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG);
+    cfg.schedule.monday = { open: true, from: '09:00', to: '14:00' };
+    cfg.schedule.tuesday = { open: true, from: '10:00', to: '20:00' };
+    cfg.schedule.wednesday = { open: true, from: '09:00', to: '14:00' };
+    cfg.schedule.thursday = { open: true, from: '09:00', to: '14:00' };
+    cfg.schedule.friday = { open: true, from: '09:00', to: '22:00' };
+    cfg.schedule.saturday = { open: true, from: '11:00', to: '15:00' };
+    cfg.schedule.sunday = { open: false, from: '11:00', to: '15:00' };
+    expect(getBusinessHoursIssue(cfg)).toBeNull();
+  });
+
+  it('acepta horario partido (pausa mediodía) con días distintos', () => {
+    const cfg = normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG);
+    cfg.schedule.monday = { open: true, from: '09:00', to: '22:00' };
+    cfg.schedule.saturday = { open: true, from: '10:00', to: '14:00' };
+    cfg.lunchBreak = { enabled: true, from: '14:00', to: '17:00' };
+    expect(getBusinessHoursIssue(cfg)).toBeNull();
+  });
+
+  it('rechaza pausa de horario partido inválida', () => {
+    const cfg = normalizeBusinessHoursConfig(DEFAULT_BUSINESS_HOURS_CONFIG);
+    cfg.lunchBreak = { enabled: true, from: '17:00', to: '14:00' };
+    expect(getBusinessHoursIssue(cfg)).toMatch(/partido/i);
+  });
+
   it('createBlankBusinessHoursConfig obliga a rellenar horas de días abiertos', () => {
     const blank = createBlankBusinessHoursConfig();
     expect(getBusinessHoursIssue(blank)).toMatch(/Lunes/i);
@@ -53,9 +79,9 @@ describe('businessHoursUtils', () => {
     blank.schedule.tuesday = { open: true, from: '09:00', to: '14:00' };
     blank.schedule.wednesday = { open: true, from: '09:00', to: '14:00' };
     blank.schedule.thursday = { open: true, from: '09:00', to: '14:00' };
-    blank.schedule.friday = { open: true, from: '09:00', to: '14:00' };
-    blank.schedule.saturday = { open: true, from: '10:00', to: '14:00' };
-    blank.schedule.sunday = { open: false, from: '', to: '' };
+    blank.schedule.friday = { open: true, from: '09:00', to: '22:00' };
+    // Finde cerrado por defecto: L–V distintos ya es válido (sin “aplicar a todos”).
+    expect(blank.schedule.saturday.open).toBe(false);
     expect(getBusinessHoursIssue(blank)).toBeNull();
   });
 

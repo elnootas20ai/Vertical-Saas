@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
-import { Building2, Layers, Minus, Plus, Store, Users, Info } from 'lucide-react';
+import { Building2, Layers, Minus, Plus, Store, Users } from 'lucide-react';
 import { ACCESO__Button } from '../../../components/design-system/ACCESO__Button';
 import {
   OnboardingStepHeading,
@@ -9,6 +9,10 @@ import {
 import { useOnboarding, ONBOARDING_ROUTES } from '../../../context/OnboardingContext';
 
 const STEP_INDEX = 2;
+
+function clampInt(n: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, n));
+}
 
 function NumberStepper({
   value,
@@ -23,40 +27,106 @@ function NumberStepper({
   max: number;
   id?: string;
 }) {
+  const [draft, setDraft] = useState(String(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(String(value));
+  }, [value, focused]);
+
+  const commit = (raw: string) => {
+    const digits = raw.replace(/[^\d]/g, '');
+    if (!digits) {
+      onChange(min);
+      setDraft(String(min));
+      return;
+    }
+    const n = clampInt(parseInt(digits, 10), min, max);
+    onChange(n);
+    setDraft(String(n));
+  };
+
   return (
-    <div className="flex items-stretch rounded-xl border-2 border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/40 overflow-hidden focus-within:border-blue-500 transition-colors">
+    <div className="flex h-10 min-h-10 items-stretch overflow-hidden rounded-xl border-2 border-gray-200 bg-white transition-colors focus-within:border-blue-500 dark:border-gray-700 dark:bg-gray-900/40 sm:h-11 sm:min-h-11">
       <button
         type="button"
         aria-label="Disminuir"
-        onClick={() => onChange(Math.max(min, value - 1))}
+        onClick={() => {
+          const next = clampInt(value - 1, min, max);
+          onChange(next);
+          setDraft(String(next));
+        }}
         disabled={value <= min}
-        className="px-3.5 py-3 shrink-0 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none transition-colors border-r border-gray-200 dark:border-gray-600"
+        className="shrink-0 border-r border-gray-200 bg-gray-50 px-2.5 transition-colors hover:bg-gray-100 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700 sm:px-3"
       >
-        <Minus className="w-4 h-4 mx-auto" />
+        <Minus className="mx-auto h-3.5 w-3.5 sm:h-4 sm:w-4" />
       </button>
       <input
         id={id}
-        type="number"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => {
-          const n = parseInt(e.target.value, 10);
-          if (Number.isNaN(n)) return;
-          onChange(Math.min(max, Math.max(min, n)));
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        autoComplete="off"
+        value={draft}
+        onFocus={() => {
+          setFocused(true);
+          setDraft(String(value));
         }}
-        className="flex-1 min-w-0 px-2 py-3 border-0 bg-transparent text-center font-semibold text-lg focus:outline-none focus:ring-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        onChange={(e) => {
+          const raw = e.target.value.replace(/[^\d]/g, '');
+          setDraft(raw);
+          if (raw === '') return;
+          const n = parseInt(raw, 10);
+          if (!Number.isNaN(n)) onChange(clampInt(n, min, max));
+        }}
+        onBlur={() => {
+          setFocused(false);
+          commit(draft);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+        className="min-w-0 flex-1 border-0 bg-transparent px-2 text-center text-base font-semibold focus:outline-none focus:ring-0 sm:text-lg"
         required
       />
       <button
         type="button"
         aria-label="Aumentar"
-        onClick={() => onChange(Math.min(max, value + 1))}
+        onClick={() => {
+          const next = clampInt(value + 1, min, max);
+          onChange(next);
+          setDraft(String(next));
+        }}
         disabled={value >= max}
-        className="px-3.5 py-3 shrink-0 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:pointer-events-none transition-colors border-l border-gray-200 dark:border-gray-600"
+        className="shrink-0 border-l border-gray-200 bg-gray-50 px-2.5 transition-colors hover:bg-gray-100 disabled:pointer-events-none disabled:opacity-40 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700 sm:px-3"
       >
-        <Plus className="w-4 h-4 mx-auto" />
+        <Plus className="mx-auto h-3.5 w-3.5 sm:h-4 sm:w-4" />
       </button>
+    </div>
+  );
+}
+
+type MetricCardProps = {
+  icon: ReactNode;
+  label: string;
+  hint: string;
+  children: ReactNode;
+};
+
+function MetricCard({ icon, label, hint, children }: MetricCardProps) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-2.5 dark:border-gray-700 dark:bg-gray-800/80 sm:p-3">
+      <label className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-900 dark:text-gray-100 sm:mb-2 sm:text-sm">
+        <span className="shrink-0 text-amber-600 dark:text-amber-400">{icon}</span>
+        <span className="min-w-0 truncate">{label}</span>
+      </label>
+      {children}
+      <p className="mt-1 text-[10px] leading-snug text-gray-500 dark:text-gray-400 sm:mt-1.5 sm:text-[11px]">
+        {hint}
+      </p>
     </div>
   );
 }
@@ -105,105 +175,69 @@ export function Structure() {
       }
     >
       <OnboardingStepHeading
+        compact
         stepLabel="Paso 3 · Estructura"
         title="Infraestructura de tu empresa"
-        subtitle="Cuéntanos el tamaño real de tu operación para activar el plan correcto desde el primer día"
+        subtitle="Empresas, trabajadores, PDV y marcas para dimensionar el plan. El TPV no se cuenta aparte."
       />
 
-      <form
-        id="structure-form"
-        onSubmit={handleContinue}
-        className="flex-1 min-h-0 flex flex-col gap-4"
-      >
-        <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-          Estos datos definen cuántas empresas, puntos de venta, trabajadores y marcas incluye tu suscripción. Así
-          evitas bloqueos al crear tiendas o marcas después de pagar.
-        </p>
+      <form id="structure-form" onSubmit={handleContinue} className="flex flex-col gap-2 pb-2 sm:gap-3">
+        <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:gap-2.5">
+          <MetricCard
+            icon={<Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+            label="Empresas *"
+            hint="CIF o razones sociales distintas."
+          >
+            <NumberStepper
+              id="structure-business-count"
+              min={1}
+              max={10}
+              value={formData.businessCount}
+              onChange={(n) => setFormData({ ...formData, businessCount: n })}
+            />
+          </MetricCard>
 
-        <div className="bg-white dark:bg-gray-800 border-2 border-amber-300 dark:border-amber-700 rounded-xl shadow-sm overflow-hidden">
-          <div className="flex items-start gap-3 border-b border-amber-100 bg-amber-50 px-4 py-3 dark:border-amber-900/50 dark:bg-amber-950/40 sm:px-5 sm:py-4">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white">
-              <Info className="h-4 w-4" />
-            </div>
-            <div className="min-w-0 pt-0.5">
-              <h3 className="font-bold text-sm text-gray-900 dark:text-gray-100">
-                Tu operativa en números
-              </h3>
-              <p className="mt-0.5 text-xs text-gray-600 dark:text-gray-400 leading-snug">
-                La marca «General» siempre está incluida. Las marcas extra son, por ejemplo, Pizzería o Burger.
-              </p>
-            </div>
-          </div>
+          <MetricCard
+            icon={<Users className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+            label="Trabajadores *"
+            hint="Admin, caja, cocina, reparto…"
+          >
+            <NumberStepper
+              id="structure-user-count"
+              min={1}
+              max={50}
+              value={formData.userCount}
+              onChange={(n) => setFormData({ ...formData, userCount: n })}
+            />
+          </MetricCard>
 
-          <div className="grid gap-4 p-4 sm:grid-cols-2 sm:gap-5 sm:p-5">
-            <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/30">
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                <Building2 className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span>Empresas *</span>
-              </label>
-              <NumberStepper
-                id="structure-business-count"
-                min={1}
-                max={10}
-                value={formData.businessCount}
-                onChange={(n) => setFormData({ ...formData, businessCount: n })}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-snug">
-                CIF o razones sociales distintas bajo tu cuenta.
-              </p>
-            </div>
+          <MetricCard
+            icon={<Store className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+            label="Puntos de venta (PDV) *"
+            hint="Locales o tiendas (no TPVs)."
+          >
+            <NumberStepper
+              id="structure-pdv-count"
+              min={1}
+              max={10}
+              value={formData.locationCount}
+              onChange={(n) => setFormData({ ...formData, locationCount: n })}
+            />
+          </MetricCard>
 
-            <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/30">
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                <Store className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span>Puntos de venta (PDV) *</span>
-              </label>
-              <NumberStepper
-                id="structure-pdv-count"
-                min={1}
-                max={10}
-                value={formData.locationCount}
-                onChange={(n) => setFormData({ ...formData, locationCount: n })}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-snug">
-                Tiendas, locales o cajas que operarán en Vertial.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/30">
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                <Users className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span>Trabajadores en total *</span>
-              </label>
-              <NumberStepper
-                id="structure-user-count"
-                min={1}
-                max={50}
-                value={formData.userCount}
-                onChange={(n) => setFormData({ ...formData, userCount: n })}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-snug">
-                Admin, caja, cocina, reparto…
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/30">
-              <label className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
-                <Layers className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                <span>Marcas extra</span>
-              </label>
-              <NumberStepper
-                id="structure-brand-count"
-                min={0}
-                max={10}
-                value={formData.commercialBrandCount}
-                onChange={(n) => setFormData({ ...formData, commercialBrandCount: n })}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 leading-snug">
-                Además de «General» (ej. Pizzería, Burger). Pon 0 si solo tienes una marca.
-              </p>
-            </div>
-          </div>
+          <MetricCard
+            icon={<Layers className="h-3.5 w-3.5 sm:h-4 sm:w-4" />}
+            label="Marcas extra"
+            hint="Además de «General». 0 si solo una."
+          >
+            <NumberStepper
+              id="structure-brand-count"
+              min={0}
+              max={10}
+              value={formData.commercialBrandCount}
+              onChange={(n) => setFormData({ ...formData, commercialBrandCount: n })}
+            />
+          </MetricCard>
         </div>
       </form>
     </OnboardingStepShell>

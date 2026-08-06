@@ -571,7 +571,8 @@ const VERTICAL_GROUPS: Record<BusinessType, Set<string>> = {
   vet:           new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'vet']),
   tobaccoShop:   new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'tobaccoShop']),
   butcherShop:   new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'butcherShop']),
-  iceCreamShop:  new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'iceCreamShop']),
+  // Heladería = mismo core + bloque operativo que Delivery (TPV, ops, caja, web, integraciones).
+  iceCreamShop:  new Set(['clientesCrm', 'equipo', 'catalogProviders', 'finanzas', 'documentacion', 'delivery']),
 };
 
 /** Items de menú por grupo, sustituyen los defaults del grupo para un vertical concreto. */
@@ -616,6 +617,17 @@ const VERTICAL_GROUP_ITEM_OVERRIDES: Partial<Record<BusinessType, Record<string,
   },
   delivery: {
     clientesCrm: ['clients', 'promotions'],
+  },
+  // Core CRM + ops propias heladería (no rutas Delivery).
+  iceCreamShop: {
+    clientesCrm: ['clients', 'promotions'],
+    delivery: [
+      'heladeria-tpv',
+      'heladeria-ops',
+      'heladeria-caja',
+      'heladeria-encargos',
+      'heladeria-integraciones',
+    ],
   },
 };
 
@@ -736,8 +748,13 @@ function SidebarInner({
       : 'carDealership';
   const isCompraventa = isCompraventaBusinessType(vertical);
   const isRestaurantVertical = isRestaurantBusinessType(vertical);
+  const isHeladeriaVertical = vertical === 'iceCreamShop';
   const isStrictDeliveryVertical = isDeliveryBusinessType(vertical);
-  const usesOpsStoreSidebar = isDeliveryOpsBusinessType(vertical) || isRestaurantVertical;
+  /** Heladería reutiliza el shell Delivery (sidebar, tiendas/PDV, locks de alta). */
+  const usesDeliverySidebarCore = isStrictDeliveryVertical || isHeladeriaVertical;
+  // Heladería comparte selector de tienda/PDV del core Delivery.
+  const usesOpsStoreSidebar =
+    isDeliveryOpsBusinessType(vertical) || isRestaurantVertical || isHeladeriaVertical;
   const showWorkCentersSidebar = usesOpsStoreSidebar || isCompraventa;
   const allowedGroups = vertical
     ? (VERTICAL_GROUPS[vertical] || VERTICAL_GROUPS.carDealership)
@@ -841,7 +858,7 @@ function SidebarInner({
   }, [accountBusinessCount, isCompraventa, loadCompraventaSidebarStores, vertical]);
 
   const activeStore = useActiveStoreScope();
-  const sidebarDelivery = useSidebarDeliveryStoreRows(isStrictDeliveryVertical);
+  const sidebarDelivery = useSidebarDeliveryStoreRows(usesDeliverySidebarCore);
   const sidebarRestaurant = useRestaurantStoreRows(isRestaurantVertical);
   const opsStoreRows = isRestaurantVertical ? sidebarRestaurant.rows : sidebarDelivery.rows;
   const opsStoreLoading = isRestaurantVertical ? sidebarRestaurant.loading : sidebarDelivery.loading;
@@ -896,11 +913,11 @@ function SidebarInner({
     return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
   }, [usesOpsStoreSidebar, activeStore.refresh]);
 
-  /** Al entrar en Delivery, forzar recarga de tiendas/PDV (no quedarse con scope vacío de otro vertical). */
+  /** Al entrar en Delivery/Heladería, forzar recarga de tiendas/PDV. */
   useEffect(() => {
-    if (!isStrictDeliveryVertical || !businessScopeId) return;
+    if (!usesDeliverySidebarCore || !businessScopeId) return;
     void activeStore.refresh();
-  }, [isStrictDeliveryVertical, businessScopeId, activeStore.refresh]);
+  }, [usesDeliverySidebarCore, businessScopeId, activeStore.refresh]);
 
   useEffect(() => {
     if (!usesOpsStoreSidebar) return;
@@ -1152,7 +1169,7 @@ function SidebarInner({
     const override = vertical ? VERTICAL_GROUP_ITEM_OVERRIDES[vertical]?.[g.id] : undefined;
     const isCompraventaCommercial = g.id === 'commercial' && vertical === 'carDealership';
     let itemIds = override ? [...override] : [...g.itemIds];
-    if (g.id === 'catalogProviders' && !isDeliveryBusinessType(vertical)) {
+    if (g.id === 'catalogProviders' && !usesDeliverySidebarCore) {
       itemIds = itemIds.filter((id) => id !== 'costing');
     }
     if (g.id === 'butcherShop' && vertical === 'butcherShop' && !currentBusiness?.ownDeliveryEnabled) {
@@ -1164,7 +1181,9 @@ function SidebarInner({
         ? null
         : g.id === 'delivery' && isRestaurantVertical
           ? <UtensilsCrossed className="w-4 h-4 shrink-0" />
-          : g.icon,
+          : g.id === 'delivery' && isHeladeriaVertical
+            ? <IceCream className="w-4 h-4 shrink-0" />
+            : g.icon,
       itemIds,
       label: g.id === 'equipo'
         ? 'RRHH'
@@ -1172,7 +1191,9 @@ function SidebarInner({
           ? t('sidebar.groups.compraventaCommercial')
           : g.id === 'delivery' && isRestaurantVertical
             ? t('sidebar.groups.restaurant')
-            : t(`sidebar.groups.${g.id}`),
+            : g.id === 'delivery' && isHeladeriaVertical
+              ? t('sidebar.groups.iceCreamShop')
+              : t(`sidebar.groups.${g.id}`),
     };
   });
 

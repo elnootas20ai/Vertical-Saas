@@ -518,7 +518,7 @@ const es = {
       },
       register: {
         title: 'Crear cuenta',
-        subtitle: 'Comienza tu periodo de prueba gratuito',
+        subtitle: 'Crea tu cuenta y configura tu negocio',
         firstName: 'Nombre',
         lastName: 'Apellidos',
         company: 'Empresa (opcional)',
@@ -574,7 +574,7 @@ const es = {
         steps: {
           workspace: 'Creando tu espacio de trabajo',
           plan: 'Configurando tu plan',
-          trial: 'Activando período de prueba (14 días gratis)',
+          trial: 'Activando tu cuenta',
           payment: 'Configurando método de pago',
           dashboard: 'Preparando tu dashboard',
         },
@@ -2435,7 +2435,7 @@ const en = {
       },
       register: {
         title: 'Create account',
-        subtitle: 'Start your free trial',
+        subtitle: 'Create your account and set up your business',
         firstName: 'First name',
         lastName: 'Last name',
         company: 'Company (optional)',
@@ -2491,7 +2491,7 @@ const en = {
         steps: {
           workspace: 'Creating your workspace',
           plan: 'Configuring your plan',
-          trial: 'Activating trial period (14 days free)',
+          trial: 'Activating your account',
           payment: 'Setting up payment method',
           dashboard: 'Preparing your dashboard',
         },
@@ -4364,7 +4364,7 @@ const pt = {
         steps: {
           workspace: 'A criar o seu espaço de trabalho',
           plan: 'A configurar o seu plano',
-          trial: 'A ativar período de teste (14 dias grátis)',
+          trial: 'A ativar a sua conta',
           payment: 'A configurar método de pagamento',
           dashboard: 'A preparar o seu dashboard',
         },
@@ -5887,7 +5887,7 @@ const fr = {
         steps: {
           workspace: 'Création de votre espace de travail',
           plan: 'Configuration de votre plan',
-          trial: "Activation de la période d'essai (14 jours gratuits)",
+          trial: 'Activation de votre compte',
           payment: 'Configuration du mode de paiement',
           dashboard: 'Préparation de votre tableau de bord',
         },
@@ -7410,7 +7410,7 @@ const it = {
         steps: {
           workspace: 'Creazione del tuo spazio di lavoro',
           plan: 'Configurazione del tuo piano',
-          trial: 'Attivazione del periodo di prova (14 giorni gratuiti)',
+          trial: 'Attivazione del tuo account',
           payment: 'Configurazione del metodo di pagamento',
           dashboard: 'Preparazione della tua dashboard',
         },

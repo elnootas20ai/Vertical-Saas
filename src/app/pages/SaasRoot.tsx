@@ -103,6 +103,9 @@ function SaasContent() {
   usePushDeepLinkNavigate(isAuthenticated && !isInitializing);
   const tpvTabletSaasSession = isTpvTabletSaasSession(location.pathname);
   const tpvTabletLocked = isTpvTabletTerminalBound();
+  const isSubscriptionPaywall =
+    location.pathname === '/saas/subscription'
+    || location.pathname.startsWith('/saas/subscription/');
 
   const [isAutoCreating, setIsAutoCreating] = useState(false);
 
@@ -123,7 +126,7 @@ function SaasContent() {
 
   // Código TPV activo → solo tienda/TPV (también cuenta empresa/admin).
   // Entrada por código es independiente del CEO: no limpiar binding para “soltar”
-  // al dashboard; salir = leaveTpvTabletSession → pantalla de código.
+  // al dashboard; salir = leaveTpvTabletSession → login trabajador.
   useEffect(() => {
     if (isInitializing || !isAuthenticated || !user) return;
     if (!tpvTabletLocked) return;
@@ -257,6 +260,10 @@ function SaasContent() {
   ]);
 
   useEffect(() => {
+    // Usar también la suscripción del auth: AppContext arranca en trial por defecto
+    // y disparaba auto-create + spinner encima del paywall.
+    const billingSub = user?.subscription || subscription;
+    const billingStatus = billingSub?.status || subscription.status;
 
     if (
       isInitializing ||
@@ -269,7 +276,8 @@ function SaasContent() {
       isUserAccount ||
       tpvTabletSaasSession ||
       tpvTabletLocked ||
-      shouldBlockSaasAccess(subscription.status, subscription)
+      isSubscriptionPaywall ||
+      shouldBlockSaasAccess(billingStatus, billingSub)
     ) {
       return;
     }
@@ -401,6 +409,8 @@ function SaasContent() {
 
     tpvTabletLocked,
 
+    isSubscriptionPaywall,
+
     subscription.status,
 
     subscription.billingExempt,
@@ -413,8 +423,9 @@ function SaasContent() {
     if (!sessionSyncedWithServer) return;
     // Trabajadores: nunca redirigir a pago/suspensión por billing.
     if (isWorkerAccount(user)) return;
-    if (user?.subscription?.billingExempt || subscription.billingExempt) return;
-    if (!shouldBlockSaasAccess(subscription.status, subscription)) return;
+    const billingSub = user?.subscription || subscription;
+    if (billingSub?.billingExempt || subscription.billingExempt) return;
+    if (!shouldBlockSaasAccess(billingSub?.status || subscription.status, billingSub)) return;
     if (isBillingRecoveryPath(location.pathname)) return;
     // Empresa: siempre opción de pago (también si está suspended), no candado ciego.
     navigate('/saas/subscription', { replace: true });
@@ -427,9 +438,19 @@ function SaasContent() {
     user,
   ]);
 
+  const billingSubForGate = user?.subscription || subscription;
   const billingRecoveryMode =
-    shouldBlockSaasAccess(subscription.status, subscription) &&
-    isBillingRecoveryPath(location.pathname);
+    shouldBlockSaasAccess(
+      billingSubForGate?.status || subscription.status,
+      billingSubForGate,
+    ) && isBillingRecoveryPath(location.pathname);
+
+  const chromeLessSaas =
+    billingRecoveryMode
+    || isSubscriptionPaywall
+    || location.pathname === '/saas/suspended'
+    || location.pathname === WORKER_IDENTITY_SETUP_PATH
+    || location.pathname === WORKER_PAYROLL_SETUP_PATH;
 
   const isInitialBusinessLoad =
     !businessCtx || isLoadingBusinesses || !businessesFetchSettled;
@@ -439,7 +460,7 @@ function SaasContent() {
     || location.pathname === WORKER_PAYROLL_SETUP_PATH
     || location.pathname === '/saas/user-dashboard'
     || location.pathname === '/saas/invitations'
-    || billingRecoveryMode
+    || chromeLessSaas
     || tpvTabletSaasSession
     || tpvTabletLocked
     || (unlinkedWorkerNeedsCompany && isWorkerUnlinkedAllowedPath(location.pathname))
@@ -449,7 +470,7 @@ function SaasContent() {
     if (isInitializing || !isAuthenticated || !user) return;
     if (isUserAccount || isLinkedWorker) return;
     if (tpvTabletSaasSession || tpvTabletLocked) return;
-    if (billingRecoveryMode) return;
+    if (chromeLessSaas) return;
     if (!businessesFetchSettled || isLoadingBusinesses) return;
     if (businesses.length > 0) return;
     if (isAutoCreating || autoCreateAttempted.current) return;
@@ -462,7 +483,7 @@ function SaasContent() {
     isLinkedWorker,
     tpvTabletSaasSession,
     tpvTabletLocked,
-    billingRecoveryMode,
+    chromeLessSaas,
     businessesFetchSettled,
     isLoadingBusinesses,
     businesses.length,
@@ -470,7 +491,11 @@ function SaasContent() {
     navigate,
   ]);
 
-  if (isInitializing || ((!skipBusinessLoadGate && isInitialBusinessLoad) || isAutoCreating)) {
+  // Paywall / suspended / setup: no bloquear con spinner de empresas ni auto-create.
+  if (
+    isInitializing
+    || (!chromeLessSaas && ((!skipBusinessLoadGate && isInitialBusinessLoad) || isAutoCreating))
+  ) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-gray-400" aria-label="Cargando" />
@@ -491,7 +516,7 @@ function SaasContent() {
     !isUserAccount &&
     !isLinkedWorker &&
     (!businessesFetchSettled || isLoadingBusinesses) &&
-    !billingRecoveryMode
+    !chromeLessSaas
   ) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
@@ -501,7 +526,7 @@ function SaasContent() {
   }
 
   if (businesses.length === 0 && !isUserAccount && !isLinkedWorker && businessesFetchSettled) {
-    if (billingRecoveryMode || tpvTabletSaasSession) {
+    if (chromeLessSaas || tpvTabletSaasSession) {
       return (
         <>
           <Outlet />
@@ -520,10 +545,7 @@ function SaasContent() {
 
 
 
-  if (location.pathname === '/saas/suspended'
-    || location.pathname === WORKER_IDENTITY_SETUP_PATH
-    || location.pathname === WORKER_PAYROLL_SETUP_PATH
-    || billingRecoveryMode) {
+  if (chromeLessSaas) {
 
     return (
       <>

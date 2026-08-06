@@ -172,7 +172,7 @@ export function SetupOnboarding() {
             {status.trialDaysRemaining > 0 && (
               <div className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-gray-800 border border-amber-200 dark:border-amber-700 rounded-lg">
                 <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{status.trialDaysRemaining} días de prueba</span>
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">{status.trialDaysRemaining} días de activación</span>
               </div>
             )}
           </div>

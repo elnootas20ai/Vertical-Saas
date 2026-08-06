@@ -94,12 +94,21 @@ describe('attributeOrderRevenueByBrand', () => {
     expect(byUnits.byBrand.b).toBe(41.25);
   });
 
-  it('sin marcas: va a categoría', () => {
+  it('sin marcas en líneas: va a categoría', () => {
     const r = attributeOrderRevenueByBrand({
       items: [{ category: 'Bebidas', quantity: 2, total: 5 }],
     });
     expect(r.unbranded).toBe(5);
     expect(r.byCategory.bebidas).toBe(5);
+  });
+
+  it('sin marcas en líneas pero brandIds del pedido → a esa marca', () => {
+    const r = attributeOrderRevenueByBrand({
+      brandIds: ['modo'],
+      items: [{ category: 'Bebidas', quantity: 2, total: 5 }],
+    });
+    expect(r.unbranded).toBe(0);
+    expect(r.byBrand.modo).toBe(5);
   });
 });
 

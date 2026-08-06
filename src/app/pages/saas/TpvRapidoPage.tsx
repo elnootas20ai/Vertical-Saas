@@ -4037,7 +4037,7 @@ export function TpvRapidoOrderFlow({
                   onClick={() => (tabletMode ? goBack() : navigate(tpvExitPath, { replace: true }))}
                   className="px-6 min-h-[48px] py-3 rounded-xl border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation"
                 >
-                  {tabletMode ? (isRestaurantMode ? 'Salir del TPV' : 'Volver al tablero') : 'Ver pedido'}
+                  {tabletMode ? (isRestaurantMode ? 'Volver al código' : 'Volver al tablero') : 'Ver pedido'}
                 </button>
               ) : null}
               <button

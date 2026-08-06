@@ -1,0 +1,33 @@
+---
+description: En producción, proponer y ESPERAR confirmación antes de ejecutar
+alwaysApply: true
+---
+
+# Producción = proponer → esperar OK → ejecutar
+
+Cuando Uriel pida **cualquier acción en producción** (VPS, CouchDB prod, `vertialapp.com`, deploy, borrados, `--apply`, cambios de datos, reopen/repair, etc.):
+
+## Obligatorio
+
+1. **No ejecutar al primer mensaje.** Primero decir en castellano claro:
+   - qué se va a hacer
+   - a qué afecta (cuenta, pedido, caja, deploy…)
+   - si es reversible o no
+2. **Esperar confirmación explícita** en un mensaje aparte, tipo:
+   - «sí», «confirmo», «OK bórrala», «haz deploy», «aplica»
+3. Solo entonces ejecutar.
+
+## No vale como confirmación sola
+
+- Hablar de prod en el mismo mensaje que el pedido (“bórralo de prod y haz una regla”) → **regla sí; acción prod aún no** hasta el OK aparte.
+- Asumir por el hilo del chat.
+- “arregla esto” / “mira prod” sin “aplica / deploy / borra X”.
+
+## Lectura sí; escritura no
+
+- Auditar, listar, diagnosticar en prod: **sí**, sin preguntar.
+- Borrar, soft-delete, `--apply`, deploy, mutar datos: **nunca** sin el OK del paso 2.
+
+## Relación con otras reglas
+
+Complementa `produccion-no-eliminar-sin-permiso.mdc`. Si hay duda → **no tocar prod** y preguntar.

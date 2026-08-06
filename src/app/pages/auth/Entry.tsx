@@ -9,7 +9,6 @@ import {
   Monitor,
   type LucideIcon,
 } from 'lucide-react';
-import { WEB__Button } from '../../components/design-system/WEB__Button';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
 import { AUTH_PATHS, type AuthAccountType } from '../../lib/authEntryPaths';
@@ -162,7 +161,7 @@ export function Entry() {
   // iOS: nunca mostrar flujo de alta Empresa/organización (Apple 3.1.1).
   if (view === 'register' && hideOrgRegistration) {
     return (
-      <AccesoSplitLayout visualKey="entry">
+      <AccesoSplitLayout visualKey="entry" onBack={() => setView('main')}>
         <div className="flex flex-1 flex-col items-center justify-center px-4 py-8">
           <div className="w-full max-w-md rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 p-6 space-y-4 text-center">
             <h1 className="text-lg font-bold text-amber-950 dark:text-amber-100">
@@ -187,7 +186,7 @@ export function Entry() {
 
   if (view === 'register') {
     return (
-      <AccesoSplitLayout visualKey="register-company">
+      <AccesoSplitLayout visualKey="register-company" onBack={() => setView('main')}>
         <div className="flex flex-1 flex-col items-center px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8 lg:px-10 lg:py-10">
         <div className="w-full max-w-xl">
           <div className="text-center mb-6 sm:mb-8">
@@ -272,10 +271,6 @@ export function Entry() {
               Continuar
               <ArrowRight className="w-5 h-5" />
             </button>
-
-            <WEB__Button variant="ghost" onClick={() => setView('main')}>
-              ← Volver
-            </WEB__Button>
           </div>
           </>
           )}
@@ -286,7 +281,11 @@ export function Entry() {
   }
 
   return (
-    <AccesoSplitLayout visualKey="entry">
+    <AccesoSplitLayout
+      visualKey="entry"
+      onBack={!Capacitor.isNativePlatform() ? () => navigate('/') : undefined}
+      backLabel="Volver"
+    >
       <div className="flex flex-1 flex-col justify-center px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-8 lg:px-10 lg:py-10">
       <div className="w-full max-w-3xl mx-auto">
         <div className="text-center mb-6 sm:mb-8 lg:mb-10">
@@ -383,13 +382,11 @@ export function Entry() {
         </p>
         )}
 
-        {!Capacitor.isNativePlatform() && (
-          <div className="mt-4 text-center">
-            <WEB__Button variant="ghost" onClick={() => navigate('/')}>
-              ← Volver a la web
-            </WEB__Button>
-          </div>
-        )}
+        {!Capacitor.isNativePlatform() ? (
+          <p className="mt-4 text-center text-xs text-gray-500 dark:text-gray-400">
+            Vertial · acceso
+          </p>
+        ) : null}
       </div>
       </div>
     </AccesoSplitLayout>
