@@ -17,6 +17,41 @@ import {
 } from '../shared/clients/deliveryClientMatch.js';
 import { orderMatchesBusinessPdvs } from '../controllers/deliveryController.js';
 
+/**
+ * Agrupa pedidos solo para las filas de la página CRM (evita O(pedidos × clientes) en cada listado).
+ * @returns {Map<string, object[]>}
+ */
+export function groupDeliveryOrdersByClientRows(orders, clientRows) {
+  const byClientId = new Map();
+  for (const row of clientRows || []) {
+    const id = String(row?.id || row?._id || '').trim();
+    if (id) byClientId.set(id, []);
+  }
+  if (byClientId.size === 0) return byClientId;
+
+  const phoneTargets = [];
+  for (const row of clientRows || []) {
+    const id = String(row?.id || row?._id || '').trim();
+    if (!id || !byClientId.has(id)) continue;
+    phoneTargets.push({ id, phone: row?.phone });
+  }
+
+  for (const order of orders || []) {
+    const oid = String(order?.clientId || '').trim();
+    if (oid) {
+      const bucket = byClientId.get(oid);
+      if (bucket) bucket.push(order);
+      continue;
+    }
+    for (const target of phoneTargets) {
+      if (deliveryOrderMatchesClient(order, target.id, target.phone)) {
+        byClientId.get(target.id).push(order);
+      }
+    }
+  }
+  return byClientId;
+}
+
 function normalizeClientBusinessId(client) {
   return String(client?.businessId || client?.business_id || '').replace(/^business:/, '').trim();
 }

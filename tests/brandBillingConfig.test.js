@@ -235,4 +235,49 @@ describe('closingSlotsFromBillingSheets / 2ª caja', () => {
     expect(slots[0].name).toBe('Modomio');
     expect(slots[0].memberBrandIds).toEqual(['m1']);
   });
+
+  it('resuelve nombre aunque la hoja use brand-uuid y el catálogo el uuid bare', () => {
+    const brands = [
+      {
+        _id: '96a8d7ce-e9af-459c-b8a9-48ffc55949ec',
+        id: '96a8d7ce-e9af-459c-b8a9-48ffc55949ec',
+        type: 'brand',
+        business_id: 'b',
+        user_id: 'u',
+        name: 'Black Burger',
+        description: '',
+        logo: '',
+        website: '',
+        deliveryLineKind: 'burger_fastfood',
+        active: true,
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+    const sheets = [
+      {
+        id: 'sheet-1',
+        label: 'brand-96a8d7ce-e9af-459c-b8a9-48ffc55949ec',
+        brandIds: ['brand-96a8d7ce-e9af-459c-b8a9-48ffc55949ec'],
+        unitColumns: [{ key: 'burger', header: 'TOTAL BURGUER' }],
+      },
+    ];
+    const slots = closingSlotsFromBillingSheets(sheets, brands);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].name).toBe('Black Burger');
+  });
+
+  it('nunca deja el uuid crudo como nombre de slot', () => {
+    const sheets = [
+      {
+        id: 'sheet-orphan',
+        label: 'brand-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        brandIds: ['brand-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'],
+        unitColumns: [{ key: 'pizza', header: 'TOTAL PIZZA' }],
+      },
+    ];
+    const slots = closingSlotsFromBillingSheets(sheets, []);
+    expect(slots).toHaveLength(1);
+    expect(slots[0].name).toBe('Marca');
+  });
 });

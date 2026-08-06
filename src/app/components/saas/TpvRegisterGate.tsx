@@ -75,7 +75,12 @@ import {
   scaleAppsBrandTotalsToAppTotal,
 } from '../../lib/registerShiftBrandBilling';
 import { listBrandsRequest, type Brand } from '../../lib/brandApi';
-import { buildBrandLabelsMap, brandIdAliases } from '../../lib/brandLabels';
+import {
+  buildBrandLabelsMap,
+  brandIdAliases,
+  displayBrandName,
+  looksLikeBrandTechnicalId,
+} from '../../lib/brandLabels';
 
 import { getBrandBillingConfigRequest } from '../../lib/brandBillingApi';
 import {
@@ -1528,7 +1533,14 @@ function mergeClosingBrandLines(
     .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
-function brandsFromClosedSession(session: TpvRegisterSession): ClosingBrandLine[] {
+function brandsFromClosedSession(
+  session: TpvRegisterSession,
+  brandLabels: Record<string, string> = {},
+): ClosingBrandLine[] {
+  const labels = {
+    ...(session.closingBrandLabels || {}),
+    ...brandLabels,
+  };
   const byBrand: Record<string, number> = {};
   for (const perBrand of Object.values(session.aggregatorClosingBrandTotals || {})) {
     if (!perBrand || typeof perBrand !== 'object') continue;
@@ -1541,7 +1553,7 @@ function brandsFromClosedSession(session: TpvRegisterSession): ClosingBrandLine[
   return Object.entries(byBrand)
     .map(([brandId, caja2]) => ({
       brandId,
-      name: brandId,
+      name: displayBrandName(brandId, labels),
       caja1: 0,
       caja2,
       total: caja2,
@@ -1549,7 +1561,27 @@ function brandsFromClosedSession(session: TpvRegisterSession): ClosingBrandLine[
     .filter((r) => r.total > 0);
 }
 
-function excelLikeAmountsFromClosedSession(session: TpvRegisterSession): ClosingExcelLikeAmounts {
+/** Si el snapshot de apps no trae marcas, arma channel→brand desde filas ya calculadas. */
+function brandTotalsByChannelFromAppsRows(
+  rows: Array<{ brandId: string; revenue: number }>,
+  channelKeys: string[],
+): Record<string, Record<string, number>> {
+  const positive = rows.filter((r) => (Number(r.revenue) || 0) > 0 && String(r.brandId || '').trim());
+  if (positive.length === 0) return {};
+  const channels = channelKeys.map((c) => String(c || '').trim()).filter(Boolean);
+  const bucket = channels[0] || '_apps';
+  const byBrand: Record<string, number> = {};
+  for (const r of positive) {
+    const id = String(r.brandId).trim();
+    byBrand[id] = Math.round(((byBrand[id] || 0) + (Number(r.revenue) || 0)) * 100) / 100;
+  }
+  return { [bucket]: byBrand };
+}
+
+function excelLikeAmountsFromClosedSession(
+  session: TpvRegisterSession,
+  brandLabels: Record<string, string> = {},
+): ClosingExcelLikeAmounts {
   const amounts = sessionToUrielAmounts(session);
   const expected = Number(session.expectedCash ?? calcTpvExpectedCash(session)) || 0;
   const counted = Number(session.finalCashAmount) || 0;
@@ -1579,15 +1611,17 @@ function excelLikeAmountsFromClosedSession(session: TpvRegisterSession): Closing
     diff,
     unpaidCash,
     unpaidCard,
-    brands: brandsFromClosedSession(session),
+    brands: brandsFromClosedSession(session, brandLabels),
   };
 }
 
 function ClosingExcelLikeSummary({
   amounts,
+  brandLabels = {},
   compact = false,
 }: {
   amounts: ClosingExcelLikeAmounts;
+  brandLabels?: Record<string, string>;
   compact?: boolean;
 }) {
   const moneyLines: Array<{ label: string; hint: string; value: number; emphasize?: boolean }> = [
@@ -1600,7 +1634,17 @@ function ClosingExcelLikeSummary({
     { label: 'GLOVO', hint: 'Glovo (hecho en apps)', value: amounts.glovo },
   ];
   const visibleMoney = moneyLines.filter((l) => l.value > 0 || l.label === 'EFECTIVO' || l.label === 'TPV');
-  const brandLines = amounts.brands || [];
+  const brandLines = (amounts.brands || []).map((b) => {
+    const resolved = displayBrandName(b.brandId, brandLabels);
+    const name =
+      resolved
+      && resolved !== 'Marca'
+        ? resolved
+        : (!looksLikeBrandTechnicalId(b.name) && String(b.name || '').trim())
+          || resolved
+          || 'Marca';
+    return { ...b, name };
+  });
   const diffLabel = amounts.diff === 0 ? 'Cuadra' : amounts.diff > 0 ? 'Sobra' : 'Falta';
 
   return (
@@ -1746,6 +1790,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       brandTotalsByChannel?: Record<string, Record<string, number>>;
       unpaidCashByBrandByChannel?: Record<string, Record<string, number>>;
       unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
+      closingBrandLabels?: Record<string, string>;
     },
   ) => void;
   onCancel: () => void;
@@ -1755,7 +1800,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   showDeliveryClosingSlots?: boolean;
 }) {
   const { currentBusiness } = useBusiness();
-  const businessId = resolveBusinessScopeId(currentBusiness) || '';
+  /** Preferir empresa activa; si el TPV tablet no tiene selector, usar la de la sesión de caja. */
+  const businessId =
+    resolveBusinessScopeId(currentBusiness)
+    || String(session.business_id || (session as { businessId?: string }).businessId || '').trim();
   const sessionId = String(session._id || '').trim();
   const savedDraft = useMemo(() => readClosingFormDraft(sessionId), [sessionId]);
   const [counts, setCounts] = useState<CashDenominationCount>(() => savedDraft?.counts || {});
@@ -2055,7 +2103,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       .then(([brands, billingConfig]) => {
         if (cancelled) return;
         const list = (brands || []).filter((b) => b && !b.deletedAt);
-        setBrandLabels(buildBrandLabelsMap(list));
+        // Catálogo + etiquetas ya guardadas en la sesión (por si el listado tarda o falla).
+        setBrandLabels({
+          ...(session.closingBrandLabels || {}),
+          ...buildBrandLabelsMap(list),
+        });
         setCatalogBrands(list);
         setBillingSheetsResolved(
           resolveBillingSheetsForClosing(billingConfig?.sheets, list),
@@ -2073,7 +2125,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     return () => {
       cancelled = true;
     };
-  }, [businessId, showDeliveryClosingSlots]);
+  }, [businessId, showDeliveryClosingSlots, session.closingBrandLabels]);
 
   const brandBillingRaw = useMemo(
     () => buildShiftBrandRevenue(session, shiftOrders, brandLabels, billingRules),
@@ -2095,10 +2147,25 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       ? billingSheetsResolved
       : suggestBillingSheetsFromBrands(catalogBrands);
     const fromSheets = closingSlotsFromBillingSheets(sheets, catalogBrands);
-    if (fromSheets.length > 0) return fromSheets;
+    if (fromSheets.length > 0) {
+      return fromSheets.map((slot) => {
+        const slotName = String(slot.name || '').trim();
+        const resolved = displayBrandName(slot.brandId, brandLabels, slotName || 'Marca');
+        return {
+          ...slot,
+          name:
+            slotName && !looksLikeBrandTechnicalId(slotName)
+              ? slotName
+              : resolved,
+        };
+      });
+    }
 
     return Object.entries(brandLabels)
-      .filter(([, name]) => String(name || '').trim())
+      .filter(([, name]) => {
+        const n = String(name || '').trim();
+        return n && !looksLikeBrandTechnicalId(n);
+      })
       .map(([id, name]) => ({
         brandId: id,
         name: String(name).trim(),
@@ -2134,7 +2201,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       }
       const appsRows = Object.entries(byBrand).map(([brandId, revenue]) => ({
         brandId,
-        name: brandLabels[brandId] || brandId,
+        name: displayBrandName(brandId, brandLabels),
         revenue,
       }));
       caja2Lines = sumAppsBrandTotalsBySlot(closingBrands, appsRows, 0);
@@ -2761,7 +2828,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
 
               {/* Resumen final — misma fila que el Excel de Facturación */}
               <div className="shrink-0 space-y-2">
-                <ClosingExcelLikeSummary amounts={excelDaySummary} />
+                <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
                 <p className="text-[11px] text-stone-500 px-0.5 tabular-nums">
                   Comprobación: Caja 1 {formatMoneyEs(tpvAllSales)} + Caja 2 {formatMoneyEs(integratorsTotal)}
                   {' = '}
@@ -3023,7 +3090,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto p-3">
                 {showDeliveryClosingSlots ? (
-                  <ClosingExcelLikeSummary amounts={excelDaySummary} compact />
+                  <ClosingExcelLikeSummary
+                    amounts={excelDaySummary}
+                    brandLabels={brandLabels}
+                    compact
+                  />
                 ) : (
                   <div className="rounded-xl border border-stone-200 dark:border-stone-700 px-3 py-2.5 space-y-1 text-sm">
                     <div className="flex justify-between gap-2">
@@ -3055,15 +3126,48 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                   disabled={busy}
                   onClick={() => {
                     setConfirmCloseOpen(false);
+                    const snapBrands = appsSnapshot?.brandTotalsByChannel || {};
+                    const hasSnapBrands = Object.keys(snapBrands).some(
+                      (ch) => Object.keys(snapBrands[ch] || {}).length > 0,
+                    );
+                    // Fallback: lo que se ve en el resumen (sistema/escalado) si el snapshot
+                    // de inputs por marca llegó vacío — el cierre NO puede perder marcas.
+                    const fallbackBrandTotals = hasSnapBrands
+                      ? snapBrands
+                      : brandTotalsByChannelFromAppsRows(
+                        scaleAppsBrandTotalsToAppTotal(
+                          appsBrandBilling.rows,
+                          appsBrandBilling.unbranded,
+                          integratorsTotal,
+                        ).rows,
+                        finalAggregatorRows
+                          .filter((r) => (Number(r.totalSales) || 0) > 0)
+                          .map((r) => r.platform.channel),
+                      );
+                    const labelMap: Record<string, string> = { ...brandLabels };
+                    for (const slot of closingBrands) {
+                      const n = String(slot.name || '').trim();
+                      if (!n || looksLikeBrandTechnicalId(n)) continue;
+                      for (const id of brandIdAliases(slot.brandId)) labelMap[id] = n;
+                      for (const mid of slot.memberBrandIds || []) {
+                        for (const id of brandIdAliases(mid)) labelMap[id] = n;
+                      }
+                    }
+                    for (const row of excelDaySummary.brands || []) {
+                      const n = String(row.name || '').trim();
+                      if (!n || looksLikeBrandTechnicalId(n)) continue;
+                      for (const id of brandIdAliases(row.brandId)) labelMap[id] = n;
+                    }
                     onClose(counts, notes, finalAggregatorRows, {
                       pizza: closingFood.pizza,
                       burger: closingFood.burger,
                       taco: closingFood.taco,
                       byChannel: closingFoodByChannel,
                     }, {
-                      brandTotalsByChannel: appsSnapshot?.brandTotalsByChannel,
+                      brandTotalsByChannel: fallbackBrandTotals,
                       unpaidCashByBrandByChannel: appsSnapshot?.unpaidCashByBrandByChannel,
                       unpaidCardByBrandByChannel: appsSnapshot?.unpaidCardByBrandByChannel,
+                      closingBrandLabels: labelMap,
                     });
                   }}
                   className={`${VERTIAL_BTN_PRIMARY} !min-h-11 flex-1 !bg-amber-600 hover:!bg-amber-700`}
@@ -4436,6 +4540,8 @@ export function TpvRegisterGate({
   const [postCloseAggregatorRows, setPostCloseAggregatorRows] = useState<AggregatorCashRow[]>([]);
   /** Detalle ampliado del cierre (sin reabrir). */
   const [postCloseShowDetail, setPostCloseShowDetail] = useState(false);
+  /** Nombres de marca para el resumen «Caja cerrada» (no mostrar brand-uuid). */
+  const [postCloseBrandLabels, setPostCloseBrandLabels] = useState<Record<string, string>>({});
   const [managerPdvPickId, setManagerPdvPickId] = useState<string | null>(null);
   const [clockedInWorkers, setClockedInWorkers] = useState<TpvClockedInWorker[]>([]);
   const [clockedInWorkersLoading, setClockedInWorkersLoading] = useState(false);
@@ -4928,6 +5034,27 @@ export function TpvRegisterGate({
     return () => window.clearInterval(t);
   }, [dataUserId, activeSession?._id, activeSession?.openedAt, activeSession?.pointOfSaleId]);
 
+  // Catálogo de marcas → nombres legibles en resumen «Caja cerrada» / Marcas.
+  useEffect(() => {
+    const bid = String(scopeBusinessId || '').trim();
+    if (!bid) {
+      setPostCloseBrandLabels({});
+      return;
+    }
+    let cancelled = false;
+    void listBrandsRequest(bid)
+      .then((brands) => {
+        if (cancelled) return;
+        setPostCloseBrandLabels(buildBrandLabelsMap((brands || []).filter((b) => b && !b.deletedAt)));
+      })
+      .catch(() => {
+        if (!cancelled) setPostCloseBrandLabels({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scopeBusinessId]);
+
   useEffect(() => {
     if (!isTpvRegisterSessionOpen(activeSession)) {
       return;
@@ -5348,7 +5475,7 @@ export function TpvRegisterGate({
         `Caja reabierta: ${reopened.pointOfSaleName || 'tienda'}${reopened.terminalName ? ` / ${reopened.terminalName}` : ''}`,
       );
     } catch (err) {
-      toast.error(toUserFacingMessage(extractErrorMessage(err) || 'No se pudo reabrir la caja'));
+      toast.error(toUserFacingMessage(err, 'No se pudo reabrir la caja'));
     } finally {
       openingInFlightRef.current = false;
     }
@@ -5522,6 +5649,7 @@ export function TpvRegisterGate({
       brandTotalsByChannel?: Record<string, Record<string, number>>;
       unpaidCashByBrandByChannel?: Record<string, Record<string, number>>;
       unpaidCardByBrandByChannel?: Record<string, Record<string, number>>;
+      closingBrandLabels?: Record<string, string>;
     },
   ) => {
     const snapshotId = String(closingSession?._id || activeSession?._id || '').trim();
@@ -5560,18 +5688,31 @@ export function TpvRegisterGate({
     const brandTotalsByChannel = appsClosingExtras?.brandTotalsByChannel;
     const unpaidCashByBrandByChannel = appsClosingExtras?.unpaidCashByBrandByChannel;
     const unpaidCardByBrandByChannel = appsClosingExtras?.unpaidCardByBrandByChannel;
-    const aggregatorClosingBrandTotals =
-      brandTotalsByChannel && Object.keys(brandTotalsByChannel).length > 0
-        ? brandTotalsByChannel
-        : undefined;
-    const aggregatorClosingUnpaidCashByBrand =
-      unpaidCashByBrandByChannel && Object.keys(unpaidCashByBrandByChannel).length > 0
-        ? unpaidCashByBrandByChannel
-        : undefined;
-    const aggregatorClosingUnpaidCardByBrand =
-      unpaidCardByBrandByChannel && Object.keys(unpaidCardByBrandByChannel).length > 0
-        ? unpaidCardByBrandByChannel
-        : undefined;
+    const closingBrandLabels = appsClosingExtras?.closingBrandLabels;
+    const hasBrandTotals = Boolean(
+      brandTotalsByChannel
+      && Object.values(brandTotalsByChannel).some((m) => m && Object.keys(m).length > 0),
+    );
+    const hasUnpaidCashByBrand = Boolean(
+      unpaidCashByBrandByChannel
+      && Object.values(unpaidCashByBrandByChannel).some((m) => m && Object.keys(m).length > 0),
+    );
+    const hasUnpaidCardByBrand = Boolean(
+      unpaidCardByBrandByChannel
+      && Object.values(unpaidCardByBrandByChannel).some((m) => m && Object.keys(m).length > 0),
+    );
+    const hasClosingLabels = Boolean(
+      closingBrandLabels && Object.keys(closingBrandLabels).length > 0,
+    );
+    // P/B/T: siempre persistir lo declarado en el cierre (aunque sea 0).
+    const productCountsToSave: NonNullable<TpvRegisterSession['productClosingCounts']> = {
+      pizza: Math.max(0, Math.floor(Number(productClosingCounts?.pizza) || 0)),
+      burger: Math.max(0, Math.floor(Number(productClosingCounts?.burger) || 0)),
+      taco: Math.max(0, Math.floor(Number(productClosingCounts?.taco) || 0)),
+      ...(productClosingCounts?.byChannel
+        ? { byChannel: productClosingCounts.byChannel }
+        : {}),
+    };
     const expected = Math.round((expectedTpv + aggregatorCashSum) * 100) / 100;
     const diff = finalAmount - expected;
     const saleOps = session.transactions.filter((t) => t.type === 'sale').length;
@@ -5590,14 +5731,15 @@ export function TpvRegisterGate({
       aggregatorClosingTotals,
       aggregatorClosingCash,
       aggregatorClosingCard,
-      ...(aggregatorClosingBrandTotals ? { aggregatorClosingBrandTotals } : {}),
-      ...(aggregatorClosingUnpaidCashByBrand
-        ? { aggregatorClosingUnpaidCashByBrand }
+      productClosingCounts: productCountsToSave,
+      ...(hasBrandTotals ? { aggregatorClosingBrandTotals: brandTotalsByChannel } : {}),
+      ...(hasUnpaidCashByBrand
+        ? { aggregatorClosingUnpaidCashByBrand: unpaidCashByBrandByChannel }
         : {}),
-      ...(aggregatorClosingUnpaidCardByBrand
-        ? { aggregatorClosingUnpaidCardByBrand }
+      ...(hasUnpaidCardByBrand
+        ? { aggregatorClosingUnpaidCardByBrand: unpaidCardByBrandByChannel }
         : {}),
-      ...(productClosingCounts ? { productClosingCounts } : {}),
+      ...(hasClosingLabels ? { closingBrandLabels } : {}),
       closingValidationStatus: autoValidated ? 'validated' : 'pending',
       ...(autoValidated
         ? {
@@ -5623,6 +5765,9 @@ export function TpvRegisterGate({
       setPostCloseSession(updated);
       setPostCloseAggregatorRows(aggregatorRows);
       setPostCloseShowDetail(false);
+      if (updated.closingBrandLabels && Object.keys(updated.closingBrandLabels).length > 0) {
+        setPostCloseBrandLabels((prev) => ({ ...prev, ...updated.closingBrandLabels }));
+      }
       if (opts?.offline) {
         toast.success(
           `Caja cerrada sin red. Se subirá al volver la conexión. Diferencia: ${diff >= 0 ? '+' : ''}${diff.toFixed(2)}€`,
@@ -6216,7 +6361,10 @@ export function TpvRegisterGate({
   }
 
   if (postCloseSession && !isTpvRegisterSessionOpen(activeSession)) {
-    const excelClosed = excelLikeAmountsFromClosedSession(postCloseSession);
+    const excelClosed = excelLikeAmountsFromClosedSession(postCloseSession, {
+      ...postCloseBrandLabels,
+      ...(postCloseSession.closingBrandLabels || {}),
+    });
     const restaurantSummary = postCloseSession.summary;
     const postCloseAggRows = postCloseAggregatorRows.length > 0
       ? postCloseAggregatorRows
@@ -6316,7 +6464,10 @@ export function TpvRegisterGate({
                 </div>
               ) : null
             ) : (
-              <ClosingExcelLikeSummary amounts={excelClosed} />
+              <ClosingExcelLikeSummary
+                amounts={excelClosed}
+                brandLabels={postCloseBrandLabels}
+              />
             )}
           </div>
 

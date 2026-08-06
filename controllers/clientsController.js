@@ -27,6 +27,7 @@ import {
   listDeliveryOrdersByUser,
   resolveDataOwnerUserId,
   invalidateClientDocumentsForUser,
+  sanitizeClientForTpvSearch,
 } from '../services/couchdb.js';
 import { chunkDocs, resolveBulkImportLimits } from '../services/bulkImportBatch.js';
 import { applyQueryOptions } from '../middleware/queryOptions.js';
@@ -38,11 +39,13 @@ import {
 import {
   syncClientFromDeliveryOrders,
   enrichClientRowWithLiveDeliveryStats,
+  groupDeliveryOrdersByClientRows,
   scopeDeliveryOrdersToBusinessId,
   scopeDeliveryOrdersToClientBusiness,
 } from '../services/deliveryClientSync.js';
 import {
   enrichClientRowWithLiveDiningStats,
+  groupDiningOrdersByClientRows,
   loadDiningOrdersForClientCrm,
   mergeClientLiveStats,
 } from '../services/restaurantClientSync.js';
@@ -177,10 +180,22 @@ export async function listClients(req, res) {
         } catch {
           diningOrders = [];
         }
+        // Solo pedidos de las filas de esta página (20–50), no re-escanear todo el historial por cliente.
+        const deliveryByClient = groupDeliveryOrdersByClientRows(deliveryOrders, clients);
+        const diningByClient = diningOrders.length
+          ? groupDiningOrdersByClientRows(diningOrders, clients)
+          : null;
         clients = clients.map((row) => {
-          const withDelivery = enrichClientRowWithLiveDeliveryStats(row, deliveryOrders);
-          if (!diningOrders.length) return withDelivery;
-          const withDining = enrichClientRowWithLiveDiningStats(row, diningOrders);
+          const rowId = String(row.id || '').trim();
+          const withDelivery = enrichClientRowWithLiveDeliveryStats(
+            row,
+            deliveryByClient.get(rowId) || [],
+          );
+          if (!diningByClient) return withDelivery;
+          const withDining = enrichClientRowWithLiveDiningStats(
+            row,
+            diningByClient.get(rowId) || [],
+          );
           return mergeClientLiveStats(row, withDelivery, withDining);
         });
       }
@@ -491,6 +506,17 @@ export async function getClientDetail(req, res) {
 
     let client = await ensureClientOwner(req, userId, clientId);
     if (!client) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
+
+    // TPV: solo ficha (direcciones/pago). Sin sync ni escaneo de pedidos/ventas/facturas.
+    const lite = req.query?.lite === '1' || req.query?.lite === 'true'
+      || req.query?.tpv === '1' || req.query?.tpv === 'true';
+    if (lite) {
+      return res.json({
+        ok: true,
+        client: sanitizeClientForTpvSearch(client),
+        summary: null,
+      });
+    }
 
     await syncClientFromDeliveryOrders(req, userId, clientId).catch(() => null);
     client = (await ensureClientOwner(req, userId, clientId)) || client;
@@ -1107,7 +1133,8 @@ export async function searchByPhone(req, res) {
     return res.json({
       ok: true,
       portfolioSize,
-      clients: clients.map((c) => sanitizeClient(c)).filter(Boolean),
+      // TPV: payload ligero con direcciones (no vehicles/interactions/…).
+      clients: clients.map((c) => sanitizeClientForTpvSearch(c)).filter(Boolean),
     });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error.message || 'Error al buscar clientes' });

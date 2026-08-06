@@ -6,7 +6,18 @@ import {
   getAllDocuments,
   bulkPutDocuments,
   softDeleteDocument,
+  findDocuments,
+  ensureIndex,
 } from './couchdb.js';
+
+const salaTypeUserIndexReady = new Set();
+
+async function ensureSalaTypeUserIndex(req, dbName) {
+  if (salaTypeUserIndexReady.has(dbName)) return;
+  const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
+  await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-type-user_id`).catch(() => null);
+  salaTypeUserIndexReady.add(dbName);
+}
 
 // ─── DB NAME ─────────────────────────────────────────────────────────────────
 
@@ -489,11 +500,37 @@ export function sanitizeDiningOrder(doc) {
 }
 
 export async function listDiningOrdersByUser(req, userId, filters = {}) {
+  const uid = String(userId || '').trim();
   const db = getSalaDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
-  let orders = docs
-    .filter((doc) => doc?.type === 'dining_order' && !doc?.deletedAt && (!userId || doc?.user_id === userId));
+  await ensureSalaTypeUserIndex(req, db);
+
+  let docs;
+  try {
+    docs = uid
+      ? await findDocuments(
+          req,
+          db,
+          { type: 'dining_order', user_id: uid },
+          { pageSize: 500, maxDocs: 100_000 },
+        )
+      : await findDocuments(
+          req,
+          db,
+          { type: 'dining_order' },
+          { pageSize: 500, maxDocs: 100_000 },
+        );
+  } catch {
+    const all = await getAllDocuments(req, db);
+    docs = all.filter(
+      (doc) => doc?.type === 'dining_order' && (!uid || doc?.user_id === uid),
+    );
+  }
+
+  let orders = docs.filter(
+    (doc) =>
+      doc?.type === 'dining_order' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+  );
 
   if (filters.status) {
     const statuses = Array.isArray(filters.status) ? filters.status : [filters.status];

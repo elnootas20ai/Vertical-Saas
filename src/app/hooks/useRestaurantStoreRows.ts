@@ -29,6 +29,11 @@ export function useRestaurantStoreRows(enabled: boolean) {
   const inflightRef = useRef(false);
   const stableRowsRef = useRef<DeliverySidebarStoreRow[]>([]);
   const stableBusinessIdRef = useRef<string | null>(null);
+  const scopeSyncRequestedRef = useRef<string | null>(null);
+  const currentBusinessRef = useRef(currentBusiness);
+  currentBusinessRef.current = currentBusiness;
+  const businessesRef = useRef(businesses);
+  businessesRef.current = businesses;
 
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
@@ -109,7 +114,7 @@ export function useRestaurantStoreRows(enabled: boolean) {
   ]);
 
   useEffect(() => {
-    if (!enabled || !dataUserId || !businessId || !currentBusiness) return;
+    if (!enabled || !dataUserId || !businessId) return;
     if (!businessesFetchSettled) return;
     if (rowsFromScope.length > 0) return;
     if (stableRowsRef.current.length > 0) return;
@@ -121,14 +126,17 @@ export function useRestaurantStoreRows(enabled: boolean) {
 
     void (async () => {
       try {
+        const biz = currentBusinessRef.current;
+        const bizList = businessesRef.current;
+        if (!biz) return;
         const [rawPdvs, allWcs] = await Promise.all([
           listPointsOfSaleRequest(dataUserId).catch(() => []),
-          listWorkCentersForDelivery(dataUserId, currentBusiness).catch(() => []),
+          listWorkCentersForDelivery(dataUserId, biz).catch(() => []),
         ]);
         if (cancelled) return;
         const retail = filterRetailWorkCentersForScope(allWcs, {
-          business: currentBusiness,
-          businesses,
+          business: biz,
+          businesses: bizList,
         });
         const pdvs = filterPointsOfSaleForWorkCenters(rawPdvs, retail);
         const rows = buildDeliverySidebarStoreRows(retail, pdvs);
@@ -143,34 +151,36 @@ export function useRestaurantStoreRows(enabled: boolean) {
               allPointsOfSale: pdvs,
               savedAt: Date.now(),
             },
-            currentBusiness,
-            businesses,
+            biz,
+            bizList,
           );
-          if (activeStore.allPointsOfSale.length === 0 && activeStore.retailWorkCenters.length === 0) {
-            void activeStore.refresh();
+          if (
+            scopeSyncRequestedRef.current !== businessId &&
+            activeStore.allPointsOfSale.length === 0 &&
+            activeStore.retailWorkCenters.length === 0
+          ) {
+            scopeSyncRequestedRef.current = businessId;
+            void activeStore.refresh({ force: false });
           }
         }
       } finally {
         inflightRef.current = false;
-        if (!cancelled) setFallbackLoading(false);
+        setFallbackLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
-      inflightRef.current = false;
     };
   }, [
     enabled,
     dataUserId,
     businessId,
     businessesFetchSettled,
-    businesses,
     rowsFromScope.length,
     activeStore.allPointsOfSale.length,
     activeStore.retailWorkCenters.length,
     activeStore.refresh,
-    currentBusiness,
   ]);
 
   const liveRows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;

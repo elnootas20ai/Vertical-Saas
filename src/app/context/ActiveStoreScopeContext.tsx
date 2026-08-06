@@ -54,6 +54,8 @@ import {
   readTpvTabletBinding,
 } from '../lib/tpvTabletSession';
 
+export type ActiveStoreRefreshOptions = { force?: boolean };
+
 export interface ActiveStoreScopeValue {
   pointsOfSale: PointOfSale[];
   allPointsOfSale: PointOfSale[];
@@ -63,9 +65,13 @@ export interface ActiveStoreScopeValue {
   setActiveSalesPoint: (pdvId: string) => void;
   setActiveWorkCenterPreference: (workCenterId: string) => void;
   loading: boolean;
-  refresh: () => Promise<void>;
+  /** Por defecto force=true (tras crear/borrar). Sidebar/gates: `{ force: false }`. */
+  refresh: (options?: ActiveStoreRefreshOptions) => Promise<void>;
   displayLabelForActive: string;
 }
+
+/** Si Couch/API no responde, no dejar spinner eterno en sidebar/ajustes. */
+const RETAIL_STORE_LOAD_TIMEOUT_MS = 12_000;
 
 const noopScope: ActiveStoreScopeValue = {
   pointsOfSale: [],
@@ -432,6 +438,7 @@ function ActiveStoreScopeProviderImpl({
       const uid = String(authUser?.user_id || authUser?.id || '').trim();
 
       if (!uid || !bidAtStart) {
+        setInitialLoading(false);
         return;
       }
 
@@ -466,21 +473,29 @@ function ActiveStoreScopeProviderImpl({
         knownBusinessIds: knownBusinessIdsFromList(businessesRef.current),
       };
 
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       try {
         // Solo lectura: el sidebar nunca crea/repara PDVs. Las reparaciones
         // viven en Ajustes → Tienda y en la apertura del TPV.
-        const state = await loadRetailStoresForBusiness(
-          authUser,
-          biz as Business,
-          businessesRef.current,
-          {
-            ...loadOpts,
-            includeInactivePdvs: true,
-            tpvBootstrap: false,
-            skipPdvMerge: true,
-            ensureTabletCodes: false,
-          },
-        );
+        const state = await Promise.race([
+          loadRetailStoresForBusiness(
+            authUser,
+            biz as Business,
+            businessesRef.current,
+            {
+              ...loadOpts,
+              includeInactivePdvs: true,
+              tpvBootstrap: false,
+              skipPdvMerge: true,
+              ensureTabletCodes: false,
+            },
+          ),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(new Error('retail_store_load_timeout'));
+            }, RETAIL_STORE_LOAD_TIMEOUT_MS);
+          }),
+        ]);
 
         if (seq !== loadSeqRef.current || businessIdRef.current !== bidAtStart) return;
 
@@ -492,9 +507,11 @@ function ActiveStoreScopeProviderImpl({
         );
         commitStores(retail, allPdvs, bidAtStart, force);
       } catch {
-        /* conservar caché / última lista */
+        /* timeout / red: conservar caché / última lista */
       } finally {
-        if (showInitialSpinner) {
+        if (timeoutId) clearTimeout(timeoutId);
+        // Siempre apagar spinner: early-return o timeout no deben dejar ajustes/sidebar colgados.
+        if (seq === loadSeqRef.current) {
           setInitialLoading(false);
         }
       }
@@ -514,8 +531,8 @@ function ActiveStoreScopeProviderImpl({
   const loadRef = useRef(load);
   loadRef.current = load;
 
-  const refresh = useCallback(async () => {
-    await loadRef.current({ force: true });
+  const refresh = useCallback(async (options?: ActiveStoreRefreshOptions) => {
+    await loadRef.current({ force: options?.force !== false });
   }, []);
 
   useEffect(() => {

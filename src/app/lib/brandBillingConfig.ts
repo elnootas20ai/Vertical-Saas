@@ -7,6 +7,12 @@
  * (majority = dominante; equal = a medias 1/N).
  */
 import type { Brand } from './brandApi';
+import {
+  brandIdAliases,
+  buildBrandLabelsMap,
+  displayBrandName,
+  looksLikeBrandTechnicalId,
+} from './brandLabels';
 import { isBrandActive, isDefaultBrandNamePlaceholder, isDefaultCommercialBrand } from './brandUtils';
 
 export type FoodUnitKey = 'pizza' | 'burger' | 'taco';
@@ -256,12 +262,13 @@ export function unitColumnsForBrand(
 }
 
 function brandIdKeys(brand: Pick<Brand, '_id' | 'id'> | null | undefined): string[] {
-  const a = String(brand?._id || '').trim();
-  const b = String(brand?.id || '').trim();
-  if (a && b && a !== b) return [a, b];
-  if (a) return [a];
-  if (b) return [b];
-  return [];
+  const out = new Set<string>();
+  for (const raw of [brand?._id, brand?.id]) {
+    for (const key of brandIdAliases(String(raw || ''))) {
+      if (key) out.add(key);
+    }
+  }
+  return [...out];
 }
 
 function brandsByIdMap(brands: Brand[]): Map<string, Brand> {
@@ -717,6 +724,7 @@ export function closingSlotsFromBillingSheets(
   brands: Brand[],
 ): ClosingBillingBrandSlot[] {
   const byId = brandsByIdMap(brands);
+  const labels = buildBrandLabelsMap(brands);
   const out: ClosingBillingBrandSlot[] = [];
   const seenHosts = new Set<string>();
 
@@ -731,14 +739,16 @@ export function closingSlotsFromBillingSheets(
     seenHosts.add(hostId);
 
     const hostBrand = byId.get(hostId);
-    const name =
-      String(hostBrand?.name || '').trim()
-      || String(sheet.label || '').trim()
-      || hostId;
+    const sheetLabel = String(sheet.label || '').trim();
+    const fromBrand = String(hostBrand?.name || '').trim();
+    const candidate =
+      (fromBrand && !looksLikeBrandTechnicalId(fromBrand) ? fromBrand : '')
+      || (sheetLabel && !looksLikeBrandTechnicalId(sheetLabel) ? sheetLabel : '')
+      || displayBrandName(hostId, labels, 'Marca');
 
     out.push({
       brandId: hostId,
-      name,
+      name: candidate,
       memberBrandIds,
     });
   }

@@ -1620,7 +1620,10 @@ export function SalesPointsTab() {
     const seq = ++loadSeqRef.current;
 
     const run = async () => {
-      if (!businessesFetchSettled) return;
+      if (!businessesFetchSettled) {
+        // No spinear eterno si el padre re-invoca loadData antes del settle.
+        return;
+      }
 
       const userNow = userRef.current;
       const bizNow = currentBusinessRef.current;
@@ -1751,6 +1754,13 @@ export function SalesPointsTab() {
     isRestaurant,
     loadData,
   ]);
+
+  /** Failsafe: si el listado de empresas no termina, no dejar Ajustes → Tienda en spinner eterno. */
+  useEffect(() => {
+    if (businessesFetchSettled) return;
+    const timer = window.setTimeout(() => setLoading(false), 12_000);
+    return () => window.clearTimeout(timer);
+  }, [businessesFetchSettled]);
 
   const loadDataRef = useRef(loadData);
   loadDataRef.current = loadData;

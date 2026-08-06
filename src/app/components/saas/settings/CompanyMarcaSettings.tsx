@@ -865,10 +865,19 @@ export function CompanyMarcaSettings() {
   }, [stores, needsPdvBeforeBrand, isRestaurant]);
 
   const loadAll = useCallback(async () => {
-    if (!businessId) return;
+    if (!businessId) {
+      setBrands([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const list = await listBrandsRequest(businessId).catch(() => [] as Brand[]);
+      const list = await Promise.race([
+        listBrandsRequest(businessId).catch(() => [] as Brand[]),
+        new Promise<Brand[]>((resolve) => {
+          window.setTimeout(() => resolve([]), 12_000);
+        }),
+      ]);
       setBrands(sortBrandsForDisplay(list));
     } catch {
       setBrands([]);
@@ -974,10 +983,8 @@ export function CompanyMarcaSettings() {
       return;
     }
     if (loading || (needsPdvBeforeBrand && pdvGate.loading)) return;
-    if (needsPdvBeforeBrand && !pdvGate.ready) {
-      void pdvGate.reload();
-      return;
-    }
+    // Sin tienda/PDV: el gate de abajo ya lo explica. No recargar en bucle.
+    if (needsPdvBeforeBrand && !pdvGate.ready) return;
     if (newBrandQueryHandledRef.current) return;
     newBrandQueryHandledRef.current = true;
 

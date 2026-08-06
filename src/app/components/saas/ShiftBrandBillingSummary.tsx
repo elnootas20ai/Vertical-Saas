@@ -4,10 +4,17 @@
 import { useState } from 'react';
 import { Banknote, ChevronDown, ChevronUp, CreditCard, Tag } from 'lucide-react';
 import type { ShiftBrandRevenueRow } from '../../lib/registerShiftBrandBilling';
+import { looksLikeBrandTechnicalId } from '../../lib/brandLabels';
 import { VERTIAL_CASH_TEXT, VERTIAL_CARD_TEXT } from '../../lib/vertialUiTokens';
 
 function fmt(n: number): string {
   return n.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function rowDisplayName(row: ShiftBrandRevenueRow): string {
+  const name = String(row.name || '').trim();
+  if (name && !looksLikeBrandTechnicalId(name)) return name;
+  return 'Marca';
 }
 
 type Props = {
@@ -60,7 +67,7 @@ export function ShiftBrandBillingSummary({
                 className="flex items-center justify-between gap-2 rounded-lg bg-stone-50 px-2 py-1 dark:bg-stone-800/60"
               >
                 <div className="min-w-0">
-                  <p className="truncate text-xs font-bold text-stone-900 dark:text-stone-100">{row.name}</p>
+                  <p className="truncate text-xs font-bold text-stone-900 dark:text-stone-100">{rowDisplayName(row)}</p>
                   <p className="text-[10px] font-semibold tabular-nums">
                     <span className={VERTIAL_CASH_TEXT}>Efectivo {fmt(cash)}€</span>
                     <span className="mx-1 text-stone-300">·</span>
@@ -129,7 +136,7 @@ export function ShiftBrandBillingSummary({
                       <ChevronDown className="h-4 w-4 shrink-0 text-stone-400" />
                     )}
                     <p className={`truncate text-sm font-bold ${open ? 'text-white' : 'text-stone-900 dark:text-stone-100'}`}>
-                      {row.name}
+                      {rowDisplayName(row)}
                     </p>
                   </div>
                   {!open ? (

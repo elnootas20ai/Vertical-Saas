@@ -109,6 +109,8 @@ export function useDeliveryStorePdvGate() {
     );
   }, [businessId, accountBusinessCount]);
 
+  // Spinner solo mientras falta empresa o el scope sigue en red.
+  // Si activeStore.loading ya es false (aunque vacío) → salir al gate/UI, no infinito.
   const loading = Boolean(
     isDelivery &&
       (!businessesFetchSettled ||
@@ -127,7 +129,7 @@ export function useDeliveryStorePdvGate() {
   }, [isDelivery, businessesFetchSettled, businessId, picked.workCenters, picked.pdvs]);
 
   const reload = useCallback(async () => {
-    await activeStore.refresh();
+    await activeStore.refresh({ force: true });
   }, [activeStore.refresh]);
 
   return { isDelivery, ready, loading, reload };

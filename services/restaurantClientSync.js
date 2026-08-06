@@ -26,6 +26,38 @@ function diningOrderMatchesClient(order, clientId, clientPhone) {
   return Boolean(phone && orderPhone && phone.length >= 9 && phone === orderPhone);
 }
 
+/** Agrupa cuentas de mesa por filas de la página CRM (misma idea que delivery). */
+export function groupDiningOrdersByClientRows(orders, clientRows) {
+  const byClientId = new Map();
+  for (const row of clientRows || []) {
+    const id = String(row?.id || row?._id || '').trim();
+    if (id) byClientId.set(id, []);
+  }
+  if (byClientId.size === 0) return byClientId;
+
+  const phoneTargets = [];
+  for (const row of clientRows || []) {
+    const id = String(row?.id || row?._id || '').trim();
+    if (!id || !byClientId.has(id)) continue;
+    phoneTargets.push({ id, phone: row?.phone });
+  }
+
+  for (const order of orders || []) {
+    const oid = String(order?.clientId || '').trim();
+    if (oid) {
+      const bucket = byClientId.get(oid);
+      if (bucket) bucket.push(order);
+      continue;
+    }
+    for (const target of phoneTargets) {
+      if (diningOrderMatchesClient(order, target.id, target.phone)) {
+        byClientId.get(target.id).push(order);
+      }
+    }
+  }
+  return byClientId;
+}
+
 function isClosedDiningOrder(order) {
   const st = String(order?.status || '').toLowerCase();
   return st === 'closed' || st === 'paid' || st === 'cancelled';

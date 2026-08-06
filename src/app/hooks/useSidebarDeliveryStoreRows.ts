@@ -44,6 +44,11 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
   const inflightRef = useRef(false);
   const stableRowsRef = useRef<DeliverySidebarStoreRow[]>([]);
   const stableBusinessIdRef = useRef<string | null>(null);
+  const scopeSyncRequestedRef = useRef<string | null>(null);
+  const currentBusinessRef = useRef(currentBusiness);
+  currentBusinessRef.current = currentBusiness;
+  const businessesRef = useRef(businesses);
+  businessesRef.current = businesses;
 
   const businessId = resolveBusinessScopeId(currentBusiness);
   const dataUserId = resolveBusinessDataUserId(user, currentBusiness);
@@ -64,6 +69,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
     }
     if (stableBusinessIdRef.current !== businessId) {
       stableBusinessIdRef.current = businessId;
+      scopeSyncRequestedRef.current = null;
       stableRowsRef.current = readCachedSidebarRows(businessId, accountBusinessCount);
       setFallbackRows(stableRowsRef.current);
     } else {
@@ -104,6 +110,7 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
 
   useEffect(() => {
     if (!enabled || !dataUserId || !businessId) return;
+    if (!businessesFetchSettled) return;
     if (rowsFromScope.length > 0) return;
     if (inflightRef.current) return;
 
@@ -113,13 +120,15 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
 
     void (async () => {
       try {
-        const accountN = businessesFetchSettled ? businesses.length : 1;
+        const accountN = businesses.length > 0 ? businesses.length : 1;
+        const biz = currentBusinessRef.current;
+        const bizList = businessesRef.current;
         const [rawPdvs, allWcs] = await Promise.all([
           listPointsOfSaleRequest(dataUserId).catch(() => []),
-          listWorkCentersForDelivery(dataUserId, currentBusiness ?? null).catch(() => []),
+          listWorkCentersForDelivery(dataUserId, biz ?? null).catch(() => []),
         ]);
         if (cancelled) return;
-        const knownIds = knownBusinessIdsFromList(businesses);
+        const knownIds = knownBusinessIdsFromList(bizList);
         const preparedWcs = rescueRetailForBusinessWithoutStores(allWcs, businessId, knownIds);
         const scopedWcs = filterWorkCentersForBusinessScope(preparedWcs, businessId, {
           accountBusinessCount: accountN,
@@ -147,21 +156,26 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
             },
             { accountBusinessCount: accountN },
           );
-          if (activeStore.allPointsOfSale.length === 0 && activeStore.retailWorkCenters.length === 0) {
-            void activeStore.refresh();
+          // Una sola sync suave al scope (no force) para no borrar filas ni spinear infinito.
+          if (
+            scopeSyncRequestedRef.current !== businessId &&
+            activeStore.allPointsOfSale.length === 0 &&
+            activeStore.retailWorkCenters.length === 0
+          ) {
+            scopeSyncRequestedRef.current = businessId;
+            void activeStore.refresh({ force: false });
           }
         }
       } finally {
         inflightRef.current = false;
-        if (!cancelled) {
-          setFallbackLoading(false);
-        }
+        // Siempre apagar: si el effect se canceló por re-render, no dejar spinner eterno.
+        setFallbackLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
-      inflightRef.current = false;
+      // No resetear inflight aquí: evita storm de fetches por identidad de BusinessContext.
     };
   }, [
     enabled,
@@ -173,8 +187,6 @@ export function useSidebarDeliveryStoreRows(enabled: boolean) {
     activeStore.allPointsOfSale.length,
     activeStore.retailWorkCenters.length,
     activeStore.refresh,
-    currentBusiness,
-    businesses,
   ]);
 
   const liveRows = rowsFromScope.length > 0 ? rowsFromScope : fallbackRows;

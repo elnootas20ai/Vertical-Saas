@@ -40,6 +40,17 @@ type DeliveryRequestOptions = {
   suppressLogout?: boolean;
 };
 
+function deliveryRequestErrorMessage(payload: { error?: unknown; message?: unknown }, fallback: string): string {
+  const err = payload?.error;
+  if (typeof err === 'string' && err.trim()) return err.trim();
+  if (err && typeof err === 'object') {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string' && msg.trim()) return msg.trim();
+  }
+  if (typeof payload?.message === 'string' && payload.message.trim()) return payload.message.trim();
+  return fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit, options?: DeliveryRequestOptions): Promise<T> {
   const response = await authFetch(`${API_BASE}${path}`, {
     ...init,
@@ -49,9 +60,9 @@ async function request<T>(path: string, init?: RequestInit, options?: DeliveryRe
       ...(init?.headers || {}),
     },
   }, 0, false, { suppressLogout: options?.suppressLogout });
-  const payload = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const payload = (await response.json().catch(() => ({}))) as T & { error?: unknown; message?: unknown };
   if (!response.ok) {
-    throw new Error(payload?.error || 'Error inesperado en delivery API');
+    throw new Error(deliveryRequestErrorMessage(payload, 'No se pudo completar la acción'));
   }
   return payload;
 }
@@ -2048,6 +2059,12 @@ export interface TpvRegisterSession {
 
   /** No pagado tarjeta por marca y canal. channel → brandId → €. */
   aggregatorClosingUnpaidCardByBrand?: Record<string, Record<string, number>>;
+
+  /**
+   * Nombres de marca capturados al cerrar (brandId → nombre).
+   * Evita ver `brand-uuid` en PC si el catálogo no carga o cambió.
+   */
+  closingBrandLabels?: Record<string, string>;
 
   /**
    * Conteo de pizzas / burgers / tacos del turno al cerrar caja.

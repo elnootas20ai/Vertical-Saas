@@ -66,11 +66,25 @@ export function buildBrandLabelsMap(
   return labels;
 }
 
+/** ¿Parece un id técnico (brand-uuid / uuid) que no debe verse en UI? */
+export function looksLikeBrandTechnicalId(value: string): boolean {
+  const v = String(value || '').trim();
+  if (!v) return false;
+  if (/^brand[-:][0-9a-f]{8}-[0-9a-f-]{4,}/i.test(v)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return true;
+  return false;
+}
+
 export function displayBrandName(
   brandId: string,
   labels: Record<string, string> | null | undefined,
+  /** Si no hay nombre en catálogo y el id es técnico, texto corto en UI. */
+  fallbackLabel = 'Marca',
 ): string {
   const id = String(brandId || '').trim();
   if (!id) return '';
-  return lookupBrandLabel(id, labels) || id;
+  const looked = lookupBrandLabel(id, labels);
+  if (looked && !looksLikeBrandTechnicalId(looked)) return looked;
+  if (looksLikeBrandTechnicalId(id)) return fallbackLabel;
+  return id;
 }

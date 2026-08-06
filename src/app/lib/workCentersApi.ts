@@ -166,9 +166,16 @@ async function listAllWorkCenterDocs(): Promise<unknown[]> {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  const timeoutSignal =
+    !init?.signal &&
+    typeof AbortSignal !== 'undefined' &&
+    typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(15_000)
+      : undefined;
   const res = await fetch(`${getApiBase()}${path}`, {
     headers: { ...getHeaders(), ...(init?.headers || {}) },
     ...init,
+    signal: init?.signal || timeoutSignal,
   });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(data?.error || 'Error en centros de trabajo');

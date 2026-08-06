@@ -913,11 +913,18 @@ function SidebarInner({
     return () => window.removeEventListener(DELIVERY_WORK_CENTERS_CHANGED, onStoresChanged);
   }, [usesOpsStoreSidebar, activeStore.refresh]);
 
-  /** Al entrar en Delivery/Heladería, forzar recarga de tiendas/PDV. */
+  /** Al entrar en Delivery/Heladería: recarga suave solo si aún no hay tiendas. */
   useEffect(() => {
     if (!usesDeliverySidebarCore || !businessScopeId) return;
-    void activeStore.refresh();
-  }, [usesDeliverySidebarCore, businessScopeId, activeStore.refresh]);
+    if (activeStore.retailWorkCenters.length > 0 || activeStore.allPointsOfSale.length > 0) return;
+    void activeStore.refresh({ force: false });
+  }, [
+    usesDeliverySidebarCore,
+    businessScopeId,
+    activeStore.retailWorkCenters.length,
+    activeStore.allPointsOfSale.length,
+    activeStore.refresh,
+  ]);
 
   useEffect(() => {
     if (!usesOpsStoreSidebar) return;
@@ -925,7 +932,7 @@ function SidebarInner({
     if (opsStoreRows.length > 0) return;
     if (activeStore.retailWorkCenters.length > 0 || activeStore.allPointsOfSale.length > 0) return;
     const onFocus = () => {
-      void activeStore.refresh();
+      void activeStore.refresh({ force: false });
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);

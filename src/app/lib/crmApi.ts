@@ -478,15 +478,25 @@ export async function fetchAllClientsForExport(
   return all;
 }
 
-export async function getClientDetailRequest(userId: string, clientId: string): Promise<Client | null> {
+export async function getClientDetailRequest(
+  userId: string,
+  clientId: string,
+  options?: { lite?: boolean },
+): Promise<Client | null> {
   try {
+    const qs = options?.lite ? '?lite=1' : '';
     const result = await request<{ ok: boolean; client: unknown }>(
-      `/api/clients/${encodeURIComponent(userId)}/${encodeURIComponent(clientId)}`,
+      `/api/clients/${encodeURIComponent(userId)}/${encodeURIComponent(clientId)}${qs}`,
     );
     return normalizeClientRecord(result.client);
   } catch {
     return null;
   }
+}
+
+/** Ficha rápida para TPV (sin sync de histórico). */
+export async function getClientForTpvRequest(userId: string, clientId: string): Promise<Client | null> {
+  return getClientDetailRequest(userId, clientId, { lite: true });
 }
 
 export type ClientDetailSummary = {

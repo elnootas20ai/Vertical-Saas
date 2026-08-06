@@ -280,10 +280,10 @@ export async function getDocument(req, dbName, docId) {
 
 /**
  * Cache en memoria por titular (evita el tope 5MB del LRU global en cuentas grandes).
- * TTL: balance entre TPV frío (~6k docs) y ver altas nuevas sin reiniciar.
- * Altas/ediciones: upsert en caché + bump de generación (no reescribir carga stale).
+ * TTL largo: el TPV busca clientes todo el turno; recargar ~6k docs cada pocos minutos
+ * hace que “a media tarde” vuelva a ir lento. Altas/ediciones invalidan al momento.
  */
-const CLIENT_DOCS_TTL_MS = 3 * 60_000;
+const CLIENT_DOCS_TTL_MS = 30 * 60_000;
 const clientDocumentsByUser = new Map();
 /** Generación por titular: si sube durante un _find, no se escribe esa carga en caché. */
 const clientDocumentsGeneration = new Map();
@@ -295,6 +295,8 @@ async function ensureDeliveryTypeUserIndex(req, dbName) {
   if (deliveryTypeUserIndexReady.has(dbName)) return;
   const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
   await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-type-user_id`).catch(() => null);
+  // TPV/caja filtran por jornada: sin createdAt Couch puede tirar de todo el histórico.
+  await ensureIndex(req, dbName, ['type', 'user_id', 'createdAt'], `idx-${safeDb}-type-user-created`).catch(() => null);
   deliveryTypeUserIndexReady.add(dbName);
 }
 const clientDocumentsInflight = new Map();
@@ -4011,11 +4013,40 @@ export function sanitizeClientSummary(client) {
   };
 }
 
+/**
+ * Respuesta del buscador TPV: lo necesario para pedir (direcciones, pago, notas)
+ * sin vehicles/interactions/documents (payload gordo × N resultados).
+ */
+export function sanitizeClientForTpvSearch(client) {
+  const base = sanitizeClientSummary(client);
+  if (!base) return null;
+  return {
+    ...base,
+    addresses: Array.isArray(client.addresses) ? client.addresses : [],
+    notes: client.notes || '',
+    defaultPaymentMethod: client.defaultPaymentMethod || '',
+    stats: {
+      ...base.stats,
+      favoriteAddressId: client.stats?.favoriteAddressId || null,
+      orderFrequencyDays: client.stats?.orderFrequencyDays || 0,
+    },
+    loyalty: {
+      enrolled: Boolean(client.loyalty?.enrolled),
+      enrolledAt: client.loyalty?.enrolledAt || null,
+      points: client.loyalty?.points || 0,
+      level: client.loyalty?.level || 'bronze',
+      totalVisits: client.loyalty?.totalVisits || 0,
+    },
+  };
+}
+
 /** Índice type+user_id para _find de carteras grandes (TPV). */
 async function ensureClientsUserTypeIndex(req, dbName) {
   if (clientsUserIndexReady.has(dbName)) return;
   const safeDb = String(dbName || '').replace(/[^a-z0-9]/g, '-');
   await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-type-user_id`).catch(() => null);
+  // Promos/notas al elegir cliente en TPV.
+  await ensureIndex(req, dbName, ['type', 'user_id', 'clientId'], `idx-${safeDb}-type-user-client`).catch(() => null);
   clientsUserIndexReady.add(dbName);
 }
 
@@ -4254,11 +4285,27 @@ export function sanitizeClientNote(note) {
 }
 
 export async function listClientNotesByClient(req, userId, clientId) {
+  const uid = String(userId || '').trim();
+  const cid = String(clientId || '').trim();
   const db = getClientsDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureClientsUserTypeIndex(req, db);
+  let docs;
+  try {
+    docs = await findDocuments(
+      req,
+      db,
+      { type: 'client_note', user_id: uid, clientId: cid },
+      { pageSize: 200, maxDocs: 2_000 },
+    );
+  } catch {
+    const all = await getAllDocuments(req, db);
+    docs = all.filter(
+      (d) => d?.type === 'client_note' && d?.user_id === uid && d?.clientId === cid,
+    );
+  }
   return docs
-    .filter((d) => d?.type === 'client_note' && !d?.deletedAt && d?.user_id === userId && d?.clientId === clientId)
+    .filter((d) => d?.type === 'client_note' && !d?.deletedAt && d?.user_id === uid && d?.clientId === cid)
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
@@ -4323,11 +4370,38 @@ export function sanitizeClientPromotion(promo) {
 }
 
 export async function listClientPromotionsByClient(req, userId, clientId) {
+  const uid = String(userId || '').trim();
+  const cid = String(clientId || '').trim();
   const db = getClientsDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureClientsUserTypeIndex(req, db);
+  // Al seleccionar cliente en TPV: no escanear toda la DB de clientes.
+  let docs;
+  try {
+    docs = await findDocuments(
+      req,
+      db,
+      { type: 'client_promotion', user_id: uid, clientId: cid },
+      { pageSize: 200, maxDocs: 2_000 },
+    );
+  } catch {
+    try {
+      docs = await findDocuments(
+        req,
+        db,
+        { type: 'client_promotion', user_id: uid },
+        { pageSize: 500, maxDocs: 10_000 },
+      );
+      docs = docs.filter((d) => String(d?.clientId || '') === cid);
+    } catch {
+      const all = await getAllDocuments(req, db);
+      docs = all.filter(
+        (d) => d?.type === 'client_promotion' && d?.user_id === uid && d?.clientId === cid,
+      );
+    }
+  }
   return docs
-    .filter((d) => d?.type === 'client_promotion' && !d?.deletedAt && d?.user_id === userId && d?.clientId === clientId)
+    .filter((d) => d?.type === 'client_promotion' && !d?.deletedAt && d?.user_id === uid && d?.clientId === cid)
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
@@ -6148,12 +6222,56 @@ export function sanitizeDeliveryOrder(doc) {
   };
 }
 
-export async function listDeliveryOrdersByUser(req, userId) {
+/**
+ * Pedidos delivery del titular.
+ * @param {{ dateFrom?: string }} [options] Si hay dateFrom (ISO), Couch filtra por createdAt
+ *   — el TPV/caja del día no deben cargar meses de histórico.
+ */
+export async function listDeliveryOrdersByUser(req, userId, options = {}) {
+  const uid = String(userId || '').trim();
+  const dateFrom = String(options?.dateFrom || '').trim();
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
-  const docs = await getAllDocuments(req, db);
+  await ensureDeliveryTypeUserIndex(req, db);
+
+  const baseSelector = uid
+    ? { type: 'delivery_order', user_id: uid }
+    : { type: 'delivery_order' };
+  const selector = dateFrom
+    ? { ...baseSelector, createdAt: { $gte: dateFrom } }
+    : baseSelector;
+
+  // Mango por type+user_id (+ createdAt si hay ventana): no _all_docs del DB compartido.
+  let docs;
+  try {
+    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs: 100_000 });
+  } catch {
+    if (dateFrom) {
+      // Índice compuesto aún no listo: al menos limitamos al titular y filtramos en memoria.
+      try {
+        docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs: 100_000 });
+      } catch {
+        const all = await getDeliveryDatabaseDocumentsInflight(req);
+        docs = all.filter(
+          (doc) => doc?.type === 'delivery_order' && (!uid || doc?.user_id === uid),
+        );
+      }
+    } else {
+      const all = await getDeliveryDatabaseDocumentsInflight(req);
+      docs = all.filter(
+        (doc) => doc?.type === 'delivery_order' && (!uid || doc?.user_id === uid),
+      );
+    }
+  }
+
   return docs
-    .filter((doc) => doc?.type === 'delivery_order' && !doc?.deletedAt && (!userId || doc?.user_id === userId))
+    .filter(
+      (doc) =>
+        doc?.type === 'delivery_order'
+        && !doc?.deletedAt
+        && (!uid || doc?.user_id === uid)
+        && (!dateFrom || String(doc.createdAt || '') >= dateFrom),
+    )
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
@@ -7451,6 +7569,21 @@ export function buildTpvRegisterSessionDocument(userId, data = {}, existing = nu
       data.aggregatorClosingBrandTotals
       || existing?.aggregatorClosingBrandTotals
       || undefined,
+    aggregatorClosingUnpaidCashByBrand:
+      data.aggregatorClosingUnpaidCashByBrand
+      || existing?.aggregatorClosingUnpaidCashByBrand
+      || undefined,
+    aggregatorClosingUnpaidCardByBrand:
+      data.aggregatorClosingUnpaidCardByBrand
+      || existing?.aggregatorClosingUnpaidCardByBrand
+      || undefined,
+    /** Nombres de marca al cerrar (para resumen PC/tablet sin depender del catálogo). */
+    closingBrandLabels:
+      (data.closingBrandLabels && typeof data.closingBrandLabels === 'object'
+        ? data.closingBrandLabels
+        : null)
+      || existing?.closingBrandLabels
+      || undefined,
     brandBillingRulesSnapshot:
       data.brandBillingRulesSnapshot
       || existing?.brandBillingRulesSnapshot
@@ -7531,6 +7664,12 @@ export function sanitizeTpvRegisterSession(doc, opts = {}) {
     aggregatorClosingCash: doc.aggregatorClosingCash || undefined,
     aggregatorClosingCard: doc.aggregatorClosingCard || undefined,
     aggregatorClosingBrandTotals: doc.aggregatorClosingBrandTotals || undefined,
+    aggregatorClosingUnpaidCashByBrand: doc.aggregatorClosingUnpaidCashByBrand || undefined,
+    aggregatorClosingUnpaidCardByBrand: doc.aggregatorClosingUnpaidCardByBrand || undefined,
+    closingBrandLabels:
+      doc.closingBrandLabels && typeof doc.closingBrandLabels === 'object'
+        ? doc.closingBrandLabels
+        : undefined,
     brandBillingRulesSnapshot: doc.brandBillingRulesSnapshot || undefined,
     productClosingCounts: sanitizeProductClosingCounts(doc.productClosingCounts),
     linkedOrderIds: Array.isArray(doc.linkedOrderIds) ? doc.linkedOrderIds : [],

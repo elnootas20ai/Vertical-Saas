@@ -26,7 +26,7 @@ import {
   type TpvPaymentMethod,
   isTpvRegisterSessionOpen,
 } from '../../lib/deliveryApi';
-import { updateClientRequest, getClientDetailRequest, listClientsPageRequest, searchClientsByPhoneRequest } from '../../lib/crmApi';
+import { updateClientRequest, getClientForTpvRequest, listClientsPageRequest, searchClientsByPhoneRequest } from '../../lib/crmApi';
 import type { Client, ClientAddress } from '../../context/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -1056,7 +1056,7 @@ export function TpvRapidoOrderFlow({
       enabled: !showCreateForm && !quickAttentionActive,
       matchByName: true,
       minQueryLength: 1,
-      debounceMs: 400,
+      debounceMs: 220,
       resultLimit: 20,
       keepSearchingWhileSelected: true,
     });
@@ -1527,7 +1527,7 @@ export function TpvRapidoOrderFlow({
 
     const clientId = String(order.clientId || '').trim();
     if (clientId && !isTpvSyntheticClientId(clientId)) {
-      void getClientDetailRequest(userId, clientId)
+      void getClientForTpvRequest(userId, clientId)
         .then((c) => {
           if (c) selectClient(c);
         })
@@ -2199,7 +2199,7 @@ export function TpvRapidoOrderFlow({
     }
 
     let cancelled = false;
-    getClientDetailRequest(userId, clientIdFromUrl)
+    getClientForTpvRequest(userId, clientIdFromUrl)
       .then((client) => {
         if (cancelled || !client) return;
         applyClientFromUrl(client);

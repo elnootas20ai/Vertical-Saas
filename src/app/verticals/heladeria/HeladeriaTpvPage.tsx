@@ -112,7 +112,7 @@ export function HeladeriaTpvPage() {
     }
     let cancelled = false;
     setClientLoading(true);
-    void getClientDetailRequest(dataUserId, clientIdParam)
+    void getClientDetailRequest(dataUserId, clientIdParam, { lite: true })
       .then((client) => {
         if (cancelled) return;
         if (!client) {

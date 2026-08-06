@@ -582,14 +582,22 @@ export async function listDeliveryOrders(req, res) {
     if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    let orders = await listDeliveryOrdersByUser(req, userId);
+    // Workers: solo jornada (Couch no carga histórico; cocina/montaje/reparto del día).
+    const workerDateFrom = req.callerIsWorker
+      ? new Date().toISOString().slice(0, 10)
+      : '';
+    let orders = await listDeliveryOrdersByUser(
+      req,
+      userId,
+      workerDateFrom ? { dateFrom: workerDateFrom } : {},
+    );
     // Defensa en profundidad para workers: solo su PDV y solo el día de hoy.
     // Las vistas operativas (cocina/montaje/reparto) trabajan con eso.
     if (req.callerIsWorker) {
       const pdvs = await listScopedPointsOfSaleForUser(req, userId);
       const workerRef = String(req.callerAccount?.employment?.salesPointId || '').trim();
       const { pdvId: workerPdv, pdvName, pdvWorkCenterId } = resolveWorkerPdvFilter(pdvs, workerRef);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = workerDateFrom || new Date().toISOString().slice(0, 10);
       const primaryPdvId = pickPrimaryPdvId(pdvs);
       orders = orders.filter((o) => {
         if (workerPdv || pdvWorkCenterId) {
@@ -1644,11 +1652,7 @@ export async function filterDeliveryOrders(req, res) {
     if (!assertUserScope(req, res, userId)) return;
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    let orders = await listDeliveryOrdersByUser(req, userId);
-    orders = orders.map(sanitizeDeliveryOrder).filter(Boolean);
-
     let { channel, salesPointId, status, dateFrom, dateTo, clientId, deliveryType, search, businessId, business_id } = req.query;
-    const businessFilter = String(businessId || business_id || '').replace(/^business:/, '').trim();
     // Si el caller es un worker invitado: limitamos lo que ve.
     // - Si tiene PDV asignado en `employment.salesPointId`, forzamos ese PDV
     //   aunque el query haya pedido otro (no debe poder espiar otras tiendas).
@@ -1665,6 +1669,14 @@ export async function filterDeliveryOrders(req, res) {
       }
       if (!dateFrom) dateFrom = new Date().toISOString().slice(0, 10);
     }
+    // Ventana de fechas → Couch no carga meses de pedidos (TPV/caja del día).
+    let orders = await listDeliveryOrdersByUser(
+      req,
+      userId,
+      dateFrom ? { dateFrom: String(dateFrom) } : {},
+    );
+    orders = orders.map(sanitizeDeliveryOrder).filter(Boolean);
+    const businessFilter = String(businessId || business_id || '').replace(/^business:/, '').trim();
     if (businessFilter) {
       orders = orders.filter((o) => {
         const ob = String(o.business_id || o.businessId || '').replace(/^business:/, '').trim();

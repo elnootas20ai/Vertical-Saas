@@ -90,7 +90,9 @@ interface RegisterClosingDetailPanelProps {
 
 export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregatorRowsProp }: RegisterClosingDetailPanelProps) {
   const { currentBusiness } = useBusiness();
-  const businessId = resolveBusinessScopeId(currentBusiness);
+  const businessId =
+    resolveBusinessScopeId(currentBusiness)
+    || String(session.business_id || (session as { businessId?: string }).businessId || '').trim();
   const summary = useMemo(() => resolveSessionSummary(session), [session]);
   const transactions = session.transactions || [];
   const cashCounts = session.cashCounts || [];
@@ -131,19 +133,22 @@ export function RegisterClosingDetailPanel({ session, aggregatorRows: aggregator
     ])
       .then(([brands, billingConfig]) => {
         if (cancelled) return;
-        setBrandLabels(buildBrandLabelsMap(brands));
+        setBrandLabels({
+          ...(session.closingBrandLabels || {}),
+          ...buildBrandLabelsMap(brands),
+        });
         setBillingRules(splitRulesFromBillingConfig(billingConfig));
       })
       .catch(() => {
         if (!cancelled) {
-          setBrandLabels({});
+          setBrandLabels({ ...(session.closingBrandLabels || {}) });
           setBillingRules(splitRulesFromBillingConfig(null));
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [businessId]);
+  }, [businessId, session.closingBrandLabels]);
 
   const brandBilling = useMemo(
     () => buildShiftBrandRevenue(session, shiftOrders, brandLabels, billingRules),

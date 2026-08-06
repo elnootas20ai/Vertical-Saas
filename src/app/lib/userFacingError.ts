@@ -13,6 +13,11 @@ const FRIENDLY: Array<{ test: RegExp; message: string }> = [
   { test: /ya hay una caja abierta/i, message: 'Ya hay una caja abierta en esa tienda.' },
   { test: /409|conflict|_rev/i, message: 'Otra acción se guardó antes. Espera un segundo y vuelve a intentarlo.' },
   { test: /timeout|timed out|tard/i, message: 'El servidor tardó demasiado. Reintenta en unos segundos.' },
+  // Nunca mostrar el 500 genérico del middleware al camarero/gerente.
+  {
+    test: /error interno( del servidor)?|internal server error|\binternal_error\b|\[object Object\]/i,
+    message: 'No se pudo completar. Espera un momento e inténtalo de nuevo.',
+  },
 ];
 
 function looksTechnical(raw: string): boolean {
@@ -28,15 +33,34 @@ function looksTechnical(raw: string): boolean {
     || /\bnode_modules\b/i.test(raw)
     || /\.tsx?\b|\.jsx?\b/i.test(raw)
     || /\bstack\s*trace\b/i.test(raw)
+    || /error interno/i.test(raw)
+    || /\bstatus\s*[:=]?\s*5\d\d\b/i.test(raw)
   );
 }
 
-export function extractErrorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'string') return err;
-  if (err && typeof err === 'object' && 'message' in err) {
-    return String((err as { message?: unknown }).message || '');
+/** Extrae texto usable de `{ error: string | { message } }` u objetos anidados. */
+function messageFromUnknown(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (!value || typeof value !== 'object') return '';
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.message === 'string' && obj.message.trim()) return obj.message.trim();
+  if (typeof obj.error === 'string' && obj.error.trim()) return obj.error.trim();
+  if (obj.error && typeof obj.error === 'object') {
+    const nested = messageFromUnknown(obj.error);
+    if (nested) return nested;
   }
+  return '';
+}
+
+export function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    const fromError = err.message.trim();
+    if (fromError && fromError !== '[object Object]') return fromError;
+  }
+  if (typeof err === 'string') return err.trim();
+  const fromObj = messageFromUnknown(err);
+  if (fromObj) return fromObj;
+  if (err instanceof Error) return err.message;
   return String(err ?? '');
 }
 

@@ -16,7 +16,7 @@ import {
   type BrandBillingSplitRules,
   type ClosingBillingBrandSlot,
 } from './brandBillingConfig';
-import { brandIdAliases, displayBrandName } from './brandLabels';
+import { brandIdAliases, displayBrandName, looksLikeBrandTechnicalId } from './brandLabels';
 import { isAggregatorChannel } from './deliveryIntegrationsUi';
 import { normalizeTpvPaymentMethod } from './tpvCajaMath';
 
@@ -265,9 +265,14 @@ export function rollupBrandRevenueToClosingSlots(
     );
     const orderCount = matching.reduce((s, r) => s + (Number(r.orderCount) || 0), 0);
 
+    const slotName = String(slot.name || '').trim();
+    const name =
+      (slotName && !looksLikeBrandTechnicalId(slotName) ? slotName : '')
+      || displayBrandName(slot.brandId, brandLabels);
+
     rolled.push({
       brandId: slot.brandId,
-      name: slot.name,
+      name,
       revenue,
       revenueEfectivo,
       revenueTarjeta,
@@ -299,8 +304,15 @@ export function rollupBrandRevenueToClosingSlots(
           || (s.memberBrandIds || []).some((id) => brandIdAliases(id).includes(fixedId)),
       ) || slots[0])
       : slots[0];
+    const hostLabel = String(host.name || '').trim();
     rolled.push(
-      emptyBrandRow(host.brandId, host.name, pool, total),
+      emptyBrandRow(
+        host.brandId,
+        (hostLabel && !looksLikeBrandTechnicalId(hostLabel) ? hostLabel : '')
+          || displayBrandName(host.brandId, brandLabels),
+        pool,
+        total,
+      ),
     );
     return { rows: rolled, unbranded: 0, total };
   }
