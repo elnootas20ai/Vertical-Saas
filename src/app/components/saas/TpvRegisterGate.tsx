@@ -1804,9 +1804,13 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const [shiftOrdersLoading, setShiftOrdersLoading] = useState(true);
   const [cashSlot, setCashSlot] = useState(() => savedDraft?.cashSlot || '');
   const [cashSlotFocused, setCashSlotFocused] = useState(false);
-  const draftHasFood = draftHasUserFoodCounts(savedDraft?.manualFood);
+  /**
+   * P/B/T solo se restauran del borrador si el usuario los editó a mano.
+   * Si no, empiezan vacíos y el sistema los rellena al cargar pedidos (nunca se congelan a media jornada).
+   */
+  const draftFoodLocked = savedDraft?.foodLockedByUser === true;
   const [manualFood, setManualFood] = useState(() => {
-    if (draftHasFood && savedDraft?.manualFood) {
+    if (draftFoodLocked && draftHasUserFoodCounts(savedDraft?.manualFood) && savedDraft?.manualFood) {
       return {
         pizza: String(savedDraft.manualFood.pizza || ''),
         burger: String(savedDraft.manualFood.burger || ''),
@@ -1815,14 +1819,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     }
     return { pizza: '', burger: '', taco: '' };
   });
-  /**
-   * Solo bloquea el auto-conteo si el usuario editó P/B/T a mano.
-   * Antes: cualquier borrador con números (auto-guardados a media jornada) congelaba
-   * pizzas/tacos (p. ej. 13) y no subían al cerrar — TOTAL TACOS a 0 o corto.
-   */
-  const [foodLockedByUser, setFoodLockedByUser] = useState(
-    () => savedDraft?.foodLockedByUser === true,
-  );
+  const [foodLockedByUser, setFoodLockedByUser] = useState(() => draftFoodLocked);
   const [appsSnapshot, setAppsSnapshot] = useState<AggregatorClosingSnapshot | null>(null);
   const [appsManualDraft, setAppsManualDraft] = useState<ManualLinesByChannel>(
     () => savedDraft?.appsManualDraft || {},
@@ -1925,7 +1922,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     counts,
     notes,
     cashSlot,
-    manualFood,
+    // Sin edición manual: no persistir P/B/T (evita reabrir el cierre con números viejos).
+    manualFood: foodLockedByUser
+      ? manualFood
+      : { pizza: '', burger: '', taco: '' },
     appsManualDraft,
     foodLockedByUser,
   }), [counts, notes, cashSlot, manualFood, appsManualDraft, foodLockedByUser]);
@@ -1946,18 +1946,10 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   useEffect(() => {
     if (!sessionId) return;
     const timer = window.setTimeout(() => {
-      writeClosingFormDraft(sessionId, {
-        v: 1,
-        counts,
-        notes,
-        cashSlot,
-        manualFood,
-        appsManualDraft,
-        foodLockedByUser,
-      });
+      writeClosingFormDraft(sessionId, buildDraftPayload());
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [sessionId, counts, notes, cashSlot, manualFood, appsManualDraft, foodLockedByUser]);
+  }, [sessionId, buildDraftPayload]);
 
   const closingFoodByChannel = appsSnapshot?.foodByChannel ?? {};
   const appsFoodTotals = appsSnapshot?.foodTotals ?? emptyFoodFamilyCounts();

@@ -1021,12 +1021,16 @@ export function TpvRapidoOrderFlow({
   );
 
   const [currentStep, setCurrentStep] = useState<Step>(() => {
+    if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) return 'products';
     if (startAsRestaurant && restaurantOpenIntent === 'pay') return 'payment';
     return startAsRestaurant ? restaurantFlowResetStep() : 'client';
   });
-  const [completedSteps, setCompletedSteps] = useState<Set<Step>>(() =>
-    startAsRestaurant ? restaurantFlowCompletedSteps() : new Set(),
-  );
+  const [completedSteps, setCompletedSteps] = useState<Set<Step>>(() => {
+    if (editingDeliveryOrder && isDeliveryOrderEditableOnTpvBoard(editingDeliveryOrder)) {
+      return new Set(['client', 'delivery']);
+    }
+    return startAsRestaurant ? restaurantFlowCompletedSteps() : new Set();
+  });
   /** Aplicar una sola vez el salto a cobro desde el plano de mesas. */
   const restaurantPayIntentAppliedRef = useRef(false);
 
@@ -1503,6 +1507,8 @@ export function TpvRapidoOrderFlow({
     // Si ya hidratamos con carta lista, no pisar con stubs.
     if (editHydratedRef.current === `${orderId}:ready`) return;
     editHydratedRef.current = hydrateKey;
+    // Sin toasts al entrar a editar (evita aviso amarillo fugaz arriba).
+    toast.dismiss();
 
     const order = editingDeliveryOrder;
     const seeds = seedTpvCartFromDeliveryOrder(order, catalogById, userId);
@@ -4212,10 +4218,20 @@ export function TpvRapidoOrderFlow({
         </p>
         <button
           type="button"
-          onClick={() => void handleGoBack()}
+          onClick={() => {
+            void handleGoBack();
+            // Si el gate no tiene caja, salir del TPV para recargar apertura.
+            window.setTimeout(() => {
+              try {
+                navigate(tpvExitPath, { replace: true });
+              } catch {
+                /* ignore */
+              }
+            }, 0);
+          }}
           className="px-4 py-2.5 rounded-xl bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-semibold"
         >
-          Volver
+          Volver a abrir caja
         </button>
       </div>
     );
@@ -4462,18 +4478,31 @@ export function TpvRapidoOrderFlow({
               <button
                 type="button"
                 onClick={handleCancelOrder}
-                className={`px-3 rounded-lg border-2 border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
+                className={
+                  isEditingDeliveryOrder
+                    ? `inline-flex items-center gap-1.5 px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`
+                    : `px-3 rounded-lg border-2 border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`
+                }
               >
-                Cancelar pedido
+                {isEditingDeliveryOrder ? (
+                  <>
+                    <ArrowLeft className="w-4 h-4 shrink-0" />
+                    Volver al tablero
+                  </>
+                ) : (
+                  'Cancelar pedido'
+                )}
               </button>
-              <button
-                type="button"
-                onClick={goToPreviousStep}
-                disabled={currentStep === 'client'}
-                className={`px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
-              >
-                Atrás
-              </button>
+              {!isEditingDeliveryOrder ? (
+                <button
+                  type="button"
+                  onClick={goToPreviousStep}
+                  disabled={currentStep === 'client'}
+                  className={`px-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed touch-manipulation ${tabletMode ? 'min-h-[44px] py-2 text-sm' : 'px-3 py-2.5 text-sm'}`}
+                >
+                  Atrás
+                </button>
+              ) : null}
             </>
           )}
           {restaurantAccountMode && cart.length > 0 ? (
@@ -6321,7 +6350,7 @@ function TpvFullscreenShell({
   tabletMode?: boolean;
   /** Tablet: bloquear scroll del shell y delegarlo al grid de productos. */
   contentFill?: boolean;
-  /** Oculta «Volver» arriba; la salida va en el footer (Cancelar pedido). */
+  /** Oculta «Volver» arriba; la salida va en el footer (Cancelar / Volver al tablero). */
   hideBack?: boolean;
   compactTop?: boolean;
 }) {

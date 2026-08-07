@@ -429,9 +429,6 @@ function OrderCard({
           className="flex-1 min-w-0 text-left"
         >
           <div className="flex items-center gap-1 flex-wrap">
-            <span className={`font-mono font-bold text-gray-900 dark:text-gray-100 ${compact ? 'text-xs' : 'text-xs'}`}>
-              #{order.orderNumber}
-            </span>
             <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded font-bold ${typeBadge.className} ${compact ? 'text-[9px]' : 'text-[9px]'}`}>
               <TypeIcon className={compact ? 'w-3 h-3' : 'w-3 h-3'} />
               {typeBadge.label}
@@ -475,13 +472,16 @@ function OrderCard({
               <span className={`px-1 py-px bg-red-100 text-red-700 font-bold rounded ${compact ? 'text-[9px]' : 'text-[9px]'}`}>!</span>
             )}
           </div>
-          {order.customerName && (
-            <p className={`font-medium text-gray-800 dark:text-gray-200 truncate ${compact ? 'text-xs mt-0.5' : 'text-xs mt-0.5'}`}>
-              {order.customerName}
-            </p>
-          )}
+          <p
+            className={`font-bold text-gray-900 dark:text-gray-100 truncate ${
+              compact ? 'text-lg mt-0.5 leading-tight' : 'text-xl mt-0.5 leading-tight'
+            }`}
+            title={order.orderNumber ? `#${order.orderNumber}` : undefined}
+          >
+            {order.customerName?.trim() || 'Sin nombre'}
+          </p>
           {itemPreview ? (
-            <p className={`text-gray-600 dark:text-gray-300 truncate font-semibold ${compact ? 'text-[10px] mt-0.5' : 'text-[11px] mt-0.5'}`}>
+            <p className={`text-gray-600 dark:text-gray-300 truncate font-semibold ${compact ? 'text-xs mt-0.5' : 'text-[13px] mt-0.5'}`}>
               {itemPreview}
             </p>
           ) : null}
@@ -1120,33 +1120,39 @@ function OrderDetail({
         </div>
 
         <div className={`flex-1 min-h-0 flex flex-col overflow-hidden ${compact ? 'gap-2 px-3 py-2' : 'gap-3 px-4 py-3'}`}>
-          <div className={`shrink-0 grid ${compact ? 'grid-cols-2 gap-1.5' : 'grid-cols-1 md:grid-cols-2 gap-3'}`}>
+          <div className={`shrink-0 flex items-start ${compact ? 'gap-1.5' : 'gap-3'}`}>
             {order.customerName && (
-              <div className={`flex items-start bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 min-w-0 ${compact ? 'gap-1.5 p-2' : 'gap-2.5 p-3 rounded-xl'}`}>
+              <div className={`flex flex-1 min-w-0 items-start bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 ${compact ? 'gap-1.5 p-2' : 'gap-2.5 p-3 rounded-xl'}`}>
                 <span className={`flex items-center justify-center rounded-md bg-cyan-50 dark:bg-cyan-950/40 shrink-0 ${compact ? 'h-7 w-7' : 'h-9 w-9 rounded-lg'}`}>
                   <User className={`text-cyan-600 dark:text-cyan-400 ${compact ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
                 </span>
-                <div className="min-w-0">
-                  <p className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-xs' : 'text-base'}`}>{order.customerName}</p>
+                <div className="min-w-0 flex-1">
+                  <p className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-xs' : 'text-sm'}`}>{order.customerName}</p>
                   {order.customerPhone && (
-                    <p className={`text-gray-600 dark:text-gray-400 truncate ${compact ? 'text-[10px]' : 'text-sm mt-0.5'}`}>{order.customerPhone}</p>
+                    <p className={`text-gray-600 dark:text-gray-400 truncate ${compact ? 'text-[10px]' : 'text-xs mt-0.5'}`}>{order.customerPhone}</p>
                   )}
                   {order.customerAddress && (
-                    <p className={`text-gray-500 leading-snug ${compact ? 'text-[10px] line-clamp-1 mt-px' : 'text-xs line-clamp-2 mt-0.5'}`}>{order.customerAddress}</p>
+                    <p
+                      className={`font-bold text-gray-900 dark:text-gray-100 leading-snug break-words ${
+                        compact ? 'text-xs mt-0.5' : 'text-base mt-1'
+                      }`}
+                    >
+                      {order.customerAddress}
+                    </p>
                   )}
                 </div>
               </div>
             )}
             {order.takenByName && (
-              <div className={`flex items-center bg-violet-50 dark:bg-violet-950/30 rounded-lg border border-violet-200/70 dark:border-violet-900 min-w-0 ${compact ? 'gap-1.5 px-2 py-2' : 'gap-2.5 px-3 py-3 rounded-xl'}`}>
-                <span className={`rounded-full bg-violet-600 text-white font-bold flex items-center justify-center shrink-0 ${compact ? 'w-7 h-7 text-[10px]' : 'w-9 h-9 text-sm'}`}>
+              <div className={`flex items-center shrink-0 ml-auto bg-violet-50 dark:bg-violet-950/30 rounded-lg border border-violet-200/70 dark:border-violet-900 ${compact ? 'gap-1 px-1.5 py-1 max-w-[38%]' : 'gap-1.5 px-2 py-1.5 max-w-[11rem]'}`}>
+                <span className={`rounded-full bg-violet-600 text-white font-bold flex items-center justify-center shrink-0 ${compact ? 'w-5 h-5 text-[8px]' : 'w-6 h-6 text-[10px]'}`}>
                   {getWorkerInitials(order.takenByName)}
                 </span>
                 <div className="min-w-0">
-                  {!compact && (
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-violet-600/80 dark:text-violet-400">Pedido cogido por</p>
-                  )}
-                  <p className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-xs' : 'text-base'}`}>{order.takenByName}</p>
+                  <p className={`font-semibold uppercase tracking-wide text-violet-600/80 dark:text-violet-400 ${compact ? 'text-[8px]' : 'text-[9px]'}`}>
+                    Cogido por
+                  </p>
+                  <p className={`font-semibold text-gray-800 dark:text-gray-200 truncate ${compact ? 'text-[10px]' : 'text-xs'}`}>{order.takenByName}</p>
                 </div>
               </div>
             )}
@@ -1362,7 +1368,8 @@ export function WorkerTpvDelivery({
   const register = useTpvRegisterIfOpen();
   const boardReady = useTpvRegisterBoardReady();
   const setStatusBarQuickActions = useTpvStatusBarQuickActions();
-  const registerOpen = boardReady || Boolean(register && isTpvRegisterSessionOpen(register.session));
+  // boardReady solo no basta: tras HMR puede quedar true sin sesión en contexto.
+  const registerOpen = Boolean(register && isTpvRegisterSessionOpen(register.session));
   const historySectionRef = useRef<HTMLDivElement | null>(null);
 
   const isTabletSession = registerScope.isTabletSession;
@@ -2055,16 +2062,32 @@ export function WorkerTpvDelivery({
     void loadOrders({ silent: true });
   }, [loadOrders]);
 
+  // Sin caja abierta no tiene sentido el flujo de pedido (evita pantalla «Abre la caja» sin salida).
+  useEffect(() => {
+    if (view !== 'new-order' && view !== 'staff-consumption') return;
+    if (registerOpen) return;
+    setEditingOrder(null);
+    setView('board');
+  }, [view, registerOpen]);
+
   const startEditOrder = useCallback((order: DeliveryOrder) => {
+    if (!registerOpen) {
+      toast.error('Abre la caja de la tienda antes de editar un pedido');
+      return;
+    }
     setSelectedOrder(null);
     setEditingOrder(order);
     setView('new-order');
-  }, []);
+  }, [registerOpen]);
 
   const startNewOrder = useCallback(() => {
+    if (!registerOpen) {
+      toast.error('Abre la caja de la tienda antes de crear un pedido');
+      return;
+    }
     setEditingOrder(null);
     setView('new-order');
-  }, []);
+  }, [registerOpen]);
 
   const exitTabletTpv = useCallback(() => {
     void leaveTpvTabletSession(logout);

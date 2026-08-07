@@ -11,8 +11,9 @@ const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '../public/catalog-
 
 /** photo-{timestamp}-{hash} de Unsplash → JPG 480×480 recortado */
 const PHOTOS = {
-  cola: 'photo-1700835880402-434acb82fca9',
-  'lemon-soda': 'photo-1622597684514-d5dfcaa11884',
+  cola: 'photo-1622483767028-3f66f32aef97',
+  'lemon-soda': 'photo-1513558161293-cdaf765ed2fd',
+  'orange-soda': 'photo-1624517452488-04869289c4ca',
   water: 'photo-1523362628743-f0fcb9a2b8b1',
   beer: 'photo-1761315413964-f8f01e105dde',
   juice: 'photo-1600275666443-68d9b0862fc4',
@@ -20,10 +21,11 @@ const PHOTOS = {
   wine: 'photo-1510812431407-41d2bd2722f4',
   drink: 'photo-1546173159-315724a3167f',
   pizza: 'photo-1565299624946-b28f40a0ae38',
-  burger: 'photo-1768204039041-bbb7adf98078',
+  burger: 'photo-1568901346375-23c9450c58cd',
   side: 'photo-1573080496219-bb080954c856',
   dessert: 'photo-1488477181946-6428a0291777',
-  combo: 'photo-1555939594-58d7cb561ad1',
+  // Menú burger+patatas+refresco (no usar la misma que burger solo)
+  combo: 'photo-1594212699903-ec8a3eca50f5',
   food: 'photo-1546069901-ba9599a7e63c',
   kebab: 'photo-1529006557810-274b1b4c1087',
   tapas: 'photo-1414235077428-338989a2e8c0',

@@ -170,8 +170,16 @@ export function isDrinkCatalogProduct(
   const cat = foldCostName(item.category);
   const name = foldCostName(item.name);
   if (item.stockCategory === 'beverage') return true;
-  if (/bebida|refresco|cerveza|agua|zumo|cola|drink|caña|cana|clara|jarra|combinado|cubata/.test(cat)) return true;
-  if (/bebida|refresco|cerveza|agua|zumo|cola|coca|fanta|sprite|nestea|pepsi|caña|cana|clara|jarra|combinado/.test(name)) return true;
+  if (/bebida|refresco|cerveza|agua|zumo|cola|drink|combinado|cubata|vino|wine/.test(cat)) return true;
+  // caña/cana/clara/jarra: palabra completa (evita «americana» → bebida)
+  if (
+    /bebida|refresco|cerveza|agua|zumo|cola|coca|fanta|sprite|nestea|pepsi|combinado|vino|wine|lambrusco|sangria/.test(
+      name,
+    )
+  ) {
+    return true;
+  }
+  if (/(?:^|\s)(caña|cana|clara|jarra)(?:\s|$)/.test(` ${name} `)) return true;
   return false;
 }
 

@@ -5,17 +5,31 @@ import { isImportComboCategory } from './deliveryCatalogImportLogic';
 export type CatalogProductPlaceholderKind =
   | 'cola'
   | 'lemon'
+  | 'fantaLemon'
+  | 'fantaLemon2l'
+  | 'orange'
+  | 'aquarius'
+  | 'aquariusLemon'
   | 'water'
   | 'beer'
+  | 'desperados'
+  | 'cerdosVoladores'
   | 'juice'
   | 'energy'
   | 'wine'
+  | 'wineRed'
   | 'cafe'
   | 'drink'
   | 'pizza'
+  | 'carbonara'
+  | 'bacon'
+  | 'bbq'
   | 'burger'
   | 'side'
+  | 'onionRings'
+  | 'wings'
   | 'dessert'
+  | 'brownie'
   | 'tapas'
   | 'kebab'
   | 'sushi'
@@ -27,17 +41,31 @@ const PLACEHOLDER_BASE = '/catalog-placeholders/photos';
 export const CATALOG_PRODUCT_PLACEHOLDER_URLS: Record<CatalogProductPlaceholderKind, string> = {
   cola: `${PLACEHOLDER_BASE}/cola.webp`,
   lemon: `${PLACEHOLDER_BASE}/lemon-soda.webp`,
+  fantaLemon: `${PLACEHOLDER_BASE}/fanta-lemon-can.webp`,
+  fantaLemon2l: `${PLACEHOLDER_BASE}/fanta-lemon-2l.webp`,
+  orange: `${PLACEHOLDER_BASE}/orange-soda.webp`,
+  aquarius: `${PLACEHOLDER_BASE}/aquarius.webp`,
+  aquariusLemon: `${PLACEHOLDER_BASE}/aquarius-lemon-can.webp`,
   water: `${PLACEHOLDER_BASE}/water.webp`,
   beer: `${PLACEHOLDER_BASE}/beer.webp`,
+  desperados: `${PLACEHOLDER_BASE}/desperados.webp`,
+  cerdosVoladores: `${PLACEHOLDER_BASE}/cerdos-voladores.webp`,
   juice: `${PLACEHOLDER_BASE}/juice.webp`,
   energy: `${PLACEHOLDER_BASE}/energy.webp`,
   wine: `${PLACEHOLDER_BASE}/wine.webp`,
+  wineRed: `${PLACEHOLDER_BASE}/wine-red.webp`,
   cafe: `${PLACEHOLDER_BASE}/cafe.webp`,
   drink: `${PLACEHOLDER_BASE}/drink.webp`,
   pizza: `${PLACEHOLDER_BASE}/pizza-lite.webp`,
+  carbonara: `${PLACEHOLDER_BASE}/pizza-carbonara.webp`,
+  bacon: `${PLACEHOLDER_BASE}/pizza-bacon.webp`,
+  bbq: `${PLACEHOLDER_BASE}/pizza-bbq.webp`,
   burger: `${PLACEHOLDER_BASE}/burger-lite.webp`,
   side: `${PLACEHOLDER_BASE}/side.webp`,
+  onionRings: `${PLACEHOLDER_BASE}/onion-rings.webp`,
+  wings: `${PLACEHOLDER_BASE}/wings.webp`,
   dessert: `${PLACEHOLDER_BASE}/dessert.webp`,
+  brownie: `${PLACEHOLDER_BASE}/brownie-helado.webp`,
   tapas: `${PLACEHOLDER_BASE}/tapas.webp`,
   kebab: `${PLACEHOLDER_BASE}/kebab.webp`,
   sushi: `${PLACEHOLDER_BASE}/sushi.webp`,
@@ -52,12 +80,101 @@ type PlaceholderRule = {
 
 const DRINK_PLACEHOLDER_RULES: PlaceholderRule[] = [
   { kind: 'cola', patterns: ['coca', 'cola', 'pepsi', 'refresco zero', 'zero cola'] },
-  { kind: 'lemon', patterns: ['sprite', 'fanta', 'schweppes', 'tonica', 'tónica', 'seven up', 'limon', 'limón', 'naranja'] },
+  // Fanta Limón 2L antes que lata / limón genérico
+  {
+    kind: 'fantaLemon2l',
+    patterns: [
+      'fanta limon 2l',
+      'fanta limón 2l',
+      'fanta limon 2 l',
+      'fanta limón 2 l',
+      'fanta limon 2 litros',
+      'fanta limón 2 litros',
+      'fanta limon 2lt',
+      'fanta limón 2lt',
+    ],
+  },
+  // Fanta Limón lata / 33cl
+  {
+    kind: 'fantaLemon',
+    patterns: ['fanta limon', 'fanta limón'],
+  },
+  // Aquarius Limón (lata) antes que limón genérico / Aquarius naranja
+  {
+    kind: 'aquariusLemon',
+    patterns: ['aquarius limon', 'aquarius limón'],
+  },
+  // Limón genérico (Sprite, Schweppes limón, etc.) — no Aquarius
+  {
+    kind: 'lemon',
+    patterns: [
+      'sprite',
+      'seven up',
+      'schweppes limon',
+      'schweppes limón',
+      'tonica',
+      'tónica',
+      'limonada',
+      'limón',
+      'limon',
+    ],
+  },
+  // Zumos antes de «naranja» genérico (evita Fanta/zumo cruzados)
+  { kind: 'juice', patterns: ['zumo', 'juice', 'nestea', 'ice tea', 'te helado', 'té helado'] },
+  // Aquarius naranja / genérico (isotónica) ≠ Fanta
+  { kind: 'aquarius', patterns: ['aquarius naranja', 'aquarius'] },
+  // Naranja / Fanta naranja
+  {
+    kind: 'orange',
+    patterns: ['fanta naranja', 'fanta', 'schweppes naranja', 'naranja'],
+  },
   { kind: 'water', patterns: ['agua', 'water'] },
-  { kind: 'beer', patterns: ['cerveza', 'beer', 'mahou', 'estrella', 'heineken', 'corona', 'san miguel', 'cana', 'caña', 'clara'] },
-  { kind: 'juice', patterns: ['zumo', 'juice', 'nestea', 'aquarius', 'ice tea', 'te helado', 'té helado'] },
+  { kind: 'desperados', patterns: ['desperados', 'desperado'] },
+  { kind: 'cerdosVoladores', patterns: ['cerdos voladores', 'cerdos voladore', 'cerdo volador'] },
+  {
+    kind: 'beer',
+    patterns: [
+      'cerveza',
+      'beer',
+      'mahou',
+      'estrella',
+      'heineken',
+      'corona',
+      'san miguel',
+      'cana',
+      'caña',
+      'clara',
+      'peroni',
+      'voll damm',
+      'voll-damm',
+    ],
+  },
   { kind: 'energy', patterns: ['red bull', 'monster', 'energetica', 'energética', 'burn'] },
-  { kind: 'wine', patterns: ['vino', 'tinto', 'blanco', 'rosado', 'cava', 'sangria', 'sangría'] },
+  // Vino negro / tinto antes que blanco genérico
+  {
+    kind: 'wineRed',
+    patterns: [
+      'vino negro',
+      'vino tinto',
+      'nina barbuda',
+      'lambrusco',
+      'tinto',
+      'negro',
+    ],
+  },
+  {
+    kind: 'wine',
+    patterns: [
+      'vino blanco',
+      'vino rosado',
+      'vino',
+      'blanco',
+      'rosado',
+      'cava',
+      'sangria',
+      'sangría',
+    ],
+  },
   {
     kind: 'cafe',
     patterns: [
@@ -79,10 +196,24 @@ const DRINK_PLACEHOLDER_RULES: PlaceholderRule[] = [
 ];
 
 const FOOD_PLACEHOLDER_RULES: PlaceholderRule[] = [
+  // Burger antes que «bacon» / «bbq» (Black BBQ burger ≠ pizza BBQ)
+  { kind: 'burger', patterns: ['burger', 'hamburg', 'smash', 'crispy chicken', 'chicken burger'] },
+  // Alitas antes que BBQ pizza
+  {
+    kind: 'wings',
+    patterns: ['alitas', 'alita', 'wings', 'chicken wing', 'alas de pollo'],
+  },
+  // Pizzas concretas antes que pizza genérica
+  { kind: 'carbonara', patterns: ['carbonara'] },
+  { kind: 'bacon', patterns: ['bacon'] },
+  { kind: 'bbq', patterns: ['bbq', 'barbacoa'] },
   { kind: 'pizza', patterns: ['pizza', 'calzone', 'mitad', 'half'] },
-  { kind: 'burger', patterns: ['burger', 'hamburg', 'smash'] },
   { kind: 'kebab', patterns: ['kebab', 'doner', 'shawarma', 'durum'] },
   { kind: 'sushi', patterns: ['sushi', 'maki', 'nigiri', 'sashimi', 'uramaki', 'poke'] },
+  {
+    kind: 'onionRings',
+    patterns: ['aros de cebolla', 'aros cebolla', 'onion ring', 'onion rings', 'aros'],
+  },
   {
     kind: 'tapas',
     patterns: [
@@ -106,9 +237,7 @@ const FOOD_PLACEHOLDER_RULES: PlaceholderRule[] = [
     patterns: [
       'complement',
       'patata',
-      'alita',
       'nugget',
-      'aros',
       'ensalada',
       'entrante',
       'extra',
@@ -117,7 +246,8 @@ const FOOD_PLACEHOLDER_RULES: PlaceholderRule[] = [
       'side',
     ],
   },
-  { kind: 'dessert', patterns: ['postre', 'dessert', 'tarta', 'helado', 'brownie', 'galleta', 'churro'] },
+  { kind: 'brownie', patterns: ['brownie'] },
+  { kind: 'dessert', patterns: ['postre', 'dessert', 'tarta', 'helado', 'galleta', 'churro'] },
 ];
 
 function foldPlaceholderText(value: string): string {
@@ -129,8 +259,26 @@ function foldPlaceholderText(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
+/** Patrones cortos que pisan comida si se buscan por substring (americana→cana, pepperoni→peroni). */
+const WHOLE_WORD_PLACEHOLDER_PATTERNS = new Set([
+  'cana',
+  'caña',
+  'clara',
+  'peroni',
+  'jarra',
+  'burn',
+  'cava', // evita «Porcavacca» → vino
+]);
+
 function matchesPlaceholderRule(folded: string, rule: PlaceholderRule): boolean {
-  return rule.patterns.some((pattern) => folded.includes(foldPlaceholderText(pattern)));
+  return rule.patterns.some((pattern) => {
+    const p = foldPlaceholderText(pattern);
+    if (!p) return false;
+    if (WHOLE_WORD_PLACEHOLDER_PATTERNS.has(p)) {
+      return new RegExp(`(?:^|\\s)${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(` ${folded} `);
+    }
+    return folded.includes(p);
+  });
 }
 
 function matchRules(rules: PlaceholderRule[], folded: string): CatalogProductPlaceholderKind | null {
@@ -174,19 +322,33 @@ export function resolveCatalogProductPlaceholderKind(
 
   if (item.itemType === 'combo' || isImportComboCategory(category)) return 'combo';
 
+  // Comida clara (Burger / Pizza / …) antes que reglas de bebida: evita «Americana»→caña/cerveza.
+  const looksLikeFoodCategory = /burger|hamburg|pizza|pizzeria|especialidad|complement|postre|tapa|kebab|sushi/.test(
+    foldPlaceholderText(category),
+  );
+  if (looksLikeFoodCategory) {
+    const foodFirst = matchRules(FOOD_PLACEHOLDER_RULES, folded);
+    if (foodFirst) return foodFirst;
+  }
+
   // Café / té / infusiones: antes que comida genérica (p. ej. «Café con leche»).
   if (looksLikeHotDrink(folded) || /cafes|cafeteria|cafetería|infusiones/.test(folded)) {
     return matchRules(DRINK_PLACEHOLDER_RULES.filter((r) => r.kind === 'cafe'), folded) || 'cafe';
   }
 
-  if (isDrinkCatalogProduct(item) || /bebida|refresco|cerveza|agua|zumo|cola/.test(folded)) {
+  // Vinos: categoría «Vinos» / nombre con vino (antes no entraban y caían en food.webp)
+  if (
+    isDrinkCatalogProduct(item) ||
+    /bebida|refresco|cerveza|agua|zumo|cola|vino|wine|sangria|sangría|lambrusco/.test(folded) ||
+    /(?:^|\s)cava(?:\s|$)/.test(` ${folded} `)
+  ) {
     return matchRules(DRINK_PLACEHOLDER_RULES, folded) || 'drink';
   }
 
   const foodKind = matchRules(FOOD_PLACEHOLDER_RULES, folded);
   if (foodKind) return foodKind;
 
-  if (/bebida|refresco|cerveza|agua|zumo|cola/.test(folded)) return 'drink';
+  if (/bebida|refresco|cerveza|agua|zumo|cola|vino|wine/.test(folded)) return 'drink';
   if (/combo|menu|menú/.test(folded)) return 'combo';
 
   return 'food';
@@ -196,11 +358,12 @@ export function resolveCatalogProductPlaceholderUrl(item: CatalogProductPlacehol
   return CATALOG_PRODUCT_PLACEHOLDER_URLS[resolveCatalogProductPlaceholderKind(item)];
 }
 
-/** Imagen del producto: URL propia o ilustración genérica incluida en Vertial. */
+/** Imagen del producto: URL propia (CDN) o ilustración genérica Vertial. */
 export function resolveCatalogProductImage(
   item: Pick<CatalogItem, 'name' | 'category' | 'stockCategory' | 'itemType' | 'image' | 'images'>,
 ): string {
   const explicit = String(item.image || item.images?.[0] || '').trim();
-  if (explicit) return explicit;
+  // Placeholders Vertial se recalculan siempre (evita beer.webp viejo en burgers).
+  if (explicit && !explicit.includes('/catalog-placeholders/')) return explicit;
   return resolveCatalogProductPlaceholderUrl(item);
 }

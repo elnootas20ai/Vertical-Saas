@@ -623,7 +623,9 @@ export function CompanyBrandPerformancePanel({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 dark:border-gray-600 dark:bg-gray-900/50">
-            {(['day', 'month', 'year'] as const).map((key) => (
+            {(['day', 'month', 'year'] as const)
+              .filter((key) => !compact || key !== 'year')
+              .map((key) => (
               <button
                 key={key}
                 type="button"
