@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  fetchAlertSummary,
   fetchAlerts,
-  normalizeAlertSummary,
   type AlertRecord,
   type AlertSource,
 } from '../../../../lib/alertCenterApi';
+import { isPortfolioCeoAlert } from '../../../../lib/portfolioCeoAlerts';
 
 export type CeoAlertFeedItem = {
   id: string;
@@ -25,6 +24,28 @@ export type CeoBizAlertStats = {
   newest: number;
 };
 
+function toFeedItem(
+  a: AlertRecord,
+  businessId: string,
+  businessName: string,
+): CeoAlertFeedItem {
+  return {
+    id: a.id,
+    businessId,
+    businessName,
+    title: a.title || a.message || 'Alerta',
+    message: a.message || '',
+    priority: a.priority,
+    source: a.source,
+    route: a.route,
+    createdAt: a.createdAt,
+  };
+}
+
+/**
+ * Feed CEO de Visión general: solo alertas de dirección
+ * (docs / finanzas / descuadre). Sin retrasos ni ruido de tienda.
+ */
 export function useCeoAlertFeed(
   rows: Array<{ businessId: string; business: { name: string } }>,
 ) {
@@ -49,114 +70,55 @@ export function useCeoAlertFeed(
     }
     setLoading(true);
     try {
-      const summaries = await Promise.all(
+      const perBiz = await Promise.all(
         snapshot.map(async (r) => {
           try {
-            const res = await fetchAlertSummary(r.businessId);
-            const s = normalizeAlertSummary(res.summary);
+            const res = await fetchAlerts(r.businessId, {
+              status: 'new,seen',
+              limit: 80,
+              sort: 'createdAt',
+              order: 'desc',
+            });
+            const ceoAlerts = (res.alerts || []).filter(isPortfolioCeoAlert);
+            const high = ceoAlerts.filter((a) => a.priority === 'high').length;
+            const newest = ceoAlerts.filter((a) => a.status === 'new').length;
             return {
               businessId: r.businessId,
               businessName: r.business.name,
               stats: {
-                unresolved: s.unresolved,
-                high: s.byPriority.high,
-                newest: s.byStatus.new,
+                unresolved: ceoAlerts.length,
+                high,
+                newest,
               } satisfies CeoBizAlertStats,
+              items: ceoAlerts.slice(0, 6).map((a) => toFeedItem(a, r.businessId, r.business.name)),
             };
           } catch {
             return {
               businessId: r.businessId,
               businessName: r.business.name,
               stats: { unresolved: 0, high: 0, newest: 0 } satisfies CeoBizAlertStats,
+              items: [] as CeoAlertFeedItem[],
             };
           }
         }),
       );
 
       const nextStats: Record<string, CeoBizAlertStats> = {};
-      for (const s of summaries) nextStats[s.businessId] = s.stats;
+      for (const row of perBiz) nextStats[row.businessId] = row.stats;
       setStatsByBiz(nextStats);
 
-      const hot = [...summaries]
-        .filter((s) => s.stats.unresolved > 0)
-        .sort(
-          (a, b) =>
-            b.stats.high - a.stats.high
-            || b.stats.unresolved - a.stats.unresolved,
-        )
-        .slice(0, 8);
-
-      const items = (
-        await Promise.all(
-          hot.map(async (biz) => {
-            try {
-              const res = await fetchAlerts(biz.businessId, {
-                status: 'new,seen',
-                limit: 4,
-                sort: 'createdAt',
-                order: 'desc',
-                priority: biz.stats.high > 0 ? 'high' : undefined,
-              });
-              return (res.alerts || []).map((a) => ({
-                id: a.id,
-                businessId: biz.businessId,
-                businessName: biz.businessName,
-                title: a.title || a.message || 'Alerta',
-                message: a.message || '',
-                priority: a.priority,
-                source: a.source,
-                route: a.route,
-                createdAt: a.createdAt,
-              }));
-            } catch {
-              return [];
-            }
-          }),
-        )
-      )
-        .flat()
+      const items = perBiz
+        .flatMap((row) => row.items)
         .sort((a, b) => {
           const rank = (p: string) => (p === 'high' ? 0 : p === 'medium' ? 1 : 2);
-          return rank(a.priority) - rank(b.priority)
-            || String(b.createdAt).localeCompare(String(a.createdAt));
+          return (
+            rank(a.priority) - rank(b.priority)
+            || String(b.createdAt).localeCompare(String(a.createdAt))
+          );
         })
-        .slice(0, 12);
+        .slice(0, 16);
 
-      // Si priority=high no trajo nada pero hay unresolved, segundo pase sin filtro
-      if (items.length === 0 && hot.length > 0) {
-        const fallback = (
-          await Promise.all(
-            hot.slice(0, 5).map(async (biz) => {
-              try {
-                const res = await fetchAlerts(biz.businessId, {
-                  status: 'new,seen',
-                  limit: 3,
-                  sort: 'createdAt',
-                  order: 'desc',
-                });
-                return (res.alerts || []).map((a) => ({
-                  id: a.id,
-                  businessId: biz.businessId,
-                  businessName: biz.businessName,
-                  title: a.title || a.message || 'Alerta',
-                  message: a.message || '',
-                  priority: a.priority,
-                  source: a.source,
-                  route: a.route,
-                  createdAt: a.createdAt,
-                }));
-              } catch {
-                return [];
-              }
-            }),
-          )
-        )
-          .flat()
-          .slice(0, 12);
-        setFeed(fallback);
-      } else {
-        setFeed(items);
-      }
+      setFeed(items);
     } finally {
       setLoading(false);
     }

@@ -124,19 +124,16 @@ export function CeoActionRequestsPanel({
 
     return visions.map((v) => {
       let bizAlerts = alertsByBiz.get(v.businessId) || [];
-      // Si hay contadores pero el feed no trajo detalle de esta empresa
-      if (bizAlerts.length === 0 && v.alertsUnresolved > 0) {
+      // Contadores ya vienen filtrados (portfolio CEO). Solo inventar si hay críticas.
+      if (bizAlerts.length === 0 && v.alertsHigh > 0) {
         bizAlerts = [
           {
             id: `summary:${v.businessId}`,
             businessId: v.businessId,
             businessName: v.name,
-            title:
-              v.alertsHigh > 0
-                ? `${v.alertsHigh} crítica${v.alertsHigh === 1 ? '' : 's'} · ${v.alertsUnresolved} activas`
-                : `${v.alertsUnresolved} alerta${v.alertsUnresolved === 1 ? '' : 's'} activas`,
+            title: `${v.alertsHigh} crítica${v.alertsHigh === 1 ? '' : 's'} (docs / finanzas)`,
             message: 'Abrir centro de alertas',
-            priority: v.alertsHigh > 0 ? 'high' : 'medium',
+            priority: 'high',
             source: 'sistema',
             route: '/saas/alerts',
             createdAt: new Date().toISOString(),
@@ -144,13 +141,14 @@ export function CeoActionRequestsPanel({
         ];
       }
       const requests = reqByBiz.get(v.businessId) || [];
+      const highFromFeed = bizAlerts.filter((a) => a.priority === 'high').length;
       return {
         vision: v,
         alerts: bizAlerts,
         requests,
         pendingCount: bizAlerts.length + requests.length,
-        criticalAlerts:
-          bizAlerts.filter((a) => a.priority === 'high').length || v.alertsHigh || 0,
+        // Número rojo = críticas CEO filtradas (no cola delivery de 164).
+        criticalAlerts: highFromFeed || v.alertsHigh || 0,
       };
     });
   }, [visions, alerts, items]);
@@ -197,7 +195,9 @@ export function CeoActionRequestsPanel({
           </p>
           <p className="text-[10px] text-stone-500">
             {visions.length} empresa{visions.length !== 1 ? 's' : ''}
-            {totalPending > 0 ? ` · ${totalPending} pendiente${totalPending !== 1 ? 's' : ''}` : ' · al día'}
+            {totalPending > 0
+              ? ` · ${totalPending} pendiente${totalPending !== 1 ? 's' : ''} (docs / finanzas)`
+              : ' · al día'}
             {alertsLoading ? ' · cargando…' : ''}
           </p>
         </div>

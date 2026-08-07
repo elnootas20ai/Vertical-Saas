@@ -165,11 +165,18 @@ export function computeRiskScore(input: {
   income: number;
   openCash: number;
 }): number {
+  const high = Math.max(0, input.alertsHigh || 0);
+  // Medium/low abiertas: no disparar riesgo en empresas sin actividad (cola vieja).
+  const softOpen = Math.max(0, (input.alertsUnresolved || 0) - high);
+  const active = (input.income || 0) > 0 || (input.openCash || 0) > 0;
+
   let risk = 0;
-  risk += Math.min(40, (input.alertsHigh || 0) * 18);
-  risk += Math.min(20, (input.alertsUnresolved || 0) * 4);
-  risk += Math.min(12, (input.scheduleAlerts || 0) * 2);
-  if (input.mom != null) {
+  risk += Math.min(40, high * 18);
+  if (active) {
+    risk += Math.min(12, softOpen * 2);
+    risk += Math.min(12, (input.scheduleAlerts || 0) * 2);
+  }
+  if (input.mom != null && active) {
     if (input.mom <= -15) risk += 20;
     else if (input.mom < 0) risk += 10;
   }

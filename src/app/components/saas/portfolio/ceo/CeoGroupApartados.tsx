@@ -1,7 +1,6 @@
 import { useMemo, type ReactNode } from 'react';
 import {
   Banknote,
-  HeartPulse,
   TrendingUp,
   UserRound,
   Users,
@@ -33,13 +32,12 @@ import {
 } from './ceoPortfolioMath';
 import { MomBadge } from './CeoGlanceRail';
 import { CeoMomWinnersLosers } from './CeoCompanyCompare';
-import { CeoRiskSizeMap } from './CeoVisionDashboard';
 import type { CeoCompanyVision } from './ceoVisionModel';
 import type { PortfolioFinanceTotals } from '../../../../lib/portfolioMetrics';
 
 /**
- * 5 apartados GENERALES del grupo (todas las empresas / verticales).
- * No son paneles de delivery: dinero, personas, clientes, ritmo, salud.
+ * Apartados GENERALES del grupo (todas las empresas / verticales).
+ * Dinero, personas, clientes, ritmo.
  */
 export function CeoGroupApartados({
   visions,
@@ -109,24 +107,12 @@ export function CeoGroupApartados({
 
   const trendSeries = useMemo(() => buildGroupMonthTrend(rows), [rows]);
 
-  const healthCounts = useMemo(() => {
-    let critical = 0;
-    let attention = 0;
-    let stable = 0;
-    for (const v of visions) {
-      if (v.health === 'critical') critical += 1;
-      else if (v.health === 'attention') attention += 1;
-      else stable += 1;
-    }
-    return { critical, attention, stable };
-  }, [visions]);
-
   const clientChart = useMemo(() => clientBars(rows, visions), [rows, visions]);
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      {/* Strip: 5 apartados abreviados */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      {/* Strip: 4 apartados */}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <ApartadoChip
           icon={<Banknote className="h-3.5 w-3.5" />}
           label="Dinero"
@@ -152,9 +138,18 @@ export function CeoGroupApartados({
         />
         <ApartadoChip
           icon={<UserRound className="h-3.5 w-3.5" />}
-          label="Clientes"
-          value={formatNumberEs(clients.total, { maxFraction: 0 })}
-          sub={`+${formatNumberEs(clients.neu, { maxFraction: 0 })} este mes`}
+          label="Clientes nuevos"
+          value={
+            rows.length === 0
+              ? '…'
+              : formatNumberEs(clients.neu, { maxFraction: 0 })
+          }
+          sub={
+            rows.length === 0
+              ? 'cargando…'
+              : `${formatNumberEs(clients.total, { maxFraction: 0 })} en total · mes`
+          }
+          tone={clients.neu > 0 ? 'ok' : undefined}
         />
         <ApartadoChip
           icon={<TrendingUp className="h-3.5 w-3.5" />}
@@ -162,18 +157,6 @@ export function CeoGroupApartados({
           value={formatMomLabel(generatedMom) || '—'}
           sub="mismo tramo vs ant."
           tone={generatedMom != null && generatedMom < 0 ? 'bad' : 'ok'}
-        />
-        <ApartadoChip
-          icon={<HeartPulse className="h-3.5 w-3.5" />}
-          label="Salud"
-          value={`${healthCounts.stable} ok`}
-          sub={
-            healthCounts.critical + healthCounts.attention > 0
-              ? `${healthCounts.critical} críticas · ${healthCounts.attention} atención`
-              : 'sin alertas de salud'
-          }
-          tone={healthCounts.critical > 0 ? 'bad' : healthCounts.attention > 0 ? 'warn' : 'ok'}
-          className="col-span-2 sm:col-span-1"
         />
       </div>
 
@@ -274,16 +257,19 @@ export function CeoGroupApartados({
             <h2 className="text-sm font-bold text-stone-900 dark:text-white">CRM del grupo</h2>
           </header>
           <div className="grid grid-cols-2 gap-2 p-3 sm:p-4">
-            <MoneyTile label="Base total" value={formatNumberEs(clients.total, { maxFraction: 0 })} />
             <MoneyTile
-              label="Alta este mes"
-              value={formatNumberEs(clients.neu, { maxFraction: 0 })}
-              extra={<MomBadge pct={clients.mom} />}
+              label="Nuevos este mes"
+              value={rows.length === 0 ? '…' : formatNumberEs(clients.neu, { maxFraction: 0 })}
+              extra={rows.length > 0 ? <MomBadge pct={clients.mom} /> : undefined}
+            />
+            <MoneyTile
+              label="Base total"
+              value={rows.length === 0 ? '…' : formatNumberEs(clients.total, { maxFraction: 0 })}
             />
           </div>
           <div className="h-[140px] px-2 pb-3">
             {clientChart.length === 0 ? (
-              <EmptyChart text="Sin clientes cargados" />
+              <EmptyChart text={rows.length === 0 ? 'Cargando clientes…' : 'Sin altas este mes'} />
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={clientChart} layout="vertical" margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
@@ -297,10 +283,10 @@ export function CeoGroupApartados({
                     tickLine={false}
                   />
                   <Tooltip
-                    formatter={(value: number) => [formatNumberEs(value, { maxFraction: 0 }), 'Clientes']}
+                    formatter={(value: number) => [formatNumberEs(value, { maxFraction: 0 }), 'Nuevos']}
                     contentStyle={{ borderRadius: 12, border: '1px solid #e7e5e4', fontSize: 12 }}
                   />
-                  <Bar dataKey="total" radius={[0, 6, 6, 0]} maxBarSize={14}>
+                  <Bar dataKey="neu" radius={[0, 6, 6, 0]} maxBarSize={14}>
                     {clientChart.map((d) => (
                       <Cell key={d.id} fill={d.color} fillOpacity={0.85} />
                     ))}
@@ -350,29 +336,6 @@ export function CeoGroupApartados({
           </div>
         ) : null}
         <CeoMomWinnersLosers visions={visions} onOpen={onOpen} />
-      </section>
-
-      {/* 5. Salud */}
-      <section className="space-y-2">
-        <div className="flex flex-wrap items-end justify-between gap-2 px-0.5">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">5 · Salud</p>
-            <h2 className="text-sm font-bold text-stone-900 dark:text-white">A quién mirar primero</h2>
-            <p className="text-[11px] text-stone-500">Lista por riesgo · en castellano, sin gráfica rara</p>
-          </div>
-          <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold">
-            <span className="rounded-lg bg-rose-50 px-2 py-0.5 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-              {healthCounts.critical} críticas
-            </span>
-            <span className="rounded-lg bg-amber-50 px-2 py-0.5 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-              {healthCounts.attention} atención
-            </span>
-            <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
-              {healthCounts.stable} estables
-            </span>
-          </div>
-        </div>
-        <CeoRiskSizeMap visions={visions} onOpen={onOpen} compact />
       </section>
     </div>
   );
@@ -461,11 +424,11 @@ function clientBars(rows: PortfolioBusiness[], visions: CeoCompanyVision[]) {
       name: (r.business.name || 'Empresa').length > 9
         ? `${(r.business.name || '').slice(0, 8)}…`
         : r.business.name || 'Empresa',
-      total: Number(r.clients.totalClients) || 0,
+      neu: Number(r.clients.newClientsMonth) || 0,
       color: colorById.get(r.businessId) || '#2563eb',
     }))
-    .filter((d) => d.total > 0)
-    .sort((a, b) => b.total - a.total)
+    .filter((d) => d.neu > 0)
+    .sort((a, b) => b.neu - a.neu)
     .slice(0, 6);
 }
 

@@ -9,10 +9,7 @@ import { useDashboardPlanAccess } from '../../hooks/useDashboardPlanAccess';
 import { usePortfolioPlanAccess } from '../../hooks/usePortfolioPlanAccess';
 import { PortfolioPlanBanner } from './PortfolioPlanBanner';
 import { companyGeneratedMonth } from './portfolio/portfolioCompanyPulse';
-import {
-  buildCeoCompanyVisions,
-  type CeoHealthTone,
-} from './portfolio/ceo/ceoVisionModel';
+import { buildCeoCompanyVisions } from './portfolio/ceo/ceoVisionModel';
 import { useCeoAlertFeed, type CeoAlertFeedItem } from './portfolio/ceo/useCeoAlertFeed';
 import {
   CeoCompanyDrawer,
@@ -26,12 +23,13 @@ import {
   CeoActionRequestsPanel,
   type CeoActionRequest,
 } from './portfolio/ceo/CeoActionRequests';
+import { MobileLazySection } from './MobileLazySection';
 
 interface GeneralDashboardProps {
   onSelectBusiness: (businessId: string) => void;
 }
 
-/** Visión general CEO: alertas + 5 apartados de grupo + líneas por empresa. */
+/** Visión general CEO: alertas + apartados de grupo + líneas por empresa. */
 export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -68,7 +66,6 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
     [visions],
   );
 
-  const [healthFilter, setHealthFilter] = useState<'all' | CeoHealthTone>('all');
   const [drawerBizId, setDrawerBizId] = useState<string | null>(null);
   const [drawerAlert, setDrawerAlert] = useState<CeoAlertFeedItem | null>(null);
 
@@ -132,7 +129,6 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
         <CeoVisionTopBar
           companyCount={visions.length || businesses.length}
           critical={alertTotals.critical}
-          attention={alertTotals.attention}
           liveLabel={liveStatusText}
           refreshing={isRefreshing || loading || alertsLoading}
           onRefresh={() => void handleRefresh()}
@@ -162,25 +158,41 @@ export function GeneralDashboard({ onSelectBusiness }: GeneralDashboardProps) {
               onAct={actOnRequest}
             />
 
-            <CeoGroupApartados
-              visions={visions}
-              rows={sortedRows}
-              finance={finance}
-              canViewEbitda={canViewEbitda}
-              laborByBiz={laborByBiz}
-              laborLoading={laborLoading}
-              onOpen={(id) => openBusinessDrawer(id)}
-            />
+            <MobileLazySection
+              rootMargin="120px 0px"
+              placeholder={
+                <div className="rounded-2xl border border-dashed border-stone-200 px-4 py-8 text-center text-[11px] text-stone-400 dark:border-stone-800">
+                  Desliza para ver dinero y clientes del grupo…
+                </div>
+              }
+            >
+              <CeoGroupApartados
+                visions={visions}
+                rows={sortedRows}
+                finance={finance}
+                canViewEbitda={canViewEbitda}
+                laborByBiz={laborByBiz}
+                laborLoading={laborLoading}
+                onOpen={(id) => openBusinessDrawer(id)}
+              />
+            </MobileLazySection>
 
-            <CeoCompanyTable
-              visions={visions}
-              canViewEbitda={canViewEbitda}
-              filter={healthFilter}
-              onFilter={setHealthFilter}
-              onOpen={(id) => openBusinessDrawer(id)}
-              laborByBiz={laborByBiz}
-              laborLoading={laborLoading}
-            />
+            <MobileLazySection
+              rootMargin="160px 0px"
+              placeholder={
+                <div className="rounded-2xl border border-dashed border-stone-200 px-4 py-8 text-center text-[11px] text-stone-400 dark:border-stone-800">
+                  Desliza para ver empresas…
+                </div>
+              }
+            >
+              <CeoCompanyTable
+                visions={visions}
+                canViewEbitda={canViewEbitda}
+                onOpen={(id) => openBusinessDrawer(id)}
+                laborByBiz={laborByBiz}
+                laborLoading={laborLoading}
+              />
+            </MobileLazySection>
           </>
         )}
 
