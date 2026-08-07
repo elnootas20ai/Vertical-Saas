@@ -2976,7 +2976,16 @@ export async function listTpvRegisterSessions(req, res) {
     if (!userId) return badRequest(res, 'Falta userId');
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
-    let sessions = await listTpvRegisterSessionsByUser(req, userId);
+    const lite = String(req.query.lite || '').trim() === '1'
+      || String(req.query.opsLite || '').trim() === '1';
+    const dateFromQ = String(req.query.dateFrom || '').trim();
+    let sessions = await listTpvRegisterSessionsByUser(req, userId, lite || dateFromQ
+      ? {
+          ...(lite ? { opsLite: true } : {}),
+          ...(dateFromQ ? { dateFrom: dateFromQ } : {}),
+          maxDocs: lite ? 800 : 5_000,
+        }
+      : {});
     if (req.callerIsWorker) {
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();
       if (workerSalesPoint) {
@@ -4348,9 +4357,30 @@ export async function getOpsCenter(req, res) {
       slotObj = config.activeTimeSlots.find(s => s.id === timeSlot) || null;
     }
 
+    // Ventana de pedidos: ops solo necesita hoy + activos recientes (no todo el histórico).
+    const ordersLookbackDays = 21;
+    const ordersFrom = (() => {
+      const [y, m, d] = String(targetDate).split('-').map(Number);
+      if (!y || !m || !d) return undefined;
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      dt.setUTCDate(dt.getUTCDate() - ordersLookbackDays);
+      return dt.toISOString();
+    })();
+    const sessionsFrom = (() => {
+      const [y, m, d] = String(targetDate).split('-').map(Number);
+      if (!y || !m || !d) return undefined;
+      const dt = new Date(Date.UTC(y, m - 1, d));
+      dt.setUTCDate(dt.getUTCDate() - 60);
+      return dt.toISOString();
+    })();
+
     const [allOrders, tpvSessions, driverSessions, pointsOfSaleAll] = await Promise.all([
-      listDeliveryOrdersByUser(req, userId),
-      listTpvRegisterSessionsByUser(req, userId),
+      listDeliveryOrdersByUser(req, userId, ordersFrom ? { dateFrom: ordersFrom } : {}),
+      listTpvRegisterSessionsByUser(req, userId, {
+        opsLite: true,
+        ...(sessionsFrom ? { dateFrom: sessionsFrom } : {}),
+        maxDocs: 800,
+      }),
       listDriverCashSessionsByUser(req, userId),
       listScopedPointsOfSaleForUser(req, userId).catch(() => []),
     ]);
@@ -4432,7 +4462,7 @@ export async function getOpsCenter(req, res) {
     const avgDeliveryTime = deliveryTimes.length > 0 ? deliveryTimes.reduce((a, b) => a + b, 0) / deliveryTimes.length : 0;
     const businessOp = businessIdQuery
       ? await getBusinessAlertsOperational(req, businessIdQuery)
-      : (account.businessId ? await getBusinessAlertsOperational(req, account.businessId) : null);
+      : null;
     const deliveryAlertCfg = resolveDeliveryAlertConfig(account, businessOp);
     const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
     const delayThreshold = deliveryAlertCfg.delayThresholds?.delivery || config.delayThresholdMinutes || 40;
@@ -4496,7 +4526,7 @@ export async function getOpsCenter(req, res) {
     const pdvs = pointsOfSale;
 
     let brandLabels = {};
-    const brandBusinessId = businessIdQuery || String(account.business_id || account.businessId || '').trim();
+    const brandBusinessId = businessIdQuery || '';
     if (brandBusinessId) {
       try {
         const brands = await listBrandsByBusiness(req, brandBusinessId);
@@ -4531,7 +4561,7 @@ export async function getOpsCenter(req, res) {
       activeOrders,
       alerts,
       cashStatus: {
-        openTpvSessions: openTpv.map(sanitizeTpvRegisterSession),
+        openTpvSessions: openTpv.map((s) => sanitizeTpvRegisterSession(s, { slimClosed: true })),
         openDriverSessions: openDriverSessions.map(sanitizeDriverCashSession),
         totalCashInRegisters: openTpv.reduce((s, sess) => {
           const txTotal = (sess.transactions || []).filter(t => t.paymentMethod === 'efectivo')

@@ -2,15 +2,24 @@
  * Cierre de caja TPV:
  * - Con descuadre → alerta (Centro + push)
  * - Sin descuadre → notificación de actividad (campana), no alerta
+ *
+ * businessId SIEMPRE de la sesión / PDV. Nunca account.business_id
+ * (en cuentas multi-empresa colgaba el descuadre en la empresa “por defecto”, p. ej. PAUNILPOL).
  */
 import {
   findBusinessById,
-  findAccountByUserId,
+  findWorkCenterById,
+  getDocument,
+  getDeliveryDbName,
 } from './couchdb.js';
 import { emitGlobalAlert, emitPositiveAlert } from './alertEmitter.js';
 import logger from './logger.js';
 
 const DELIVERY_CAJA_ROUTE = '/saas/vertical/delivery/caja';
+
+function bareId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
 
 function isManagerRole(role) {
   const r = String(role || '').toLowerCase();
@@ -40,6 +49,30 @@ function formatDiff(diff) {
   return `${sign}${n.toFixed(2)}€`;
 }
 
+async function resolveBusinessIdForTpvSession(req, session) {
+  const fromSession = bareId(session?.business_id || session?.businessId);
+  if (fromSession) return fromSession;
+
+  const pdvId = String(session?.pointOfSaleId || '').trim();
+  if (!pdvId) return '';
+
+  try {
+    const db = getDeliveryDbName();
+    const pdv = await getDocument(req, db, pdvId).catch(() => null);
+    const fromPdv = bareId(pdv?.businessId || pdv?.business_id);
+    if (fromPdv) return fromPdv;
+    const wcId = String(pdv?.workCenterId || '').trim();
+    if (wcId) {
+      const wc = await findWorkCenterById(req, wcId).catch(() => null);
+      const fromWc = bareId(wc?.business_id || wc?.businessId);
+      if (fromWc) return fromWc;
+    }
+  } catch {
+    /* ignore */
+  }
+  return '';
+}
+
 /**
  * @param {object} params
  * @param {object} params.req
@@ -51,19 +84,15 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
   try {
     if (!session?._id || session.status !== 'closed') return;
 
-    const account = await findAccountByUserId(req, dataUserId);
-    const businessId = String(
-      session.business_id
-      || session.businessId
-      || account?.business_id
-      || account?.businessId
-      || '',
-    ).trim();
-
-    let business = null;
-    if (businessId) {
-      business = await findBusinessById(req, businessId).catch(() => null);
+    const businessId = await resolveBusinessIdForTpvSession(req, session);
+    if (!businessId) {
+      logger.warn?.(
+        '[TPV close notify] sin businessId de sesión/PDV — no se emite alerta (evita colgarla en otra empresa)',
+      );
+      return;
     }
+
+    const business = await findBusinessById(req, businessId).catch(() => null);
 
     const store = String(session.pointOfSaleName || session.terminalName || 'TPV').trim();
     const worker = String(session.workerName || 'Equipo').trim();
@@ -102,7 +131,7 @@ export async function notifyTpvRegisterClosed({ req, dataUserId, actorUserId, se
     }
 
     await emitGlobalAlert({
-      businessId: businessId || undefined,
+      businessId,
       userId: business?.owner_user_id || dataUserId,
       source: 'delivery',
       ruleId: 'delivery_register_closed_discrepancy',

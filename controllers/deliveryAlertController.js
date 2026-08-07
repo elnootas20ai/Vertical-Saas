@@ -47,8 +47,9 @@ export async function getDeliveryAlerts(req, res) {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
 
-    const { priority, alertType, limit } = req.query;
-    let result = await getDeliveryAlertSummary(userId);
+    const { priority, alertType, limit, businessId, business_id: businessIdAlt } = req.query;
+    const bizFilter = String(businessId || businessIdAlt || '').replace(/^business:/, '').trim();
+    let result = await getDeliveryAlertSummary(userId, bizFilter ? { businessId: bizFilter } : {});
 
     let alerts = result.alerts || [];
     if (priority) alerts = alerts.filter((a) => a.priority === priority);
@@ -73,7 +74,8 @@ export async function getActiveDeliveryAlerts(req, res) {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
 
-    const result = await getDeliveryAlertSummary(userId);
+    const bizFilter = String(req.query.businessId || req.query.business_id || '').replace(/^business:/, '').trim();
+    const result = await getDeliveryAlertSummary(userId, bizFilter ? { businessId: bizFilter } : {});
     const alerts = (result.alerts || [])
       .sort((a, b) => {
         const pOrder = { high: 0, medium: 1, low: 2 };
@@ -251,7 +253,12 @@ export async function getDeliveryAlertHistory(req, res) {
 
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
     const from = new Date(Date.now() - days * 86_400_000).toISOString();
-    const scopeId = account.businessId || userId;
+    const queryBiz = String(req.query.businessId || req.query.business_id || '')
+      .replace(/^business:/, '')
+      .trim();
+    // Multi-empresa: historial de la empresa pedida; sin query no usar account.businessId
+    // (colgaba historial de Modomio bajo PAUNILPOL). Preferir userId = legado sin businessId.
+    const scopeId = queryBiz || userId;
 
     const result = await listAlertsByBusiness(req, scopeId, {
       historyOnly: true,
@@ -279,7 +286,8 @@ export async function getDeliveryAlertStats(req, res) {
     const { userId } = req.params;
     if (!userId) return res.status(400).json({ ok: false, error: 'Falta userId' });
 
-    const result = await getDeliveryAlertSummary(userId);
+    const bizFilter = String(req.query.businessId || req.query.business_id || '').replace(/^business:/, '').trim();
+    const result = await getDeliveryAlertSummary(userId, bizFilter ? { businessId: bizFilter } : {});
     return res.json({ ok: true, stats: result.summary });
   } catch (error) {
     return res.status(500).json({ ok: false, error: error instanceof Error ? error.message : 'Error obteniendo estadisticas' });

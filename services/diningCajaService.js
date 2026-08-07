@@ -18,8 +18,9 @@ import logger from './logger.js';
 function broadcastTpvSessionLive(account, ownerUserId, sessionDoc) {
   const sanitized = sanitizeTpvRegisterSession(sessionDoc);
   broadcastToUser(ownerUserId, 'tpv_session_updated', sanitized);
+  // Preferir empresa de la sesión (multi-empresa); account.business_id puede ser otra.
   const businessId = String(
-    account?.business_id || account?.businessId || sessionDoc?.business_id || '',
+    sessionDoc?.business_id || sessionDoc?.businessId || account?.business_id || account?.businessId || '',
   ).replace(/^business:/, '').trim();
   if (businessId) {
     try {

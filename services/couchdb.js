@@ -297,6 +297,13 @@ async function ensureDeliveryTypeUserIndex(req, dbName) {
   await ensureIndex(req, dbName, ['type', 'user_id'], `idx-${safeDb}-type-user_id`).catch(() => null);
   // TPV/caja filtran por jornada: sin createdAt Couch puede tirar de todo el histórico.
   await ensureIndex(req, dbName, ['type', 'user_id', 'createdAt'], `idx-${safeDb}-type-user-created`).catch(() => null);
+  await ensureIndex(req, dbName, ['type', 'user_id', 'status'], `idx-${safeDb}-type-user-status`).catch(() => null);
+  await ensureIndex(
+    req,
+    dbName,
+    ['type', 'user_id', 'closingValidationStatus'],
+    `idx-${safeDb}-type-user-val`,
+  ).catch(() => null);
   deliveryTypeUserIndexReady.add(dbName);
 }
 const clientDocumentsInflight = new Map();
@@ -1780,8 +1787,20 @@ export function sanitizeNotification(notification) {
 
 export async function listNotificationsByUser(req, userId) {
   await ensureDatabase(req, NOTIFICATIONS_DB);
-  const docs = await getAllDocuments(req, NOTIFICATIONS_DB);
   const uid = String(userId || '').trim();
+  if (!uid) return [];
+
+  let docs = [];
+  try {
+    docs = await findDocuments(
+      req,
+      NOTIFICATIONS_DB,
+      { type: 'notification', user_id: uid },
+      { pageSize: 400, maxDocs: 3_000 },
+    );
+  } catch {
+    docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+  }
 
   return docs
     .filter((doc) => {
@@ -2576,6 +2595,8 @@ const INDEX_DEFINITIONS = {
     ['user_id', 'type'],
     ['user_id', 'read'],
     ['user_id', 'createdAt'],
+    ['type', 'businessId'],
+    ['type', 'user_id'],
     ['businessId', 'status', 'priority', 'createdAt'],
     ['businessId', 'source', 'status', 'createdAt'],
     ['businessId', 'status', 'createdAt'],
@@ -7685,38 +7706,89 @@ export function sanitizeTpvRegisterSession(doc, opts = {}) {
   };
 }
 
-export async function listTpvRegisterSessionsByUser(req, userId) {
+export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
   const uid = String(userId || '').trim();
+  const dateFrom = String(options?.dateFrom || '').trim();
+  const maxDocs = Math.min(Math.max(1, Number(options?.maxDocs) || 5_000), 5_000);
+  const opsLite = Boolean(options?.opsLite);
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
   await ensureDeliveryTypeUserIndex(req, db);
 
+  const baseSelector = uid
+    ? { type: 'tpv_register_session', user_id: uid }
+    : { type: 'tpv_register_session' };
+
+  const keep = (doc) =>
+    doc?.type === 'tpv_register_session'
+    && !doc?.deletedAt
+    && (!uid || doc?.user_id === uid);
+
+  /** Ops / home: abiertas + por validar + ventana reciente (no 5000 cajas con txs). */
+  if (opsLite) {
+    const lookback = dateFrom || (() => {
+      const dt = new Date();
+      dt.setUTCDate(dt.getUTCDate() - 60);
+      return dt.toISOString();
+    })();
+    const [recent, openOnes, pendingOnes] = await Promise.all([
+      findDocuments(
+        req,
+        db,
+        { ...baseSelector, createdAt: { $gte: lookback } },
+        { pageSize: 200, maxDocs: Math.min(maxDocs, 600) },
+      ).catch(() => []),
+      findDocuments(
+        req,
+        db,
+        { ...baseSelector, status: 'open' },
+        { pageSize: 50, maxDocs: 80 },
+      ).catch(() => []),
+      findDocuments(
+        req,
+        db,
+        { ...baseSelector, closingValidationStatus: 'pending' },
+        { pageSize: 100, maxDocs: 300 },
+      ).catch(() => []),
+    ]);
+    const byId = new Map();
+    for (const doc of [...recent, ...openOnes, ...pendingOnes]) {
+      if (keep(doc) && doc._id) byId.set(doc._id, doc);
+    }
+    return [...byId.values()].sort((a, b) =>
+      String(b.createdAt || '').localeCompare(String(a.createdAt || '')),
+    );
+  }
+
+  const selector = dateFrom
+    ? { ...baseSelector, createdAt: { $gte: dateFrom } }
+    : baseSelector;
+
   let docs;
   try {
-    docs = uid
-      ? await findDocuments(
-          req,
-          db,
-          { type: 'tpv_register_session', user_id: uid },
-          { pageSize: 500, maxDocs: 5_000 },
-        )
-      : await findDocuments(
-          req,
-          db,
-          { type: 'tpv_register_session' },
-          { pageSize: 500, maxDocs: 5_000 },
-        );
+    docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs });
   } catch {
-    const all = await getDeliveryDatabaseDocumentsInflight(req);
-    docs = all.filter(
-      (doc) => doc?.type === 'tpv_register_session' && (!uid || doc?.user_id === uid),
-    );
+    if (dateFrom) {
+      try {
+        docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs });
+      } catch {
+        const all = await getDeliveryDatabaseDocumentsInflight(req);
+        docs = all.filter(
+          (doc) => doc?.type === 'tpv_register_session' && (!uid || doc?.user_id === uid),
+        );
+      }
+    } else {
+      const all = await getDeliveryDatabaseDocumentsInflight(req);
+      docs = all.filter(
+        (doc) => doc?.type === 'tpv_register_session' && (!uid || doc?.user_id === uid),
+      );
+    }
   }
 
   return docs
     .filter(
       (doc) =>
-        doc?.type === 'tpv_register_session' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
+        keep(doc) && (!dateFrom || String(doc.createdAt || doc.openedAt || '') >= dateFrom),
     )
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
@@ -13249,16 +13321,101 @@ function normalizeAlertScopeId(value) {
   return String(value || '').replace(/^business:/, '').trim();
 }
 
+const alertScopeDocsCache = new Map();
+const alertScopeDocsInflight = new Map();
+const ALERT_SCOPE_DOCS_TTL_MS = 12_000;
+
+/**
+ * Docs del centro de alertas para un negocio/usuario.
+ * Antes: getAllDocuments(notifications) en cada list/summary → segundos en móvil.
+ * Ahora: Mango por businessId / user_id + singleflight cache corta.
+ */
+async function getNotificationDocsForScope(req, scopeId) {
+  const scope = normalizeAlertScopeId(scopeId);
+  if (!scope) return [];
+
+  const cached = alertScopeDocsCache.get(scope);
+  if (cached && Date.now() - cached.at < ALERT_SCOPE_DOCS_TTL_MS) {
+    return cached.docs;
+  }
+  const inflight = alertScopeDocsInflight.get(scope);
+  if (inflight) return inflight;
+
+  const promise = (async () => {
+    await ensureDatabase(req, NOTIFICATIONS_DB);
+    await setupDatabaseIndexes(req, NOTIFICATIONS_DB).catch(() => null);
+
+    const bizVariants = [scope, `business:${scope}`];
+    const queries = [
+      ...bizVariants.map((businessId) =>
+        findDocuments(
+          req,
+          NOTIFICATIONS_DB,
+          { type: 'notification', businessId },
+          { pageSize: 400, maxDocs: 4_000 },
+        ).catch(() => []),
+      ),
+      // Scope = user_id (sin empresa activa). Con businessId en el doc, matchesScope ya no mezcla empresas.
+      findDocuments(
+        req,
+        NOTIFICATIONS_DB,
+        { type: 'notification', user_id: scope },
+        { pageSize: 400, maxDocs: 4_000 },
+      ).catch(() => []),
+    ];
+
+    let batches = await Promise.all(queries);
+    const any = batches.some((b) => Array.isArray(b) && b.length > 0);
+    if (!any) {
+      // Fallback legado si el índice aún no está listo
+      try {
+        const all = await getAllDocuments(req, NOTIFICATIONS_DB);
+        batches = [all];
+      } catch {
+        batches = [];
+      }
+    }
+
+    const byId = new Map();
+    for (const batch of batches) {
+      for (const doc of batch || []) {
+        if (doc?._id && notificationMatchesScope(doc, scope, { includeDeleted: true })) {
+          byId.set(doc._id, doc);
+        }
+      }
+    }
+    const docs = [...byId.values()];
+    alertScopeDocsCache.set(scope, { at: Date.now(), docs });
+    return docs;
+  })().finally(() => {
+    alertScopeDocsInflight.delete(scope);
+  });
+
+  alertScopeDocsInflight.set(scope, promise);
+  return promise;
+}
+
+export function invalidateAlertScopeDocsCache(scopeId) {
+  const scope = normalizeAlertScopeId(scopeId);
+  if (!scope) {
+    alertScopeDocsCache.clear();
+    return;
+  }
+  alertScopeDocsCache.delete(scope);
+}
+
 export function notificationMatchesScope(doc, scopeId, { includeDeleted = false } = {}) {
   if (!doc || doc.type !== 'notification') return false;
   if (doc.deletedAt && !includeDeleted) return false;
   const scope = normalizeAlertScopeId(scopeId);
   if (!scope) return false;
   const docBiz = normalizeAlertScopeId(doc.businessId);
-  if (docBiz && docBiz === scope) return true;
-  if (String(doc.businessId || '') === scope) return true;
-  if (String(doc.user_id || '') === scope) return true;
-  return false;
+  // Con empresa: solo esa empresa (no mezclar Modomio ↔ PAUNILPOL por user_id).
+  if (docBiz) {
+    return docBiz === scope || String(doc.businessId || '') === scopeId;
+  }
+  // Legado sin businessId: solo si el scope es el user_id del aviso.
+  return String(doc.user_id || '') === scope;
 }
 
 function normalizeNotificationStatus(doc) {
@@ -13370,8 +13527,7 @@ function filterAlertsForScope(docs, scopeId, filters = {}) {
 }
 
 export async function listAlertsByBusiness(req, scopeId, filters = {}) {
-  await ensureDatabase(req, NOTIFICATIONS_DB);
-  const docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+  const docs = await getNotificationDocsForScope(req, scopeId);
   const items = filterAlertsForScope(docs, scopeId, filters);
 
   const page = Math.max(1, Number(filters.page) || 1);
@@ -13390,8 +13546,7 @@ export async function listAlertsByBusiness(req, scopeId, filters = {}) {
 }
 
 export async function getAlertsSummary(req, scopeId) {
-  await ensureDatabase(req, NOTIFICATIONS_DB);
-  const docs = await getAllDocuments(req, NOTIFICATIONS_DB);
+  const docs = await getNotificationDocsForScope(req, scopeId);
   const items = filterAlertsForScope(docs, scopeId, {});
 
   const byPriority = { high: 0, medium: 0, low: 0 };
@@ -13403,17 +13558,21 @@ export async function getAlertsSummary(req, scopeId) {
   for (const doc of items) {
     const status = normalizeNotificationStatus(doc);
     byStatus[status] = (byStatus[status] || 0) + 1;
-    if (status !== 'resolved') unresolved += 1;
+    const isOpen = status !== 'resolved';
+    if (isOpen) unresolved += 1;
 
     const priority = doc.priority && VALID_PRIORITIES.includes(doc.priority)
       ? doc.priority
       : (LEVEL_PRIORITY_MAP[normalizeNotificationLevel(doc.level)] || 'medium');
-    byPriority[priority] = (byPriority[priority] || 0) + 1;
+    // Solo abiertas: si no, Visión general / riesgo sumaba críticas ya resueltas.
+    if (isOpen) {
+      byPriority[priority] = (byPriority[priority] || 0) + 1;
+    }
 
     const source = doc.source && VALID_SOURCES.includes(doc.source)
       ? doc.source
       : (CATEGORY_SOURCE_MAP[String(doc.category || '')] || 'sistema');
-    if (status !== 'resolved') {
+    if (isOpen) {
       bySource[source] = (bySource[source] || 0) + 1;
     }
 

@@ -17,6 +17,11 @@ import {
   dedupeActivePointsOfSale,
   filterPointsOfSaleLinkedToWorkCenters,
   listActiveWorkCenterIds,
+  listOwnerBusinessesForUser,
+  listScopedPointsOfSaleForBusiness,
+  filterTpvRegisterSessionsForBusiness,
+  getDocument,
+  findWorkCenterById,
 } from './couchdb.js';
 import { emitGlobalAlert } from './alertEmitter.js';
 import { mutateAlertStatus } from './alertHistory.js';
@@ -531,6 +536,66 @@ async function reconcileDeliveryAlerts(businessId, userId, activeAlerts) {
   return resolved;
 }
 
+function bareBusinessId(value) {
+  return String(value || '').replace(/^business:/, '').trim();
+}
+
+function filterOrdersForBusiness(orders, businessId, scopedPdvIds) {
+  const bid = bareBusinessId(businessId);
+  if (!bid) return [];
+  const pdvSet = scopedPdvIds instanceof Set ? scopedPdvIds : new Set(scopedPdvIds || []);
+  return (Array.isArray(orders) ? orders : []).filter((o) => {
+    const ob = bareBusinessId(o?.business_id || o?.businessId);
+    if (ob) return ob === bid;
+    const pdv = String(o?.salesPointId || '').trim();
+    return Boolean(pdv && pdvSet.has(pdv));
+  });
+}
+
+function filterDriverSessionsForBusiness(sessions, businessId, scopedPdvIds) {
+  const bid = bareBusinessId(businessId);
+  if (!bid) return [];
+  const pdvSet = scopedPdvIds instanceof Set ? scopedPdvIds : new Set(scopedPdvIds || []);
+  return (Array.isArray(sessions) ? sessions : []).filter((s) => {
+    const sb = bareBusinessId(s?.business_id || s?.businessId);
+    if (sb) return sb === bid;
+    const pdv = String(s?.pointOfSaleId || s?.salesPointId || '').trim();
+    return Boolean(pdv && pdvSet.has(pdv));
+  });
+}
+
+async function resolveOwnerBusinessIds(userId, account) {
+  const owned = await listOwnerBusinessesForUser(fakeReq, userId).catch(() => []);
+  const fromOwned = owned
+    .map((b) => bareBusinessId(b?.business_id || b?.businessId || b?.id))
+    .filter(Boolean);
+  if (fromOwned.length > 0) return [...new Set(fromOwned)];
+  const fallback = bareBusinessId(account?.businessId || account?.business_id);
+  return fallback ? [fallback] : [''];
+}
+
+/** Empresa de sesión repartidor: sesión → PDV → work center. Sin fallback a otra empresa. */
+async function resolveBusinessIdForDriverSession(sess) {
+  const fromSess = bareBusinessId(sess?.business_id || sess?.businessId);
+  if (fromSess) return fromSess;
+  const pdvId = String(sess?.pointOfSaleId || sess?.salesPointId || '').trim();
+  if (!pdvId) return '';
+  try {
+    const db = getDeliveryDbName();
+    const pdv = await getDocument(fakeReq, db, pdvId).catch(() => null);
+    const fromPdv = bareBusinessId(pdv?.businessId || pdv?.business_id);
+    if (fromPdv) return fromPdv;
+    const wcId = String(pdv?.workCenterId || '').trim();
+    if (wcId) {
+      const wc = await findWorkCenterById(fakeReq, wcId).catch(() => null);
+      return bareBusinessId(wc?.business_id || wc?.businessId);
+    }
+  } catch {
+    /* ignore */
+  }
+  return '';
+}
+
 // ─── ENGINE LOOP ────────────────────────────────────────────────────────────
 
 async function getAllUserIds() {
@@ -538,38 +603,73 @@ async function getAllUserIds() {
   catch { return []; }
 }
 
-async function runForUser(userId) {
-  const account = await findAccountByUserId(fakeReq, userId);
-  if (!account) return 0;
-  const bId = account.businessId || '';
+async function runForBusinessScope({
+  userId,
+  account,
+  businessId,
+  allOrders,
+  catItems,
+  catalogInfraDocs,
+  tpvS,
+  drvS,
+  pointsOfSale,
+  drivers,
+}) {
+  const bId = bareBusinessId(businessId);
+  const scopedPdvs = bId
+    ? await listScopedPointsOfSaleForBusiness(fakeReq, userId, bId).catch(() => [])
+    : pointsOfSale;
+  const scopedPdvIds = new Set(
+    (scopedPdvs || []).map((p) => String(p?._id || p?.id || '').trim()).filter(Boolean),
+  );
+  const orders = bId
+    ? filterOrdersForBusiness(allOrders, bId, scopedPdvIds)
+    : allOrders;
+  const tpvScoped = bId
+    ? filterTpvRegisterSessionsForBusiness(tpvS, bId, scopedPdvIds)
+    : tpvS;
+  const drvScoped = bId
+    ? filterDriverSessionsForBusiness(drvS, bId, scopedPdvIds)
+    : drvS;
+  const pdvScoped = bId
+    ? (scopedPdvs?.length ? scopedPdvs : pointsOfSale.filter((p) => scopedPdvIds.has(String(p?._id || '').trim())))
+    : pointsOfSale;
+
   const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
   const config = resolveDeliveryAlertConfig(account, businessOp);
   if (!config.enabled) return 0;
-  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers] = await Promise.all([
-    fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
-    fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
-    fetchCatalogInfraDocs(userId),
-    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
-    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
-    fetchPointsOfSale(userId),
-    fetchDrivers(userId),
-  ]);
-  const active = filterActiveDeliveryOrders(allOrders);
-  const today = allOrders.filter((o) => isToday(o.createdAt));
+
+  const active = filterActiveDeliveryOrders(orders);
+  const today = orders.filter((o) => isToday(o.createdAt));
   const dc = account.deliveryConfig || null;
-  if (!canEmitDeliveryAlerts({ deliveryOrders: allOrders, pointsOfSale, deliveryConfig: dc })) {
+  if (!canEmitDeliveryAlerts({ deliveryOrders: orders, pointsOfSale: pdvScoped, deliveryConfig: dc })) {
     await reconcileDeliveryAlerts(bId, userId, []);
     return 0;
   }
   const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
   const allPending = collectDeliveryAlerts({
-    active, today, allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, config, dc, cashCfg,
+    active,
+    today,
+    allOrders: orders,
+    catItems,
+    catalogInfraDocs,
+    tpvS: tpvScoped,
+    drvS: drvScoped,
+    pointsOfSale: pdvScoped,
+    drivers,
+    config,
+    dc,
+    cashCfg,
     includeMargin: cycleCount % MARGIN_CHECK_INTERVAL === 0,
   });
   const reconciled = await reconcileDeliveryAlerts(bId, userId, allPending);
   let cnt = 0;
-  for (const a of allPending) { if (await emitDeliveryAlert({ userId, businessId: bId, ...a })) cnt++; }
-  if (reconciled > 0) logger.info({ tag: TAG, userId, businessId: bId, reconciled }, 'Alertas delivery obsoletas resueltas');
+  for (const a of allPending) {
+    if (await emitDeliveryAlert({ userId, businessId: bId, ...a })) cnt += 1;
+  }
+  if (reconciled > 0) {
+    logger.info({ tag: TAG, userId, businessId: bId, reconciled }, 'Alertas delivery obsoletas resueltas');
+  }
   if (bId && (allPending.length > 0 || reconciled > 0)) {
     const byPriority = { high: 0, medium: 0, low: 0 };
     const byType = {};
@@ -584,6 +684,39 @@ async function runForUser(userId) {
   return cnt;
 }
 
+async function runForUser(userId) {
+  const account = await findAccountByUserId(fakeReq, userId);
+  if (!account) return 0;
+
+  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businessIds] = await Promise.all([
+    fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
+    fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
+    fetchCatalogInfraDocs(userId),
+    fetchDocsOfType(getDeliveryDbName(), 'tpv_register_session').then((d) => d.filter((s) => s.user_id === userId)),
+    fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
+    fetchPointsOfSale(userId),
+    fetchDrivers(userId),
+    resolveOwnerBusinessIds(userId, account),
+  ]);
+
+  let tot = 0;
+  for (const bId of businessIds) {
+    tot += await runForBusinessScope({
+      userId,
+      account,
+      businessId: bId,
+      allOrders,
+      catItems,
+      catalogInfraDocs,
+      tpvS,
+      drvS,
+      pointsOfSale,
+      drivers,
+    });
+  }
+  return tot;
+}
+
 export async function runDeliveryAlerts() {
   const ms = Date.now(); cycleCount++;
   if (cycleCount % 30 === 0) cleanCaches();
@@ -596,14 +729,12 @@ export async function runDeliveryAlerts() {
   } catch (e) { logger.error({ tag: TAG, err: e?.message }, 'Error motor alertas delivery'); }
 }
 
-export async function getDeliveryAlertSummary(userId) {
+export async function getDeliveryAlertSummary(userId, options = {}) {
   const account = await findAccountByUserId(fakeReq, userId);
   if (!account) return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
-  const bId = account.businessId || '';
-  const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
-  const config = resolveDeliveryAlertConfig(account, businessOp);
-  if (!config.enabled) return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
-  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers] = await Promise.all([
+
+  const filterBiz = bareBusinessId(options.businessId || options.business_id || '');
+  const [allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, businessIds] = await Promise.all([
     fetchDocsOfType(getDeliveryDbName(), 'delivery_order').then((d) => d.filter((o) => o.user_id === userId)),
     fetchDocsOfType(getCatalogDbName(), 'catalog_item').then((d) => d.filter((i) => i.user_id === userId && i.active)),
     fetchCatalogInfraDocs(userId),
@@ -611,20 +742,63 @@ export async function getDeliveryAlertSummary(userId) {
     fetchDocsOfType(getDeliveryDbName(), 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId)),
     fetchPointsOfSale(userId),
     fetchDrivers(userId),
+    resolveOwnerBusinessIds(userId, account),
   ]);
-  const active = filterActiveDeliveryOrders(allOrders);
-  const today = allOrders.filter((o) => isToday(o.createdAt));
-  const dc = account.deliveryConfig || null;
-  if (!canEmitDeliveryAlerts({ deliveryOrders: allOrders, pointsOfSale, deliveryConfig: dc })) {
-    return { alerts: [], summary: { total: 0, byPriority: {}, byType: {} } };
+
+  const targetBizIds = filterBiz
+    ? businessIds.filter((id) => id === filterBiz)
+    : businessIds;
+  // Si piden una empresa concreta que no está en owned, aún así evaluar solo esa (scope estricto).
+  const loopIds = filterBiz && targetBizIds.length === 0 ? [filterBiz] : (targetBizIds.length ? targetBizIds : ['']);
+
+  const pending = [];
+  for (const bId of loopIds) {
+    const scopedPdvs = bId
+      ? await listScopedPointsOfSaleForBusiness(fakeReq, userId, bId).catch(() => [])
+      : pointsOfSale;
+    const scopedPdvIds = new Set(
+      (scopedPdvs || []).map((p) => String(p?._id || p?.id || '').trim()).filter(Boolean),
+    );
+    const orders = bId ? filterOrdersForBusiness(allOrders, bId, scopedPdvIds) : allOrders;
+    const tpvScoped = bId ? filterTpvRegisterSessionsForBusiness(tpvS, bId, scopedPdvIds) : tpvS;
+    const drvScoped = bId ? filterDriverSessionsForBusiness(drvS, bId, scopedPdvIds) : drvS;
+    const pdvScoped = bId
+      ? (scopedPdvs?.length ? scopedPdvs : pointsOfSale.filter((p) => scopedPdvIds.has(String(p?._id || '').trim())))
+      : pointsOfSale;
+
+    const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
+    const config = resolveDeliveryAlertConfig(account, businessOp);
+    if (!config.enabled) continue;
+    const dc = account.deliveryConfig || null;
+    if (!canEmitDeliveryAlerts({ deliveryOrders: orders, pointsOfSale: pdvScoped, deliveryConfig: dc })) continue;
+    const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
+    const active = filterActiveDeliveryOrders(orders);
+    const today = orders.filter((o) => isToday(o.createdAt));
+    pending.push(
+      ...collectDeliveryAlerts({
+        active,
+        today,
+        allOrders: orders,
+        catItems,
+        catalogInfraDocs,
+        tpvS: tpvScoped,
+        drvS: drvScoped,
+        pointsOfSale: pdvScoped,
+        drivers,
+        config,
+        dc,
+        cashCfg,
+        includeMargin: true,
+      }).map((a) => ({ ...a, businessId: bId })),
+    );
   }
-  const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
-  const pending = collectDeliveryAlerts({
-    active, today, allOrders, catItems, catalogInfraDocs, tpvS, drvS, pointsOfSale, drivers, config, dc, cashCfg,
-    includeMargin: true,
-  });
-  const byP = { high: 0, medium: 0, low: 0 }, byT = {};
-  for (const a of pending) { byP[a.priority] = (byP[a.priority] || 0) + 1; byT[a.alertType] = (byT[a.alertType] || 0) + 1; }
+
+  const byP = { high: 0, medium: 0, low: 0 };
+  const byT = {};
+  for (const a of pending) {
+    byP[a.priority] = (byP[a.priority] || 0) + 1;
+    byT[a.alertType] = (byT[a.alertType] || 0) + 1;
+  }
   return { alerts: pending, summary: { total: pending.length, active: pending.length, byPriority: byP, byType: byT } };
 }
 
@@ -666,29 +840,36 @@ export async function triggerReactiveAlert(userId, eventType, payload) {
     if (eventType === 'cash_session_changed') {
       const account = await findAccountByUserId(fakeReq, userId);
       if (!account) return;
-      const bId = account.businessId || '';
-      const businessOp = bId ? await getBusinessAlertsOperational(fakeReq, bId) : null;
-      const config = resolveDeliveryAlertConfig(account, businessOp);
-      if (!config.enabled) return;
       const db = getDeliveryDbName();
       if ((payload?.action === 'closed' || payload?.action === 'pending_review') && payload?.sessionType === 'driver') {
         const drivers = await fetchDrivers(userId);
         if (canEmitDriverCashAlerts(drivers)) {
           const ds = await fetchDocsOfType(db, 'driver_cash_session').then((d) => d.filter((s) => s.user_id === userId));
           const sess = ds.find((s) => s._id === payload?.sessionId);
-          if (sess && Math.abs(sess.difference || 0) >= (config.driverMismatchThreshold || 5)) {
-            await emitDeliveryAlert({
-              userId,
-              businessId: bId,
-              alertType: 'delivery_driver_mismatch',
-              dedupKey: `drv-mismatch-${sess._id}`,
-              priority: Math.abs(sess.difference) >= (config.driverMismatchThreshold || 5) * 3 ? 'high' : 'medium',
-              title: 'Descuadre de caja repartidor',
-              message: `${sess.driverName || 'Repartidor'} cerró caja con diferencia de ${sess.difference >= 0 ? '+' : ''}${Number(sess.difference).toFixed(2)}€`,
-              data: { sessionType: 'driver', sessionId: sess._id, driverName: sess.driverName, difference: sess.difference },
-              route: DELIVERY_CAJA_ROUTE,
-              targetRoles: ['manager', 'owner'],
-            });
+          if (sess && Math.abs(sess.difference || 0) >= 5) {
+            const bId = await resolveBusinessIdForDriverSession(sess);
+            if (!bId) {
+              logger.warn({ tag: TAG, sessionId: sess._id }, 'Descuadre repartidor sin businessId — no se emite (evita otra empresa)');
+              return;
+            }
+            const businessOp = await getBusinessAlertsOperational(fakeReq, bId);
+            const config = resolveDeliveryAlertConfig(account, businessOp);
+            if (!config.enabled) return;
+            const thr = config.driverMismatchThreshold || 5;
+            if (Math.abs(sess.difference || 0) >= thr) {
+              await emitDeliveryAlert({
+                userId,
+                businessId: bId,
+                alertType: 'delivery_driver_mismatch',
+                dedupKey: `drv-mismatch-${sess._id}`,
+                priority: Math.abs(sess.difference) >= thr * 3 ? 'high' : 'medium',
+                title: 'Descuadre de caja repartidor',
+                message: `${sess.driverName || 'Repartidor'} cerró caja con diferencia de ${sess.difference >= 0 ? '+' : ''}${Number(sess.difference).toFixed(2)}€`,
+                data: { sessionType: 'driver', sessionId: sess._id, driverName: sess.driverName, difference: sess.difference },
+                route: DELIVERY_CAJA_ROUTE,
+                targetRoles: ['manager', 'owner'],
+              });
+            }
           }
         }
       }

@@ -2425,8 +2425,14 @@ app.get('/api/dashboard/kpis/:userId', async (req, res) => {
     let deliveryAlertsKpi = null;
     if (['delivery', 'restaurant'].includes(businessType)) {
       try {
+        const kpiBiz = String(req.query.businessId || req.query.business_id || '')
+          .replace(/^business:/, '')
+          .trim();
         const { getDeliveryAlertSummary } = await import('./services/deliveryAlertEngine.js');
-        const dSummary = await getDeliveryAlertSummary(userId);
+        const dSummary = await getDeliveryAlertSummary(
+          userId,
+          kpiBiz ? { businessId: kpiBiz } : {},
+        );
         if (dSummary?.summary?.total > 0) {
           deliveryAlertsKpi = {
             total: dSummary.summary.total,

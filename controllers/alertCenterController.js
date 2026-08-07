@@ -14,6 +14,7 @@ import {
   getAlertsSummary,
   sanitizeNotification,
   notificationMatchesScope,
+  invalidateAlertScopeDocsCache,
 } from '../services/couchdb.js';
 import {
   mutateAlertStatus,
@@ -44,6 +45,8 @@ async function updateAlertDocWithRetry(req, alertId, mutateFn, scopeId = null) {
     const updated = mutateFn(doc);
     try {
       const result = await putDocument(req, NOTIFICATIONS_DB, alertId, updated);
+      if (scopeId) invalidateAlertScopeDocsCache(scopeId);
+      else if (updated?.businessId) invalidateAlertScopeDocsCache(updated.businessId);
       return { ...updated, _rev: result.rev };
     } catch (error) {
       if (attempt < ALERT_PUT_MAX_ATTEMPTS - 1 && isRevisionConflict(error)) {

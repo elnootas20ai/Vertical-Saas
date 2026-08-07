@@ -61,6 +61,8 @@ import {
   getScrapyardSalesDbName,
   getSalesDbName,
   getLeadsDbName,
+  listScopedPointsOfSaleForBusiness,
+  filterTpvRegisterSessionsForBusiness,
 } from './couchdb.js';
 import { getSalaDbName } from './salaService.js';
 import { getButcherDbName } from './butcherShop.js';
@@ -1779,13 +1781,22 @@ async function runAlertsForBusiness(business) {
     const cashCfg = resolveCashRegisterAlertConfig(account, businessOp);
     if (cashCfg.discrepancyEnabled || cashCfg.highReturnEnabled) {
       const deliveryDb = getDeliveryDbName();
-      const [tpvSessions, pointsOfSale] = await Promise.all([
+      // Multi-empresa: solo cajas/PDVs de ESTA empresa (no colgar descuadre de Modomio en PAUNILPOL).
+      const [tpvAll, scopedPdvs] = await Promise.all([
         fetchAllDocsOfType(deliveryDb, 'tpv_register_session').then((d) => d.filter((i) => i.user_id === ownerId)),
-        fetchAllDocsOfType(deliveryDb, 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
+        businessId
+          ? listScopedPointsOfSaleForBusiness(fakeReq, ownerId, businessId).catch(() => [])
+          : fetchAllDocsOfType(deliveryDb, 'point_of_sale').then((d) => d.filter((i) => i.user_id === ownerId)),
       ]);
-      if (canEmitPdvCashAlerts(pointsOfSale)) {
-        if (cashCfg.discrepancyEnabled) results.push(...await checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg, pointsOfSale));
-        if (cashCfg.highReturnEnabled) results.push(...await checkHighReturnInRegister(ctx, tpvSessions, cashCfg, pointsOfSale));
+      const scopedPdvIds = new Set(
+        (scopedPdvs || []).map((p) => String(p?._id || p?.id || '').trim()).filter(Boolean),
+      );
+      const tpvSessions = businessId
+        ? filterTpvRegisterSessionsForBusiness(tpvAll, businessId, scopedPdvIds)
+        : tpvAll;
+      if (canEmitPdvCashAlerts(scopedPdvs)) {
+        if (cashCfg.discrepancyEnabled) results.push(...await checkRegisterDiscrepancy(ctx, tpvSessions, cashCfg, scopedPdvs));
+        if (cashCfg.highReturnEnabled) results.push(...await checkHighReturnInRegister(ctx, tpvSessions, cashCfg, scopedPdvs));
       }
     }
   } catch { /* cash register not active */ }
