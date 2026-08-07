@@ -180,10 +180,8 @@ export function CeoGroupApartados({
             <MoneyTile label="Pendiente" value={formatMoneyEs(pnl.pendingAmount)} />
             <MoneyTile label="Bancos" value={formatMoneyEs(pnl.cashBalance)} />
           </div>
-          <div className="h-[200px] min-h-[180px]">
-            {moneyBars.length === 0 ? (
-              <EmptyChart text="Sin movimientos este mes" />
-            ) : (
+          {moneyBars.length > 0 ? (
+            <div className="h-[160px] sm:h-[200px]">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={moneyBars} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,113,108,0.18)" vertical={false} />
@@ -204,8 +202,10 @@ export function CeoGroupApartados({
                   <Bar dataKey="gastos" fill="#a8a29e" radius={[6, 6, 0, 0]} maxBarSize={28} />
                 </BarChart>
               </ResponsiveContainer>
-            )}
-          </div>
+            </div>
+          ) : (
+            <p className="px-0.5 text-[11px] text-stone-400">Sin movimientos este mes</p>
+          )}
         </div>
       </section>
 
@@ -267,10 +267,8 @@ export function CeoGroupApartados({
               value={rows.length === 0 ? '…' : formatNumberEs(clients.total, { maxFraction: 0 })}
             />
           </div>
-          <div className="h-[140px] px-2 pb-3">
-            {clientChart.length === 0 ? (
-              <EmptyChart text={rows.length === 0 ? 'Cargando clientes…' : 'Sin altas este mes'} />
-            ) : (
+          {clientChart.length > 0 ? (
+            <div className="h-[140px] px-2 pb-3">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={clientChart} layout="vertical" margin={{ top: 4, right: 8, left: 4, bottom: 0 }}>
                   <XAxis type="number" hide />
@@ -293,8 +291,12 @@ export function CeoGroupApartados({
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-            )}
-          </div>
+            </div>
+          ) : (
+            <p className="px-3 pb-3 text-[11px] text-stone-400">
+              {rows.length === 0 ? 'Cargando clientes…' : 'Sin altas este mes'}
+            </p>
+          )}
         </section>
       </div>
 
@@ -407,12 +409,6 @@ function MoneyTile({
         {extra}
       </div>
     </div>
-  );
-}
-
-function EmptyChart({ text }: { text: string }) {
-  return (
-    <div className="flex h-full items-center justify-center text-[11px] text-stone-400">{text}</div>
   );
 }
 
