@@ -1354,6 +1354,8 @@ type ClosingFormDraft = {
   cashSlot: string;
   manualFood: { pizza: string; burger: string; taco: string };
   appsManualDraft: ManualLinesByChannel;
+  /** Solo true si el usuario editó a mano P/B/T (no por auto-guardado del sistema). */
+  foodLockedByUser?: boolean;
 };
 
 function closingDraftStorageKey(sessionId: string): string {
@@ -1594,6 +1596,8 @@ function excelLikeAmountsFromClosedSession(
   const unpaidCard = Math.round(
     Object.values(session.aggregatorClosingCard || {}).reduce((s, n) => s + (Number(n) || 0), 0) * 100,
   ) / 100;
+  /** TOTAL del resumen = canales + no pagado apps (0 no cambia nada). */
+  const total = Math.round((amounts.total + unpaidCash + unpaidCard) * 100) / 100;
   return {
     efectivo: amounts.efectivo,
     tpv: amounts.tpv,
@@ -1602,7 +1606,7 @@ function excelLikeAmountsFromClosedSession(
     uber: amounts.uber,
     justEat: amounts.justEat,
     glovo: amounts.glovo,
-    total: amounts.total,
+    total,
     pizza: amounts.totalPizza,
     burger: amounts.totalBurger,
     taco: amounts.totalTaco,
@@ -1632,8 +1636,12 @@ function ClosingExcelLikeSummary({
     { label: 'UBER', hint: 'Uber Eats (hecho en apps)', value: amounts.uber },
     { label: 'JUST EAT', hint: 'Just Eat (hecho en apps)', value: amounts.justEat },
     { label: 'GLOVO', hint: 'Glovo (hecho en apps)', value: amounts.glovo },
+    { label: 'NO PAG. EFECTIVO', hint: 'Apps no pagado → cajón', value: amounts.unpaidCash },
+    { label: 'NO PAG. TARJETA', hint: 'Apps no pagado (tarjeta)', value: amounts.unpaidCard },
   ];
-  const visibleMoney = moneyLines.filter((l) => l.value > 0 || l.label === 'EFECTIVO' || l.label === 'TPV');
+  const visibleMoney = moneyLines.filter(
+    (l) => l.value > 0 || l.label === 'EFECTIVO' || l.label === 'TPV',
+  );
   const brandLines = (amounts.brands || []).map((b) => {
     const resolved = displayBrandName(b.brandId, brandLabels);
     const name =
@@ -1680,7 +1688,7 @@ function ClosingExcelLikeSummary({
           <div>
             <p className={`font-black text-stone-900 dark:text-stone-50 ${compact ? 'text-sm' : 'text-base'}`}>TOTAL</p>
             {!compact ? (
-              <p className="text-[10px] text-stone-500">Suma de los canales de arriba</p>
+              <p className="text-[10px] text-stone-500">Canales + no pagado apps (si hay)</p>
             ) : null}
           </div>
           <span className={`font-black tabular-nums text-[#2563EB] shrink-0 ${compact ? 'text-lg' : 'text-2xl'}`}>
@@ -1757,22 +1765,6 @@ function ClosingExcelLikeSummary({
             {amounts.diff >= 0 ? '+' : ''}{formatMoneyEs(amounts.diff)}
           </span>
         </div>
-        {(amounts.unpaidCash > 0 || amounts.unpaidCard > 0) && !compact ? (
-          <div className="pt-1.5 mt-1 border-t border-stone-100 dark:border-stone-800 space-y-0.5 text-[11px]">
-            {amounts.unpaidCash > 0 ? (
-              <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
-                <span>No pagado apps → cajón</span>
-                <span className="font-bold tabular-nums">{formatMoneyEs(amounts.unpaidCash)}</span>
-              </div>
-            ) : null}
-            {amounts.unpaidCard > 0 ? (
-              <div className={`flex justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
-                <span>No pagado apps (tarjeta)</span>
-                <span className="font-bold tabular-nums">{formatMoneyEs(amounts.unpaidCard)}</span>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     </div>
   );
@@ -1823,8 +1815,14 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     }
     return { pizza: '', burger: '', taco: '' };
   });
-  /** El usuario ha tocado P/B/T o restauró un borrador con totales > 0: no pisar con el sistema. */
-  const [foodLockedByUser, setFoodLockedByUser] = useState(() => draftHasFood);
+  /**
+   * Solo bloquea el auto-conteo si el usuario editó P/B/T a mano.
+   * Antes: cualquier borrador con números (auto-guardados a media jornada) congelaba
+   * pizzas/tacos (p. ej. 13) y no subían al cerrar — TOTAL TACOS a 0 o corto.
+   */
+  const [foodLockedByUser, setFoodLockedByUser] = useState(
+    () => savedDraft?.foodLockedByUser === true,
+  );
   const [appsSnapshot, setAppsSnapshot] = useState<AggregatorClosingSnapshot | null>(null);
   const [appsManualDraft, setAppsManualDraft] = useState<ManualLinesByChannel>(
     () => savedDraft?.appsManualDraft || {},
@@ -1929,7 +1927,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     cashSlot,
     manualFood,
     appsManualDraft,
-  }), [counts, notes, cashSlot, manualFood, appsManualDraft]);
+    foodLockedByUser,
+  }), [counts, notes, cashSlot, manualFood, appsManualDraft, foodLockedByUser]);
 
   const persistDraft = useCallback(() => {
     if (!sessionId) return;
@@ -1954,10 +1953,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
         cashSlot,
         manualFood,
         appsManualDraft,
+        foodLockedByUser,
       });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [sessionId, counts, notes, cashSlot, manualFood, appsManualDraft]);
+  }, [sessionId, counts, notes, cashSlot, manualFood, appsManualDraft, foodLockedByUser]);
 
   const closingFoodByChannel = appsSnapshot?.foodByChannel ?? {};
   const appsFoodTotals = appsSnapshot?.foodTotals ?? emptyFoodFamilyCounts();
@@ -1984,16 +1984,25 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
   const tpvCashSales = Math.round((Number(summary.salesByMethod.efectivo) || 0) * 100) / 100;
   const tpvCardSales = Math.round((Number(summary.salesByMethod.tarjeta) || 0) * 100) / 100;
   const tpvAllSales = Math.round((Number(summary.totalSales) || 0) * 100) / 100;
-  const integratorsTotal = Math.round(
+  /** Caja 2 = solo hecho en apps. */
+  const hechoAppsTotal = Math.round(
     (appsSnapshot?.appTotal
       ?? finalAggregatorRows.reduce((s, r) => s + (Number(r.totalSales) || 0), 0)) * 100,
+  ) / 100;
+  const integratorsTotal = hechoAppsTotal;
+  /**
+   * Caja 1 (Vertial) = ventas TPV + no pagado apps (tarjeta y efectivo).
+   * Si no pagado = 0, el total no cambia.
+   */
+  const caja1Total = Math.round(
+    (tpvAllSales + aggregatorCashTotal + aggregatorCardTotal) * 100,
   ) / 100;
   /** Esperado físico en cajón = efectivo TPV (fondo+cobros+entradas−salidas) + no pagado efectivo apps. */
   const dayDrawerExpected = expected;
   /** Cobros tarjeta tienda + no pagado tarjeta apps (informativo; no es el cajón). */
   const dayCardCollected = Math.round((tpvCardSales + aggregatorCardTotal) * 100) / 100;
-  /** Facturación día = ventas TPV + hecho en apps (2ª caja). El no pagado no se suma otra vez. */
-  const dayMoneyTotal = Math.round((tpvAllSales + integratorsTotal) * 100) / 100;
+  /** Facturación día = Caja 1 Vertial + Caja 2 integraciones. */
+  const dayMoneyTotal = Math.round((caja1Total + integratorsTotal) * 100) / 100;
   /** Fila tipo resumen con los totales del cierre en vivo. */
   const excelDaySummaryBase = useMemo((): ClosingExcelLikeAmounts => {
     const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -2010,6 +2019,8 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     const uber = ch('ubereats');
     const justEat = ch('justeat');
     const glovo = ch('glovo');
+    const unpaidCash = aggregatorCashTotal;
+    const unpaidCard = aggregatorCardTotal;
     return {
       efectivo,
       tpv,
@@ -2018,15 +2029,15 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       uber,
       justEat,
       glovo,
-      total: r2(efectivo + tpv + x + app + uber + justEat + glovo),
+      total: r2(efectivo + tpv + x + app + uber + justEat + glovo + unpaidCash + unpaidCard),
       pizza: closingFood.pizza,
       burger: closingFood.burger,
       taco: closingFood.taco,
       expected: dayDrawerExpected,
       counted: countedTotal,
       diff,
-      unpaidCash: aggregatorCashTotal,
-      unpaidCard: aggregatorCardTotal,
+      unpaidCash,
+      unpaidCard,
       brands: [],
     };
   }, [
@@ -2210,7 +2221,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
       const scaled = scaleAppsBrandTotalsToAppTotal(
         appsBrandBilling.rows,
         appsBrandBilling.unbranded,
-        integratorsTotal,
+        hechoAppsTotal,
       );
       caja2Lines = sumAppsBrandTotalsBySlot(closingBrands, scaled.rows, scaled.unbranded);
     }
@@ -2223,7 +2234,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
     brandLabels,
     appsBrandBilling.rows,
     appsBrandBilling.unbranded,
-    integratorsTotal,
+    hechoAppsTotal,
     brandBilling.rows,
   ]);
 
@@ -2495,11 +2506,11 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         Caja 1
                       </p>
                       <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
-                        Tienda (TPV)
+                        Vertial (TPV)
                       </p>
                     </div>
                     <p className="text-lg font-black tabular-nums text-stone-900 dark:text-stone-50">
-                      {formatMoneyEs(tpvAllSales)}
+                      {formatMoneyEs(caja1Total)}
                     </p>
                   </div>
                   <div className="space-y-1 text-[11px]">
@@ -2529,6 +2540,30 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         </span>
                       </div>
                     ) : null}
+                    {aggregatorCashTotal > 0 ? (
+                      <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
+                        <span className="font-semibold">No pagado efectivo → cajón</span>
+                        <span className="font-black tabular-nums">
+                          {formatMoneyEs(aggregatorCashTotal)}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div
+                    className={`rounded-xl border px-2.5 py-2 ${VERTIAL_CARD_BORDER} ${VERTIAL_CARD_BG}`}
+                  >
+                    <div className={`flex items-center justify-between gap-2 ${VERTIAL_CARD_TEXT}`}>
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold">
+                        <CreditCard className="w-3.5 h-3.5" />
+                        Tarjeta no pagado
+                      </span>
+                      <span className="text-base font-black tabular-nums">
+                        {formatMoneyEs(aggregatorCardTotal)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-stone-500 dark:text-stone-400">
+                      Apps · suma a Caja 1
+                    </p>
                   </div>
                   {brandBilling.rows.length > 0 ? (
                     <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 space-y-0.5">
@@ -2557,7 +2592,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         Caja 2
                       </p>
                       <p className="text-sm font-bold text-blue-950 dark:text-blue-50">
-                        Apps (hecho en app)
+                        Integraciones (hecho en app)
                       </p>
                     </div>
                     <p className="text-lg font-black tabular-nums text-blue-950 dark:text-blue-50">
@@ -2583,14 +2618,6 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         </div>
                       );
                     })}
-                    {aggregatorCashTotal > 0 ? (
-                      <div className={`flex justify-between gap-2 ${VERTIAL_CASH_TEXT}`}>
-                        <span className="font-semibold">No pagado efectivo → cajón</span>
-                        <span className="font-black tabular-nums">
-                          {formatMoneyEs(aggregatorCashTotal)}
-                        </span>
-                      </div>
-                    ) : null}
                   </div>
                   {appsBrandBilling.rows.length > 0 ? (
                     <div className="border-t border-blue-200/60 dark:border-blue-900/40 pt-1.5 space-y-0.5">
@@ -2616,7 +2643,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <div className="shrink-0">
                 <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Contar el cajón</p>
                 <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                  Esperado = Caja 1 efectivo + no pagado efectivo de Caja 2. La tarjeta no pagada no entra aquí.
+                  Esperado = efectivo TPV + no pagado efectivo apps. La tarjeta no pagada suma a Caja 1, no al cajón.
                 </p>
               </div>
 
@@ -2646,7 +2673,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     <span className="font-bold tabular-nums">{formatMoneyEs(expectedTpv)}</span>
                   </div>
                   <div className="flex justify-between gap-2 items-baseline text-stone-600 dark:text-stone-300">
-                    <span>+ Caja 2 no pagado efectivo</span>
+                    <span>+ No pagado efectivo apps</span>
                     <span className="font-bold tabular-nums">{formatMoneyEs(aggregatorCashTotal)}</span>
                   </div>
                   <div className={`flex justify-between gap-2 items-baseline border-t border-stone-100 dark:border-stone-800 pt-1.5 ${VERTIAL_CASH_TEXT}`}>
@@ -2830,7 +2857,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
               <div className="shrink-0 space-y-2">
                 <ClosingExcelLikeSummary amounts={excelDaySummary} brandLabels={brandLabels} />
                 <p className="text-[11px] text-stone-500 px-0.5 tabular-nums">
-                  Comprobación: Caja 1 {formatMoneyEs(tpvAllSales)} + Caja 2 {formatMoneyEs(integratorsTotal)}
+                  Comprobación: Caja 1 {formatMoneyEs(caja1Total)} + Caja 2 {formatMoneyEs(integratorsTotal)}
                   {' = '}
                   <strong className="text-stone-800 dark:text-stone-100">{formatMoneyEs(dayMoneyTotal)}</strong>
                   {dayCardCollected > 0 ? (
@@ -3138,7 +3165,7 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                         scaleAppsBrandTotalsToAppTotal(
                           appsBrandBilling.rows,
                           appsBrandBilling.unbranded,
-                          integratorsTotal,
+                          hechoAppsTotal,
                         ).rows,
                         finalAggregatorRows
                           .filter((r) => (Number(r.totalSales) || 0) > 0)

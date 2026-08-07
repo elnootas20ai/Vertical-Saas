@@ -388,17 +388,93 @@ describe('buildShiftBrandRevenue', () => {
 });
 
 describe('absorbUnbrandedIntoBrandRows — orphanMode', () => {
-  it('unassigned deja Sin marca', () => {
+  it('legacy unassigned ya no deja Sin marca (cae a dominante)', () => {
     const out = absorbUnbrandedIntoBrandRows(
       {
-        rows: [{ brandId: 'modo', name: 'M', revenue: 10, orderCount: 1, sharePercent: 100, revenueEfectivo: 10, revenueTarjeta: 0 }],
+        rows: [{
+          brandId: 'modo',
+          name: 'M',
+          revenue: 10,
+          orderCount: 1,
+          sharePercent: 100,
+          revenueEfectivo: 10,
+          revenueTarjeta: 0,
+          ownRevenue: 10,
+          sharedAssigned: 0,
+          why: '',
+        }],
         unbranded: 3,
+        unbrandedEfectivo: 0,
+        unbrandedTarjeta: 3,
         total: 13,
       },
       { orphanMode: 'unassigned' },
     );
-    expect(out.unbranded).toBe(3);
-    expect(out.rows[0].revenue).toBe(10);
+    expect(out.unbranded).toBe(0);
+    expect(out.rows[0].revenue).toBe(13);
+    expect(out.rows[0].revenueTarjeta).toBe(3);
+    expect(out.rows[0].revenueEfectivo).toBe(10);
+  });
+
+  it('helado suelto solo (sin ventas de marca): ancla a fallback y respeta tarjeta', () => {
+    const out = absorbUnbrandedIntoBrandRows(
+      {
+        rows: [],
+        unbranded: 11,
+        unbrandedEfectivo: 0,
+        unbrandedTarjeta: 11,
+        total: 11,
+      },
+      { orphanMode: 'shift_majority' },
+      { modo: 'Modomio', bb: 'Black Burger' },
+      { fallbackBrandIds: ['modo', 'bb'] },
+    );
+    expect(out.unbranded).toBe(0);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0].brandId).toBe('modo');
+    expect(out.rows[0].revenue).toBe(11);
+    expect(out.rows[0].revenueTarjeta).toBe(11);
+    expect(out.rows[0].revenueEfectivo).toBe(0);
+  });
+});
+
+describe('buildShiftBrandRevenue — suelto tarjeta', () => {
+  it('helado solo cobrado en tarjeta: va a marca y a revenueTarjeta', () => {
+    const session = {
+      openedAt: '2026-07-15T09:00:00.000Z',
+      closedAt: '2026-07-15T22:00:00.000Z',
+      status: 'closed',
+      pointOfSaleId: 'pdv1',
+      transactions: [
+        {
+          type: 'sale',
+          amount: 11,
+          paymentMethod: 'tarjeta',
+          linkedDeliveryOrderId: 'helado-1',
+          orderId: 'helado-1',
+          date: '2026-07-15T12:00:00.000Z',
+        },
+      ],
+    };
+    const orders = [
+      paidOrder({
+        _id: 'helado-1',
+        totalAmount: 11,
+        paidAmount: 11,
+        paymentMethod: 'tarjeta',
+        items: [{ category: 'Postres', name: 'Helado', quantity: 1, total: 11 }],
+      }),
+    ];
+    const { rows, unbranded } = buildShiftBrandRevenue(
+      session,
+      orders,
+      { modo: 'Modomio', bb: 'Black Burger' },
+      { orphanMode: 'shift_majority', monoBrandTakesAll: true, sharedSplitMode: 'majority' },
+    );
+    expect(unbranded).toBe(0);
+    expect(rows[0]?.revenue).toBe(11);
+    expect(rows[0]?.revenueTarjeta).toBe(11);
+    expect(rows[0]?.revenueEfectivo).toBe(0);
   });
 });
 

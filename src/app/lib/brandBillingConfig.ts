@@ -38,9 +38,9 @@ export type BrandBillingSharedSplitMode = 'majority' | 'by_units' | 'equal';
  * - shift_majority: todo a la marca que más ha facturado en el turno
  * - equal: a medias entre las marcas del turno / hojas
  * - fixed_brand: siempre a orphanFixedBrandId
- * - unassigned: dejar «Sin marca» (no recomendado)
+ * Nunca se deja «Sin marca»: `unassigned` legacy se normaliza a shift_majority.
  */
-export type BrandBillingOrphanMode = 'shift_majority' | 'equal' | 'fixed_brand' | 'unassigned';
+export type BrandBillingOrphanMode = 'shift_majority' | 'equal' | 'fixed_brand';
 
 export type BrandBillingConfig = {
   _id: string;
@@ -132,20 +132,14 @@ export const ORPHAN_MODE_OPTIONS: Array<{
     hint: 'Elige abajo a qué marca va todo lo suelto sin marca (recomendado si casi todo es de una).',
     example: 'Cerveza suelta 3 € → siempre a la marca que elijas',
   },
-  {
-    value: 'unassigned',
-    label: 'Dejar sin marca',
-    shortLabel: 'Sin asignar',
-    hint: 'No recomendado: verás «Sin marca» en el cierre. Solo si quieres revisarlo a mano.',
-    example: 'Cerveza 3 € → aparece como Sin marca 3 €',
-  },
 ];
 
 export function normalizeBillingOrphanMode(
   raw: string | null | undefined,
 ): BrandBillingOrphanMode {
   const mode = String(raw || 'shift_majority').trim();
-  if (mode === 'equal' || mode === 'fixed_brand' || mode === 'unassigned') return mode;
+  // Legacy «unassigned» / basura → dominante (nunca dejar Sin marca en cierre).
+  if (mode === 'equal' || mode === 'fixed_brand') return mode;
   return 'shift_majority';
 }
 

@@ -48,12 +48,10 @@ function ActiveRuleSummary({
     : 'si solo hay una marca, la bebida puede quedar sin asignar';
   const orphanLabel =
     orphanMode === 'equal'
-      ? 'si el pedido va suelto (solo cerveza, etc.), a medias entre marcas del turno'
+      ? 'si el pedido va suelto (solo cerveza/helado…), a medias entre marcas del turno'
       : orphanMode === 'fixed_brand'
         ? `si el pedido va suelto, siempre a ${orphanBrandName || 'la marca fija'}`
-        : orphanMode === 'unassigned'
-          ? 'si el pedido va suelto, queda Sin marca'
-          : 'si el pedido va suelto, a la marca que más lleva el turno';
+        : 'si el pedido va suelto, a la marca que más lleva el turno';
 
   return (
     <div className="rounded-lg border border-emerald-200 bg-emerald-50/90 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/40">
@@ -61,10 +59,11 @@ function ActiveRuleSummary({
         Ahora mismo
       </p>
       <p className="mt-1 text-[11px] leading-snug text-emerald-950 dark:text-emerald-100">
-        {monoLabel}. {mixLabel}. Y {orphanLabel}.
+        {monoLabel}. {mixLabel}. Y {orphanLabel}. Nunca queda «Sin marca».
       </p>
       <p className="mt-1.5 text-[10px] text-emerald-800/80 dark:text-emerald-300/80">
-        Lo de cada marca sigue yendo a su marca. Esto solo mueve lo que no tiene marca (bebidas, sueltos…).
+        Lo de cada marca sigue yendo a su marca. Bebidas/postres/sueltos se reparte según estas reglas.
+        Efectivo y tarjeta siguen el cobro real del pedido.
       </p>
     </div>
   );
@@ -489,8 +488,8 @@ export function BrandBillingSettingsPanel({
                 3 · Pedido suelto (sin ninguna marca)
               </p>
               <p className="text-[11px] leading-snug text-gray-600 dark:text-gray-300">
-                Una cerveza sola, solo bebidas, o cualquier ticket donde <span className="font-semibold">nada</span> tiene marca.
-                Tiene que ir a alguna marca igual:
+                Helado, cerveza sola, solo bebidas… ticket donde <span className="font-semibold">nada</span> tiene marca.
+                <span className="font-semibold"> Siempre</span> va a una marca (nunca «Sin marca»). Elige cómo:
               </p>
               <div className="grid gap-2 sm:grid-cols-2">
                 {ORPHAN_MODE_OPTIONS.map((opt) => {

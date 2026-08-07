@@ -102,7 +102,8 @@ export function parseComboExtraLine(raw: string): { name: string; units: number 
 
 function isLikelyNonMainComboExtra(name: string): boolean {
   const n = fold(name);
-  return /bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|patata|frita|complemento|acompan|postre|helado|tiramisu|nugget|alita|ensalada|salad|dip|salsa|brownie|cookie|batido|smoothie|zumo|nestea|aquarius|red.?bull|monster|maiz|pan\b|aros|tequeno|salchipapa|chicken\s*balls?/.test(
+  // Bebidas / cervezas / sides del combo: NUNCA suman como pizza (p. ej. «Moritz 0,0» en un Dúo).
+  return /bebida|refresco|agua|coca|fanta|sprite|cerveza|vino|cafe|te\b|patata|frita|complemento|acompan|postre|helado|tiramisu|nugget|alita|ensalada|salad|dip|salsa|brownie|cookie|batido|smoothie|zumo|nestea|aquarius|red.?bull|monster|maiz|pan\b|aros|tequeno|salchipapa|chicken\s*balls?|moritz|estrella|mahou|heineken|amstel|cruzcampo|san\s*miguel|coronita|desperados|free\s*damm|0[,.]0|sin\s*alcohol|radler|clara\b|tonica|schweppes|seven\s*up|7\s*up|kas\b|trinkata|powerade|gatorade|monster|burn\b|appletiser/.test(
     n,
   );
 }

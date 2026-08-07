@@ -119,6 +119,31 @@ describe('buildShiftFoodFamilyReport', () => {
     expect(report.total.pizza).toBe(6);
   });
 
+  it('Dúo: cerveza Moritz no suma como pizza (caso Badalona)', () => {
+    const report = buildShiftFoodFamilyReport([
+      {
+        _id: 'duo-moritz',
+        channel: 'tpv',
+        status: 'entregado',
+        items: [
+          {
+            name: 'Dúo',
+            category: 'Combos',
+            quantity: 1,
+            extras: [
+              '▸ 4 Quesos',
+              '▸ Pepperoni',
+              '▸ Patatas Monalisa',
+              '▸ Coca-Cola',
+              '▸ Moritz 0,0',
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(report.total).toEqual({ pizza: 2, burger: 0, taco: 0 });
+  });
+
   it('no convierte burgers con “Familiar” en pizzas', () => {
     const report = buildShiftFoodFamilyReport([
       {

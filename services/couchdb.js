@@ -10508,10 +10508,9 @@ export function buildBrandBillingConfigDocument(businessId, data = {}, existing 
   const orphanRaw =
     data.orphanMode !== undefined ? data.orphanMode : existing?.orphanMode;
   const orphanStr = String(orphanRaw || 'shift_majority').trim();
+  // Nunca persistir «unassigned»: los sueltos siempre van a una marca.
   const orphanMode =
-    orphanStr === 'equal' || orphanStr === 'fixed_brand' || orphanStr === 'unassigned'
-      ? orphanStr
-      : 'shift_majority';
+    orphanStr === 'equal' || orphanStr === 'fixed_brand' ? orphanStr : 'shift_majority';
   const orphanFixedBrandId = String(
     data.orphanFixedBrandId !== undefined
       ? data.orphanFixedBrandId
@@ -10541,9 +10540,7 @@ export function sanitizeBrandBillingConfig(doc) {
     modeStr === 'equal' || modeStr === 'by_units' ? 'equal' : 'majority';
   const orphanStr = String(doc.orphanMode || 'shift_majority').trim();
   const orphanMode =
-    orphanStr === 'equal' || orphanStr === 'fixed_brand' || orphanStr === 'unassigned'
-      ? orphanStr
-      : 'shift_majority';
+    orphanStr === 'equal' || orphanStr === 'fixed_brand' ? orphanStr : 'shift_majority';
   return {
     _id: doc._id,
     _rev: doc._rev,
