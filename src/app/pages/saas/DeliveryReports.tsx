@@ -213,7 +213,7 @@ export function DeliveryReports() {
   };
 
   return (
-    <Layout title="Informes Delivery" subtitle="Rendimiento operativo y económico con datos reales">
+    <Layout backTo="/saas/delivery-ops" title="Informes Delivery" subtitle="Rendimiento operativo y económico con datos reales">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">

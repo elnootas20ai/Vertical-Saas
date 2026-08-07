@@ -4814,7 +4814,7 @@ export function CatalogPage() {
   const catalogBusy = loading && catalogItems.length === 0;
 
   return (
-    <Layout title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
+    <Layout backTo="/saas/delivery-ops" title="Catálogo" subtitle="Gestión de productos, proveedores y compras">
       <div className="space-y-3">
         {!pageReady && (
           <CatalogTabLoadingState phase="session" />

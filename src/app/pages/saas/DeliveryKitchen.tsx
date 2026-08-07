@@ -964,7 +964,7 @@ export function DeliveryKitchen() {
   }, [mobileTab, colQueue, colKitchen, colReady]);
 
   return (
-    <Layout title="Cocina / KDS" noPadding>
+    <Layout backTo="/saas/delivery-ops" title="Cocina / KDS" noPadding>
       <div className="flex flex-col h-[calc(100vh-64px)] min-h-0">
         {/* ── KPI bar ────────────────────────────────────────────────────── */}
         <div className="shrink-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 px-4 py-3">

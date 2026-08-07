@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, type MouseEvent } fr
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Layout } from '../../components/saas/Layout';
+import { useIsMobile } from '../../components/ui/use-mobile';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness } from '../../context/BusinessContext';
 import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
@@ -41,6 +42,7 @@ import { getAuthHeaders } from '../../lib/authApi';
 import { fetchDailySummary, type DailySummary } from '../../lib/clockinsApi';
 import {
   getOpsCenterRequest,
+  invalidateOpsCenterCache,
   localDateInputValue,
   pointOfSaleDisplayLabel,
   dedupePointsOfSale,
@@ -133,6 +135,7 @@ function FiltersBar({
   viewMode,
   onViewModeChange,
   sticky = false,
+  hideLiveAll = false,
 }: {
   filters: OpsCenterFilters;
   onChange: (f: OpsCenterFilters) => void;
@@ -142,6 +145,8 @@ function FiltersBar({
   onViewModeChange: (mode: DeliveryOpsViewMode, salesPointId?: string) => void;
   /** Solo útil fuera de paneles con scroll interno; dentro de Ops evita huecos raros */
   sticky?: boolean;
+  /** Móvil: sin multi-fetch «todas». */
+  hideLiveAll?: boolean;
 }) {
   const nav = useNavigate();
   const { user } = useAuth();
@@ -232,7 +237,9 @@ function FiltersBar({
               onViewModeChange('single', v || undefined);
             }}
           >
-            <option value={DELIVERY_OPS_LIVE_ALL_FILTER}>En directo · todas</option>
+            {!hideLiveAll ? (
+              <option value={DELIVERY_OPS_LIVE_ALL_FILTER}>En directo · todas</option>
+            ) : null}
             {pdvs.map((p) => (
               <option key={p._id} value={p._id}>
                 {pointOfSaleDisplayLabel(p)}
@@ -1563,6 +1570,7 @@ export function DeliveryOpsCenter() {
   const activeStoreScope = useActiveStoreScope();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     const panel = searchParams.get('panel')?.trim();
@@ -1675,7 +1683,8 @@ export function DeliveryOpsCenter() {
     return (data?.pointsOfSale ?? []).filter((p) => p.active !== false);
   }, [activeStoreScope.pointsOfSale, activeStoreScope.allPointsOfSale, data?.pointsOfSale]);
 
-  const isLiveAll = opsViewMode === 'live_all' && opsPdvs.length > 1;
+  /** En móvil no multi-fetch «todas las tiendas» (N× ops-center = timeout). */
+  const isLiveAll = !isMobile && opsViewMode === 'live_all' && opsPdvs.length > 1;
 
   const resolvedOpsPdvId = useMemo(() => {
     if (isLiveAll) return null;
@@ -1733,6 +1742,25 @@ export function DeliveryOpsCenter() {
       notifyDeliveryActiveStoreChanged();
     }
   }, [currentBusiness?.business_id, currentBusiness?.id, dataUserId]);
+
+  /** Móvil web / app: forzar 1 tienda (más rápido y usable). */
+  useEffect(() => {
+    if (!isMobile) return;
+    if (opsViewMode !== 'live_all') return;
+    const pdvId =
+      activeStoreScope.activeSalesPointId
+      || resolvedOpsPdvId
+      || opsPdvs[0]?._id
+      || '';
+    handleViewModeChange('single', pdvId || undefined);
+  }, [
+    isMobile,
+    opsViewMode,
+    activeStoreScope.activeSalesPointId,
+    resolvedOpsPdvId,
+    opsPdvs,
+    handleViewModeChange,
+  ]);
 
   /** Alinear filtro Ops con sidebar / localStorage en cuanto haya PDVs en scope (modo 1 tienda). */
   useEffect(() => {
@@ -1868,7 +1896,7 @@ export function DeliveryOpsCenter() {
     [navFromOps],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { bypassCache?: boolean }) => {
     if (!authUserId) {
       setLoading(false);
       return;
@@ -1877,6 +1905,8 @@ export function DeliveryOpsCenter() {
       setLoading(false);
       return;
     }
+    const bypassCache = Boolean(opts?.bypassCache);
+    if (bypassCache) invalidateOpsCenterCache(authUserId);
     const seq = ++loadSeqRef.current;
     try {
       const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
@@ -1890,10 +1920,14 @@ export function DeliveryOpsCenter() {
         const results = await Promise.all(
           opsPdvs.map(async (pdv) => {
             try {
-              const row = await getOpsCenterRequest(authUserId, {
-                ...baseFilters,
-                salesPointId: pdv._id,
-              });
+              const row = await getOpsCenterRequest(
+                authUserId,
+                {
+                  ...baseFilters,
+                  salesPointId: pdv._id,
+                },
+                { bypassCache },
+              );
               return [pdv._id, row] as const;
             } catch (e) {
               console.error('ops-center live pdv error', pdv._id, e);
@@ -1936,7 +1970,7 @@ export function DeliveryOpsCenter() {
           ...baseFilters,
           ...(resolvedOpsPdvId ? { salesPointId: resolvedOpsPdvId } : {}),
         };
-        const r = await getOpsCenterRequest(authUserId, effectiveFilters);
+        const r = await getOpsCenterRequest(authUserId, effectiveFilters, { bypassCache });
         if (seq !== loadSeqRef.current) return;
         setLiveByPdv({});
         setData(r);
@@ -1958,7 +1992,7 @@ export function DeliveryOpsCenter() {
     opsPdvs,
   ]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
     const businessId = String(currentBusiness?.business_id || currentBusiness?.id || '').trim();
@@ -1982,7 +2016,7 @@ export function DeliveryOpsCenter() {
 
   useEffect(() => {
     const onLocalLive = () => {
-      void load();
+      void load({ bypassCache: true });
     };
     window.addEventListener(DELIVERY_OPS_LIVE_EVENT, onLocalLive);
     return () => window.removeEventListener(DELIVERY_OPS_LIVE_EVENT, onLocalLive);
@@ -1996,7 +2030,7 @@ export function DeliveryOpsCenter() {
       }
       return;
     }
-    poll.current = setInterval(load, 30000);
+    poll.current = setInterval(() => { void load({ bypassCache: true }); }, 30000);
     return () => { if (poll.current) clearInterval(poll.current); };
   }, [load, sseOk]);
 
@@ -2012,23 +2046,23 @@ export function DeliveryOpsCenter() {
         return f;
       });
       if (data?.date && data.date !== today) {
-        load();
+        void load({ bypassCache: true });
       }
     }, 60_000);
     return () => clearInterval(tick);
   }, [data?.date, load]);
 
   const handlers = useMemo(() => ({
-    'delivery:order_created': () => load(),
-    'delivery:order_updated': () => load(),
-    'delivery:order_status_changed': () => load(),
-    'delivery:incident_reported': () => load(),
-    'delivery:incident_resolved': () => load(),
-    delivery_order_created: () => load(),
-    delivery_order_updated: () => load(),
-    delivery_order_cancelled: () => load(),
-    tpv_session_updated: () => load(),
-    delivery_payment_registered: () => load(),
+    'delivery:order_created': () => { void load({ bypassCache: true }); },
+    'delivery:order_updated': () => { void load({ bypassCache: true }); },
+    'delivery:order_status_changed': () => { void load({ bypassCache: true }); },
+    'delivery:incident_reported': () => { void load({ bypassCache: true }); },
+    'delivery:incident_resolved': () => { void load({ bypassCache: true }); },
+    delivery_order_created: () => { void load({ bypassCache: true }); },
+    delivery_order_updated: () => { void load({ bypassCache: true }); },
+    delivery_order_cancelled: () => { void load({ bypassCache: true }); },
+    tpv_session_updated: () => { void load({ bypassCache: true }); },
+    delivery_payment_registered: () => { void load({ bypassCache: true }); },
     connected: () => setSseOk(true),
     disconnected: () => setSseOk(false),
     reconnecting: () => setSseOk(false),
@@ -2050,7 +2084,7 @@ export function DeliveryOpsCenter() {
         stageHistory: [...(order.stageHistory || []), { status: s, date: new Date().toISOString(), user: user.fullName || 'Sistema' }],
       });
       toast.success(`${order.orderNumber} → ${STATUS_CFG[s]?.label || s}`);
-      load();
+      void load({ bypassCache: true });
     } catch { toast.error('Error al actualizar'); }
   }, [authUserId, user, load]);
 
@@ -2162,7 +2196,7 @@ export function DeliveryOpsCenter() {
               )}
             </span>
             <div className="flex-1 min-w-[4px]" />
-            <button type="button" onClick={load} className="p-2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100 rounded-md hover:bg-white/80 dark:hover:bg-gray-800 border border-transparent hover:border-gray-200 dark:hover:border-gray-600 transition-colors shrink-0" title="Actualizar">
+            <button type="button" onClick={() => void load({ bypassCache: true })} className="p-2 text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100 rounded-md hover:bg-white/80 dark:hover:bg-gray-800 border border-transparent hover:border-gray-200 dark:hover:border-gray-600 transition-colors shrink-0" title="Actualizar">
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -2185,6 +2219,7 @@ export function DeliveryOpsCenter() {
               viewMode={isLiveAll ? 'live_all' : opsViewMode}
               onViewModeChange={handleViewModeChange}
               sticky={false}
+              hideLiveAll={isMobile}
             />
 
             {data?.alerts && data.alerts.length > 0 && (

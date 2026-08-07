@@ -41,6 +41,8 @@ interface LayoutProps {
   noPadding?: boolean;
   titleClassName?: string;
   subtitleClassName?: string;
+  /** false = ocultar Atrás; string = destino fijo; omitir = auto */
+  backTo?: string | false;
 }
 
 /** Shell persistente: sidebar + topbar montados una sola vez por sesión SaaS. */
@@ -64,8 +66,9 @@ export function Layout({
   noPadding,
   titleClassName,
   subtitleClassName,
+  backTo,
 }: LayoutProps) {
-  useRegisterPageLayout({ title, subtitle, noPadding, titleClassName, subtitleClassName });
+  useRegisterPageLayout({ title, subtitle, noPadding, titleClassName, subtitleClassName, backTo });
   return <>{children}</>;
 }
 
@@ -151,7 +154,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
   const auth = useAuthOptional();
   const navigate = useNavigate();
   const location = useLocation();
-  const { title, subtitle, noPadding, titleClassName, subtitleClassName } = usePageLayoutConfig();
+  const { title, subtitle, noPadding, titleClassName, subtitleClassName, backTo } = usePageLayoutConfig();
   const user = auth?.user;
   const { businesses, currentBusiness } = useBusiness();
   const switchActiveBusiness = useSwitchActiveBusiness();
@@ -309,6 +312,7 @@ function SaasAppShellInner({ children }: { children: ReactNode }) {
           subtitle={subtitle}
           titleClassName={titleClassName}
           subtitleClassName={subtitleClassName}
+          backTo={backTo}
           onToggleSidebar={handleToggleSidebar}
           onOpenGlobalSearch={() => setGlobalSearchOpen(true)}
         />

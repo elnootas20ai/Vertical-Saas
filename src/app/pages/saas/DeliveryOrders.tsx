@@ -519,7 +519,7 @@ export function DeliveryOrders() {
   // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <Layout title="Pedidos" subtitle="Gestión omnicanal de pedidos">
+    <Layout backTo="/saas/delivery-ops" title="Pedidos" subtitle="Gestión omnicanal de pedidos">
       <div className="space-y-5">
         {/* Alerts */}
         <DeliveryAlertsBar alerts={alerts} onDismiss={(id) => setDismissedAlerts((prev) => new Set(prev).add(id))} />

@@ -43,3 +43,4 @@ export {
 export { DeliveryOpsInsightsPanel } from './DeliveryOpsInsightsPanel';
 
 export { DeliveryMobileDashboardBlocks } from './DeliveryMobileDashboardBlocks';
+export { DeliveryMobileHomeAlerts } from './DeliveryMobileHomeAlerts';

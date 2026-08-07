@@ -385,7 +385,7 @@ export function DeliveryCrm() {
 
   if (loading) {
     return (
-      <Layout title="CRM Delivery" subtitle="Fidelización y retención de clientes">
+      <Layout backTo="/saas/delivery-ops" title="CRM Delivery" subtitle="Fidelización y retención de clientes">
         <div className="flex items-center justify-center py-32">
           <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -394,7 +394,7 @@ export function DeliveryCrm() {
   }
 
   return (
-    <Layout title="CRM Delivery" subtitle="Fidelización y retención de clientes">
+    <Layout backTo="/saas/delivery-ops" title="CRM Delivery" subtitle="Fidelización y retención de clientes">
       <div className="space-y-6">
         {/* Tabs */}
         <Tabs tabs={tabs} activeTab={activeTab} onChange={(id) => setActiveTab(id as TabId)} />

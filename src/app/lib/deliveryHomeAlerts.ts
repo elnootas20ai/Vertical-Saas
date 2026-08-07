@@ -114,7 +114,8 @@ export function countAlertsByHomeBlock(alerts: AlertRecord[]): Record<DeliveryHo
     cobro: 0,
   };
   for (const alert of alerts) {
-    if (!isDeliveryHomeCompactAlert(alert) && blockIdForAlert(alert) === null) continue;
+    // Solo el pack compacto delivery (no el centro genérico de cientos de alertas).
+    if (!isDeliveryHomeCompactAlert(alert)) continue;
     const id = blockIdForAlert(alert);
     if (id) counts[id] += 1;
   }

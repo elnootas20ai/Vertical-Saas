@@ -82,7 +82,7 @@ export function DeliveryCrmWorker() {
 
   if (loading) {
     return (
-      <Layout title="Clientes Delivery" subtitle="Consulta de clientes">
+      <Layout backTo="/saas/delivery-ops" title="Clientes Delivery" subtitle="Consulta de clientes">
         <div className="flex items-center justify-center py-32">
           <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -91,7 +91,7 @@ export function DeliveryCrmWorker() {
   }
 
   return (
-    <Layout title="Clientes Delivery" subtitle="Consulta de clientes y pedidos">
+    <Layout backTo="/saas/delivery-ops" title="Clientes Delivery" subtitle="Consulta de clientes y pedidos">
       <div className="space-y-4">
         {/* Search */}
         <div className="relative">

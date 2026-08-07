@@ -237,7 +237,7 @@ export function DeliveryIntegrations() {
   });
 
   return (
-    <Layout title={pageTitle}>
+    <Layout backTo="/saas/delivery-ops" title={pageTitle}>
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         <div>
           <h1 className="text-2xl font-bold text-stone-900 dark:text-stone-100 flex items-center gap-2">

@@ -281,13 +281,13 @@ export function DeliveryReparto() {
   ];
 
   if (loading) return (
-    <Layout title="Reparto propio" subtitle="Gestión de entregas con repartidores propios">
+    <Layout backTo="/saas/delivery-ops" title="Reparto propio" subtitle="Gestión de entregas con repartidores propios">
       <div className="flex items-center justify-center py-24 text-gray-500 dark:text-gray-400"><div className="animate-spin w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full mr-3" />Cargando...</div>
     </Layout>
   );
 
   return (
-    <Layout title="Reparto propio" subtitle="Gestión de entregas con repartidores propios">
+    <Layout backTo="/saas/delivery-ops" title="Reparto propio" subtitle="Gestión de entregas con repartidores propios">
       <div className="space-y-5">
         {showMgrView && alerts.length > 0 && (
           <div className="bg-amber-50 dark:bg-amber-900/20 border-2 border-amber-200 dark:border-amber-800 rounded-xl p-4">

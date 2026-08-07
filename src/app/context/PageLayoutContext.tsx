@@ -14,6 +14,13 @@ export interface PageLayoutConfig {
   noPadding?: boolean;
   titleClassName?: string;
   subtitleClassName?: string;
+  /**
+   * Atrás en Topbar:
+   * - undefined → auto (si no es pestaña raíz)
+   * - string → ruta fija
+   * - false → ocultar
+   */
+  backTo?: string | false;
 }
 
 const DEFAULT_PAGE_LAYOUT: PageLayoutConfig = {
@@ -26,7 +33,8 @@ function pageLayoutEqual(a: PageLayoutConfig, b: PageLayoutConfig): boolean {
     a.subtitle === b.subtitle &&
     a.noPadding === b.noPadding &&
     a.titleClassName === b.titleClassName &&
-    a.subtitleClassName === b.subtitleClassName
+    a.subtitleClassName === b.subtitleClassName &&
+    a.backTo === b.backTo
   );
 }
 
@@ -67,5 +75,6 @@ export function useRegisterPageLayout(config: PageLayoutConfig) {
     config.noPadding,
     config.titleClassName,
     config.subtitleClassName,
+    config.backTo,
   ]);
 }

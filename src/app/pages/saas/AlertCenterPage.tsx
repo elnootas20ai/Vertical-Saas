@@ -142,36 +142,42 @@ export default function AlertCenterPage() {
     const silent = options?.silent === true;
     if (!silent) setLoading(true);
     try {
-      const summaryRes = await fetchAlertSummary(businessId);
       const sourceFilter = departmentSourceFilter(activeDepartment);
       const includeDocs = !isHistory && shouldIncludeDocumentAlerts(sourceFilter);
-      const docAlerts = includeDocs && dataUserId
-        ? await fetchDocumentAlertsAsRecords(dataUserId, businessId)
-        : [];
 
-      if (isSettings) {
-        setSummary(mergeDocumentAlertsIntoSummary(normalizeAlertSummary(summaryRes.summary), docAlerts));
-        return;
-      }
+      // Paralelo: resumen + listado (antes era secuencial × 2 escaneos de toda notifications).
+      const [summaryRes, alertsRes, docAlerts] = await Promise.all([
+        fetchAlertSummary(businessId),
+        isSettings
+          ? Promise.resolve(null)
+          : isHistory
+            ? fetchAlertHistory(businessId, {
+                ...filters,
+                search: searchTerm || undefined,
+                includeDeleted,
+                from: historyFrom || undefined,
+                to: historyTo || undefined,
+              })
+            : fetchAlerts(businessId, {
+                ...filters,
+                search: searchTerm || undefined,
+                ...(sourceFilter ? { source: sourceFilter } : {}),
+              }),
+        includeDocs && dataUserId
+          ? fetchDocumentAlertsAsRecords(dataUserId, businessId).catch(() => [])
+          : Promise.resolve([] as AlertRecord[]),
+      ]);
 
       setSummary(mergeDocumentAlertsIntoSummary(normalizeAlertSummary(summaryRes.summary), docAlerts));
 
+      if (isSettings || !alertsRes) {
+        return;
+      }
+
       if (isHistory) {
-        const alertsRes = await fetchAlertHistory(businessId, {
-          ...filters,
-          search: searchTerm || undefined,
-          includeDeleted,
-          from: historyFrom || undefined,
-          to: historyTo || undefined,
-        });
         setAlerts(mapAlertsForBusinessVertical(alertsRes.alerts, currentBusiness?.businessType));
         setPagination(alertsRes.pagination);
       } else {
-        const alertsRes = await fetchAlerts(businessId, {
-          ...filters,
-          search: searchTerm || undefined,
-          ...(sourceFilter ? { source: sourceFilter } : {}),
-        });
         const merged = mergeAlertLists(
           mapAlertsForBusinessVertical(alertsRes.alerts || [], currentBusiness?.businessType),
           docAlerts,

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Search, Menu, HelpCircle, User, Sun, Moon, Globe, Check, Command, Store } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router';
+import { Bell, Search, Menu, HelpCircle, User, Sun, Moon, Globe, Check, Command, Store, ArrowLeft } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { useTranslation } from 'react-i18next';
 import { useApp } from '../../context/AppContext';
@@ -14,6 +15,12 @@ import { SAAS__NotificationsDrawer } from '../design-system/SAAS__NotificationsD
 import { SAAS__ProfileModal } from '../design-system/SAAS__ProfileModal';
 import { SAAS__HelpModal } from '../design-system/SAAS__HelpModal';
 import { NotificationLivePopup } from './NotificationLivePopup';
+import {
+  isDeliveryNestedPath,
+  resolveSaasBackFallback,
+  resolveSaasBackTarget,
+  shouldShowSaasBack,
+} from '../../lib/saasBackNavigation';
 
 interface TopbarProps {
   title: string;
@@ -21,6 +28,7 @@ interface TopbarProps {
   subtitle?: string;
   titleClassName?: string;
   subtitleClassName?: string;
+  backTo?: string | false;
   onToggleSidebar: () => void;
   onOpenGlobalSearch?: () => void;
 }
@@ -28,6 +36,7 @@ interface TopbarProps {
 export function Topbar({
   title,
   titleClassName,
+  backTo,
   onToggleSidebar,
   onOpenGlobalSearch,
 }: TopbarProps) {
@@ -38,6 +47,7 @@ export function Topbar({
       auth={auth}
       title={title}
       titleClassName={titleClassName}
+      backTo={backTo}
       onToggleSidebar={onToggleSidebar}
       onOpenGlobalSearch={onOpenGlobalSearch}
     />
@@ -48,9 +58,12 @@ function TopbarInner({
   auth,
   title,
   titleClassName,
+  backTo,
   onToggleSidebar,
   onOpenGlobalSearch,
 }: TopbarProps & { auth: AuthContextType }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { notifications } = useApp();
   const { user } = auth;
   const isWorker = isWorkerAccount(user);
@@ -108,15 +121,46 @@ function TopbarInner({
   const showStoreStrip =
     activeStore.pointsOfSale.length > 0 || hasSavedStorePreference;
 
+  const showBack = shouldShowSaasBack(location.pathname, backTo);
+  const backLabel = isDeliveryNestedPath(location.pathname)
+    ? 'Volver a Operativa'
+    : 'Atrás';
+  const handleBack = () => {
+    const target = resolveSaasBackTarget(location.pathname, backTo);
+    if (!target) return;
+    if (target !== 'history') {
+      navigate(target);
+      return;
+    }
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate(resolveSaasBackFallback(location.pathname));
+  };
+
   return (
     <>
       <header className="saas-topbar vsaas-topbar-shell px-3 md:px-5 pb-3 md:py-3.5 sticky top-0 z-30">
         <div className="flex items-center justify-between gap-2 md:gap-3">
           <div className="flex items-center gap-2 md:gap-3 min-w-0 flex-1">
+            {showBack ? (
+              <button
+                type="button"
+                onClick={handleBack}
+                className="vsaas-icon-btn flex-shrink-0"
+                aria-label={backLabel}
+                title={backLabel}
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+            ) : null}
             <button
+              type="button"
               onClick={onToggleSidebar}
-              className="vsaas-icon-btn flex-shrink-0"
-              title="Toggle sidebar"
+              className={`vsaas-icon-btn flex-shrink-0 ${showBack ? 'hidden md:inline-flex' : ''}`}
+              title="Menú"
+              aria-label="Menú"
             >
               <Menu className="w-5 h-5" />
             </button>

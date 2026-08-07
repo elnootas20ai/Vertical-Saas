@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   AlertTriangle,
   Banknote,
   ChevronRight,
-  Clock,
-  Package,
   RefreshCw,
   Store,
-  Truck,
   UserCheck,
   Wallet,
 } from 'lucide-react';
@@ -19,23 +16,23 @@ import { useActiveStoreScope } from '../../context/ActiveStoreScopeContext';
 import { resolveBusinessDataUserId } from '../../lib/tenantUserId';
 import { isDeliveryBusinessType } from '../../lib/deliverySetup';
 import {
-  getOpsCenterRequest,
+  listTpvRegisterSessionsRequest,
   pointOfSaleDisplayLabel,
-  type OpsCenterData,
+  type TpvRegisterSession,
 } from '../../lib/deliveryApi';
 import { useDeliveryOrdersLive } from '../../hooks/useDeliveryOrdersLive';
-import {
-  fetchAlertSummary,
-  normalizeAlertSummary,
-  type AlertSummary,
-} from '../../lib/alertCenterApi';
 import { fetchActiveNow, type ActiveMember } from '../../lib/clockinsApi';
 import { isRestaurantBusinessType } from '../../lib/deliveryOpsTypes';
-import { DeliveryMobileDashboardBlocks } from '../../verticals/delivery/DeliveryMobileDashboardBlocks';
-
-function eur(n: number): string {
-  return n.toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
+import { formatMoneyEs } from '../../lib/formatNumberEs';
+import {
+  VERTIAL_ACCENT_TEXT,
+  VERTIAL_SURFACE_STONE,
+} from '../../lib/vertialUiTokens';
+import {
+  DeliveryMobileDashboardBlocks,
+  DeliveryMobileHomeAlerts,
+} from '../../verticals/delivery';
+import { MobileLazySection } from './MobileLazySection';
 
 function formatClockIn(iso: string | null): string {
   if (!iso) return '—';
@@ -46,9 +43,29 @@ function formatClockIn(iso: string | null): string {
   }
 }
 
+function minutesSince(iso: string | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, (Date.now() - t) / 60000);
+}
+
+function cashInOpenSession(session: TpvRegisterSession): number {
+  const txs = session.transactions || [];
+  const txTotal = txs
+    .filter((t) => String(t.paymentMethod || '') === 'efectivo')
+    .reduce((sum, t) => {
+      const amt = Number(t.amount || 0) || 0;
+      const typ = String(t.type || '');
+      return sum + (typ === 'sale' || typ === 'cash_in' || typ === 'staff_consumption' ? amt : -amt);
+    }, 0);
+  return Number(session.initialCashAmount || 0) + txTotal;
+}
+
 /**
  * Home compacto del CEO en móvil / app nativa.
- * Enfoque: tienda, alertas, caja, sin cobrar, resumen del día, equipo fichado.
+ * Delivery (1 empresa): mismos datos que Dashboard PC, layout táctil.
+ * No llama al ops-center completo (pesado): caja con sesiones lite.
  */
 export function CeoMobileHome() {
   const navigate = useNavigate();
@@ -64,38 +81,43 @@ export function CeoMobileHome() {
   const isDelivery = isDeliveryBusinessType(currentBusiness?.businessType);
   const isRestaurant = isRestaurantBusinessType(currentBusiness?.businessType);
 
-  const [loading, setLoading] = useState(true);
-  const [ops, setOps] = useState<OpsCenterData | null>(null);
-  const [summary, setSummary] = useState<AlertSummary | null>(null);
+  const [cashLoading, setCashLoading] = useState(true);
+  const [sessions, setSessions] = useState<TpvRegisterSession[]>([]);
   const [active, setActive] = useState<ActiveMember[]>([]);
+  const [unpaidCount, setUnpaidCount] = useState(0);
+  const [unpaidAmount, setUnpaidAmount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  const onUnpaidSnapshot = useCallback((count: number, amount: number) => {
+    setUnpaidCount(count);
+    setUnpaidAmount(amount);
+  }, []);
 
   const load = useCallback(async () => {
     if (!businessId) {
-      setLoading(false);
+      setCashLoading(false);
       return;
     }
-    setLoading(true);
+    setCashLoading(true);
     setError(null);
     try {
       const salesPointId = store.activeSalesPointId || undefined;
-      const [alertRes, activeRes, opsRes] = await Promise.all([
-        fetchAlertSummary(businessId).catch(() => null),
+      const [activeRes, sessionList] = await Promise.all([
         fetchActiveNow(businessId).catch(() => [] as ActiveMember[]),
         isDelivery && dataUserId
-          ? getOpsCenterRequest(dataUserId, {
+          ? listTpvRegisterSessionsRequest(dataUserId, {
               businessId,
-              salesPointId,
-            }).catch(() => null)
-          : Promise.resolve(null),
+              lite: true,
+              ...(salesPointId ? { salesPointId } : {}),
+            }).catch(() => [] as TpvRegisterSession[])
+          : Promise.resolve([] as TpvRegisterSession[]),
       ]);
-      setSummary(alertRes ? normalizeAlertSummary(alertRes.summary) : null);
       setActive(activeRes || []);
-      setOps(opsRes);
+      setSessions(Array.isArray(sessionList) ? sessionList : []);
     } catch (e) {
       setError((e as Error).message || 'No se pudo cargar el resumen');
     } finally {
-      setLoading(false);
+      setCashLoading(false);
     }
   }, [businessId, dataUserId, isDelivery, store.activeSalesPointId]);
 
@@ -113,29 +135,23 @@ export function CeoMobileHome() {
     fallbackPollMs: 45_000,
   });
 
-  const unpaidOrders = useMemo(() => {
-    if (!ops?.activeOrders?.length) return [];
-    return ops.activeOrders.filter((o) => {
-      const st = String(o.paymentStatus || '').toLowerCase();
-      return st === 'pending' || st === 'partial';
-    });
-  }, [ops?.activeOrders]);
+  const scopedSessions = useMemo(() => {
+    const pdv = store.activeSalesPointId || '';
+    if (!pdv) return sessions;
+    return sessions.filter((s) => String(s.pointOfSaleId || '').trim() === pdv);
+  }, [sessions, store.activeSalesPointId]);
 
-  const unpaidCount = unpaidOrders.length;
-  const unpaidAmount = unpaidOrders.reduce((s, o) => s + Number(o.totalAmount || 0), 0);
-  const highAlerts = summary?.byPriority?.high ?? 0;
-  const unresolved = summary?.unresolved ?? 0;
-  const cash = ops?.cashStatus;
-  const openCajas = cash?.openTpvSessions?.length ?? 0;
-  const pendingClose = (cash?.pendingClose || 0) + (cash?.pendingValidation || 0);
-  const discrepancy = Math.abs(cash?.todayDiscrepancy || 0);
-  const byStatus = ops?.kpis?.byStatus;
-  const activeOrdersCount =
-    (byStatus?.nuevo || 0)
-    + (byStatus?.cocina || 0)
-    + (byStatus?.listo || 0)
-    + (byStatus?.en_reparto || 0);
-  const delayed = ops?.deliveryStatus?.delayedCount ?? 0;
+  const openSessions = useMemo(
+    () => scopedSessions.filter((s) => String(s.status || '') === 'open'),
+    [scopedSessions],
+  );
+  const openCajas = openSessions.length;
+  const pendingCloseLate = openSessions.filter((s) => minutesSince(s.openedAt) / 60 > 14).length;
+  const pendingValidation = scopedSessions.filter(
+    (s) => String(s.status || '') === 'closed' && String(s.closingValidationStatus || '') === 'pending',
+  ).length;
+  const cashInDrawer = openSessions.reduce((sum, s) => sum + cashInOpenSession(s), 0);
+  const cashNeedsAttention = pendingCloseLate > 0 || pendingValidation > 0;
 
   const businessName = currentBusiness?.name || 'Tu negocio';
   const greeting = (() => {
@@ -145,60 +161,65 @@ export function CeoMobileHome() {
     return 'Buenas noches';
   })();
 
+  const storeChips = store.pointsOfSale.map((pdv) => ({
+    id: String(pdv.id || pdv._id || ''),
+    label: pointOfSaleDisplayLabel(pdv),
+  })).filter((s) => s.id);
+
   return (
     <Layout title="Inicio" subtitle={businessName}>
       <div className="mx-auto max-w-lg space-y-3 pb-24">
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start justify-between gap-3 px-0.5">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{greeting}</p>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100 truncate">
+            <p className="text-xs font-medium text-stone-500">{greeting}</p>
+            <h1 className="truncate text-xl font-bold text-stone-900 dark:text-stone-100">
               {user?.firstName || user?.fullName || 'CEO'}
             </h1>
           </div>
           <button
             type="button"
             onClick={() => void load()}
-            className="shrink-0 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-2.5 text-gray-600 dark:text-gray-300"
+            className="shrink-0 rounded-xl border border-stone-200 bg-white p-2.5 text-stone-600 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300"
             aria-label="Actualizar"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-4 w-4 ${cashLoading ? 'animate-spin' : ''}`} />
           </button>
         </div>
 
-        {/* Local */}
-        <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3.5">
-          <div className="flex items-center gap-2 mb-2">
-            <Store className="w-4 h-4 text-gray-500" />
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-500">
+        {/* Tienda */}
+        <section className={`${VERTIAL_SURFACE_STONE} p-3.5`}>
+          <div className="mb-2 flex items-center gap-2">
+            <Store className="h-4 w-4 text-stone-500" />
+            <p className="text-xs font-bold uppercase tracking-wide text-stone-500">
               {isRestaurant ? 'Local' : 'Tienda'}
             </p>
           </div>
           {store.loading ? (
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-stone-400">
               {isRestaurant ? 'Cargando locales…' : 'Cargando tiendas…'}
             </p>
-          ) : store.pointsOfSale.length <= 1 ? (
-            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          ) : storeChips.length <= 1 ? (
+            <p className="text-sm font-semibold text-stone-900 dark:text-stone-100">
               {store.displayLabelForActive
-                || (store.pointsOfSale[0] ? pointOfSaleDisplayLabel(store.pointsOfSale[0]) : businessName)}
+                || storeChips[0]?.label
+                || businessName}
             </p>
           ) : (
-            <div className="flex gap-2 overflow-x-auto pb-0.5 -mx-0.5">
-              {store.pointsOfSale.map((pdv) => {
-                const id = String(pdv.id || pdv._id || '');
-                const selected = id === store.activeSalesPointId;
+            <div className="-mx-0.5 flex gap-2 overflow-x-auto pb-0.5">
+              {storeChips.map((pdv) => {
+                const selected = pdv.id === store.activeSalesPointId;
                 return (
                   <button
-                    key={id}
+                    key={pdv.id}
                     type="button"
-                    onClick={() => store.setActiveSalesPoint(id)}
-                    className={`shrink-0 rounded-xl px-3 py-2 text-xs font-semibold border transition-colors ${
+                    onClick={() => store.setActiveSalesPoint(pdv.id)}
+                    className={`shrink-0 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${
                       selected
-                        ? 'border-gray-900 bg-gray-900 text-white dark:border-gray-100 dark:bg-gray-100 dark:text-gray-900'
-                        : 'border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-900/40'
+                        ? 'border-[var(--v-blue,#2563eb)] bg-[var(--v-blue,#2563eb)] text-white'
+                        : 'border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-600 dark:bg-stone-950/40 dark:text-stone-200'
                     }`}
                   >
-                    {pointOfSaleDisplayLabel(pdv)}
+                    {pdv.label}
                   </button>
                 );
               })}
@@ -208,7 +229,7 @@ export function CeoMobileHome() {
             <button
               type="button"
               onClick={() => navigate('/auth/gate')}
-              className="mt-2 text-xs font-semibold text-violet-600 dark:text-violet-400"
+              className={`mt-2 text-xs font-semibold ${VERTIAL_ACCENT_TEXT}`}
             >
               Cambiar de empresa →
             </button>
@@ -216,167 +237,104 @@ export function CeoMobileHome() {
         </section>
 
         {error && (
-          <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-1.5">
-            <AlertTriangle className="w-4 h-4 shrink-0" /> {error}
+          <p className="flex items-center gap-1.5 text-sm text-[var(--v-rose,#e11d48)]">
+            <AlertTriangle className="h-4 w-4 shrink-0" /> {error}
           </p>
         )}
 
-        {loading && !ops && !summary ? (
-          <div className="flex justify-center py-16">
-            <RefreshCw className="w-6 h-6 animate-spin text-gray-400" />
-          </div>
-        ) : (
-          <>
-            {/* Alertas urgentes */}
-            <button
-              type="button"
-              onClick={() => navigate('/saas/alerts')}
-              className={`w-full text-left rounded-2xl border-2 p-4 transition-colors ${
-                highAlerts > 0
-                  ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/30'
-                  : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className={`w-5 h-5 ${highAlerts > 0 ? 'text-red-600' : 'text-gray-400'}`} />
-                  <div>
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Alertas urgentes</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {highAlerts > 0
-                        ? `${highAlerts} prioritaria${highAlerts !== 1 ? 's' : ''} · ${unresolved} abiertas`
-                        : unresolved > 0
-                          ? `${unresolved} abiertas · sin críticas`
-                          : 'Todo en orden'}
-                    </p>
+        <>
+            {isDelivery && businessId ? (
+              <MobileLazySection
+                rootMargin="40px 0px"
+                eagerFromMd={false}
+                placeholder={
+                  <div className={`${VERTIAL_SURFACE_STONE} px-4 py-4 text-center text-[11px] text-stone-400`}>
+                    Desliza para ver alertas…
                   </div>
-                </div>
-                <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />
-              </div>
-            </button>
+                }
+              >
+                <DeliveryMobileHomeAlerts
+                  businessId={businessId}
+                  dataUserId={dataUserId}
+                />
+              </MobileLazySection>
+            ) : null}
 
-            {/* Caja — solo delivery (datos de ops delivery). Restaurant usa atajos a /saas/caja. */}
             {isDelivery && (
               <button
                 type="button"
                 onClick={() => navigate('/saas/vertical/delivery/caja')}
-                className={`w-full text-left rounded-2xl border-2 p-4 ${
-                  pendingClose > 0 || discrepancy >= 20
-                    ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+                className={`w-full rounded-2xl border p-4 text-left ${
+                  cashNeedsAttention
+                    ? 'border-amber-200 bg-amber-50/70 dark:border-amber-900/40 dark:bg-amber-950/20'
+                    : VERTIAL_SURFACE_STONE
                 }`}
               >
-                <div className="flex items-center justify-between gap-2 mb-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <Banknote className="w-5 h-5 text-amber-700 dark:text-amber-400" />
-                    <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Estado de cajas</p>
+                    <Banknote className="h-5 w-5 text-stone-600 dark:text-stone-300" />
+                    <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Estado de cajas</p>
                   </div>
-                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                  <ChevronRight className="h-4 w-4 text-stone-400" />
                 </div>
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="rounded-xl bg-white/70 dark:bg-gray-900/40 p-2.5">
-                    <p className="text-lg font-black text-gray-900 dark:text-gray-100 tabular-nums">{openCajas}</p>
-                    <p className="text-[10px] text-gray-500 font-semibold">Abiertas</p>
-                  </div>
-                  <div className="rounded-xl bg-white/70 dark:bg-gray-900/40 p-2.5">
-                    <p className={`text-lg font-black tabular-nums ${pendingClose > 0 ? 'text-red-600' : 'text-gray-900 dark:text-gray-100'}`}>
-                      {pendingClose}
-                    </p>
-                    <p className="text-[10px] text-gray-500 font-semibold">Pend. cierre</p>
-                  </div>
-                  <div className="rounded-xl bg-white/70 dark:bg-gray-900/40 p-2.5">
-                    <p className="text-lg font-black text-gray-900 dark:text-gray-100 tabular-nums">
-                      {eur(cash?.totalCashInRegisters || 0)}€
-                    </p>
-                    <p className="text-[10px] text-gray-500 font-semibold">En cajón</p>
-                  </div>
+                  <CashStat
+                    label="Abiertas"
+                    value={cashLoading ? '…' : String(openCajas)}
+                  />
+                  <CashStat
+                    label="Por validar"
+                    value={cashLoading ? '…' : String(pendingValidation)}
+                    warn={pendingValidation > 0}
+                  />
+                  <CashStat
+                    label="En cajón"
+                    value={cashLoading ? '…' : formatMoneyEs(cashInDrawer)}
+                  />
                 </div>
-                {discrepancy >= 20 && (
-                  <p className="mt-2 text-xs font-semibold text-red-700 dark:text-red-400">
-                    Descuadre hoy: {eur(discrepancy)}€
+                {pendingCloseLate > 0 && (
+                  <p className="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                    {pendingCloseLate} caja{pendingCloseLate !== 1 ? 's' : ''} abierta{pendingCloseLate !== 1 ? 's' : ''} +14 h
                   </p>
                 )}
               </button>
             )}
 
-            {/* Sin cobrar — solo delivery */}
             {isDelivery && (
               <button
                 type="button"
                 onClick={() => navigate('/saas/delivery-ops')}
-                className={`w-full text-left rounded-2xl border-2 p-4 ${
+                className={`flex w-full items-center justify-between gap-2 rounded-2xl border p-4 text-left ${
                   unpaidCount > 0
-                    ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/25'
-                    : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
+                    ? 'border-rose-200 bg-rose-50/80 dark:border-rose-900/40 dark:bg-rose-950/20'
+                    : VERTIAL_SURFACE_STONE
                 }`}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Wallet className={`w-5 h-5 ${unpaidCount > 0 ? 'text-red-600' : 'text-gray-400'}`} />
-                    <div>
-                      <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Sin cobrar</p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {unpaidCount > 0
-                          ? `${unpaidCount} pedido${unpaidCount !== 1 ? 's' : ''} · ${eur(unpaidAmount)}€`
-                          : 'Ningún pedido activo pendiente de cobro'}
-                      </p>
-                    </div>
+                <div className="flex items-center gap-2">
+                  <Wallet className={`h-5 w-5 ${unpaidCount > 0 ? 'text-[var(--v-rose,#e11d48)]' : 'text-stone-400'}`} />
+                  <div>
+                    <p className="text-sm font-bold text-stone-900 dark:text-stone-100">Sin cobrar</p>
+                    <p className="mt-0.5 text-xs text-stone-500">
+                      {unpaidCount > 0
+                        ? `${unpaidCount} pedido${unpaidCount !== 1 ? 's' : ''} · ${formatMoneyEs(unpaidAmount)}`
+                        : 'Ningún pedido activo pendiente de cobro'}
+                    </p>
                   </div>
-                  <ChevronRight className="w-4 h-4 text-gray-400" />
                 </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-stone-400" />
               </button>
             )}
 
-            {/* Resumen del día — solo delivery */}
-            {isDelivery && ops?.kpis && (
-              <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-bold text-gray-900 dark:text-gray-100">Hoy en el local</p>
-                  <button
-                    type="button"
-                    onClick={() => navigate('/saas/delivery-ops')}
-                    className="text-xs font-semibold text-[var(--v-blue,#2563eb)]"
-                  >
-                    Operativa →
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <StatChip
-                    icon={<Package className="w-4 h-4" />}
-                    label="Activos"
-                    value={String(activeOrdersCount)}
-                  />
-                  <StatChip
-                    icon={<Truck className="w-4 h-4" />}
-                    label="En reparto"
-                    value={String(byStatus?.en_reparto || 0)}
-                  />
-                  <StatChip
-                    icon={<Clock className="w-4 h-4" />}
-                    label="Retrasados"
-                    value={String(delayed)}
-                    warn={delayed > 0}
-                  />
-                  <StatChip
-                    icon={<Banknote className="w-4 h-4" />}
-                    label="Ingresos"
-                    value={`${eur(ops.kpis.revenue || 0)}€`}
-                  />
-                </div>
-              </section>
-            )}
-
-            {/* Marcas · pagos · tiempos (misma visión dashboard desktop, adaptada) */}
+            {/* KPIs/marcas en paralelo — no esperan al ops-center */}
             {isDelivery && dataUserId && businessId ? (
               <DeliveryMobileDashboardBlocks
                 dataUserId={dataUserId}
                 businessId={businessId}
                 businessName={businessName}
                 salesPointId={store.activeSalesPointId || null}
-                stores={store.pointsOfSale.map((pdv) => ({
-                  id: String(pdv.id || pdv._id || ''),
-                  name: pointOfSaleDisplayLabel(pdv),
-                })).filter((s) => s.id)}
+                opsAlertCount={pendingValidation + pendingCloseLate + unpaidCount}
+                onUnpaidSnapshot={onUnpaidSnapshot}
+                stores={storeChips.map((s) => ({ id: s.id, name: s.label }))}
                 pdvs={store.pointsOfSale.map((pdv) => ({
                   id: String(pdv.id || pdv._id || '').trim(),
                   name: pointOfSaleDisplayLabel(pdv),
@@ -385,10 +343,9 @@ export function CeoMobileHome() {
               />
             ) : null}
 
-            {/* Atajos restaurant (sala) */}
             {isRestaurant && (
-              <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-                <p className="mb-3 text-sm font-bold text-gray-900 dark:text-gray-100">Operativa del local</p>
+              <section className={`${VERTIAL_SURFACE_STONE} p-4`}>
+                <p className="mb-3 text-sm font-bold text-stone-900 dark:text-stone-100">Operativa del local</p>
                 <div className="grid grid-cols-2 gap-2">
                   <QuickLink label="Centro ops" onClick={() => navigate('/saas/restaurant-ops')} />
                   <QuickLink label="Sala" onClick={() => navigate('/saas/sala')} />
@@ -397,25 +354,25 @@ export function CeoMobileHome() {
                 </div>
               </section>
             )}
-            {/* Equipo fichado */}
-            <section className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-              <div className="flex items-center justify-between mb-3">
+
+            <section className={`${VERTIAL_SURFACE_STONE} p-4`}>
+              <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <UserCheck className="w-4 h-4 text-violet-600" />
-                  <p className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                  <UserCheck className="h-4 w-4 text-[var(--v-blue,#2563eb)]" />
+                  <p className="text-sm font-bold text-stone-900 dark:text-stone-100">
                     Equipo fichado ({active.length})
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => navigate('/saas/clockins')}
-                  className="text-xs font-semibold text-violet-600 dark:text-violet-400"
+                  className={`text-xs font-semibold ${VERTIAL_ACCENT_TEXT}`}
                 >
                   Ver →
                 </button>
               </div>
               {active.length === 0 ? (
-                <p className="text-xs text-gray-500">Nadie fichado ahora mismo.</p>
+                <p className="text-xs text-stone-500">Nadie fichado ahora mismo.</p>
               ) : (
                 <ul className="space-y-2">
                   {active.slice(0, 6).map((m) => (
@@ -423,22 +380,21 @@ export function CeoMobileHome() {
                       key={m.member_id}
                       className="flex items-center justify-between gap-2 text-sm"
                     >
-                      <span className="font-semibold text-gray-800 dark:text-gray-200 truncate">
+                      <span className="truncate font-semibold text-stone-800 dark:text-stone-200">
                         {m.member_name}
                       </span>
-                      <span className="text-xs text-gray-400 tabular-nums shrink-0">
+                      <span className="shrink-0 tabular-nums text-xs text-stone-400">
                         desde {formatClockIn(m.clock_in)}
                       </span>
                     </li>
                   ))}
                   {active.length > 6 && (
-                    <p className="text-xs text-gray-400">+{active.length - 6} más</p>
+                    <p className="text-xs text-stone-400">+{active.length - 6} más</p>
                   )}
                 </ul>
               )}
             </section>
 
-            {/* Atajos */}
             <div className="grid grid-cols-2 gap-2 pt-1">
               {isDelivery && (
                 <QuickLink label="TPV" onClick={() => navigate('/saas/vertical/delivery/tpv')} />
@@ -446,7 +402,10 @@ export function CeoMobileHome() {
               {isRestaurant && (
                 <QuickLink label="Cocina" onClick={() => navigate('/saas/cocina')} />
               )}
-              <QuickLink label="Alertas" onClick={() => navigate('/saas/alerts')} />
+              <QuickLink
+                label="Operativa"
+                onClick={() => navigate(isDelivery ? '/saas/delivery-ops' : '/saas/restaurant-ops')}
+              />
               {isDelivery && (
                 <QuickLink label="Caja" onClick={() => navigate('/saas/vertical/delivery/caja')} />
               )}
@@ -456,32 +415,30 @@ export function CeoMobileHome() {
               <QuickLink label="Documentos OCR" onClick={() => navigate('/saas/documents')} />
             </div>
           </>
-        )}
       </div>
     </Layout>
   );
 }
 
-function StatChip({
-  icon,
+function CashStat({
   label,
   value,
   warn,
 }: {
-  icon: ReactNode;
   label: string;
   value: string;
   warn?: boolean;
 }) {
   return (
-    <div className={`rounded-xl p-3 ${warn ? 'bg-red-50 dark:bg-red-950/30' : 'bg-gray-50 dark:bg-gray-900/50'}`}>
-      <div className={`flex items-center gap-1.5 mb-1 ${warn ? 'text-red-600' : 'text-gray-500'}`}>
-        {icon}
-        <span className="text-[10px] font-semibold uppercase tracking-wide">{label}</span>
-      </div>
-      <p className={`text-lg font-black tabular-nums ${warn ? 'text-red-700 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'}`}>
+    <div className="rounded-xl bg-white/80 p-2.5 dark:bg-stone-950/40">
+      <p
+        className={`text-lg font-black tabular-nums ${
+          warn ? 'text-[var(--v-rose,#e11d48)]' : 'text-stone-900 dark:text-stone-100'
+        }`}
+      >
         {value}
       </p>
+      <p className="text-[10px] font-semibold text-stone-500">{label}</p>
     </div>
   );
 }
@@ -491,7 +448,7 @@ function QuickLink({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-3 text-sm font-semibold text-gray-800 dark:text-gray-100 active:scale-[0.98] transition"
+      className="rounded-xl border border-stone-200 bg-white px-3 py-3 text-sm font-semibold text-stone-800 transition active:scale-[0.98] dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
     >
       {label}
     </button>

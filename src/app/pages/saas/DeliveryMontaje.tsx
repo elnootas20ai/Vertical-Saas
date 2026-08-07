@@ -1701,7 +1701,7 @@ export function DeliveryMontaje() {
 
   if (loading) {
     return (
-      <Layout title="Montaje y empaquetado" subtitle="Revisión y cierre de pedidos antes de salida o entrega">
+      <Layout backTo="/saas/delivery-ops" title="Montaje y empaquetado" subtitle="Revisión y cierre de pedidos antes de salida o entrega">
         <div className="flex items-center justify-center py-32">
           <div className="flex flex-col items-center gap-3">
             <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
@@ -1713,7 +1713,7 @@ export function DeliveryMontaje() {
   }
 
   return (
-    <Layout title="Montaje y empaquetado" subtitle="Revisión y cierre de pedidos antes de salida o entrega">
+    <Layout backTo="/saas/delivery-ops" title="Montaje y empaquetado" subtitle="Revisión y cierre de pedidos antes de salida o entrega">
       <div className="space-y-6">
         {renderKPIs()}
         {renderAlerts()}

@@ -2108,12 +2108,14 @@ export function isTpvRegisterSessionOpen(session: TpvRegisterSession | null | un
 
 export async function listTpvRegisterSessionsRequest(
   userId: string,
-  options?: { salesPointId?: string; businessId?: string },
+  options?: { salesPointId?: string; businessId?: string; lite?: boolean; dateFrom?: string },
 ): Promise<TpvRegisterSession[]> {
   const id = normalizeUserId(userId);
   const params = new URLSearchParams();
   if (options?.salesPointId?.trim()) params.set('salesPointId', options.salesPointId.trim());
   if (options?.businessId?.trim()) params.set('businessId', options.businessId.trim());
+  if (options?.lite) params.set('lite', '1');
+  if (options?.dateFrom?.trim()) params.set('dateFrom', options.dateFrom.trim());
   const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean; sessions: TpvRegisterSession[] }>(
     `/api/delivery/tpv-sessions/${encodeURIComponent(id)}${qs}`,
@@ -2470,8 +2472,33 @@ export function localDateInputValue(date = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-export async function getOpsCenterRequest(userId: string, filters?: OpsCenterFilters): Promise<OpsCenterData> {
+const OPS_CENTER_CACHE_TTL_MS = 45_000;
+const opsCenterMemoryCache = new Map<string, { at: number; data: OpsCenterData }>();
+
+function opsCenterCacheKey(userId: string, filters?: OpsCenterFilters): string {
+  return [
+    normalizeUserId(userId),
+    filters?.businessId || '',
+    filters?.salesPointId || '',
+    filters?.channel || '',
+    filters?.timeSlot || '',
+    filters?.date || localDateInputValue(),
+  ].join('|');
+}
+
+export async function getOpsCenterRequest(
+  userId: string,
+  filters?: OpsCenterFilters,
+  options?: { bypassCache?: boolean },
+): Promise<OpsCenterData> {
   const id = normalizeUserId(userId);
+  const key = opsCenterCacheKey(id, filters);
+  if (!options?.bypassCache) {
+    const hit = opsCenterMemoryCache.get(key);
+    if (hit && Date.now() - hit.at < OPS_CENTER_CACHE_TTL_MS) {
+      return hit.data;
+    }
+  }
   const params = new URLSearchParams();
   if (filters?.salesPointId) params.set('salesPointId', filters.salesPointId);
   if (filters?.businessId) params.set('businessId', filters.businessId);
@@ -2482,7 +2509,20 @@ export async function getOpsCenterRequest(userId: string, filters?: OpsCenterFil
   const payload = await request<{ ok: boolean } & OpsCenterData>(
     `/api/delivery/ops-center/${encodeURIComponent(id)}${qs}`,
   );
+  opsCenterMemoryCache.set(key, { at: Date.now(), data: payload });
   return payload;
+}
+
+/** Invalida caché del centro operativo (tras cobros / cambios de pedidos). */
+export function invalidateOpsCenterCache(userId?: string): void {
+  const uid = userId ? normalizeUserId(userId) : '';
+  if (!uid) {
+    opsCenterMemoryCache.clear();
+    return;
+  }
+  for (const key of opsCenterMemoryCache.keys()) {
+    if (key.startsWith(`${uid}|`)) opsCenterMemoryCache.delete(key);
+  }
 }
 
 // ─── DRIVERS (Repartidores) ──────────────────────────────────────────────────
