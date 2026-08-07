@@ -168,6 +168,48 @@ function last7Days(): string[] {
   return Array.from({ length: 7 }, (_, i) => addDaysIso(today, -6 + i)  );
 }
 
+/** Meses YYYY-MM a pedir para el Excel (nunca “todo” en una sola request). */
+function listCajaExportYearMonths(range: UrielCajaHistoryRange, preferredYm: string): string[] {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(preferredYm || '').trim());
+  if (!m) return [todayIsoDate().slice(0, 7)];
+  const y = Number(m[1]);
+  const month = Number(m[2]);
+  if (range === 'month') return [`${m[1]}-${m[2]}`];
+  if (range === 'year') {
+    const now = new Date();
+    const maxM = now.getFullYear() === y ? now.getMonth() + 1 : 12;
+    return Array.from({ length: maxM }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
+  }
+  // Historial: hasta 36 meses hacia atrás (se corta si hay 3 meses vacíos seguidos).
+  const out: string[] = [];
+  let cy = y;
+  let cm = month;
+  for (let i = 0; i < 36; i++) {
+    out.push(`${cy}-${String(cm).padStart(2, '0')}`);
+    cm -= 1;
+    if (cm < 1) {
+      cm = 12;
+      cy -= 1;
+    }
+  }
+  return out;
+}
+
+function monthBoundsIso(ym: string): { from: string; to: string } {
+  const parts = String(ym || '').split('-').map((n) => Number(n));
+  const y = parts[0];
+  const month = parts[1];
+  if (!y || !month) {
+    const today = todayIsoDate().slice(0, 7);
+    return monthBoundsIso(today);
+  }
+  const lastDay = new Date(y, month, 0).getDate();
+  return {
+    from: localDayBoundsForKey(`${ym}-01`).from,
+    to: localDayBoundsForKey(`${ym}-${String(lastDay).padStart(2, '0')}`).to,
+  };
+}
+
 // ─── Vista por tienda / turno ───────────────────────────────────────────────
 
 function turnAccentClass(session: TpvRegisterSession): string {
@@ -719,8 +761,20 @@ export function CajaPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
+      // Solo el día seleccionado (+ abiertas/pendientes en servidor). No tirar de años.
+      const deepLink = typeof window !== 'undefined'
+        ? (new URLSearchParams(window.location.search).get('validate')
+          || new URLSearchParams(window.location.search).get('view'))
+        : null;
+      let dateFrom = localDayBoundsForKey(selectedDate).from;
+      if (deepLink) {
+        const lookback = new Date();
+        lookback.setDate(lookback.getDate() - 120);
+        dateFrom = lookback.toISOString();
+      }
       const { sessions: sessData, driverSessions: driverData } = await listCajaBootstrapRequest(dataUserId, {
         businessId,
+        dateFrom,
       });
       // Filtrado PDV en cliente (scopedPdvKey no debe re-disparar este fetch).
       const pdvIds = scopedPdvKeyRef.current ? scopedPdvKeyRef.current.split('|') : [];
@@ -735,7 +789,7 @@ export function CajaPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dataUserId, businessId]);
+  }, [dataUserId, businessId, selectedDate]);
 
   // Al cambiar de empresa, forzar recarga completa (mismo dueño ≠ mismos datos).
   useEffect(() => {
@@ -954,12 +1008,14 @@ export function CajaPage() {
     });
   }, [openOnSelectedDay]);
 
+  // Contador del día (la UI no bloquea export: el historial se pide al descargar).
   const excelClosedCount = sessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
   const handleDownload = async (
     format: UrielCajaDownloadFormat,
-    historyRange: UrielCajaHistoryRange = 'all',
+    historyRange: UrielCajaHistoryRange = 'month',
   ) => {
+    const toastId = toast.loading('Preparando facturación…');
     try {
       const pdvId = String(
         filterPdv
@@ -989,7 +1045,41 @@ export function CajaPage() {
         }
       }
 
-      const { rows, fileName, sheetNames, yearMonth: exportedMonth, historyRange: usedRange } = await downloadUrielCajaClosings(sessions, {
+      const months = listCajaExportYearMonths(historyRange, yearMonth);
+      const byId = new Map<string, TpvRegisterSession>();
+      const pdvIds = scopedPdvKeyRef.current ? scopedPdvKeyRef.current.split('|') : [];
+      let emptyStreak = 0;
+      // Mes a mes (nuevo → viejo): feedback y sin pegar de 3 años de golpe.
+      for (let i = 0; i < months.length; i++) {
+        const ym = months[i];
+        toast.loading(`Cargando facturación ${ym}… (${i + 1}/${months.length})`, { id: toastId });
+        const { from, to } = monthBoundsIso(ym);
+        const { sessions: chunk } = await listCajaBootstrapRequest(dataUserId, {
+          businessId: businessId || undefined,
+          dateFrom: from,
+          dateTo: to,
+          full: true,
+        });
+        let added = 0;
+        for (const s of chunk) {
+          if (!s._id) continue;
+          if (businessId && !tpvSessionBelongsToBusiness(s, businessId, pdvIds)) continue;
+          if (!byId.has(s._id)) {
+            byId.set(s._id, s);
+            added += 1;
+          }
+        }
+        if (added === 0) {
+          emptyStreak += 1;
+          if (historyRange === 'all' && emptyStreak >= 3) break;
+        } else {
+          emptyStreak = 0;
+        }
+      }
+      const scopedExport = Array.from(byId.values());
+
+      toast.loading('Generando archivo Excel…', { id: toastId });
+      const { rows, fileName, sheetNames, yearMonth: exportedMonth, historyRange: usedRange } = await downloadUrielCajaClosings(scopedExport, {
         pointOfSaleId: pdvId || undefined,
         pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : undefined,
         pointsOfSale: pointsOfSale.map((p) => ({
@@ -997,13 +1087,14 @@ export function CajaPage() {
           name: pointOfSaleDisplayLabel(p),
           workCenterId: String(p.workCenterId || '').trim() || undefined,
         })).filter((p) => p.id),
+        businessName: String(currentBusiness?.name || '').trim() || undefined,
         yearMonth,
         historyRange,
         billingSheets,
         format,
       });
       if (rows === 0) {
-        toast.info('Aún no hay cierres de caja con importes para exportar');
+        toast.info('Aún no hay cierres de caja con importes para exportar', { id: toastId });
         return;
       }
       const rangeLabel = usedRange === 'all'
@@ -1015,18 +1106,24 @@ export function CajaPage() {
       if (format === 'google-sheets') {
         toast.success(
           `Descargado ${fileName} (${rangeLabel}). Súbelo a Google Drive y ábrelo con Hojas de cálculo (${rows} día${rows === 1 ? '' : 's'}).`,
-          { duration: 7000 },
+          { id: toastId, duration: 7000 },
         );
         return;
       }
       if (format === 'csv') {
-        toast.success(`CSV ${sheetsLabel} · ${rangeLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
+        toast.success(
+          `CSV ${sheetsLabel} · ${rangeLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`,
+          { id: toastId },
+        );
         return;
       }
-      toast.success(`Excel ${sheetsLabel} · ${rangeLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
+      toast.success(
+        `Excel ${sheetsLabel} · ${rangeLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`,
+        { id: toastId },
+      );
     } catch (err) {
       console.error(err);
-      toast.error(err instanceof Error ? err.message : 'No se pudo generar la descarga');
+      toast.error(err instanceof Error ? err.message : 'No se pudo generar la descarga', { id: toastId });
     }
   };
 

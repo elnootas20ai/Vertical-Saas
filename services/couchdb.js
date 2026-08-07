@@ -6813,27 +6813,74 @@ export function sanitizeDriverCashSession(doc) {
   };
 }
 
-export async function listDriverCashSessionsByUser(req, userId) {
+export async function listDriverCashSessionsByUser(req, userId, options = {}) {
   const uid = String(userId || '').trim();
+  const dateFrom = String(options?.dateFrom || '').trim();
+  const dateTo = String(options?.dateTo || '').trim();
+  const maxDocs = Math.min(Math.max(1, Number(options?.maxDocs) || 5_000), 5_000);
+  const includeOpen = Boolean(options?.includeOpen);
   const db = getDeliveryDbName();
   await ensureDatabase(req, db);
   await ensureDeliveryTypeUserIndex(req, db);
 
+  const baseSelector = uid
+    ? { type: 'driver_cash_session', user_id: uid }
+    : { type: 'driver_cash_session' };
+
+  const keep = (doc) =>
+    doc?.type === 'driver_cash_session'
+    && !doc?.deletedAt
+    && (!uid || doc?.user_id === uid);
+
+  const inWindow = (doc) => {
+    const ts = String(doc?.createdAt || doc?.openedAt || '');
+    if (dateFrom && ts && ts < dateFrom) return false;
+    if (dateTo && ts && ts > dateTo) return false;
+    return true;
+  };
+
+  if (dateFrom || includeOpen) {
+    const lookback = dateFrom || (() => {
+      const dt = new Date();
+      dt.setUTCDate(dt.getUTCDate() - 7);
+      return dt.toISOString();
+    })();
+    const createdAt = dateTo
+      ? { $gte: lookback, $lte: dateTo }
+      : { $gte: lookback };
+    const queries = [
+      findDocuments(
+        req,
+        db,
+        { ...baseSelector, createdAt },
+        { pageSize: 200, maxDocs: Math.min(maxDocs, 600) },
+      ).catch(() => []),
+    ];
+    if (includeOpen) {
+      queries.push(
+        findDocuments(
+          req,
+          db,
+          { ...baseSelector, status: 'open' },
+          { pageSize: 50, maxDocs: 80 },
+        ).catch(() => []),
+      );
+    }
+    const chunks = await Promise.all(queries);
+    const byId = new Map();
+    for (const doc of chunks.flat()) {
+      if (keep(doc) && doc._id && (includeOpen && doc.status === 'open' ? true : inWindow(doc))) {
+        byId.set(doc._id, doc);
+      }
+    }
+    return [...byId.values()].sort((a, b) =>
+      String(b.createdAt || '').localeCompare(String(a.createdAt || '')),
+    );
+  }
+
   let docs;
   try {
-    docs = uid
-      ? await findDocuments(
-          req,
-          db,
-          { type: 'driver_cash_session', user_id: uid },
-          { pageSize: 500, maxDocs: 5_000 },
-        )
-      : await findDocuments(
-          req,
-          db,
-          { type: 'driver_cash_session' },
-          { pageSize: 500, maxDocs: 5_000 },
-        );
+    docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs });
   } catch {
     const all = await getDeliveryDatabaseDocumentsInflight(req);
     docs = all.filter(
@@ -6842,18 +6889,30 @@ export async function listDriverCashSessionsByUser(req, userId) {
   }
 
   return docs
-    .filter(
-      (doc) =>
-        doc?.type === 'driver_cash_session' && !doc?.deletedAt && (!uid || doc?.user_id === uid),
-    )
+    .filter(keep)
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 
 /** Caja CEO: TPV + reparto por Mango (sin _all_docs del delivery DB entero). */
-export async function listCajaDataByUser(req, userId) {
+export async function listCajaDataByUser(req, userId, options = {}) {
+  const dateFrom = String(options?.dateFrom || '').trim();
+  const dateTo = String(options?.dateTo || '').trim();
+  const full = Boolean(options?.full);
+  const maxDocs = Math.min(Math.max(1, Number(options?.maxDocs) || (full ? 800 : 400)), 5_000);
+  // Por defecto (pantalla Caja): ventana del día + abiertas/pendientes. full=export por trozos.
+  const range = {
+    ...(dateFrom ? { dateFrom } : {}),
+    ...(dateTo ? { dateTo } : {}),
+  };
+  const tpvOpts = full
+    ? { ...range, maxDocs }
+    : { opsLite: true, ...range, maxDocs };
+  const driverOpts = full
+    ? { ...range, maxDocs }
+    : { includeOpen: true, ...range, maxDocs };
   const [tpvSessions, driverSessions] = await Promise.all([
-    listTpvRegisterSessionsByUser(req, userId),
-    listDriverCashSessionsByUser(req, userId),
+    listTpvRegisterSessionsByUser(req, userId, tpvOpts),
+    listDriverCashSessionsByUser(req, userId, driverOpts),
   ]);
   return { tpvSessions, driverSessions };
 }
@@ -7709,6 +7768,7 @@ export function sanitizeTpvRegisterSession(doc, opts = {}) {
 export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
   const uid = String(userId || '').trim();
   const dateFrom = String(options?.dateFrom || '').trim();
+  const dateTo = String(options?.dateTo || '').trim();
   const maxDocs = Math.min(Math.max(1, Number(options?.maxDocs) || 5_000), 5_000);
   const opsLite = Boolean(options?.opsLite);
   const db = getDeliveryDbName();
@@ -7724,6 +7784,20 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
     && !doc?.deletedAt
     && (!uid || doc?.user_id === uid);
 
+  const inWindow = (doc) => {
+    const ts = String(doc?.createdAt || doc?.openedAt || '');
+    if (dateFrom && ts && ts < dateFrom) return false;
+    if (dateTo && ts && ts > dateTo) return false;
+    return true;
+  };
+
+  const createdAtSelector = () => {
+    if (dateFrom && dateTo) return { $gte: dateFrom, $lte: dateTo };
+    if (dateFrom) return { $gte: dateFrom };
+    if (dateTo) return { $lte: dateTo };
+    return null;
+  };
+
   /** Ops / home: abiertas + por validar + ventana reciente (no 5000 cajas con txs). */
   if (opsLite) {
     const lookback = dateFrom || (() => {
@@ -7731,11 +7805,14 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
       dt.setUTCDate(dt.getUTCDate() - 60);
       return dt.toISOString();
     })();
+    const recentCreatedAt = dateTo
+      ? { $gte: lookback, $lte: dateTo }
+      : { $gte: lookback };
     const [recent, openOnes, pendingOnes] = await Promise.all([
       findDocuments(
         req,
         db,
-        { ...baseSelector, createdAt: { $gte: lookback } },
+        { ...baseSelector, createdAt: recentCreatedAt },
         { pageSize: 200, maxDocs: Math.min(maxDocs, 600) },
       ).catch(() => []),
       findDocuments(
@@ -7753,22 +7830,31 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
     ]);
     const byId = new Map();
     for (const doc of [...recent, ...openOnes, ...pendingOnes]) {
-      if (keep(doc) && doc._id) byId.set(doc._id, doc);
+      if (!keep(doc) || !doc._id) continue;
+      // Abiertas/pendientes siempre; el resto respeta la ventana.
+      if (
+        doc.status === 'open'
+        || String(doc.closingValidationStatus || '') === 'pending'
+        || inWindow(doc)
+      ) {
+        byId.set(doc._id, doc);
+      }
     }
     return [...byId.values()].sort((a, b) =>
       String(b.createdAt || '').localeCompare(String(a.createdAt || '')),
     );
   }
 
-  const selector = dateFrom
-    ? { ...baseSelector, createdAt: { $gte: dateFrom } }
+  const createdAt = createdAtSelector();
+  const selector = createdAt
+    ? { ...baseSelector, createdAt }
     : baseSelector;
 
   let docs;
   try {
     docs = await findDocuments(req, db, selector, { pageSize: 500, maxDocs });
   } catch {
-    if (dateFrom) {
+    if (dateFrom || dateTo) {
       try {
         docs = await findDocuments(req, db, baseSelector, { pageSize: 500, maxDocs });
       } catch {
@@ -7786,10 +7872,7 @@ export async function listTpvRegisterSessionsByUser(req, userId, options = {}) {
   }
 
   return docs
-    .filter(
-      (doc) =>
-        keep(doc) && (!dateFrom || String(doc.createdAt || doc.openedAt || '') >= dateFrom),
-    )
+    .filter((doc) => keep(doc) && inWindow(doc))
     .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
 }
 

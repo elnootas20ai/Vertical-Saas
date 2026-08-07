@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Download,
   FileSpreadsheet,
+  Loader2,
   Table2,
   X,
 } from 'lucide-react';
@@ -70,9 +71,12 @@ export type CajaTimelineBoardProps = {
   dayStats: { stores: number; turns: number; openNow: number; sales: number };
   excelClosedCount: number;
   /** Un solo formato (p. ej. restaurant). Preferir onDownloadFormat en delivery. */
-  onExcelClick?: () => void;
+  onExcelClick?: () => void | Promise<void>;
   /** Menú Descargar: Excel / Google Sheets / CSV (+ alcance historial). */
-  onDownloadFormat?: (format: UrielCajaDownloadFormat, range?: UrielCajaHistoryRange) => void;
+  onDownloadFormat?: (
+    format: UrielCajaDownloadFormat,
+    range?: UrielCajaHistoryRange,
+  ) => void | Promise<void>;
   onBack: () => void;
   selectedSessionId: string | null;
   onSelectSession: (id: string | null) => void;
@@ -196,6 +200,18 @@ export function CajaTimelineBoard({
   const selectedExpected = selected ? calcTpvExpectedCash(selected) : 0;
   const selectedMoves = selected?.transactions?.slice(-8).reverse() || [];
   const busyForce = forcingSessionId === selected?._id;
+  const [excelDownloading, setExcelDownloading] = useState(false);
+
+  const runExcelDownload = async (job: () => void | Promise<void>) => {
+    if (excelDownloading) return;
+    setDownloadOpen(false);
+    setExcelDownloading(true);
+    try {
+      await job();
+    } finally {
+      setExcelDownloading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#f3f3f5] dark:bg-zinc-950 text-[#030213] dark:text-zinc-100">
@@ -230,14 +246,35 @@ export function CajaTimelineBoard({
               <div ref={downloadRef} className="relative">
                 <button
                   type="button"
-                  onClick={() => setDownloadOpen((v) => !v)}
-                  disabled={excelClosedCount === 0}
-                  title="Descargar Excel de Facturación (por defecto: todo el historial)"
-                  className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
+                  onClick={() => {
+                    if (excelDownloading) return;
+                    setDownloadOpen((v) => !v);
+                  }}
+                  disabled={excelDownloading}
+                  aria-busy={excelDownloading}
+                  title={
+                    excelDownloading
+                      ? 'Cargando facturación mes a mes…'
+                      : 'Descargar Excel de Facturación (por defecto: este mes)'
+                  }
+                  className={`inline-flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-[12.5px] font-medium disabled:cursor-wait ${
+                    excelDownloading
+                      ? 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200'
+                      : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                  }`}
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  Facturación ({excelClosedCount})
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${downloadOpen ? 'rotate-180' : ''}`} />
+                  {excelDownloading ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  {excelDownloading ? 'Descargando…' : 'Facturación'}
+                  {!excelDownloading && excelClosedCount > 0 ? (
+                    <span className="text-zinc-400">({excelClosedCount})</span>
+                  ) : null}
+                  {!excelDownloading ? (
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${downloadOpen ? 'rotate-180' : ''}`} />
+                  ) : null}
                 </button>
                 {downloadOpen && (
                   <>
@@ -248,46 +285,46 @@ export function CajaTimelineBoard({
                           Facturación · Excel
                         </p>
                         <p className="text-[10px] text-zinc-400 dark:text-zinc-500 leading-snug">
-                          € por marca = ratio pizzas/burgers/tacos. Bebidas y postres no son unidades; van en el dinero total.
+                          Se carga mes a mes. Empieza por este mes; año/historial van por trozos.
                         </p>
                       </div>
                       {([
                         {
                           id: 'excel' as const,
-                          range: 'all' as UrielCajaHistoryRange,
-                          label: 'Todo el historial',
-                          description: 'Todos los días con cierre + RESUMEN y COMPARATIVA (recomendado)',
+                          range: 'month' as UrielCajaHistoryRange,
+                          label: 'Este mes',
+                          description: 'Solo el mes del día seleccionado (rápido)',
                           icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600" />,
                         },
                         {
                           id: 'excel' as const,
                           range: 'year' as UrielCajaHistoryRange,
                           label: 'Este año',
-                          description: 'Día a día del año + totales',
+                          description: 'Mes a mes del año + totales',
                           icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600/80" />,
                         },
                         {
                           id: 'excel' as const,
-                          range: 'month' as UrielCajaHistoryRange,
-                          label: 'Este mes',
-                          description: 'Plantilla del mes (columna DIA)',
+                          range: 'all' as UrielCajaHistoryRange,
+                          label: 'Historial (por meses)',
+                          description: 'Hasta ~3 años, cargando mes a mes (no de golpe)',
                           icon: <FileSpreadsheet className="w-4 h-4 text-emerald-600/60" />,
                         },
                       ]).map((opt) => (
                         <button
                           key={`excel-${opt.range}`}
                           type="button"
+                          disabled={excelDownloading}
                           onClick={() => {
-                            setDownloadOpen(false);
-                            onDownloadFormat(opt.id, opt.range);
+                            void runExcelDownload(() => onDownloadFormat(opt.id, opt.range));
                           }}
-                          className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5 border-b border-zinc-100 dark:border-zinc-800"
+                          className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5 border-b border-zinc-100 dark:border-zinc-800 disabled:opacity-50"
                         >
                           <div className="mt-0.5 shrink-0">{opt.icon}</div>
                           <div className="min-w-0">
                             <p className="font-semibold text-[13px] text-[#030213] dark:text-zinc-100">
                               {opt.label}
-                              {opt.range === 'all' ? (
+                              {opt.range === 'month' ? (
                                 <span className="ml-1.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
                                   por defecto
                                 </span>
@@ -299,31 +336,31 @@ export function CajaTimelineBoard({
                       ))}
                       <div className="px-3.5 py-2 border-b border-zinc-100 dark:border-zinc-800">
                         <p className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
-                          Otros formatos (historial completo)
+                          Otros formatos (este mes)
                         </p>
                       </div>
                       {([
                         {
                           id: 'google-sheets' as const,
                           label: 'Google Sheets',
-                          description: 'Mismo .xlsx: súbelo a Drive y ábrelo con Hojas',
+                          description: 'Mismo .xlsx del mes: súbelo a Drive y ábrelo con Hojas',
                           icon: <Table2 className="w-4 h-4 text-green-600" />,
                         },
                         {
                           id: 'csv' as const,
                           label: 'CSV (ZIP)',
-                          description: 'Una hoja por archivo CSV, fácil de importar',
+                          description: 'Una hoja por archivo CSV del mes',
                           icon: <Download className="w-4 h-4 text-sky-600" />,
                         },
                       ]).map((opt, i, arr) => (
                         <div key={opt.id}>
                           <button
                             type="button"
+                            disabled={excelDownloading}
                             onClick={() => {
-                              setDownloadOpen(false);
-                              onDownloadFormat(opt.id, 'all');
+                              void runExcelDownload(() => onDownloadFormat(opt.id, 'month'));
                             }}
-                            className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5"
+                            className="w-full px-3.5 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-left transition-colors flex items-start gap-2.5 disabled:opacity-50"
                           >
                             <div className="mt-0.5 shrink-0">{opt.icon}</div>
                             <div className="min-w-0">
@@ -341,17 +378,44 @@ export function CajaTimelineBoard({
             ) : (
               <button
                 type="button"
-                onClick={onExcelClick}
-                disabled={excelClosedCount === 0 || !onExcelClick}
-                title="Descargar informe del mes"
-                className="inline-flex items-center gap-1.5 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 rounded-lg text-[12.5px] font-medium text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
+                onClick={() => {
+                  if (!onExcelClick) return;
+                  void runExcelDownload(() => onExcelClick());
+                }}
+                disabled={excelClosedCount === 0 || !onExcelClick || excelDownloading}
+                title={excelDownloading ? 'Generando Excel…' : 'Descargar informe del mes'}
+                className={`inline-flex items-center gap-1.5 border px-3 py-1.5 rounded-lg text-[12.5px] font-medium disabled:opacity-40 ${
+                  excelDownloading
+                    ? 'border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-200'
+                    : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                }`}
               >
-                <Download className="w-3.5 h-3.5" />
-                Descargar ({excelClosedCount})
+                {excelDownloading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                {excelDownloading ? 'Descargando…' : `Descargar (${excelClosedCount})`}
               </button>
             )}
           </div>
         </div>
+
+        {excelDownloading ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="sticky top-0 z-30 mb-3 mt-2 flex items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-sm text-blue-900 shadow-sm dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-100"
+          >
+            <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+            <div className="min-w-0">
+              <p className="font-semibold leading-tight">Descargando Excel de facturación…</p>
+              <p className="text-[11px] text-blue-800/80 dark:text-blue-200/80 mt-0.5">
+                Puede tardar un poco con mucho historial. No cierres la página.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {/* Date + legend */}
         <div className="flex items-center justify-between flex-wrap gap-2.5 my-3.5 mb-5">

@@ -38,6 +38,7 @@ import {
   buildTpvRegisterSummaryForDay,
   dedupeOpenRegisterSessions,
   localCalendarDayKey,
+  localDayBoundsForKey,
   sessionBelongsToCajaDay,
   sortRegisterSessionsForDisplay,
 } from '../../lib/tpvCajaScope';
@@ -580,7 +581,17 @@ export function RestaurantCajaPage() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     try {
-      const sessData = await listRestaurantRegisterSessions(dataUserId, { businessId });
+      const deepLink = typeof window !== 'undefined'
+        ? (new URLSearchParams(window.location.search).get('validate')
+          || new URLSearchParams(window.location.search).get('view'))
+        : null;
+      let dateFrom = localDayBoundsForKey(selectedDate).from;
+      if (deepLink) {
+        const lookback = new Date();
+        lookback.setDate(lookback.getDate() - 120);
+        dateFrom = lookback.toISOString();
+      }
+      const sessData = await listRestaurantRegisterSessions(dataUserId, { businessId, dateFrom });
       const unique = Array.from(new Map(sessData.map((s) => [s._id, s])).values());
       setSessions(unique);
       hasLoadedOnceRef.current = true;
@@ -590,7 +601,7 @@ export function RestaurantCajaPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dataUserId, businessId]);
+  }, [dataUserId, businessId, selectedDate]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -712,6 +723,7 @@ export function RestaurantCajaPage() {
   const excelClosedCount = scopedSessions.filter((s) => String(s.status || '').toLowerCase() !== 'open').length;
 
   const handleDownload = async (format: UrielCajaDownloadFormat) => {
+    const toastId = toast.loading('Descargando Excel de facturación… Puede tardar.');
     try {
       const pdvId = String(
         filterPdv
@@ -720,7 +732,7 @@ export function RestaurantCajaPage() {
         || '',
       ).trim();
       if (!pdvId) {
-        toast.info('Elige un local para descargar el informe de ingresos');
+        toast.info('Elige un local para descargar el informe de ingresos', { id: toastId });
         return;
       }
       const pdv = pointsOfSale.find((p) => p._id === pdvId);
@@ -744,33 +756,57 @@ export function RestaurantCajaPage() {
         }
       }
 
-      const { rows, fileName, sheetNames } = await downloadUrielCajaClosings(scopedSessions, {
+      toast.loading(`Cargando facturación ${yearMonth}…`, { id: toastId });
+      const [y, m] = yearMonth.split('-').map((n) => Number(n));
+      const lastDay = new Date(y, m, 0).getDate();
+      const exportFrom = localDayBoundsForKey(`${yearMonth}-01`).from;
+      const exportTo = localDayBoundsForKey(`${yearMonth}-${String(lastDay).padStart(2, '0')}`).to;
+      const exportRaw = await listRestaurantRegisterSessions(dataUserId, {
+        businessId,
+        dateFrom: exportFrom,
+        dateTo: exportTo,
+        full: true,
+      });
+      const exportSessions = filterRestaurantRegisterSessions(exportRaw, {
+        businessId,
+        pointOfSaleIds: pointsOfSale.map((p) => p._id),
+      });
+
+      toast.loading('Generando archivo Excel…', { id: toastId });
+      const { rows, fileName, sheetNames } = await downloadUrielCajaClosings(exportSessions, {
         pointOfSaleId: pdvId,
         pointOfSaleName: pdv ? pointOfSaleDisplayLabel(pdv) : pdvId,
+        businessName: String(currentBusiness?.name || '').trim() || undefined,
         yearMonth,
         billingSheets,
         format,
       });
       if (rows === 0) {
-        toast.info('Aún no hay cierres de caja en este mes para ese local');
+        toast.info('Aún no hay cierres de caja en este mes para ese local', { id: toastId });
         return;
       }
       const sheetsLabel = sheetNames.length ? sheetNames.join(' + ') : 'ingresos';
       if (format === 'google-sheets') {
         toast.success(
           `Descargado ${fileName}. Súbelo a Google Drive y ábrelo con Hojas de cálculo (${rows} día${rows === 1 ? '' : 's'}).`,
-          { duration: 7000 },
+          { id: toastId, duration: 7000 },
         );
         return;
       }
       if (format === 'csv') {
-        toast.success(`CSV ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
+        toast.success(
+          `CSV ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`,
+          { id: toastId },
+        );
         return;
       }
-      toast.success(`Excel ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`);
+      toast.success(
+        `Excel ${sheetsLabel}: ${fileName} (${rows} día${rows === 1 ? '' : 's'})`,
+        { id: toastId },
+      );
     } catch (err) {
       console.error(err);
-      toast.error(err instanceof Error ? err.message : 'No se pudo generar la descarga');
+      toast.error(err instanceof Error ? err.message : 'No se pudo generar la descarga', { id: toastId });
     }
   };
 

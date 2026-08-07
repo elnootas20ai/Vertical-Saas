@@ -33,6 +33,12 @@ export type ListRestaurantRegisterSessionsOptions = {
   /** Filtra turnos al negocio actual (p. ej. Bodegeta) y sus PDV. */
   businessId?: string | null;
   salesPointId?: string | null;
+  /** Inicio del día (ISO). La pantalla Caja pide solo ese día + abiertas. */
+  dateFrom?: string | null;
+  /** Fin de ventana (ISO). Export mes a mes. */
+  dateTo?: string | null;
+  /** Trozo de historial para export (requiere dateFrom). */
+  full?: boolean;
 };
 
 function sessionBusinessId(session: TpvRegisterSession): string {
@@ -70,8 +76,13 @@ export async function listRestaurantRegisterSessions(
   const params = new URLSearchParams();
   const businessId = String(options?.businessId || '').trim();
   const salesPointId = String(options?.salesPointId || '').trim();
+  const dateFrom = String(options?.dateFrom || '').trim();
+  const dateTo = String(options?.dateTo || '').trim();
   if (businessId) params.set('businessId', businessId);
   if (salesPointId) params.set('salesPointId', salesPointId);
+  if (dateFrom) params.set('dateFrom', dateFrom);
+  if (dateTo) params.set('dateTo', dateTo);
+  if (options?.full) params.set('full', '1');
   const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{ ok: boolean; sessions: TpvRegisterSession[] }>(
     `/api/delivery/caja-bootstrap/${encodeURIComponent(id)}${qs}`,

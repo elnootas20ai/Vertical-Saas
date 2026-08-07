@@ -1280,6 +1280,8 @@ export type DownloadUrielCajaExcelOptions = {
   pointOfSaleName?: string;
   /** Nombres de tienda para las hojas detalle. */
   pointsOfSale?: Array<{ id: string; name?: string; workCenterId?: string }>;
+  /** Nombre de la empresa que descarga → nombre del archivo .xlsx */
+  businessName?: string;
   yearMonth?: string;
   /** Alcance: all (defecto) | year | month. */
   historyRange?: UrielCajaHistoryRange;
@@ -1645,7 +1647,11 @@ export function buildUrielCajaClosingsWorkbook(
     : historyRange === 'year'
       ? `ano-${yearMonth.slice(0, 4)}`
       : yearMonth;
-  const baseName = String(opts.fileName || `facturacion-caja-${rangeSlug}`)
+  const companySlug = sanitizeFilePart(String(opts.businessName || '').trim());
+  const defaultBase = companySlug
+    ? `${companySlug}-facturacion-${rangeSlug}`
+    : `facturacion-caja-${rangeSlug}`;
+  const baseName = String(opts.fileName || defaultBase)
     .replace(/\.xlsx$/i, '')
     .replace(/\.zip$/i, '');
 

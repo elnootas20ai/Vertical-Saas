@@ -3035,7 +3035,27 @@ export async function listCajaBootstrap(req, res) {
     const account = await findAccountByUserId(req, userId);
     if (!account) return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
 
-    let { tpvSessions, driverSessions } = await listCajaDataByUser(req, userId);
+    const dateFrom = String(req.query.dateFrom || '').trim();
+    const dateTo = String(req.query.dateTo || '').trim();
+    const full = String(req.query.full || '').trim() === '1';
+    // Sin dateFrom ni full → hoy (UTC) para no tirar de años de historial por defecto.
+    // full sin ventana → no (el Excel pide mes a mes desde el cliente).
+    const effectiveFrom = dateFrom || (full
+      ? ''
+      : (() => {
+          const d = new Date();
+          d.setUTCHours(0, 0, 0, 0);
+          return d.toISOString();
+        })());
+    if (full && !effectiveFrom) {
+      return badRequest(res, 'Exportación: indica dateFrom (mes a mes). No se carga todo el historial de golpe.');
+    }
+    let { tpvSessions, driverSessions } = await listCajaDataByUser(req, userId, {
+      ...(effectiveFrom ? { dateFrom: effectiveFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+      full,
+      maxDocs: full ? 800 : 400,
+    });
 
     if (req.callerIsWorker) {
       const workerSalesPoint = String(req.callerAccount?.employment?.salesPointId || '').trim();

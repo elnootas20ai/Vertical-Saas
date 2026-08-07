@@ -1019,12 +1019,24 @@ export async function listDriverCashSessionsRequest(userId: string): Promise<Dri
 
 export async function listCajaBootstrapRequest(
   userId: string,
-  options?: { salesPointId?: string; businessId?: string },
+  options?: {
+    salesPointId?: string;
+    businessId?: string;
+    /** Inicio del día (ISO). Sin esto el API usa hoy; no carga años de historial. */
+    dateFrom?: string;
+    /** Fin de ventana (ISO). Para export mes a mes. */
+    dateTo?: string;
+    /** Export Excel / trozo de historial (requiere dateFrom). */
+    full?: boolean;
+  },
 ): Promise<{ sessions: TpvRegisterSession[]; driverSessions: DriverCashSession[] }> {
   const id = normalizeUserId(userId);
   const params = new URLSearchParams();
   if (options?.salesPointId?.trim()) params.set('salesPointId', options.salesPointId.trim());
   if (options?.businessId?.trim()) params.set('businessId', options.businessId.trim());
+  if (options?.dateFrom?.trim()) params.set('dateFrom', options.dateFrom.trim());
+  if (options?.dateTo?.trim()) params.set('dateTo', options.dateTo.trim());
+  if (options?.full) params.set('full', '1');
   const qs = params.toString() ? `?${params.toString()}` : '';
   const payload = await request<{
     ok: boolean;
