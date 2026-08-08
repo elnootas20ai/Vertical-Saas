@@ -12,6 +12,8 @@ const KEEP_ON_ACCOUNT_SWITCH = new Set([
   'vertial_native_onboarding_seen',
   // Tablet TPV: al caducar sesión / re-login no perder el vínculo PDV (pedidos de reparto).
   'vertial_tpv_tablet_binding',
+  // Id estable del dispositivo: sin esto, al salir y volver parece tablet nueva y pide aprobación otra vez.
+  'vertial_tpv_device_id',
   // Tras update: no borrar el flag hasta login OK (setSessionUser).
   'vertial_force_fresh_login',
   'vertial_app_install_stamp',
@@ -199,6 +201,8 @@ export function clearVertialClientCachesForAppUpdate(): void {
     'vertial_cookie_consent',
     'vertial_app_install_stamp',
     'vertial_force_fresh_login',
+    // Misma tablet física tras update: no regenerar deviceId (evitar re-aprobación CEO).
+    'vertial_tpv_device_id',
   ]);
   clearAuthTokens();
 
