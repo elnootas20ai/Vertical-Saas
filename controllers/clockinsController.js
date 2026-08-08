@@ -1255,21 +1255,7 @@ export async function checkInMember(req, res) {
       }
     }
 
-    // Tope anti-spam: máx. 3 sesiones (entrada→salida) por día (jornada partida / vuelta).
-    const MAX_SESSIONS_PER_DAY = 3;
-    const todaySessions = existingRecords.filter((r) => {
-      if (normalizeClockinUserId(r.member_id) !== targetMemberId) return false;
-      return clockinLocalDayKey(r) === date;
-    });
-    if (todaySessions.length >= MAX_SESSIONS_PER_DAY) {
-      return res.status(409).json({
-        ok: false,
-        error: `Máximo ${MAX_SESSIONS_PER_DAY} fichajes al día. Ya has usado los ${MAX_SESSIONS_PER_DAY}.`,
-        code: 'MAX_SESSIONS',
-        maxSessions: MAX_SESSIONS_PER_DAY,
-        usedSessions: todaySessions.length,
-      });
-    }
+    // Tope de 3 fichajes/día eliminado: pueden fichar entrada/salida las veces que haga falta.
 
     const id = `clockin:${businessId}:${targetMemberId}:${date}:${Date.now()}`;
     const entry = { type: 'clock_in', time: now, geo: geo || undefined };

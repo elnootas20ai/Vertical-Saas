@@ -16,7 +16,6 @@ import {
   shouldAutoClockOut,
 } from '../lib/clockinAutoOut';
 import {
-  MAX_CLOCKIN_SESSIONS_PER_DAY,
   pickActiveClockinRecord,
 } from '../lib/clockinHistoryUtils';
 
@@ -317,7 +316,7 @@ export function useWorkerClockIn(
           used = sessions.length;
           setTodaySessionCount(used);
         } catch {
-          used = Math.min(MAX_CLOCKIN_SESSIONS_PER_DAY, Math.max(1, todaySessionCount));
+          used = Math.max(1, todaySessionCount);
           setTodaySessionCount(used);
         }
       }
@@ -327,12 +326,10 @@ export function useWorkerClockIn(
       } catch {
         /* UI history refresh best-effort */
       }
-      if (used < MAX_CLOCKIN_SESSIONS_PER_DAY) {
-        setInfo(
-          `Salida fichada. Puedes volver a entrar hoy (${used}/${MAX_CLOCKIN_SESSIONS_PER_DAY} turnos).`,
-        );
+      if (used > 0) {
+        setInfo(`Salida fichada. Puedes volver a entrar hoy (turnos hoy: ${used}).`);
       } else {
-        setInfo(`Salida fichada. Has alcanzado el máximo de ${MAX_CLOCKIN_SESSIONS_PER_DAY} fichajes hoy.`);
+        setInfo('Salida fichada.');
       }
       return rec;
     } catch (e: unknown) {
@@ -370,12 +367,6 @@ export function useWorkerClockIn(
 
   const handleClockIn = useCallback(async () => {
     if (acting || !businessId || !memberId) return null;
-    if (todaySessionCount >= MAX_CLOCKIN_SESSIONS_PER_DAY) {
-      setError(
-        `Máximo ${MAX_CLOCKIN_SESSIONS_PER_DAY} fichajes al día. Ya has usado los ${MAX_CLOCKIN_SESSIONS_PER_DAY}.`,
-      );
-      return null;
-    }
     setActing(true);
     setError('');
     setInfo('');
@@ -418,7 +409,7 @@ export function useWorkerClockIn(
         // Entrada nueva: el contador SIEMPRE arranca en 00:00:00 en este dispositivo.
         reanchorDisplay(rec, { freshClockIn: true });
         fireClockinNotification('clock_in', rec, Boolean(geo));
-        setTodaySessionCount((n) => Math.min(MAX_CLOCKIN_SESSIONS_PER_DAY, n + 1));
+        setTodaySessionCount((n) => n + 1);
       }
       autoClockOutTriggered.current = false;
       setRecord(rec);
@@ -435,7 +426,6 @@ export function useWorkerClockIn(
     businessId,
     memberId,
     memberName,
-    todaySessionCount,
     getGeoForAction,
     fireClockinNotification,
     isMobile,
@@ -466,9 +456,8 @@ export function useWorkerClockIn(
     }
   }, [acting, record, isOnBreak, getGeoForAction, fireClockinNotification, reanchorDisplay]);
 
-  const maxSessionsReached = todaySessionCount >= MAX_CLOCKIN_SESSIONS_PER_DAY;
-  /** Puede abrir un turno nuevo (no hay activo y no se ha llegado al tope del día). */
-  const canStartNewSession = !isClockedIn && !maxSessionsReached;
+  /** Puede abrir un turno nuevo (no hay activo). Sin tope diario de sesiones. */
+  const canStartNewSession = !isClockedIn;
 
   return {
     record,
@@ -485,8 +474,6 @@ export function useWorkerClockIn(
     /** true si el auto-cierre usa fin de turno + 10 min (no el tope de 4 h). */
     autoOutUsesShiftEnd: Boolean(record?.scheduled_end),
     todaySessionCount,
-    maxSessionsPerDay: MAX_CLOCKIN_SESSIONS_PER_DAY,
-    maxSessionsReached,
     canStartNewSession,
     geoLocation,
     geoStatus,

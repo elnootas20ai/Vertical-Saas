@@ -73,8 +73,6 @@ export function WorkerClockInCard({
     remainingMinutes,
     autoOutUsesShiftEnd,
     todaySessionCount,
-    maxSessionsPerDay,
-    maxSessionsReached,
     canStartNewSession,
     geoLocation,
     geoStatus,
@@ -214,14 +212,9 @@ export function WorkerClockInCard({
           )}
         </div>
 
-        {!isClockedIn && maxSessionsReached ? (
-          <p className="mt-2 text-[11px] text-stone-500">
-            Máximo {maxSessionsPerDay} fichajes hoy ({todaySessionCount}/{maxSessionsPerDay}).
-          </p>
-        ) : null}
         {!isClockedIn && canStartNewSession && todaySessionCount > 0 ? (
           <p className="mt-2 text-[11px] text-stone-500">
-            Turnos hoy: {todaySessionCount}/{maxSessionsPerDay}
+            Turnos hoy: {todaySessionCount}
           </p>
         ) : null}
 
