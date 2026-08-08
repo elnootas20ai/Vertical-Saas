@@ -28,8 +28,12 @@ import {
   isTpvTabletAllowedPath,
   isTpvTabletSaasSession,
   isTpvTabletTerminalBound,
+  peekTpvTabletReturnCode,
+  readTpvTabletBinding,
   resolveTpvTabletWorkerPath,
+  TPV_TABLET_LOGIN_PATH,
 } from '../lib/tpvTabletSession';
+import { AUTH_PATHS } from '../lib/authEntryPaths';
 import { isWorkerAccount } from '../lib/authApi';
 import {
   readStoredOnboardingBusinessType,
@@ -115,13 +119,21 @@ function SaasContent() {
 
 
   useEffect(() => {
-
-    if (!isInitializing && !isAuthenticated) {
-
-      navigate('/auth/login', { replace: true });
-
+    if (isInitializing || isAuthenticated) return;
+    // Tablet: no mandar a login empresa (bloqueaba reabrir el TPV).
+    const binding = readTpvTabletBinding();
+    const returnCode = peekTpvTabletReturnCode();
+    const code = String(binding?.terminalCode || returnCode || '').trim().toUpperCase();
+    if (code || binding) {
+      navigate(
+        code
+          ? `${TPV_TABLET_LOGIN_PATH}?code=${encodeURIComponent(code)}`
+          : AUTH_PATHS.tpvTabletLogin,
+        { replace: true },
+      );
+      return;
     }
-
+    navigate(AUTH_PATHS.companyLogin, { replace: true });
   }, [isAuthenticated, isInitializing, navigate]);
 
   // Código TPV activo → solo tienda/TPV (también cuenta empresa/admin).
@@ -506,7 +518,18 @@ function SaasContent() {
 
 
   if (!isAuthenticated) {
-    return <Navigate to="/auth/login" replace />;
+    const binding = readTpvTabletBinding();
+    const returnCode = peekTpvTabletReturnCode();
+    const code = String(binding?.terminalCode || returnCode || '').trim().toUpperCase();
+    if (code || binding) {
+      return (
+        <Navigate
+          to={code ? `${TPV_TABLET_LOGIN_PATH}?code=${encodeURIComponent(code)}` : AUTH_PATHS.tpvTabletLogin}
+          replace
+        />
+      );
+    }
+    return <Navigate to={AUTH_PATHS.companyLogin} replace />;
   }
 
 

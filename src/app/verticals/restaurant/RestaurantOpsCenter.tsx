@@ -221,13 +221,25 @@ export function RestaurantOpsCenter() {
   const loadSeqRef = useRef(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Solo al cambiar de empresa/cuenta: no re-aplicar bodegeta en cada refresh de PDVs.
   useEffect(() => {
     if (!businessId || !dataUserId) return;
     const mode = readDeliveryOpsViewMode(businessId, dataUserId);
     setViewMode(mode);
     const saved = readDeliveryOpsSelectedPdvId(businessId, dataUserId);
-    setSelectedPdvId(coerceSelectedPdvId(activePdvs, saved || activeStoreScope.activeSalesPointId));
-  }, [businessId, dataUserId, activePdvs, activeStoreScope.activeSalesPointId]);
+    setSelectedPdvId(
+      coerceSelectedPdvId(activePdvs, saved || activeStoreScope.activeSalesPointId),
+    );
+    // activePdvs / activeSalesPointId a propósito fuera: si no, cada reload te devuelve a la 1ª tienda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo hidratar al entrar en el negocio
+  }, [businessId, dataUserId]);
+
+  // Si el usuario cambia tienda desde Topbar/sidebar, alinear el filtro del ops.
+  useEffect(() => {
+    const fromScope = String(activeStoreScope.activeSalesPointId || '').trim();
+    if (!fromScope) return;
+    setSelectedPdvId((prev) => (prev === fromScope ? prev : fromScope));
+  }, [activeStoreScope.activeSalesPointId]);
 
   const handleViewModeChange = useCallback(
     (mode: DeliveryOpsViewMode, salesPointId?: string) => {

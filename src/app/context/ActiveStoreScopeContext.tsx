@@ -17,7 +17,6 @@ import {
   DELIVERY_ACTIVE_STORE_CHANGED,
   coerceSelectedPdvId,
   notifyDeliveryActiveStoreChanged,
-  pickDefaultActivePdvId,
   pickDefaultActiveStorePreference,
   readDeliveryOpsSelectedPdvId,
   resolvePreferenceToPdvId,
@@ -676,14 +675,26 @@ function ActiveStoreScopeProviderImpl({
   }, [businessId, dataUserId, version, pointsOfSale.length, allPointsOfSale.length]);
 
   const activeSalesPointId = useMemo(() => {
-    if (pointsOfSale.length === 0) return null;
-    return coerceSelectedPdvId(pointsOfSale, activePreferenceRaw);
-  }, [pointsOfSale, activePreferenceRaw]);
+    const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
+    if (pool.length === 0) return null;
+    // Preferencia guardada primero; solo fallback al default si no hay preferencia.
+    const resolved = resolvePreferenceToPdvId(pool.filter((p) => p.active !== false), activePreferenceRaw);
+    if (resolved) return resolved;
+    // Si la preferencia apunta a un PDV que aún no está en la lista (refresh a medias),
+    // no caer al primero (bodegeta): devolver null hasta que la lista se complete.
+    if (activePreferenceRaw) return null;
+    return coerceSelectedPdvId(pointsOfSale.length > 0 ? pointsOfSale : pool, null);
+  }, [pointsOfSale, allPointsOfSale, activePreferenceRaw]);
 
   useEffect(() => {
     if (!businessId || !dataUserId) return;
+    // Mientras carga, no pisar la tienda elegida con el PDV por defecto.
+    if (initialLoading) return;
+
     const raw = String(readDeliveryOpsSelectedPdvId(businessId, dataUserId) || '').trim();
-    const active = pointsOfSale.filter((p) => p.active !== false);
+    const pool = (allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale).filter(
+      (p) => p.active !== false,
+    );
     const retail = retailWorkCenters.filter((wc) => !wc.deletedAt && wc.active !== false);
 
     const writeIfChanged = (next: string | null, notify = false) => {
@@ -696,25 +707,39 @@ function ActiveStoreScopeProviderImpl({
 
     if (raw) {
       if (raw.startsWith('wc:')) {
-        writeIfChanged(resolvePreferenceToPdvId(active, raw));
+        const resolved = resolvePreferenceToPdvId(pool, raw);
+        // Solo normalizar wc→pdv si ya está en la lista; si no, esperar (no default).
+        if (resolved) writeIfChanged(resolved);
         return;
       }
 
-      if (!active.some((p) => p._id === raw)) {
-        writeIfChanged(pickDefaultActiveStorePreference(active, retail), true);
-      }
+      if (pool.some((p) => p._id === raw)) return;
+
+      // Preferencia huérfana de verdad (lista cargada y el PDV ya no existe).
+      // Si la lista está vacía, es un refresh a medias: no tocar storage.
+      if (pool.length === 0) return;
+      writeIfChanged(pickDefaultActiveStorePreference(pool, retail), true);
       return;
     }
 
-    if (active.length === 0 && retail.length === 0) return;
-    writeIfChanged(pickDefaultActiveStorePreference(active, retail), true);
-  }, [businessId, dataUserId, pointsOfSale, retailWorkCenters, bump]);
+    if (pool.length === 0 && retail.length === 0) return;
+    writeIfChanged(pickDefaultActiveStorePreference(pool, retail), true);
+  }, [
+    businessId,
+    dataUserId,
+    pointsOfSale,
+    allPointsOfSale,
+    retailWorkCenters,
+    initialLoading,
+    bump,
+  ]);
 
   const setActiveSalesPoint = useCallback(
     (pdvId: string) => {
       if (!businessId || !dataUserId || !pdvId.trim()) return;
       const id = pdvId.trim();
       const pool = allPointsOfSale.length > 0 ? allPointsOfSale : pointsOfSale;
+      // Lista vacía (refresh): igual guardar la elección del usuario.
       if (pool.length > 0 && !pool.some((p) => p._id === id && p.active !== false)) return;
       writeDeliveryOpsSelectedPdvId(businessId, dataUserId, id);
       notifyDeliveryActiveStoreChanged();

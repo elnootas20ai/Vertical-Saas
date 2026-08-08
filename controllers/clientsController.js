@@ -251,16 +251,40 @@ export async function createClient(req, res) {
 
     const rawPhone = String(client.phone || '').trim();
     const cleanPhone = rawPhone.replace(/\D/g, '');
+    // TPV delivery: solo dígitos, sin forzar prefijo; extranjeros 7–15 (E.164).
+    const MIN_PHONE = 7;
+    const MAX_PHONE = 15;
     if (!allowEmptyPhone) {
       if (!rawPhone) return badRequest(res, 'El teléfono del cliente es obligatorio');
-      if (cleanPhone.length < 9) {
-        return res.status(400).json({ ok: false, error: 'El teléfono debe tener al menos 9 dígitos', field: 'phone' });
+      if (cleanPhone.length < MIN_PHONE) {
+        return res.status(400).json({
+          ok: false,
+          error: `El teléfono debe tener al menos ${MIN_PHONE} dígitos`,
+          field: 'phone',
+        });
+      }
+      if (cleanPhone.length > MAX_PHONE) {
+        return res.status(400).json({
+          ok: false,
+          error: `El teléfono no puede tener más de ${MAX_PHONE} dígitos`,
+          field: 'phone',
+        });
       }
       if (!/^[\d\s+\-().]+$/.test(rawPhone)) {
         return res.status(400).json({ ok: false, error: 'El teléfono contiene caracteres no válidos', field: 'phone' });
       }
-    } else if (rawPhone && cleanPhone.length > 0 && cleanPhone.length < 9) {
-      return res.status(400).json({ ok: false, error: 'El teléfono debe tener al menos 9 dígitos', field: 'phone' });
+    } else if (rawPhone && cleanPhone.length > 0 && cleanPhone.length < MIN_PHONE) {
+      return res.status(400).json({
+        ok: false,
+        error: `El teléfono debe tener al menos ${MIN_PHONE} dígitos`,
+        field: 'phone',
+      });
+    } else if (rawPhone && cleanPhone.length > MAX_PHONE) {
+      return res.status(400).json({
+        ok: false,
+        error: `El teléfono no puede tener más de ${MAX_PHONE} dígitos`,
+        field: 'phone',
+      });
     }
 
     const { ownerUserId, account } = await resolveDataOwnerUserId(req, userId);
@@ -274,8 +298,18 @@ export async function createClient(req, res) {
     const db = getClientsDbName();
     await ensureDatabase(req, db);
     const listOptions = await resolveClientListOptions(req, ownerUserId, businessId);
+    // Guardar solo dígitos (sin obligar prefijo UI); 34+móvil ES → 9 locales.
+    let phoneForSave = cleanPhone;
+    let phonePrefixForSave =
+      client.phonePrefix != null ? String(client.phonePrefix).trim() : '';
+    if (phoneForSave.length === 11 && phoneForSave.startsWith('34') && /^[67]\d{8}$/.test(phoneForSave.slice(2))) {
+      phoneForSave = phoneForSave.slice(2);
+      phonePrefixForSave = '';
+    }
     const doc = buildClientDocument(ownerUserId, {
       ...client,
+      phone: phoneForSave || cleanPhone,
+      phonePrefix: phonePrefixForSave,
       businessId,
       business_id: businessId,
     });

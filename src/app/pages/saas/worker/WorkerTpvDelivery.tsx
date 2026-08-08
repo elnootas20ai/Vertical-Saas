@@ -1127,14 +1127,16 @@ function OrderDetail({
                   <User className={`text-cyan-600 dark:text-cyan-400 ${compact ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className={`font-bold text-gray-900 dark:text-gray-100 truncate ${compact ? 'text-xs' : 'text-sm'}`}>{order.customerName}</p>
+                  <p className={`font-bold text-gray-900 dark:text-gray-100 truncate leading-snug ${compact ? 'text-base' : 'text-lg'}`}>
+                    {order.customerName}
+                  </p>
                   {order.customerPhone && (
-                    <p className={`text-gray-600 dark:text-gray-400 truncate ${compact ? 'text-[10px]' : 'text-xs mt-0.5'}`}>{order.customerPhone}</p>
+                    <p className={`text-gray-600 dark:text-gray-400 truncate ${compact ? 'text-[10px] mt-0.5' : 'text-xs mt-0.5'}`}>{order.customerPhone}</p>
                   )}
                   {order.customerAddress && (
                     <p
-                      className={`font-bold text-gray-900 dark:text-gray-100 leading-snug break-words ${
-                        compact ? 'text-xs mt-0.5' : 'text-base mt-1'
+                      className={`text-gray-600 dark:text-gray-300 leading-snug break-words ${
+                        compact ? 'text-xs mt-0.5' : 'text-sm mt-1'
                       }`}
                     >
                       {order.customerAddress}
@@ -2614,24 +2616,31 @@ export function WorkerTpvDelivery({
                       : dimmed
                         ? 'bg-white/70 dark:bg-gray-800/70 opacity-60'
                         : 'bg-white dark:bg-gray-900 hover:bg-emerald-50/80 dark:hover:bg-gray-800'
-                  } ${isTabletUi ? 'py-1.5 px-2' : 'px-3 py-2'}`}
+                  } ${isTabletUi ? 'py-2 px-2' : 'px-3 py-2'}`}
                 >
-                  <div className="min-w-0 flex items-center gap-1.5">
+                  <div className="min-w-0 flex-1 flex items-start gap-2">
                     <OrderChannelBadge channel={order.channel} compact={isTabletUi} />
-                    <div className="min-w-0">
-                    <p className={`font-bold font-mono ${deleted ? 'text-gray-500 line-through' : 'text-gray-900 dark:text-gray-100'} ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
-                      #{order.orderNumber}
-                    </p>
-                    <p className={`text-gray-500 truncate ${isTabletUi ? 'text-[10px]' : 'text-[11px]'}`}>
-                      {order.customerName || 'Cliente'}
-                      {' · '}
-                      {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <p
+                        className={`font-bold truncate leading-snug ${
+                          deleted ? 'text-gray-500 line-through' : 'text-gray-900 dark:text-gray-100'
+                        } ${isTabletUi ? 'text-lg' : 'text-base'}`}
+                      >
+                        {(order.customerName || 'Cliente').trim()}
+                      </p>
+                      {order.customerAddress?.trim() ? (
+                        <p className={`text-gray-500 truncate leading-snug ${isTabletUi ? 'text-xs mt-0.5' : 'text-[11px] mt-0.5'}`}>
+                          {order.customerAddress.trim().split(',')[0]}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <p className={`font-bold tabular-nums ${deleted ? 'text-gray-500' : ''} ${isTabletUi ? 'text-[11px]' : 'text-xs'}`}>
+                  <div className="text-right shrink-0 self-center">
+                    <p className={`font-bold tabular-nums ${deleted ? 'text-gray-500' : ''} ${isTabletUi ? 'text-sm' : 'text-xs'}`}>
                       {formatCurrency(resolveDeliveryOrderChargeTotal(order))}
+                    </p>
+                    <p className={`text-gray-400 tabular-nums ${isTabletUi ? 'text-[10px]' : 'text-[11px]'}`}>
+                      {new Date(order.createdAt || '').toLocaleTimeString('es-ES', { timeStyle: 'short' })}
                     </p>
                     <p className={`font-semibold ${deleted ? 'text-red-600 dark:text-red-400' : statusCfg.color} ${isTabletUi ? 'text-[9px]' : 'text-[10px]'}`}>
                       {deleted ? cancelledOrderHistoryLabel(order) : statusCfg.label}

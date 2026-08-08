@@ -229,9 +229,11 @@ export async function leaveTpvTabletSession(
 
   if (code) rememberTpvTabletReturnCode(code);
 
+  // Volver al código de tienda (no login empresa). Así reabrir TPV no se pierde
+  // en /auth/login ni en worker-login sin campo de código.
   const dest = code
-    ? `${TPV_TABLET_EXIT_PATH}?from=tpv-tablet&code=${encodeURIComponent(code)}`
-    : TPV_TABLET_EXIT_PATH;
+    ? `${TPV_TABLET_LOGIN_PATH}?code=${encodeURIComponent(code)}`
+    : TPV_TABLET_LOGIN_PATH;
 
   // Importante: replace ANTES de await logout. Si logout pone isAuthenticated=false
   // estando aún en /saas, SaasRoot pinta /auth/login y se queda pillado un momento.
@@ -241,7 +243,7 @@ export async function leaveTpvTabletSession(
   try {
     await logout();
   } catch {
-    // Ya vamos al login trabajador.
+    // Ya vamos a la pantalla de código tablet.
   }
 }
 

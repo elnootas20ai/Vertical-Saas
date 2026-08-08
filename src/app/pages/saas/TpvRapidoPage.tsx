@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom';
 import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import { toastActionError, toUserFacingMessage } from '../../lib/userFacingError';
-import { PhonePrefixSelector } from '../../components/saas/PhonePrefixSelector';
+import {
+  MIN_CLIENT_PHONE_DIGITS,
+  clientPhonesMatch,
+  normalizeClientPhoneForSave,
+} from '../../../../shared/clients/clientSearchMatch.js';
 import { DecimalNumpadField } from '../../components/saas/DecimalNumpadField';
 import { parseDecimalPadValue } from '../../lib/decimalNumpadInput';
 import { useAuth } from '../../context/AuthContext';
@@ -262,9 +266,9 @@ function buildTpvWalkInClient(
     business_id: businessId,
     clientType: 'particular',
     name: opts.name,
-    // Sin teléfono: no es ficha CRM; evita «+34 0» en ticket y sync falso por dígito 0.
+    // Sin teléfono: no es ficha CRM; evita sync falso por dígito 0.
     phone: '',
-    phonePrefix: '+34',
+    phonePrefix: '',
     email: '',
     status: 'active',
     responsible: 'TPV',
@@ -306,18 +310,18 @@ function buildDeliveryQuickAttentionClient(
   businessId: string,
   displayName = 'Atención rápida',
   phone = '',
-  phonePrefix = '+34',
+  phonePrefix = '',
 ): Client {
   const base = buildTpvWalkInClient(userId, businessId, {
     id: DELIVERY_QUICK_ATTENTION_CLIENT_ID,
     name: displayName,
     tags: ['tpv', 'quick-attention'],
   });
-  const digits = String(phone || '').replace(/\D/g, '');
+  const normalized = normalizeClientPhoneForSave(phone);
   return {
     ...base,
-    phone: digits,
-    phonePrefix: phonePrefix || '+34',
+    phone: normalized.phone,
+    phonePrefix: phonePrefix || normalized.phonePrefix || '',
   };
 }
 
@@ -1035,7 +1039,8 @@ export function TpvRapidoOrderFlow({
   const restaurantPayIntentAppliedRef = useRef(false);
 
   // Step 1 - Client
-  const [phonePrefix, setPhonePrefix] = useState('+34');
+  /** Prefijo legacy en ficha; el TPV ya no pide prefijo — solo dígitos. */
+  const [phonePrefix, setPhonePrefix] = useState('');
   const [phoneInput, setPhoneInput] = useState('');
   const [phoneShake, setPhoneShake] = useState(false);
   const phoneRef = useRef<HTMLInputElement>(null);
@@ -2186,8 +2191,8 @@ export function TpvRapidoOrderFlow({
     const applyClientFromUrl = (match: Parameters<typeof handleSelectClient>[0]) => {
       appliedClientIdFromUrl.current = clientIdFromUrl;
       handleSelectClient(match);
-      setPhonePrefix(match.phonePrefix || '+34');
-      setPhoneInput(match.phone || '');
+      setPhonePrefix(match.phonePrefix || '');
+      setPhoneInput(String(match.phone || '').replace(/\D/g, ''));
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -2216,9 +2221,10 @@ export function TpvRapidoOrderFlow({
   }, [clientIdFromUrl, userId, clients, handleSelectClient, setSearchParams]);
 
   const handleCreateClient = useCallback(async () => {
-    const phoneDigits = newClientPhone.replace(/\D/g, '');
-    if (!newClientName.trim() || phoneDigits.length < 9) {
-      toast.error('Completa nombre y teléfono (mín. 9 dígitos)');
+    const normalizedPhone = normalizeClientPhoneForSave(newClientPhone);
+    const phoneDigits = normalizedPhone.phone;
+    if (!newClientName.trim() || phoneDigits.length < MIN_CLIENT_PHONE_DIGITS) {
+      toast.error(`Completa nombre y teléfono (mín. ${MIN_CLIENT_PHONE_DIGITS} dígitos)`);
       return;
     }
     if (!userId) {
@@ -2238,8 +2244,8 @@ export function TpvRapidoOrderFlow({
           : {}),
         clientType: 'particular',
         name: newClientName.trim(),
-        phone: newClientPhone.replace(/\D/g, '') || newClientPhone.trim(),
-        phonePrefix,
+        phone: phoneDigits,
+        phonePrefix: normalizedPhone.phonePrefix,
         email: '',
         status: 'active' as const,
         responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
@@ -2289,7 +2295,7 @@ export function TpvRapidoOrderFlow({
       setNewClientPayment('');
       setNewClientPhone('');
       setPhoneInput(created.phone || phoneDigits);
-      setPhonePrefix(created.phonePrefix || phonePrefix);
+      setPhonePrefix(created.phonePrefix || '');
       handleSelectClient(created);
     } catch (err: unknown) {
       toast.error(toUserFacingMessage(err, 'No se pudo crear el cliente'));
@@ -2326,9 +2332,10 @@ export function TpvRapidoOrderFlow({
       return;
     }
 
-    const phoneDigits = quickPhoneDraft.replace(/\D/g, '');
-    // Teléfono opcional: solo cuenta si tiene 9+ dígitos. Menos = se ignora (no bloquea).
-    const hasPhone = phoneDigits.length >= 9;
+    const normalizedPhone = normalizeClientPhoneForSave(quickPhoneDraft);
+    const phoneDigits = normalizedPhone.phone;
+    // Teléfono opcional: solo cuenta si llega al mínimo. Menos = se ignora (no bloquea).
+    const hasPhone = phoneDigits.length >= MIN_CLIENT_PHONE_DIGITS;
     const bizId = writeBusinessId || businessId || '';
     const selectedCashier = selectedOrderTaker;
     const primaryBranchId = currentBusiness?.branches?.[0]?.branch_id || '';
@@ -2390,9 +2397,7 @@ export function TpvRapidoOrderFlow({
           undefined,
           { includeLegacy: true, fallbackAll: true },
         );
-        const exact = matches.find(
-          (c) => String(c.phone || '').replace(/\D/g, '') === phoneDigits,
-        );
+        const exact = matches.find((c) => clientPhonesMatch(c.phone, phoneDigits));
         if (exact) crmClient = exact;
       } catch {
         // Si falla la búsqueda, intentamos crear igual.
@@ -2411,7 +2416,7 @@ export function TpvRapidoOrderFlow({
         clientType: 'particular',
         name,
         phone: phoneDigits,
-        phonePrefix: '+34',
+        phonePrefix: normalizedPhone.phonePrefix,
         email: '',
         status: 'active',
         responsible: selectedCashier?.name || user?.fullName || user?.firstName || 'TPV',
@@ -3930,7 +3935,7 @@ export function TpvRapidoOrderFlow({
     setCurrentStep('client');
     setCompletedSteps(new Set());
     setPhoneInput('');
-    setPhonePrefix('+34');
+    setPhonePrefix('');
     clearSelection();
     clearResults();
     clearClientPhoneSearchCache();
@@ -4624,7 +4629,6 @@ export function TpvRapidoOrderFlow({
                 onSubmit={(e) => e.preventDefault()}
                 role="search"
               >
-                <PhonePrefixSelector value={phonePrefix} onChange={setPhonePrefix} compact className="sm:shrink-0" />
                 <div className="flex-1 relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
                   <input
@@ -4656,7 +4660,7 @@ export function TpvRapidoOrderFlow({
                         setPhoneShake(false);
                       }
                     }}
-                    placeholder="Ej. 612… o María García"
+                    placeholder="Ej. 612345678 o María García"
                     className={`${INPUT_CLASS} pl-10 ${tabletMode ? 'text-base py-2' : 'text-lg'} ${phoneShake ? 'animate-shake border-red-400 dark:border-red-500' : ''}`}
                     autoComplete="off"
                     autoCorrect="off"
@@ -4670,8 +4674,8 @@ export function TpvRapidoOrderFlow({
                 {!clientSearchUserId
                   ? 'No se pudo identificar la cuenta para buscar clientes. Cierra sesión y vuelve a entrar.'
                   : clientsTotalCount >= 500
-                  ? `Tienes ${clientsTotalCount.toLocaleString('es-ES')} clientes: busca por teléfono o nombre (desde la 1.ª letra). No se listan todos a la vez.`
-                  : 'Escribe nombre o teléfono: la búsqueda empieza en la primera letra.'}
+                  ? `Tienes ${clientsTotalCount.toLocaleString('es-ES')} clientes: nombre o solo números (sin prefijo). No se listan todos a la vez.`
+                  : 'Nombre o solo números del móvil (sin prefijo; también extranjeros).'}
               </p>
             </div>
 
@@ -4767,7 +4771,7 @@ export function TpvRapidoOrderFlow({
                     name="vertial-new-client-phone"
                     autoComplete="tel"
                     className={`${INPUT_CLASS} font-mono`}
-                    placeholder="Solo números del móvil"
+                    placeholder={`Solo números (mín. ${MIN_CLIENT_PHONE_DIGITS})`}
                   />
                 </div>
                 <div>
@@ -6472,8 +6476,8 @@ function ClientResultCard({ client, onSelect }: { client: Client; onSelect: () =
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">{client.name}</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          {client.phonePrefix || '+34'} {client.phone}
+        <p className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+          {String(client.phone || '').replace(/\D/g, '') || client.phone || '—'}
         </p>
         <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400 dark:text-gray-500">
           {primaryAddr && (

@@ -259,23 +259,39 @@ function buildDenominationFromAmount(amount: number): CashDenominationCount {
   return counts;
 }
 
+/** Listado ligero para el gate TPV: abiertas + cierres recientes (reabrir hoy/ayer). */
+function tpvGateSessionsQueryOpts(businessId?: string): {
+  businessId?: string;
+  lite: boolean;
+  dateFrom: string;
+} {
+  const from = new Date();
+  from.setUTCDate(from.getUTCDate() - 3);
+  from.setUTCHours(0, 0, 0, 0);
+  const bid = String(businessId || '').trim();
+  return {
+    ...(bid ? { businessId: bid } : {}),
+    lite: true,
+    dateFrom: from.toISOString(),
+  };
+}
+
 function shouldKeepTpvSessionInList(
   session: TpvRegisterSession,
   scopedPdvs: PointOfSale[],
   businessId?: string,
 ): boolean {
+  const pid = String(session.pointOfSaleId || '').trim();
+  const matchesScopedPdv = () =>
+    Boolean(pid && (scopedPdvs.some((p) => p._id === pid) || scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid)));
+  // Tiendas aún no cargadas: no tirar abiertas ni cierres (hace falta «Reabrir» / recuperar).
+  if (scopedPdvs.length === 0) return true;
+
   const pdvIds = new Set(scopedPdvs.map((p) => p._id));
   if (businessId && !tpvSessionBelongsToBusiness(session, businessId, pdvIds)) {
     return false;
   }
-  const pid = String(session.pointOfSaleId || '').trim();
-  const matchesScopedPdv = () =>
-    Boolean(pid && (scopedPdvs.some((p) => p._id === pid) || scopedPdvs.some((p) => String(p.workCenterId || '').trim() === pid)));
-  // Si el listado de tiendas aún no cargó, no borrar cajas abiertas (evita OpeningScreen eterno).
-  if (isTpvRegisterSessionOpen(session)) {
-    if (scopedPdvs.length === 0) return true;
-    return matchesScopedPdv();
-  }
+  if (isTpvRegisterSessionOpen(session)) return matchesScopedPdv();
   if (!pid) return !businessId;
   return matchesScopedPdv();
 }
@@ -626,7 +642,9 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
   const effectivePrinter = selectedTerminal?.printerName || '';
 
   const effectiveWorkerName = useCallback(() => {
-    const w = workerOptions.find((x) => x.id === selectedWorkerId);
+    const sid = String(selectedWorkerId || '').trim();
+    if (!sid) return '';
+    const w = workerOptions.find((x) => clockinIdsMatch(x.id, sid));
     return (w?.name || '').trim();
   }, [workerOptions, selectedWorkerId]);
 
@@ -687,19 +705,35 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
   }, [vacationBlockedById, selectedWorkerId, workerOptions]);
 
   useEffect(() => {
-    if (isTabletMode || workerOptions.length === 0) return;
+    if (workerOptions.length === 0) return;
+    if (selectedWorkerId) {
+      // Si el id está normalizado (sin account:) y la opción sí lo tiene, reenganchar.
+      const exact = workerOptions.some((w) => w.id === selectedWorkerId);
+      if (exact) return;
+      const fuzzy = workerOptions.find((w) => clockinIdsMatch(w.id, selectedWorkerId));
+      if (fuzzy) {
+        setSelectedWorkerId(fuzzy.id);
+        return;
+      }
+    }
+    // Tablet: no autoelegir del listado Equipo (lo hace ClockInModal / Abrir).
+    // Sí autoelegir si solo hay una persona (desktop y tablet).
     if (selectedWorkerId) return;
     if (workerOptions.length === 1) {
-      setSelectedWorkerId(workerOptions[0].id);
+      const only = workerOptions[0];
+      if (!vacationBlockedById[only.id] && !vacationBlockedById[String(only.id).trim()]) {
+        setSelectedWorkerId(only.id);
+      }
       return;
     }
+    if (isTabletMode) return;
     const cached = (() => {
       try { return localStorage.getItem('vertial.tpvRapido.cashierName') || ''; } catch { return ''; }
     })().trim().toLowerCase();
     if (!cached) return;
     const match = workerOptions.find((w) => w.name.trim().toLowerCase() === cached);
     if (match) setSelectedWorkerId(match.id);
-  }, [workerOptionsKey, isTabletMode, selectedWorkerId, workerOptions]);
+  }, [workerOptionsKey, isTabletMode, selectedWorkerId, workerOptions, vacationBlockedById]);
 
   useEffect(() => {
     if (!restrictedToPdvId) return;
@@ -915,7 +949,7 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
             <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
               {isTabletMode
                 ? tabletStep === 1
-                  ? '1 · Ficha tu entrada'
+                  ? '1 · Ficha o elige quién abre'
                   : '2 · Cuenta el efectivo e abre'
                 : storeAlreadyFixed
                   ? `Apertura${terminalLabel ? ` · ${terminalLabel}` : ''}`
@@ -949,7 +983,7 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
           <div className="shrink-0 px-3 sm:px-4 py-2 border-b border-stone-200 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/60">
             <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300">
               {tabletStep === 1
-                ? 'Pulsa Fichar en tu nombre'
+                ? 'Ficha tu entrada o pulsa Abrir si ya estás en turno'
                 : 'Cuenta el dinero del cajón (0 € si está vacío)'}
             </p>
           </div>
@@ -1001,11 +1035,11 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
                 </div>
               ) : selectedWorkerId ? (
                 <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium shrink-0">
-                  Abre la caja: <strong>{effectiveWorkerName()}</strong> (quien acaba de fichar)
+                  Abre la caja: <strong>{effectiveWorkerName()}</strong>
                 </p>
               ) : (
                 <p className="text-xs text-violet-700 dark:text-violet-300 font-medium shrink-0">
-                  Pulsa <strong>Fichar</strong> en tu nombre para continuar
+                  Pulsa <strong>Fichar</strong> o, si ya estás en turno, <strong>Abrir</strong>
                 </p>
               )}
             </div>
@@ -1266,12 +1300,17 @@ function OpeningScreen({ onOpen, onReopenClosed, onViewClosed, loading: parentLo
               <button
                 type="button"
                 onClick={() => {
-                  if (tabletStep === 2) setTabletStep(1);
-                  else goBack();
+                  if (tabletStep === 2) {
+                    setTabletStep(1);
+                    return;
+                  }
+                  // Antes llamaba a goBack() (= logout + salir de tablet) con etiqueta
+                  // «Cambiar trabajador». Solo quita la selección; salir = X del header.
+                  setSelectedWorkerId('');
                 }}
                 className="px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg font-semibold text-xs hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
               >
-                {tabletStep === 2 ? 'Anterior' : 'Cambiar trabajador'}
+                {tabletStep === 2 ? 'Anterior' : 'Cambiar'}
               </button>
               {tabletStep === 1 ? (
                 <button
@@ -2563,18 +2602,35 @@ function ClosingScreen({ session, dataUserId, onClose, onCancel, restaurantWarni
                     </p>
                   </div>
                   {brandBilling.rows.length > 0 ? (
-                    <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 space-y-0.5">
-                      {brandBilling.rows.map((row) => (
-                        <div
-                          key={row.brandId}
-                          className="flex justify-between gap-2 text-[10px] text-stone-600 dark:text-stone-300"
-                        >
-                          <span className="truncate font-medium">{row.name}</span>
-                          <span className="shrink-0 tabular-nums font-bold">
-                            {formatMoneyEs(row.revenue)}
-                          </span>
-                        </div>
-                      ))}
+                    <div className="border-t border-stone-100 dark:border-stone-800 pt-1.5 space-y-1">
+                      {brandBilling.rows.map((row) => {
+                        const cash = Number(row.revenueEfectivo) || 0;
+                        const card = Number(row.revenueTarjeta) || 0;
+                        return (
+                          <div
+                            key={row.brandId}
+                            className="flex items-start justify-between gap-2 rounded-lg bg-stone-50 px-2 py-1.5 dark:bg-stone-900/70"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-bold text-stone-900 dark:text-stone-100">
+                                {row.name}
+                              </p>
+                              <p className="text-[10px] font-semibold tabular-nums leading-snug">
+                                <span className={VERTIAL_CASH_TEXT}>
+                                  Efectivo {formatMoneyEs(cash)}
+                                </span>
+                                <span className="mx-1 text-stone-300">·</span>
+                                <span className={VERTIAL_CARD_TEXT}>
+                                  Tarjeta {formatMoneyEs(card)}
+                                </span>
+                              </p>
+                            </div>
+                            <span className="shrink-0 text-xs font-black tabular-nums text-stone-900 dark:text-stone-50">
+                              {formatMoneyEs(row.revenue)}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : null}
                   <p className="text-[10px] text-stone-400 tabular-nums">
@@ -3235,7 +3291,7 @@ function ClockInModal({
   sessionOpenedAt?: string | null;
   onCancel: () => void;
   onChanged?: () => void;
-  /** Tras fichar entrada (p. ej. preseleccionar quién abre la caja). */
+  /** Tras fichar entrada o elegir a alguien ya en turno (quién abre la caja). */
   onMemberClockedIn?: (memberId: string) => void;
   /** Panel dentro de apertura de caja (sin popup a pantalla completa). */
   embedded?: boolean;
@@ -3247,6 +3303,9 @@ function ClockInModal({
   const [error, setError] = useState('');
   const [actionMsg, setActionMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [vacationBlockedById, setVacationBlockedById] = useState<Record<string, string>>({});
+  /** Quién abre la caja (puede estar ya fichado; no hace falta volver a fichar). */
+  const [selectedOpenerId, setSelectedOpenerId] = useState('');
+  const didAutoSelectOpenerRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -3310,6 +3369,8 @@ function ClockInModal({
   }, [businessId, ownerUserId, pdvId, workCenterId]);
 
   useEffect(() => {
+    didAutoSelectOpenerRef.current = false;
+    setSelectedOpenerId('');
     void load();
   }, [load]);
 
@@ -3335,6 +3396,57 @@ function ClockInModal({
   }).length;
 
   const storeClockinOpts = { store_team_clockin: true as const };
+
+  const selectOpener = useCallback(
+    (memberId: string, opts?: { silent?: boolean }) => {
+      const mid = normalizeClockinUserId(memberId);
+      if (!mid) return;
+      if (vacationBlockedById[mid]) {
+        if (!opts?.silent) {
+          setActionMsg({ type: 'err', text: vacationBlockedById[mid] });
+        }
+        return;
+      }
+      setSelectedOpenerId(mid);
+      onMemberClockedIn?.(mid);
+      if (!opts?.silent) {
+        const member = team.find((m) => memberKey(m) === mid);
+        const label = member?.fullName || member?.email || 'Trabajador';
+        setActionMsg({
+          type: 'ok',
+          text: `${label} abrirá la caja (ya en turno — no hace falta fichar otra vez).`,
+        });
+      }
+    },
+    [onMemberClockedIn, team, vacationBlockedById],
+  );
+
+  // Embedded: si ya hay gente en turno, seleccionar opener sin exigir un fichaje nuevo.
+  useEffect(() => {
+    if (!embedded || loading || didAutoSelectOpenerRef.current) return;
+    const present = team
+      .map((m) => {
+        const mid = memberKey(m);
+        const r = todayRecords.get(mid);
+        const st = deriveEffectiveClockinStatus(r);
+        return mid && isClockinPresent(st) && !vacationBlockedById[mid] ? mid : '';
+      })
+      .filter(Boolean);
+    if (present.length === 0) return;
+    didAutoSelectOpenerRef.current = true;
+    const prefer = selectedOpenerId && present.includes(selectedOpenerId)
+      ? selectedOpenerId
+      : present[0];
+    selectOpener(prefer, { silent: true });
+  }, [
+    embedded,
+    loading,
+    team,
+    todayRecords,
+    vacationBlockedById,
+    selectedOpenerId,
+    selectOpener,
+  ]);
 
   const handleClockIn = async (member: AuthUser) => {
     const mid = memberKey(member);
@@ -3392,7 +3504,7 @@ function ClockInModal({
         ? `${member.fullName || 'Trabajador'} — ya estaba fichado`
         : `${member.fullName || 'Trabajador'} — fichaje de entrada`,
     );
-    onMemberClockedIn?.(mid);
+    selectOpener(mid, { silent: true });
     onChanged?.();
     setActingId(null);
   };
@@ -3462,7 +3574,7 @@ function ClockInModal({
             </h2>
             <p className="text-[11px] text-stone-500 dark:text-stone-400 truncate">
               {embedded
-                ? 'Pulsa Fichar en tu nombre'
+                ? 'Ficha o, si ya estás en turno, pulsa Abrir'
                 : `${storeLabel || 'Tienda'} · Pulsa Fichar al entrar`}
             </p>
           </div>
@@ -3521,12 +3633,15 @@ function ClockInModal({
             const busy = actingId === member.user_id;
 
             if (embedded) {
+              const isOpener = Boolean(mid && selectedOpenerId === mid);
               return (
                 <div
                   key={member.user_id}
                   className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border ${
                     onVacation
                       ? 'border-sky-200 bg-sky-50/70 dark:bg-sky-950/20'
+                      : isOpener
+                        ? 'border-[#2563EB] bg-blue-50 dark:bg-blue-950/30 ring-1 ring-blue-200 dark:ring-blue-900'
                       : isActive
                         ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/30'
                         : isOnBreak
@@ -3536,6 +3651,7 @@ function ClockInModal({
                 >
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                     onVacation ? 'bg-sky-500 text-white'
+                      : isOpener ? 'bg-[#2563EB] text-white'
                       : isOnBreak ? 'bg-amber-500 text-white'
                         : isActive ? 'bg-emerald-600 text-white'
                           : 'bg-stone-200 dark:bg-stone-700 text-stone-600 dark:text-stone-200'
@@ -3549,6 +3665,8 @@ function ClockInModal({
                     <p className="text-[10px] text-stone-500 truncate">
                       {onVacation
                         ? (vacationMsg || 'Ausente')
+                        : isOpener
+                          ? 'Abre la caja'
                         : isOnBreak && clockInTime
                           ? `Descanso · ${clockInTime}`
                           : isActive && clockInTime
@@ -3570,6 +3688,17 @@ function ClockInModal({
                     </button>
                   ) : (
                     <div className="shrink-0 flex gap-1">
+                      {isWorking && !isOpener ? (
+                        <button
+                          type="button"
+                          disabled={busy || onVacation}
+                          onClick={() => selectOpener(mid)}
+                          className="min-h-9 px-2.5 rounded-lg text-[10px] font-bold bg-[#2563EB] hover:bg-blue-700 text-white disabled:opacity-40"
+                          title="Usar este fichaje para abrir la caja"
+                        >
+                          Abrir
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         disabled={busy || !canBreak}
@@ -3717,6 +3846,7 @@ function ClockInModal({
           <div className="shrink-0 px-3 py-1.5 border-t border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-950/40">
             <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300 text-center">
               {clockedInCount} fichado{clockedInCount === 1 ? '' : 's'}
+              {selectedOpenerId ? ' · ya puedes abrir caja' : ' · pulsa Abrir en tu nombre'}
             </p>
           </div>
         ) : null}
@@ -4745,7 +4875,10 @@ export function TpvRegisterGate({
   useEffect(() => {
     if (!dataUserId) return;
     const refreshSessions = () => {
-      void listTpvRegisterSessionsRequest(dataUserId, { businessId: scopeBusinessIdRef.current || undefined })
+      void listTpvRegisterSessionsRequest(
+        dataUserId,
+        tpvGateSessionsQueryOpts(scopeBusinessIdRef.current || undefined),
+      )
         .then((sessData) => {
           setSessions((prev) => {
             const tabletPdvId = String(tabletBindingRef.current?.pdvId || '').trim();
@@ -5247,10 +5380,11 @@ export function TpvRegisterGate({
           hasDisplayedStoresRef.current = stubPdvs.length > 0;
         }
 
-        // 1) Sesiones primero (crítico para recuperar caja abierta). No esperar tiendas.
-        const sessData = await listTpvRegisterSessionsRequest(uid, {
-          businessId: bidAtStart || undefined,
-        });
+        // 1) Sesiones ligeras (crítico para recuperar caja). Sin lite el desktop se queda en «Recuperando caja…».
+        const sessData = await listTpvRegisterSessionsRequest(
+          uid,
+          tpvGateSessionsQueryOpts(bidAtStart || undefined),
+        );
 
         if (seq !== loadSeqRef.current) return;
         if (!isTabletSessionRef.current && scopeBusinessIdRef.current !== bidAtStart) return;
@@ -5916,9 +6050,10 @@ export function TpvRegisterGate({
         } catch {
           if (attempt < 4) {
             try {
-              const refreshed = await listTpvRegisterSessionsRequest(uid, {
-                businessId: scopeBusinessIdRef.current || undefined,
-              });
+              const refreshed = await listTpvRegisterSessionsRequest(
+                uid,
+                tpvGateSessionsQueryOpts(scopeBusinessIdRef.current || undefined),
+              );
               setSessions((prev) =>
                 mergeTpvRegisterSessionsPreservingOpen(
                   prev,
@@ -6013,9 +6148,10 @@ export function TpvRegisterGate({
         } catch {
           if (attempt < 4) {
             try {
-              const refreshed = await listTpvRegisterSessionsRequest(uid, {
-                businessId: scopeBusinessIdRef.current || undefined,
-              });
+              const refreshed = await listTpvRegisterSessionsRequest(
+                uid,
+                tpvGateSessionsQueryOpts(scopeBusinessIdRef.current || undefined),
+              );
               setSessions((prev) =>
                 mergeTpvRegisterSessionsPreservingOpen(
                   prev,

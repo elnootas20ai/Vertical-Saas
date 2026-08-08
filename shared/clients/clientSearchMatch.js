@@ -77,11 +77,43 @@ function foldedNameQueryMatches(qFold, haystackFold) {
   );
 }
 
+/** Mín/máx dígitos al guardar teléfono (TPV/CRM). E.164 ≤ 15. */
+export const MIN_CLIENT_PHONE_DIGITS = 7;
+export const MAX_CLIENT_PHONE_DIGITS = 15;
+
 /** Últimos 9 dígitos (móvil ES) para buscar aunque el doc tenga +34. */
 export function localPhoneDigits(digits) {
   const d = String(digits || '').replace(/\D/g, '');
   if (d.length >= 9) return d.slice(-9);
   return d;
+}
+
+/** Solo dígitos, sin prefijo UI. Normaliza 34XXXXXXXXX → XXXXXXXXX (móvil ES). */
+export function normalizeClientPhoneForSave(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (!d) return { phone: '', phonePrefix: '' };
+  if (d.length > MAX_CLIENT_PHONE_DIGITS) d = d.slice(0, MAX_CLIENT_PHONE_DIGITS);
+  // España con 34 pegado: 34612… → 612…
+  if (d.length === 11 && d.startsWith('34') && /^[67]\d{8}$/.test(d.slice(2))) {
+    return { phone: d.slice(2), phonePrefix: '' };
+  }
+  return { phone: d, phonePrefix: '' };
+}
+
+/** ¿Mismo cliente por teléfono? Exacto, sufijo, o últimos 9 (ES +34). */
+export function clientPhonesMatch(a, b) {
+  const da = String(a || '').replace(/\D/g, '');
+  const db = String(b || '').replace(/\D/g, '');
+  if (!da || !db) return false;
+  if (da === db) return true;
+  if (da.length >= 9 && db.length >= 9 && localPhoneDigits(da) === localPhoneDigits(db)) {
+    return true;
+  }
+  const minLen = Math.min(da.length, db.length);
+  if (minLen >= MIN_CLIENT_PHONE_DIGITS && (da.endsWith(db) || db.endsWith(da))) {
+    return true;
+  }
+  return false;
 }
 
 export function clientPhoneDigitHaystacks(doc) {

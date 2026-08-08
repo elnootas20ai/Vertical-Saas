@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useSearchParams } from 'react-router-dom';
-import { Monitor, Store } from 'lucide-react';
-import { ACCESO__Button } from '../../components/design-system/ACCESO__Button';
+import { Store } from 'lucide-react';
 import { ACCESO__Input } from '../../components/design-system/ACCESO__Input';
 import { VertialLogo } from '../../components/VertialLogo';
 import { AccesoSplitLayout } from '../../components/auth/AccesoSplitLayout';
@@ -19,6 +18,7 @@ import {
   clearTpvTabletBinding,
   resolveTpvTabletWorkerPath,
 } from '../../lib/tpvTabletSession';
+import { VERTIAL_BTN_PRIMARY, VERTIAL_BTN_SECONDARY } from '../../lib/vertialUiTokens';
 
 export function TpvTabletLogin() {
   const navigate = useNavigate();
@@ -169,52 +169,47 @@ export function TpvTabletLogin() {
 
   return (
     <AccesoSplitLayout visualKey="login-company" scrollable onBack={goBack} backLabel="Volver">
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-start px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:justify-center sm:p-6 sm:pb-[max(1.25rem,env(safe-area-inset-bottom))] lg:min-h-dvh lg:px-8">
         <div className="w-full max-w-md shrink-0">
-          <div className="rounded-2xl border-2 border-gray-200 bg-white p-4 pb-3.5 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:p-6 sm:pb-5">
-            <div className="mb-4 text-center sm:mb-5">
-              <div className="mb-3 hidden items-center justify-center sm:flex">
+          <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm dark:border-stone-800 dark:bg-stone-900 sm:p-7">
+            <div className="mb-6 text-center">
+              <div className="mb-4 hidden items-center justify-center sm:flex">
                 <VertialLogo size="md" />
               </div>
-              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-900/30">
-                <Monitor className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-              </div>
-              <span className="mb-2 inline-block rounded-full bg-blue-50 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                TPV tablet
-              </span>
-              <h1 className="mb-1 text-xl font-bold text-gray-900 dark:text-gray-100 sm:text-2xl">
-                Código de tienda
+              <h1 className="text-2xl font-bold tracking-tight text-stone-900 dark:text-stone-50">
+                Tablet TPV
               </h1>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
+              <p className="mt-1.5 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
                 {storeLabel
                   ? storeLabel
                   : binding
                     ? 'Introduce el código para entrar al TPV'
-                    : `Activa la tablet con el código de tu ${tabletCopy.storeCountLabel}`}
+                    : `Código de tu ${tabletCopy.storeCountLabel} (Ajustes → Tienda)`}
               </p>
             </div>
 
             {errors.general ? (
-              <div className="mb-4 rounded-lg p-3 text-sm bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300">
                 {errors.general}
               </div>
             ) : null}
 
-            <form onSubmit={performLogin} className="space-y-5">
+            <form onSubmit={performLogin} className="space-y-4">
               {binding ? (
-                <div className="flex items-center justify-between px-1 text-xs text-gray-500 dark:text-gray-400">
-                  <span>Tablet vinculada a esta tienda</span>
+                <div className="flex items-center justify-between rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600 dark:border-stone-700 dark:bg-stone-950/50 dark:text-stone-300">
+                  <span>Tablet vinculada</span>
                   <button
                     type="button"
                     onClick={resetTerminal}
-                    className="font-medium text-blue-600 hover:underline dark:text-blue-400"
+                    className="font-semibold text-[var(--v-blue,#2563eb)] hover:underline"
                   >
                     Otra tienda
                   </button>
                 </div>
               ) : null}
+
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                <label className="mb-1.5 block text-sm font-medium text-stone-700 dark:text-stone-300">
                   {tabletCopy.tabletCodeLabel}
                 </label>
                 <ACCESO__Input
@@ -228,29 +223,31 @@ export function TpvTabletLogin() {
                   placeholder="Ej. ABC123"
                   autoComplete="off"
                   autoCapitalize="characters"
-                  className="text-center font-mono text-lg uppercase tracking-widest"
+                  className="text-center font-mono text-xl uppercase tracking-[0.28em]"
                   icon={<Store className="h-4 w-4" />}
                 />
                 {errors.terminalCode ? (
-                  <p className="mt-1 text-xs text-red-600">{errors.terminalCode}</p>
+                  <p className="mt-1.5 text-xs text-rose-600">{errors.terminalCode}</p>
                 ) : null}
               </div>
-              <ACCESO__Button type="submit" className="w-full" disabled={isSubmitting}>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={`${VERTIAL_BTN_PRIMARY} w-full`}
+              >
                 {isSubmitting ? 'Entrando…' : 'Entrar al TPV'}
-              </ACCESO__Button>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate(AUTH_PATHS.workerLogin)}
+                className={`${VERTIAL_BTN_SECONDARY} w-full !min-h-10 !text-sm`}
+              >
+                Soy trabajador — iniciar sesión
+              </button>
             </form>
           </div>
-
-          <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-            ¿Eres trabajador?{' '}
-            <button
-              type="button"
-              onClick={() => navigate(AUTH_PATHS.workerLogin)}
-              className="font-medium text-blue-600 hover:underline dark:text-blue-400"
-            >
-              Iniciar sesión
-            </button>
-          </p>
         </div>
       </div>
     </AccesoSplitLayout>

@@ -15,7 +15,8 @@ import { WORKER_DEFAULT_LANDING_PATH } from '../../lib/workerProfileCompletion';
 import { useGoogleSignIn, googleClientConfigured } from '../../hooks/useGoogleSignIn';
 import { shouldHideThirdPartyAuthOnIos, isAppleSignInAvailable } from '../../lib/appStoreCompliance';
 import { signInWithApple } from '../../lib/appleSignIn';
-import { clearTpvTabletReturnCode } from '../../lib/tpvTabletSession';
+import { clearTpvTabletReturnCode, peekTpvTabletReturnCode } from '../../lib/tpvTabletSession';
+import { normalizeTpvTabletCode } from '../../lib/tpvTabletLoginUrl';
 
 const CREDENTIALS_KEY = 'vertial_saved_worker_login';
 
@@ -54,16 +55,22 @@ export function WorkerLogin() {
   const [peekPassword, setPeekPassword] = useState(false);
   const [googleTimedOut, setGoogleTimedOut] = useState(false);
 
-  // Limpiar restos de TPV tablet (query/session) para no interferir con login admin/trabajador.
+  // Si vienes de salir del TPV tablet → pantalla de código (no quedarte aquí sin poder reactivar).
   useEffect(() => {
-    clearTpvTabletReturnCode();
     const params = new URLSearchParams(location.search);
-    const dirty = params.has('from') || params.has('code');
-    if (!dirty) return;
-    params.delete('from');
-    params.delete('code');
-    const qs = params.toString();
-    navigate(`${location.pathname}${qs ? `?${qs}` : ''}`, { replace: true, state: null });
+    const fromTablet = params.get('from') === 'tpv-tablet';
+    const code = normalizeTpvTabletCode(params.get('code') || peekTpvTabletReturnCode() || '');
+    if (fromTablet || code) {
+      clearTpvTabletReturnCode();
+      navigate(
+        code
+          ? `${AUTH_PATHS.tpvTabletLogin}?code=${encodeURIComponent(code)}`
+          : AUTH_PATHS.tpvTabletLogin,
+        { replace: true },
+      );
+      return;
+    }
+    clearTpvTabletReturnCode();
   }, [location.pathname, location.search, navigate]);
 
   const goAfterLogin = useCallback(

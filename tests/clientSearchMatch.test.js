@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   clientMatchesBusinessScope,
+  clientPhonesMatch,
   foldSearchText,
+  normalizeClientPhoneForSave,
   scoreClientSearchMatch,
   scorePhoneDigitsMatch,
   buildClientSearchIndex,
@@ -52,6 +54,34 @@ describe('clientMatchesBusinessScope', () => {
     expect(clientMatchesBusinessScope(scoped, 'biz-a', opts)).toBe(true);
     expect(clientMatchesBusinessScope(other, 'biz-a', opts)).toBe(false);
     expect(clientMatchesBusinessScope({ name: 'Sin sede' }, 'biz-a', opts)).toBe(false);
+  });
+});
+
+describe('normalizeClientPhoneForSave', () => {
+  it('deja solo dígitos y quita 34 de móvil ES', () => {
+    expect(normalizeClientPhoneForSave('+34 612 345 678')).toEqual({
+      phone: '612345678',
+      phonePrefix: '',
+    });
+    expect(normalizeClientPhoneForSave('34612345678')).toEqual({
+      phone: '612345678',
+      phonePrefix: '',
+    });
+  });
+
+  it('guarda números extranjeros enteros sin prefijo UI', () => {
+    expect(normalizeClientPhoneForSave('33612345678')).toEqual({
+      phone: '33612345678',
+      phonePrefix: '',
+    });
+  });
+});
+
+describe('clientPhonesMatch', () => {
+  it('casa 34… con móvil local y exacto', () => {
+    expect(clientPhonesMatch('612345678', '34612345678')).toBe(true);
+    expect(clientPhonesMatch('612345678', '612345678')).toBe(true);
+    expect(clientPhonesMatch('612345678', '699000000')).toBe(false);
   });
 });
 
