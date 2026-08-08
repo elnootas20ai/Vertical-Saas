@@ -4634,16 +4634,7 @@ async function resolveAccountForTpvTabletLogin(req, business, pdv) {
   return { account: null, accessDenied: true, code: 'STORE_NOT_ASSIGNED' };
 }
 
-async function persistPdvDevices(req, pdv, devices) {
-  const db = getDeliveryDbName();
-  const ownerUserId = String(pdv.user_id || '').trim();
-  if (!ownerUserId || !pdv._id) return pdv;
-  const doc = buildPointOfSaleDocument(ownerUserId, { tpvAllowedDevices: devices }, pdv);
-  const saved = await putDocument(req, db, doc._id, doc);
-  return { ...doc, _rev: saved.rev };
-}
-
-async function performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceLabel }) {
+async function performTpvTabletLogin(req, res, { terminalCode }) {
   const ip = getClientIp(req);
 
   if (!terminalCode) {
@@ -4655,36 +4646,9 @@ async function performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceL
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
   }
 
-  let pdv = resolved.pdv;
+  const pdv = resolved.pdv;
 
-  const { evaluateTabletDeviceAccess } = await import('../services/tpvTabletDevices.js');
-  const deviceResult = evaluateTabletDeviceAccess(pdv, {
-    deviceId,
-    label: deviceLabel || String(req.headers['user-agent'] || '').slice(0, 80) || 'Dispositivo',
-  });
-
-  if (deviceResult.devices) {
-    try {
-      pdv = await persistPdvDevices(req, pdv, deviceResult.devices);
-    } catch {
-      // si falla el save, seguimos con la evaluación en memoria
-    }
-  }
-
-  if (!deviceResult.ok) {
-    const status =
-      deviceResult.code === 'DEVICE_BLOCKED' || deviceResult.code === 'DEVICE_NOT_ALLOWED'
-        ? 403
-        : deviceResult.code === 'DEVICE_ID_REQUIRED'
-          ? 400
-          : 403;
-    return res.status(status).json({
-      ok: false,
-      error: deviceResult.error,
-      code: deviceResult.code,
-    });
-  }
-
+  // Sin gate de dispositivos: el código de tienda basta para entrar al TPV.
   const business = await resolveBusinessForPointOfSale(req, pdv);
   if (!business) {
     return res.status(401).json({ ok: false, error: 'Código de tienda incorrecto' });
@@ -4784,7 +4748,7 @@ async function performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceL
 export async function tpvTabletActivate(req, res) {
   try {
     const { terminalCode, deviceId, deviceLabel } = req.body || {};
-    return performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceLabel });
+    return performTpvTabletLogin(req, res, { terminalCode });
   } catch (error) {
     return res.status(500).json({
       ok: false,
@@ -4795,8 +4759,8 @@ export async function tpvTabletActivate(req, res) {
 
 export async function tpvTabletSwitch(req, res) {
   try {
-    const { terminalCode, deviceId, deviceLabel } = req.body || {};
-    return performTpvTabletLogin(req, res, { terminalCode, deviceId, deviceLabel });
+    const { terminalCode } = req.body || {};
+    return performTpvTabletLogin(req, res, { terminalCode });
   } catch (error) {
     return res.status(500).json({
       ok: false,

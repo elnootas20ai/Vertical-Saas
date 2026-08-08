@@ -278,22 +278,21 @@ export function isTpvTabletBindingAllowedForAuth(params: {
   const boundAuth = String(binding.authUserId || '').trim();
   if (boundAuth && boundAuth !== selfId) return false;
 
+  // Quien activó el código en este dispositivo: OK siempre.
+  // Debe ir ANTES de mirar la lista de empresas: si el API tarda, viene vacío
+  // o no trae aún ese negocio, no se puede echar del TPV tras un login correcto.
+  if (boundAuth === selfId) return true;
+
   const list = Array.isArray(params.businesses) ? params.businesses : [];
   if (list.length === 0) {
-    // Sin empresas: solo confiar si este mismo usuario activó el código.
     // Bindings viejos sin authUserId → no confiar (bloquea salto a Pau).
-    return boundAuth === selfId;
+    return false;
   }
 
   const match = list.find(
     (b) => normalizeBusinessScopeId(b.business_id || b.id) === businessId,
   );
   if (!match) return false;
-
-  // Quien activó el código en este dispositivo: OK aunque el API de empresas
-  // no traiga `members` (trabajadores / payloads reducidos). Sin esto el TPV
-  // echaba al login tras entrar con el código.
-  if (boundAuth === selfId) return true;
 
   const ownerId = String(match.owner_user_id || '').trim();
   if (dataUserId !== selfId && dataUserId !== ownerId) return false;

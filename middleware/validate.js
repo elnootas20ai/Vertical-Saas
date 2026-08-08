@@ -213,7 +213,8 @@ export const posSwitchUserSchema = z.object({
 
 export const tpvTabletLoginSchema = z.object({
   terminalCode: z.string().min(4, 'El código de tienda es obligatorio').max(12).trim(),
-  deviceId: z.string().min(8, 'Falta el dispositivo').max(80).trim(),
+  // deviceId ya no se usa para acceso; se acepta si viene y se ignora.
+  deviceId: z.string().max(80).trim().optional(),
   deviceLabel: z.string().max(120).trim().optional(),
 });
 

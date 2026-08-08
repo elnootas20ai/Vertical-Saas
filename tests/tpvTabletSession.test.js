@@ -68,6 +68,35 @@ describe('tpvTabletSession — rutas tablet', () => {
     ).toBe(false);
   });
 
+  it('quien activó el código no se echa si la lista de empresas aún no trae ese negocio', () => {
+    const binding = {
+      terminalCode: '8DYALQ',
+      pdvId: 'pdv-badalona',
+      workCenterId: 'wc-1',
+      businessId: 'biz-modomio',
+      dataUserId: 'owner-1',
+      authUserId: 'worker-caja',
+      tpvVertical: 'delivery',
+      boundAt: new Date().toISOString(),
+    };
+    expect(
+      isTpvTabletBindingAllowedForAuth({
+        binding,
+        authUser: { user_id: 'worker-caja' },
+        businesses: [],
+        businessesSettled: true,
+      }),
+    ).toBe(true);
+    expect(
+      isTpvTabletBindingAllowedForAuth({
+        binding,
+        authUser: { user_id: 'worker-caja' },
+        businesses: [{ business_id: 'biz-otra', owner_user_id: 'owner-x', members: [] }],
+        businessesSettled: true,
+      }),
+    ).toBe(true);
+  });
+
   it('isTpvTabletWorkerPath reconoce delivery, restaurant y prefijo worker/tpv', () => {
     expect(isTpvTabletWorkerPath(TPV_TABLET_DELIVERY_PATH)).toBe(true);
     expect(isTpvTabletWorkerPath(TPV_TABLET_RESTAURANT_PATH)).toBe(true);

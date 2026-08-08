@@ -101,7 +101,6 @@ import { useActivationFocus } from '../../../hooks/useActivationFocus';
 import { ActivationFieldWrap } from '../ActivationGuideUi';
 import { ACCESO__AddressAutocomplete } from '../../design-system/ACCESO__AddressAutocomplete';
 import { SettingsWizardFooter, SettingsWizardShell, type SettingsWizardStep } from './SettingsWizardShell';
-import { TpvDevicesPanel } from './TpvDevicesPanel';
 import { formatAddonPriceShort } from '../../../lib/planAddonCatalog';
 import {
   Search,
@@ -2658,7 +2657,7 @@ export function SalesPointsTab() {
                       </div>
                     </div>
                     <p className="text-sm leading-snug text-indigo-900/90 dark:text-indigo-100/90">
-                      En la tablet: Acceso → TPV en tablet → introduce este código. El dispositivo quedará vinculado a esta tienda (2 tablets incluidas por tienda; la 3ª de este local es SVA {formatAddonPriceShort('extra_tpv_tablet')}).
+                      En la tablet: Acceso → TPV en tablet → introduce este código para entrar al TPV de esta tienda.
                     </p>
                     <button
                       type="button"
@@ -2672,17 +2671,6 @@ export function SalesPointsTab() {
                       Copiar enlace para la tablet
                       <ExternalLink className="w-3.5 h-3.5 opacity-70" />
                     </button>
-                    {dataUserId && deliveryPdvsByWorkCenter[wc._id]?._id ? (
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <TpvDevicesPanel
-                          userId={dataUserId}
-                          pdvId={deliveryPdvsByWorkCenter[wc._id]!._id}
-                          onNeedAddon={() => {
-                            toast.message(`Contrata SVA Tablet TPV extra (${formatAddonPriceShort('extra_tpv_tablet')}) en Mi plan`);
-                          }}
-                        />
-                      </div>
-                    ) : null}
                   </div>
                 )}
                 {wc.email && (
