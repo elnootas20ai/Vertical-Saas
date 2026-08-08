@@ -3,18 +3,23 @@ import {
   TPV_INCLUDED_TABLET_SLOTS,
   TPV_MAX_REJECT_COUNT,
   approveDeviceInList,
+  countApprovedDevices,
   evaluateTabletDeviceAccess,
   rejectDeviceInList,
   resolveTabletSlotLimit,
+  revokeDeviceInList,
   unblockDeviceInList,
 } from '../services/tpvTabletDevices.js';
 
 describe('tpvTabletDevices', () => {
-  it('auto-aprueba el primer dispositivo si el PDV no tiene lista', () => {
+  it('deja pendiente el primer dispositivo (sin auto-aprobación)', () => {
     const result = evaluateTabletDeviceAccess({}, { deviceId: 'device-aaaa-1111', label: 'Tablet A' });
-    expect(result.ok).toBe(true);
-    expect(result.autoApproved).toBe(true);
-    expect(result.devices[0].status).toBe('approved');
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('DEVICE_PENDING_APPROVAL');
+    expect(result.autoApproved).toBeUndefined();
+    expect(result.devices).toHaveLength(1);
+    expect(result.devices[0].status).toBe('pending');
+    expect(result.devices[0].label).toBe('Tablet A');
   });
 
   it('deja pendiente un dispositivo nuevo cuando la lista ya existe', () => {
@@ -48,9 +53,21 @@ describe('tpvTabletDevices', () => {
     expect(unblocked[0].rejectCount).toBe(0);
   });
 
-  it('cupo = 2 + extras', () => {
+  it('cupo = 2 por PDV + extras', () => {
     expect(TPV_INCLUDED_TABLET_SLOTS).toBe(2);
     expect(resolveTabletSlotLimit({})).toBe(2);
     expect(resolveTabletSlotLimit({ extraTpvTabletSlots: 1 })).toBe(3);
+  });
+
+  it('revocar elimina el dispositivo de la lista y libera cupo', () => {
+    const devices = [
+      { deviceId: 'd1', label: 'A', status: 'approved', rejectCount: 0, createdAt: 't' },
+      { deviceId: 'd2', label: 'B', status: 'approved', rejectCount: 0, createdAt: 't' },
+    ];
+    const result = revokeDeviceInList(devices, 'd1');
+    expect(result.found).toBe(true);
+    expect(result.devices).toHaveLength(1);
+    expect(result.devices[0].deviceId).toBe('d2');
+    expect(countApprovedDevices(result.devices)).toBe(1);
   });
 });

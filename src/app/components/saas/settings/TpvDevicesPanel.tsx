@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Check, Loader2, Monitor, ShieldBan, ShieldOff, X } from 'lucide-react';
+import { Check, Loader2, Monitor, ShieldBan, ShieldOff, Trash2, X } from 'lucide-react';
 import {
   approvePdvTpvDeviceRequest,
   listPdvTpvDevicesRequest,
@@ -24,6 +24,15 @@ type Props = {
   pdvId: string;
   onNeedAddon?: () => void;
 };
+
+function friendlyDeviceLabel(label: string | undefined, index: number): string {
+  const raw = String(label || '').trim();
+  if (!raw) return `Tablet ${index + 1}`;
+  if (/mozilla\/|webkit|iphone|android|macintosh|windows nt/i.test(raw)) {
+    return `Tablet ${index + 1}`;
+  }
+  return raw;
+}
 
 export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
   const [loading, setLoading] = useState(true);
@@ -57,6 +66,13 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
     action: 'approve' | 'reject' | 'revoke' | 'unblock',
     deviceId: string,
   ) => {
+    if (action === 'revoke') {
+      const ok = window.confirm(
+        '¿Quitar este dispositivo? Liberará un hueco de tablet. Si vuelve a meter el código, tendrá que aprobarlo otra vez.',
+      );
+      if (!ok) return;
+    }
+
     setBusyId(deviceId);
     try {
       const fn =
@@ -73,11 +89,14 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
         onNeedAddon?.();
         return;
       }
-      if (result.error && !result.devices.length) {
+      if (result.error) {
         toast.error(result.error);
         return;
       }
-      setDevices(result.devices);
+      if (Array.isArray(result.devices)) {
+        setDevices(result.devices);
+        setApprovedCount(result.devices.filter((d) => d.status === 'approved').length);
+      }
       await load();
       toast.success(
         action === 'approve'
@@ -85,9 +104,11 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
           : action === 'reject'
             ? 'Dispositivo rechazado'
             : action === 'revoke'
-              ? 'Dispositivo revocado'
+              ? 'Dispositivo quitado · hueco liberado'
               : 'Dispositivo desbloqueado',
       );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo actualizar el dispositivo');
     } finally {
       setBusyId('');
     }
@@ -95,6 +116,7 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
 
   const pending = devices.filter((d) => d.status === 'pending');
   const addonPrice = formatAddonPriceShort('extra_tpv_tablet');
+  const visibleDevices = devices.filter((d) => d.status !== 'revoked');
 
   return (
     <div className="rounded-xl border border-indigo-200 dark:border-indigo-800/60 bg-white/80 dark:bg-gray-900/50 px-3 py-3 space-y-3">
@@ -105,10 +127,13 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
             Dispositivos TPV
           </p>
           <p className="text-sm text-gray-700 dark:text-gray-200 mt-1">
-            {approvedCount}/{slotLimit} tablets
+            {approvedCount}/{slotLimit} tablets en esta tienda
             {slotLimit <= includedSlots
               ? ` (${includedSlots} incluidas)`
               : ` (${includedSlots} incluidas + extras)`}
+          </p>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+            Cada tienda tiene su propio cupo de {includedSlots} tablets.
           </p>
         </div>
         {approvedCount >= slotLimit ? (
@@ -128,13 +153,13 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
         <div className="flex justify-center py-4">
           <Loader2 className="w-5 h-5 animate-spin text-indigo-500" />
         </div>
-      ) : devices.length === 0 ? (
+      ) : visibleDevices.length === 0 ? (
         <p className="text-xs text-gray-500 dark:text-gray-400 py-1">
           Aún no hay dispositivos. Cuando activen el código en una tablet, aparecerán aquí.
         </p>
       ) : (
         <ul className="space-y-2">
-          {devices.map((d) => (
+          {visibleDevices.map((d, index) => (
             <li
               key={d.deviceId}
               className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/60 px-3 py-2.5"
@@ -142,7 +167,7 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                    {d.label || 'Dispositivo'}
+                    {friendlyDeviceLabel(d.label, index)}
                   </p>
                   <p className="text-[11px] text-gray-500">
                     {STATUS_LABEL[d.status] || d.status}
@@ -188,11 +213,15 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
                       }}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-xs font-semibold dark:border-gray-600 dark:text-gray-200 disabled:opacity-50"
                     >
-                      <ShieldOff className="w-3.5 h-3.5" />
-                      Revocar
+                      {busyId === d.deviceId ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                      Quitar
                     </button>
                   ) : null}
-                  {d.status === 'blocked' || d.status === 'revoked' ? (
+                  {d.status === 'blocked' ? (
                     <button
                       type="button"
                       disabled={busyId === d.deviceId}
@@ -204,6 +233,21 @@ export function TpvDevicesPanel({ userId, pdvId, onNeedAddon }: Props) {
                     >
                       <ShieldBan className="w-3.5 h-3.5" />
                       Desbloquear
+                    </button>
+                  ) : null}
+                  {d.status === 'pending' || d.status === 'rejected' || d.status === 'blocked' ? (
+                    <button
+                      type="button"
+                      disabled={busyId === d.deviceId}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void runAction('revoke', d.deviceId);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-500 text-xs font-semibold dark:border-gray-600 disabled:opacity-50"
+                      title="Quitar de la lista"
+                    >
+                      <ShieldOff className="w-3.5 h-3.5" />
+                      Quitar
                     </button>
                   ) : null}
                 </div>

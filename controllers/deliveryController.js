@@ -3818,24 +3818,6 @@ export async function regeneratePointOfSaleTerminalCode(req, res) {
   }
 }
 
-async function countApprovedTabletsForBusiness(req, ownerUserId, businessId) {
-  const bizId = String(businessId || '').replace(/^business:/, '').trim();
-  const uid = String(ownerUserId || '').trim();
-  if (!bizId || !uid) return 0;
-  const pdvs = await listScopedPointsOfSaleForBusiness(req, uid, bizId, {
-    includeInactive: true,
-  }).catch(() => []);
-  const {
-    countApprovedDevices,
-    normalizeTpvAllowedDevices,
-  } = await import('../services/tpvTabletDevices.js');
-  let total = 0;
-  for (const pdv of pdvs || []) {
-    total += countApprovedDevices(normalizeTpvAllowedDevices(pdv?.tpvAllowedDevices));
-  }
-  return total;
-}
-
 async function resolveOwnerSubscriptionForPdv(req, pdv) {
   const business = await resolveBusinessDocumentForPointOfSale(req, pdv).catch(() => null);
   const ownerId = String(business?.owner_user_id || pdv?.user_id || '').trim();
@@ -3854,24 +3836,20 @@ export async function listPdvTpvDevices(req, res) {
     if (!existing) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
     const {
       normalizeTpvAllowedDevices,
+      countApprovedDevices,
       resolveTabletSlotLimit,
       TPV_INCLUDED_TABLET_SLOTS,
     } = await import('../services/tpvTabletDevices.js');
-    const { business, account, subscription } = await resolveOwnerSubscriptionForPdv(req, existing);
+    const { subscription } = await resolveOwnerSubscriptionForPdv(req, existing);
     const devices = normalizeTpvAllowedDevices(existing.tpvAllowedDevices);
     const limit = resolveTabletSlotLimit(subscription);
-    const ownerId = String(account?.user_id || existing.user_id || userId || '').trim();
-    const approvedBusiness = await countApprovedTabletsForBusiness(
-      req,
-      ownerId,
-      business?.business_id || existing.businessId || existing.business_id,
-    );
+    const approvedOnPdv = countApprovedDevices(devices);
     return res.json({
       ok: true,
       devices,
       includedSlots: TPV_INCLUDED_TABLET_SLOTS,
       slotLimit: limit,
-      approvedCount: approvedBusiness,
+      approvedCount: approvedOnPdv,
       extraTpvTabletSlots: Math.max(0, Math.floor(Number(subscription.extraTpvTabletSlots) || 0)),
     });
   } catch (error) {
@@ -3900,26 +3878,20 @@ async function mutatePdvTpvDevice(req, res, action) {
 
     let result;
     if (action === 'approve') {
-      const { business, account, subscription } = await resolveOwnerSubscriptionForPdv(req, existing);
+      const { subscription } = await resolveOwnerSubscriptionForPdv(req, existing);
       const limit = resolveTabletSlotLimit(subscription);
-      const ownerId = String(account?.user_id || existing.user_id || userId || '').trim();
-      const approvedBusiness = await countApprovedTabletsForBusiness(
-        req,
-        ownerId,
-        business?.business_id || existing.businessId || existing.business_id,
-      );
-      const current = normalizeTpvAllowedDevices(existing.tpvAllowedDevices).find(
-        (d) => d.deviceId === deviceId,
-      );
+      const devicesNow = normalizeTpvAllowedDevices(existing.tpvAllowedDevices);
+      const approvedOnPdv = countApprovedDevices(devicesNow);
+      const current = devicesNow.find((d) => d.deviceId === deviceId);
       const alreadyApproved = current?.status === 'approved';
-      if (!alreadyApproved && approvedBusiness >= limit) {
+      if (!alreadyApproved && approvedOnPdv >= limit) {
         return res.status(402).json({
           ok: false,
           code: 'TABLET_SLOT_LIMIT',
-          error: `Tienes ${approvedBusiness}/${limit} tablets. La siguiente es un SVA: Tablet TPV extra (+9,90 €/mes).`,
+          error: `Esta tienda tiene ${approvedOnPdv}/${limit} tablets. La siguiente es un SVA: Tablet TPV extra (+9,90 €/mes).`,
           includedSlots: TPV_INCLUDED_TABLET_SLOTS,
           slotLimit: limit,
-          approvedCount: approvedBusiness,
+          approvedCount: approvedOnPdv,
           requestedAddon: 'extra_tpv_tablet',
         });
       }

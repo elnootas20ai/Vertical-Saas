@@ -2658,7 +2658,7 @@ export function SalesPointsTab() {
                       </div>
                     </div>
                     <p className="text-sm leading-snug text-indigo-900/90 dark:text-indigo-100/90">
-                      En la tablet: Acceso → TPV en tablet → introduce este código. El dispositivo quedará vinculado a esta tienda (2 tablets incluidas; la 3ª es SVA {formatAddonPriceShort('extra_tpv_tablet')}).
+                      En la tablet: Acceso → TPV en tablet → introduce este código. El dispositivo quedará vinculado a esta tienda (2 tablets incluidas por tienda; la 3ª de este local es SVA {formatAddonPriceShort('extra_tpv_tablet')}).
                     </p>
                     <button
                       type="button"

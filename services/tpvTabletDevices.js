@@ -1,6 +1,7 @@
 /**
  * Dispositivos TPV vinculados al código de tienda (PDV).
- * 2 tablets incluidas por negocio; extras vía subscription.extraTpvTabletSlots.
+ * 2 tablets incluidas **por PDV**; extras vía subscription.extraTpvTabletSlots (suman al cupo de cada tienda).
+ * Ningún dispositivo se aprueba solo: solo el CEO desde Ajustes.
  */
 
 export const TPV_INCLUDED_TABLET_SLOTS = 2;
@@ -34,10 +35,6 @@ export function normalizeTpvAllowedDevices(raw) {
     .filter(Boolean);
 }
 
-export function pdvHasDeviceListInitialized(pdv) {
-  return Object.prototype.hasOwnProperty.call(pdv || {}, 'tpvAllowedDevices');
-}
-
 export function countApprovedDevices(devices) {
   return normalizeTpvAllowedDevices(devices).filter((d) => d.status === 'approved').length;
 }
@@ -48,7 +45,8 @@ export function resolveTabletSlotLimit(subscription) {
 }
 
 /**
- * @returns {{ ok: true, devices: object[], autoApproved?: boolean } | { ok: false, code: string, error: string, devices: object[] }}
+ * Solo el CEO puede aprobar (endpoint aparte). Aquí nunca se auto-aprueba.
+ * @returns {{ ok: true, devices: object[] } | { ok: false, code: string, error: string, devices: object[] }}
  */
 export function evaluateTabletDeviceAccess(pdv, { deviceId, label } = {}) {
   const id = normalizeDeviceId(deviceId);
@@ -62,7 +60,6 @@ export function evaluateTabletDeviceAccess(pdv, { deviceId, label } = {}) {
   }
 
   const now = new Date().toISOString();
-  const initialized = pdvHasDeviceListInitialized(pdv);
   let devices = normalizeTpvAllowedDevices(pdv?.tpvAllowedDevices);
   const existing = devices.find((d) => d.deviceId === id);
 
@@ -118,22 +115,7 @@ export function evaluateTabletDeviceAccess(pdv, { deviceId, label } = {}) {
     };
   }
 
-  // Nuevo dispositivo
-  if (!initialized) {
-    // Bootstrap: primera tablet del PDV se auto-aprueba
-    const boot = {
-      deviceId: id,
-      label: label || 'Tablet',
-      status: 'approved',
-      rejectCount: 0,
-      createdAt: now,
-      approvedAt: now,
-      lastSeenAt: now,
-      lastRequestAt: now,
-    };
-    return { ok: true, devices: [boot], autoApproved: true };
-  }
-
+  // Nuevo dispositivo: siempre pendiente. Solo el CEO aprueba.
   const pending = {
     deviceId: id,
     label: label || 'Dispositivo',
@@ -177,12 +159,10 @@ export function rejectDeviceInList(devices, deviceId) {
 
 export function revokeDeviceInList(devices, deviceId) {
   const id = normalizeDeviceId(deviceId);
-  let found = false;
-  const next = normalizeTpvAllowedDevices(devices).map((d) => {
-    if (d.deviceId !== id) return d;
-    found = true;
-    return { ...d, status: 'revoked' };
-  });
+  const list = normalizeTpvAllowedDevices(devices);
+  const found = list.some((d) => d.deviceId === id);
+  // Quitar del cupo: se elimina de la lista (no dejar "revocado" ocupando UI).
+  const next = list.filter((d) => d.deviceId !== id);
   return { found, devices: next };
 }
 

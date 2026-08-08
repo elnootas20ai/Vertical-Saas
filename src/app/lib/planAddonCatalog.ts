@@ -58,7 +58,7 @@ export const PLAN_ADDON_CATALOG: Record<PlanAddonId, PlanAddonDefinition> = {
     id: 'extra_tpv_tablet',
     name: 'SVA · Tablet TPV extra',
     shortLabel: '+1 tablet TPV',
-    description: 'Dispositivo TPV adicional (2 tablets incluidas por negocio).',
+    description: 'Dispositivo TPV adicional en una tienda (2 tablets incluidas por PDV).',
     monthlyPriceEur: 9.9,
     requiresProPlan: true,
   },
